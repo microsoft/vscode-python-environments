@@ -27,7 +27,6 @@ import {
     setCondaForGlobal,
     setCondaForWorkspace,
 } from './condaUtils';
-import { EXTENSION_ROOT_DIR } from '../../common/constants';
 import { NativePythonFinder } from '../common/nativePythonFinder';
 import { createDeferred, Deferred } from '../../common/utils/deferred';
 
@@ -60,7 +59,7 @@ export class CondaEnvManager implements EnvironmentManager, Disposable {
     preferredPackageManagerId: string = 'ms-python.python:conda';
     description: string;
     tooltip: string | MarkdownString;
-    iconPath: IconPath;
+    iconPath?: IconPath;
 
     public dispose() {
         this.disposablesMap.forEach((d) => d.dispose());

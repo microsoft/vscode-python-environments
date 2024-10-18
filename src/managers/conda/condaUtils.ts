@@ -13,7 +13,7 @@ import * as path from 'path';
 import * as os from 'os';
 import * as fsapi from 'fs-extra';
 import { LogOutputChannel, ProgressLocation, Uri, window } from 'vscode';
-import { ENVS_EXTENSION_ID, EXTENSION_ROOT_DIR } from '../../common/constants';
+import { ENVS_EXTENSION_ID } from '../../common/constants';
 import { createDeferred } from '../../common/utils/deferred';
 import { pickProject } from '../../common/pickers';
 import {

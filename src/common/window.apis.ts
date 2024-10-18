@@ -2,6 +2,9 @@ import {
     CancellationToken,
     Disposable,
     ExtensionTerminalOptions,
+    InputBox,
+    InputBoxOptions,
+    QuickInputButton,
     QuickInputButtons,
     QuickPick,
     QuickPickItem,
@@ -71,33 +74,45 @@ export function showTextDocument(uri: Uri): Thenable<TextEditor> {
     return window.showTextDocument(uri);
 }
 
+export interface QuickPickButtonEvent<T extends QuickPickItem> {
+    readonly item: T | readonly T[] | undefined;
+    readonly button: QuickInputButton;
+}
+
 export async function showQuickPickWithButtons<T extends QuickPickItem>(
     items: readonly T[],
-    options?: QuickPickOptions & { showBackButton?: boolean },
+    options?: QuickPickOptions & { showBackButton?: boolean; buttons?: QuickInputButton[]; selected?: T[] },
     token?: CancellationToken,
     itemButtonHandler?: (e: QuickPickItemButtonEvent<T>) => void,
 ): Promise<T | T[] | undefined> {
     const quickPick: QuickPick<T> = window.createQuickPick<T>();
     const disposables: Disposable[] = [quickPick];
+    const deferred = createDeferred<T | T[] | undefined>();
 
     quickPick.items = items;
-    if (options?.showBackButton) {
-        quickPick.buttons = [QuickInputButtons.Back];
-    }
     quickPick.canSelectMany = options?.canPickMany ?? false;
     quickPick.ignoreFocusOut = options?.ignoreFocusOut ?? false;
     quickPick.matchOnDescription = options?.matchOnDescription ?? false;
     quickPick.matchOnDetail = options?.matchOnDetail ?? false;
     quickPick.placeholder = options?.placeHolder;
     quickPick.title = options?.title;
+    quickPick.selectedItems = options?.selected ?? [];
 
-    const deferred = createDeferred<T | T[] | undefined>();
+    if (options?.showBackButton) {
+        quickPick.buttons = [QuickInputButtons.Back];
+    }
+
+    if (options?.buttons) {
+        quickPick.buttons = [...quickPick.buttons, ...options.buttons];
+    }
 
     disposables.push(
-        quickPick,
-        quickPick.onDidTriggerButton((item) => {
-            if (item === QuickInputButtons.Back) {
+        quickPick.onDidTriggerButton((button) => {
+            if (button === QuickInputButtons.Back) {
                 deferred.reject(QuickInputButtons.Back);
+                quickPick.hide();
+            } else if (options?.buttons?.includes(button)) {
+                deferred.reject({ item: quickPick.selectedItems, button });
                 quickPick.hide();
             }
         }),
@@ -131,6 +146,67 @@ export async function showQuickPickWithButtons<T extends QuickPickItem>(
         );
     }
     quickPick.show();
+
+    try {
+        return await deferred.promise;
+    } finally {
+        disposables.forEach((d) => d.dispose());
+    }
+}
+
+export async function showInputBoxWithButtons(
+    options?: InputBoxOptions & { showBackButton?: boolean },
+): Promise<string | undefined> {
+    const inputBox: InputBox = window.createInputBox();
+    const disposables: Disposable[] = [inputBox];
+    const deferred = createDeferred<string | undefined>();
+
+    inputBox.placeholder = options?.placeHolder;
+    inputBox.title = options?.title;
+    inputBox.value = options?.value ?? '';
+    inputBox.ignoreFocusOut = options?.ignoreFocusOut ?? false;
+    inputBox.password = options?.password ?? false;
+    inputBox.prompt = options?.prompt;
+
+    if (options?.valueSelection) {
+        inputBox.valueSelection = options?.valueSelection;
+    }
+
+    if (options?.showBackButton) {
+        inputBox.buttons = [QuickInputButtons.Back];
+    }
+
+    disposables.push(
+        inputBox.onDidTriggerButton((button) => {
+            if (button === QuickInputButtons.Back) {
+                deferred.reject(QuickInputButtons.Back);
+                inputBox.hide();
+            }
+        }),
+        inputBox.onDidAccept(() => {
+            if (!deferred.completed) {
+                deferred.resolve(inputBox.value);
+                inputBox.hide();
+            }
+        }),
+        inputBox.onDidHide(() => {
+            if (!deferred.completed) {
+                deferred.resolve(undefined);
+            }
+        }),
+        inputBox.onDidChangeValue(async (value) => {
+            if (options?.validateInput) {
+                const validation = await options?.validateInput(value);
+                if (validation === null || validation === undefined) {
+                    inputBox.validationMessage = undefined;
+                } else {
+                    inputBox.validationMessage = validation;
+                }
+            }
+        }),
+    );
+
+    inputBox.show();
 
     try {
         return await deferred.promise;

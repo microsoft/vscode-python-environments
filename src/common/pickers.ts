@@ -1,4 +1,12 @@
-import { QuickPickItem, QuickPickItemButtonEvent, QuickPickItemKind, ThemeIcon, Uri, window } from 'vscode';
+import {
+    QuickInputButtons,
+    QuickPickItem,
+    QuickPickItemButtonEvent,
+    QuickPickItemKind,
+    ThemeIcon,
+    Uri,
+    window,
+} from 'vscode';
 import {
     GetEnvironmentsScope,
     IconPath,
@@ -13,7 +21,7 @@ import * as path from 'path';
 import { InternalEnvironmentManager, InternalPackageManager } from '../internal.api';
 import { Common, PackageManagement } from './localize';
 import { EXTENSION_ROOT_DIR } from './constants';
-import { showQuickPickWithButtons, showTextDocument } from './window.apis';
+import { showInputBoxWithButtons, showQuickPickWithButtons, showTextDocument } from './window.apis';
 import { launchBrowser } from './env.apis';
 import { traceWarn } from './logging';
 
@@ -205,10 +213,11 @@ export async function pickPackageOptions(): Promise<string | undefined> {
 }
 
 export async function enterPackageManually(filler?: string): Promise<string[] | undefined> {
-    const input = await window.showInputBox({
+    const input = await showInputBoxWithButtons({
         placeHolder: PackageManagement.enterPackagesPlaceHolder,
         value: filler,
         ignoreFocusOut: true,
+        showBackButton: true,
     });
     return input?.split(' ');
 }
@@ -237,7 +246,12 @@ export const OPEN_EDITOR_BUTTON = {
     tooltip: Common.openInBrowser,
 };
 
-function handleButton(uri?: Uri) {
+export const EDIT_ARGUMENTS_BUTTON = {
+    iconPath: new ThemeIcon('wrench'),
+    tooltip: PackageManagement.editArguments,
+};
+
+function handleItemButton(uri?: Uri) {
     if (uri) {
         if (uri.scheme.toLowerCase().startsWith('http')) {
             launchBrowser(uri);
@@ -347,13 +361,9 @@ function getGroupedItems(items: Installable[]): PackageQuickPickItem[] {
 async function getWorkspacePackages(
     packageManager: InternalPackageManager,
     environment: PythonEnvironment,
+    preSelected?: PackageQuickPickItem[] | undefined,
 ): Promise<string[] | undefined> {
-    const items: PackageQuickPickItem[] = [
-        {
-            label: PackageManagement.enterPackageNames,
-            alwaysShow: true,
-        },
-    ];
+    const items: PackageQuickPickItem[] = [];
 
     let installable = await packageManager?.getInstallable(environment);
     if (installable && installable.length > 0) {
@@ -370,18 +380,42 @@ async function getWorkspacePackages(
         );
     }
 
-    const selected = await showQuickPickWithButtons(
-        items,
-        {
-            placeHolder: PackageManagement.selectPackagesToInstall,
-            ignoreFocusOut: true,
-            canPickMany: true,
-        },
-        undefined,
-        async (e: QuickPickItemButtonEvent<PackageQuickPickItem>) => {
-            handleButton(e.item.uri);
-        },
-    );
+    let preSelectedItems = items
+        .filter((i) => i.kind !== QuickPickItemKind.Separator)
+        .filter((i) =>
+            preSelected?.find((s) => s.label === i.label && s.description === i.description && s.detail === i.detail),
+        );
+    let selected: PackageQuickPickItem | PackageQuickPickItem[] | undefined;
+    try {
+        selected = await showQuickPickWithButtons(
+            items,
+            {
+                placeHolder: PackageManagement.selectPackagesToInstall,
+                ignoreFocusOut: true,
+                canPickMany: true,
+                showBackButton: true,
+                buttons: [EDIT_ARGUMENTS_BUTTON],
+                selected: preSelectedItems,
+            },
+            undefined,
+            (e: QuickPickItemButtonEvent<PackageQuickPickItem>) => {
+                handleItemButton(e.item.uri);
+            },
+        );
+    } catch (ex: any) {
+        if (ex === QuickInputButtons.Back) {
+            throw ex;
+        } else if (ex.button === EDIT_ARGUMENTS_BUTTON && ex.item) {
+            const parts: PackageQuickPickItem[] = Array.isArray(ex.item) ? ex.item : [ex.item];
+            selected = [
+                {
+                    label: PackageManagement.enterPackageNames,
+                    alwaysShow: true,
+                },
+                ...parts,
+            ];
+        }
+    }
 
     if (selected && Array.isArray(selected)) {
         if (selected.find((s) => s.label === PackageManagement.enterPackageNames)) {
@@ -389,9 +423,82 @@ async function getWorkspacePackages(
                 .filter((s) => s.label !== PackageManagement.enterPackageNames)
                 .flatMap((s) => s.args ?? [])
                 .join(' ');
-            return enterPackageManually(filler);
+            try {
+                const result = await enterPackageManually(filler);
+                return result;
+            } catch (ex) {
+                if (ex === QuickInputButtons.Back) {
+                    return getWorkspacePackages(packageManager, environment, selected);
+                }
+                return undefined;
+            }
         } else {
             return selected.flatMap((s) => s.args ?? []);
+        }
+    }
+}
+
+export async function getCommonPackagesToInstall(
+    preSelected?: PackageQuickPickItem[] | undefined,
+): Promise<string[] | undefined> {
+    const common = await getCommonPackages();
+
+    const items: PackageQuickPickItem[] = common.map(installableToQuickPickItem);
+    const preSelectedItems = items
+        .filter((i) => i.kind !== QuickPickItemKind.Separator)
+        .filter((i) =>
+            preSelected?.find((s) => s.label === i.label && s.description === i.description && s.detail === i.detail),
+        );
+
+    let selected: PackageQuickPickItem | PackageQuickPickItem[] | undefined;
+    try {
+        selected = await showQuickPickWithButtons(
+            items,
+            {
+                placeHolder: PackageManagement.selectPackagesToInstall,
+                ignoreFocusOut: true,
+                canPickMany: true,
+                showBackButton: true,
+                buttons: [EDIT_ARGUMENTS_BUTTON],
+                selected: preSelectedItems,
+            },
+            undefined,
+            (e: QuickPickItemButtonEvent<PackageQuickPickItem>) => {
+                handleItemButton(e.item.uri);
+            },
+        );
+    } catch (ex: any) {
+        if (ex === QuickInputButtons.Back) {
+            throw ex;
+        } else if (ex.button === EDIT_ARGUMENTS_BUTTON && ex.item) {
+            const parts: PackageQuickPickItem[] = Array.isArray(ex.item) ? ex.item : [ex.item];
+            selected = [
+                {
+                    label: PackageManagement.enterPackageNames,
+                    alwaysShow: true,
+                },
+                ...parts,
+            ];
+        }
+    }
+
+    if (selected && Array.isArray(selected)) {
+        if (selected.find((s) => s.label === PackageManagement.enterPackageNames)) {
+            const filler = selected
+                .filter((s) => s.label !== PackageManagement.enterPackageNames)
+                .map((s) => s.label)
+                .join(' ');
+            try {
+                const result = await enterPackageManually(filler);
+                return result;
+            } catch (ex) {
+                if (ex === QuickInputButtons.Back) {
+                    return getCommonPackagesToInstall(selected);
+                }
+                return undefined;
+            }
+        } else {
+            return selected.map((s) => s.label);
         }
     }
 }
@@ -407,48 +514,35 @@ export async function getPackagesToInstall(
     }
 
     if (packageType === PackageManagement.enterPackageNames) {
-        return enterPackageManually();
+        try {
+            const result = await enterPackageManually();
+            return result;
+        } catch (ex) {
+            if (ex === QuickInputButtons.Back) {
+                return getPackagesToInstall(packageManager, environment);
+            }
+            return undefined;
+        }
     } else if (packageType === PackageManagement.workspacePackages) {
-        return getWorkspacePackages(packageManager, environment);
+        try {
+            const result = await getWorkspacePackages(packageManager, environment);
+            return result;
+        } catch (ex) {
+            if (ex === QuickInputButtons.Back) {
+                return getPackagesToInstall(packageManager, environment);
+            }
+            return undefined;
+        }
     }
 
-    const common = await getCommonPackages();
-    const items: PackageQuickPickItem[] = [
-        {
-            label: PackageManagement.enterPackageNames,
-            alwaysShow: true,
-        },
-        {
-            label: PackageManagement.commonPackages,
-            kind: QuickPickItemKind.Separator,
-        },
-    ];
-
-    items.push(...common.map(installableToQuickPickItem));
-
-    const selected = await showQuickPickWithButtons(
-        items,
-        {
-            placeHolder: PackageManagement.selectPackagesToInstall,
-            ignoreFocusOut: true,
-            canPickMany: true,
-        },
-        undefined,
-        async (e: QuickPickItemButtonEvent<PackageQuickPickItem>) => {
-            handleButton(e.item.uri);
-        },
-    );
-
-    if (selected && Array.isArray(selected)) {
-        if (selected.find((s) => s.label === PackageManagement.enterPackageNames)) {
-            const filler = selected
-                .filter((s) => s.label !== PackageManagement.enterPackageNames)
-                .map((s) => s.label)
-                .join(' ');
-            return enterPackageManually(filler);
-        } else {
-            return selected.map((s) => s.label);
+    try {
+        const result = await getCommonPackagesToInstall();
+        return result;
+    } catch (ex) {
+        if (ex === QuickInputButtons.Back) {
+            return getPackagesToInstall(packageManager, environment);
         }
+        return undefined;
     }
 }
 

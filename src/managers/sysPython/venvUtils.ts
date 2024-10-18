@@ -295,7 +295,7 @@ function getTomlInstallable(toml: tomljs.JsonMap, tomlPath: Uri): Installable[] 
 
     if (isPipInstallableToml(toml)) {
         extras.push({
-            displayName: 'Editable',
+            displayName: path.basename(tomlPath.fsPath),
             description: 'Install project as editable',
             group: 'Toml',
             args: ['-e', path.dirname(tomlPath.fsPath)],

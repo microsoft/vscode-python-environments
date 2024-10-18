@@ -19,4 +19,5 @@ export namespace PackageManagement {
     export const workspacePackages = l10n.t('Workspace packages');
     export const selectPackagesToUninstall = l10n.t('Select packages to uninstall');
     export const enterPackagesPlaceHolder = l10n.t('Enter package names separated by space');
+    export const editArguments = l10n.t('Edit arguments');
 }

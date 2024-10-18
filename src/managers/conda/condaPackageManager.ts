@@ -1,14 +1,4 @@
-import * as path from 'path';
-import {
-    Disposable,
-    Event,
-    EventEmitter,
-    LogOutputChannel,
-    MarkdownString,
-    ProgressLocation,
-    Uri,
-    window,
-} from 'vscode';
+import { Disposable, Event, EventEmitter, LogOutputChannel, MarkdownString, ProgressLocation, window } from 'vscode';
 import {
     DidChangePackagesEventArgs,
     IconPath,
