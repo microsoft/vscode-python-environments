@@ -297,14 +297,16 @@ function installableToQuickPickItem(i: Installable): PackageQuickPickItem {
 async function getPackageType(): Promise<string | undefined> {
     const items: QuickPickItem[] = [
         {
-            label: `$(folder) ${PackageManagement.workspaceDependencies}`,
+            label: PackageManagement.workspaceDependencies,
             description: PackageManagement.workspaceDependenciesDescription,
             alwaysShow: true,
+            iconPath: new ThemeIcon('folder'),
         },
         {
-            label: `$(search) ${PackageManagement.commonPackages}`,
+            label: PackageManagement.commonPackages,
             description: PackageManagement.commonPackagesDescription,
             alwaysShow: true,
+            iconPath: new ThemeIcon('search'),
         },
     ];
     const selected = (await showQuickPickWithButtons(items, {

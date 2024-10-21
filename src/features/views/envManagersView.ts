@@ -9,7 +9,7 @@ import {
     InternalEnvironmentManager,
     InternalPackageManager,
 } from '../../internal.api';
-import { traceError, traceVerbose } from '../../common/logging';
+import { traceError } from '../../common/logging';
 import {
     EnvTreeItem,
     EnvManagerTreeItem,
@@ -201,13 +201,9 @@ export class EnvManagerView implements TreeDataProvider<EnvTreeItem>, Disposable
 
     private onDidChangePackages(args: InternalDidChangePackagesEventArgs) {
         const pkgRoot = this._viewsPackageRoots.get(args.environment.envId.id);
-        if (!pkgRoot) {
-            traceVerbose(`Add Package Error: No environment view found for: ${args.environment.envId.id}`);
-            traceVerbose(`Environment views: ${Array.from(this._viewsEnvironments.keys()).join(', ')}`);
-            return;
+        if (pkgRoot) {
+            this.fireDataChanged(pkgRoot);
         }
-
-        this.fireDataChanged(pkgRoot);
     }
 
     private onDidChangePackageManager(args: DidChangePackageManagerEventArgs) {

@@ -15,9 +15,9 @@ export namespace Interpreter {
 export namespace PackageManagement {
     export const selectPackagesToInstall = l10n.t('Select packages to install');
     export const enterPackageNames = l10n.t('Enter package names');
-    export const commonPackages = l10n.t('Common packages');
+    export const commonPackages = l10n.t('Search common packages');
     export const commonPackagesDescription = l10n.t('Search and Install common packages');
-    export const workspaceDependencies = l10n.t('Workspace dependencies');
+    export const workspaceDependencies = l10n.t('Install workspace dependencies');
     export const workspaceDependenciesDescription = l10n.t('Install dependencies found in the current workspace.');
     export const selectPackagesToUninstall = l10n.t('Select packages to uninstall');
     export const enterPackagesPlaceHolder = l10n.t('Enter package names separated by space');
