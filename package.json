@@ -2,10 +2,10 @@
     "name": "vscode-python-envs",
     "displayName": "Python Environment Manager",
     "description": "Provides a unified python environment experience",
-    "version": "0.0.1",
+    "version": "0.0.0",
     "publisher": "ms-python",
     "engines": {
-        "vscode": "^1.93.0-20240910"
+        "vscode": "^1.93.0"
     },
     "categories": [
         "Other"
@@ -13,13 +13,13 @@
     "activationEvents": [
         "onLanguage:python"
     ],
-    "homepage": "https://github.com/karthiknadig/vscode-python-envs",
+    "homepage": "https://github.com/microsoft/vscode-python-environments",
     "repository": {
         "type": "git",
-        "url": "https://github.com/karthiknadig/vscode-python-envs.git"
+        "url": "https://github.com/microsoft/vscode-python-environments.git"
     },
     "bugs": {
-        "url": "https://github.com/karthiknadig/vscode-python-envs/issues"
+        "url": "https://github.com/microsoft/vscode-python-environments/issues"
     },
     "extensionDependencies": [
         "ms-python.python"

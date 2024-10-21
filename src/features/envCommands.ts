@@ -1,4 +1,4 @@
-import { TaskExecution, TaskRevealKind, Terminal, Uri, window } from 'vscode';
+import { QuickInputButtons, TaskExecution, TaskRevealKind, Terminal, Uri, window } from 'vscode';
 import {
     EnvironmentManagers,
     InternalPackageManager,
@@ -129,7 +129,13 @@ export async function handlePackagesCommand(
 
     if (action === Common.install) {
         if (!packages || packages.length === 0) {
-            packages = await getPackagesToInstall(packageManager, environment);
+            try {
+                packages = await getPackagesToInstall(packageManager, environment);
+            } catch (ex: any) {
+                if (ex === QuickInputButtons.Back) {
+                    return handlePackagesCommand(packageManager, environment, packages);
+                }
+            }
         }
         if (packages && packages.length > 0) {
             return packageManager.install(environment, packages, { upgrade: false });

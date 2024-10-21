@@ -243,11 +243,11 @@ export const OPEN_BROWSER_BUTTON = {
 
 export const OPEN_EDITOR_BUTTON = {
     iconPath: new ThemeIcon('go-to-file'),
-    tooltip: Common.openInBrowser,
+    tooltip: Common.openInEditor,
 };
 
 export const EDIT_ARGUMENTS_BUTTON = {
-    iconPath: new ThemeIcon('wrench'),
+    iconPath: new ThemeIcon('pencil'),
     tooltip: PackageManagement.editArguments,
 };
 
@@ -294,29 +294,24 @@ function installableToQuickPickItem(i: Installable): PackageQuickPickItem {
     };
 }
 
-async function getPackageType(packageManager: InternalPackageManager): Promise<string | undefined> {
-    if (!packageManager.supportsGetInstallable) {
-        return PackageManagement.commonPackages;
-    }
-
+async function getPackageType(): Promise<string | undefined> {
     const items: QuickPickItem[] = [
         {
-            label: PackageManagement.enterPackageNames,
+            label: `$(folder) ${PackageManagement.workspaceDependencies}`,
+            description: PackageManagement.workspaceDependenciesDescription,
             alwaysShow: true,
         },
         {
-            label: PackageManagement.workspacePackages,
-            alwaysShow: true,
-        },
-        {
-            label: PackageManagement.commonPackages,
+            label: `$(search) ${PackageManagement.commonPackages}`,
+            description: PackageManagement.commonPackagesDescription,
             alwaysShow: true,
         },
     ];
-    const selected = await window.showQuickPick(items, {
+    const selected = (await showQuickPickWithButtons(items, {
         placeHolder: PackageManagement.selectPackagesToInstall,
+        showBackButton: true,
         ignoreFocusOut: true,
-    });
+    })) as QuickPickItem;
 
     return selected?.label;
 }
@@ -349,7 +344,7 @@ function getGroupedItems(items: Installable[]): PackageQuickPickItem[] {
 
     if (workspaceInstallable.length > 0) {
         result.push({
-            label: PackageManagement.workspacePackages,
+            label: PackageManagement.workspaceDependencies,
             kind: QuickPickItemKind.Separator,
         });
         result.push(...workspaceInstallable.map(installableToQuickPickItem));
@@ -507,43 +502,41 @@ export async function getPackagesToInstall(
     packageManager: InternalPackageManager,
     environment: PythonEnvironment,
 ): Promise<string[] | undefined> {
-    const packageType = await getPackageType(packageManager);
+    const packageType = packageManager.supportsGetInstallable
+        ? await getPackageType()
+        : PackageManagement.commonPackages;
 
-    if (!packageType) {
-        return;
-    }
-
-    if (packageType === PackageManagement.enterPackageNames) {
-        try {
-            const result = await enterPackageManually();
-            return result;
-        } catch (ex) {
-            if (ex === QuickInputButtons.Back) {
-                return getPackagesToInstall(packageManager, environment);
-            }
-            return undefined;
-        }
-    } else if (packageType === PackageManagement.workspacePackages) {
+    if (packageType === PackageManagement.workspaceDependencies) {
         try {
             const result = await getWorkspacePackages(packageManager, environment);
             return result;
         } catch (ex) {
-            if (ex === QuickInputButtons.Back) {
+            if (packageManager.supportsGetInstallable && ex === QuickInputButtons.Back) {
                 return getPackagesToInstall(packageManager, environment);
+            }
+            if (ex === QuickInputButtons.Back) {
+                throw ex;
             }
             return undefined;
         }
     }
 
-    try {
-        const result = await getCommonPackagesToInstall();
-        return result;
-    } catch (ex) {
-        if (ex === QuickInputButtons.Back) {
-            return getPackagesToInstall(packageManager, environment);
+    if (packageType === PackageManagement.commonPackages) {
+        try {
+            const result = await getCommonPackagesToInstall();
+            return result;
+        } catch (ex) {
+            if (packageManager.supportsGetInstallable && ex === QuickInputButtons.Back) {
+                return getPackagesToInstall(packageManager, environment);
+            }
+            if (ex === QuickInputButtons.Back) {
+                throw ex;
+            }
+            return undefined;
         }
-        return undefined;
     }
+
+    return undefined;
 }
 
 export async function getPackagesToUninstall(packages: Package[]): Promise<Package[] | undefined> {
