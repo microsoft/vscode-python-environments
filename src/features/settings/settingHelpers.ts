@@ -1,5 +1,12 @@
 import * as path from 'path';
-import { ConfigurationScope, ConfigurationTarget, Uri, workspace, WorkspaceConfiguration } from 'vscode';
+import {
+    ConfigurationScope,
+    ConfigurationTarget,
+    Uri,
+    workspace,
+    WorkspaceConfiguration,
+    WorkspaceFolder,
+} from 'vscode';
 import { PythonProjectManager, PythonProjectSettings } from '../../internal.api';
 import { traceError, traceInfo } from '../../common/logging';
 import { PythonProject } from '../../api';
@@ -74,12 +81,14 @@ export async function setEnvironmentManager(context: Uri, managerId: string, wm:
         if (index >= 0) {
             overrides[index].envManager = managerId;
             await config.update('pythonProjects', overrides, ConfigurationTarget.Workspace);
-        } else {
+        } else if (config.get('defaultEnvManager') !== managerId) {
             await config.update('defaultEnvManager', managerId, ConfigurationTarget.Workspace);
         }
     } else {
         const config = workspace.getConfiguration('python-envs', undefined);
-        await config.update('defaultEnvManager', managerId, ConfigurationTarget.Global);
+        if (config.get('defaultEnvManager') !== managerId) {
+            await config.update('defaultEnvManager', managerId, ConfigurationTarget.Global);
+        }
     }
 }
 
@@ -94,50 +103,98 @@ export async function setPackageManager(context: Uri, managerId: string, wm: Pyt
         if (index >= 0) {
             overrides[index].packageManager = managerId;
             await config.update('pythonProjects', overrides, ConfigurationTarget.Workspace);
-        } else {
+        } else if (config.get('defaultPackageManager') !== managerId) {
             await config.update('defaultPackageManager', managerId, ConfigurationTarget.Workspace);
         }
     } else {
         const config = workspace.getConfiguration('python-envs', undefined);
-        await config.update('defaultPackageManager', managerId, ConfigurationTarget.Global);
+        if (config.get('defaultPackageManager') !== managerId) {
+            await config.update('defaultPackageManager', managerId, ConfigurationTarget.Global);
+        }
     }
 }
 
-export async function addPythonProjectSetting(
-    pw: PythonProject,
-    envManager: string,
-    pkgManager: string,
-): Promise<void> {
-    const w = workspace.getWorkspaceFolder(pw.uri);
-    if (w) {
-        const config = workspace.getConfiguration('python-envs', w.uri);
-        const overrides = config.get<PythonProjectSettings[]>('pythonProjects', []);
-        const pwPath = path.normalize(pw.uri.fsPath);
-        const index = overrides.findIndex((s) => path.resolve(w.uri.fsPath, s.path) === pwPath);
-        if (index >= 0) {
-            overrides[index].envManager = envManager;
-            overrides[index].packageManager = pkgManager;
+export interface EditSettings {
+    project: PythonProject;
+    envManager?: string;
+    packageManager?: string;
+}
+
+export async function addPythonProjectSetting(edits: EditSettings[]): Promise<void> {
+    const noWorkspace: EditSettings[] = [];
+    const workspaces = new Map<WorkspaceFolder, EditSettings[]>();
+    const globalConfig = workspace.getConfiguration('python-envs', undefined);
+    const envManager = globalConfig.get<string>('defaultEnvManager', DEFAULT_ENV_MANAGER_ID);
+    const pkgManager = globalConfig.get<string>('defaultPackageManager', DEFAULT_PACKAGE_MANAGER_ID);
+
+    edits.forEach((e) => {
+        const w = workspace.getWorkspaceFolder(e.project.uri);
+        if (w) {
+            workspaces.set(w, [...(workspaces.get(w) || []), e]);
         } else {
-            overrides.push({ path: path.relative(w.uri.fsPath, pwPath), envManager, packageManager: pkgManager });
+            noWorkspace.push(e);
         }
-        await config.update('pythonProjects', overrides, ConfigurationTarget.Workspace);
-    } else {
-        traceError(`Unable to find workspace for ${pw.uri.fsPath}`);
-    }
-}
+    });
 
-export async function removePythonProjectSetting(pw: PythonProject): Promise<void> {
-    const w = workspace.getWorkspaceFolder(pw.uri);
-    if (w) {
+    noWorkspace.forEach((e) => {
+        traceError(`Unable to find workspace for ${e.project.uri.fsPath}`);
+    });
+
+    const promises: Thenable<void>[] = [];
+    workspaces.forEach((es, w) => {
         const config = workspace.getConfiguration('python-envs', w.uri);
         const overrides = config.get<PythonProjectSettings[]>('pythonProjects', []);
-        const pwPath = path.normalize(pw.uri.fsPath);
-        const index = overrides.findIndex((s) => path.resolve(w.uri.fsPath, s.path) === pwPath);
-        if (index >= 0) {
-            overrides.splice(index, 1);
-            await config.update('pythonProjects', overrides, ConfigurationTarget.Workspace);
+        es.forEach((e) => {
+            const pwPath = path.normalize(e.project.uri.fsPath);
+            const index = overrides.findIndex((s) => path.resolve(w.uri.fsPath, s.path) === pwPath);
+            if (index >= 0) {
+                overrides[index].envManager = e.envManager ?? envManager;
+                overrides[index].packageManager = e.packageManager ?? pkgManager;
+            } else {
+                overrides.push({
+                    path: path.relative(w.uri.fsPath, pwPath).replace(/\\/g, '/'),
+                    envManager,
+                    packageManager: pkgManager,
+                });
+            }
+        });
+        promises.push(config.update('pythonProjects', overrides, ConfigurationTarget.Workspace));
+    });
+    await Promise.all(promises);
+}
+
+export async function removePythonProjectSetting(edits: EditSettings[]): Promise<void> {
+    const noWorkspace: EditSettings[] = [];
+    const workspaces = new Map<WorkspaceFolder, EditSettings[]>();
+    edits.forEach((e) => {
+        const w = workspace.getWorkspaceFolder(e.project.uri);
+        if (w) {
+            workspaces.set(w, [...(workspaces.get(w) || []), e]);
+        } else {
+            noWorkspace.push(e);
         }
-    } else {
-        traceError(`Unable to find workspace for ${pw.uri.fsPath}`);
-    }
+    });
+
+    noWorkspace.forEach((e) => {
+        traceError(`Unable to find workspace for ${e.project.uri.fsPath}`);
+    });
+
+    const promises: Thenable<void>[] = [];
+    workspaces.forEach((es, w) => {
+        const config = workspace.getConfiguration('python-envs', w.uri);
+        const overrides = config.get<PythonProjectSettings[]>('pythonProjects', []);
+        es.forEach((e) => {
+            const pwPath = path.normalize(e.project.uri.fsPath);
+            const index = overrides.findIndex((s) => path.resolve(w.uri.fsPath, s.path) === pwPath);
+            if (index >= 0) {
+                overrides.splice(index, 1);
+            }
+        });
+        if (overrides.length === 0) {
+            promises.push(config.update('pythonProjects', undefined, ConfigurationTarget.Workspace));
+        } else {
+            promises.push(config.update('pythonProjects', overrides, ConfigurationTarget.Workspace));
+        }
+    });
+    await Promise.all(promises);
 }

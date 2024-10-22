@@ -27,6 +27,7 @@ import {
     removePythonProjectSetting,
     getDefaultEnvManagerSetting,
     getDefaultPkgManagerSetting,
+    EditSettings,
 } from './settings/settingHelpers';
 
 import { getAbsolutePath } from '../common/utils/fileNameUtils';
@@ -278,8 +279,7 @@ export async function addPythonProject(
             em.getEnvironmentManager(envManagerId)?.preferredPackageManagerId,
         );
         const pw = wm.create(path.basename(uri.fsPath), uri);
-        await addPythonProjectSetting(pw, envManagerId, pkgManagerId);
-        wm.add(pw);
+        await addPythonProjectSetting([{ project: pw, envManager: envManagerId, packageManager: pkgManagerId }]);
         return pw;
     }
 
@@ -305,6 +305,7 @@ export async function addPythonProject(
         }
 
         const projects: PythonProject[] = [];
+        const edits: EditSettings[] = [];
 
         for (const result of results) {
             const uri = await getAbsolutePath(result.uri.fsPath);
@@ -320,15 +321,16 @@ export async function addPythonProject(
                 em.getEnvironmentManager(envManagerId)?.preferredPackageManagerId,
             );
             const pw = wm.create(path.basename(uri.fsPath), uri);
-            await addPythonProjectSetting(pw, envManagerId, pkgManagerId);
             projects.push(pw);
+            edits.push({ project: pw, envManager: envManagerId, packageManager: pkgManagerId });
         }
+        await addPythonProjectSetting(edits);
         return projects;
     }
 }
 
 export async function removePythonProject(item: ProjectItem, wm: PythonProjectManager): Promise<void> {
-    await removePythonProjectSetting(item.project);
+    await removePythonProjectSetting([{ project: item.project }]);
     wm.remove(item.project);
 }
 

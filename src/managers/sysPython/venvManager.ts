@@ -183,12 +183,12 @@ export class VenvManager implements EnvironmentManager {
             return this.globalEnv;
         }
 
-        let env = this.fsPathToEnv.get(project.uri.fsPath) ?? this.globalEnv;
+        let env = this.fsPathToEnv.get(project.uri.fsPath);
         if (!env) {
             env = this.findEnvironmentByPath(project.uri.fsPath);
         }
 
-        return env;
+        return env ?? this.globalEnv;
     }
 
     async set(scope: SetEnvironmentScope, environment?: PythonEnvironment): Promise<void> {
