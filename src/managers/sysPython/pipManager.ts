@@ -15,7 +15,6 @@ import { installPackages, refreshPackages, uninstallPackages } from './utils';
 import { EXTENSION_ROOT_DIR } from '../../common/constants';
 import { Disposable } from 'vscode-jsonrpc';
 import { getProjectInstallable } from './venvUtils';
-import { pickProject } from '../../common/pickers';
 import { VenvManager } from './venvManager';
 
 function getChanges(before: Package[], after: Package[]): { kind: PackageChangeKind; pkg: Package }[] {
@@ -123,20 +122,7 @@ export class PipPackageManager implements PackageManager, Disposable {
     }
     async getInstallable(environment: PythonEnvironment): Promise<Installable[]> {
         const projects = this.venv.getProjectsByEnvironment(environment);
-        if (projects.length === 0) {
-            return [];
-        }
-
-        if (projects.length === 1) {
-            return getProjectInstallable(this.api, projects[0]);
-        }
-
-        const project = await pickProject(projects);
-        if (!project) {
-            return [];
-        }
-
-        return getProjectInstallable(this.api, project);
+        return getProjectInstallable(this.api, projects);
     }
     dispose(): void {
         this._onDidChangePackages.dispose();

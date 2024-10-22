@@ -297,7 +297,7 @@ function getTomlInstallable(toml: tomljs.JsonMap, tomlPath: Uri): Installable[] 
         extras.push({
             displayName: path.basename(tomlPath.fsPath),
             description: 'Install project as editable',
-            group: 'Toml',
+            group: 'TOML',
             args: ['-e', path.dirname(tomlPath.fsPath)],
             uri: tomlPath,
         });
@@ -308,7 +308,7 @@ function getTomlInstallable(toml: tomljs.JsonMap, tomlPath: Uri): Installable[] 
         for (const key of Object.keys(deps)) {
             extras.push({
                 displayName: key,
-                group: 'Toml',
+                group: 'TOML',
                 args: ['-e', `.[${key}]`],
                 uri: tomlPath,
             });
@@ -319,9 +319,9 @@ function getTomlInstallable(toml: tomljs.JsonMap, tomlPath: Uri): Installable[] 
 
 export async function getProjectInstallable(
     api: PythonEnvironmentApi,
-    project?: PythonProject,
+    projects?: PythonProject[],
 ): Promise<Installable[]> {
-    if (!project) {
+    if (!projects) {
         return [];
     }
     const exclude = '**/{.venv*,.git,.nox,.tox,.conda,site-packages,__pypackages__}/**';
@@ -332,43 +332,36 @@ export async function getProjectInstallable(
             title: 'Searching dependencies',
         },
         async (progress, token) => {
-            progress.report({ message: 'Searching for requirements files' });
-            const results1 = await findFiles(
-                new RelativePattern(project.uri, '**/*requirements*.txt'),
-                exclude,
-                undefined,
-                token,
-            );
-            const results2 = await findFiles(
-                new RelativePattern(project.uri, '**/requirements/*.txt'),
-                exclude,
-                undefined,
-                token,
-            );
-            [...results1, ...results2].forEach((uri) => {
-                const p = api.getPythonProject(uri);
-                if (p?.uri.fsPath === project.uri.fsPath) {
-                    installable.push({
-                        uri,
-                        displayName: path.basename(uri.fsPath),
-                        group: 'requirements',
-                        args: ['-r', uri.fsPath],
-                    });
-                }
-            });
+            progress.report({ message: 'Searching for Requirements and TOML files' });
+            const results: Uri[] = (
+                await Promise.all([
+                    findFiles('**/requirements*.txt', exclude, undefined, token),
+                    findFiles('**/requirements/*.txt', exclude, undefined, token),
+                    findFiles('**/pyproject.toml', exclude, undefined, token),
+                ])
+            ).flat();
 
-            progress.report({ message: 'Searching for `pyproject.toml` file' });
-            const results3 = await findFiles(
-                new RelativePattern(project.uri, '**/pyproject.toml'),
-                exclude,
-                undefined,
-                token,
-            );
-            results3.filter((uri) => api.getPythonProject(uri)?.uri.fsPath === project.uri.fsPath);
+            const fsPaths = projects.map((p) => p.uri.fsPath);
+            const filtered = results
+                .filter((uri) => {
+                    const p = api.getPythonProject(uri)?.uri.fsPath;
+                    return p && fsPaths.includes(p);
+                })
+                .sort();
+
             await Promise.all(
-                results3.map(async (uri) => {
-                    const toml = tomlParse(await fsapi.readFile(uri.fsPath, 'utf-8'));
-                    installable.push(...getTomlInstallable(toml, uri));
+                filtered.map(async (uri) => {
+                    if (uri.fsPath.endsWith('.toml')) {
+                        const toml = tomlParse(await fsapi.readFile(uri.fsPath, 'utf-8'));
+                        installable.push(...getTomlInstallable(toml, uri));
+                    } else {
+                        installable.push({
+                            uri,
+                            displayName: path.basename(uri.fsPath),
+                            group: 'Requirements',
+                            args: ['-r', uri.fsPath],
+                        });
+                    }
                 }),
             );
         },
