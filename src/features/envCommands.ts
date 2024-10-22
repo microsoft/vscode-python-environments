@@ -17,6 +17,7 @@ import {
     pickPackageManager,
     pickPackageOptions,
     pickProject,
+    pickProjectMany,
 } from '../common/pickers';
 import { PythonEnvironment, PythonEnvironmentApi, PythonProject, PythonProjectCreator } from '../api';
 import * as path from 'path';
@@ -27,7 +28,8 @@ import {
     removePythonProjectSetting,
     getDefaultEnvManagerSetting,
     getDefaultPkgManagerSetting,
-    EditSettings,
+    EditProjectSettings,
+    setAllManagerSettings,
 } from './settings/settingHelpers';
 
 import { getAbsolutePath } from '../common/utils/fileNameUtils';
@@ -158,7 +160,7 @@ export async function handlePackagesCommand(
 }
 
 export interface EnvironmentSetResult {
-    workspace?: PythonProject;
+    project?: PythonProject;
     environment: PythonEnvironment;
 }
 
@@ -166,16 +168,21 @@ export async function setEnvironmentCommand(
     context: unknown,
     em: EnvironmentManagers,
     wm: PythonProjectManager,
-): Promise<EnvironmentSetResult | undefined> {
+): Promise<EnvironmentSetResult[] | undefined> {
     if (context instanceof PythonEnvTreeItem) {
         const view = context as PythonEnvTreeItem;
         const manager = view.parent.manager;
-        const pw = await pickProject(wm.getProjects());
-        if (pw) {
-            await setEnvironmentManager(pw.uri, manager.id, wm);
-            await setPackageManager(pw.uri, manager.preferredPackageManagerId, wm);
-            manager.set(pw.uri, view.environment);
-            return { workspace: pw, environment: view.environment };
+        const projects = await pickProjectMany(wm.getProjects());
+        if (projects) {
+            await Promise.all(projects.map((p) => manager.set(p.uri, view.environment)));
+            await setAllManagerSettings(
+                projects.map((p) => ({
+                    project: p,
+                    envManager: manager.id,
+                    packageManager: manager.preferredPackageManagerId,
+                })),
+            );
+            return projects.map((p) => ({ project: p, environment: view.environment }));
         }
         return;
     } else if (context instanceof ProjectItem) {
@@ -193,10 +200,15 @@ export async function setEnvironmentCommand(
         if (result) {
             result.manager.set(uri, result.selected);
             if (result.manager.id !== manager?.id) {
-                await setEnvironmentManager(uri, result.manager.id, wm);
-                await setPackageManager(uri, result.manager.preferredPackageManagerId, wm);
+                await setAllManagerSettings([
+                    {
+                        project: wm.get(uri),
+                        envManager: result.manager.id,
+                        packageManager: result.manager.preferredPackageManagerId,
+                    },
+                ]);
             }
-            return { workspace: wm.get(uri), environment: result.selected };
+            return [{ project: wm.get(uri), environment: result.selected }];
         }
         return;
     } else if (context === undefined) {
@@ -240,21 +252,21 @@ export async function resetEnvironmentCommand(
 }
 
 export async function setEnvManagerCommand(em: EnvironmentManagers, wm: PythonProjectManager): Promise<void> {
-    const pw = await pickProject(wm.getProjects());
-    if (pw) {
+    const projects = await pickProjectMany(wm.getProjects());
+    if (projects) {
         const manager = await pickEnvironmentManager(em.managers);
         if (manager) {
-            await setEnvironmentManager(pw.uri, manager, wm);
+            await setEnvironmentManager(projects.map((p) => ({ project: p, envManager: manager })));
         }
     }
 }
 
 export async function setPkgManagerCommand(em: EnvironmentManagers, wm: PythonProjectManager): Promise<void> {
-    const pw = await pickProject(wm.getProjects());
-    if (pw) {
+    const projects = await pickProjectMany(wm.getProjects());
+    if (projects) {
         const manager = await pickPackageManager(em.packageManagers);
         if (manager) {
-            await setPackageManager(pw.uri, manager, wm);
+            await setPackageManager(projects.map((p) => ({ project: p, packageManager: manager })));
         }
     }
 }
@@ -305,7 +317,7 @@ export async function addPythonProject(
         }
 
         const projects: PythonProject[] = [];
-        const edits: EditSettings[] = [];
+        const edits: EditProjectSettings[] = [];
 
         for (const result of results) {
             const uri = await getAbsolutePath(result.uri.fsPath);

@@ -29,7 +29,7 @@ import { getPythonApi, setPythonApi } from './features/pythonApi';
 import { setPersistentState } from './common/persistentState';
 import { isPythonProjectFile } from './common/utils/fileNameUtils';
 import { createNativePythonFinder, NativePythonFinder } from './managers/common/nativePythonFinder';
-import { PythonEnvironmentApi } from './api';
+import { PythonEnvironmentApi, PythonProject } from './api';
 import {
     ProjectCreatorsImpl,
     registerAutoProjectProvider,
@@ -102,13 +102,25 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
         commands.registerCommand('python-envs.set', async (item) => {
             const result = await setEnvironmentCommand(item, envManagers, projectManager);
             if (result) {
-                workspaceView.updateProject(result.workspace);
+                const projects: PythonProject[] = [];
+                result.forEach((r) => {
+                    if (r.project) {
+                        projects.push(r.project);
+                    }
+                });
+                workspaceView.updateProject(projects);
             }
         }),
         commands.registerCommand('python-envs.setEnv', async (item) => {
             const result = await setEnvironmentCommand(item, envManagers, projectManager);
             if (result) {
-                workspaceView.updateProject(result.workspace);
+                const projects: PythonProject[] = [];
+                result.forEach((r) => {
+                    if (r.project) {
+                        projects.push(r.project);
+                    }
+                });
+                workspaceView.updateProject(projects);
             }
         }),
         commands.registerCommand('python-envs.reset', async (item) => {
