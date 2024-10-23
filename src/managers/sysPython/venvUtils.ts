@@ -1,4 +1,4 @@
-import { LogOutputChannel, ProgressLocation, RelativePattern, Uri, window } from 'vscode';
+import { LogOutputChannel, ProgressLocation, Uri, window } from 'vscode';
 import {
     EnvironmentManager,
     Installable,
