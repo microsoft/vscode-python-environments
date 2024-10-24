@@ -22,11 +22,12 @@ import {
     getVenvForGlobal,
     getVenvForWorkspace,
     removeVenv,
+    resolveVenvPythonEnvironment,
+    resolveVenvPythonEnvironmentPath,
     setVenvForGlobal,
     setVenvForWorkspace,
 } from './venvUtils';
 import * as path from 'path';
-import { resolvePythonEnvironment, resolvePythonEnvironmentPath } from './utils';
 import { NativePythonFinder } from '../common/nativePythonFinder';
 import { EXTENSION_ROOT_DIR } from '../../common/constants';
 import { createDeferred, Deferred } from '../../common/utils/deferred';
@@ -247,7 +248,13 @@ export class VenvManager implements EnvironmentManager {
             }
         }
 
-        const resolved = await resolvePythonEnvironment(context, this.nativeFinder, this.api, this);
+        const resolved = await resolveVenvPythonEnvironment(
+            context,
+            this.nativeFinder,
+            this.api,
+            this,
+            this.baseManager,
+        );
         if (resolved) {
             // This is just like finding a new environment or creating a new one.
             // Add it to collection, and trigger the added event.
@@ -271,7 +278,13 @@ export class VenvManager implements EnvironmentManager {
 
             // If the environment is not found, resolve the fsPath. Could be portable conda.
             if (!this.globalEnv) {
-                this.globalEnv = await resolvePythonEnvironmentPath(fsPath, this.nativeFinder, this.api, this);
+                this.globalEnv = await resolveVenvPythonEnvironmentPath(
+                    fsPath,
+                    this.nativeFinder,
+                    this.api,
+                    this,
+                    this.baseManager,
+                );
 
                 // If the environment is resolved, add it to the collection
                 if (this.globalEnv) {
@@ -300,7 +313,13 @@ export class VenvManager implements EnvironmentManager {
                         this._onDidChangeEnvironment.fire({ uri: pw.uri, old: undefined, new: found });
                     }
                 } else {
-                    const resolved = await resolvePythonEnvironmentPath(env, this.nativeFinder, this.api, this);
+                    const resolved = await resolveVenvPythonEnvironmentPath(
+                        env,
+                        this.nativeFinder,
+                        this.api,
+                        this,
+                        this.baseManager,
+                    );
                     if (resolved) {
                         // If resolved add it to the collection
                         this.fsPathToEnv.set(p, resolved);

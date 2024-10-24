@@ -391,7 +391,7 @@ export async function uninstallPackages(
     throw new Error(`No executable found for python: ${environment.environmentPath.fsPath}`);
 }
 
-export async function resolvePythonEnvironment(
+export async function resolveSystemPythonEnvironment(
     context: ResolveEnvironmentContext,
     nativeFinder: NativePythonFinder,
 
@@ -399,11 +399,11 @@ export async function resolvePythonEnvironment(
     manager: EnvironmentManager,
 ): Promise<PythonEnvironment | undefined> {
     const fsPath = context instanceof Uri ? context.fsPath : context.environmentPath.fsPath;
-    const resolved = await resolvePythonEnvironmentPath(fsPath, nativeFinder, api, manager);
+    const resolved = await resolveSystemPythonEnvironmentPath(fsPath, nativeFinder, api, manager);
     return resolved;
 }
 
-export async function resolvePythonEnvironmentPath(
+export async function resolveSystemPythonEnvironmentPath(
     fsPath: string,
     nativeFinder: NativePythonFinder,
     api: PythonEnvironmentApi,

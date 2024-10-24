@@ -18,8 +18,8 @@ import {
     getSystemEnvForGlobal,
     getSystemEnvForWorkspace,
     refreshPythons,
-    resolvePythonEnvironment,
-    resolvePythonEnvironmentPath,
+    resolveSystemPythonEnvironment,
+    resolveSystemPythonEnvironmentPath,
     setSystemEnvForGlobal,
     setSystemEnvForWorkspace,
 } from './utils';
@@ -178,7 +178,7 @@ export class SysPythonManager implements EnvironmentManager {
         }
 
         // This environment is unknown. Resolve it.
-        const resolved = await resolvePythonEnvironment(context, this.nativeFinder, this.api, this);
+        const resolved = await resolveSystemPythonEnvironment(context, this.nativeFinder, this.api, this);
         if (resolved) {
             // This is just like finding a new environment or creating a new one.
             // Add it to collection, and trigger the added event.
@@ -225,7 +225,7 @@ export class SysPythonManager implements EnvironmentManager {
 
             // If the environment is not found, resolve the fsPath.
             if (!this.globalEnv) {
-                this.globalEnv = await resolvePythonEnvironmentPath(fsPath, this.nativeFinder, this.api, this);
+                this.globalEnv = await resolveSystemPythonEnvironmentPath(fsPath, this.nativeFinder, this.api, this);
 
                 // If the environment is resolved, add it to the collection
                 if (this.globalEnv) {
@@ -253,7 +253,7 @@ export class SysPythonManager implements EnvironmentManager {
                     this.fsPathToEnv.set(p, found);
                 } else {
                     // If not found, resolve the path.
-                    const resolved = await resolvePythonEnvironmentPath(env, this.nativeFinder, this.api, this);
+                    const resolved = await resolveSystemPythonEnvironmentPath(env, this.nativeFinder, this.api, this);
 
                     if (resolved) {
                         // If resolved add it to the collection

@@ -5,14 +5,16 @@ import {
     PythonCommandRunConfiguration,
     PythonEnvironment,
     PythonEnvironmentApi,
+    PythonEnvironmentInfo,
     PythonProject,
+    ResolveEnvironmentContext,
     TerminalShellType,
 } from '../../api';
 import * as tomljs from '@iarna/toml';
 import * as path from 'path';
 import * as os from 'os';
 import * as fsapi from 'fs-extra';
-import { isUvInstalled, runPython, runUV } from './utils';
+import { isUvInstalled, resolveSystemPythonEnvironmentPath, runPython, runUV } from './utils';
 import { ENVS_EXTENSION_ID, EXTENSION_ROOT_DIR } from '../../common/constants';
 import {
     isNativeEnvInfo,
@@ -88,6 +90,52 @@ function getName(binPath: string): string {
     return path.basename(dir1);
 }
 
+function getPythonInfo(env: NativeEnvInfo): PythonEnvironmentInfo {
+    if (env.executable && env.version && env.prefix) {
+        const venvName = env.name ?? getName(env.executable);
+        const sv = shortVersion(env.version);
+        const name = `${venvName} (${sv})`;
+
+        const binDir = path.dirname(env.executable);
+
+        const shellActivation: Map<TerminalShellType, PythonCommandRunConfiguration[]> = new Map();
+        shellActivation.set(TerminalShellType.bash, [{ executable: 'source', args: [path.join(binDir, 'activate')] }]);
+        shellActivation.set(TerminalShellType.powershell, [{ executable: path.join(binDir, 'Activate.ps1') }]);
+        shellActivation.set(TerminalShellType.commandPrompt, [{ executable: path.join(binDir, 'activate.bat') }]);
+        shellActivation.set(TerminalShellType.unknown, [{ executable: path.join(binDir, 'activate') }]);
+
+        const shellDeactivation = new Map<TerminalShellType, PythonCommandRunConfiguration[]>();
+        shellDeactivation.set(TerminalShellType.bash, [{ executable: 'deactivate' }]);
+        shellDeactivation.set(TerminalShellType.powershell, [{ executable: 'deactivate' }]);
+        shellDeactivation.set(TerminalShellType.commandPrompt, [{ executable: path.join(binDir, 'deactivate.bat') }]);
+        shellActivation.set(TerminalShellType.unknown, [{ executable: 'deactivate' }]);
+
+        return {
+            name: name,
+            displayName: name,
+            shortDisplayName: `${sv} (${venvName})`,
+            displayPath: env.executable,
+            version: env.version,
+            description: env.executable,
+            environmentPath: Uri.file(env.executable),
+            iconPath: Uri.file(path.join(EXTENSION_ROOT_DIR, 'files', 'logo.svg')),
+            sysPrefix: env.prefix,
+            execInfo: {
+                run: {
+                    executable: env.executable,
+                },
+                activatedRun: {
+                    executable: env.executable,
+                },
+                shellActivation,
+                shellDeactivation,
+            },
+        };
+    } else {
+        throw new Error(`Invalid python info: ${JSON.stringify(env)}`);
+    }
+}
+
 export async function findVirtualEnvironments(
     hardRefresh: boolean,
     nativeFinder: NativePythonFinder,
@@ -109,50 +157,9 @@ export async function findVirtualEnvironments(
             return;
         }
 
-        const venvName = e.name ?? getName(e.executable);
-        const sv = shortVersion(e.version);
-        const name = `${venvName} (${sv})`;
-
-        const binDir = path.dirname(e.executable);
-
-        const shellActivation: Map<TerminalShellType, PythonCommandRunConfiguration[]> = new Map();
-        shellActivation.set(TerminalShellType.bash, [{ executable: 'source', args: [path.join(binDir, 'activate')] }]);
-        shellActivation.set(TerminalShellType.powershell, [{ executable: path.join(binDir, 'Activate.ps1') }]);
-        shellActivation.set(TerminalShellType.commandPrompt, [{ executable: path.join(binDir, 'activate.bat') }]);
-        shellActivation.set(TerminalShellType.unknown, [{ executable: path.join(binDir, 'activate') }]);
-
-        const shellDeactivation = new Map<TerminalShellType, PythonCommandRunConfiguration[]>();
-        shellDeactivation.set(TerminalShellType.bash, [{ executable: 'deactivate' }]);
-        shellDeactivation.set(TerminalShellType.powershell, [{ executable: 'deactivate' }]);
-        shellDeactivation.set(TerminalShellType.commandPrompt, [{ executable: path.join(binDir, 'deactivate.bat') }]);
-        shellActivation.set(TerminalShellType.unknown, [{ executable: 'deactivate' }]);
-
-        const env = api.createPythonEnvironmentItem(
-            {
-                name: name,
-                displayName: name,
-                shortDisplayName: `${sv} (${venvName})`,
-                displayPath: e.executable,
-                version: e.version,
-                description: e.executable,
-                environmentPath: Uri.file(e.executable),
-                iconPath: Uri.file(path.join(EXTENSION_ROOT_DIR, 'files', 'logo.svg')),
-                sysPrefix: e.prefix,
-                execInfo: {
-                    run: {
-                        executable: e.executable,
-                    },
-                    activatedRun: {
-                        executable: e.executable,
-                    },
-                    shellActivation,
-                    shellDeactivation,
-                },
-            },
-            manager,
-        );
+        const env = api.createPythonEnvironmentItem(getPythonInfo(e), manager);
         collection.push(env);
-        log.info(`Found venv environment: ${name}`);
+        log.info(`Found venv environment: ${env.name}`);
     });
     return collection;
 }
@@ -455,4 +462,33 @@ export async function getProjectInstallable(
         },
     );
     return installable;
+}
+
+export async function resolveVenvPythonEnvironment(
+    context: ResolveEnvironmentContext,
+    nativeFinder: NativePythonFinder,
+    api: PythonEnvironmentApi,
+    manager: EnvironmentManager,
+    baseManager: EnvironmentManager,
+): Promise<PythonEnvironment | undefined> {
+    const fsPath = context instanceof Uri ? context.fsPath : context.environmentPath.fsPath;
+    const resolved = await resolveVenvPythonEnvironmentPath(fsPath, nativeFinder, api, manager, baseManager);
+    return resolved;
+}
+
+export async function resolveVenvPythonEnvironmentPath(
+    fsPath: string,
+    nativeFinder: NativePythonFinder,
+    api: PythonEnvironmentApi,
+    manager: EnvironmentManager,
+    baseManager: EnvironmentManager,
+): Promise<PythonEnvironment | undefined> {
+    const resolved = await nativeFinder.resolve(fsPath);
+
+    if (resolved.kind === NativePythonEnvironmentKind.venv) {
+        const envInfo = getPythonInfo(resolved);
+        return api.createPythonEnvironmentItem(envInfo, manager);
+    }
+
+    return resolveSystemPythonEnvironmentPath(fsPath, nativeFinder, api, baseManager);
 }
