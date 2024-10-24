@@ -1,4 +1,4 @@
-import { LogOutputChannel, ProgressLocation, Uri, window } from 'vscode';
+import { LogOutputChannel, ProgressLocation, QuickPickItem, QuickPickItemKind, Uri } from 'vscode';
 import {
     EnvironmentManager,
     Installable,
@@ -22,8 +22,16 @@ import {
 } from '../common/nativePythonFinder';
 import { getWorkspacePersistentState } from '../../common/persistentState';
 import { shortVersion, sortEnvironments } from '../common/utils';
-import { findFiles } from '../../common/workspace.apis';
+import { findFiles, getConfiguration } from '../../common/workspace.apis';
 import { pickEnvironmentFrom } from '../../common/pickers/environments';
+import {
+    showQuickPick,
+    withProgress,
+    showWarningMessage,
+    showInputBox,
+    showOpenDialog,
+} from '../../common/window.apis';
+import { showErrorMessage } from '../../common/errors/utils';
 
 export const VENV_WORKSPACE_KEY = `${ENVS_EXTENSION_ID}:venv:WORKSPACE_SELECTED`;
 export const VENV_GLOBAL_KEY = `${ENVS_EXTENSION_ID}:venv:GLOBAL_SELECTED`;
@@ -35,6 +43,10 @@ export async function clearVenvCache(): Promise<void> {
 }
 
 export async function getVenvForWorkspace(fsPath: string): Promise<string | undefined> {
+    if (process.env.VIRTUAL_ENV) {
+        return process.env.VIRTUAL_ENV;
+    }
+
     const state = await getWorkspacePersistentState();
     const data: { [key: string]: string } | undefined = await state.get(VENV_WORKSPACE_KEY);
     if (data) {
@@ -145,44 +157,120 @@ export async function findVirtualEnvironments(
     return collection;
 }
 
+function getVenvFoldersSetting(): string[] {
+    const settings = getConfiguration('python');
+    return settings.get<string[]>('venvFolders', []);
+}
+
+interface FolderQuickPickItem extends QuickPickItem {
+    uri?: Uri;
+}
+export async function getGlobalVenvLocation(): Promise<Uri | undefined> {
+    const items: FolderQuickPickItem[] = [
+        {
+            label: 'Browse',
+            description: 'Select a folder to create a global virtual environment',
+        },
+    ];
+
+    const venvPaths = getVenvFoldersSetting();
+    if (venvPaths.length > 0) {
+        items.push(
+            {
+                label: 'Venv Folders Setting',
+                kind: QuickPickItemKind.Separator,
+            },
+            ...venvPaths.map((p) => ({
+                label: path.basename(p),
+                description: path.resolve(p),
+                uri: Uri.file(path.resolve(p)),
+            })),
+        );
+    }
+
+    if (process.env.WORKON_HOME) {
+        items.push(
+            {
+                label: 'Virtualenvwrapper',
+                kind: QuickPickItemKind.Separator,
+            },
+            {
+                label: 'WORKON_HOME',
+                description: process.env.WORKON_HOME,
+                uri: Uri.file(process.env.WORKON_HOME),
+            },
+        );
+    }
+
+    const selected = await showQuickPick(items, {
+        placeHolder: 'Select a folder to create a global virtual environment',
+        ignoreFocusOut: true,
+    });
+
+    if (selected) {
+        if (selected.label === 'Browse') {
+            const result = await showOpenDialog({
+                canSelectFiles: false,
+                canSelectFolders: true,
+                canSelectMany: false,
+                openLabel: 'Select Folder',
+            });
+            if (result && result.length > 0) {
+                return result[0];
+            }
+        } else if (selected.uri) {
+            return selected.uri;
+        }
+    }
+    return undefined;
+}
+
 export async function createPythonVenv(
     nativeFinder: NativePythonFinder,
     api: PythonEnvironmentApi,
     log: LogOutputChannel,
     manager: EnvironmentManager,
     basePythons: PythonEnvironment[],
-    project: PythonProject,
+    venvRoot: Uri,
 ): Promise<PythonEnvironment | undefined> {
     const filtered = basePythons.filter((e) => e.execInfo);
     if (filtered.length === 0) {
         log.error('No base python found');
-        window.showErrorMessage('No base python found');
+        showErrorMessage('No base python found');
         return;
     }
 
     const basePython = await pickEnvironmentFrom(sortEnvironments(filtered));
     if (!basePython || !basePython.execInfo) {
         log.error('No base python selected, cannot create virtual environment.');
-        window.showErrorMessage('No base python selected, cannot create virtual environment.');
+        showErrorMessage('No base python selected, cannot create virtual environment.');
         return;
     }
 
-    const name = await window.showInputBox({
+    const name = await showInputBox({
         prompt: 'Enter name for virtual environment',
         value: '.venv',
         ignoreFocusOut: true,
+        validateInput: async (value) => {
+            if (!value) {
+                return 'Name cannot be empty';
+            }
+            if (await fsapi.pathExists(path.join(venvRoot.fsPath, value))) {
+                return 'Virtual environment already exists';
+            }
+        },
     });
     if (!name) {
         log.error('No name entered, cannot create virtual environment.');
-        window.showErrorMessage('No name entered, cannot create virtual environment.');
+        showErrorMessage('No name entered, cannot create virtual environment.');
         return;
     }
 
-    const envPath = path.join(project.uri.fsPath, name);
+    const envPath = path.join(venvRoot.fsPath, name);
     const pythonPath =
         os.platform() === 'win32' ? path.join(envPath, 'Scripts', 'python.exe') : path.join(envPath, 'bin', 'python');
 
-    return await window.withProgress(
+    return await withProgress(
         {
             location: ProgressLocation.Notification,
             title: 'Creating virtual environment',
@@ -193,15 +281,15 @@ export async function createPythonVenv(
                 if (basePython.execInfo?.run.executable) {
                     if (useUv) {
                         await runUV(
-                            ['venv', '--verbose', '--seed', '--python', basePython.execInfo?.run.executable, name],
-                            project.uri.fsPath,
+                            ['venv', '--verbose', '--seed', '--python', basePython.execInfo?.run.executable, envPath],
+                            venvRoot.fsPath,
                             log,
                         );
                     } else {
                         await runPython(
                             basePython.execInfo.run.executable,
-                            ['-m', 'venv', name],
-                            project.uri.fsPath,
+                            ['-m', 'venv', envPath],
+                            venvRoot.fsPath,
                             manager.log,
                         );
                     }
@@ -241,7 +329,7 @@ export async function createPythonVenv(
                 }
             } catch (e) {
                 log.error(`Failed to create virtual environment: ${e}`);
-                window.showErrorMessage(`Failed to create virtual environment`);
+                showErrorMessage(`Failed to create virtual environment`);
                 return;
             }
         },
@@ -255,9 +343,9 @@ export async function removeVenv(environment: PythonEnvironment, log: LogOutputC
         ? path.dirname(path.dirname(environment.environmentPath.fsPath))
         : environment.environmentPath.fsPath;
 
-    const confirm = await window.showWarningMessage(`Are you sure you want to remove ${envPath}?`, 'Yes', 'No');
+    const confirm = await showWarningMessage(`Are you sure you want to remove ${envPath}?`, 'Yes', 'No');
     if (confirm === 'Yes') {
-        await window.withProgress(
+        await withProgress(
             {
                 location: ProgressLocation.Notification,
                 title: 'Removing virtual environment',
@@ -326,7 +414,7 @@ export async function getProjectInstallable(
     }
     const exclude = '**/{.venv*,.git,.nox,.tox,.conda,site-packages,__pypackages__}/**';
     const installable: Installable[] = [];
-    await window.withProgress(
+    await withProgress(
         {
             location: ProgressLocation.Window,
             title: 'Searching dependencies',

@@ -19,3 +19,14 @@ export async function showErrorMessage(message: string, log?: LogOutputChannel) 
         }
     }
 }
+
+export async function showWarningMessage(message: string, log?: LogOutputChannel) {
+    const result = await window.showWarningMessage(message, 'View Logs');
+    if (result === 'View Logs') {
+        if (log) {
+            log.show();
+        } else {
+            commands.executeCommand('python-envs.viewLogs');
+        }
+    }
+}

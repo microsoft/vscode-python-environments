@@ -97,10 +97,14 @@ class PythonEnvironmentApiImpl implements PythonEnvironmentApi {
             }
             return manager.create(scope);
         } else if (Array.isArray(scope) && scope.length > 0 && scope.every((s) => s instanceof Uri)) {
-            const managers: InternalEnvironmentManager[] = scope
-                .map((s) => this.envManagers.getEnvironmentManager(s))
-                .filter((m) => !!m)
-                .reduce<InternalEnvironmentManager[]>((acc, c) => (!acc.includes(c) ? [...acc, c] : acc), []);
+            const managers: InternalEnvironmentManager[] = [];
+            scope.forEach((s) => {
+                const manager = this.envManagers.getEnvironmentManager(s);
+                if (manager && !managers.includes(manager)) {
+                    managers.push(manager);
+                }
+            });
+
             if (managers.length === 0) {
                 return Promise.reject(new Error('No environment managers found'));
             }
@@ -163,10 +167,14 @@ class PythonEnvironmentApiImpl implements PythonEnvironmentApi {
     async resolveEnvironment(context: ResolveEnvironmentContext): Promise<PythonEnvironment | undefined> {
         if (context instanceof Uri) {
             const projects = this.projectManager.getProjects();
-            const projectEnvManagers = projects
-                .map((p) => this.envManagers.getEnvironmentManager(p.uri))
-                .filter((m) => !!m)
-                .reduce<InternalEnvironmentManager[]>((acc, c) => (!acc.includes(c) ? [...acc, c] : acc), []);
+            const projectEnvManagers: InternalEnvironmentManager[] = [];
+            projects.forEach((p) => {
+                const manager = this.envManagers.getEnvironmentManager(p.uri);
+                if (manager && !projectEnvManagers.includes(manager)) {
+                    projectEnvManagers.push(manager);
+                }
+            });
+
             return await handlePythonPath(context, this.envManagers.managers, projectEnvManagers);
         } else if ('envId' in context) {
             const manager = this.envManagers.getEnvironmentManager(context);

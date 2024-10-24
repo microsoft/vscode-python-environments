@@ -242,3 +242,11 @@ export async function showInputBoxWithButtons(
         disposables.forEach((d) => d.dispose());
     }
 }
+
+export function showWarningMessage(message: string, ...items: string[]): Thenable<string | undefined> {
+    return window.showWarningMessage(message, ...items);
+}
+
+export function showInputBox(options?: InputBoxOptions, token?: CancellationToken): Thenable<string | undefined> {
+    return window.showInputBox(options, token);
+}

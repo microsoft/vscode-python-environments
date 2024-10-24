@@ -415,22 +415,24 @@ async function createNamedCondaEnvironment(
         return;
     }
 
+    const envName: string = name;
+
     return await window.withProgress(
         {
             location: ProgressLocation.Notification,
-            title: `Creating conda environment: ${name}`,
+            title: `Creating conda environment: ${envName}`,
         },
         async () => {
             try {
                 const bin = os.platform() === 'win32' ? 'python.exe' : 'python';
-                const output = await runConda(['create', '--yes', '--name', name, 'python']);
+                const output = await runConda(['create', '--yes', '--name', envName, 'python']);
                 log.info(output);
 
                 const prefixes = await getPrefixes();
                 let envPath = '';
                 for (let prefix of prefixes) {
-                    if (await fsapi.pathExists(path.join(prefix, name))) {
-                        envPath = path.join(prefix, name);
+                    if (await fsapi.pathExists(path.join(prefix, envName))) {
+                        envPath = path.join(prefix, envName);
                         break;
                     }
                 }
@@ -438,15 +440,18 @@ async function createNamedCondaEnvironment(
 
                 const environment = api.createPythonEnvironmentItem(
                     {
-                        name,
+                        name: envName,
                         environmentPath: Uri.file(envPath),
-                        displayName: `${version} (${name})`,
+                        displayName: `${version} (${envName})`,
                         displayPath: envPath,
                         description: envPath,
                         version,
                         execInfo: {
-                            activatedRun: { executable: 'conda', args: ['run', '--live-stream', '-n', name, 'python'] },
-                            activation: [{ executable: 'conda', args: ['activate', name] }],
+                            activatedRun: {
+                                executable: 'conda',
+                                args: ['run', '--live-stream', '-n', envName, 'python'],
+                            },
+                            activation: [{ executable: 'conda', args: ['activate', envName] }],
                             deactivation: [{ executable: 'conda', args: ['deactivate'] }],
                             run: { executable: path.join(envPath, bin) },
                         },

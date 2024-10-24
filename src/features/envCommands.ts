@@ -86,10 +86,13 @@ export async function createEnvironmentCommand(
 export async function createAnyEnvironmentCommand(em: EnvironmentManagers, pm: PythonProjectManager): Promise<void> {
     const projects = await pickProjectMany(pm.getProjects());
     if (projects && projects.length > 0) {
-        const defaultManagers = projects
-            .map((p) => em.getEnvironmentManager(p.uri))
-            .filter((m) => !!m)
-            .filter((m) => m.supportsCreate);
+        const defaultManagers: InternalEnvironmentManager[] = [];
+        projects.forEach((p) => {
+            const manager = em.getEnvironmentManager(p.uri);
+            if (manager && manager.supportsCreate && !defaultManagers.includes(manager)) {
+                defaultManagers.push(manager);
+            }
+        });
         const managerId = await pickEnvironmentManager(
             em.managers.filter((m) => m.supportsCreate),
             defaultManagers,
@@ -200,11 +203,19 @@ export async function setEnvironmentCommand(
         return;
     } else if (Array.isArray(context) && context.length > 0 && context.every((c) => c instanceof Uri)) {
         const uris = context as Uri[];
-        const projects: PythonProject[] = uris.map((u) => wm.get(u)).filter((p) => !!p);
-        const projectEnvManagers: InternalEnvironmentManager[] = projects
-            .map((u) => em.getEnvironmentManager(u.uri))
-            .filter((m) => !!m)
-            .reduce<InternalEnvironmentManager[]>((acc, c) => (!acc.includes(c) ? [...acc, c] : acc), []);
+        const projects: PythonProject[] = [];
+        const projectEnvManagers: InternalEnvironmentManager[] = [];
+        uris.forEach((uri) => {
+            const project = wm.get(uri);
+            if (project) {
+                projects.push(project);
+                const manager = em.getEnvironmentManager(uri);
+                if (manager && !projectEnvManagers.includes(manager)) {
+                    projectEnvManagers.push(manager);
+                }
+            }
+        });
+
         const recommended =
             projectEnvManagers.length === 1 && uris.length === 1 ? await projectEnvManagers[0].get(uris[0]) : undefined;
         const selected = await pickEnvironment(em.managers, projectEnvManagers, {

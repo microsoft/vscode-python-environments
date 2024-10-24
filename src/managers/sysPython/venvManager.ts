@@ -18,6 +18,7 @@ import {
 import {
     createPythonVenv,
     findVirtualEnvironments,
+    getGlobalVenvLocation,
     getVenvForGlobal,
     getVenvForWorkspace,
     removeVenv,
@@ -30,7 +31,6 @@ import { NativePythonFinder } from '../common/nativePythonFinder';
 import { EXTENSION_ROOT_DIR } from '../../common/constants';
 import { createDeferred, Deferred } from '../../common/utils/deferred';
 import { getLatest, sortEnvironments } from '../common/utils';
-import { pickProject } from '../../common/pickers/projects';
 
 export class VenvManager implements EnvironmentManager {
     private collection: PythonEnvironment[] = [];
@@ -80,13 +80,17 @@ export class VenvManager implements EnvironmentManager {
     }
 
     async create(scope: CreateEnvironmentScope): Promise<PythonEnvironment | undefined> {
-        const project = scope === 'global' ? await pickProject(this.api.getPythonProjects()) : scope;
-        if (!project) {
+        let isGlobal = scope === 'global';
+        if (Array.isArray(scope) && scope.length > 1) {
+            isGlobal = true;
+        }
+        const uri = !isGlobal && scope instanceof Uri ? scope : await getGlobalVenvLocation();
+        if (!uri) {
             return;
         }
 
         const globals = await this.baseManager.getEnvironments('global');
-        const environment = await createPythonVenv(this.nativeFinder, this.api, this.log, this, globals, project);
+        const environment = await createPythonVenv(this.nativeFinder, this.api, this.log, this, globals, uri);
         if (environment) {
             this.collection.push(environment);
             this._onDidChangeEnvironments.fire([{ environment, kind: EnvironmentChangeKind.add }]);
