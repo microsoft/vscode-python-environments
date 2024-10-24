@@ -16,7 +16,7 @@ import {
     runInTerminalCommand,
     setEnvManagerCommand,
     setEnvironmentCommand,
-    setPkgManagerCommand,
+    setPackageManagerCommand,
     resetEnvironmentCommand,
     refreshPackagesCommand,
     createAnyEnvironmentCommand,
@@ -104,8 +104,8 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
             if (result) {
                 const projects: PythonProject[] = [];
                 result.forEach((r) => {
-                    if (r.project) {
-                        projects.push(r.project);
+                    if (r.projects) {
+                        projects.push(r.projects);
                     }
                 });
                 workspaceView.updateProject(projects);
@@ -116,8 +116,8 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
             if (result) {
                 const projects: PythonProject[] = [];
                 result.forEach((r) => {
-                    if (r.project) {
-                        projects.push(r.project);
+                    if (r.projects) {
+                        projects.push(r.projects);
                     }
                 });
                 workspaceView.updateProject(projects);
@@ -130,7 +130,7 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
             await setEnvManagerCommand(envManagers, projectManager);
         }),
         commands.registerCommand('python-envs.setPkgManager', async () => {
-            await setPkgManagerCommand(envManagers, projectManager);
+            await setPackageManagerCommand(envManagers, projectManager);
         }),
         commands.registerCommand('python-envs.addPythonProject', async (resource) => {
             await addPythonProject(resource, projectManager, envManagers, projectCreators);

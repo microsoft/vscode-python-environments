@@ -1,7 +1,7 @@
 import { l10n } from 'vscode';
 
 export namespace Common {
-    export const recommended = l10n.t('recommended');
+    export const recommended = l10n.t('Recommended');
     export const install = l10n.t('Install');
     export const uninstall = l10n.t('Uninstall');
     export const openInBrowser = l10n.t('Open in Browser');
@@ -10,6 +10,8 @@ export namespace Common {
 
 export namespace Interpreter {
     export const statusBarSelect = l10n.t('Select Interpreter');
+    export const browsePath = l10n.t('Browse...');
+    export const createVirtualEnvironment = l10n.t('Create Virtual Environment...');
 }
 
 export namespace PackageManagement {

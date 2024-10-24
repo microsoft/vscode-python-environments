@@ -1,6 +1,7 @@
 import { QuickInputButtons, TaskExecution, TaskRevealKind, Terminal, Uri, window } from 'vscode';
 import {
     EnvironmentManagers,
+    InternalEnvironmentManager,
     InternalPackageManager,
     ProjectCreators,
     PythonProjectManager,
@@ -8,17 +9,6 @@ import {
     PythonTerminalExecutionOptions,
 } from '../internal.api';
 import { traceError, traceVerbose } from '../common/logging';
-import {
-    getPackagesToInstall,
-    getPackagesToUninstall,
-    pickCreator,
-    pickEnvironment,
-    pickEnvironmentManager,
-    pickPackageManager,
-    pickPackageOptions,
-    pickProject,
-    pickProjectMany,
-} from '../common/pickers';
 import { PythonEnvironment, PythonEnvironmentApi, PythonProject, PythonProjectCreator } from '../api';
 import * as path from 'path';
 import {
@@ -30,6 +20,7 @@ import {
     getDefaultPkgManagerSetting,
     EditProjectSettings,
     setAllManagerSettings,
+    EditAllManagerSettings,
 } from './settings/settingHelpers';
 
 import { getAbsolutePath } from '../common/utils/fileNameUtils';
@@ -45,6 +36,10 @@ import {
     ProjectPackageRootTreeItem,
 } from './views/treeViewItems';
 import { Common } from '../common/localize';
+import { pickEnvironment } from '../common/pickers/environments';
+import { pickEnvironmentManager, pickPackageManager, pickCreator } from '../common/pickers/managers';
+import { pickPackageOptions, getPackagesToInstall, getPackagesToUninstall } from '../common/pickers/packages';
+import { pickProject, pickProjectMany } from '../common/pickers/projects';
 
 export async function refreshManagerCommand(context: unknown): Promise<void> {
     if (context instanceof EnvManagerTreeItem) {
@@ -81,28 +76,28 @@ export async function createEnvironmentCommand(
         const manager = managers.getEnvironmentManager(context as Uri);
         const project = projects.get(context as Uri);
         if (project) {
-            await manager?.create(project);
+            await manager?.create(project.uri);
         }
     } else {
         traceError(`Invalid context for create command: ${context}`);
     }
 }
 
-export async function createAnyEnvironmentCommand(
-    managers: EnvironmentManagers,
-    projects: PythonProjectManager,
-): Promise<void> {
-    const pw = await pickProject(projects.getProjects());
-    if (pw) {
-        const defaultManager = managers.getEnvironmentManager(pw.uri);
+export async function createAnyEnvironmentCommand(em: EnvironmentManagers, pm: PythonProjectManager): Promise<void> {
+    const projects = await pickProjectMany(pm.getProjects());
+    if (projects && projects.length > 0) {
+        const defaultManagers = projects
+            .map((p) => em.getEnvironmentManager(p.uri))
+            .filter((m) => !!m)
+            .filter((m) => m.supportsCreate);
         const managerId = await pickEnvironmentManager(
-            managers.managers.filter((m) => m.supportsCreate),
-            defaultManager?.supportsCreate ? defaultManager : undefined,
+            em.managers.filter((m) => m.supportsCreate),
+            defaultManagers,
         );
 
-        const manager = managers.managers.find((m) => m.id === managerId);
+        const manager = em.managers.find((m) => m.id === managerId);
         if (manager) {
-            await manager.create(pw);
+            await manager.create(projects.map((p) => p.uri));
         }
     }
 }
@@ -160,7 +155,7 @@ export async function handlePackagesCommand(
 }
 
 export interface EnvironmentSetResult {
-    project?: PythonProject;
+    projects?: PythonProject;
     environment: PythonEnvironment;
 }
 
@@ -173,7 +168,7 @@ export async function setEnvironmentCommand(
         const view = context as PythonEnvTreeItem;
         const manager = view.parent.manager;
         const projects = await pickProjectMany(wm.getProjects());
-        if (projects) {
+        if (projects && projects.length > 0) {
             await Promise.all(projects.map((p) => manager.set(p.uri, view.environment)));
             await setAllManagerSettings(
                 projects.map((p) => ({
@@ -182,39 +177,59 @@ export async function setEnvironmentCommand(
                     packageManager: manager.preferredPackageManagerId,
                 })),
             );
-            return projects.map((p) => ({ project: p, environment: view.environment }));
+            return projects.map((p) => ({ project: [p], environment: view.environment }));
         }
         return;
     } else if (context instanceof ProjectItem) {
         const view = context as ProjectItem;
         return setEnvironmentCommand(view.project.uri, em, wm);
     } else if (context instanceof Uri) {
-        const uri = context as Uri;
-        const manager = em.getEnvironmentManager(uri);
-        const recommended = await manager?.get(uri);
-        const result = await pickEnvironment(
-            em.managers,
-            'all',
-            manager && recommended ? { selected: recommended, manager: manager } : undefined,
-        );
-        if (result) {
-            result.manager.set(uri, result.selected);
-            if (result.manager.id !== manager?.id) {
-                await setAllManagerSettings([
-                    {
-                        project: wm.get(uri),
-                        envManager: result.manager.id,
-                        packageManager: result.manager.preferredPackageManagerId,
-                    },
-                ]);
+        return setEnvironmentCommand([context], em, wm);
+    } else if (context === undefined) {
+        const project = await pickProjectMany(wm.getProjects());
+        if (project && project.length > 0) {
+            try {
+                const result = setEnvironmentCommand(project, em, wm);
+                return result;
+            } catch (ex) {
+                if (ex === QuickInputButtons.Back) {
+                    return setEnvironmentCommand(context, em, wm);
+                }
             }
-            return [{ project: wm.get(uri), environment: result.selected }];
         }
         return;
-    } else if (context === undefined) {
-        const project = await pickProject(wm.getProjects());
-        if (project) {
-            return setEnvironmentCommand(project.uri, em, wm);
+    } else if (Array.isArray(context) && context.length > 0 && context.every((c) => c instanceof Uri)) {
+        const uris = context as Uri[];
+        const projects: PythonProject[] = uris.map((u) => wm.get(u)).filter((p) => !!p);
+        const projectEnvManagers: InternalEnvironmentManager[] = projects
+            .map((u) => em.getEnvironmentManager(u.uri))
+            .filter((m) => !!m)
+            .reduce<InternalEnvironmentManager[]>((acc, c) => (!acc.includes(c) ? [...acc, c] : acc), []);
+        const recommended =
+            projectEnvManagers.length === 1 && uris.length === 1 ? await projectEnvManagers[0].get(uris[0]) : undefined;
+        const selected = await pickEnvironment(em.managers, projectEnvManagers, {
+            projects,
+            recommended,
+            showBackButton: uris.length > 1,
+        });
+        const manager = em.managers.find((m) => m.id === selected?.envId.managerId);
+        if (selected && manager) {
+            const promises: Thenable<void>[] = [];
+            const settings: EditAllManagerSettings[] = [];
+            uris.forEach((uri) => {
+                const m = em.getEnvironmentManager(uri);
+                if (manager.id !== m?.id) {
+                    promises.push(manager.set(uri, selected));
+                    settings.push({
+                        project: wm.get(uri),
+                        envManager: manager.id,
+                        packageManager: manager.preferredPackageManagerId,
+                    });
+                }
+            });
+            await Promise.all(promises);
+            await setAllManagerSettings(settings);
+            return [...projects.map((p) => ({ project: p, environment: selected }))];
         }
         return;
     }
@@ -253,7 +268,7 @@ export async function resetEnvironmentCommand(
 
 export async function setEnvManagerCommand(em: EnvironmentManagers, wm: PythonProjectManager): Promise<void> {
     const projects = await pickProjectMany(wm.getProjects());
-    if (projects) {
+    if (projects && projects.length > 0) {
         const manager = await pickEnvironmentManager(em.managers);
         if (manager) {
             await setEnvironmentManager(projects.map((p) => ({ project: p, envManager: manager })));
@@ -261,9 +276,9 @@ export async function setEnvManagerCommand(em: EnvironmentManagers, wm: PythonPr
     }
 }
 
-export async function setPkgManagerCommand(em: EnvironmentManagers, wm: PythonProjectManager): Promise<void> {
+export async function setPackageManagerCommand(em: EnvironmentManagers, wm: PythonProjectManager): Promise<void> {
     const projects = await pickProjectMany(wm.getProjects());
-    if (projects) {
+    if (projects && projects.length > 0) {
         const manager = await pickPackageManager(em.packageManagers);
         if (manager) {
             await setPackageManager(projects.map((p) => ({ project: p, packageManager: manager })));

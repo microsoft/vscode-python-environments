@@ -28,9 +28,9 @@ import * as path from 'path';
 import { resolvePythonEnvironment, resolvePythonEnvironmentPath } from './utils';
 import { NativePythonFinder } from '../common/nativePythonFinder';
 import { EXTENSION_ROOT_DIR } from '../../common/constants';
-import { pickProject } from '../../common/pickers';
 import { createDeferred, Deferred } from '../../common/utils/deferred';
 import { getLatest, sortEnvironments } from '../common/utils';
+import { pickProject } from '../../common/pickers/projects';
 
 export class VenvManager implements EnvironmentManager {
     private collection: PythonEnvironment[] = [];

@@ -6,8 +6,8 @@ import {
     PythonProjectCreator,
     PythonProjectCreatorOptions,
 } from '../../api';
-import { pickProject } from '../../common/pickers';
 import { runUV } from './utils';
+import { pickProject } from '../../common/pickers/projects';
 
 export class UvProjectCreator implements PythonProjectCreator {
     constructor(private readonly api: PythonEnvironmentApi, private log: LogOutputChannel) {

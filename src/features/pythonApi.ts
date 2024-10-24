@@ -25,6 +25,7 @@ import {
 } from '../api';
 import {
     EnvironmentManagers,
+    InternalEnvironmentManager,
     ProjectCreators,
     PythonEnvironmentImpl,
     PythonPackageImpl,
@@ -33,6 +34,8 @@ import {
 import { createDeferred } from '../common/utils/deferred';
 import { traceError } from '../common/logging';
 import { showErrorMessage } from '../common/errors/utils';
+import { pickEnvironmentManager } from '../common/pickers/managers';
+import { handlePythonPath } from '../common/utils/pythonPath';
 
 class PythonEnvironmentApiImpl implements PythonEnvironmentApi {
     private readonly _onDidChangeEnvironments = new EventEmitter<DidChangeEnvironmentsEventArgs>();
@@ -80,12 +83,34 @@ class PythonEnvironmentApiImpl implements PythonEnvironmentApi {
         };
         return new PythonEnvironmentImpl(envId, info);
     }
-    createEnvironment(scope: CreateEnvironmentScope): Promise<PythonEnvironment | undefined> {
-        const manager = this.envManagers.getEnvironmentManager(scope === 'global' ? undefined : scope.uri);
-        if (!manager) {
-            return Promise.reject(new Error('No environment manager found'));
+    async createEnvironment(scope: CreateEnvironmentScope): Promise<PythonEnvironment | undefined> {
+        if (scope === 'global' || (!Array.isArray(scope) && scope instanceof Uri)) {
+            const manager = this.envManagers.getEnvironmentManager(scope === 'global' ? undefined : scope);
+            if (!manager) {
+                return Promise.reject(new Error('No environment manager found'));
+            }
+            return manager.create(scope);
+        } else if (Array.isArray(scope) && scope.length === 1 && scope[0] instanceof Uri) {
+            const manager = this.envManagers.getEnvironmentManager(scope[0]);
+            if (!manager) {
+                return Promise.reject(new Error('No environment manager found'));
+            }
+            return manager.create(scope);
+        } else if (Array.isArray(scope) && scope.length > 0 && scope.every((s) => s instanceof Uri)) {
+            const managers: InternalEnvironmentManager[] = scope
+                .map((s) => this.envManagers.getEnvironmentManager(s))
+                .filter((m) => !!m)
+                .reduce<InternalEnvironmentManager[]>((acc, c) => (!acc.includes(c) ? [...acc, c] : acc), []);
+            if (managers.length === 0) {
+                return Promise.reject(new Error('No environment managers found'));
+            }
+            const managerId = await pickEnvironmentManager(managers);
+            if (!managerId) {
+                return Promise.reject(new Error('No environment manager selected'));
+            }
+            const result = await managers.find((m) => m.id === managerId)?.create(scope);
+            return result;
         }
-        return manager.create(scope);
     }
     removeEnvironment(environment: PythonEnvironment): Promise<void> {
         const manager = this.envManagers.getEnvironmentManager(environment);
@@ -120,12 +145,12 @@ class PythonEnvironmentApiImpl implements PythonEnvironmentApi {
         return items;
     }
     onDidChangeEnvironments: Event<DidChangeEnvironmentsEventArgs> = this._onDidChangeEnvironments.event;
-    setEnvironment(scope: SetEnvironmentScope, environment?: PythonEnvironment): void {
+    async setEnvironment(scope: SetEnvironmentScope, environment?: PythonEnvironment): Promise<void> {
         const manager = this.envManagers.getEnvironmentManager(scope);
         if (!manager) {
             throw new Error('No environment manager found');
         }
-        manager.set(scope, environment);
+        await manager.set(scope, environment);
     }
     async getEnvironment(context: GetEnvironmentScope): Promise<PythonEnvironment | undefined> {
         const manager = this.envManagers.getEnvironmentManager(context);
@@ -136,24 +161,34 @@ class PythonEnvironmentApiImpl implements PythonEnvironmentApi {
     }
     onDidChangeEnvironment: Event<DidChangeEnvironmentEventArgs> = this._onDidChangeEnvironment.event;
     async resolveEnvironment(context: ResolveEnvironmentContext): Promise<PythonEnvironment | undefined> {
-        const manager = this.envManagers.getEnvironmentManager(context);
-        if (!manager) {
-            const data = context instanceof Uri ? context.fsPath : context.environmentPath.fsPath;
-            traceError(`No environment manager found: ${data}`);
-            traceError(`Know environment managers: ${this.envManagers.managers.map((m) => m.name).join(', ')}`);
-            showErrorMessage('No environment manager found');
-            return undefined;
-        }
-        const env = await manager.resolve(context);
-        if (env && !env.execInfo) {
-            traceError(`Environment wasn't resolved correctly, missing execution info: ${env.name}`);
-            traceError(`Environment: ${JSON.stringify(env)}`);
-            traceError(`Resolved by: ${manager.id}`);
-            showErrorMessage("Environment wasn't resolved correctly, missing execution info");
-            return undefined;
-        }
+        if (context instanceof Uri) {
+            const projects = this.projectManager.getProjects();
+            const projectEnvManagers = projects
+                .map((p) => this.envManagers.getEnvironmentManager(p.uri))
+                .filter((m) => !!m)
+                .reduce<InternalEnvironmentManager[]>((acc, c) => (!acc.includes(c) ? [...acc, c] : acc), []);
+            return await handlePythonPath(context, this.envManagers.managers, projectEnvManagers);
+        } else if ('envId' in context) {
+            const manager = this.envManagers.getEnvironmentManager(context);
+            if (!manager) {
+                const data = context instanceof Uri ? context.fsPath : context.environmentPath.fsPath;
+                traceError(`No environment manager found: ${data}`);
+                traceError(`Know environment managers: ${this.envManagers.managers.map((m) => m.name).join(', ')}`);
+                showErrorMessage('No environment manager found');
+                return undefined;
+            }
+            const env = await manager.resolve(context);
+            if (env && !env.execInfo) {
+                traceError(`Environment wasn't resolved correctly, missing execution info: ${env.name}`);
+                traceError(`Environment: ${JSON.stringify(env)}`);
+                traceError(`Resolved by: ${manager.id}`);
+                showErrorMessage("Environment wasn't resolved correctly, missing execution info");
+                return undefined;
+            }
 
-        return env;
+            return env;
+        }
+        return undefined;
     }
 
     registerPackageManager(manager: PackageManager): Disposable {

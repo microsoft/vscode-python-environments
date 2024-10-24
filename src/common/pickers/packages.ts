@@ -1,222 +1,13 @@
-import {
-    QuickInputButtons,
-    QuickPickItem,
-    QuickPickItemButtonEvent,
-    QuickPickItemKind,
-    ThemeIcon,
-    Uri,
-    window,
-} from 'vscode';
-import {
-    GetEnvironmentsScope,
-    IconPath,
-    Installable,
-    Package,
-    PythonEnvironment,
-    PythonProject,
-    PythonProjectCreator,
-} from '../api';
-import * as fs from 'fs-extra';
 import * as path from 'path';
-import { InternalEnvironmentManager, InternalPackageManager } from '../internal.api';
-import { Common, PackageManagement } from './localize';
-import { EXTENSION_ROOT_DIR } from './constants';
-import { showInputBoxWithButtons, showQuickPickWithButtons, showTextDocument } from './window.apis';
-import { launchBrowser } from './env.apis';
-import { traceWarn } from './logging';
-
-export async function pickProject(pws: ReadonlyArray<PythonProject>): Promise<PythonProject | undefined> {
-    if (pws.length > 1) {
-        const items = pws.map((pw) => ({
-            label: path.basename(pw.uri.fsPath),
-            description: pw.uri.fsPath,
-            pw: pw,
-        }));
-        const item = await window.showQuickPick(items, {
-            placeHolder: 'Select a project, folder or script',
-            ignoreFocusOut: true,
-        });
-        if (item) {
-            return item.pw;
-        }
-    } else if (pws.length === 1) {
-        return pws[0];
-    }
-    return undefined;
-}
-
-interface ProjectQuickPickItem extends QuickPickItem {
-    project: PythonProject;
-}
-export async function pickProjectMany(projects: ReadonlyArray<PythonProject>): Promise<PythonProject[] | undefined> {
-    if (projects.length > 1) {
-        const items: ProjectQuickPickItem[] = projects.map((pw) => ({
-            label: path.basename(pw.uri.fsPath),
-            description: pw.uri.fsPath,
-            project: pw,
-        }));
-        const item: ProjectQuickPickItem[] | undefined = await window.showQuickPick(items, {
-            placeHolder: 'Select a project, folder or script',
-            ignoreFocusOut: true,
-            canPickMany: true,
-        });
-        if (item) {
-            return item.map((p) => p.project);
-        }
-    } else if (projects.length === 1) {
-        return [...projects];
-    }
-    return undefined;
-}
-
-export async function pickEnvironmentManager(
-    managers: InternalEnvironmentManager[],
-    defaultMgr?: InternalEnvironmentManager,
-): Promise<string | undefined> {
-    const items = managers.map((m) => ({
-        label: defaultMgr?.id === m.id ? `${m.displayName} (${Common.recommended})` : m.displayName,
-        description: m.description,
-        id: m.id,
-    }));
-    const item = await window.showQuickPick(items, {
-        placeHolder: 'Select an environment manager',
-        ignoreFocusOut: true,
-    });
-    return item?.id;
-}
-
-export async function pickPackageManager(
-    managers: InternalPackageManager[],
-    defaultMgr?: InternalPackageManager,
-): Promise<string | undefined> {
-    const items = managers.map((m) => ({
-        label: defaultMgr?.id === m.id ? `${m.displayName} (${Common.recommended})` : m.displayName,
-        description: m.description,
-        id: m.id,
-    }));
-
-    const item = await window.showQuickPick(items, {
-        placeHolder: 'Select a package manager',
-        ignoreFocusOut: true,
-    });
-    return item?.id;
-}
-
-type QuickPickIcon =
-    | Uri
-    | {
-          /**
-           * The icon path for the light theme.
-           */
-          light: Uri;
-          /**
-           * The icon path for the dark theme.
-           */
-          dark: Uri;
-      }
-    | ThemeIcon
-    | undefined;
-
-function getIconPath(i: IconPath | undefined): QuickPickIcon {
-    if (i === undefined || i instanceof Uri || i instanceof ThemeIcon) {
-        return i;
-    }
-
-    if (typeof i === 'string') {
-        return Uri.file(i);
-    }
-
-    return {
-        light: i.light instanceof Uri ? i.light : Uri.file(i.light),
-        dark: i.dark instanceof Uri ? i.dark : Uri.file(i.dark),
-    };
-}
-
-export interface SelectionResult {
-    selected: PythonEnvironment;
-    manager: InternalEnvironmentManager;
-}
-
-export async function pickEnvironment(
-    managers: InternalEnvironmentManager[],
-    scope: GetEnvironmentsScope,
-    recommended?: SelectionResult,
-): Promise<SelectionResult | undefined> {
-    const items: (QuickPickItem | (QuickPickItem & { e: SelectionResult }))[] = [];
-
-    if (recommended) {
-        items.push(
-            {
-                label: Common.recommended,
-                kind: QuickPickItemKind.Separator,
-            },
-            {
-                label: recommended.selected.displayName,
-                description: recommended.selected.description,
-                e: recommended,
-                iconPath: getIconPath(recommended.selected.iconPath),
-            },
-        );
-    }
-
-    for (const manager of managers) {
-        items.push({
-            label: manager.displayName,
-            kind: QuickPickItemKind.Separator,
-        });
-        const envs = await manager.getEnvironments(scope);
-        items.push(
-            ...envs.map((e) => {
-                return {
-                    label: e.displayName ?? e.name,
-                    description: e.description,
-                    e: { selected: e, manager: manager },
-                    iconPath: getIconPath(e.iconPath),
-                };
-            }),
-        );
-    }
-    const selected = await window.showQuickPick(items, {
-        placeHolder: `Select a Python Environment`,
-        ignoreFocusOut: true,
-    });
-    return (selected as { e: SelectionResult })?.e;
-}
-
-export async function pickEnvironmentFrom(environments: PythonEnvironment[]): Promise<PythonEnvironment | undefined> {
-    const items = environments.map((e) => ({
-        label: e.displayName ?? e.name,
-        description: e.description,
-        e: e,
-        iconPath: getIconPath(e.iconPath),
-    }));
-    const selected = await window.showQuickPick(items, {
-        placeHolder: 'Select Python Environment',
-        ignoreFocusOut: true,
-    });
-    return (selected as { e: PythonEnvironment })?.e;
-}
-
-export async function pickCreator(creators: PythonProjectCreator[]): Promise<PythonProjectCreator | undefined> {
-    if (creators.length === 0) {
-        return;
-    }
-
-    if (creators.length === 1) {
-        return creators[0];
-    }
-
-    const items: (QuickPickItem & { c: PythonProjectCreator })[] = creators.map((c) => ({
-        label: c.displayName ?? c.name,
-        description: c.description,
-        c: c,
-    }));
-    const selected = await window.showQuickPick(items, {
-        placeHolder: 'Select a project creator',
-        ignoreFocusOut: true,
-    });
-    return (selected as { c: PythonProjectCreator })?.c;
-}
+import * as fs from 'fs-extra';
+import { Uri, ThemeIcon, QuickPickItem, QuickPickItemKind, QuickPickItemButtonEvent, QuickInputButtons } from 'vscode';
+import { Installable, PythonEnvironment, Package } from '../../api';
+import { InternalPackageManager } from '../../internal.api';
+import { EXTENSION_ROOT_DIR } from '../constants';
+import { launchBrowser } from '../env.apis';
+import { Common, PackageManagement } from '../localize';
+import { traceWarn } from '../logging';
+import { showQuickPick, showInputBoxWithButtons, showTextDocument, showQuickPickWithButtons } from '../window.apis';
 
 export async function pickPackageOptions(): Promise<string | undefined> {
     const items = [
@@ -229,7 +20,7 @@ export async function pickPackageOptions(): Promise<string | undefined> {
             description: 'Uninstall packages',
         },
     ];
-    const selected = await window.showQuickPick(items, {
+    const selected = await showQuickPick(items, {
         placeHolder: 'Select an option',
         ignoreFocusOut: true,
     });
@@ -571,10 +362,10 @@ export async function getPackagesToUninstall(packages: Package[]): Promise<Packa
         description: p.version,
         p: p,
     }));
-    const selected = await window.showQuickPick(items, {
+    const selected = await showQuickPick(items, {
         placeHolder: PackageManagement.selectPackagesToUninstall,
         ignoreFocusOut: true,
         canPickMany: true,
     });
-    return selected?.map((s) => s.p);
+    return Array.isArray(selected) ? selected?.map((s) => s.p) : undefined;
 }

@@ -217,7 +217,7 @@ export type GetEnvironmentScope = undefined | Uri;
  * Type representing the scope for creating a Python environment.
  * Can be a Python project or 'global'.
  */
-export type CreateEnvironmentScope = PythonProject | 'global';
+export type CreateEnvironmentScope = Uri | Uri[] | 'global';
 /**
  * The scope for which environments are to be refreshed.
  * - `undefined`: Search for environments globally and workspaces.
@@ -828,7 +828,7 @@ export interface PythonEnvironmentManagerApi {
      * @param scope - The scope within which to set the environment.
      * @param environment - The Python environment to set. If undefined, the environment is unset.
      */
-    setEnvironment(scope: SetEnvironmentScope, environment?: PythonEnvironment): void;
+    setEnvironment(scope: SetEnvironmentScope, environment?: PythonEnvironment): Promise<void>;
 
     /**
      * Retrieves the current Python environment within the specified scope.

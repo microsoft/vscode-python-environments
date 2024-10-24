@@ -4,6 +4,7 @@ import { PythonProject, PythonProjectCreator, PythonProjectCreatorOptions } from
 import { ProjectCreators } from '../internal.api';
 import { showErrorMessage } from '../common/errors/utils';
 import { findFiles } from '../common/workspace.apis';
+import { showOpenDialog } from '../common/window.apis';
 
 export class ProjectCreatorsImpl implements ProjectCreators {
     private _creators: PythonProjectCreator[] = [];
@@ -29,7 +30,7 @@ export function registerExistingProjectProvider(pc: ProjectCreators): Disposable
         displayName: 'Add Existing Projects',
 
         async create(_options?: PythonProjectCreatorOptions): Promise<PythonProject | PythonProject[] | undefined> {
-            const results = await window.showOpenDialog({
+            const results = await showOpenDialog({
                 canSelectFiles: true,
                 canSelectFolders: true,
                 canSelectMany: true,

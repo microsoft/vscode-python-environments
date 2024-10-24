@@ -7,7 +7,6 @@ import {
     PackageManager,
     PythonEnvironment,
     PythonEnvironmentApi,
-    PythonProject,
 } from '../../api';
 import * as path from 'path';
 import * as os from 'os';
@@ -15,7 +14,6 @@ import * as fsapi from 'fs-extra';
 import { LogOutputChannel, ProgressLocation, Uri, window } from 'vscode';
 import { ENVS_EXTENSION_ID } from '../../common/constants';
 import { createDeferred } from '../../common/utils/deferred';
-import { pickProject } from '../../common/pickers';
 import {
     isNativeEnvInfo,
     NativeEnvInfo,
@@ -27,6 +25,7 @@ import { getConfiguration } from '../../common/workspace.apis';
 import { getGlobalPersistentState, getWorkspacePersistentState } from '../../common/persistentState';
 import which from 'which';
 import { shortVersion, sortEnvironments } from '../common/utils';
+import { pickProject } from '../../common/pickers/projects';
 
 export const CONDA_PATH_KEY = `${ENVS_EXTENSION_ID}:conda:CONDA_PATH`;
 export const CONDA_PREFIXES_KEY = `${ENVS_EXTENSION_ID}:conda:CONDA_PREFIXES`;
@@ -352,28 +351,51 @@ export async function refreshCondaEnvs(
     return [];
 }
 
+function getName(api: PythonEnvironmentApi, uris?: Uri | Uri[]): string | undefined {
+    if (!uris) {
+        return undefined;
+    }
+    if (Array.isArray(uris) && uris.length !== 1) {
+        return undefined;
+    }
+    return api.getPythonProject(Array.isArray(uris) ? uris[0] : uris)?.name;
+}
+
+async function getLocation(api: PythonEnvironmentApi, uris: Uri | Uri[]): Promise<string | undefined> {
+    if (!uris || (Array.isArray(uris) && (uris.length === 0 || uris.length > 1))) {
+        const project = await pickProject(api.getPythonProjects());
+        return project?.uri.fsPath;
+    }
+    return api.getPythonProject(Array.isArray(uris) ? uris[0] : uris)?.uri.fsPath;
+}
+
 export async function createCondaEnvironment(
     api: PythonEnvironmentApi,
     log: LogOutputChannel,
     manager: EnvironmentManager,
-    project?: PythonProject,
+    uris?: Uri | Uri[],
 ): Promise<PythonEnvironment | undefined> {
     // step1 ask user for named or prefix environment
-    const envType = await window.showQuickPick(
-        [
-            { label: 'Named', description: 'Create a named conda environment' },
-            { label: 'Prefix', description: 'Create environment in your workspace' },
-        ],
-        {
-            placeHolder: 'Select the type of conda environment to create',
-            ignoreFocusOut: true,
-        },
-    );
+    const envType =
+        Array.isArray(uris) && uris.length > 1
+            ? 'Named'
+            : (
+                  await window.showQuickPick(
+                      [
+                          { label: 'Named', description: 'Create a named conda environment' },
+                          { label: 'Prefix', description: 'Create environment in your workspace' },
+                      ],
+                      {
+                          placeHolder: 'Select the type of conda environment to create',
+                          ignoreFocusOut: true,
+                      },
+                  )
+              )?.label;
 
     if (envType) {
-        return envType.label === 'Named'
-            ? await createNamedCondaEnvironment(api, log, manager, project)
-            : await createPrefixCondaEnvironment(api, log, manager, project);
+        return envType === 'Named'
+            ? await createNamedCondaEnvironment(api, log, manager, getName(api, uris ?? []))
+            : await createPrefixCondaEnvironment(api, log, manager, await getLocation(api, uris ?? []));
     }
     return undefined;
 }
@@ -382,11 +404,11 @@ async function createNamedCondaEnvironment(
     api: PythonEnvironmentApi,
     log: LogOutputChannel,
     manager: EnvironmentManager,
-    project?: PythonProject,
+    name?: string,
 ): Promise<PythonEnvironment | undefined> {
-    const name = await window.showInputBox({
+    name = await window.showInputBox({
         prompt: 'Enter the name of the conda environment to create',
-        value: project?.name,
+        value: name,
         ignoreFocusOut: true,
     });
     if (!name) {
@@ -445,16 +467,15 @@ async function createPrefixCondaEnvironment(
     api: PythonEnvironmentApi,
     log: LogOutputChannel,
     manager: EnvironmentManager,
-    project?: PythonProject,
+    fsPath?: string,
 ): Promise<PythonEnvironment | undefined> {
-    const picked = project?.uri.fsPath ?? (await pickProject(api.getPythonProjects()))?.uri.fsPath;
-    if (!picked) {
+    if (!fsPath) {
         return;
     }
 
     let name = `./.conda`;
-    if (await fsapi.pathExists(path.join(picked, '.conda'))) {
-        log.warn(`Environment "${path.join(picked, '.conda')}" already exists`);
+    if (await fsapi.pathExists(path.join(fsPath, '.conda'))) {
+        log.warn(`Environment "${path.join(fsPath, '.conda')}" already exists`);
         const newName = await window.showInputBox({
             prompt: `Environment "${name}" already exists. Enter a different name`,
             ignoreFocusOut: true,
@@ -471,7 +492,7 @@ async function createPrefixCondaEnvironment(
         name = newName;
     }
 
-    const prefix: string = path.isAbsolute(name) ? name : path.join(picked, name);
+    const prefix: string = path.isAbsolute(name) ? name : path.join(fsPath, name);
 
     return await window.withProgress(
         {
