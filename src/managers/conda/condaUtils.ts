@@ -7,6 +7,7 @@ import {
     PackageManager,
     PythonEnvironment,
     PythonEnvironmentApi,
+    PythonProject,
 } from '../../api';
 import * as path from 'path';
 import * as os from 'os';
@@ -363,7 +364,18 @@ function getName(api: PythonEnvironmentApi, uris?: Uri | Uri[]): string | undefi
 
 async function getLocation(api: PythonEnvironmentApi, uris: Uri | Uri[]): Promise<string | undefined> {
     if (!uris || (Array.isArray(uris) && (uris.length === 0 || uris.length > 1))) {
-        const project = await pickProject(api.getPythonProjects());
+        const projects: PythonProject[] = [];
+        if (Array.isArray(uris)) {
+            for (let uri of uris) {
+                const project = api.getPythonProject(uri);
+                if (project && !projects.includes(project)) {
+                    projects.push(project);
+                }
+            }
+        } else {
+            api.getPythonProjects().forEach((p) => projects.push(p));
+        }
+        const project = await pickProject(projects);
         return project?.uri.fsPath;
     }
     return api.getPythonProject(Array.isArray(uris) ? uris[0] : uris)?.uri.fsPath;
