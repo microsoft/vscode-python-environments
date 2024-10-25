@@ -1,4 +1,4 @@
-import { Disposable, Event, LogOutputChannel, MarkdownString, ThemeIcon, Uri } from 'vscode';
+import { Disposable, Event, LogOutputChannel, MarkdownString, Uri } from 'vscode';
 import {
     PythonEnvironment,
     EnvironmentManager,
@@ -313,7 +313,7 @@ export class PythonProjectsImpl implements PythonProject {
         this.uri = uri;
         this.description = options?.description ?? uri.fsPath;
         this.tooltip = options?.tooltip ?? uri.fsPath;
-        this.iconPath = options?.iconPath ?? ThemeIcon.Folder;
+        this.iconPath = options?.iconPath;
     }
 }
 

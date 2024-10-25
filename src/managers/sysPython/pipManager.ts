@@ -43,7 +43,7 @@ export class PipPackageManager implements PackageManager, Disposable {
         this.displayName = 'Pip';
         this.description = 'This package manager for python installs using pip.';
         this.tooltip = new MarkdownString('This package manager for python installs using `pip`.');
-        this.iconPath = Uri.file(path.join(EXTENSION_ROOT_DIR, 'files', 'logo.svg'));
+        this.iconPath = Uri.file(path.join(EXTENSION_ROOT_DIR, 'files', '__icon__.py'));
     }
     readonly name: string;
     readonly displayName?: string;

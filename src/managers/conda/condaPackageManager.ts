@@ -35,10 +35,10 @@ export class CondaPackageManager implements PackageManager, Disposable {
         this.tooltip = 'Conda package manager';
     }
     name: string;
-    displayName?: string | undefined;
-    description?: string | undefined;
-    tooltip?: string | MarkdownString | undefined;
-    iconPath?: IconPath | undefined;
+    displayName?: string;
+    description?: string;
+    tooltip?: string | MarkdownString;
+    iconPath?: IconPath;
 
     async install(environment: PythonEnvironment, packages: string[], options: PackageInstallOptions): Promise<void> {
         await window.withProgress(

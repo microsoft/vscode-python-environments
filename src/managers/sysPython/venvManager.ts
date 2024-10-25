@@ -62,7 +62,7 @@ export class VenvManager implements EnvironmentManager {
         this.description = 'Manages virtual environments created using venv';
         this.tooltip = new MarkdownString('Manages virtual environments created using `venv`', true);
         this.preferredPackageManagerId = 'ms-python.python:pip';
-        this.iconPath = Uri.file(path.join(EXTENSION_ROOT_DIR, 'files', 'logo.svg'));
+        this.iconPath = Uri.file(path.join(EXTENSION_ROOT_DIR, 'files', '__icon__.py'));
     }
 
     private _initialized: Deferred<void> | undefined;

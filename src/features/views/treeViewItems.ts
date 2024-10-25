@@ -1,4 +1,4 @@
-import { TreeItem, TreeItemCollapsibleState, MarkdownString, Command, ThemeIcon } from 'vscode';
+import { TreeItem, TreeItemCollapsibleState, MarkdownString, Command, ThemeIcon, Uri } from 'vscode';
 import { InternalEnvironmentManager, InternalPackageManager } from '../../internal.api';
 import { PythonEnvironment, IconPath, Package, PythonProject } from '../../api';
 
@@ -26,16 +26,26 @@ export class EnvManagerTreeItem implements EnvTreeItem {
     public readonly parent: undefined;
     constructor(public readonly manager: InternalEnvironmentManager) {
         const item = new TreeItem(manager.displayName, TreeItemCollapsibleState.Collapsed);
-        item.iconPath = manager.iconPath;
         item.contextValue = this.getContextValue();
         item.description = manager.description;
         item.tooltip = manager.tooltip;
+        this.setIcon(item);
         this.treeItem = item;
     }
 
     private getContextValue() {
         const create = this.manager.supportsCreate ? '-create' : '';
         return `pythonEnvManager${create}`;
+    }
+
+    private setIcon(item: TreeItem) {
+        const iconPath = this.manager.iconPath;
+        if (iconPath instanceof Uri && iconPath.fsPath.endsWith('__icon__.py')) {
+            item.resourceUri = iconPath;
+            item.iconPath = ThemeIcon.File;
+        } else {
+            item.iconPath = iconPath;
+        }
     }
 }
 
@@ -44,16 +54,26 @@ export class PythonEnvTreeItem implements EnvTreeItem {
     public readonly treeItem: TreeItem;
     constructor(public readonly environment: PythonEnvironment, public readonly parent: EnvManagerTreeItem) {
         const item = new TreeItem(environment.displayName ?? environment.name, TreeItemCollapsibleState.Collapsed);
-        item.iconPath = environment.iconPath;
         item.contextValue = this.getContextValue();
         item.description = environment.description;
         item.tooltip = environment.tooltip;
+        this.setIcon(item);
         this.treeItem = item;
     }
 
     private getContextValue() {
         const remove = this.parent.manager.supportsRemove ? '-remove' : '';
         return `pythonEnvironment${remove}`;
+    }
+
+    private setIcon(item: TreeItem) {
+        const iconPath = this.environment.iconPath;
+        if (iconPath instanceof Uri && iconPath.fsPath.endsWith('__icon__.py')) {
+            item.resourceUri = iconPath;
+            item.iconPath = ThemeIcon.File;
+        } else {
+            item.iconPath = iconPath;
+        }
     }
 }
 
@@ -190,7 +210,8 @@ export class ProjectItem implements ProjectTreeItem {
         item.contextValue = 'python-workspace';
         item.description = this.project.description;
         item.tooltip = this.project.tooltip;
-        item.iconPath = this.project.iconPath;
+        item.resourceUri = project.uri.fsPath.endsWith('.py') ? this.project.uri : undefined;
+        item.iconPath = this.project.iconPath ?? (project.uri.fsPath.endsWith('.py') ? ThemeIcon.File : undefined);
         this.treeItem = item;
     }
 
@@ -212,12 +233,22 @@ export class ProjectEnvironment implements ProjectTreeItem {
         item.contextValue = 'python-env';
         item.description = this.environment.description;
         item.tooltip = this.environment.tooltip;
-        item.iconPath = this.environment.iconPath;
+        this.setIcon(item);
         this.treeItem = item;
     }
 
     static getId(workspace: ProjectItem, environment: PythonEnvironment): string {
         return `${workspace.id}>>>${environment.envId}`;
+    }
+
+    private setIcon(item: TreeItem) {
+        const iconPath = this.environment.iconPath;
+        if (iconPath instanceof Uri && iconPath.fsPath.endsWith('__icon__.py')) {
+            item.resourceUri = iconPath;
+            item.iconPath = ThemeIcon.File;
+        } else {
+            item.iconPath = iconPath;
+        }
     }
 }
 

@@ -56,7 +56,7 @@ export class SysPythonManager implements EnvironmentManager {
         this.preferredPackageManagerId = 'ms-python.python:pip';
         this.description = 'Manages Global python installs';
         this.tooltip = new MarkdownString('$(globe) Python Environment Manager', true);
-        this.iconPath = Uri.file(path.join(EXTENSION_ROOT_DIR, 'files', 'logo.svg'));
+        this.iconPath = Uri.file(path.join(EXTENSION_ROOT_DIR, 'files', '__icon__.py'));
     }
 
     private _initialized: Deferred<void> | undefined;
