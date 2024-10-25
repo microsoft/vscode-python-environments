@@ -18,8 +18,12 @@ type QuickPickIcon =
     | undefined;
 
 function getIconPath(i: IconPath | undefined): QuickPickIcon {
-    if (i === undefined || i instanceof Uri || i instanceof ThemeIcon) {
+    if (i === undefined || i instanceof ThemeIcon) {
         return i;
+    }
+
+    if (i instanceof Uri) {
+        return i.fsPath.endsWith('__icon__.py') ? undefined : i;
     }
 
     if (typeof i === 'string') {
