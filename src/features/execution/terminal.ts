@@ -8,8 +8,9 @@ import {
     Uri,
     window,
 } from 'vscode';
-import { PythonEnvironment, PythonProject } from '../../api';
+import { IconPath, PythonEnvironment, PythonProject } from '../../api';
 import * as path from 'path';
+import * as fsapi from 'fs-extra';
 import {
     createTerminal,
     onDidChangeTerminalShellIntegration,
@@ -134,11 +135,18 @@ async function activateEnvironmentOnCreation(
     }
 }
 
+function getIconPath(i: IconPath | undefined): IconPath | undefined {
+    if (i instanceof Uri) {
+        return i.fsPath.endsWith('__icon__.py') ? undefined : i;
+    }
+    return i;
+}
+
 export async function createPythonTerminal(environment: PythonEnvironment, cwd?: string | Uri): Promise<Terminal> {
     const activatable = isActivatableEnvironment(environment);
     const newTerminal = createTerminal({
         // name: `Python: ${environment.displayName}`,
-        iconPath: environment.iconPath,
+        iconPath: getIconPath(environment.iconPath),
         cwd,
     });
 
@@ -177,7 +185,12 @@ export async function getDedicatedTerminal(
     }
 
     const config = getConfiguration('python', uri);
-    const cwd = config.get<boolean>('terminal.executeInFileDir', false) ? path.dirname(uri.fsPath) : project.uri;
+    const projectStat = await fsapi.stat(project.uri.fsPath);
+    const projectDir = projectStat.isDirectory() ? project.uri.fsPath : path.dirname(project.uri.fsPath);
+
+    const uriStat = await fsapi.stat(uri.fsPath);
+    const uriDir = uriStat.isDirectory() ? uri.fsPath : path.dirname(uri.fsPath);
+    const cwd = config.get<boolean>('terminal.executeInFileDir', false) ? uriDir : projectDir;
 
     const newTerminal = await createPythonTerminal(environment, cwd);
     dedicatedTerminals.set(key, newTerminal);
@@ -205,8 +218,9 @@ export async function getProjectTerminal(
             return terminal;
         }
     }
-
-    const newTerminal = await createPythonTerminal(environment, project.uri);
+    const stat = await fsapi.stat(project.uri.fsPath);
+    const cwd = stat.isDirectory() ? project.uri.fsPath : path.dirname(project.uri.fsPath);
+    const newTerminal = await createPythonTerminal(environment, cwd);
     projectTerminals.set(key, newTerminal);
 
     const disable = onDidCloseTerminal((terminal) => {
