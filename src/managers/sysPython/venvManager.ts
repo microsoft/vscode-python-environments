@@ -85,13 +85,20 @@ export class VenvManager implements EnvironmentManager {
         if (Array.isArray(scope) && scope.length > 1) {
             isGlobal = true;
         }
-        const uri = !isGlobal && scope instanceof Uri ? scope : await getGlobalVenvLocation();
+        let uri: Uri | undefined = undefined;
+        if (isGlobal) {
+            uri = await getGlobalVenvLocation();
+        } else {
+            uri = scope instanceof Uri ? scope : (scope as Uri[])[0];
+        }
+
         if (!uri) {
             return;
         }
 
+        const venvRoot: Uri = uri;
         const globals = await this.baseManager.getEnvironments('global');
-        const environment = await createPythonVenv(this.nativeFinder, this.api, this.log, this, globals, uri);
+        const environment = await createPythonVenv(this.nativeFinder, this.api, this.log, this, globals, venvRoot);
         if (environment) {
             this.collection.push(environment);
             this._onDidChangeEnvironments.fire([{ environment, kind: EnvironmentChangeKind.add }]);

@@ -66,15 +66,18 @@ export async function refreshPackagesCommand(context: unknown) {
 
 export async function createEnvironmentCommand(
     context: unknown,
-    managers: EnvironmentManagers,
-    projects: PythonProjectManager,
+    em: EnvironmentManagers,
+    pm: PythonProjectManager,
 ): Promise<void> {
     if (context instanceof EnvManagerTreeItem) {
         const manager = (context as EnvManagerTreeItem).manager;
-        await manager.create('global');
+        const projects = await pickProjectMany(pm.getProjects());
+        if (projects) {
+            await manager.create(projects.length === 0 ? 'global' : projects.map((p) => p.uri));
+        }
     } else if (context instanceof Uri) {
-        const manager = managers.getEnvironmentManager(context as Uri);
-        const project = projects.get(context as Uri);
+        const manager = em.getEnvironmentManager(context as Uri);
+        const project = pm.get(context as Uri);
         if (project) {
             await manager?.create(project.uri);
         }
@@ -101,6 +104,12 @@ export async function createAnyEnvironmentCommand(em: EnvironmentManagers, pm: P
         const manager = em.managers.find((m) => m.id === managerId);
         if (manager) {
             await manager.create(projects.map((p) => p.uri));
+        }
+    } else if (projects && projects.length === 0) {
+        const managerId = await pickEnvironmentManager(em.managers.filter((m) => m.supportsCreate));
+        const manager = em.managers.find((m) => m.id === managerId);
+        if (manager) {
+            await manager.create('global');
         }
     }
 }
