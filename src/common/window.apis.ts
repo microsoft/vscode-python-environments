@@ -18,6 +18,7 @@ import {
     Terminal,
     TerminalOptions,
     TerminalShellExecutionEndEvent,
+    TerminalShellExecutionStartEvent,
     TerminalShellIntegrationChangeEvent,
     TextEditor,
     Uri,
@@ -51,6 +52,14 @@ export function terminals(): readonly Terminal[] {
 
 export function activeTerminal(): Terminal | undefined {
     return window.activeTerminal;
+}
+
+export function onDidStartTerminalShellExecution(
+    listener: (e: TerminalShellExecutionStartEvent) => any,
+    thisArgs?: any,
+    disposables?: Disposable[],
+): Disposable {
+    return window.onDidStartTerminalShellExecution(listener, thisArgs, disposables);
 }
 
 export function onDidEndTerminalShellExecution(

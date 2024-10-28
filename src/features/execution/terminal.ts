@@ -6,7 +6,6 @@ import {
     TerminalShellExecutionEndEvent,
     TerminalShellIntegration,
     Uri,
-    window,
 } from 'vscode';
 import { IconPath, PythonEnvironment, PythonProject } from '../../api';
 import * as path from 'path';
@@ -17,11 +16,13 @@ import {
     onDidCloseTerminal,
     onDidEndTerminalShellExecution,
     onDidOpenTerminal,
+    withProgress,
 } from '../../common/window.apis';
 import { getActivationCommand, isActivatableEnvironment } from './activation';
 import { createDeferred } from '../../common/utils/deferred';
 import { getConfiguration } from '../../common/workspace.apis';
 import { quoteArgs } from './execUtils';
+import { showErrorMessage } from '../../common/errors/utils';
 
 const SHELL_INTEGRATION_TIMEOUT = 5;
 
@@ -152,7 +153,7 @@ export async function createPythonTerminal(environment: PythonEnvironment, cwd?:
 
     if (activatable) {
         try {
-            await window.withProgress(
+            await withProgress(
                 {
                     location: ProgressLocation.Window,
                     title: `Activating ${environment.displayName}`,
@@ -162,7 +163,7 @@ export async function createPythonTerminal(environment: PythonEnvironment, cwd?:
                 },
             );
         } catch (e) {
-            window.showErrorMessage(`Failed to activate ${environment.displayName}`);
+            showErrorMessage(`Failed to activate ${environment.displayName}`);
         }
     }
 
