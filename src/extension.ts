@@ -20,6 +20,7 @@ import {
     resetEnvironmentCommand,
     refreshPackagesCommand,
     createAnyEnvironmentCommand,
+    runInDedicatedTerminalCommand,
 } from './features/envCommands';
 import { registerCondaFeatures } from './managers/conda/main';
 import { registerSystemPythonFeatures } from './managers/sysPython/main';
@@ -37,6 +38,7 @@ import {
 } from './features/projectCreators';
 import { WorkspaceView } from './features/views/projectView';
 import { registerCompletionProvider } from './features/settings/settingCompletions';
+import { TerminalManager, TerminalManagerImpl } from './features/execution/terminalManager';
 
 export async function activate(context: ExtensionContext): Promise<PythonEnvironmentApi> {
     // Logging should be set up before anything else.
@@ -45,6 +47,8 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
 
     // Setup the persistent state for the extension.
     setPersistentState(context);
+
+    const terminalManager: TerminalManager = new TerminalManagerImpl();
 
     const projectManager: PythonProjectManager = new PythonProjectManagerImpl();
     context.subscriptions.push(projectManager);
@@ -143,13 +147,16 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
             await envManagers.clearCache(undefined);
         }),
         commands.registerCommand('python-envs.runInTerminal', (item) => {
-            return runInTerminalCommand(item, api);
+            return runInTerminalCommand(item, api, terminalManager);
+        }),
+        commands.registerCommand('python-envs.runInDedicatedTerminal', (item) => {
+            return runInDedicatedTerminalCommand(item, api, terminalManager);
         }),
         commands.registerCommand('python-envs.runAsTask', (item) => {
             return runAsTaskCommand(item, api);
         }),
         commands.registerCommand('python-envs.createTerminal', (item) => {
-            return createTerminalCommand(item, api);
+            return createTerminalCommand(item, api, terminalManager);
         }),
         window.onDidChangeActiveTextEditor(async (e: TextEditor | undefined) => {
             if (e && !e.document.isUntitled && e.document.uri.scheme === 'file') {

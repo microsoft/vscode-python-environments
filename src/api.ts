@@ -1,4 +1,4 @@
-import { Uri, Disposable, MarkdownString, Event, LogOutputChannel, ThemeIcon } from 'vscode';
+import { Uri, Disposable, MarkdownString, Event, LogOutputChannel, ThemeIcon, Terminal } from 'vscode';
 
 /**
  * The path to an icon, or a theme-specific configuration of icons.
@@ -767,6 +767,38 @@ export interface Installable {
     readonly uri?: Uri;
 }
 
+export interface PythonProcess {
+    /**
+     * The process ID of the Python process.
+     */
+    readonly pid: number;
+
+    /**
+     * The standard input of the Python process.
+     */
+    readonly stdin: NodeJS.WritableStream;
+
+    /**
+     * The standard output of the Python process.
+     */
+    readonly stdout: NodeJS.ReadableStream;
+
+    /**
+     * The standard error of the Python process.
+     */
+    readonly stderr: NodeJS.ReadableStream;
+
+    /**
+     * Kills the Python process.
+     */
+    kill(): void;
+
+    /**
+     * Event that is fired when the Python process exits.
+     */
+    onExit: Event<number>;
+}
+
 export interface PythonEnvironmentManagerApi {
     /**
      * Register an environment manager implementation.
@@ -963,6 +995,40 @@ export interface PythonProjectApi {
     registerPythonProjectCreator(creator: PythonProjectCreator): Disposable;
 }
 
+export interface PythonExecutionApi {
+    createTerminal(
+        cwd: string | Uri | PythonProject,
+        environment?: PythonEnvironment,
+        envVars?: { [key: string]: string },
+    ): Promise<Terminal>;
+    runInTerminal(
+        environment: PythonEnvironment,
+        cwd: string | Uri | PythonProject,
+        command: string,
+        args?: string[],
+    ): Promise<Terminal>;
+    runInDedicatedTerminal(
+        terminalKey: string | Uri,
+        environment: PythonEnvironment,
+        cwd: string | Uri | PythonProject,
+        command: string,
+        args?: string[],
+    ): Promise<Terminal>;
+    runAsTask(
+        environment: PythonEnvironment,
+        cwd: string | Uri | PythonProject,
+        command: string,
+        args?: string[],
+        envVars?: { [key: string]: string },
+    ): Promise<PythonProcess>;
+    runInBackground(
+        environment: PythonEnvironment,
+        cwd: string | Uri | PythonProject,
+        command: string,
+        args?: string[],
+        envVars?: { [key: string]: string },
+    ): Promise<PythonProcess>;
+}
 /**
  * The API for interacting with Python environments, package managers, and projects.
  */

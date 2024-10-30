@@ -325,7 +325,7 @@ export interface ProjectCreators extends Disposable {
 export interface PythonTerminalExecutionOptions {
     project: PythonProject;
     args: string[];
-    useDedicatedTerminal?: Uri;
+    uri?: Uri;
 }
 
 export interface PythonTaskExecutionOptions {

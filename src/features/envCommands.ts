@@ -24,7 +24,6 @@ import {
 } from './settings/settingHelpers';
 
 import { getAbsolutePath } from '../common/utils/fileNameUtils';
-import { createPythonTerminal } from './execution/terminal';
 import { runInTerminal } from './execution/runInTerminal';
 import { runAsTask } from './execution/runAsTask';
 import {
@@ -40,6 +39,7 @@ import { pickEnvironment } from '../common/pickers/environments';
 import { pickEnvironmentManager, pickPackageManager, pickCreator } from '../common/pickers/managers';
 import { pickPackageOptions, getPackagesToInstall, getPackagesToUninstall } from '../common/pickers/packages';
 import { pickProject, pickProjectMany } from '../common/pickers/projects';
+import { TerminalManager } from './execution/terminalManager';
 
 export async function refreshManagerCommand(context: unknown): Promise<void> {
     if (context instanceof EnvManagerTreeItem) {
@@ -417,19 +417,20 @@ export async function getPackageCommandOptions(
 export async function createTerminalCommand(
     context: unknown,
     api: PythonEnvironmentApi,
+    tm: TerminalManager,
 ): Promise<Terminal | undefined> {
     if (context instanceof Uri) {
         const uri = context as Uri;
         const env = await api.getEnvironment(uri);
         const pw = api.getPythonProject(uri);
         if (env && pw) {
-            return await createPythonTerminal(env, pw.uri);
+            return await tm.create(env, pw.uri);
         }
     } else if (context instanceof ProjectItem) {
         const view = context as ProjectItem;
         const env = await api.getEnvironment(view.project.uri);
         if (env) {
-            const terminal = await createPythonTerminal(env, view.project.uri);
+            const terminal = await tm.create(env, view.project.uri);
             terminal.show();
             return terminal;
         }
@@ -437,26 +438,32 @@ export async function createTerminalCommand(
         const view = context as PythonEnvTreeItem;
         const pw = await pickProject(api.getPythonProjects());
         if (pw) {
-            const terminal = await createPythonTerminal(view.environment, pw.uri);
+            const terminal = await tm.create(view.environment, pw.uri);
             terminal.show();
             return terminal;
         }
     }
 }
 
-export async function runInTerminalCommand(item: unknown, api: PythonEnvironmentApi): Promise<void> {
+export async function runInTerminalCommand(
+    item: unknown,
+    api: PythonEnvironmentApi,
+    tm: TerminalManager,
+): Promise<void> {
     const keys = Object.keys(item ?? {});
     if (item instanceof Uri) {
         const uri = item as Uri;
         const project = api.getPythonProject(uri);
         const environment = await api.getEnvironment(uri);
         if (environment && project) {
+            const terminal = await tm.getProjectTerminal(project, environment);
             await runInTerminal(
+                environment,
+                terminal,
                 {
                     project,
                     args: [item.fsPath],
                 },
-                environment,
                 { show: true },
             );
         }
@@ -464,7 +471,40 @@ export async function runInTerminalCommand(item: unknown, api: PythonEnvironment
         const options = item as PythonTerminalExecutionOptions;
         const environment = await api.getEnvironment(options.project.uri);
         if (environment) {
-            await runInTerminal(options, environment, { show: true });
+            const terminal = await tm.getProjectTerminal(options.project, environment);
+            await runInTerminal(environment, terminal, options, { show: true });
+        }
+    }
+}
+
+export async function runInDedicatedTerminalCommand(
+    item: unknown,
+    api: PythonEnvironmentApi,
+    tm: TerminalManager,
+): Promise<void> {
+    const keys = Object.keys(item ?? {});
+    if (item instanceof Uri) {
+        const uri = item as Uri;
+        const project = api.getPythonProject(uri);
+        const environment = await api.getEnvironment(uri);
+        if (environment && project) {
+            const terminal = await tm.getDedicatedTerminal(item, project, environment);
+            await runInTerminal(
+                environment,
+                terminal,
+                {
+                    project,
+                    args: [item.fsPath],
+                },
+                { show: true },
+            );
+        }
+    } else if (keys.includes('project') && keys.includes('args')) {
+        const options = item as PythonTerminalExecutionOptions;
+        const environment = await api.getEnvironment(options.project.uri);
+        if (environment && options.uri) {
+            const terminal = await tm.getDedicatedTerminal(options.uri, options.project, environment);
+            await runInTerminal(environment, terminal, options, { show: true });
         }
     }
 }
