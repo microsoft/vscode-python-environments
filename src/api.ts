@@ -767,6 +767,8 @@ export interface Installable {
     readonly uri?: Uri;
 }
 
+export interface PythonTaskResult {}
+
 export interface PythonProcess {
     /**
      * The process ID of the Python process.
@@ -1020,7 +1022,7 @@ export interface PythonExecutionApi {
         command: string,
         args?: string[],
         envVars?: { [key: string]: string },
-    ): Promise<PythonProcess>;
+    ): Promise<PythonTaskResult>;
     runInBackground(
         environment: PythonEnvironment,
         cwd: string | Uri | PythonProject,
