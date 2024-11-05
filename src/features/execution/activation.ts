@@ -30,3 +30,24 @@ export function getActivationCommand(
 
     return activation;
 }
+
+export function getDeactivationCommand(
+    terminal: Terminal,
+    environment: PythonEnvironment,
+): PythonCommandRunConfiguration[] | undefined {
+    const shell = identifyTerminalShell(terminal);
+
+    let deactivation: PythonCommandRunConfiguration[] | undefined;
+    if (environment.execInfo?.shellDeactivation) {
+        deactivation = environment.execInfo.shellDeactivation.get(shell);
+        if (!deactivation) {
+            deactivation = environment.execInfo.shellDeactivation.get(TerminalShellType.unknown);
+        }
+    }
+
+    if (!deactivation) {
+        deactivation = environment.execInfo?.deactivation;
+    }
+
+    return deactivation;
+}

@@ -54,6 +54,26 @@ export function activeTerminal(): Terminal | undefined {
     return window.activeTerminal;
 }
 
+export function activeTextEditor(): TextEditor | undefined {
+    return window.activeTextEditor;
+}
+
+export function onDidChangeActiveTerminal(
+    listener: (e: Terminal | undefined) => any,
+    thisArgs?: any,
+    disposables?: Disposable[],
+): Disposable {
+    return window.onDidChangeActiveTerminal(listener, thisArgs, disposables);
+}
+
+export function onDidChangeActiveTextEditor(
+    listener: (e: TextEditor | undefined) => any,
+    thisArgs?: any,
+    disposables?: Disposable[],
+): Disposable {
+    return window.onDidChangeActiveTextEditor(listener, thisArgs, disposables);
+}
+
 export function onDidStartTerminalShellExecution(
     listener: (e: TerminalShellExecutionStartEvent) => any,
     thisArgs?: any,

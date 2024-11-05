@@ -18,15 +18,17 @@ import {
     onDidEndTerminalShellExecution,
     onDidOpenTerminal,
     onDidStartTerminalShellExecution,
+    terminals,
     withProgress,
 } from '../../common/window.apis';
 import { IconPath, PythonEnvironment, PythonProject } from '../../api';
-import { getActivationCommand, isActivatableEnvironment } from './activation';
+import { getActivationCommand, getDeactivationCommand, isActivatableEnvironment } from './activation';
 import { showErrorMessage } from '../../common/errors/utils';
 import { quoteArgs } from './execUtils';
 import { createDeferred } from '../../common/utils/deferred';
-import { traceVerbose } from '../../common/logging';
+import { traceError, traceVerbose } from '../../common/logging';
 import { getConfiguration } from '../../common/workspace.apis';
+import { EnvironmentManagers } from '../../internal.api';
 
 function getIconPath(i: IconPath | undefined): IconPath | undefined {
     if (i instanceof Uri) {
@@ -38,7 +40,21 @@ function getIconPath(i: IconPath | undefined): IconPath | undefined {
 const SHELL_INTEGRATION_TIMEOUT = 500; // 0.5 seconds
 const SHELL_INTEGRATION_POLL_INTERVAL = 100; // 0.1 seconds
 
-export interface TerminalManager extends Disposable {
+export interface TerminalActivation {
+    isActivated(terminal: Terminal, environment?: PythonEnvironment): boolean;
+    activate(terminal: Terminal, environment: PythonEnvironment): Promise<void>;
+    deactivate(terminal: Terminal): Promise<void>;
+}
+
+export interface TerminalCreation {
+    create(
+        environment: PythonEnvironment,
+        cwd?: string | Uri,
+        env?: { [key: string]: string | null | undefined },
+    ): Promise<Terminal>;
+}
+
+export interface TerminalGetters {
     getProjectTerminal(project: PythonProject, environment: PythonEnvironment, createNew?: boolean): Promise<Terminal>;
     getDedicatedTerminal(
         uri: Uri,
@@ -46,15 +62,18 @@ export interface TerminalManager extends Disposable {
         environment: PythonEnvironment,
         createNew?: boolean,
     ): Promise<Terminal>;
-    create(
-        environment: PythonEnvironment,
-        cwd?: string | Uri | PythonProject,
-        env?: { [key: string]: string | null | undefined },
-    ): Promise<Terminal>;
 }
 
-export class TerminalManagerImpl implements Disposable {
+export interface TerminalManager extends TerminalActivation, TerminalCreation, TerminalGetters, Disposable {
+    initialize(projects: PythonProject[], em: EnvironmentManagers): Promise<void>;
+}
+
+export class TerminalManagerImpl implements TerminalManager {
     private disposables: Disposable[] = [];
+    private activatedTerminals = new Map<Terminal, PythonEnvironment>();
+    private activatingTerminals = new Map<Terminal, Promise<void>>();
+    private deactivatingTerminals = new Map<Terminal, Promise<void>>();
+
     private onTerminalOpenedEmitter = new EventEmitter<Terminal>();
     private onTerminalOpened = this.onTerminalOpenedEmitter.event;
 
@@ -106,6 +125,17 @@ export class TerminalManagerImpl implements Disposable {
         }
     }
 
+    private deactivateLegacy(terminal: Terminal, environment: PythonEnvironment) {
+        const deactivationCommands = getDeactivationCommand(terminal, environment);
+        if (deactivationCommands) {
+            for (const command of deactivationCommands) {
+                const args = command.args ?? [];
+                const text = quoteArgs([command.executable, ...args]).join(' ');
+                terminal.sendText(text);
+            }
+        }
+    }
+
     private async activateUsingShellIntegration(
         shellIntegration: TerminalShellIntegration,
         terminal: Terminal,
@@ -135,14 +165,47 @@ export class TerminalManagerImpl implements Disposable {
         }
     }
 
+    private async deactivateUsingShellIntegration(
+        shellIntegration: TerminalShellIntegration,
+        terminal: Terminal,
+        environment: PythonEnvironment,
+    ): Promise<void> {
+        const deactivationCommands = getDeactivationCommand(terminal, environment);
+        if (deactivationCommands) {
+            for (const command of deactivationCommands) {
+                const execPromise = createDeferred<void>();
+                const execution = shellIntegration.executeCommand(command.executable, command.args ?? []);
+                const disposables: Disposable[] = [];
+                disposables.push(
+                    this.onTerminalShellExecutionEnd((e: TerminalShellExecutionEndEvent) => {
+                        if (e.execution === execution) {
+                            execPromise.resolve();
+                        }
+                    }),
+                    this.onTerminalShellExecutionStart((e: TerminalShellExecutionStartEvent) => {
+                        if (e.execution === execution) {
+                            traceVerbose(`Shell execution started: ${command.executable} ${command.args?.join(' ')}`);
+                        }
+                    }),
+                );
+
+                await execPromise.promise;
+            }
+        }
+    }
+
     private async activateEnvironmentOnCreation(terminal: Terminal, environment: PythonEnvironment): Promise<void> {
         const deferred = createDeferred<void>();
         const disposables: Disposable[] = [];
         let disposeTimer: Disposable | undefined;
         let activated = false;
+        this.activatingTerminals.set(terminal, deferred.promise);
 
         try {
             disposables.push(
+                new Disposable(() => {
+                    this.activatingTerminals.delete(terminal);
+                }),
                 this.onTerminalOpened(async (t: Terminal) => {
                     if (t === terminal) {
                         if (terminal.shellIntegration) {
@@ -191,6 +254,10 @@ export class TerminalManagerImpl implements Disposable {
                     disposeTimer?.dispose();
                 }),
             );
+            await deferred.promise;
+            this.activatedTerminals.set(terminal, environment);
+        } catch (ex) {
+            traceError('Failed to activate environment:\r\n', ex);
         } finally {
             disposables.forEach((d) => d.dispose());
         }
@@ -198,7 +265,7 @@ export class TerminalManagerImpl implements Disposable {
 
     public async create(
         environment: PythonEnvironment,
-        cwd?: string | Uri,
+        cwd?: string | Uri | undefined,
         env?: { [key: string]: string | null | undefined },
     ): Promise<Terminal> {
         const activatable = isActivatableEnvironment(environment);
@@ -288,6 +355,110 @@ export class TerminalManagerImpl implements Disposable {
         });
 
         return newTerminal;
+    }
+
+    public isActivated(terminal: Terminal, environment?: PythonEnvironment): boolean {
+        if (!environment) {
+            return this.activatedTerminals.has(terminal);
+        }
+        const env = this.activatedTerminals.get(terminal);
+        return env?.envId.id === environment?.envId.id;
+    }
+
+    private async activateInternal(terminal: Terminal, environment: PythonEnvironment): Promise<void> {
+        if (terminal.shellIntegration) {
+            await this.activateUsingShellIntegration(terminal.shellIntegration, terminal, environment);
+        } else {
+            this.activateLegacy(terminal, environment);
+        }
+    }
+
+    public async activate(terminal: Terminal, environment: PythonEnvironment): Promise<void> {
+        if (this.isActivated(terminal, environment)) {
+            return;
+        }
+
+        if (this.deactivatingTerminals.has(terminal)) {
+            traceVerbose('Terminal is being deactivated, cannot activate. Waiting...');
+            return this.deactivatingTerminals.get(terminal);
+        }
+
+        if (this.activatingTerminals.has(terminal)) {
+            return this.activatingTerminals.get(terminal);
+        }
+
+        try {
+            traceVerbose(`Activating terminal for environment: ${environment.displayName}`);
+            const promise = this.activateInternal(terminal, environment);
+            this.activatingTerminals.set(terminal, promise);
+            await promise;
+            this.activatedTerminals.set(terminal, environment);
+        } catch (ex) {
+            traceError('Failed to activate environment:\r\n', ex);
+        } finally {
+            this.activatingTerminals.delete(terminal);
+        }
+    }
+
+    private async deactivateInternal(terminal: Terminal, environment: PythonEnvironment): Promise<void> {
+        if (terminal.shellIntegration) {
+            await this.deactivateUsingShellIntegration(terminal.shellIntegration, terminal, environment);
+        } else {
+            this.deactivateLegacy(terminal, environment);
+        }
+    }
+
+    public async deactivate(terminal: Terminal): Promise<void> {
+        if (this.activatingTerminals.has(terminal)) {
+            traceVerbose('Terminal is being activated, cannot deactivate. Waiting...');
+            await this.activatingTerminals.get(terminal);
+        }
+
+        if (this.deactivatingTerminals.has(terminal)) {
+            return this.deactivatingTerminals.get(terminal);
+        }
+
+        const environment = this.activatedTerminals.get(terminal);
+        if (!environment) {
+            return;
+        }
+
+        try {
+            traceVerbose(`Deactivating terminal for environment: ${environment.displayName}`);
+            const promise = this.deactivateInternal(terminal, environment);
+            this.deactivatingTerminals.set(terminal, promise);
+            await promise;
+            this.activatedTerminals.delete(terminal);
+        } catch (ex) {
+            traceError('Failed to activate environment:\r\n', ex);
+        } finally {
+            this.deactivatingTerminals.delete(terminal);
+        }
+    }
+
+    public async initialize(projects: PythonProject[], em: EnvironmentManagers): Promise<void> {
+        const config = getConfiguration('python');
+        if (config.get<boolean>('terminal.activateEnvInCurrentTerminal', false)) {
+            await Promise.all(
+                terminals().map(async (t) => {
+                    if (projects.length === 0) {
+                        const manager = em.getEnvironmentManager(undefined);
+                        const env = await manager?.get(undefined);
+                        if (env) {
+                            return this.activate(t, env);
+                        }
+                    } else if (projects.length === 1) {
+                        const manager = em.getEnvironmentManager(projects[0].uri);
+                        const env = await manager?.get(projects[0].uri);
+                        if (env) {
+                            return this.activate(t, env);
+                        }
+                    } else {
+                        // TODO: handle multi project case
+                    }
+                }),
+            );
+        }
     }
 
     dispose(): void {

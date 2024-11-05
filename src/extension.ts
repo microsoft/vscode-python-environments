@@ -39,6 +39,8 @@ import {
 import { WorkspaceView } from './features/views/projectView';
 import { registerCompletionProvider } from './features/settings/settingCompletions';
 import { TerminalManager, TerminalManagerImpl } from './features/execution/terminalManager';
+import { ActivateStatusButton } from './features/execution/activateButton';
+import { activeTerminal, onDidChangeActiveTextEditor } from './common/window.apis';
 
 export async function activate(context: ExtensionContext): Promise<PythonEnvironmentApi> {
     // Logging should be set up before anything else.
@@ -49,12 +51,16 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
     setPersistentState(context);
 
     const terminalManager: TerminalManager = new TerminalManagerImpl();
+    context.subscriptions.push(terminalManager);
 
     const projectManager: PythonProjectManager = new PythonProjectManagerImpl();
     context.subscriptions.push(projectManager);
 
     const envManagers: EnvironmentManagers = new PythonEnvironmentManagers(projectManager);
     context.subscriptions.push(envManagers);
+
+    const activateStatusButton = new ActivateStatusButton(terminalManager, envManagers, projectManager);
+    context.subscriptions.push(activateStatusButton);
 
     const projectCreators: ProjectCreators = new ProjectCreatorsImpl();
     context.subscriptions.push(
@@ -158,7 +164,18 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
         commands.registerCommand('python-envs.createTerminal', (item) => {
             return createTerminalCommand(item, api, terminalManager);
         }),
-        window.onDidChangeActiveTextEditor(async (e: TextEditor | undefined) => {
+        commands.registerCommand('python-envs.terminal.activate', async (terminal, env) => {
+            await terminalManager.activate(terminal, env);
+            await activateStatusButton.update(terminal);
+        }),
+        commands.registerCommand('python-envs.terminal.deactivate', async (terminal) => {
+            await terminalManager.deactivate(terminal);
+            await activateStatusButton.update(terminal);
+        }),
+        envManagers.onDidChangeEnvironmentManager(async () => {
+            await activateStatusButton.update(activeTerminal());
+        }),
+        onDidChangeActiveTextEditor(async (e: TextEditor | undefined) => {
             if (e && !e.document.isUntitled && e.document.uri.scheme === 'file') {
                 if (
                     e.document.languageId === 'python' ||
