@@ -22,9 +22,9 @@ import {
     withProgress,
 } from '../../common/window.apis';
 import { IconPath, PythonEnvironment, PythonProject } from '../../api';
-import { getActivationCommand, getDeactivationCommand, isActivatableEnvironment } from './activation';
+import { getActivationCommand, getDeactivationCommand, isActivatableEnvironment } from '../common/activation';
 import { showErrorMessage } from '../../common/errors/utils';
-import { quoteArgs } from './execUtils';
+import { quoteArgs } from '../execution/execUtils';
 import { createDeferred } from '../../common/utils/deferred';
 import { traceError, traceVerbose } from '../../common/logging';
 import { getConfiguration } from '../../common/workspace.apis';
@@ -64,9 +64,21 @@ export interface TerminalGetters {
     ): Promise<Terminal>;
 }
 
-export interface TerminalManager extends TerminalActivation, TerminalCreation, TerminalGetters, Disposable {
+export interface TerminalEnvironment {
+    getEnvironment(terminal: Terminal): Promise<PythonEnvironment | undefined>;
+}
+
+export interface TerminalInit {
     initialize(projects: PythonProject[], em: EnvironmentManagers): Promise<void>;
 }
+
+export interface TerminalManager
+    extends TerminalEnvironment,
+        TerminalInit,
+        TerminalActivation,
+        TerminalCreation,
+        TerminalGetters,
+        Disposable {}
 
 export class TerminalManagerImpl implements TerminalManager {
     private disposables: Disposable[] = [];
@@ -122,6 +134,7 @@ export class TerminalManagerImpl implements TerminalManager {
                 const text = quoteArgs([command.executable, ...args]).join(' ');
                 terminal.sendText(text);
             }
+            this.activatedTerminals.set(terminal, environment);
         }
     }
 
@@ -133,6 +146,7 @@ export class TerminalManagerImpl implements TerminalManager {
                 const text = quoteArgs([command.executable, ...args]).join(' ');
                 terminal.sendText(text);
             }
+            this.activatedTerminals.delete(terminal);
         }
     }
 
@@ -143,24 +157,29 @@ export class TerminalManagerImpl implements TerminalManager {
     ): Promise<void> {
         const activationCommands = getActivationCommand(terminal, environment);
         if (activationCommands) {
-            for (const command of activationCommands) {
-                const execPromise = createDeferred<void>();
-                const execution = shellIntegration.executeCommand(command.executable, command.args ?? []);
-                const disposables: Disposable[] = [];
-                disposables.push(
-                    this.onTerminalShellExecutionEnd((e: TerminalShellExecutionEndEvent) => {
-                        if (e.execution === execution) {
-                            execPromise.resolve();
-                        }
-                    }),
-                    this.onTerminalShellExecutionStart((e: TerminalShellExecutionStartEvent) => {
-                        if (e.execution === execution) {
-                            traceVerbose(`Shell execution started: ${command.executable} ${command.args?.join(' ')}`);
-                        }
-                    }),
-                );
-
-                await execPromise.promise;
+            try {
+                for (const command of activationCommands) {
+                    const execPromise = createDeferred<void>();
+                    const execution = shellIntegration.executeCommand(command.executable, command.args ?? []);
+                    const disposables: Disposable[] = [];
+                    disposables.push(
+                        this.onTerminalShellExecutionEnd((e: TerminalShellExecutionEndEvent) => {
+                            if (e.execution === execution) {
+                                execPromise.resolve();
+                            }
+                        }),
+                        this.onTerminalShellExecutionStart((e: TerminalShellExecutionStartEvent) => {
+                            if (e.execution === execution) {
+                                traceVerbose(
+                                    `Shell execution started: ${command.executable} ${command.args?.join(' ')}`,
+                                );
+                            }
+                        }),
+                    );
+                    await execPromise.promise;
+                }
+            } finally {
+                this.activatedTerminals.set(terminal, environment);
             }
         }
     }
@@ -172,24 +191,30 @@ export class TerminalManagerImpl implements TerminalManager {
     ): Promise<void> {
         const deactivationCommands = getDeactivationCommand(terminal, environment);
         if (deactivationCommands) {
-            for (const command of deactivationCommands) {
-                const execPromise = createDeferred<void>();
-                const execution = shellIntegration.executeCommand(command.executable, command.args ?? []);
-                const disposables: Disposable[] = [];
-                disposables.push(
-                    this.onTerminalShellExecutionEnd((e: TerminalShellExecutionEndEvent) => {
-                        if (e.execution === execution) {
-                            execPromise.resolve();
-                        }
-                    }),
-                    this.onTerminalShellExecutionStart((e: TerminalShellExecutionStartEvent) => {
-                        if (e.execution === execution) {
-                            traceVerbose(`Shell execution started: ${command.executable} ${command.args?.join(' ')}`);
-                        }
-                    }),
-                );
+            try {
+                for (const command of deactivationCommands) {
+                    const execPromise = createDeferred<void>();
+                    const execution = shellIntegration.executeCommand(command.executable, command.args ?? []);
+                    const disposables: Disposable[] = [];
+                    disposables.push(
+                        this.onTerminalShellExecutionEnd((e: TerminalShellExecutionEndEvent) => {
+                            if (e.execution === execution) {
+                                execPromise.resolve();
+                            }
+                        }),
+                        this.onTerminalShellExecutionStart((e: TerminalShellExecutionStartEvent) => {
+                            if (e.execution === execution) {
+                                traceVerbose(
+                                    `Shell execution started: ${command.executable} ${command.args?.join(' ')}`,
+                                );
+                            }
+                        }),
+                    );
 
-                await execPromise.promise;
+                    await execPromise.promise;
+                }
+            } finally {
+                this.activatedTerminals.delete(terminal);
             }
         }
     }
@@ -255,7 +280,6 @@ export class TerminalManagerImpl implements TerminalManager {
                 }),
             );
             await deferred.promise;
-            this.activatedTerminals.set(terminal, environment);
         } catch (ex) {
             traceError('Failed to activate environment:\r\n', ex);
         } finally {
@@ -392,7 +416,6 @@ export class TerminalManagerImpl implements TerminalManager {
             const promise = this.activateInternal(terminal, environment);
             this.activatingTerminals.set(terminal, promise);
             await promise;
-            this.activatedTerminals.set(terminal, environment);
         } catch (ex) {
             traceError('Failed to activate environment:\r\n', ex);
         } finally {
@@ -428,9 +451,8 @@ export class TerminalManagerImpl implements TerminalManager {
             const promise = this.deactivateInternal(terminal, environment);
             this.deactivatingTerminals.set(terminal, promise);
             await promise;
-            this.activatedTerminals.delete(terminal);
         } catch (ex) {
-            traceError('Failed to activate environment:\r\n', ex);
+            traceError('Failed to deactivate environment:\r\n', ex);
         } finally {
             this.deactivatingTerminals.delete(terminal);
         }
@@ -458,6 +480,20 @@ export class TerminalManagerImpl implements TerminalManager {
                     }
                 }),
             );
+        }
+    }
+
+    public async getEnvironment(terminal: Terminal): Promise<PythonEnvironment | undefined> {
+        if (this.deactivatingTerminals.has(terminal)) {
+            return undefined;
+        }
+
+        if (this.activatingTerminals.has(terminal)) {
+            await this.activatingTerminals.get(terminal);
+        }
+
+        if (this.activatedTerminals.has(terminal)) {
+            return Promise.resolve(this.activatedTerminals.get(terminal));
         }
     }
 

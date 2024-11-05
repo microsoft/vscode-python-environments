@@ -39,7 +39,7 @@ import { pickEnvironment } from '../common/pickers/environments';
 import { pickEnvironmentManager, pickPackageManager, pickCreator } from '../common/pickers/managers';
 import { pickPackageOptions, getPackagesToInstall, getPackagesToUninstall } from '../common/pickers/packages';
 import { pickProject, pickProjectMany } from '../common/pickers/projects';
-import { TerminalManager } from './execution/terminalManager';
+import { TerminalManager } from './terminal/terminalManager';
 
 export async function refreshManagerCommand(context: unknown): Promise<void> {
     if (context instanceof EnvManagerTreeItem) {
@@ -158,7 +158,7 @@ export async function handlePackagesCommand(
 }
 
 export interface EnvironmentSetResult {
-    projects?: PythonProject;
+    project?: PythonProject;
     environment: PythonEnvironment;
 }
 
@@ -180,7 +180,7 @@ export async function setEnvironmentCommand(
                     packageManager: manager.preferredPackageManagerId,
                 })),
             );
-            return projects.map((p) => ({ project: [p], environment: view.environment }));
+            return projects.map((p) => ({ project: p, environment: view.environment }));
         }
         return;
     } else if (context instanceof ProjectItem) {
@@ -240,7 +240,7 @@ export async function setEnvironmentCommand(
             });
             await Promise.all(promises);
             await setAllManagerSettings(settings);
-            return [...projects.map((p) => ({ project: p, environment: selected }))];
+            return projects.map((p) => ({ project: p, environment: selected }));
         }
         return;
     }

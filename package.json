@@ -179,6 +179,18 @@
                 "title": "Run as Task",
                 "category": "Python Envs",
                 "icon": "$(play)"
+            },
+            {
+                "command": "python-envs.terminal.activate",
+                "title": "Activate Environment in Current Terminal",
+                "category": "Python Envs",
+                "icon": "$(zap)"
+            },
+            {
+                "command": "python-envs.terminal.deactivate",
+                "title": "Deactivate Environment in Current Terminal",
+                "category": "Python Envs",
+                "icon": "$(circle-slash)"
             }
         ],
         "menus": {
@@ -234,6 +246,14 @@
                 {
                     "command": "python-envs.runAsTask",
                     "when": "true"
+                },
+                {
+                    "command": "python-envs.terminal.activate",
+                    "when": "false"
+                },
+                {
+                    "command": "python-envs.terminal.deactivate",
+                    "when": "false"
                 }
             ],
             "view/item/context": [
@@ -315,6 +335,16 @@
                     "command": "python-envs.refreshAllManagers",
                     "group": "navigation",
                     "when": "view == env-managers"
+                },
+                {
+                    "command": "python-envs.terminal.activate",
+                    "group": "navigation",
+                    "when": "view == terminal && pythonTerminalActivation && !pythonTerminalActivated"
+                },
+                {
+                    "command": "python-envs.terminal.deactivate",
+                    "group": "navigation",
+                    "when": "view == terminal && pythonTerminalActivation && pythonTerminalActivated"
                 }
             ],
             "explorer/context": [
@@ -334,6 +364,16 @@
                     "command": "python-envs.runAsTask",
                     "group": "Python",
                     "when": "editorLangId == python"
+                }
+            ],
+            "terminal/title/context": [
+                {
+                    "command": "python-envs.terminal.activate",
+                    "when": "pythonTerminalActivation && !pythonTerminalActivated"
+                },
+                {
+                    "command": "python-envs.terminal.deactivate",
+                    "when": "pythonTerminalActivation && pythonTerminalActivated"
                 }
             ]
         },

@@ -38,9 +38,13 @@ import {
 } from './features/projectCreators';
 import { WorkspaceView } from './features/views/projectView';
 import { registerCompletionProvider } from './features/settings/settingCompletions';
-import { TerminalManager, TerminalManagerImpl } from './features/execution/terminalManager';
-import { ActivateStatusButton } from './features/execution/activateButton';
-import { activeTerminal, onDidChangeActiveTextEditor } from './common/window.apis';
+import { TerminalManager, TerminalManagerImpl } from './features/terminal/terminalManager';
+import { activeTerminal, onDidChangeActiveTerminal, onDidChangeActiveTextEditor } from './common/window.apis';
+import {
+    getEnvironmentForTerminal,
+    setActivateMenuButtonContext,
+    updateActivateMenuButtonContext,
+} from './features/terminal/activateMenuButton';
 
 export async function activate(context: ExtensionContext): Promise<PythonEnvironmentApi> {
     // Logging should be set up before anything else.
@@ -58,9 +62,6 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
 
     const envManagers: EnvironmentManagers = new PythonEnvironmentManagers(projectManager);
     context.subscriptions.push(envManagers);
-
-    const activateStatusButton = new ActivateStatusButton(terminalManager, envManagers, projectManager);
-    context.subscriptions.push(activateStatusButton);
 
     const projectCreators: ProjectCreators = new ProjectCreatorsImpl();
     context.subscriptions.push(
@@ -114,11 +115,12 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
             if (result) {
                 const projects: PythonProject[] = [];
                 result.forEach((r) => {
-                    if (r.projects) {
-                        projects.push(r.projects);
+                    if (r.project) {
+                        projects.push(r.project);
                     }
                 });
                 workspaceView.updateProject(projects);
+                await updateActivateMenuButtonContext(terminalManager, projectManager, envManagers);
             }
         }),
         commands.registerCommand('python-envs.setEnv', async (item) => {
@@ -126,11 +128,12 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
             if (result) {
                 const projects: PythonProject[] = [];
                 result.forEach((r) => {
-                    if (r.projects) {
-                        projects.push(r.projects);
+                    if (r.project) {
+                        projects.push(r.project);
                     }
                 });
                 workspaceView.updateProject(projects);
+                await updateActivateMenuButtonContext(terminalManager, projectManager, envManagers);
             }
         }),
         commands.registerCommand('python-envs.reset', async (item) => {
@@ -164,16 +167,31 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
         commands.registerCommand('python-envs.createTerminal', (item) => {
             return createTerminalCommand(item, api, terminalManager);
         }),
-        commands.registerCommand('python-envs.terminal.activate', async (terminal, env) => {
-            await terminalManager.activate(terminal, env);
-            await activateStatusButton.update(terminal);
+        commands.registerCommand('python-envs.terminal.activate', async () => {
+            const terminal = activeTerminal();
+            if (terminal) {
+                const env = await getEnvironmentForTerminal(terminalManager, projectManager, envManagers, terminal);
+                if (env) {
+                    await terminalManager.activate(terminal, env);
+                    await setActivateMenuButtonContext(terminalManager, terminal, env);
+                }
+            }
         }),
-        commands.registerCommand('python-envs.terminal.deactivate', async (terminal) => {
-            await terminalManager.deactivate(terminal);
-            await activateStatusButton.update(terminal);
+        commands.registerCommand('python-envs.terminal.deactivate', async () => {
+            const terminal = activeTerminal();
+            if (terminal) {
+                await terminalManager.deactivate(terminal);
+                const env = await getEnvironmentForTerminal(terminalManager, projectManager, envManagers, terminal);
+                if (env) {
+                    await setActivateMenuButtonContext(terminalManager, terminal, env);
+                }
+            }
         }),
         envManagers.onDidChangeEnvironmentManager(async () => {
-            await activateStatusButton.update(activeTerminal());
+            await updateActivateMenuButtonContext(terminalManager, projectManager, envManagers);
+        }),
+        onDidChangeActiveTerminal(async (t) => {
+            await updateActivateMenuButtonContext(terminalManager, projectManager, envManagers, t);
         }),
         onDidChangeActiveTextEditor(async (e: TextEditor | undefined) => {
             if (e && !e.document.isUntitled && e.document.uri.scheme === 'file') {
