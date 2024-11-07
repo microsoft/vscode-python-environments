@@ -1,23 +1,16 @@
-import { isPromise } from 'util/types';
+import type { IEventNamePropertyMapping } from './constants';
 import { StopWatch } from '../stopWatch';
-import { IEventNamePropertyMapping } from './constants';
 import { isTestExecution } from '../utils/testing';
 import { getTelemetryReporter } from './reporter';
+import { isPromise } from 'util/types';
 
 type FailedEventType = { failed: true };
 
-/**
- * Checks whether telemetry is supported.
- * Its possible this function gets called within Debug Adapter, vscode isn't available in there.
- * Within DA, there's a completely different way to send telemetry.
- * @returns {boolean}
- */
 function isTelemetrySupported(): boolean {
     try {
         const vsc = require('vscode');
         const reporter = require('@vscode/extension-telemetry');
-
-        return vsc !== undefined && reporter !== undefined;
+        return !!vsc && !!reporter;
     } catch {
         return false;
     }
@@ -34,33 +27,20 @@ export function sendTelemetryEvent<P extends IEventNamePropertyMapping, E extend
     }
     const reporter = getTelemetryReporter();
     const measures =
-        typeof measuresOrDurationMs === 'number'
-            ? { duration: measuresOrDurationMs }
-            : measuresOrDurationMs || undefined;
+        typeof measuresOrDurationMs === 'number' ? { duration: measuresOrDurationMs } : measuresOrDurationMs;
+
     const customProperties: Record<string, string> = {};
     const eventNameSent = eventName as string;
 
     if (properties) {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const data = properties as any;
-        Object.getOwnPropertyNames(data).forEach((prop) => {
-            if (data[prop] === undefined || data[prop] === null) {
+        const data = properties as Record<string, unknown>;
+        Object.entries(data).forEach(([prop, value]) => {
+            if (value === null || value === undefined) {
                 return;
             }
+
             try {
-                // If there are any errors in serializing one property, ignore that and move on.
-                // Else nothing will be sent.
-                switch (typeof data[prop]) {
-                    case 'string':
-                        customProperties[prop] = data[prop];
-                        break;
-                    case 'object':
-                        customProperties[prop] = 'object';
-                        break;
-                    default:
-                        customProperties[prop] = data[prop].toString();
-                        break;
-                }
+                customProperties[prop] = typeof value === 'object' ? 'object' : String(value);
             } catch (exception) {
                 console.error(`Failed to serialize ${prop} for ${String(eventName)}`, exception);
             }
@@ -78,86 +58,54 @@ export function sendTelemetryEvent<P extends IEventNamePropertyMapping, E extend
         reporter.sendTelemetryEvent(eventNameSent, customProperties, measures);
     }
 
-    if (process.env && process.env.VSC_PYTHON_LOG_TELEMETRY) {
+    if (process.env?.VSC_PYTHON_LOG_TELEMETRY) {
         console.info(
             `Telemetry Event : ${eventNameSent} Measures: ${JSON.stringify(measures)} Props: ${JSON.stringify(
                 customProperties,
-            )} `,
+            )}`,
         );
     }
 }
 
-// Type-parameterized form of MethodDecorator in lib.es5.d.ts.
 type TypedMethodDescriptor<T> = (
     target: unknown,
     propertyKey: string | symbol,
     descriptor: TypedPropertyDescriptor<T>,
 ) => TypedPropertyDescriptor<T> | void;
 
-/**
- * Decorates a method, sending a telemetry event with the given properties.
- * @param eventName The event name to send.
- * @param properties Properties to send with the event; must be valid for the event.
- * @param captureDuration True if the method's execution duration should be captured.
- * @param failureEventName If the decorated method returns a Promise and fails, send this event instead of eventName.
- * @param lazyProperties A static function on the decorated class which returns extra properties to add to the event.
- * This can be used to provide properties which are only known at runtime (after the decorator has executed).
- * @param lazyMeasures A static function on the decorated class which returns extra measures to add to the event.
- * This can be used to provide measures which are only known at runtime (after the decorator has executed).
- */
 export function captureTelemetry<This, P extends IEventNamePropertyMapping, E extends keyof P>(
     eventName: E,
     properties?: P[E],
     captureDuration = true,
     failureEventName?: E,
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    lazyProperties?: (obj: This, result?: any) => P[E],
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    lazyMeasures?: (obj: This, result?: any) => Record<string, number>,
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-): TypedMethodDescriptor<(this: This, ...args: any[]) => any> {
+    lazyProperties?: (obj: This, result?: unknown) => P[E],
+    lazyMeasures?: (obj: This, result?: unknown) => Record<string, number>,
+): TypedMethodDescriptor<(this: This, ...args: unknown[]) => unknown> {
     return function (
         _target: unknown,
         _propertyKey: string | symbol,
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        descriptor: TypedPropertyDescriptor<(this: This, ...args: any[]) => any>,
+        descriptor: TypedPropertyDescriptor<(this: This, ...args: unknown[]) => unknown>,
     ) {
         const originalMethod = descriptor.value!;
 
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        descriptor.value = function (this: This, ...args: any[]) {
-            // Legacy case; fast path that sends event before method executes.
-            // Does not set "failed" if the result is a Promise and throws an exception.
+        descriptor.value = function (this: This, ...args: unknown[]) {
             if (!captureDuration && !lazyProperties && !lazyMeasures) {
                 sendTelemetryEvent(eventName, undefined, properties);
-
                 return originalMethod.apply(this, args);
             }
 
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            const getProps = (result?: any) => {
-                if (lazyProperties) {
-                    return { ...properties, ...lazyProperties(this, result) };
-                }
-                return properties;
-            };
-
+            const getProps = (result?: unknown) =>
+                lazyProperties ? { ...properties, ...lazyProperties(this, result) } : properties;
             const stopWatch = captureDuration ? new StopWatch() : undefined;
-
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            const getMeasures = (result?: any) => {
+            const getMeasures = (result?: unknown) => {
                 const measures = stopWatch ? { duration: stopWatch.elapsedTime } : undefined;
-                if (lazyMeasures) {
-                    return { ...measures, ...lazyMeasures(this, result) };
-                }
-                return measures;
+                return lazyMeasures ? { ...measures, ...lazyMeasures(this, result) } : measures;
             };
 
             const result = originalMethod.apply(this, args);
 
-            // If method being wrapped returns a promise then wait for it.
             if (result && isPromise(result)) {
-                result
+                return result
                     .then((data) => {
                         sendTelemetryEvent(eventName, getMeasures(data), getProps(data));
                         return data;
@@ -165,12 +113,12 @@ export function captureTelemetry<This, P extends IEventNamePropertyMapping, E ex
                     .catch((ex) => {
                         const failedProps: P[E] = { ...getProps(), failed: true } as P[E] & FailedEventType;
                         sendTelemetryEvent(failureEventName || eventName, getMeasures(), failedProps, ex);
+                        return Promise.reject(ex);
                     });
             } else {
                 sendTelemetryEvent(eventName, getMeasures(result), getProps(result));
+                return result;
             }
-
-            return result;
         };
 
         return descriptor;
@@ -180,18 +128,17 @@ export function captureTelemetry<This, P extends IEventNamePropertyMapping, E ex
 export function sendTelemetryWhenDone<P extends IEventNamePropertyMapping, E extends keyof P>(
     eventName: E,
     promise: Promise<unknown> | Thenable<unknown>,
-    stopWatch?: StopWatch,
+    stopWatch: StopWatch = new StopWatch(),
     properties?: P[E],
 ): void {
-    stopWatch = stopWatch || new StopWatch();
     if (typeof promise.then === 'function') {
-        (promise as Promise<unknown>).then(
+        promise.then(
             (data) => {
-                sendTelemetryEvent(eventName, stopWatch!.elapsedTime, properties);
+                sendTelemetryEvent(eventName, stopWatch.elapsedTime, properties);
                 return data;
             },
             (ex) => {
-                sendTelemetryEvent(eventName, stopWatch!.elapsedTime, properties, ex);
+                sendTelemetryEvent(eventName, stopWatch.elapsedTime, properties, ex);
                 return Promise.reject(ex);
             },
         );
