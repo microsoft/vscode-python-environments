@@ -402,6 +402,7 @@
     },
     "dependencies": {
         "@iarna/toml": "^2.2.5",
+        "@vscode/extension-telemetry": "^0.9.7",
         "@vscode/test-cli": "^0.0.10",
         "fs-extra": "^11.2.0",
         "stack-trace": "0.0.10",
