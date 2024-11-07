@@ -48,6 +48,27 @@ This project has adopted the [Microsoft Open Source Code of Conduct](https://ope
 For more information see the [Code of Conduct FAQ](https://opensource.microsoft.com/codeofconduct/faq/) or
 contact [opencode@microsoft.com](mailto:opencode@microsoft.com) with any additional questions or comments.
 
+
+## Questions, issues, feature requests, and contributions
+
+-   If you have a question about how to accomplish something with the extension, please [ask on our Discussions page](https://github.com/microsoft/vscode-python/discussions/categories/q-a).
+-   If you come across a problem with the extension, please [file an issue](https://github.com/microsoft/vscode-python).
+-   Contributions are always welcome! Please see our [contributing guide](https://github.com/Microsoft/vscode-python/blob/main/CONTRIBUTING.md) for more details.
+-   Any and all feedback is appreciated and welcome!
+    -   If someone has already [filed an issue](https://github.com/Microsoft/vscode-python) that encompasses your feedback, please leave a 👍/👎 reaction on the issue.
+    -   Otherwise please start a [new discussion](https://github.com/microsoft/vscode-python/discussions/categories/ideas).
+-   If you're interested in the development of the extension, you can read about our [development process](https://github.com/Microsoft/vscode-python/blob/main/CONTRIBUTING.md#development-process).
+
+## Data and telemetry
+
+The Microsoft Python Extension for Visual Studio Code collects usage
+data and sends it to Microsoft to help improve our products and
+services. Read our
+[privacy statement](https://privacy.microsoft.com/privacystatement) to
+learn more. This extension respects the `telemetry.enableTelemetry`
+setting which you can learn more about at
+https://code.visualstudio.com/docs/supporting/faq#_how-to-disable-telemetry-reporting.
+
 ## Trademarks
 
 This project may contain trademarks or logos for projects, products, or services. Authorized use of Microsoft 
