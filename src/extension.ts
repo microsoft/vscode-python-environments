@@ -231,12 +231,10 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
     /**
      * Below are all the contributed features using the APIs.
      */
-
-    // This is the finder that is used by all the built in environment managers
-    const nativeFinder: NativePythonFinder = createNativePythonFinder(outputChannel, api, context);
-    context.subscriptions.push(nativeFinder);
-
     setImmediate(async () => {
+        // This is the finder that is used by all the built in environment managers
+        const nativeFinder: NativePythonFinder = await createNativePythonFinder(outputChannel, api, context);
+        context.subscriptions.push(nativeFinder);
         await Promise.all([
             registerSystemPythonFeatures(nativeFinder, context.subscriptions, outputChannel),
             registerCondaFeatures(nativeFinder, context.subscriptions, outputChannel),

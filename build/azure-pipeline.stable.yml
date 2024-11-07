@@ -1,0 +1,88 @@
+trigger: none
+#   branches:
+#     include:
+#       - release*
+#   tags:
+#     include: ['*']
+pr: none
+
+resources:
+  repositories:
+    - repository: templates
+      type: github
+      name: microsoft/vscode-engineering
+      ref: main
+      endpoint: Monaco
+
+parameters:
+  - name: publishExtension
+    displayName: 🚀 Publish Extension
+    type: boolean
+    default: false
+
+extends:
+  template: azure-pipelines/extension/stable.yml@templates
+  parameters:
+    l10nSourcePaths: ./src
+    publishExtension: ${{ parameters.publishExtension }}
+    ghCreateTag: true
+    buildSteps:
+      - task: NodeTool@0
+        inputs:
+          versionSpec: '18.17.0'
+        displayName: Select Node version
+
+      - task: UsePythonVersion@0
+        inputs:
+          versionSpec: '3.8'
+          addToPath: true
+          architecture: 'x64'
+        displayName: Select Python version
+
+      - script: npm ci
+        displayName: Install NPM dependencies
+
+      - script: python -m pip install -U pip
+        displayName: Upgrade pip
+
+      - script: python -m pip install wheel
+        displayName: Install wheel
+
+      - script: python -m pip install nox
+        displayName: Install wheel
+
+      - script: python ./build/update_ext_version.py --release --for-publishing
+        displayName: Update build number
+
+      - bash: |
+          mkdir -p $(Build.SourcesDirectory)/python-env-tools/bin
+          chmod +x $(Build.SourcesDirectory)/python-env-tools/bin
+        displayName: Make Directory for python-env-tool binary
+
+      - task: DownloadPipelineArtifact@2
+        inputs:
+          buildType: 'specific'
+          project: 'Monaco'
+          definition: 593
+          buildVersionToDownload: 'latestFromBranch'
+          branchName: 'refs/heads/release/2024.18'
+          targetPath: '$(Build.SourcesDirectory)/python-env-tools/bin'
+          artifactName: 'bin-$(vsceTarget)'
+          itemPattern: |
+            pet.exe
+            pet
+            ThirdPartyNotices.txt
+
+      - bash: |
+          ls -lf ./python-env-tools/bin
+          chmod +x ./python-env-tools/bin/pet*
+          ls -lf ./python-env-tools/bin
+        displayName: Set chmod for pet binary
+
+      - script: npm run package
+        displayName: Build extension
+    tsa:
+      config:
+        areaPath: 'Visual Studio Code Python Extensions'
+        serviceTreeID: '6e6194bc-7baa-4486-86d0-9f5419626d46'
+      enabled: true

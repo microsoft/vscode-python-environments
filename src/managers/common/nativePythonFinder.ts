@@ -2,7 +2,7 @@ import * as fs from 'fs-extra';
 import * as path from 'path';
 import * as rpc from 'vscode-jsonrpc/node';
 import * as ch from 'child_process';
-import { PYTHON_EXTENSION_ID } from '../../common/constants';
+import { ENVS_EXTENSION_ID, PYTHON_EXTENSION_ID } from '../../common/constants';
 import { getExtension } from '../../common/extension.apis';
 import { getUserHomeDir, isWindows, noop, untildify } from './utils';
 import { Disposable, ExtensionContext, LogOutputChannel, Uri } from 'vscode';
@@ -12,18 +12,21 @@ import { getConfiguration } from '../../common/workspace.apis';
 import { createRunningWorkerPool, WorkerPool } from '../../common/utils/workerPool';
 import { traceVerbose } from '../../common/logging';
 
-let PYTHON_EXTENSION_ROOT_DIR: string | undefined;
-function getNativePythonToolsPath(): string {
-    if (!PYTHON_EXTENSION_ROOT_DIR) {
-        const python = getExtension(PYTHON_EXTENSION_ID);
-        PYTHON_EXTENSION_ROOT_DIR = python?.extensionPath;
+async function getNativePythonToolsPath(): Promise<string> {
+    const envsExt = getExtension(ENVS_EXTENSION_ID);
+    if (envsExt) {
+        const petPath = path.join(envsExt.extensionPath, 'python-env-tools', 'bin', isWindows() ? 'pet.exe' : 'pet');
+        if (await fs.pathExists(petPath)) {
+            return petPath;
+        }
     }
-    if (!PYTHON_EXTENSION_ROOT_DIR) {
+
+    const python = getExtension(PYTHON_EXTENSION_ID);
+    if (!python) {
         throw new Error('Python extension not found');
     }
-    return isWindows()
-        ? path.join(PYTHON_EXTENSION_ROOT_DIR, 'python-env-tools', 'bin', 'pet.exe')
-        : path.join(PYTHON_EXTENSION_ROOT_DIR, 'python-env-tools', 'bin', 'pet');
+
+    return path.join(python.extensionPath, 'python-env-tools', 'bin', isWindows() ? 'pet.exe' : 'pet');
 }
 
 export interface NativeEnvInfo {
@@ -374,10 +377,10 @@ export async function clearCacheDirectory(context: ExtensionContext): Promise<vo
     await fs.emptyDir(cacheDirectory.fsPath).catch(noop);
 }
 
-export function createNativePythonFinder(
+export async function createNativePythonFinder(
     outputChannel: LogOutputChannel,
     api: PythonProjectApi,
     context: ExtensionContext,
-): NativePythonFinder {
-    return new NativePythonFinderImpl(outputChannel, getNativePythonToolsPath(), api, getCacheDirectory(context));
+): Promise<NativePythonFinder> {
+    return new NativePythonFinderImpl(outputChannel, await getNativePythonToolsPath(), api, getCacheDirectory(context));
 }
