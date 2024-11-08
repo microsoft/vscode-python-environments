@@ -70,7 +70,7 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
         registerAutoProjectProvider(projectCreators),
     );
 
-    setPythonApi(envManagers, projectManager, projectCreators);
+    setPythonApi(envManagers, projectManager, projectCreators, terminalManager);
 
     const managerView = new EnvManagerView(envManagers);
     context.subscriptions.push(managerView);

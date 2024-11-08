@@ -1,4 +1,4 @@
-import { Uri, Disposable, Event, EventEmitter } from 'vscode';
+import { Uri, Disposable, Event, EventEmitter, Terminal, TaskExecution } from 'vscode';
 import {
     PythonEnvironmentApi,
     PythonEnvironment,
@@ -22,6 +22,10 @@ import {
     PythonProjectCreator,
     ResolveEnvironmentContext,
     PackageInstallOptions,
+    PythonProcess,
+    PythonTaskExecutionOptions,
+    PythonTerminalExecutionOptions,
+    PythonBackgroundRunOptions,
 } from '../api';
 import {
     EnvironmentManagers,
@@ -36,6 +40,9 @@ import { traceError } from '../common/logging';
 import { showErrorMessage } from '../common/errors/utils';
 import { pickEnvironmentManager } from '../common/pickers/managers';
 import { handlePythonPath } from '../common/utils/pythonPath';
+import { TerminalManager } from './terminal/terminalManager';
+import { runAsTask } from './execution/runAsTask';
+import { runInTerminal } from './execution/runInTerminal';
 
 class PythonEnvironmentApiImpl implements PythonEnvironmentApi {
     private readonly _onDidChangeEnvironments = new EventEmitter<DidChangeEnvironmentsEventArgs>();
@@ -46,6 +53,7 @@ class PythonEnvironmentApiImpl implements PythonEnvironmentApi {
         private readonly envManagers: EnvironmentManagers,
         private readonly projectManager: PythonProjectManager,
         private readonly projectCreators: ProjectCreators,
+        private readonly terminalManager: TerminalManager,
     ) {}
 
     registerEnvironmentManager(manager: EnvironmentManager): Disposable {
@@ -266,6 +274,40 @@ class PythonEnvironmentApiImpl implements PythonEnvironmentApi {
     registerPythonProjectCreator(creator: PythonProjectCreator): Disposable {
         return this.projectCreators.registerPythonProjectCreator(creator);
     }
+    async createTerminal(
+        environment: PythonEnvironment,
+        cwd: string | Uri,
+        envVars?: { [key: string]: string },
+    ): Promise<Terminal> {
+        return this.terminalManager.create(environment, cwd, envVars);
+    }
+    async runInTerminal(environment: PythonEnvironment, options: PythonTerminalExecutionOptions): Promise<Terminal> {
+        const terminal = await this.terminalManager.getProjectTerminal(
+            options.cwd instanceof Uri ? options.cwd : Uri.file(options.cwd),
+            environment,
+        );
+        await runInTerminal(environment, terminal, options);
+        return terminal;
+    }
+    async runInDedicatedTerminal(
+        terminalKey: Uri,
+        environment: PythonEnvironment,
+        options: PythonTerminalExecutionOptions,
+    ): Promise<Terminal> {
+        const terminal = await this.terminalManager.getDedicatedTerminal(
+            terminalKey,
+            options.cwd instanceof Uri ? options.cwd : Uri.file(options.cwd),
+            environment,
+        );
+        await runInTerminal(environment, terminal, options);
+        return terminal;
+    }
+    runAsTask(environment: PythonEnvironment, options: PythonTaskExecutionOptions): Promise<TaskExecution> {
+        return runAsTask(environment, options);
+    }
+    runInBackground(environment: PythonEnvironment, options: PythonBackgroundRunOptions): Promise<PythonProcess> {
+        throw new Error('Method not implemented.');
+    }
 }
 
 let _deferred = createDeferred<PythonEnvironmentApi>();
@@ -273,8 +315,9 @@ export function setPythonApi(
     envMgr: EnvironmentManagers,
     projectMgr: PythonProjectManager,
     projectCreators: ProjectCreators,
+    terminalManager: TerminalManager,
 ) {
-    _deferred.resolve(new PythonEnvironmentApiImpl(envMgr, projectMgr, projectCreators));
+    _deferred.resolve(new PythonEnvironmentApiImpl(envMgr, projectMgr, projectCreators, terminalManager));
 }
 
 export function getPythonApi(): Promise<PythonEnvironmentApi> {

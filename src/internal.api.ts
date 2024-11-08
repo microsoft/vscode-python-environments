@@ -321,17 +321,3 @@ export interface ProjectCreators extends Disposable {
     registerPythonProjectCreator(creator: PythonProjectCreator): Disposable;
     getProjectCreators(): PythonProjectCreator[];
 }
-
-export interface PythonTerminalExecutionOptions {
-    project: PythonProject;
-    args: string[];
-    uri?: Uri;
-}
-
-export interface PythonTaskExecutionOptions {
-    project: PythonProject;
-    args: string[];
-    cwd?: string;
-    env?: { [key: string]: string };
-    name: string;
-}

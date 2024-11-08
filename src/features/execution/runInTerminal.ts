@@ -1,6 +1,5 @@
 import { Terminal, TerminalShellExecution } from 'vscode';
-import { PythonEnvironment } from '../../api';
-import { PythonTerminalExecutionOptions } from '../../internal.api';
+import { PythonEnvironment, PythonTerminalExecutionOptions } from '../../api';
 import { onDidEndTerminalShellExecution } from '../../common/window.apis';
 import { createDeferred } from '../../common/utils/deferred';
 import { quoteArgs } from './execUtils';
@@ -9,16 +8,15 @@ export async function runInTerminal(
     environment: PythonEnvironment,
     terminal: Terminal,
     options: PythonTerminalExecutionOptions,
-    extra?: { show?: boolean },
 ): Promise<void> {
-    if (extra?.show) {
+    if (options.show) {
         terminal.show();
     }
 
     const executable =
         environment.execInfo?.activatedRun?.executable ?? environment.execInfo?.run.executable ?? 'python';
     const args = environment.execInfo?.activatedRun?.args ?? environment.execInfo?.run.args ?? [];
-    const allArgs = [...args, ...options.args];
+    const allArgs = [...args, ...(options.args ?? [])];
 
     if (terminal.shellIntegration) {
         let execution: TerminalShellExecution | undefined;

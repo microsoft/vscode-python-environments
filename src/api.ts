@@ -1,4 +1,4 @@
-import { Uri, Disposable, MarkdownString, Event, LogOutputChannel, ThemeIcon, Terminal } from 'vscode';
+import { Uri, Disposable, MarkdownString, Event, LogOutputChannel, ThemeIcon, Terminal, TaskExecution } from 'vscode';
 
 /**
  * The path to an icon, or a theme-specific configuration of icons.
@@ -767,8 +767,6 @@ export interface Installable {
     readonly uri?: Uri;
 }
 
-export interface PythonTaskResult {}
-
 export interface PythonProcess {
     /**
      * The process ID of the Python process.
@@ -801,7 +799,7 @@ export interface PythonProcess {
     onExit: Event<number>;
 }
 
-export interface PythonEnvironmentManagerApi {
+export interface PythonEnvironmentManagerRegistrationApi {
     /**
      * Register an environment manager implementation.
      *
@@ -810,7 +808,9 @@ export interface PythonEnvironmentManagerApi {
      * @see {@link EnvironmentManager}
      */
     registerEnvironmentManager(manager: EnvironmentManager): Disposable;
+}
 
+export interface PythonEnvironmentItemApi {
     /**
      * Create a Python environment item from the provided environment info. This item is used to interact
      * with the environment.
@@ -820,7 +820,9 @@ export interface PythonEnvironmentManagerApi {
      * @returns The Python environment.
      */
     createPythonEnvironmentItem(info: PythonEnvironmentInfo, manager: EnvironmentManager): PythonEnvironment;
+}
 
+export interface PythonEnvironmentManagementApi {
     /**
      * Create a Python environment using environment manager associated with the scope.
      *
@@ -836,7 +838,9 @@ export interface PythonEnvironmentManagerApi {
      * @returns A promise that resolves when the environment has been removed.
      */
     removeEnvironment(environment: PythonEnvironment): Promise<void>;
+}
 
+export interface PythonEnvironmentsApi {
     /**
      * Initiates a refresh of Python environments within the specified scope.
      * @param scope - The scope within which to search for environments.
@@ -858,6 +862,16 @@ export interface PythonEnvironmentManagerApi {
     onDidChangeEnvironments: Event<DidChangeEnvironmentsEventArgs>;
 
     /**
+     * This method is used to get the details missing from a PythonEnvironment. Like
+     * {@link PythonEnvironment.execInfo} and other details.
+     *
+     * @param context : The PythonEnvironment or Uri for which details are required.
+     */
+    resolveEnvironment(context: ResolveEnvironmentContext): Promise<PythonEnvironment | undefined>;
+}
+
+export interface PythonProjectEnvironmentApi {
+    /**
      * Sets the current Python environment within the specified scope.
      * @param scope - The scope within which to set the environment.
      * @param environment - The Python environment to set. If undefined, the environment is unset.
@@ -876,17 +890,16 @@ export interface PythonEnvironmentManagerApi {
      * @see {@link DidChangeEnvironmentEventArgs}
      */
     onDidChangeEnvironment: Event<DidChangeEnvironmentEventArgs>;
-
-    /**
-     * This method is used to get the details missing from a PythonEnvironment. Like
-     * {@link PythonEnvironment.execInfo} and other details.
-     *
-     * @param context : The PythonEnvironment or Uri for which details are required.
-     */
-    resolveEnvironment(context: ResolveEnvironmentContext): Promise<PythonEnvironment | undefined>;
 }
 
-export interface PythonPackageManagerApi {
+export interface PythonEnvironmentManagerApi
+    extends PythonEnvironmentManagerRegistrationApi,
+        PythonEnvironmentItemApi,
+        PythonEnvironmentManagementApi,
+        PythonEnvironmentsApi,
+        PythonProjectEnvironmentApi {}
+
+export interface PythonPackageManagerRegistrationApi {
     /**
      * Register a package manager implementation.
      *
@@ -895,24 +908,9 @@ export interface PythonPackageManagerApi {
      * @see {@link PackageManager}
      */
     registerPackageManager(manager: PackageManager): Disposable;
+}
 
-    /**
-     * Install packages into a Python Environment.
-     *
-     * @param environment The Python Environment into which packages are to be installed.
-     * @param packages The packages to install.
-     * @param options Options for installing packages.
-     */
-    installPackages(environment: PythonEnvironment, packages: string[], options: PackageInstallOptions): Promise<void>;
-
-    /**
-     * Uninstall packages from a Python Environment.
-     *
-     * @param environment The Python Environment from which packages are to be uninstalled.
-     * @param packages The packages to uninstall.
-     */
-    uninstallPackages(environment: PythonEnvironment, packages: PackageInfo[] | string[]): Promise<void>;
-
+export interface PythonPackageGetterApi {
     /**
      * Refresh the list of packages in a Python Environment.
      *
@@ -934,7 +932,9 @@ export interface PythonPackageManagerApi {
      * @see {@link DidChangePackagesEventArgs}
      */
     onDidChangePackages: Event<DidChangePackagesEventArgs>;
+}
 
+export interface PythonPackageItemApi {
     /**
      * Create a package item from the provided package info.
      *
@@ -946,14 +946,57 @@ export interface PythonPackageManagerApi {
     createPackageItem(info: PackageInfo, environment: PythonEnvironment, manager: PackageManager): Package;
 }
 
-/**
- * The API for interacting with Python projects. A project in python is any folder or file that is a contained
- * in some manner. For example, a PEP-723 compliant file can be treated as a project. A folder with a `pyproject.toml`,
- * or just python files can be treated as a project. All this allows you to do is set a python environment for that project.
- *
- * By default all `vscode.workspace.workspaceFolders` are treated as projects.
- */
-export interface PythonProjectApi {
+export interface PythonPackageManagementApi {
+    /**
+     * Install packages into a Python Environment.
+     *
+     * @param environment The Python Environment into which packages are to be installed.
+     * @param packages The packages to install.
+     * @param options Options for installing packages.
+     */
+    installPackages(environment: PythonEnvironment, packages: string[], options: PackageInstallOptions): Promise<void>;
+
+    /**
+     * Uninstall packages from a Python Environment.
+     *
+     * @param environment The Python Environment from which packages are to be uninstalled.
+     * @param packages The packages to uninstall.
+     */
+    uninstallPackages(environment: PythonEnvironment, packages: PackageInfo[] | string[]): Promise<void>;
+}
+
+export interface PythonPackageManagerApi
+    extends PythonPackageManagerRegistrationApi,
+        PythonPackageGetterApi,
+        PythonEnvironmentManagerApi,
+        PythonPackageItemApi {}
+
+export interface PythonProjectCreationApi {
+    /**
+     * Register a Python project creator.
+     *
+     * @param creator The project creator to register.
+     * @returns A disposable that can be used to unregister the project creator.
+     * @see {@link PythonProjectCreator}
+     */
+    registerPythonProjectCreator(creator: PythonProjectCreator): Disposable;
+}
+export interface PythonProjectGetterApi {
+    /**
+     * Get all python projects.
+     */
+    getPythonProjects(): readonly PythonProject[];
+
+    /**
+     * Get the python project for a given URI.
+     *
+     * @param uri The URI of the project
+     * @returns The project or `undefined` if not found.
+     */
+    getPythonProject(uri: Uri): PythonProject | undefined;
+}
+
+export interface PythonProjectModifyApi {
     /**
      * Add a python project or projects to the list of projects.
      *
@@ -969,69 +1012,92 @@ export interface PythonProjectApi {
     removePythonProject(project: PythonProject): void;
 
     /**
-     * Get all python projects.
-     */
-    getPythonProjects(): readonly PythonProject[];
-
-    /**
      * Event raised when python projects are added or removed.
      * @see {@link DidChangePythonProjectsEventArgs}
      */
     onDidChangePythonProjects: Event<DidChangePythonProjectsEventArgs>;
-
-    /**
-     * Get the python project for a given URI.
-     *
-     * @param uri The URI of the project
-     * @returns The project or `undefined` if not found.
-     */
-    getPythonProject(uri: Uri): PythonProject | undefined;
-
-    /**
-     * Register a Python project creator.
-     *
-     * @param creator The project creator to register.
-     * @returns A disposable that can be used to unregister the project creator.
-     * @see {@link PythonProjectCreator}
-     */
-    registerPythonProjectCreator(creator: PythonProjectCreator): Disposable;
 }
 
-export interface PythonExecutionApi {
+/**
+ * The API for interacting with Python projects. A project in python is any folder or file that is a contained
+ * in some manner. For example, a PEP-723 compliant file can be treated as a project. A folder with a `pyproject.toml`,
+ * or just python files can be treated as a project. All this allows you to do is set a python environment for that project.
+ *
+ * By default all `vscode.workspace.workspaceFolders` are treated as projects.
+ */
+export interface PythonProjectApi extends PythonProjectCreationApi, PythonProjectGetterApi, PythonProjectModifyApi {}
+
+export interface PythonTerminalCreateApi {
     createTerminal(
-        cwd: string | Uri | PythonProject,
-        environment?: PythonEnvironment,
+        environment: PythonEnvironment,
+        cwd: string | Uri,
         envVars?: { [key: string]: string },
     ): Promise<Terminal>;
-    runInTerminal(
-        environment: PythonEnvironment,
-        cwd: string | Uri | PythonProject,
-        command: string,
-        args?: string[],
-    ): Promise<Terminal>;
-    runInDedicatedTerminal(
-        terminalKey: string | Uri,
-        environment: PythonEnvironment,
-        cwd: string | Uri | PythonProject,
-        command: string,
-        args?: string[],
-    ): Promise<Terminal>;
-    runAsTask(
-        environment: PythonEnvironment,
-        cwd: string | Uri | PythonProject,
-        command: string,
-        args?: string[],
-        envVars?: { [key: string]: string },
-    ): Promise<PythonTaskResult>;
-    runInBackground(
-        environment: PythonEnvironment,
-        cwd: string | Uri | PythonProject,
-        command: string,
-        args?: string[],
-        envVars?: { [key: string]: string },
-    ): Promise<PythonProcess>;
 }
+
+export interface PythonTerminalExecutionOptions {
+    cwd: string | Uri;
+    args?: string[];
+
+    show?: boolean;
+}
+
+export interface PythonTerminalRunApi {
+    runInTerminal(environment: PythonEnvironment, options: PythonTerminalExecutionOptions): Promise<Terminal>;
+    runInDedicatedTerminal(
+        terminalKey: Uri,
+        environment: PythonEnvironment,
+        options: PythonTerminalExecutionOptions,
+    ): Promise<Terminal>;
+}
+
+/**
+ *
+ * Example:
+ *  * Running Script: `python myscript.py --arg1`
+ *  ```typescript
+ *    {
+ *       args: ["myscript.py", "--arg1"]
+ *    }
+ *  ```
+ *  * Running a module: `python -m my_module --arg1`
+ *  ```typescript
+ *    {
+ *       args: ["-m", "my_module", "--arg1"]
+ *    }
+ *  ```
+ */
+export interface PythonTaskExecutionOptions {
+    project?: PythonProject;
+    args: string[];
+    cwd?: string;
+    env?: { [key: string]: string };
+    name: string;
+}
+
+export interface PythonTaskRunApi {
+    runAsTask(environment: PythonEnvironment, options: PythonTaskExecutionOptions): Promise<TaskExecution>;
+}
+
+export interface PythonBackgroundRunOptions {
+    args: string[];
+    cwd?: string;
+    env?: { [key: string]: string };
+}
+export interface PythonBackgroundRunApi {
+    runInBackground(environment: PythonEnvironment, options: PythonBackgroundRunOptions): Promise<PythonProcess>;
+}
+
+export interface PythonExecutionApi
+    extends PythonTerminalCreateApi,
+        PythonTerminalRunApi,
+        PythonTaskRunApi,
+        PythonBackgroundRunApi {}
 /**
  * The API for interacting with Python environments, package managers, and projects.
  */
-export interface PythonEnvironmentApi extends PythonEnvironmentManagerApi, PythonPackageManagerApi, PythonProjectApi {}
+export interface PythonEnvironmentApi
+    extends PythonEnvironmentManagerApi,
+        PythonPackageManagerApi,
+        PythonProjectApi,
+        PythonExecutionApi {}

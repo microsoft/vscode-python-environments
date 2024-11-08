@@ -55,10 +55,14 @@ export interface TerminalCreation {
 }
 
 export interface TerminalGetters {
-    getProjectTerminal(project: PythonProject, environment: PythonEnvironment, createNew?: boolean): Promise<Terminal>;
+    getProjectTerminal(
+        project: Uri | PythonProject,
+        environment: PythonEnvironment,
+        createNew?: boolean,
+    ): Promise<Terminal>;
     getDedicatedTerminal(
         uri: Uri,
-        project: PythonProject,
+        project: Uri | PythonProject,
         environment: PythonEnvironment,
         createNew?: boolean,
     ): Promise<Terminal>;
@@ -320,7 +324,7 @@ export class TerminalManagerImpl implements TerminalManager {
     private dedicatedTerminals = new Map<string, Terminal>();
     async getDedicatedTerminal(
         uri: Uri,
-        project: PythonProject,
+        project: Uri | PythonProject,
         environment: PythonEnvironment,
         createNew: boolean = false,
     ): Promise<Terminal> {
@@ -332,9 +336,10 @@ export class TerminalManagerImpl implements TerminalManager {
             }
         }
 
+        const puri = project instanceof Uri ? project : project.uri;
         const config = getConfiguration('python', uri);
-        const projectStat = await fsapi.stat(project.uri.fsPath);
-        const projectDir = projectStat.isDirectory() ? project.uri.fsPath : path.dirname(project.uri.fsPath);
+        const projectStat = await fsapi.stat(puri.fsPath);
+        const projectDir = projectStat.isDirectory() ? puri.fsPath : path.dirname(puri.fsPath);
 
         const uriStat = await fsapi.stat(uri.fsPath);
         const uriDir = uriStat.isDirectory() ? uri.fsPath : path.dirname(uri.fsPath);
@@ -355,19 +360,20 @@ export class TerminalManagerImpl implements TerminalManager {
 
     private projectTerminals = new Map<string, Terminal>();
     async getProjectTerminal(
-        project: PythonProject,
+        project: Uri | PythonProject,
         environment: PythonEnvironment,
         createNew: boolean = false,
     ): Promise<Terminal> {
-        const key = `${environment.envId.id}:${path.normalize(project.uri.fsPath)}`;
+        const uri = project instanceof Uri ? project : project.uri;
+        const key = `${environment.envId.id}:${path.normalize(uri.fsPath)}`;
         if (!createNew) {
             const terminal = this.projectTerminals.get(key);
             if (terminal) {
                 return terminal;
             }
         }
-        const stat = await fsapi.stat(project.uri.fsPath);
-        const cwd = stat.isDirectory() ? project.uri.fsPath : path.dirname(project.uri.fsPath);
+        const stat = await fsapi.stat(uri.fsPath);
+        const cwd = stat.isDirectory() ? uri.fsPath : path.dirname(uri.fsPath);
         const newTerminal = await this.create(environment, cwd);
         this.projectTerminals.set(key, newTerminal);
 
