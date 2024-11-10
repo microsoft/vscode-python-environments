@@ -44,7 +44,7 @@ export async function runAsTask(
         echo: true,
         panel: TaskPanelKind.Shared,
         close: false,
-        showReuseMessage: false,
+        showReuseMessage: true,
     };
 
     return executeTask(task);
