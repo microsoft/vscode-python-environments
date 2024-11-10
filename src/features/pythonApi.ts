@@ -42,7 +42,8 @@ import { pickEnvironmentManager } from '../common/pickers/managers';
 import { handlePythonPath } from '../common/utils/pythonPath';
 import { TerminalManager } from './terminal/terminalManager';
 import { runAsTask } from './execution/runAsTask';
-import { runInTerminal } from './execution/runInTerminal';
+import { runInTerminal } from './terminal/runInTerminal';
+import { runInBackground } from './execution/runInBackground';
 
 class PythonEnvironmentApiImpl implements PythonEnvironmentApi {
     private readonly _onDidChangeEnvironments = new EventEmitter<DidChangeEnvironmentsEventArgs>();
@@ -306,7 +307,7 @@ class PythonEnvironmentApiImpl implements PythonEnvironmentApi {
         return runAsTask(environment, options);
     }
     runInBackground(environment: PythonEnvironment, options: PythonBackgroundRunOptions): Promise<PythonProcess> {
-        throw new Error('Method not implemented.');
+        return runInBackground(environment, options);
     }
 }
 

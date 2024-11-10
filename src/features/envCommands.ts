@@ -22,7 +22,6 @@ import {
 } from './settings/settingHelpers';
 
 import { getAbsolutePath } from '../common/utils/fileNameUtils';
-import { runInTerminal } from './execution/runInTerminal';
 import { runAsTask } from './execution/runAsTask';
 import {
     EnvManagerTreeItem,
@@ -38,6 +37,7 @@ import { pickEnvironmentManager, pickPackageManager, pickCreator } from '../comm
 import { pickPackageOptions, getPackagesToInstall, getPackagesToUninstall } from '../common/pickers/packages';
 import { pickProject, pickProjectMany } from '../common/pickers/projects';
 import { TerminalManager } from './terminal/terminalManager';
+import { runInTerminal } from './terminal/runInTerminal';
 
 export async function refreshManagerCommand(context: unknown): Promise<void> {
     if (context instanceof EnvManagerTreeItem) {

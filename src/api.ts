@@ -771,7 +771,7 @@ export interface PythonProcess {
     /**
      * The process ID of the Python process.
      */
-    readonly pid: number;
+    readonly pid?: number;
 
     /**
      * The standard input of the Python process.
@@ -796,7 +796,7 @@ export interface PythonProcess {
     /**
      * Event that is fired when the Python process exits.
      */
-    onExit: Event<number>;
+    onExit(listener: (code: number | null, signal: NodeJS.Signals | null) => void): void;
 }
 
 export interface PythonEnvironmentManagerRegistrationApi {

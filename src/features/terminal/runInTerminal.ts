@@ -2,7 +2,7 @@ import { Terminal, TerminalShellExecution } from 'vscode';
 import { PythonEnvironment, PythonTerminalExecutionOptions } from '../../api';
 import { onDidEndTerminalShellExecution } from '../../common/window.apis';
 import { createDeferred } from '../../common/utils/deferred';
-import { quoteArgs } from './execUtils';
+import { quoteArgs } from '../execution/execUtils';
 
 export async function runInTerminal(
     environment: PythonEnvironment,
