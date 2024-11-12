@@ -2,7 +2,7 @@
 
 ## Overview
 
-Python Environments and Package Manager is a VS Code extension that helps users manage their Python environments and package management with their preferred environment manager using extensible APIs. This extension provides unique support to specify environments for specific files, whole Python projects, or multiroot/monorepos scenarios.
+Python Environments and Package Manager is a VS Code extension that helps users manage their Python environments and packages with their preferred environment manager using extensible APIs. This extension provides unique support to specify environments for specific files, whole Python projects, or multiroot/monorepos scenarios.
 
 > Note: This extension is in preview and the APIs and features are subject to change as the project evolves.
 
@@ -30,29 +30,23 @@ The extension by uses `pip` as the default package manager. You can change this 
 
 |Id| name |Description|
 |---|----|--|
-|ms-python.python:pip| `pip` |The default package manager. It is a built-in package manager provided by the Python standard library.|
-|ms-python.python:conda| `conda` |The conda package manager. It is a popular package manager for Python.|
+|ms-python.python:pip| `pip` | Pip acts as the default package manager and is built-in to the Python language provided by the Python standard library.|
+|ms-python.python:conda| `conda` |The conda package manager. |
 
 ## Settings Reference
 
 The extension recognizes and consumes a variety of settings from the Python extension and third-party providers to allow more control over your desired experience. 
 
-| Setting (python.environments) |	Default |	Description |
+| Setting (python-envs.) |	Default |	Description |
 | ----- | ----- | -----| 
-defaultInterpreterPath | `"python"` |	Path to the default Python interpreter to be used by the Python extension on the first time it loads for a workspace, or the path to a folder containing the Python interpreter. Can use variables like ${workspaceFolder} and ${workspaceFolder}/.venv. Using a path to a folder allows anyone working with a project to create an environment in the .venv folder as appropriate to their operating system, rather than having to specify an exact platform-dependent path. The settings.json file can then be included in a source code repository. Note: Changes to this setting made after an interpreter has been selected for a workspace will not be applied or considered by the Python extension. The Python extension doesn't automatically add or change this setting. |
-
-
-### Third party settings 
-| Setting (python.environments) |	Default |	Description |
-| ----- | ----- | -----| 
-| condaPath |	`"conda"`	| Path to the conda executable. |
-| poetryPath |	`"poetry"`	| Specifies the location of the Poetry dependency manager executable, if installed. The default value "poetry" assumes the executable is in the current path. The Python extension uses this setting to install packages when Poetry is available and there's a poetry.lock file in the workspace folder. |
-| pipenvPath |	`"pipenv"` |	Path to the pipenv executable to use for activation. |
+| defaultEnvManager | `"ms-python.python:venv"` |	The default environment manager used for creating and managing environments. |
+| defaultPackageManager | `"ms-python.python:pip"` |	The default package manager to use for installing and managing packages. This is often dictated by the default environment manager but can be customized. |
+| pythonProjects | `[]` |	A list of Python workspaces, specified by the path, in which you can set particular environment and package managers. You can set information for a workspace as `[{"path":  "/path/to/workspace", "envManager": "ms-python.python:venv", "packageManager": "ms-python.python:pip"]}`. |
 
 
 ## API Reference
 
-See the `src\api.ts` for the full list of APIs.
+See `src\api.ts` for the full list of APIs.
 
 ## Contributing
 
@@ -81,18 +75,11 @@ contact [opencode@microsoft.com](mailto:opencode@microsoft.com) with any additio
 
 ## Data and telemetry
 
-The Microsoft Python Extension for Visual Studio Code collects usage
-data and sends it to Microsoft to help improve our products and
-services. Read our
-[privacy statement](https://privacy.microsoft.com/privacystatement) to
-learn more. This extension respects the `telemetry.enableTelemetry`
-setting which you can learn more about at
-https://code.visualstudio.com/docs/supporting/faq#_how-to-disable-telemetry-reporting.
+The Microsoft Python Extension for Visual Studio Code collects usage data and sends it to Microsoft to help improve our products and services. Read our [privacy statement](https://privacy.microsoft.com/privacystatement) to learn more. This extension respects the `telemetry.enableTelemetry` setting which you can learn more about at https://code.visualstudio.com/docs/supporting/faq#_how-to-disable-telemetry-reporting.
 
 ## Trademarks
 
-This project may contain trademarks or logos for projects, products, or services. Authorized use of Microsoft 
-trademarks or logos is subject to and must follow 
+This project may contain trademarks or logos for projects, products, or services. Authorized use of Microsoft trademarks or logos is subject to and must follow 
 [Microsoft's Trademark & Brand Guidelines](https://www.microsoft.com/en-us/legal/intellectualproperty/trademarks/usage/general).
 Use of Microsoft trademarks or logos in modified versions of this project must not cause confusion or imply Microsoft sponsorship.
 Any use of third-party trademarks or logos are subject to those third-party's policies.
