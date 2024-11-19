@@ -2,17 +2,17 @@
 
 ## Overview
 
-Python Environments and Package Manager is a VS Code extension that helps users manage their Python environments and packages with their preferred environment manager using extensible APIs. This extension provides unique support to specify environments for specific files, whole Python projects, or multiroot/monorepos scenarios.
+The Python Environments and Package Manager extension for VS Code helps users manage Python environments and packages using their preferred environment manager backed by its extensible APIs. This extension provides unique support to specify environments for specific files, whole Python projects, or multiroot/monorepos scenarios.
 
-> Note: This extension is in preview and the APIs and features are subject to change as the project evolves.
+> Note: This extension is in preview and its APIs and features are subject to change as the project continues to evolves.
 
 ## Features
 
 ### Environment Management
 
-This extension provides an environment view in the Activity Bar for the user to manage their Python environments. The user can create, delete, and switch between environments as desired. The user can also install and uninstall packages in the current environment. This extension provides APIs for extension developers to contribute environment managers.
+This extension provides an environments view, stored in the VS Code Activity Bar, for users to manage their Python environments. Here, users can create, delete, and switch between environments, as well as install and uninstall packages within the current environment. It also provides APIs for extension developers to contribute their own environment managers.
 
-The default environment manager is the environment manager that the extension uses automatically, unless you specify otherwise. It determines how environments are created, managed, and where the packages are installed. The extension by uses `venv` by default, however you can change this by setting the `python-envs.defaultEnvManager` setting to a different environment manager. The following are environment managers that are supported out of the box:
+By default, the extension uses the `venv` environment manager. This default manager determines how environments are created, managed, and where packages are installed. However, users can change the default by setting the `python-envs.defaultEnvManager` to a different environment manager. The following environment managers are supported out of the box:
 
 |Id| name |Description|
 |---|----|--|
@@ -26,7 +26,7 @@ The environment manager is responsible for specifying which package manager will
 
 This extension provides a package view for the user to manage, install and uninstall, their Python packages in any partiular environment. This extension provides APIs for extension developers to contribute package managers.
 
-The extension by uses `pip` as the default package manager. You can change this by setting the `python-envs.defaultPackageManager` setting to a different package manager. Following are the out of the box package managers:
+The extension by uses `pip` as the default package manager. You can change this by setting the `python-envs.defaultPackageManager` setting to a different package manager. The following are package managers supported out of the box:
 
 |Id| name |Description|
 |---|----|--|
@@ -34,8 +34,6 @@ The extension by uses `pip` as the default package manager. You can change this 
 |ms-python.python:conda| `conda` |The conda package manager. |
 
 ## Settings Reference
-
-The extension recognizes and consumes a variety of settings from the Python extension and third-party providers to allow more control over your desired experience. 
 
 | Setting (python-envs.) |	Default |	Description |
 | ----- | ----- | -----| 
