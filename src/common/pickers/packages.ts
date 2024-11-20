@@ -172,7 +172,7 @@ function getGroupedItems(items: Installable[]): PackageQuickPickItem[] {
 
 async function getInstallables(packageManager: InternalPackageManager, environment: PythonEnvironment) {
     const installable = await packageManager?.getInstallable(environment);
-    if (installable && installable.length > 0) {
+    if (installable && installable.length === 0) {
         traceWarn(`No installable packages found for ${packageManager.id}: ${environment.environmentPath.fsPath}`);
     }
     return installable;
