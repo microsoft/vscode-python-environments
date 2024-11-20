@@ -170,25 +170,30 @@ function getGroupedItems(items: Installable[]): PackageQuickPickItem[] {
     return result;
 }
 
+async function getInstallables(packageManager: InternalPackageManager, environment: PythonEnvironment) {
+    const installable = await packageManager?.getInstallable(environment);
+    if (installable && installable.length > 0) {
+        traceWarn(`No installable packages found for ${packageManager.id}: ${environment.environmentPath.fsPath}`);
+    }
+    return installable;
+}
+
 async function getWorkspacePackages(
-    packageManager: InternalPackageManager,
-    environment: PythonEnvironment,
+    installable: Installable[] | undefined,
     preSelected?: PackageQuickPickItem[] | undefined,
 ): Promise<string[] | undefined> {
     const items: PackageQuickPickItem[] = [];
 
-    let installable = await packageManager?.getInstallable(environment);
     if (installable && installable.length > 0) {
         items.push(...getGroupedItems(installable));
     } else {
-        traceWarn(`No installable packages found for ${packageManager.id}: ${environment.environmentPath.fsPath}`);
-        installable = await getCommonPackages();
+        const common = await getCommonPackages();
         items.push(
             {
                 label: PackageManagement.commonPackages,
                 kind: QuickPickItemKind.Separator,
             },
-            ...installable.map(installableToQuickPickItem),
+            ...common.map(installableToQuickPickItem),
         );
     }
 
@@ -240,7 +245,7 @@ async function getWorkspacePackages(
                 return result;
             } catch (ex) {
                 if (ex === QuickInputButtons.Back) {
-                    return getWorkspacePackages(packageManager, environment, selected);
+                    return getWorkspacePackages(installable, selected);
                 }
                 return undefined;
             }
@@ -250,7 +255,7 @@ async function getWorkspacePackages(
     }
 }
 
-export async function getCommonPackagesToInstall(
+async function getCommonPackagesToInstall(
     preSelected?: PackageQuickPickItem[] | undefined,
 ): Promise<string[] | undefined> {
     const common = await getCommonPackages();
@@ -315,7 +320,7 @@ export async function getCommonPackagesToInstall(
     }
 }
 
-export async function getPackagesToInstall(
+export async function getPackagesToInstallFromPackageManager(
     packageManager: InternalPackageManager,
     environment: PythonEnvironment,
 ): Promise<string[] | undefined> {
@@ -325,11 +330,12 @@ export async function getPackagesToInstall(
 
     if (packageType === PackageManagement.workspaceDependencies) {
         try {
-            const result = await getWorkspacePackages(packageManager, environment);
+            const installable = await getInstallables(packageManager, environment);
+            const result = await getWorkspacePackages(installable);
             return result;
         } catch (ex) {
             if (packageManager.supportsGetInstallable && ex === QuickInputButtons.Back) {
-                return getPackagesToInstall(packageManager, environment);
+                return getPackagesToInstallFromPackageManager(packageManager, environment);
             }
             if (ex === QuickInputButtons.Back) {
                 throw ex;
@@ -344,7 +350,7 @@ export async function getPackagesToInstall(
             return result;
         } catch (ex) {
             if (packageManager.supportsGetInstallable && ex === QuickInputButtons.Back) {
-                return getPackagesToInstall(packageManager, environment);
+                return getPackagesToInstallFromPackageManager(packageManager, environment);
             }
             if (ex === QuickInputButtons.Back) {
                 throw ex;
@@ -354,6 +360,13 @@ export async function getPackagesToInstall(
     }
 
     return undefined;
+}
+
+export async function getPackagesToInstallFromInstallable(installable: Installable[]): Promise<string[] | undefined> {
+    if (installable.length === 0) {
+        return undefined;
+    }
+    return getWorkspacePackages(installable);
 }
 
 export async function getPackagesToUninstall(packages: Package[]): Promise<Package[] | undefined> {

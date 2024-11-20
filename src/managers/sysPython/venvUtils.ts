@@ -34,6 +34,7 @@ import {
     showOpenDialog,
 } from '../../common/window.apis';
 import { showErrorMessage } from '../../common/errors/utils';
+import { getPackagesToInstallFromInstallable } from '../../common/pickers/packages';
 
 export const VENV_WORKSPACE_KEY = `${ENVS_EXTENSION_ID}:venv:WORKSPACE_SELECTED`;
 export const VENV_GLOBAL_KEY = `${ENVS_EXTENSION_ID}:venv:GLOBAL_SELECTED`;
@@ -277,6 +278,18 @@ export async function createPythonVenv(
     const pythonPath =
         os.platform() === 'win32' ? path.join(envPath, 'Scripts', 'python.exe') : path.join(envPath, 'bin', 'python');
 
+    const project = api.getPythonProject(venvRoot);
+    const installable = await getProjectInstallable(api, project ? [project] : undefined);
+
+    let packages: string[] = [];
+    if (installable && installable.length > 0) {
+        const packagesToInstall = await getPackagesToInstallFromInstallable(installable);
+        if (!packagesToInstall) {
+            return;
+        }
+        packages = packagesToInstall;
+    }
+
     return await withProgress(
         {
             location: ProgressLocation.Notification,
@@ -330,6 +343,10 @@ export async function createPythonVenv(
                         manager,
                     );
                     log.info(`Created venv environment: ${name}`);
+
+                    if (packages?.length > 0) {
+                        await api.installPackages(env, packages, { upgrade: false });
+                    }
                     return env;
                 } else {
                     throw new Error('Could not resolve the virtual environment');
@@ -430,7 +447,7 @@ export async function getProjectInstallable(
             progress.report({ message: 'Searching for Requirements and TOML files' });
             const results: Uri[] = (
                 await Promise.all([
-                    findFiles('**/requirements*.txt', exclude, undefined, token),
+                    findFiles('**/*requirements*.txt', exclude, undefined, token),
                     findFiles('**/requirements/*.txt', exclude, undefined, token),
                     findFiles('**/pyproject.toml', exclude, undefined, token),
                 ])

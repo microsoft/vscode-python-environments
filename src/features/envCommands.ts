@@ -34,7 +34,11 @@ import {
 import { Common } from '../common/localize';
 import { pickEnvironment } from '../common/pickers/environments';
 import { pickEnvironmentManager, pickPackageManager, pickCreator } from '../common/pickers/managers';
-import { pickPackageOptions, getPackagesToInstall, getPackagesToUninstall } from '../common/pickers/packages';
+import {
+    pickPackageOptions,
+    getPackagesToInstallFromPackageManager,
+    getPackagesToUninstall,
+} from '../common/pickers/packages';
 import { pickProject, pickProjectMany } from '../common/pickers/projects';
 import { TerminalManager } from './terminal/terminalManager';
 import { runInTerminal } from './terminal/runInTerminal';
@@ -138,7 +142,7 @@ export async function handlePackagesCommand(
     if (action === Common.install) {
         if (!packages || packages.length === 0) {
             try {
-                packages = await getPackagesToInstall(packageManager, environment);
+                packages = await getPackagesToInstallFromPackageManager(packageManager, environment);
             } catch (ex: any) {
                 if (ex === QuickInputButtons.Back) {
                     return handlePackagesCommand(packageManager, environment, packages);

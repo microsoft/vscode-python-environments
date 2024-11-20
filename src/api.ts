@@ -968,7 +968,7 @@ export interface PythonPackageManagementApi {
 export interface PythonPackageManagerApi
     extends PythonPackageManagerRegistrationApi,
         PythonPackageGetterApi,
-        PythonEnvironmentManagerApi,
+        PythonPackageManagementApi,
         PythonPackageItemApi {}
 
 export interface PythonProjectCreationApi {
