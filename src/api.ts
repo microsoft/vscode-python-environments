@@ -954,7 +954,7 @@ export interface PythonPackageManagementApi {
      * @param packages The packages to install.
      * @param options Options for installing packages.
      */
-    installPackages(environment: PythonEnvironment, packages: string[], options: PackageInstallOptions): Promise<void>;
+    installPackages(environment: PythonEnvironment, packages: string[], options?: PackageInstallOptions): Promise<void>;
 
     /**
      * Uninstall packages from a Python Environment.
@@ -1031,7 +1031,7 @@ export interface PythonTerminalCreateApi {
     createTerminal(
         environment: PythonEnvironment,
         cwd: string | Uri,
-        envVars?: { [key: string]: string },
+        envVars?: { [key: string]: string | undefined },
     ): Promise<Terminal>;
 }
 
@@ -1082,7 +1082,7 @@ export interface PythonTaskRunApi {
 export interface PythonBackgroundRunOptions {
     args: string[];
     cwd?: string;
-    env?: { [key: string]: string };
+    env?: { [key: string]: string | undefined };
 }
 export interface PythonBackgroundRunApi {
     runInBackground(environment: PythonEnvironment, options: PythonBackgroundRunOptions): Promise<PythonProcess>;
