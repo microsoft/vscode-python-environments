@@ -10,6 +10,16 @@
     "categories": [
         "Other"
     ],
+    "capabilities": {
+        "untrustedWorkspaces": {
+            "supported": false,
+            "description": "This extension doesn't support untrusted workspaces."
+        },
+        "virtualWorkspaces": {
+            "supported": false,
+            "description": "This extension doesn't support virtual workspaces."
+        }
+    },
     "activationEvents": [
         "onLanguage:python"
     ],
@@ -21,9 +31,6 @@
     "bugs": {
         "url": "https://github.com/microsoft/vscode-python-environments/issues"
     },
-    "extensionDependencies": [
-        "ms-python.python"
-    ],
     "main": "./dist/extension.js",
     "icon": "icon.png",
     "contributes": {
