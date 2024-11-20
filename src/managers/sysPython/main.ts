@@ -7,6 +7,8 @@ import { getPythonApi } from '../../features/pythonApi';
 import { NativePythonFinder } from '../common/nativePythonFinder';
 import { UvProjectCreator } from './uvProjectCreator';
 import { isUvInstalled } from './utils';
+import { createFileSystemWatcher, onDidDeleteFiles } from '../../common/workspace.apis';
+import { createSimpleDebounce } from '../../common/utils/debounce';
 
 export async function registerSystemPythonFeatures(
     nativeFinder: NativePythonFinder,
@@ -22,6 +24,23 @@ export async function registerSystemPythonFeatures(
         api.registerPackageManager(pkgManager),
         api.registerEnvironmentManager(envManager),
         api.registerEnvironmentManager(venvManager),
+    );
+
+    const venvDebouncedRefresh = createSimpleDebounce(500, () => {
+        venvManager.refresh(undefined);
+    });
+    const watcher = createFileSystemWatcher('{**/pyenv.cfg,**/bin/python,**/python.exe}', false, true, false);
+    disposables.push(
+        watcher,
+        watcher.onDidCreate(() => {
+            venvDebouncedRefresh.trigger();
+        }),
+        watcher.onDidDelete(() => {
+            venvDebouncedRefresh.trigger();
+        }),
+        onDidDeleteFiles((e) => {
+            venvDebouncedRefresh.trigger();
+        }),
     );
 
     setImmediate(async () => {

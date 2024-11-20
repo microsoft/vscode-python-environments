@@ -3,6 +3,8 @@ import {
     ConfigurationChangeEvent,
     ConfigurationScope,
     Disposable,
+    FileDeleteEvent,
+    FileSystemWatcher,
     GlobPattern,
     Uri,
     workspace,
@@ -38,4 +40,21 @@ export function findFiles(
     token?: CancellationToken,
 ): Thenable<Uri[]> {
     return workspace.findFiles(include, exclude, maxResults, token);
+}
+
+export function createFileSystemWatcher(
+    globPattern: GlobPattern,
+    ignoreCreateEvents?: boolean,
+    ignoreChangeEvents?: boolean,
+    ignoreDeleteEvents?: boolean,
+): FileSystemWatcher {
+    return workspace.createFileSystemWatcher(globPattern, ignoreCreateEvents, ignoreChangeEvents, ignoreDeleteEvents);
+}
+
+export function onDidDeleteFiles(
+    listener: (e: FileDeleteEvent) => any,
+    thisArgs?: any,
+    disposables?: Disposable[],
+): Disposable {
+    return workspace.onDidDeleteFiles(listener, thisArgs, disposables);
 }

@@ -154,8 +154,8 @@ export class SysPythonManager implements EnvironmentManager {
 
     async resolve(context: ResolveEnvironmentContext): Promise<PythonEnvironment | undefined> {
         if (context instanceof Uri) {
-            // NOTE: `environmentPath` for envs in `this.collection` for venv always points to the python
-            // executable in the venv. This is set when we create the PythonEnvironment object.
+            // NOTE: `environmentPath` for envs in `this.collection` for system envs always points to the python
+            // executable. This is set when we create the PythonEnvironment object.
             const found = this.findEnvironmentByPath(context.fsPath);
             if (found) {
                 // If it is in the collection, then it is a venv, and it should already be fully resolved.
@@ -247,7 +247,7 @@ export class SysPythonManager implements EnvironmentManager {
             const env = await getSystemEnvForWorkspace(p);
 
             if (env) {
-                const found = this.findEnvironmentByPath(p);
+                const found = this.findEnvironmentByPath(env);
 
                 if (found) {
                     this.fsPathToEnv.set(p, found);
