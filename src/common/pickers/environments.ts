@@ -165,7 +165,8 @@ export async function pickEnvironment(
                 return {
                     label: e.displayName ?? e.name,
                     description: e.description,
-                    e: { selected: e, manager: manager },
+                    result: e,
+                    manager: manager,
                     iconPath: getIconPath(e.iconPath),
                 };
             }),

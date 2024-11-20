@@ -196,7 +196,7 @@ export async function setEnvironmentCommand(
         return;
     } else if (context instanceof ProjectItem) {
         const view = context as ProjectItem;
-        return setEnvironmentCommand(view.project.uri, em, wm);
+        return setEnvironmentCommand([view.project.uri], em, wm);
     } else if (context instanceof Uri) {
         return setEnvironmentCommand([context], em, wm);
     } else if (context === undefined) {
@@ -240,8 +240,8 @@ export async function setEnvironmentCommand(
             const settings: EditAllManagerSettings[] = [];
             uris.forEach((uri) => {
                 const m = em.getEnvironmentManager(uri);
+                promises.push(manager.set(uri, selected));
                 if (manager.id !== m?.id) {
-                    promises.push(manager.set(uri, selected));
                     settings.push({
                         project: wm.get(uri),
                         envManager: manager.id,
