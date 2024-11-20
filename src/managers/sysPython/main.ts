@@ -38,7 +38,7 @@ export async function registerSystemPythonFeatures(
         watcher.onDidDelete(() => {
             venvDebouncedRefresh.trigger();
         }),
-        onDidDeleteFiles((e) => {
+        onDidDeleteFiles(() => {
             venvDebouncedRefresh.trigger();
         }),
     );
