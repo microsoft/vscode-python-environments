@@ -318,7 +318,7 @@ export async function createPythonVenv(
                             version: resolved.version,
                             description: pythonPath,
                             environmentPath: Uri.file(pythonPath),
-                            iconPath: Uri.file(path.join(EXTENSION_ROOT_DIR, 'files', 'logo.svg')),
+                            iconPath: Uri.file(path.join(EXTENSION_ROOT_DIR, 'files', '__icon__.py')),
                             sysPrefix: resolved.prefix,
                             execInfo: {
                                 run: {
