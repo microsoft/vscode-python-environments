@@ -40,6 +40,8 @@ export async function handlePythonPath(
     reporter?: Progress<{ message?: string; increment?: number }>,
     token?: CancellationToken,
 ): Promise<PythonEnvironment | undefined> {
+    // Use the managers user has set for the project first. Likely, these
+    // managers are the ones that should be used.
     for (const manager of sortManagersByPriority(projectEnvManagers)) {
         if (token?.isCancellationRequested) {
             return;
@@ -54,6 +56,8 @@ export async function handlePythonPath(
         traceVerbose(`Manager ${manager.displayName} (${manager.id}) cannot handle ${interpreterUri.fsPath}`);
     }
 
+    // If the project managers cannot handle the interpreter, then try all the managers
+    // that user has installed. Excluding anything that is already checked.
     const checkedIds = projectEnvManagers.map((m) => m.id);
     const filtered = managers.filter((m) => !checkedIds.includes(m.id));
 
@@ -68,10 +72,6 @@ export async function handlePythonPath(
             traceInfo(`Using ${manager.displayName} (${manager.id}) to handle ${interpreterUri.fsPath}`);
             return env;
         }
-    }
-
-    if (token?.isCancellationRequested) {
-        return;
     }
 
     traceError(`Unable to handle ${interpreterUri.fsPath}`);

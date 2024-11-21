@@ -182,6 +182,10 @@ export class SysPythonManager implements EnvironmentManager {
         if (resolved) {
             // This is just like finding a new environment or creating a new one.
             // Add it to collection, and trigger the added event.
+
+            // For all other env types we need to ensure that the environment is of the type managed by the manager.
+            // But System is a exception, this is the last resort for resolving. So we don't need to check.
+            // We will just add it and treat it as a non-activatable environment.
             this.collection.push(resolved);
             this._onDidChangeEnvironments.fire([{ environment: resolved, kind: EnvironmentChangeKind.add }]);
         }
@@ -256,7 +260,7 @@ export class SysPythonManager implements EnvironmentManager {
                     const resolved = await resolveSystemPythonEnvironmentPath(env, this.nativeFinder, this.api, this);
 
                     if (resolved) {
-                        // If resolved add it to the collection
+                        // If resolved add it to the collection.
                         this.fsPathToEnv.set(p, resolved);
                         this.collection.push(resolved);
                     } else {

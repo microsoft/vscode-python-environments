@@ -29,7 +29,7 @@ import {
 } from './venvUtils';
 import * as path from 'path';
 import { NativePythonFinder } from '../common/nativePythonFinder';
-import { EXTENSION_ROOT_DIR } from '../../common/constants';
+import { ENVS_EXTENSION_ID, EXTENSION_ROOT_DIR } from '../../common/constants';
 import { createDeferred, Deferred } from '../../common/utils/deferred';
 import { getLatest, sortEnvironments } from '../common/utils';
 
@@ -262,12 +262,18 @@ export class VenvManager implements EnvironmentManager {
             this.baseManager,
         );
         if (resolved) {
-            // This is just like finding a new environment or creating a new one.
-            // Add it to collection, and trigger the added event.
-            this.addEnvironment(resolved, true);
+            if (resolved.envId.managerId === `${ENVS_EXTENSION_ID}:venv`) {
+                // This is just like finding a new environment or creating a new one.
+                // Add it to collection, and trigger the added event.
+                this.addEnvironment(resolved, true);
+
+                // We should only return the resolved env if it is a venv.
+                // Fall through an return undefined if it is not a venv
+                return resolved;
+            }
         }
 
-        return resolved;
+        return undefined;
     }
 
     private addEnvironment(environment: PythonEnvironment, raiseEvent?: boolean): void {
