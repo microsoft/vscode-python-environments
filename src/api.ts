@@ -240,7 +240,7 @@ export type DidChangeEnvironmentEventArgs = {
     /**
      * The URI of the environment that changed.
      */
-    readonly uri: Uri;
+    readonly uri: Uri | undefined;
 
     /**
      * The old Python environment before the change.

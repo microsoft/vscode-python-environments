@@ -44,7 +44,7 @@ export class WorkspaceView implements TreeDataProvider<ProjectTreeItem> {
                 this.updateProject();
             }),
             this.envManagers.onDidChangeEnvironment((e) => {
-                this.updateProject(this.projectManager.get(e.uri));
+                this.updateProject(e.uri ? this.projectManager.get(e.uri) : undefined);
             }),
             this.envManagers.onDidChangeEnvironments(() => {
                 this.updateProject();
