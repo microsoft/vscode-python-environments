@@ -100,8 +100,7 @@ export class VenvManager implements EnvironmentManager {
         const globals = await this.baseManager.getEnvironments('global');
         const environment = await createPythonVenv(this.nativeFinder, this.api, this.log, this, globals, venvRoot);
         if (environment) {
-            this.collection.push(environment);
-            this._onDidChangeEnvironments.fire([{ environment, kind: EnvironmentChangeKind.add }]);
+            this.addEnvironment(environment, true);
         }
         return environment;
     }
@@ -265,11 +264,33 @@ export class VenvManager implements EnvironmentManager {
         if (resolved) {
             // This is just like finding a new environment or creating a new one.
             // Add it to collection, and trigger the added event.
-            this.collection.push(resolved);
-            this._onDidChangeEnvironments.fire([{ environment: resolved, kind: EnvironmentChangeKind.add }]);
+            this.addEnvironment(resolved, true);
         }
 
         return resolved;
+    }
+
+    private addEnvironment(environment: PythonEnvironment, raiseEvent?: boolean): void {
+        if (this.collection.find((e) => e.envId.id === environment.envId.id)) {
+            return;
+        }
+
+        const oldEnv = this.findEnvironmentByPath(environment.environmentPath.fsPath);
+        if (oldEnv) {
+            this.collection = this.collection.filter((e) => e.envId.id !== oldEnv.envId.id);
+            this.collection.push(environment);
+            if (raiseEvent) {
+                this._onDidChangeEnvironments.fire([
+                    { environment: oldEnv, kind: EnvironmentChangeKind.remove },
+                    { environment, kind: EnvironmentChangeKind.add },
+                ]);
+            }
+        } else {
+            this.collection.push(environment);
+            if (raiseEvent) {
+                this._onDidChangeEnvironments.fire([{ environment, kind: EnvironmentChangeKind.add }]);
+            }
+        }
     }
 
     private async loadEnvMap() {
@@ -295,7 +316,7 @@ export class VenvManager implements EnvironmentManager {
 
                 // If the environment is resolved, add it to the collection
                 if (this.globalEnv) {
-                    this.collection.push(this.globalEnv);
+                    this.addEnvironment(this.globalEnv, false);
                 }
             }
         }
@@ -307,6 +328,7 @@ export class VenvManager implements EnvironmentManager {
 
         const sorted = sortEnvironments(this.collection);
         const paths = this.api.getPythonProjects().map((p) => path.normalize(p.uri.fsPath));
+        const events: (() => void)[] = [];
         for (const p of paths) {
             const env = await getVenvForWorkspace(p);
 
@@ -317,7 +339,9 @@ export class VenvManager implements EnvironmentManager {
                 if (found) {
                     this.fsPathToEnv.set(p, found);
                     if (pw && previous?.envId.id !== found.envId.id) {
-                        this._onDidChangeEnvironment.fire({ uri: pw.uri, old: undefined, new: found });
+                        events.push(() =>
+                            this._onDidChangeEnvironment.fire({ uri: pw.uri, old: undefined, new: found }),
+                        );
                     }
                 } else {
                     const resolved = await resolveVenvPythonEnvironmentPath(
@@ -330,9 +354,11 @@ export class VenvManager implements EnvironmentManager {
                     if (resolved) {
                         // If resolved add it to the collection
                         this.fsPathToEnv.set(p, resolved);
-                        this.collection.push(resolved);
+                        this.addEnvironment(resolved, false);
                         if (pw && previous?.envId.id !== resolved.envId.id) {
-                            this._onDidChangeEnvironment.fire({ uri: pw.uri, old: undefined, new: resolved });
+                            events.push(() =>
+                                this._onDidChangeEnvironment.fire({ uri: pw.uri, old: undefined, new: resolved }),
+                            );
                         }
                     } else {
                         this.log.error(`Failed to resolve python environment: ${env}`);
@@ -355,6 +381,8 @@ export class VenvManager implements EnvironmentManager {
                 }
             }
         }
+
+        events.forEach((e) => e());
     }
 
     private findEnvironmentByPath(fsPath: string, collection?: PythonEnvironment[]): PythonEnvironment | undefined {
