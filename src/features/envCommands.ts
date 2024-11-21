@@ -203,7 +203,11 @@ export async function setEnvironmentCommand(
         const project = await pickProjectMany(wm.getProjects());
         if (project && project.length > 0) {
             try {
-                const result = setEnvironmentCommand(project, em, wm);
+                const result = setEnvironmentCommand(
+                    project.map((p) => p.uri),
+                    em,
+                    wm,
+                );
                 return result;
             } catch (ex) {
                 if (ex === QuickInputButtons.Back) {
