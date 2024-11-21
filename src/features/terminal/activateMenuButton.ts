@@ -1,10 +1,28 @@
-import { Terminal } from 'vscode';
+import { Terminal, TerminalOptions, Uri } from 'vscode';
 import { activeTerminal } from '../../common/window.apis';
 import { TerminalActivation, TerminalEnvironment } from './terminalManager';
 import { EnvironmentManagers, PythonProjectManager } from '../../internal.api';
 import { PythonEnvironment } from '../../api';
 import { isActivatableEnvironment } from '../common/activation';
 import { executeCommand } from '../../common/command.api';
+import { getWorkspaceFolders } from '../../common/workspace.apis';
+
+async function getDistinctProjectEnvs(pm: PythonProjectManager, em: EnvironmentManagers): Promise<PythonEnvironment[]> {
+    const projects = pm.getProjects();
+    const envs: PythonEnvironment[] = [];
+    const projectEnvs = await Promise.all(
+        projects.map(async (p) => {
+            const manager = em.getEnvironmentManager(p.uri);
+            return manager?.get(p.uri);
+        }),
+    );
+    projectEnvs.forEach((e) => {
+        if (e && !envs.find((x) => x.envId.id === e.envId.id)) {
+            envs.push(e);
+        }
+    });
+    return envs;
+}
 
 export async function getEnvironmentForTerminal(
     tm: TerminalEnvironment,
@@ -13,15 +31,43 @@ export async function getEnvironmentForTerminal(
     t: Terminal,
 ): Promise<PythonEnvironment | undefined> {
     let env = await tm.getEnvironment(t);
+    if (env) {
+        return env;
+    }
 
-    if (!env) {
-        const projects = pm.getProjects();
-        if (projects.length === 0) {
-            const manager = em.getEnvironmentManager(undefined);
-            env = await manager?.get(undefined);
-        } else if (projects.length === 1) {
-            const manager = em.getEnvironmentManager(projects[0].uri);
-            env = await manager?.get(projects[0].uri);
+    const projects = pm.getProjects();
+    if (projects.length === 0) {
+        const manager = em.getEnvironmentManager(undefined);
+        env = await manager?.get(undefined);
+    } else if (projects.length === 1) {
+        const manager = em.getEnvironmentManager(projects[0].uri);
+        env = await manager?.get(projects[0].uri);
+    } else {
+        const envs = await getDistinctProjectEnvs(pm, em);
+        if (envs.length === 1) {
+            // If we have only one distinct environment, then use that.
+            env = envs[0];
+        } else {
+            // If we have multiple distinct environments, then we can't pick one
+            // So skip selecting so we can try heuristic approach
+        }
+    }
+    if (env) {
+        return env;
+    }
+
+    // This is a heuristic approach to attempt to find the environment for this terminal.
+    // This is not guaranteed to work, but is better than nothing.
+    let tempCwd = (t.creationOptions as TerminalOptions)?.cwd;
+    let cwd = typeof tempCwd === 'string' ? Uri.file(tempCwd) : tempCwd;
+    if (cwd) {
+        const manager = em.getEnvironmentManager(cwd);
+        env = await manager?.get(cwd);
+    } else {
+        const workspaces = getWorkspaceFolders() ?? [];
+        if (workspaces.length === 1) {
+            const manager = em.getEnvironmentManager(workspaces[0].uri);
+            env = await manager?.get(workspaces[0].uri);
         }
     }
 
