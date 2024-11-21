@@ -22,6 +22,7 @@ import {
     ProjectPackage,
     ProjectPackageRootInfoTreeItem,
 } from './treeViewItems';
+import { onDidChangeConfiguration } from '../../common/workspace.apis';
 
 export class WorkspaceView implements TreeDataProvider<ProjectTreeItem> {
     private treeView: TreeView<ProjectTreeItem>;
@@ -50,6 +51,15 @@ export class WorkspaceView implements TreeDataProvider<ProjectTreeItem> {
             }),
             this.envManagers.onDidChangePackages((e) => {
                 this.updatePackagesForEnvironment(e.environment);
+            }),
+            onDidChangeConfiguration(async (e) => {
+                if (
+                    e.affectsConfiguration('python-envs.defaultEnvManager') ||
+                    e.affectsConfiguration('python-envs.pythonProjects') ||
+                    e.affectsConfiguration('python-envs.defaultPackageManager')
+                ) {
+                    this.updateProject();
+                }
             }),
         );
     }
@@ -131,11 +141,43 @@ export class WorkspaceView implements TreeDataProvider<ProjectTreeItem> {
             const projectItem = element as ProjectItem;
             const envView = this._environmentViews.get(projectItem.id);
 
-            const manager = this.envManagers.getEnvironmentManager(projectItem.project.uri);
-            const environment = await manager?.get(projectItem.project.uri);
-            if (!manager || !environment) {
+            if (this.envManagers.managers.length === 0) {
                 this._environmentViews.delete(projectItem.id);
-                return [new NoProjectEnvironment(projectItem.project, projectItem)];
+                return [
+                    new NoProjectEnvironment(
+                        projectItem.project,
+                        projectItem,
+                        'Waiting for environment managers to load',
+                        undefined,
+                        undefined,
+                        '$(loading~spin)',
+                    ),
+                ];
+            }
+
+            const manager = this.envManagers.getEnvironmentManager(projectItem.project.uri);
+            if (!manager) {
+                this._environmentViews.delete(projectItem.id);
+                return [
+                    new NoProjectEnvironment(
+                        projectItem.project,
+                        projectItem,
+                        'Environment manager not found',
+                        'Install an environment manager to get started. If you have installed then it might be loading.',
+                    ),
+                ];
+            }
+
+            const environment = await manager?.get(projectItem.project.uri);
+            if (!environment) {
+                this._environmentViews.delete(projectItem.id);
+                return [
+                    new NoProjectEnvironment(
+                        projectItem.project,
+                        projectItem,
+                        `No environment provided by ${manager.displayName}`,
+                    ),
+                ];
             }
 
             const envItemId = ProjectEnvironment.getId(projectItem, environment);

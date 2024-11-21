@@ -259,13 +259,14 @@ export class NoProjectEnvironment implements ProjectTreeItem {
     constructor(
         public readonly project: PythonProject,
         public readonly parent: ProjectItem,
+        private readonly label: string,
         private readonly description?: string,
         private readonly tooltip?: string | MarkdownString,
         private readonly iconPath?: string | IconPath,
     ) {
         const randomStr1 = Math.random().toString(36).substring(2);
         this.id = `${this.parent.id}>>>none>>>${randomStr1}`;
-        const item = new TreeItem('Please select an environment', TreeItemCollapsibleState.None);
+        const item = new TreeItem(this.label, TreeItemCollapsibleState.None);
         item.contextValue = 'no-environment';
         item.description = this.description;
         item.tooltip = this.tooltip;
