@@ -201,6 +201,7 @@ class PythonEnvironmentApiImpl implements PythonEnvironmentApi {
             this._previousEnvironments.set(scope?.toString() ?? 'global', newEnv);
             this._onDidChangeEnvironment.fire({ uri: scope, new: newEnv, old: oldEnv });
         }
+        return newEnv;
     }
     onDidChangeEnvironment: Event<DidChangeEnvironmentEventArgs> = this._onDidChangeEnvironment.event;
     async resolveEnvironment(context: ResolveEnvironmentContext): Promise<PythonEnvironment | undefined> {
