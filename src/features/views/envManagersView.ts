@@ -148,12 +148,12 @@ export class EnvManagerView implements TreeDataProvider<EnvTreeItem>, Disposable
         return element.parent;
     }
 
-    async reveal(environment?: PythonEnvironment) {
-        if (environment && this.treeView.visible) {
-            const view = this.revealMap.get(environment.envId.id);
-            if (view) {
+    reveal(environment?: PythonEnvironment) {
+        const view = environment ? this.revealMap.get(environment.envId.id) : undefined;
+        if (view && this.treeView.visible) {
+            setImmediate(async () => {
                 await this.treeView.reveal(view);
-            }
+            });
         }
     }
 

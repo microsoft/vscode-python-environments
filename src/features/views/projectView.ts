@@ -89,18 +89,31 @@ export class WorkspaceView implements TreeDataProvider<ProjectTreeItem> {
         this._treeDataChanged.fire(views);
     }
 
-    async reveal(uri: Uri): Promise<PythonEnvironment | undefined> {
+    private revealInternal(view: ProjectEnvironment): void {
         if (this.treeView.visible) {
-            const pw = this.projectManager.get(uri);
+            setImmediate(async () => {
+                await this.treeView.reveal(view);
+            });
+        }
+    }
+
+    reveal(context: Uri | PythonEnvironment): PythonEnvironment | undefined {
+        if (context instanceof Uri) {
+            const pw = this.projectManager.get(context);
             if (pw) {
                 const view = this.revealMap.get(pw.uri.fsPath);
                 if (view) {
-                    await this.treeView.reveal(view);
+                    this.revealInternal(view);
                     return view.environment;
                 }
             }
+        } else {
+            const view = Array.from(this.revealMap.values()).find((v) => v.environment.envId.id === context.envId.id);
+            if (view) {
+                this.revealInternal(view);
+                return view.environment;
+            }
         }
-
         return undefined;
     }
 

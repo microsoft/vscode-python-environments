@@ -4,7 +4,9 @@ import {
     ExtensionTerminalOptions,
     InputBox,
     InputBoxOptions,
+    LogOutputChannel,
     OpenDialogOptions,
+    OutputChannel,
     Progress,
     ProgressOptions,
     QuickInputButton,
@@ -278,4 +280,12 @@ export function showWarningMessage(message: string, ...items: string[]): Thenabl
 
 export function showInputBox(options?: InputBoxOptions, token?: CancellationToken): Thenable<string | undefined> {
     return window.showInputBox(options, token);
+}
+
+export function createOutputChannel(name: string, languageId?: string): OutputChannel {
+    return window.createOutputChannel(name, languageId);
+}
+
+export function createLogOutputChannel(name: string): LogOutputChannel {
+    return window.createOutputChannel(name, { log: true });
 }
