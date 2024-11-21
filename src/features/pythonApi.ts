@@ -44,6 +44,7 @@ import { TerminalManager } from './terminal/terminalManager';
 import { runAsTask } from './execution/runAsTask';
 import { runInTerminal } from './terminal/runInTerminal';
 import { runInBackground } from './execution/runInBackground';
+import { setAllManagerSettings } from './settings/settingHelpers';
 
 class PythonEnvironmentApiImpl implements PythonEnvironmentApi {
     private readonly _onDidChangeEnvironments = new EventEmitter<DidChangeEnvironmentsEventArgs>();
@@ -161,11 +162,28 @@ class PythonEnvironmentApiImpl implements PythonEnvironmentApi {
     }
     onDidChangeEnvironments: Event<DidChangeEnvironmentsEventArgs> = this._onDidChangeEnvironments.event;
     async setEnvironment(scope: SetEnvironmentScope, environment?: PythonEnvironment): Promise<void> {
-        const manager = this.envManagers.getEnvironmentManager(scope);
+        const manager = environment
+            ? this.envManagers.getEnvironmentManager(environment.envId.managerId)
+            : this.envManagers.getEnvironmentManager(scope);
+
         if (!manager) {
             throw new Error('No environment manager found');
         }
         await manager.set(scope, environment);
+        if (scope) {
+            const project = this.projectManager.get(scope);
+            const packageManager = this.envManagers.getPackageManager(environment);
+            if (project && packageManager) {
+                await setAllManagerSettings([
+                    {
+                        project,
+                        envManager: manager.id,
+                        packageManager: packageManager.id,
+                    },
+                ]);
+            }
+        }
+
         const oldEnv = this._previousEnvironments.get(scope?.toString() ?? 'global');
         if (oldEnv?.envId.id !== environment?.envId.id) {
             this._previousEnvironments.set(scope?.toString() ?? 'global', environment);

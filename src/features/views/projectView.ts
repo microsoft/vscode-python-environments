@@ -9,7 +9,7 @@ import {
     Uri,
     window,
 } from 'vscode';
-import { PythonProject, PythonEnvironment } from '../../api';
+import { PythonEnvironment } from '../../api';
 import { EnvironmentManagers, PythonProjectManager } from '../../internal.api';
 import {
     ProjectTreeItem,
@@ -23,31 +23,38 @@ import {
     ProjectPackageRootInfoTreeItem,
 } from './treeViewItems';
 import { onDidChangeConfiguration } from '../../common/workspace.apis';
+import { createSimpleDebounce } from '../../common/utils/debounce';
 
 export class WorkspaceView implements TreeDataProvider<ProjectTreeItem> {
     private treeView: TreeView<ProjectTreeItem>;
     private _treeDataChanged: EventEmitter<ProjectTreeItem | ProjectTreeItem[] | null | undefined> = new EventEmitter<
         ProjectTreeItem | ProjectTreeItem[] | null | undefined
     >();
-    private _projectViews: Map<string, ProjectItem> = new Map();
-    private _environmentViews: Map<string, ProjectEnvironment> = new Map();
-    private _viewsPackageRoots: Map<string, ProjectPackageRootTreeItem> = new Map();
+    private projectViews: Map<string, ProjectItem> = new Map();
+    private revealMap: Map<string, ProjectEnvironment> = new Map();
+    private packageRoots: Map<string, ProjectPackageRootTreeItem> = new Map();
     private disposables: Disposable[] = [];
+    private debouncedUpdateProject = createSimpleDebounce(500, () => this.updateProject());
     public constructor(private envManagers: EnvironmentManagers, private projectManager: PythonProjectManager) {
         this.treeView = window.createTreeView<ProjectTreeItem>('python-projects', {
             treeDataProvider: this,
         });
         this.disposables.push(
+            new Disposable(() => {
+                this.packageRoots.clear();
+                this.revealMap.clear();
+                this.projectViews.clear();
+            }),
             this.treeView,
             this._treeDataChanged,
             this.projectManager.onDidChangeProjects(() => {
-                this.updateProject();
+                this.debouncedUpdateProject.trigger();
             }),
-            this.envManagers.onDidChangeEnvironment((e) => {
-                this.updateProject(e.uri ? this.projectManager.get(e.uri) : undefined);
+            this.envManagers.onDidChangeEnvironment(() => {
+                this.debouncedUpdateProject.trigger();
             }),
             this.envManagers.onDidChangeEnvironments(() => {
-                this.updateProject();
+                this.debouncedUpdateProject.trigger();
             }),
             this.envManagers.onDidChangePackages((e) => {
                 this.updatePackagesForEnvironment(e.environment);
@@ -58,7 +65,7 @@ export class WorkspaceView implements TreeDataProvider<ProjectTreeItem> {
                     e.affectsConfiguration('python-envs.pythonProjects') ||
                     e.affectsConfiguration('python-envs.defaultPackageManager')
                 ) {
-                    this.updateProject();
+                    this.debouncedUpdateProject.trigger();
                 }
             }),
         );
@@ -68,33 +75,13 @@ export class WorkspaceView implements TreeDataProvider<ProjectTreeItem> {
         this.projectManager.initialize();
     }
 
-    updateProject(p?: PythonProject | PythonProject[]): void {
-        if (Array.isArray(p)) {
-            const views: ProjectItem[] = [];
-            p.forEach((w) => {
-                const view = this._projectViews.get(ProjectItem.getId(w));
-                if (view) {
-                    this._environmentViews.delete(view.id);
-                    views.push(view);
-                }
-            });
-            this._treeDataChanged.fire(views);
-        } else if (p) {
-            const view = this._projectViews.get(ProjectItem.getId(p));
-            if (view) {
-                this._environmentViews.delete(view.id);
-                this._treeDataChanged.fire(view);
-            }
-        } else {
-            this._projectViews.clear();
-            this._environmentViews.clear();
-            this._treeDataChanged.fire(undefined);
-        }
+    updateProject(): void {
+        this._treeDataChanged.fire(undefined);
     }
 
     private updatePackagesForEnvironment(e: PythonEnvironment): void {
         const views: ProjectTreeItem[] = [];
-        this._viewsPackageRoots.forEach((v) => {
+        this.packageRoots.forEach((v) => {
             if (v.environment.envId.id === e.envId.id) {
                 views.push(v);
             }
@@ -106,11 +93,11 @@ export class WorkspaceView implements TreeDataProvider<ProjectTreeItem> {
         if (this.treeView.visible) {
             const pw = this.projectManager.get(uri);
             if (pw) {
-                const view = this._environmentViews.get(ProjectItem.getId(pw));
+                const view = this.revealMap.get(pw.uri.fsPath);
                 if (view) {
                     await this.treeView.reveal(view);
+                    return view.environment;
                 }
-                return view?.environment;
             }
         }
 
@@ -126,11 +113,11 @@ export class WorkspaceView implements TreeDataProvider<ProjectTreeItem> {
 
     async getChildren(element?: ProjectTreeItem | undefined): Promise<ProjectTreeItem[] | undefined> {
         if (element === undefined) {
+            this.projectViews.clear();
             const views: ProjectTreeItem[] = [];
             this.projectManager.getProjects().forEach((w) => {
-                const id = ProjectItem.getId(w);
-                const view = this._projectViews.get(id) ?? new ProjectItem(w);
-                this._projectViews.set(ProjectItem.getId(w), view);
+                const view = new ProjectItem(w);
+                this.projectViews.set(w.uri.fsPath, view);
                 views.push(view);
             });
 
@@ -139,10 +126,7 @@ export class WorkspaceView implements TreeDataProvider<ProjectTreeItem> {
 
         if (element.kind === ProjectTreeItemKind.project) {
             const projectItem = element as ProjectItem;
-            const envView = this._environmentViews.get(projectItem.id);
-
             if (this.envManagers.managers.length === 0) {
-                this._environmentViews.delete(projectItem.id);
                 return [
                     new NoProjectEnvironment(
                         projectItem.project,
@@ -157,7 +141,6 @@ export class WorkspaceView implements TreeDataProvider<ProjectTreeItem> {
 
             const manager = this.envManagers.getEnvironmentManager(projectItem.project.uri);
             if (!manager) {
-                this._environmentViews.delete(projectItem.id);
                 return [
                     new NoProjectEnvironment(
                         projectItem.project,
@@ -170,7 +153,6 @@ export class WorkspaceView implements TreeDataProvider<ProjectTreeItem> {
 
             const environment = await manager?.get(projectItem.project.uri);
             if (!environment) {
-                this._environmentViews.delete(projectItem.id);
                 return [
                     new NoProjectEnvironment(
                         projectItem.project,
@@ -179,15 +161,8 @@ export class WorkspaceView implements TreeDataProvider<ProjectTreeItem> {
                     ),
                 ];
             }
-
-            const envItemId = ProjectEnvironment.getId(projectItem, environment);
-            if (envView && envView.id === envItemId) {
-                return [envView];
-            }
-
-            this._environmentViews.delete(projectItem.id);
             const view = new ProjectEnvironment(projectItem, environment);
-            this._environmentViews.set(projectItem.id, view);
+            this.revealMap.set(projectItem.project.uri.fsPath, view);
             return [view];
         }
 
@@ -201,7 +176,7 @@ export class WorkspaceView implements TreeDataProvider<ProjectTreeItem> {
 
             if (pkgManager) {
                 const item = new ProjectPackageRootTreeItem(environmentItem, pkgManager, environment);
-                this._viewsPackageRoots.set(environment.envId.id, item);
+                this.packageRoots.set(environmentItem.parent.project.uri.fsPath, item);
                 views.push(item);
             } else {
                 views.push(new ProjectEnvironmentInfo(environmentItem, 'No package manager found'));
