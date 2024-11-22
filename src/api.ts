@@ -1,4 +1,14 @@
-import { Uri, Disposable, MarkdownString, Event, LogOutputChannel, ThemeIcon, Terminal, TaskExecution } from 'vscode';
+import {
+    Uri,
+    Disposable,
+    MarkdownString,
+    Event,
+    LogOutputChannel,
+    ThemeIcon,
+    Terminal,
+    TaskExecution,
+    TerminalOptions,
+} from 'vscode';
 
 /**
  * The path to an icon, or a theme-specific configuration of icons.
@@ -1027,18 +1037,25 @@ export interface PythonProjectModifyApi {
  */
 export interface PythonProjectApi extends PythonProjectCreationApi, PythonProjectGetterApi, PythonProjectModifyApi {}
 
+export interface PythonTerminalOptions extends TerminalOptions {
+    /**
+     * The working directory for the terminal.
+     */
+    cwd: string | Uri;
+
+    /**
+     * Whether to show the terminal.
+     */
+    disableActivation?: boolean;
+}
+
 export interface PythonTerminalCreateApi {
-    createTerminal(
-        environment: PythonEnvironment,
-        cwd: string | Uri,
-        envVars?: { [key: string]: string | undefined },
-    ): Promise<Terminal>;
+    createTerminal(environment: PythonEnvironment, options: PythonTerminalOptions): Promise<Terminal>;
 }
 
 export interface PythonTerminalExecutionOptions {
     cwd: string | Uri;
     args?: string[];
-
     show?: boolean;
 }
 
