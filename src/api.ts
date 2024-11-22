@@ -1062,7 +1062,7 @@ export interface PythonTerminalExecutionOptions {
 export interface PythonTerminalRunApi {
     runInTerminal(environment: PythonEnvironment, options: PythonTerminalExecutionOptions): Promise<Terminal>;
     runInDedicatedTerminal(
-        terminalKey: Uri,
+        terminalKey: Uri | string,
         environment: PythonEnvironment,
         options: PythonTerminalExecutionOptions,
     ): Promise<Terminal>;

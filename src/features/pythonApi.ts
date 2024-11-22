@@ -297,7 +297,7 @@ class PythonEnvironmentApiImpl implements PythonEnvironmentApi {
         return terminal;
     }
     async runInDedicatedTerminal(
-        terminalKey: Uri,
+        terminalKey: Uri | string,
         environment: PythonEnvironment,
         options: PythonTerminalExecutionOptions,
     ): Promise<Terminal> {
