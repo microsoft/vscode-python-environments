@@ -1,7 +1,7 @@
 import { commands, ExtensionContext, LogOutputChannel } from 'vscode';
 
 import { PythonEnvironmentManagers } from './features/envManagers';
-import { registerLogger } from './common/logging';
+import { registerLogger, traceInfo } from './common/logging';
 import { EnvManagerView } from './features/views/envManagersView';
 import {
     addPythonProject,
@@ -120,18 +120,10 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
             await handlePackagesCommand(packageManager, environment);
         }),
         commands.registerCommand('python-envs.set', async (item) => {
-            const result = await setEnvironmentCommand(item, envManagers, projectManager);
-            if (result) {
-                workspaceView.updateProject();
-                await updateActivateMenuButtonContext(terminalManager, projectManager, envManagers);
-            }
+            await setEnvironmentCommand(item, envManagers, projectManager);
         }),
         commands.registerCommand('python-envs.setEnv', async (item) => {
-            const result = await setEnvironmentCommand(item, envManagers, projectManager);
-            if (result) {
-                workspaceView.updateProject();
-                await updateActivateMenuButtonContext(terminalManager, projectManager, envManagers);
-            }
+            await setEnvironmentCommand(item, envManagers, projectManager);
         }),
         commands.registerCommand('python-envs.reset', async (item) => {
             await resetEnvironmentCommand(item, envManagers, projectManager);
@@ -194,9 +186,19 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
             updateViewsAndStatus(statusBar, workspaceView, managerView, api);
         }),
         envManagers.onDidChangeEnvironment(async () => {
+            await updateActivateMenuButtonContext(terminalManager, projectManager, envManagers);
             updateViewsAndStatus(statusBar, workspaceView, managerView, api);
         }),
         envManagers.onDidChangeEnvironments(async () => {
+            await updateActivateMenuButtonContext(terminalManager, projectManager, envManagers);
+            updateViewsAndStatus(statusBar, workspaceView, managerView, api);
+        }),
+        envManagers.onDidChangeEnvironmentFiltered(async (e) => {
+            const location = e.uri?.fsPath ?? 'global';
+            traceInfo(
+                `Internal: Changed environment from ${e.old?.displayName} to ${e.new?.displayName} for: ${location}`,
+            );
+            await updateActivateMenuButtonContext(terminalManager, projectManager, envManagers);
             updateViewsAndStatus(statusBar, workspaceView, managerView, api);
         }),
     );

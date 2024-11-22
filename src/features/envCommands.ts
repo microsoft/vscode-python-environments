@@ -17,8 +17,6 @@ import {
     getDefaultEnvManagerSetting,
     getDefaultPkgManagerSetting,
     EditProjectSettings,
-    setAllManagerSettings,
-    EditAllManagerSettings,
 } from './settings/settingHelpers';
 
 import { getAbsolutePath } from '../common/utils/fileNameUtils';
@@ -168,99 +166,56 @@ export async function handlePackagesCommand(
     }
 }
 
-export interface EnvironmentSetResult {
-    project?: PythonProject;
-    environment: PythonEnvironment;
-}
-
 export async function setEnvironmentCommand(
     context: unknown,
     em: EnvironmentManagers,
     wm: PythonProjectManager,
-): Promise<EnvironmentSetResult[] | undefined> {
-    if (context instanceof PythonEnvTreeItem) {
-        const view = context as PythonEnvTreeItem;
-        const manager = view.parent.manager;
-        const projects = await pickProjectMany(wm.getProjects());
-        if (projects && projects.length > 0) {
-            await Promise.all(projects.map((p) => manager.set(p.uri, view.environment)));
-            await setAllManagerSettings(
-                projects.map((p) => ({
-                    project: p,
-                    envManager: manager.id,
-                    packageManager: manager.preferredPackageManagerId,
-                })),
-            );
-            return projects.map((p) => ({ project: p, environment: view.environment }));
-        }
-        return;
-    } else if (context instanceof ProjectItem) {
-        const view = context as ProjectItem;
-        return setEnvironmentCommand([view.project.uri], em, wm);
-    } else if (context instanceof Uri) {
-        return setEnvironmentCommand([context], em, wm);
-    } else if (context === undefined) {
-        const project = await pickProjectMany(wm.getProjects());
-        if (project && project.length > 0) {
-            try {
-                const result = setEnvironmentCommand(
-                    project.map((p) => p.uri),
-                    em,
-                    wm,
-                );
-                return result;
-            } catch (ex) {
-                if (ex === QuickInputButtons.Back) {
-                    return setEnvironmentCommand(context, em, wm);
-                }
+): Promise<void> {
+    try {
+        if (context instanceof PythonEnvTreeItem) {
+            const view = context as PythonEnvTreeItem;
+            const projects = await pickProjectMany(wm.getProjects());
+            if (projects && projects.length > 0) {
+                const uris = projects.map((p) => p.uri);
+                await em.setEnvironments(uris, view.environment);
             }
-        }
-        return;
-    } else if (Array.isArray(context) && context.length > 0 && context.every((c) => c instanceof Uri)) {
-        const uris = context as Uri[];
-        const projects: PythonProject[] = [];
-        const projectEnvManagers: InternalEnvironmentManager[] = [];
-        uris.forEach((uri) => {
-            const project = wm.get(uri);
-            if (project) {
-                projects.push(project);
-                const manager = em.getEnvironmentManager(uri);
-                if (manager && !projectEnvManagers.includes(manager)) {
-                    projectEnvManagers.push(manager);
-                }
+        } else if (context instanceof ProjectItem) {
+            const view = context as ProjectItem;
+            await setEnvironmentCommand([view.project.uri], em, wm);
+        } else if (context instanceof Uri) {
+            await setEnvironmentCommand([context], em, wm);
+        } else if (context === undefined) {
+            const projects = await pickProjectMany(wm.getProjects());
+            if (projects && projects.length > 0) {
+                const uris = projects.map((p) => p.uri);
+                await setEnvironmentCommand(uris, em, wm);
             }
-        });
-
-        const recommended =
-            projectEnvManagers.length === 1 && uris.length === 1 ? await projectEnvManagers[0].get(uris[0]) : undefined;
-        const selected = await pickEnvironment(em.managers, projectEnvManagers, {
-            projects,
-            recommended,
-            showBackButton: uris.length > 1,
-        });
-        const manager = em.managers.find((m) => m.id === selected?.envId.managerId);
-        if (selected && manager) {
-            const promises: Thenable<void>[] = [];
-            const settings: EditAllManagerSettings[] = [];
-            uris.forEach((uri) => {
-                const m = em.getEnvironmentManager(uri);
-                promises.push(manager.set(uri, selected));
-                if (manager.id !== m?.id) {
-                    settings.push({
-                        project: wm.get(uri),
-                        envManager: manager.id,
-                        packageManager: manager.preferredPackageManagerId,
-                    });
-                }
+        } else if (Array.isArray(context) && context.length > 0 && context.every((c) => c instanceof Uri)) {
+            const uris = context as Uri[];
+            const projects = wm.getProjects(uris).map((p) => p);
+            const projectEnvManagers = em.getProjectEnvManagers(uris);
+            const recommended =
+                projectEnvManagers.length === 1 && uris.length === 1
+                    ? await projectEnvManagers[0].get(uris[0])
+                    : undefined;
+            const selected = await pickEnvironment(em.managers, projectEnvManagers, {
+                projects,
+                recommended,
+                showBackButton: uris.length > 1,
             });
-            await Promise.all(promises);
-            await setAllManagerSettings(settings);
-            return projects.map((p) => ({ project: p, environment: selected }));
+
+            if (selected) {
+                await em.setEnvironments(uris, selected);
+            }
+        } else {
+            traceError(`Invalid context for setting environment command: ${context}`);
+            window.showErrorMessage('Invalid context for setting environment');
         }
-        return;
+    } catch (ex) {
+        if (ex === QuickInputButtons.Back) {
+            await setEnvironmentCommand(context, em, wm);
+        }
     }
-    traceError(`Invalid context for setting environment command: ${context}`);
-    window.showErrorMessage('Invalid context for setting environment');
 }
 
 export async function resetEnvironmentCommand(

@@ -112,8 +112,19 @@ export class PythonProjectManagerImpl implements PythonProjectManager {
         this._onDidChangeProjects.fire(Array.from(this._projects.values()));
     }
 
-    getProjects(): ReadonlyArray<PythonProject> {
-        return Array.from(this._projects.values());
+    getProjects(uris?: Uri[]): ReadonlyArray<PythonProject> {
+        if (uris === undefined) {
+            return Array.from(this._projects.values());
+        } else {
+            const projects: PythonProject[] = [];
+            for (const uri of uris) {
+                const project = this.get(uri);
+                if (project !== undefined && !projects.includes(project)) {
+                    projects.push(project);
+                }
+            }
+            return projects;
+        }
     }
 
     get(uri: Uri): PythonProject | undefined {

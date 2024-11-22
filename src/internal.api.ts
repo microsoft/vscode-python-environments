@@ -73,6 +73,7 @@ export interface EnvironmentManagers extends Disposable {
 
     onDidChangeEnvironments: Event<InternalDidChangeEnvironmentsEventArgs>;
     onDidChangeEnvironment: Event<DidChangeEnvironmentEventArgs>;
+    onDidChangeEnvironmentFiltered: Event<DidChangeEnvironmentEventArgs>;
     onDidChangePackages: Event<InternalDidChangePackagesEventArgs>;
 
     onDidChangeEnvironmentManager: Event<DidChangeEnvironmentManagerEventArgs>;
@@ -85,6 +86,12 @@ export interface EnvironmentManagers extends Disposable {
     packageManagers: InternalPackageManager[];
 
     clearCache(scope: EnvironmentManagerScope): Promise<void>;
+
+    setEnvironment(scope: SetEnvironmentScope, environment?: PythonEnvironment): Promise<void>;
+    setEnvironments(scope: Uri[], environment?: PythonEnvironment): Promise<void>;
+    getEnvironment(scope: GetEnvironmentScope): Promise<PythonEnvironment | undefined>;
+
+    getProjectEnvManagers(uris: Uri[]): InternalEnvironmentManager[];
 }
 
 export class InternalEnvironmentManager implements EnvironmentManager {
@@ -238,7 +245,7 @@ export interface PythonProjectManager extends Disposable {
     ): PythonProject;
     add(pyWorkspace: PythonProject | PythonProject[]): void;
     remove(pyWorkspace: PythonProject | PythonProject[]): void;
-    getProjects(): ReadonlyArray<PythonProject>;
+    getProjects(uris?: Uri[]): ReadonlyArray<PythonProject>;
     get(uri: Uri): PythonProject | undefined;
     onDidChangeProjects: Event<PythonProject[] | undefined>;
 }

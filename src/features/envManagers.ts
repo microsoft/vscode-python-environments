@@ -4,11 +4,19 @@ import {
     DidChangeEnvironmentsEventArgs,
     DidChangePackagesEventArgs,
     EnvironmentManager,
+    GetEnvironmentScope,
     PackageManager,
+    PythonEnvironment,
     PythonProject,
+    SetEnvironmentScope,
 } from '../api';
 import { traceError } from '../common/logging';
-import { getDefaultEnvManagerSetting, getDefaultPkgManagerSetting } from './settings/settingHelpers';
+import {
+    EditAllManagerSettings,
+    getDefaultEnvManagerSetting,
+    getDefaultPkgManagerSetting,
+    setAllManagerSettings,
+} from './settings/settingHelpers';
 import {
     DidChangeEnvironmentManagerEventArgs,
     DidChangePackageManagerEventArgs,
@@ -35,11 +43,13 @@ function generateId(name: string): string {
 export class PythonEnvironmentManagers implements EnvironmentManagers {
     private _environmentManagers: Map<string, InternalEnvironmentManager> = new Map();
     private _packageManagers: Map<string, InternalPackageManager> = new Map();
+    private readonly _previousEnvironments = new Map<string, PythonEnvironment | undefined>();
 
     private _onDidChangeEnvironmentManager = new EventEmitter<DidChangeEnvironmentManagerEventArgs>();
     private _onDidChangePackageManager = new EventEmitter<DidChangePackageManagerEventArgs>();
     private _onDidChangeEnvironments = new EventEmitter<InternalDidChangeEnvironmentsEventArgs>();
     private _onDidChangeEnvironment = new EventEmitter<DidChangeEnvironmentEventArgs>();
+    private _onDidChangeEnvironmentFiltered = new EventEmitter<DidChangeEnvironmentEventArgs>();
     private _onDidChangePackages = new EventEmitter<InternalDidChangePackagesEventArgs>();
 
     public onDidChangeEnvironmentManager: Event<DidChangeEnvironmentManagerEventArgs> =
@@ -48,8 +58,10 @@ export class PythonEnvironmentManagers implements EnvironmentManagers {
     public onDidChangeEnvironments: Event<InternalDidChangeEnvironmentsEventArgs> = this._onDidChangeEnvironments.event;
     public onDidChangeEnvironment: Event<DidChangeEnvironmentEventArgs> = this._onDidChangeEnvironment.event;
     public onDidChangePackages: Event<InternalDidChangePackagesEventArgs> = this._onDidChangePackages.event;
+    public onDidChangeEnvironmentFiltered: Event<DidChangeEnvironmentEventArgs> =
+        this._onDidChangeEnvironmentFiltered.event;
 
-    constructor(private readonly workspaceManager: PythonProjectManager) {}
+    constructor(private readonly pm: PythonProjectManager) {}
 
     public registerEnvironmentManager(manager: EnvironmentManager): Disposable {
         const managerId = generateId(manager.name);
@@ -74,7 +86,7 @@ export class PythonEnvironmentManagers implements EnvironmentManagers {
                 );
             }),
             mgr.onDidChangeEnvironment((e: DidChangeEnvironmentEventArgs) => {
-                if (e.old === undefined && e.new === undefined) {
+                if (e.old?.envId.id === e.new?.envId.id) {
                     return;
                 }
 
@@ -141,7 +153,7 @@ export class PythonEnvironmentManagers implements EnvironmentManagers {
 
         if (context === undefined || context instanceof Uri) {
             // get default environment manager from setting
-            const defaultEnvManagerId = getDefaultEnvManagerSetting(this.workspaceManager, context);
+            const defaultEnvManagerId = getDefaultEnvManagerSetting(this.pm, context);
             if (defaultEnvManagerId === undefined) {
                 return undefined;
             }
@@ -162,8 +174,8 @@ export class PythonEnvironmentManagers implements EnvironmentManagers {
         }
 
         if (context === undefined || context instanceof Uri) {
-            const defaultPkgManagerId = getDefaultPkgManagerSetting(this.workspaceManager, context);
-            const defaultEnvManagerId = getDefaultEnvManagerSetting(this.workspaceManager, context);
+            const defaultPkgManagerId = getDefaultPkgManagerSetting(this.pm, context);
+            const defaultEnvManagerId = getDefaultEnvManagerSetting(this.pm, context);
             if (defaultPkgManagerId) {
                 return this._packageManagers.get(defaultPkgManagerId);
             }
@@ -222,5 +234,137 @@ export class PythonEnvironmentManagers implements EnvironmentManagers {
         if (manager) {
             await manager.clearCache();
         }
+    }
+
+    public async setEnvironment(scope: SetEnvironmentScope, environment?: PythonEnvironment): Promise<void> {
+        const customScope = environment ? environment : scope;
+        const manager = this.getEnvironmentManager(customScope);
+        if (!manager) {
+            traceError(
+                `No environment manager found for: ${
+                    customScope instanceof Uri ? customScope.fsPath : customScope?.environmentPath?.fsPath
+                }`,
+            );
+            return;
+        }
+        await manager.set(scope, environment);
+
+        const project = scope ? this.pm.get(scope) : undefined;
+        if (scope) {
+            const packageManager = this.getPackageManager(environment);
+            if (project && packageManager) {
+                await setAllManagerSettings([
+                    {
+                        project,
+                        envManager: manager.id,
+                        packageManager: packageManager.id,
+                    },
+                ]);
+            }
+        }
+
+        const oldEnv = this._previousEnvironments.get(project?.uri.toString() ?? 'global');
+        if (oldEnv?.envId.id !== environment?.envId.id) {
+            this._previousEnvironments.set(project?.uri.toString() ?? 'global', environment);
+            setImmediate(() =>
+                this._onDidChangeEnvironmentFiltered.fire({ uri: project?.uri, new: environment, old: oldEnv }),
+            );
+        }
+    }
+
+    public async setEnvironments(scope: Uri[], environment?: PythonEnvironment): Promise<void> {
+        if (environment) {
+            const manager = this.managers.find((m) => m.id === environment.envId.managerId);
+            if (!manager) {
+                traceError(
+                    `No environment manager found for: ${
+                        environment.environmentPath ? environment.environmentPath.fsPath : ''
+                    }`,
+                );
+                return;
+            }
+
+            const promises: Promise<void>[] = [];
+            const settings: EditAllManagerSettings[] = [];
+            const events: DidChangeEnvironmentEventArgs[] = [];
+            scope.forEach((uri) => {
+                const m = this.getEnvironmentManager(uri);
+                promises.push(manager.set(uri, environment));
+                if (manager.id !== m?.id) {
+                    settings.push({
+                        project: this.pm.get(uri),
+                        envManager: manager.id,
+                        packageManager: manager.preferredPackageManagerId,
+                    });
+                }
+
+                const project = this.pm.get(uri);
+                const oldEnv = this._previousEnvironments.get(project?.uri.toString() ?? 'global');
+                if (oldEnv?.envId.id !== environment?.envId.id) {
+                    this._previousEnvironments.set(project?.uri.toString() ?? 'global', environment);
+                    events.push({ uri: project?.uri, new: environment, old: oldEnv });
+                }
+            });
+            await Promise.all(promises);
+            await setAllManagerSettings(settings);
+            setImmediate(() => events.forEach((e) => this._onDidChangeEnvironmentFiltered.fire(e)));
+        } else {
+            const promises: Promise<void>[] = [];
+            const events: DidChangeEnvironmentEventArgs[] = [];
+            scope.forEach((uri) => {
+                const manager = this.getEnvironmentManager(uri);
+                if (manager) {
+                    const setAndAddEvent = async () => {
+                        await manager.set(uri);
+
+                        const project = this.pm.get(uri);
+
+                        // Always get the new first, then compare with the old. This has minor impact on the ordering of
+                        // events. But it ensures that we always get the latest environment at the time of this call.
+                        const newEnv = await manager.get(uri);
+                        const oldEnv = this._previousEnvironments.get(project?.uri.toString() ?? 'global');
+                        if (oldEnv?.envId.id !== newEnv?.envId.id) {
+                            this._previousEnvironments.set(project?.uri.toString() ?? 'global', newEnv);
+                            events.push({ uri: project?.uri, new: newEnv, old: oldEnv });
+                        }
+                    };
+                    promises.push(setAndAddEvent());
+                }
+            });
+            await Promise.all(promises);
+            setImmediate(() => events.forEach((e) => this._onDidChangeEnvironmentFiltered.fire(e)));
+        }
+    }
+
+    async getEnvironment(scope: GetEnvironmentScope): Promise<PythonEnvironment | undefined> {
+        const manager = this.getEnvironmentManager(scope);
+        if (!manager) {
+            return undefined;
+        }
+
+        const project = scope ? this.pm.get(scope) : undefined;
+
+        // Always get the new first, then compare with the old. This has minor impact on the ordering of
+        // events. But it ensures that we always get the latest environment at the time of this call.
+        const newEnv = await manager.get(scope);
+        const oldEnv = this._previousEnvironments.get(project?.uri.toString() ?? 'global');
+        if (oldEnv?.envId.id !== newEnv?.envId.id) {
+            this._previousEnvironments.set(project?.uri.toString() ?? 'global', newEnv);
+            setImmediate(() =>
+                this._onDidChangeEnvironmentFiltered.fire({ uri: project?.uri, new: newEnv, old: oldEnv }),
+            );
+        }
+        return newEnv;
+    }
+
+    getProjectEnvManagers(uris: Uri[]): InternalEnvironmentManager[] {
+        const projectEnvManagers: InternalEnvironmentManager[] = [];
+        uris.forEach((uri) => {
+            const manager = this.getEnvironmentManager(uri);
+            if (manager && !projectEnvManagers.includes(manager)) {
+                projectEnvManagers.push(manager);
+            }
+        });
+        return projectEnvManagers;
     }
 }

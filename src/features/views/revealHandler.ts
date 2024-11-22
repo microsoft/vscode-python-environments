@@ -11,6 +11,8 @@ export function updateViewsAndStatus(
     managerView: EnvManagerView,
     api: PythonEnvironmentApi,
 ) {
+    workspaceView.updateProject();
+
     const activeDocument = activeTextEditor()?.document;
     if (!activeDocument || activeDocument.isUntitled || activeDocument.uri.scheme !== 'file') {
         statusBar.hide();
@@ -26,14 +28,10 @@ export function updateViewsAndStatus(
         return;
     }
 
-    const env = workspaceView.reveal(activeDocument.uri);
-    managerView.reveal(env);
-    if (env) {
+    workspaceView.reveal(activeDocument.uri);
+    setImmediate(async () => {
+        const env = await api.getEnvironment(activeDocument.uri);
         statusBar.show(env?.displayName);
-    } else {
-        setImmediate(async () => {
-            const e = await api.getEnvironment(activeDocument.uri);
-            statusBar.show(e?.displayName);
-        });
-    }
+        managerView.reveal(env);
+    });
 }
