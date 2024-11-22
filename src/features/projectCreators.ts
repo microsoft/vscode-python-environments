@@ -1,10 +1,10 @@
 import * as path from 'path';
-import { Disposable, Uri, window } from 'vscode';
+import { Disposable, Uri } from 'vscode';
 import { PythonProject, PythonProjectCreator, PythonProjectCreatorOptions } from '../api';
 import { ProjectCreators } from '../internal.api';
 import { showErrorMessage } from '../common/errors/utils';
 import { findFiles } from '../common/workspace.apis';
-import { showOpenDialog } from '../common/window.apis';
+import { showOpenDialog, showQuickPickWithButtons } from '../common/window.apis';
 
 export class ProjectCreatorsImpl implements ProjectCreators {
     private _creators: PythonProjectCreator[] = [];
@@ -78,13 +78,20 @@ function getUniqueUri(uris: Uri[]): {
 async function pickProjects(uris: Uri[]): Promise<Uri[] | undefined> {
     const items = getUniqueUri(uris);
 
-    const selected = await window.showQuickPick(items, {
+    const selected = await showQuickPickWithButtons(items, {
         canPickMany: true,
         ignoreFocusOut: true,
         placeHolder: 'Select the folders to add as Python projects',
+        showBackButton: true,
     });
 
-    return selected?.map((s) => s.uri);
+    if (Array.isArray(selected)) {
+        return selected.map((s) => s.uri);
+    } else if (selected) {
+        return [selected.uri];
+    }
+
+    return undefined;
 }
 
 export function registerAutoProjectProvider(pc: ProjectCreators): Disposable {

@@ -171,50 +171,56 @@ export async function setEnvironmentCommand(
     em: EnvironmentManagers,
     wm: PythonProjectManager,
 ): Promise<void> {
-    try {
-        if (context instanceof PythonEnvTreeItem) {
+    if (context instanceof PythonEnvTreeItem) {
+        try {
             const view = context as PythonEnvTreeItem;
             const projects = await pickProjectMany(wm.getProjects());
             if (projects && projects.length > 0) {
                 const uris = projects.map((p) => p.uri);
                 await em.setEnvironments(uris, view.environment);
             }
-        } else if (context instanceof ProjectItem) {
-            const view = context as ProjectItem;
-            await setEnvironmentCommand([view.project.uri], em, wm);
-        } else if (context instanceof Uri) {
-            await setEnvironmentCommand([context], em, wm);
-        } else if (context === undefined) {
+        } catch (ex) {
+            if (ex === QuickInputButtons.Back) {
+                await setEnvironmentCommand(context, em, wm);
+            }
+            throw ex;
+        }
+    } else if (context instanceof ProjectItem) {
+        const view = context as ProjectItem;
+        await setEnvironmentCommand([view.project.uri], em, wm);
+    } else if (context instanceof Uri) {
+        await setEnvironmentCommand([context], em, wm);
+    } else if (context === undefined) {
+        try {
             const projects = await pickProjectMany(wm.getProjects());
             if (projects && projects.length > 0) {
                 const uris = projects.map((p) => p.uri);
                 await setEnvironmentCommand(uris, em, wm);
             }
-        } else if (Array.isArray(context) && context.length > 0 && context.every((c) => c instanceof Uri)) {
-            const uris = context as Uri[];
-            const projects = wm.getProjects(uris).map((p) => p);
-            const projectEnvManagers = em.getProjectEnvManagers(uris);
-            const recommended =
-                projectEnvManagers.length === 1 && uris.length === 1
-                    ? await projectEnvManagers[0].get(uris[0])
-                    : undefined;
-            const selected = await pickEnvironment(em.managers, projectEnvManagers, {
-                projects,
-                recommended,
-                showBackButton: uris.length > 1,
-            });
-
-            if (selected) {
-                await em.setEnvironments(uris, selected);
+        } catch (ex) {
+            if (ex === QuickInputButtons.Back) {
+                await setEnvironmentCommand(context, em, wm);
             }
-        } else {
-            traceError(`Invalid context for setting environment command: ${context}`);
-            window.showErrorMessage('Invalid context for setting environment');
+            throw ex;
         }
-    } catch (ex) {
-        if (ex === QuickInputButtons.Back) {
-            await setEnvironmentCommand(context, em, wm);
+    } else if (Array.isArray(context) && context.length > 0 && context.every((c) => c instanceof Uri)) {
+        const uris = context as Uri[];
+        const projects = wm.getProjects(uris).map((p) => p);
+        const projectEnvManagers = em.getProjectEnvManagers(uris);
+        const recommended =
+            projectEnvManagers.length === 1 && uris.length === 1 ? await projectEnvManagers[0].get(uris[0]) : undefined;
+        const selected = await pickEnvironment(em.managers, projectEnvManagers, {
+            projects,
+            recommended,
+            showBackButton: uris.length > 1,
+        });
+
+        if (selected) {
+            await em.setEnvironments(uris, selected);
         }
+    } else {
+        traceError(`Invalid context for setting environment command: ${context}`);
+        window.showErrorMessage('Invalid context for setting environment');
     }
 }
 
@@ -297,9 +303,17 @@ export async function addPythonProject(
             return;
         }
 
-        let results = await creator.create();
-        if (results === undefined) {
-            return;
+        let results: PythonProject | PythonProject[] | undefined;
+        try {
+            results = await creator.create();
+            if (results === undefined) {
+                return;
+            }
+        } catch (ex: any) {
+            if (ex === QuickInputButtons.Back) {
+                return addPythonProject(resource, wm, em, pc);
+            }
+            throw ex;
         }
 
         if (!Array.isArray(results)) {
