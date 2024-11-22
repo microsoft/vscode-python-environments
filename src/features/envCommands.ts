@@ -394,13 +394,13 @@ export async function createTerminalCommand(
         const env = await api.getEnvironment(uri);
         const pw = api.getPythonProject(uri);
         if (env && pw) {
-            return await tm.create(env, pw.uri);
+            return await tm.create(env, { cwd: pw.uri });
         }
     } else if (context instanceof ProjectItem) {
         const view = context as ProjectItem;
         const env = await api.getEnvironment(view.project.uri);
         if (env) {
-            const terminal = await tm.create(env, view.project.uri);
+            const terminal = await tm.create(env, { cwd: view.project.uri });
             terminal.show();
             return terminal;
         }
@@ -408,7 +408,7 @@ export async function createTerminalCommand(
         const view = context as PythonEnvTreeItem;
         const pw = await pickProject(api.getPythonProjects());
         if (pw) {
-            const terminal = await tm.create(view.environment, pw.uri);
+            const terminal = await tm.create(view.environment, { cwd: pw.uri });
             terminal.show();
             return terminal;
         }
