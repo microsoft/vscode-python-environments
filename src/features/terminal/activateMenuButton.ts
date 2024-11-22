@@ -58,7 +58,7 @@ export async function getEnvironmentForTerminal(
 
     // This is a heuristic approach to attempt to find the environment for this terminal.
     // This is not guaranteed to work, but is better than nothing.
-    let tempCwd = (t.creationOptions as TerminalOptions)?.cwd;
+    let tempCwd = t.shellIntegration?.cwd ?? (t.creationOptions as TerminalOptions)?.cwd;
     let cwd = typeof tempCwd === 'string' ? Uri.file(tempCwd) : tempCwd;
     if (cwd) {
         const manager = em.getEnvironmentManager(cwd);
