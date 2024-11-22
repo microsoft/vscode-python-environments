@@ -288,7 +288,6 @@ export class TerminalManagerImpl implements TerminalManager {
     }
 
     public async create(environment: PythonEnvironment, options: PythonTerminalOptions): Promise<Terminal> {
-        const activatable = isActivatableEnvironment(environment);
         // const name = options.name ?? `Python: ${environment.displayName}`;
         const newTerminal = createTerminal({
             name: options.name,
@@ -304,6 +303,7 @@ export class TerminalManagerImpl implements TerminalManager {
             location: options.location,
             isTransient: options.isTransient,
         });
+        const activatable = !options.disableActivation && isActivatableEnvironment(environment);
 
         if (activatable) {
             try {
