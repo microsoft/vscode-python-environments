@@ -1039,11 +1039,6 @@ export interface PythonProjectApi extends PythonProjectCreationApi, PythonProjec
 
 export interface PythonTerminalOptions extends TerminalOptions {
     /**
-     * The working directory for the terminal.
-     */
-    cwd: string | Uri;
-
-    /**
      * Whether to show the terminal.
      */
     disableActivation?: boolean;
