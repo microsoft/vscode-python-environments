@@ -1136,8 +1136,9 @@ export interface PythonEnvironmentVariablesApi {
      *
      * Order of overrides:
      * 1. `baseEnvVar` if given or `process.env`
-     * 2. `.env` file in the workspace root
-     * 3. `overrides` in the order provided.
+     * 2. `.env` file from the "python.envFile" setting in the workspace.
+     * 3. `.env` file at the root of the python project.
+     * 4. `overrides` in the order provided.
      *
      * @param uri The URI of the project, workspace or a file in a for which environment variables are required.
      * @param overrides Additional environment variables to override the defaults.
