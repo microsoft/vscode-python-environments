@@ -114,32 +114,38 @@ class PythonEnvironmentApiImpl implements PythonEnvironmentApi {
         if (scope === 'global' || (!Array.isArray(scope) && scope instanceof Uri)) {
             const manager = this.envManagers.getEnvironmentManager(scope === 'global' ? undefined : scope);
             if (!manager) {
-                return Promise.reject(new Error('No environment manager found'));
+                throw new Error('No environment manager found');
+            }
+            if (!manager.supportsCreate) {
+                throw new Error(`Environment manager does not support creating environments: ${manager.id}`);
             }
             return manager.create(scope);
         } else if (Array.isArray(scope) && scope.length === 1 && scope[0] instanceof Uri) {
-            const manager = this.envManagers.getEnvironmentManager(scope[0]);
-            if (!manager) {
-                return Promise.reject(new Error('No environment manager found'));
-            }
-            return manager.create(scope);
+            return this.createEnvironment(scope[0]);
         } else if (Array.isArray(scope) && scope.length > 0 && scope.every((s) => s instanceof Uri)) {
             const managers: InternalEnvironmentManager[] = [];
             scope.forEach((s) => {
                 const manager = this.envManagers.getEnvironmentManager(s);
-                if (manager && !managers.includes(manager)) {
+                if (manager && !managers.includes(manager) && manager.supportsCreate) {
                     managers.push(manager);
                 }
             });
 
             if (managers.length === 0) {
-                return Promise.reject(new Error('No environment managers found'));
+                throw new Error('No environment managers found');
             }
+
             const managerId = await pickEnvironmentManager(managers);
             if (!managerId) {
-                return Promise.reject(new Error('No environment manager selected'));
+                throw new Error('No environment manager selected');
             }
-            const result = await managers.find((m) => m.id === managerId)?.create(scope);
+
+            const manager = managers.find((m) => m.id === managerId);
+            if (!manager) {
+                throw new Error('No environment manager found');
+            }
+
+            const result = await manager.create(scope);
             return result;
         }
     }
