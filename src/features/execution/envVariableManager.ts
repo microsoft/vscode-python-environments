@@ -1,22 +1,16 @@
 import * as path from 'path';
 import * as fsapi from 'fs-extra';
-import { Uri, Event, EventEmitter, FileChangeType, RelativePattern } from 'vscode';
-import {
-    DidChangeEnvironmentVariablesEventArgs,
-    PythonEnvironment,
-    PythonEnvironmentVariablesApi,
-    TerminalShellType,
-} from '../../api';
+import { Uri, Event, EventEmitter, FileChangeType } from 'vscode';
+import { DidChangeEnvironmentVariablesEventArgs, PythonEnvironmentVariablesApi } from '../../api';
 import { Disposable } from 'vscode-jsonrpc';
-import { createFileSystemWatcher, findFiles, getConfiguration } from '../../common/workspace.apis';
+import { createFileSystemWatcher, getConfiguration } from '../../common/workspace.apis';
 import { PythonProjectManager } from '../../internal.api';
 import { mergeEnvVariables, parseEnvFile } from './envVarUtils';
 import { resolveVariables } from '../../common/utils/internalVariables';
-import { getActivationCommand } from '../common/activation';
 
-export interface InternalPythonEnvironmentVariablesApi extends PythonEnvironmentVariablesApi, Disposable {}
+export interface EnvVarManager extends PythonEnvironmentVariablesApi, Disposable {}
 
-class PythonEnvVariableManager implements InternalPythonEnvironmentVariablesApi {
+export class PythonEnvVariableManager implements EnvVarManager {
     private disposables: Disposable[] = [];
 
     private _onDidChangeEnvironmentVariables;
@@ -40,14 +34,6 @@ class PythonEnvVariableManager implements InternalPythonEnvironmentVariablesApi 
                 this._onDidChangeEnvironmentVariables.fire({ uri: e, changeTye: FileChangeType.Deleted }),
             ),
         );
-    }
-
-    async getActivatedEnvironmentVariables(
-        _environment: PythonEnvironment,
-        _baseEnvVar?: { [key: string]: string | undefined },
-        _shellType?: TerminalShellType,
-    ): Promise<{ [key: string]: string | undefined }> {
-        throw new Error('Method not implemented.');
     }
 
     async getEnvironmentVariables(

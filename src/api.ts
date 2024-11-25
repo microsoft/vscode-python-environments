@@ -1114,23 +1114,6 @@ export interface DidChangeEnvironmentVariablesEventArgs {
 
 export interface PythonEnvironmentVariablesApi {
     /**
-     * Get activated environment variables for a Python environment. This API will not pick up `.env`
-     * files or any overrides. This is because, an environment can be used for multiple projects. If
-     * you want full activated environment variables then use  {@link getEnvironmentVariables} API to
-     * get the env variables, and pas that in to this API as base.
-     *
-     * @param environment The Python environment for which environment variables are required.
-     * @param baseEnvVar The base environment variables that should be used as a starting point.
-     * @param shellType The shell type for which the environment variables are required.
-     * @returns The environment variables for the Python environment.
-     */
-    getActivatedEnvironmentVariables(
-        environment: PythonEnvironment,
-        baseEnvVar?: { [key: string]: string | undefined },
-        shellType?: TerminalShellType,
-    ): Promise<{ [key: string]: string | undefined }>;
-
-    /**
      * Get environment variables for a workspace. This picks up `.env` file from the root of the
      * workspace.
      *

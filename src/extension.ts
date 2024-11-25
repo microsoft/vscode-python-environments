@@ -51,6 +51,7 @@ import {
 } from './features/terminal/activateMenuButton';
 import { PythonStatusBarImpl } from './features/views/pythonStatusBar';
 import { updateViewsAndStatus } from './features/views/revealHandler';
+import { EnvVarManager, PythonEnvVariableManager } from './features/execution/envVariableManager';
 
 export async function activate(context: ExtensionContext): Promise<PythonEnvironmentApi> {
     // Logging should be set up before anything else.
@@ -69,6 +70,9 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
     const projectManager: PythonProjectManager = new PythonProjectManagerImpl();
     context.subscriptions.push(projectManager);
 
+    const envVarManager: EnvVarManager = new PythonEnvVariableManager(projectManager);
+    context.subscriptions.push(envVarManager);
+
     const envManagers: EnvironmentManagers = new PythonEnvironmentManagers(projectManager);
     context.subscriptions.push(envManagers);
 
@@ -79,7 +83,7 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
         registerAutoProjectProvider(projectCreators),
     );
 
-    setPythonApi(envManagers, projectManager, projectCreators, terminalManager);
+    setPythonApi(envManagers, projectManager, projectCreators, terminalManager, envVarManager);
 
     const managerView = new EnvManagerView(envManagers);
     context.subscriptions.push(managerView);
