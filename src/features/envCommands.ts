@@ -68,12 +68,12 @@ export async function createEnvironmentCommand(
     context: unknown,
     em: EnvironmentManagers,
     pm: PythonProjectManager,
-): Promise<void> {
+): Promise<PythonEnvironment | undefined> {
     if (context instanceof EnvManagerTreeItem) {
         const manager = (context as EnvManagerTreeItem).manager;
         const projects = await pickProjectMany(pm.getProjects());
         if (projects) {
-            await manager.create(projects.length === 0 ? 'global' : projects.map((p) => p.uri));
+            return await manager.create(projects.length === 0 ? 'global' : projects.map((p) => p.uri));
         } else {
             traceError(`No projects found for ${context}`);
         }
@@ -81,7 +81,7 @@ export async function createEnvironmentCommand(
         const manager = em.getEnvironmentManager(context as Uri);
         const project = pm.get(context as Uri);
         if (project) {
-            await manager?.create(project.uri);
+            return await manager?.create(project.uri);
         } else {
             traceError(`No project found for ${context}`);
         }
@@ -90,7 +90,10 @@ export async function createEnvironmentCommand(
     }
 }
 
-export async function createAnyEnvironmentCommand(em: EnvironmentManagers, pm: PythonProjectManager): Promise<void> {
+export async function createAnyEnvironmentCommand(
+    em: EnvironmentManagers,
+    pm: PythonProjectManager,
+): Promise<PythonEnvironment | undefined> {
     const projects = await pickProjectMany(pm.getProjects());
     if (projects && projects.length > 0) {
         const defaultManagers: InternalEnvironmentManager[] = [];
@@ -109,14 +112,14 @@ export async function createAnyEnvironmentCommand(em: EnvironmentManagers, pm: P
 
         const manager = em.managers.find((m) => m.id === managerId);
         if (manager) {
-            await manager.create(projects.map((p) => p.uri));
+            return await manager.create(projects.map((p) => p.uri));
         }
     } else if (projects && projects.length === 0) {
         const managerId = await pickEnvironmentManager(em.managers.filter((m) => m.supportsCreate));
 
         const manager = em.managers.find((m) => m.id === managerId);
         if (manager) {
-            await manager.create('global');
+            return await manager.create('global');
         }
     }
 }

@@ -103,10 +103,10 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
             await refreshPackagesCommand(item);
         }),
         commands.registerCommand('python-envs.create', async (item) => {
-            await createEnvironmentCommand(item, envManagers, projectManager);
+            return await createEnvironmentCommand(item, envManagers, projectManager);
         }),
         commands.registerCommand('python-envs.createAny', async () => {
-            await createAnyEnvironmentCommand(envManagers, projectManager);
+            return await createAnyEnvironmentCommand(envManagers, projectManager);
         }),
         commands.registerCommand('python-envs.remove', async (item) => {
             await removeEnvironmentCommand(item, envManagers);
