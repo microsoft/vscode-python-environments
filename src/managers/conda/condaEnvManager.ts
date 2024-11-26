@@ -1,5 +1,5 @@
 import * as path from 'path';
-import { Disposable, EventEmitter, LogOutputChannel, MarkdownString, ProgressLocation, Uri, window } from 'vscode';
+import { Disposable, EventEmitter, LogOutputChannel, MarkdownString, ProgressLocation, Uri } from 'vscode';
 import {
     CreateEnvironmentScope,
     DidChangeEnvironmentEventArgs,
@@ -29,6 +29,7 @@ import {
 } from './condaUtils';
 import { NativePythonFinder } from '../common/nativePythonFinder';
 import { createDeferred, Deferred } from '../../common/utils/deferred';
+import { withProgress } from '../../common/window.apis';
 
 export class CondaEnvManager implements EnvironmentManager, Disposable {
     private collection: PythonEnvironment[] = [];
@@ -73,7 +74,7 @@ export class CondaEnvManager implements EnvironmentManager, Disposable {
 
         this._initialized = createDeferred();
 
-        await window.withProgress(
+        await withProgress(
             {
                 location: ProgressLocation.Window,
                 title: 'Discovering Conda environments',
@@ -164,7 +165,7 @@ export class CondaEnvManager implements EnvironmentManager, Disposable {
             this.disposablesMap.forEach((d) => d.dispose());
             this.disposablesMap.clear();
 
-            await window.withProgress(
+            await withProgress(
                 {
                     location: ProgressLocation.Window,
                     title: 'Refreshing Conda Environments',
