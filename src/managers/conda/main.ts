@@ -6,17 +6,6 @@ import { getPythonApi } from '../../features/pythonApi';
 import { NativePythonFinder } from '../common/nativePythonFinder';
 import { traceInfo } from '../../common/logging';
 import { getConda } from './condaUtils';
-import { onDidChangeConfiguration } from '../../common/workspace.apis';
-
-async function register(
-    api: PythonEnvironmentApi,
-    nativeFinder: NativePythonFinder,
-    log: LogOutputChannel,
-): Promise<Disposable> {
-    const disposables: Disposable[] = [];
-
-    return Disposable.from(...disposables);
-}
 
 export async function registerCondaFeatures(
     nativeFinder: NativePythonFinder,
