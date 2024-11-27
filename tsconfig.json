@@ -1,11 +1,9 @@
 {
-	"compilerOptions": {
+    "compilerOptions": {
         "module": "NodeNext",
         "moduleResolution": "NodeNext",
-		"target": "ES2020",
-		"lib": [
-			"ES2020"
-		],
+        "target": "ES2020",
+        "lib": ["ES2020"],
         "sourceMap": true,
         "rootDir": "src",
         "experimentalDecorators": true,
@@ -18,5 +16,5 @@
         "noFallthroughCasesInSwitch": true,
         "resolveJsonModule": true,
         "removeComments": true
-	}
+    }
 }
