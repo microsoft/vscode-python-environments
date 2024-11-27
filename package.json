@@ -422,7 +422,7 @@
         "package": "webpack --mode production --devtool source-map --config ./webpack.config.js",
         "compile-tests": "tsc -p . --outDir out",
         "watch-tests": "tsc -p . -w --outDir out",
-        "pretest": "npm run lint && npm run compile-tests && npm run compile",
+        "pretest": "npm run compile-tests && npm run compile",
         "lint": "eslint --config=eslint.config.mjs src",
         "unittest": "mocha --config=./build/.mocha.unittests.json",
         "vsce-package": "vsce package -o ms-python-envs-insiders.vsix"
