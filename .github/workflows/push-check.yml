@@ -9,7 +9,11 @@ on:
       - 'release-*'
 
 env:
-  NODE_VERSION: 18.17.1
+  NODE_VERSION: '20.18.0'
+  # Force a path with spaces and to test extension works in these scenarios
+  # Unicode characters are causing 2.7 failures so skip that for now.
+  special-working-directory: './path with spaces'
+  special-working-directory-relative: 'path with spaces'
 
 jobs:
   build-vsix:
@@ -24,3 +28,31 @@ jobs:
         uses: ./.github/actions/build-vsix
         with:
           node_version: ${{ env.NODE_VERSION }}
+
+  ts-unit-tests:
+    name: TypeScript Unit Tests
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+          cache-dependency-path: ${{ env.special-working-directory-relative }}/package-lock.json
+
+      - name: Install Dependencies
+        run: npm ci
+
+      - name: Compile Tests
+        run: npm run pretest
+
+      - name: Run Tests
+        run: npm run unittest
