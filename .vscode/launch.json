@@ -16,7 +16,7 @@
         {
             "args": [
                 "-u=tdd",
-                "--timeout=999999",
+                "--timeout=180000",
                 "--colors",
                 "--recursive",
                 //"--grep", "<suite name>",
