@@ -317,6 +317,7 @@ export class TerminalManagerImpl implements TerminalManager {
                     },
                 );
             } catch (e) {
+                traceError('Failed to activate environment:\r\n', e);
                 showErrorMessage(`Failed to activate ${environment.displayName}`);
             }
         }

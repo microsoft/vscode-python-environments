@@ -151,10 +151,11 @@ export async function handlePackagesCommand(
         if (!packages || packages.length === 0) {
             try {
                 packages = await getPackagesToInstallFromPackageManager(packageManager, environment);
-            } catch (ex: any) {
+            } catch (ex) {
                 if (ex === QuickInputButtons.Back) {
                     return handlePackagesCommand(packageManager, environment, packages);
                 }
+                throw ex;
             }
         }
         if (packages && packages.length > 0) {
@@ -319,7 +320,7 @@ export async function addPythonProject(
             if (results === undefined) {
                 return;
             }
-        } catch (ex: any) {
+        } catch (ex) {
             if (ex === QuickInputButtons.Back) {
                 return addPythonProject(resource, wm, em, pc);
             }

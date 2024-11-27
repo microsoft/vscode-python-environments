@@ -219,6 +219,7 @@ async function getWorkspacePackages(
                 handleItemButton(e.item.uri);
             },
         );
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
     } catch (ex: any) {
         if (ex === QuickInputButtons.Back) {
             throw ex;
@@ -284,6 +285,7 @@ async function getCommonPackagesToInstall(
                 handleItemButton(e.item.uri);
             },
         );
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
     } catch (ex: any) {
         if (ex === QuickInputButtons.Back) {
             throw ex;

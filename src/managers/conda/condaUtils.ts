@@ -147,6 +147,7 @@ async function runConda(args: string[]): Promise<string> {
     return deferred.promise;
 }
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 async function getCondaInfo(): Promise<any> {
     const raw = await runConda(['info', '--envs', '--json']);
     return JSON.parse(raw);
