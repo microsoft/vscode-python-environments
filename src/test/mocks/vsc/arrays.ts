@@ -1,8 +1,6 @@
 // Copyright (c) Microsoft Corporation. All rights reserved.
 // Licensed under the MIT License.
 
-'use strict';
-
 /**
  * Returns the last element of an array.
  * @param array The array.
@@ -364,7 +362,7 @@ export function index<T, R>(array: T[], indexer: (t: T) => string, merger?: (t: 
 export function index<T, R>(
     array: T[],
     indexer: (t: T) => string,
-    merger: (t: T, r: R) => R = (t) => (t as unknown) as R,
+    merger: (t: T, r: R) => R = (t) => t as unknown as R,
 ): Record<string, R> {
     return array.reduce((r, t) => {
         const key = indexer(t);

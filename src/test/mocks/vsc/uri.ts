@@ -1,10 +1,7 @@
-/* eslint-disable max-classes-per-file */
 /*---------------------------------------------------------------------------------------------
  *  Copyright (c) Microsoft Corporation. All rights reserved.
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
-
-'use strict';
 
 import * as pathImport from 'path';
 import { CharCode } from './charCode';
@@ -298,7 +295,6 @@ export class URI implements UriComponents {
             return this;
         }
 
-        // eslint-disable-next-line @typescript-eslint/no-use-before-define
         return new _URI(scheme, authority, path, query, fragment);
     }
 
@@ -314,10 +310,8 @@ export class URI implements UriComponents {
     static parse(value: string, _strict = false): URI {
         const match = _regexp.exec(value);
         if (!match) {
-            // eslint-disable-next-line @typescript-eslint/no-use-before-define
             return new _URI(_empty, _empty, _empty, _empty, _empty);
         }
-        // eslint-disable-next-line @typescript-eslint/no-use-before-define
         return new _URI(
             match[2] || _empty,
             decodeURIComponent(match[4] || _empty),
@@ -372,7 +366,6 @@ export class URI implements UriComponents {
             }
         }
 
-        // eslint-disable-next-line @typescript-eslint/no-use-before-define
         return new _URI('file', authority, path, _empty, _empty);
     }
 
@@ -383,7 +376,6 @@ export class URI implements UriComponents {
         query?: string;
         fragment?: string;
     }): URI {
-        // eslint-disable-next-line @typescript-eslint/no-use-before-define
         return new _URI(
             components.scheme,
             components.authority,
@@ -429,7 +421,6 @@ export class URI implements UriComponents {
         if (data instanceof URI) {
             return data;
         }
-        // eslint-disable-next-line @typescript-eslint/no-use-before-define
         const result = new _URI(data);
         result._formatted = (<UriState>data).external;
         result._fsPath = (<UriState>data)._sep === _pathSepMarker ? (<UriState>data).fsPath : null;

@@ -1,9 +1,5 @@
-/* eslint-disable max-classes-per-file */
 // Copyright (c) Microsoft Corporation. All rights reserved.
 // Licensed under the MIT License.
-
-'use strict';
-
 import { EventEmitter as NodeEventEmitter } from 'events';
 import * as vscode from 'vscode';
 
@@ -82,7 +78,6 @@ export class Disposable {
     }
 }
 
-// eslint-disable-next-line @typescript-eslint/no-namespace
 export namespace l10n {
     export function t(message: string, ...args: unknown[]): string;
     export function t(options: {
@@ -125,7 +120,7 @@ export class EventEmitter<T> implements vscode.EventEmitter<T> {
     public emitter: NodeEventEmitter;
 
     constructor() {
-        this.event = (this.add.bind(this) as unknown) as vscode.Event<T>;
+        this.event = this.add.bind(this) as unknown as vscode.Event<T>;
         this.emitter = new NodeEventEmitter();
     }
 
@@ -144,11 +139,15 @@ export class EventEmitter<T> implements vscode.EventEmitter<T> {
     ): Disposable => {
         const bound = _thisArgs ? listener.bind(_thisArgs) : listener;
         this.emitter.addListener('evt', bound);
-        return {
+        const disposable = {
             dispose: () => {
                 this.emitter.removeListener('evt', bound);
             },
         } as Disposable;
+        if (_disposables) {
+            _disposables.push(disposable);
+        }
+        return disposable;
     };
 }
 

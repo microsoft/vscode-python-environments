@@ -1,8 +1,5 @@
 // Copyright (c) Microsoft Corporation. All rights reserved.
 // Licensed under the MIT License.
-
-'use strict';
-
 import { ConfigurationTarget, WorkspaceConfiguration } from 'vscode';
 
 type SectionType<T> = {
@@ -45,6 +42,7 @@ export class MockWorkspaceConfiguration implements WorkspaceConfiguration {
     public update(
         section: string,
         value: unknown,
+        // eslint-disable-next-line @typescript-eslint/no-unused-vars
         _configurationTarget?: boolean | ConfigurationTarget | undefined,
     ): Promise<void> {
         this.values.set(section, value);

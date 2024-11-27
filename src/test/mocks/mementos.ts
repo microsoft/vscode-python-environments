@@ -12,7 +12,7 @@ export class MockMemento implements Memento {
     }
 
     // @ts-ignore Ignore the return value warning
-    // eslint-disable-next-line @typescript-eslint/explicit-module-boundary-types, @typescript-eslint/no-explicit-any
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     public get(key: any, defaultValue?: any);
 
     public get<T>(key: string, defaultValue?: T): T {
@@ -22,7 +22,7 @@ export class MockMemento implements Memento {
         return exists ? this._value[key] : (defaultValue! as any);
     }
 
-    // eslint-disable-next-line @typescript-eslint/explicit-module-boundary-types, @typescript-eslint/no-explicit-any
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     public update(key: string, value: any): Thenable<void> {
         this._value[key] = value;
         return Promise.resolve();

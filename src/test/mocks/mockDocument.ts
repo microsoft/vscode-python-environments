@@ -1,9 +1,5 @@
-/* eslint-disable max-classes-per-file */
 // Copyright (c) Microsoft Corporation. All rights reserved.
 // Licensed under the MIT License.
-
-'use strict';
-
 import { EndOfLine, Position, Range, TextDocument, TextDocumentContentChangeEvent, TextLine, Uri } from 'vscode';
 
 class MockLine implements TextLine {
@@ -123,7 +119,6 @@ export class MockDocument implements TextDocument {
         return this._isDirty;
     }
 
-    // eslint-disable-next-line class-methods-use-this
     public get isClosed(): boolean {
         return false;
     }
@@ -132,7 +127,6 @@ export class MockDocument implements TextDocument {
         return this._onSave(this);
     }
 
-    // eslint-disable-next-line class-methods-use-this
     public get eol(): EndOfLine {
         return EndOfLine.LF;
     }
@@ -173,7 +167,6 @@ export class MockDocument implements TextDocument {
         return this._contents.substr(startOffset, endOffset - startOffset);
     }
 
-    // eslint-disable-next-line class-methods-use-this
     public getWordRangeAtPosition(position: Position, regexp?: RegExp | undefined): Range | undefined {
         if (!regexp && position.line > 0) {
             // use default when custom-regexp isn't provided
@@ -183,12 +176,10 @@ export class MockDocument implements TextDocument {
         return undefined;
     }
 
-    // eslint-disable-next-line class-methods-use-this
     public validateRange(range: Range): Range {
         return range;
     }
 
-    // eslint-disable-next-line class-methods-use-this
     public validatePosition(position: Position): Position {
         return position;
     }
@@ -211,7 +202,6 @@ export class MockDocument implements TextDocument {
         });
     }
 
-    // eslint-disable-next-line class-methods-use-this
     private createTextLine(line: string, index: number, prevLine: MockLine | undefined): MockLine {
         return new MockLine(
             line,

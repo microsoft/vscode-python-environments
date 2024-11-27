@@ -3,6 +3,7 @@ import { resolveVariables } from '../../common/utils/internalVariables';
 import * as workspaceApi from '../../common/workspace.apis';
 import * as sinon from 'sinon';
 import * as path from 'path';
+import { Uri } from 'vscode';
 
 suite('Internal Variable substitution', () => {
     let getWorkspaceFolderStub: sinon.SinonStub;
@@ -37,7 +38,7 @@ suite('Internal Variable substitution', () => {
         test(`Resolve ${item.variable}`, () => {
             // Two times here to ensure that both instances are handled
             const value = `Some ${item.variable} text ${item.variable}`;
-            const result = resolveVariables(value, project.uri as any);
+            const result = resolveVariables(value, project.uri as unknown as Uri);
             assert.equal(result, `Some ${item.substitution} text ${item.substitution}`);
         });
     });

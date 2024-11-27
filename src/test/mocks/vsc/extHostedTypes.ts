@@ -1,10 +1,6 @@
-/* eslint-disable @typescript-eslint/explicit-module-boundary-types */
 /* eslint-disable @typescript-eslint/no-explicit-any */
-/* eslint-disable max-classes-per-file */
 // Copyright (c) Microsoft Corporation. All rights reserved.
 // Licensed under the MIT License.
-
-'use strict';
 
 import { relative } from 'path';
 import * as vscode from 'vscode';
@@ -450,12 +446,12 @@ export class Selection extends Range {
     }
 
     toJSON(): [Position, Position] {
-        return ({
+        return {
             start: this.start,
             end: this.end,
             active: this.active,
             anchor: this.anchor,
-        } as unknown) as [Position, Position];
+        } as unknown as [Position, Position];
     }
 }
 
@@ -528,7 +524,6 @@ export class TextEdit {
 }
 
 export class WorkspaceEdit implements vscode.WorkspaceEdit {
-    // eslint-disable-next-line class-methods-use-this
     appendNotebookCellOutput(
         _uri: vscode.Uri,
         _index: number,
@@ -538,7 +533,6 @@ export class WorkspaceEdit implements vscode.WorkspaceEdit {
         // Noop.
     }
 
-    // eslint-disable-next-line class-methods-use-this
     replaceNotebookCellOutputItems(
         _uri: vscode.Uri,
         _index: number,
@@ -549,7 +543,6 @@ export class WorkspaceEdit implements vscode.WorkspaceEdit {
         // Noop.
     }
 
-    // eslint-disable-next-line class-methods-use-this
     appendNotebookCellOutputItems(
         _uri: vscode.Uri,
         _index: number,
@@ -560,7 +553,6 @@ export class WorkspaceEdit implements vscode.WorkspaceEdit {
         // Noop.
     }
 
-    // eslint-disable-next-line class-methods-use-this
     replaceNotebookCells(
         _uri: vscode.Uri,
         _start: number,
@@ -571,7 +563,6 @@ export class WorkspaceEdit implements vscode.WorkspaceEdit {
         // Noop.
     }
 
-    // eslint-disable-next-line class-methods-use-this
     replaceNotebookCellOutput(
         _uri: vscode.Uri,
         _index: number,
@@ -603,17 +594,14 @@ export class WorkspaceEdit implements vscode.WorkspaceEdit {
     // 	return this._resourceEdits.map(({ from, to }) => (<[vscode.Uri, vscode.Uri]>[from, to]));
     // }
 
-    // eslint-disable-next-line class-methods-use-this
     createFile(_uri: vscode.Uri, _options?: { overwrite?: boolean; ignoreIfExists?: boolean }): void {
         throw new Error('Method not implemented.');
     }
 
-    // eslint-disable-next-line class-methods-use-this
     deleteFile(_uri: vscode.Uri, _options?: { recursive?: boolean; ignoreIfNotExists?: boolean }): void {
         throw new Error('Method not implemented.');
     }
 
-    // eslint-disable-next-line class-methods-use-this
     renameFile(
         _oldUri: vscode.Uri,
         _newUri: vscode.Uri,
@@ -648,7 +636,7 @@ export class WorkspaceEdit implements vscode.WorkspaceEdit {
     set(uri: vscUri.URI, edits: readonly unknown[]): void {
         let data = this._textEdits.get(uri.toString());
         if (!data) {
-            data = { seq: this._seqPool += 1, uri, edits: [] };
+            data = { seq: (this._seqPool += 1), uri, edits: [] };
             this._textEdits.set(uri.toString(), data);
         }
         if (!edits) {
@@ -884,7 +872,7 @@ export class Diagnostic {
 
     toJSON(): { severity: DiagnosticSeverity; message: string; range: Range; source: string; code: string | number } {
         return {
-            severity: (DiagnosticSeverity[this.severity] as unknown) as DiagnosticSeverity,
+            severity: DiagnosticSeverity[this.severity] as unknown as DiagnosticSeverity,
             message: this.message,
             range: this.range,
             source: this.source,
@@ -933,7 +921,7 @@ export class DocumentHighlight {
     toJSON(): { range: Range; kind: DocumentHighlightKind } {
         return {
             range: this.range,
-            kind: (DocumentHighlightKind[this.kind] as unknown) as DocumentHighlightKind,
+            kind: DocumentHighlightKind[this.kind] as unknown as DocumentHighlightKind,
         };
     }
 }
@@ -1008,7 +996,7 @@ export class SymbolInformation {
     toJSON(): { name: string; kind: SymbolKind; location: Location; containerName: string } {
         return {
             name: this.name,
-            kind: (SymbolKind[this.kind] as unknown) as SymbolKind,
+            kind: SymbolKind[this.kind] as unknown as SymbolKind,
             location: this.location,
             containerName: this.containerName,
         };
@@ -1269,7 +1257,7 @@ export class CompletionItem {
         return {
             label: this.label,
             label2: this.label2,
-            kind: this.kind && ((CompletionItemKind[this.kind] as unknown) as CompletionItemKind),
+            kind: this.kind && (CompletionItemKind[this.kind] as unknown as CompletionItemKind),
             detail: this.detail,
             documentation: this.documentation,
             sortText: this.sortText,
@@ -1362,7 +1350,6 @@ export enum TextEditorRevealType {
     AtTop = 3,
 }
 
-// eslint-disable-next-line import/export
 export enum TextEditorSelectionChangeKind {
     Keyboard = 1,
     Mouse = 2,
@@ -1391,7 +1378,6 @@ export enum DecorationRangeBehavior {
     ClosedOpen = 3,
 }
 
-// eslint-disable-next-line import/export, @typescript-eslint/no-namespace
 export namespace TextEditorSelectionChangeKind {
     export function fromValue(s: string): TextEditorSelectionChangeKind | undefined {
         switch (s) {
@@ -1610,7 +1596,6 @@ export class ProcessExecution implements vscode.ProcessExecution {
         this._options = value;
     }
 
-    // eslint-disable-next-line class-methods-use-this
     public computeId(): string {
         // const hash = crypto.createHash('md5');
         // hash.update('process');
@@ -1706,7 +1691,6 @@ export class ShellExecution implements vscode.ShellExecution {
         this._options = value;
     }
 
-    // eslint-disable-next-line class-methods-use-this
     public computeId(): string {
         // const hash = crypto.createHash('md5');
         // hash.update('shell');
@@ -2080,7 +2064,6 @@ export class RelativePattern implements IRelativePattern {
         this.pattern = pattern;
     }
 
-    // eslint-disable-next-line class-methods-use-this
     public pathToRelative(from: string, to: string): string {
         return relative(from, to);
     }
@@ -2216,7 +2199,6 @@ export class FileSystemError extends Error {
         }
     }
 
-    // eslint-disable-next-line class-methods-use-this
     public get code(): string {
         return '';
     }

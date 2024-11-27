@@ -28,9 +28,6 @@ jobs:
   ts-unit-tests:
     name: TypeScript Unit Tests
     runs-on: ${{ matrix.os }}
-    defaults:
-      run:
-        working-directory: ${{ env.special-working-directory }}
     strategy:
       fail-fast: false
       matrix:

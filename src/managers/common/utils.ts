@@ -55,7 +55,7 @@ export function isGreater(a: string | undefined, b: string | undefined): boolean
                 return false;
             }
         }
-    } catch (ex) {
+    } catch {
         return false;
     }
     return false;

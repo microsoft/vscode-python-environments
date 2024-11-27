@@ -26,6 +26,6 @@ export async function registerCondaFeatures(
             api.registerPackageManager(packageManager),
         );
     } catch (ex) {
-        traceInfo('Conda not found, turning off conda features.');
+        traceInfo('Conda not found, turning off conda features.', ex);
     }
 }
