@@ -10,10 +10,6 @@ on:
 
 env:
   NODE_VERSION: '20.18.0'
-  # Force a path with spaces and to test extension works in these scenarios
-  # Unicode characters are causing 2.7 failures so skip that for now.
-  special-working-directory: './path with spaces'
-  special-working-directory-relative: 'path with spaces'
 
 jobs:
   build-vsix:
@@ -49,7 +45,6 @@ jobs:
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: 'npm'
-          cache-dependency-path: ${{ env.special-working-directory-relative }}/package-lock.json
 
       - name: Install Dependencies
         run: npm ci
