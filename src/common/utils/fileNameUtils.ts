@@ -1,7 +1,8 @@
 import * as path from 'path';
 import * as fsapi from 'fs-extra';
 import { KNOWN_FILES, KNOWN_TEMPLATE_ENDINGS } from '../constants';
-import { Uri, workspace } from 'vscode';
+import { Uri } from 'vscode';
+import { getWorkspaceFolders } from '../workspace.apis';
 
 export function isPythonProjectFile(fileName: string): boolean {
     const baseName = path.basename(fileName).toLowerCase();
@@ -20,14 +21,15 @@ export async function getAbsolutePath(fsPath: string): Promise<Uri | undefined> 
         return Uri.file(fsPath);
     }
 
-    if (workspace.workspaceFolders && workspace.workspaceFolders.length > 0) {
-        if (workspace.workspaceFolders.length === 1) {
-            const absPath = path.resolve(workspace.workspaceFolders[0].uri.fsPath, fsPath);
+    const workspaceFolders = getWorkspaceFolders() ?? [];
+    if (workspaceFolders.length > 0) {
+        if (workspaceFolders.length === 1) {
+            const absPath = path.resolve(workspaceFolders[0].uri.fsPath, fsPath);
             if (await fsapi.pathExists(absPath)) {
                 return Uri.file(absPath);
             }
         } else {
-            const workspaces = Array.from(workspace.workspaceFolders)
+            const workspaces = Array.from(workspaceFolders)
                 .sort((a, b) => a.uri.fsPath.length - b.uri.fsPath.length)
                 .reverse();
             for (const folder of workspaces) {
