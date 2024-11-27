@@ -109,7 +109,9 @@ function getPythonInfo(env: NativeEnvInfo): PythonEnvironmentInfo {
 
         const shellActivation: Map<TerminalShellType, PythonCommandRunConfiguration[]> = new Map();
         shellActivation.set(TerminalShellType.bash, [{ executable: 'source', args: [path.join(binDir, 'activate')] }]);
-        shellActivation.set(TerminalShellType.powershell, [{ executable: path.join(binDir, 'Activate.ps1') }]);
+        shellActivation.set(TerminalShellType.powershell, [
+            { executable: '&', args: [path.join(binDir, 'Activate.ps1')] },
+        ]);
         shellActivation.set(TerminalShellType.commandPrompt, [{ executable: path.join(binDir, 'activate.bat') }]);
         shellActivation.set(TerminalShellType.unknown, [{ executable: path.join(binDir, 'activate') }]);
 
