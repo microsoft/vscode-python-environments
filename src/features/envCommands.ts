@@ -6,7 +6,7 @@ import {
     ProjectCreators,
     PythonProjectManager,
 } from '../internal.api';
-import { traceError, traceVerbose } from '../common/logging';
+import { traceError, traceInfo, traceVerbose } from '../common/logging';
 import { PythonEnvironment, PythonEnvironmentApi, PythonProject, PythonProjectCreator } from '../api';
 import * as path from 'path';
 import {
@@ -71,11 +71,16 @@ export async function createEnvironmentCommand(
 ): Promise<PythonEnvironment | undefined> {
     if (context instanceof EnvManagerTreeItem) {
         const manager = (context as EnvManagerTreeItem).manager;
-        const projects = await pickProjectMany(pm.getProjects());
-        if (projects) {
-            return await manager.create(projects.length === 0 ? 'global' : projects.map((p) => p.uri));
-        } else {
-            traceError(`No projects found for ${context}`);
+        const projects = pm.getProjects();
+        if (projects.length === 0) {
+            return await manager.create('global');
+        } else if (projects.length > 0) {
+            const selected = await pickProjectMany(projects);
+            if (selected) {
+                return await manager.create(selected.length === 0 ? 'global' : selected.map((p) => p.uri));
+            } else {
+                traceInfo('No project selected or global condition met for environment creation');
+            }
         }
     } else if (context instanceof Uri) {
         const manager = em.getEnvironmentManager(context as Uri);
