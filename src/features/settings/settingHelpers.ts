@@ -101,7 +101,7 @@ export async function setAllManagerSettings(edits: EditAllManagerSettings[]): Pr
 
     noWorkspace.forEach((e) => {
         if (e.project) {
-            traceError(`Unable to find workspace for ${e.project.uri.fsPath}`);
+            traceInfo(`Unable to find workspace for ${e.project.uri.fsPath}, will use global settings for this.`);
         }
     });
 

@@ -203,10 +203,24 @@ export async function setEnvironmentCommand(
         await setEnvironmentCommand([context], em, wm);
     } else if (context === undefined) {
         try {
-            const projects = await pickProjectMany(wm.getProjects());
+            const projects = wm.getProjects();
             if (projects && projects.length > 0) {
-                const uris = projects.map((p) => p.uri);
-                await setEnvironmentCommand(uris, em, wm);
+                const selected = await pickProjectMany(projects);
+                if (selected && selected.length > 0) {
+                    const uris = selected.map((p) => p.uri);
+                    await setEnvironmentCommand(uris, em, wm);
+                }
+            } else {
+                const globalEnvManager = em.getEnvironmentManager(undefined);
+                const recommended = globalEnvManager ? await globalEnvManager.get(undefined) : undefined;
+                const selected = await pickEnvironment(em.managers, globalEnvManager ? [globalEnvManager] : [], {
+                    projects: [],
+                    recommended,
+                    showBackButton: false,
+                });
+                if (selected) {
+                    await em.setEnvironments('global', selected);
+                }
             }
         } catch (ex) {
             if (ex === QuickInputButtons.Back) {
@@ -487,7 +501,7 @@ export async function runAsTaskCommand(item: unknown, api: PythonEnvironmentApi)
         const uri = item as Uri;
         const project = api.getPythonProject(uri);
         const environment = await api.getEnvironment(uri);
-        if (environment && project) {
+        if (environment) {
             return await runAsTask(
                 environment,
                 {

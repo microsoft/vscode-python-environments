@@ -272,7 +272,7 @@ export class PythonEnvironmentManagers implements EnvironmentManagers {
         }
     }
 
-    public async setEnvironments(scope: Uri[], environment?: PythonEnvironment): Promise<void> {
+    public async setEnvironments(scope: Uri[] | string, environment?: PythonEnvironment): Promise<void> {
         if (environment) {
             const manager = this.managers.find((m) => m.id === environment.envId.managerId);
             if (!manager) {
@@ -287,50 +287,87 @@ export class PythonEnvironmentManagers implements EnvironmentManagers {
             const promises: Promise<void>[] = [];
             const settings: EditAllManagerSettings[] = [];
             const events: DidChangeEnvironmentEventArgs[] = [];
-            scope.forEach((uri) => {
-                const m = this.getEnvironmentManager(uri);
-                promises.push(manager.set(uri, environment));
+            if (Array.isArray(scope) && scope.every((s) => s instanceof Uri)) {
+                scope.forEach((uri) => {
+                    const m = this.getEnvironmentManager(uri);
+                    promises.push(manager.set(uri, environment));
+                    if (manager.id !== m?.id) {
+                        settings.push({
+                            project: this.pm.get(uri),
+                            envManager: manager.id,
+                            packageManager: manager.preferredPackageManagerId,
+                        });
+                    }
+
+                    const project = this.pm.get(uri);
+                    const oldEnv = this._previousEnvironments.get(project?.uri.toString() ?? 'global');
+                    if (oldEnv?.envId.id !== environment?.envId.id) {
+                        this._previousEnvironments.set(project?.uri.toString() ?? 'global', environment);
+                        events.push({ uri: project?.uri, new: environment, old: oldEnv });
+                    }
+                });
+            } else if (typeof scope === 'string' && scope === 'global') {
+                const m = this.getEnvironmentManager(undefined);
+                promises.push(manager.set(undefined, environment));
                 if (manager.id !== m?.id) {
                     settings.push({
-                        project: this.pm.get(uri),
+                        project: undefined,
                         envManager: manager.id,
                         packageManager: manager.preferredPackageManagerId,
                     });
                 }
 
-                const project = this.pm.get(uri);
-                const oldEnv = this._previousEnvironments.get(project?.uri.toString() ?? 'global');
+                const oldEnv = this._previousEnvironments.get('global');
                 if (oldEnv?.envId.id !== environment?.envId.id) {
-                    this._previousEnvironments.set(project?.uri.toString() ?? 'global', environment);
-                    events.push({ uri: project?.uri, new: environment, old: oldEnv });
+                    this._previousEnvironments.set('global', environment);
+                    events.push({ uri: undefined, new: environment, old: oldEnv });
                 }
-            });
+            }
             await Promise.all(promises);
             await setAllManagerSettings(settings);
             setImmediate(() => events.forEach((e) => this._onDidChangeEnvironmentFiltered.fire(e)));
         } else {
             const promises: Promise<void>[] = [];
             const events: DidChangeEnvironmentEventArgs[] = [];
-            scope.forEach((uri) => {
-                const manager = this.getEnvironmentManager(uri);
+            if (Array.isArray(scope) && scope.every((s) => s instanceof Uri)) {
+                scope.forEach((uri) => {
+                    const manager = this.getEnvironmentManager(uri);
+                    if (manager) {
+                        const setAndAddEvent = async () => {
+                            await manager.set(uri);
+
+                            const project = this.pm.get(uri);
+
+                            // Always get the new first, then compare with the old. This has minor impact on the ordering of
+                            // events. But it ensures that we always get the latest environment at the time of this call.
+                            const newEnv = await manager.get(uri);
+                            const oldEnv = this._previousEnvironments.get(project?.uri.toString() ?? 'global');
+                            if (oldEnv?.envId.id !== newEnv?.envId.id) {
+                                this._previousEnvironments.set(project?.uri.toString() ?? 'global', newEnv);
+                                events.push({ uri: project?.uri, new: newEnv, old: oldEnv });
+                            }
+                        };
+                        promises.push(setAndAddEvent());
+                    }
+                });
+            } else if (typeof scope === 'string' && scope === 'global') {
+                const manager = this.getEnvironmentManager(undefined);
                 if (manager) {
                     const setAndAddEvent = async () => {
-                        await manager.set(uri);
-
-                        const project = this.pm.get(uri);
+                        await manager.set(undefined);
 
                         // Always get the new first, then compare with the old. This has minor impact on the ordering of
                         // events. But it ensures that we always get the latest environment at the time of this call.
-                        const newEnv = await manager.get(uri);
-                        const oldEnv = this._previousEnvironments.get(project?.uri.toString() ?? 'global');
+                        const newEnv = await manager.get(undefined);
+                        const oldEnv = this._previousEnvironments.get('global');
                         if (oldEnv?.envId.id !== newEnv?.envId.id) {
-                            this._previousEnvironments.set(project?.uri.toString() ?? 'global', newEnv);
-                            events.push({ uri: project?.uri, new: newEnv, old: oldEnv });
+                            this._previousEnvironments.set('global', newEnv);
+                            events.push({ uri: undefined, new: newEnv, old: oldEnv });
                         }
                     };
                     promises.push(setAndAddEvent());
                 }
-            });
+            }
             await Promise.all(promises);
             setImmediate(() => events.forEach((e) => this._onDidChangeEnvironmentFiltered.fire(e)));
         }

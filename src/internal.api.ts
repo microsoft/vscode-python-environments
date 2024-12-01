@@ -88,7 +88,7 @@ export interface EnvironmentManagers extends Disposable {
     clearCache(scope: EnvironmentManagerScope): Promise<void>;
 
     setEnvironment(scope: SetEnvironmentScope, environment?: PythonEnvironment): Promise<void>;
-    setEnvironments(scope: Uri[], environment?: PythonEnvironment): Promise<void>;
+    setEnvironments(scope: Uri[] | string, environment?: PythonEnvironment): Promise<void>;
     getEnvironment(scope: GetEnvironmentScope): Promise<PythonEnvironment | undefined>;
 
     getProjectEnvManagers(uris: Uri[]): InternalEnvironmentManager[];

@@ -21,6 +21,7 @@ import {
     ProjectEnvironmentInfo,
     ProjectPackage,
     ProjectPackageRootInfoTreeItem,
+    GlobalProjectItem,
 } from './treeViewItems';
 import { onDidChangeConfiguration } from '../../common/workspace.apis';
 import { createSimpleDebounce } from '../../common/utils/debounce';
@@ -100,12 +101,11 @@ export class WorkspaceView implements TreeDataProvider<ProjectTreeItem> {
     reveal(context: Uri | PythonEnvironment): PythonEnvironment | undefined {
         if (context instanceof Uri) {
             const pw = this.projectManager.get(context);
-            if (pw) {
-                const view = this.revealMap.get(pw.uri.fsPath);
-                if (view) {
-                    this.revealInternal(view);
-                    return view.environment;
-                }
+            const key = pw ? pw.uri.fsPath : 'global';
+            const view = this.revealMap.get(key);
+            if (view) {
+                this.revealInternal(view);
+                return view.environment;
             }
         } else {
             const view = Array.from(this.revealMap.values()).find((v) => v.environment.envId.id === context.envId.id);
@@ -128,11 +128,16 @@ export class WorkspaceView implements TreeDataProvider<ProjectTreeItem> {
         if (element === undefined) {
             this.projectViews.clear();
             const views: ProjectTreeItem[] = [];
-            this.projectManager.getProjects().forEach((w) => {
+            const projects = this.projectManager.getProjects();
+            projects.forEach((w) => {
                 const view = new ProjectItem(w);
                 this.projectViews.set(w.uri.fsPath, view);
                 views.push(view);
             });
+
+            if (projects.length === 0) {
+                views.push(new GlobalProjectItem());
+            }
 
             return views;
         }
@@ -152,7 +157,8 @@ export class WorkspaceView implements TreeDataProvider<ProjectTreeItem> {
                 ];
             }
 
-            const manager = this.envManagers.getEnvironmentManager(projectItem.project.uri);
+            const uri = projectItem.id === 'global' ? undefined : projectItem.project.uri;
+            const manager = this.envManagers.getEnvironmentManager(uri);
             if (!manager) {
                 return [
                     new NoProjectEnvironment(
@@ -164,7 +170,7 @@ export class WorkspaceView implements TreeDataProvider<ProjectTreeItem> {
                 ];
             }
 
-            const environment = await manager?.get(projectItem.project.uri);
+            const environment = await manager?.get(uri);
             if (!environment) {
                 return [
                     new NoProjectEnvironment(
@@ -175,7 +181,7 @@ export class WorkspaceView implements TreeDataProvider<ProjectTreeItem> {
                 ];
             }
             const view = new ProjectEnvironment(projectItem, environment);
-            this.revealMap.set(projectItem.project.uri.fsPath, view);
+            this.revealMap.set(uri ? uri.fsPath : 'global', view);
             return [view];
         }
 

@@ -310,7 +310,7 @@
                 },
                 {
                     "command": "python-envs.removePythonProject",
-                    "when": "view == python-projects && viewItem == python-workspace"
+                    "when": "view == python-projects && viewItem == python-workspace-removable"
                 },
                 {
                     "command": "python-envs.set",
