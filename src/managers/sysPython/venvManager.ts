@@ -116,6 +116,10 @@ export class VenvManager implements EnvironmentManager {
             const newEnv = await this.get(uri);
             this._onDidChangeEnvironment.fire({ uri, old: environment, new: newEnv });
         }
+
+        if (this.globalEnv?.envId.id === environment.envId.id) {
+            await this.set(undefined, undefined);
+        }
     }
 
     private updateCollection(environment: PythonEnvironment): void {
@@ -204,9 +208,12 @@ export class VenvManager implements EnvironmentManager {
 
     async set(scope: SetEnvironmentScope, environment?: PythonEnvironment): Promise<void> {
         if (scope === undefined) {
+            const before = this.globalEnv;
             this.globalEnv = environment;
-            if (environment) {
-                await setVenvForGlobal(environment.environmentPath.fsPath);
+            await setVenvForGlobal(environment?.environmentPath.fsPath);
+            await this.resetGlobalEnv();
+            if (before?.envId.id !== this.globalEnv?.envId.id) {
+                this._onDidChangeEnvironment.fire({ uri: undefined, old: before, new: this.globalEnv });
             }
             return;
         }
@@ -217,14 +224,16 @@ export class VenvManager implements EnvironmentManager {
                 return;
             }
 
+            const before = this.fsPathToEnv.get(pw.uri.fsPath);
             if (environment) {
-                const before = this.fsPathToEnv.get(pw.uri.fsPath);
                 this.fsPathToEnv.set(pw.uri.fsPath, environment);
                 await setVenvForWorkspace(pw.uri.fsPath, environment.environmentPath.fsPath);
-                this._onDidChangeEnvironment.fire({ uri: scope, old: before, new: environment });
             } else {
                 this.fsPathToEnv.delete(pw.uri.fsPath);
                 await setVenvForWorkspace(pw.uri.fsPath, undefined);
+            }
+            if (before?.envId.id !== environment?.envId.id) {
+                this._onDidChangeEnvironment.fire({ uri: scope, old: before, new: environment });
             }
         }
     }
@@ -299,11 +308,15 @@ export class VenvManager implements EnvironmentManager {
         }
     }
 
-    private async loadEnvMap() {
+    private async resetGlobalEnv() {
         this.globalEnv = undefined;
-        this.fsPathToEnv.clear();
-
         const globals = await this.baseManager.getEnvironments('global');
+        await this.loadGlobalEnv(globals);
+    }
+
+    private async loadGlobalEnv(globals: PythonEnvironment[]) {
+        this.globalEnv = undefined;
+
         // Try to find a global environment
         const fsPath = await getVenvForGlobal();
 
@@ -331,6 +344,13 @@ export class VenvManager implements EnvironmentManager {
         if (!this.globalEnv) {
             this.globalEnv = getLatest(globals);
         }
+    }
+
+    private async loadEnvMap() {
+        const globals = await this.baseManager.getEnvironments('global');
+        await this.loadGlobalEnv(globals);
+
+        this.fsPathToEnv.clear();
 
         const sorted = sortEnvironments(this.collection);
         const paths = this.api.getPythonProjects().map((p) => path.normalize(p.uri.fsPath));

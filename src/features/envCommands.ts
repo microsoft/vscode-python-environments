@@ -75,15 +75,16 @@ export async function createEnvironmentCommand(
         if (projects.length === 0) {
             const env = await manager.create('global');
             if (env) {
-                await manager.set(undefined, env);
+                await em.setEnvironments('global', env);
             }
             return env;
         } else if (projects.length > 0) {
             const selected = await pickProjectMany(projects);
             if (selected) {
-                const env = await manager.create(selected.length === 0 ? 'global' : selected.map((p) => p.uri));
+                const scope = selected.length === 0 ? 'global' : selected.map((p) => p.uri);
+                const env = await manager.create(scope);
                 if (env) {
-                    await manager.set(undefined, env);
+                    await em.setEnvironments(scope, env);
                 }
                 return env;
             } else {

@@ -274,7 +274,7 @@ export class NoProjectEnvironment implements ProjectTreeItem {
     public readonly id: string;
     public readonly treeItem: TreeItem;
     constructor(
-        public readonly project: PythonProject,
+        public readonly project: PythonProject | undefined,
         public readonly parent: ProjectItem,
         private readonly label: string,
         private readonly description?: string,
@@ -291,7 +291,7 @@ export class NoProjectEnvironment implements ProjectTreeItem {
         item.command = {
             command: 'python-envs.set',
             title: 'Set Environment',
-            arguments: [this.project.uri],
+            arguments: this.project ? [this.project.uri] : undefined,
         };
         this.treeItem = item;
     }
