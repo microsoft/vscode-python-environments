@@ -330,37 +330,11 @@ export async function createPythonVenv(
                 }
 
                 const resolved = await nativeFinder.resolve(pythonPath);
-                if (resolved.version && resolved.executable && resolved.prefix) {
-                    const sv = shortVersion(resolved.version);
-                    const env = api.createPythonEnvironmentItem(
-                        {
-                            name: `${name} (${sv})`,
-                            displayName: `${name} (${sv})`,
-                            shortDisplayName: `${name}:${sv}`,
-                            displayPath: pythonPath,
-                            version: resolved.version,
-                            description: pythonPath,
-                            environmentPath: Uri.file(pythonPath),
-                            iconPath: Uri.file(path.join(EXTENSION_ROOT_DIR, 'files', '__icon__.py')),
-                            sysPrefix: resolved.prefix,
-                            execInfo: {
-                                run: {
-                                    executable: pythonPath,
-                                    args: [],
-                                },
-                            },
-                        },
-                        manager,
-                    );
-                    log.info(`Created venv environment: ${name}`);
-
-                    if (packages?.length > 0) {
-                        await api.installPackages(env, packages, { upgrade: false });
-                    }
-                    return env;
-                } else {
-                    throw new Error('Could not resolve the virtual environment');
+                const env = api.createPythonEnvironmentItem(getPythonInfo(resolved), manager);
+                if (packages?.length > 0) {
+                    await api.installPackages(env, packages, { upgrade: false });
                 }
+                return env;
             } catch (e) {
                 log.error(`Failed to create virtual environment: ${e}`);
                 showErrorMessage(`Failed to create virtual environment`);
