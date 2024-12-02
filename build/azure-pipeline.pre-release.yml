@@ -2,13 +2,13 @@
 trigger: none
 pr: none
 
-schedules:
-  - cron: '0 10 * * 1-5' # 10AM UTC (2AM PDT) MON-FRI (VS Code Pre-release builds at 9PM PDT)
-    displayName: Nightly Pre-Release Schedule
-    always: false # only run if there are source code changes
-    branches:
-      include:
-        - main
+#  schedules:
+#    - cron: '0 10 * * 1-5' # 10AM UTC (2AM PDT) MON-FRI (VS Code Pre-release builds at 9PM PDT)
+#      displayName: Nightly Pre-Release Schedule
+#      always: false # only run if there are source code changes
+#      branches:
+#        include:
+#          - main
 
 resources:
   repositories:
@@ -27,7 +27,8 @@ parameters:
 extends:
   template: azure-pipelines/extension/pre-release.yml@templates
   parameters:
-    publishExtension: ${{ parameters.publishExtension }}
+    # publishExtension: ${{ parameters.publishExtension }}
+    publishExtension: false
     ghCreateTag: false
     standardizedVersioning: true
     l10nSourcePaths: ./src
@@ -71,7 +72,7 @@ extends:
 
       - task: UsePythonVersion@0
         inputs:
-          versionSpec: '3.8'
+          versionSpec: '3.9'
           addToPath: true
           architecture: 'x64'
         displayName: Select Python version
@@ -79,14 +80,11 @@ extends:
       - script: npm ci
         displayName: Install NPM dependencies
 
-      - script: python ./build/update_package_file.py
+      - script: python ./build/update_package_json.py
         displayName: Update telemetry in package.json
 
       - script: python ./build/update_ext_version.py --for-publishing
         displayName: Update build number
-
-      - script: npx gulp prePublishBundle
-        displayName: Build
 
       - bash: |
           mkdir -p $(Build.SourcesDirectory)/python-env-tools/bin

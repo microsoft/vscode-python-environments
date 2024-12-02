@@ -1,9 +1,4 @@
 trigger: none
-#   branches:
-#     include:
-#       - release*
-#   tags:
-#     include: ['*']
 pr: none
 
 resources:
@@ -26,10 +21,42 @@ extends:
     l10nSourcePaths: ./src
     publishExtension: ${{ parameters.publishExtension }}
     ghCreateTag: true
+
+    buildPlatforms:
+      - name: Linux
+        vsceTarget: 'web'
+      - name: Linux
+        packageArch: arm64
+        vsceTarget: linux-arm64
+      - name: Linux
+        packageArch: arm
+        vsceTarget: linux-armhf
+      - name: Linux
+        packageArch: x64
+        vsceTarget: linux-x64
+      - name: Linux
+        packageArch: arm64
+        vsceTarget: alpine-arm64
+      - name: Linux
+        packageArch: x64
+        vsceTarget: alpine-x64
+      - name: MacOS
+        packageArch: arm64
+        vsceTarget: darwin-arm64
+      - name: MacOS
+        packageArch: x64
+        vsceTarget: darwin-x64
+      - name: Windows
+        packageArch: arm
+        vsceTarget: win32-arm64
+      - name: Windows
+        packageArch: x64
+        vsceTarget: win32-x64
+
     buildSteps:
       - task: NodeTool@0
         inputs:
-          versionSpec: '18.17.0'
+          versionSpec: '20.18.0'
         displayName: Select Node version
 
       - task: UsePythonVersion@0
@@ -42,14 +69,8 @@ extends:
       - script: npm ci
         displayName: Install NPM dependencies
 
-      - script: python -m pip install -U pip
-        displayName: Upgrade pip
-
-      - script: python -m pip install wheel
-        displayName: Install wheel
-
-      - script: python -m pip install nox
-        displayName: Install wheel
+      - script: python ./build/update_package_json.py
+        displayName: Update telemetry in package.json
 
       - script: python ./build/update_ext_version.py --release --for-publishing
         displayName: Update build number
