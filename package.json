@@ -2,7 +2,7 @@
     "name": "vscode-python-envs",
     "displayName": "Python Environment Manager",
     "description": "Provides a unified python environment experience",
-    "version": "0.0.0",
+    "version": "0.1.0-dev",
     "publisher": "ms-python",
     "engines": {
         "vscode": "^1.93.0"
