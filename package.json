@@ -286,7 +286,7 @@
                 {
                     "command": "python-envs.createTerminal",
                     "group": "inline",
-                    "when": "view == env-managers && viewItem =~ /.*pythonEnvironment.*/"
+                    "when": "view == env-managers && viewItem =~ /.*pythonEnvironment.*activatable.*/"
                 },
                 {
                     "command": "python-envs.refreshPackages",
@@ -315,16 +315,16 @@
                 {
                     "command": "python-envs.set",
                     "group": "inline",
-                    "when": "view == python-projects && viewItem == python-workspace"
+                    "when": "view == python-projects && viewItem =~ /.*python-workspace.*/"
                 },
                 {
                     "command": "python-envs.reset",
-                    "when": "view == python-projects && viewItem == python-workspace"
+                    "when": "view == python-projects && viewItem =~ /.*python-workspace.*/"
                 },
                 {
                     "command": "python-envs.createTerminal",
                     "group": "inline",
-                    "when": "view == python-projects && viewItem == python-workspace"
+                    "when": "view == python-projects && viewItem =~ /.*python-workspace.*/"
                 }
             ],
             "view/title": [

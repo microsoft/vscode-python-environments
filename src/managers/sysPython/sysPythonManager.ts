@@ -15,6 +15,7 @@ import {
     SetEnvironmentScope,
 } from '../../api';
 import {
+    clearSystemEnvCache,
     getSystemEnvForGlobal,
     getSystemEnvForWorkspace,
     refreshPythons,
@@ -191,6 +192,10 @@ export class SysPythonManager implements EnvironmentManager {
         }
 
         return resolved;
+    }
+
+    async clearCache(): Promise<void> {
+        await clearSystemEnvCache();
     }
 
     private findEnvironmentByPath(fsPath: string): PythonEnvironment | undefined {

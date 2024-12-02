@@ -14,11 +14,11 @@ This extension provides an Environments view, which can be accessed via the VS C
 
 By default, the extension uses the `venv` environment manager. This default manager determines how environments are created, managed, and where packages are installed. However, users can change the default by setting the `python-envs.defaultEnvManager` to a different environment manager. The following environment managers are supported out of the box:
 
-|Id| name |Description|
-|---|----|--|
-|ms-python.python:venv| `venv` |The default environment manager. It is a built-in environment manager provided by the Python standard library.|
-|ms-python.python:system| System Installed Python | These are global Python installs on your system. These are typically installed with your OS, from [python.org](https://www.python.org/), or any other OS package manager. |
-|ms-python.python:conda| `conda` | The [Anaconda](https://www.anaconda.com/) environment manager. |
+| Id                      | name                    | Description                                                                                                                                                               |
+| ----------------------- | ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| ms-python.python:venv   | `venv`                  | The default environment manager. It is a built-in environment manager provided by the Python standard library.                                                            |
+| ms-python.python:system | System Installed Python | These are global Python installs on your system. These are typically installed with your OS, from [python.org](https://www.python.org/), or any other OS package manager. |
+| ms-python.python:conda  | `conda`                 | The [Anaconda](https://www.anaconda.com/) environment manager.                                                                                                            |
 
 The environment manager is responsible for specifying which package manager will be used by default to install and manage Python packages within the environment. This ensures that packages are managed consistently according to the preferred tools and settings of the chosen environment manager.
 
@@ -28,27 +28,58 @@ This extension provides a package view for you to manage, install and uninstall 
 
 The extension uses `pip` as the default package manager. You can change this by setting the `python-envs.defaultPackageManager` setting to a different package manager. The following are package managers supported out of the box:
 
-|Id| name |Description|
-|---|----|--|
-|ms-python.python:pip| `pip` | Pip acts as the default package manager and it's typically built-in to Python.|
-|ms-python.python:conda| `conda` |  The [Anaconda](https://www.anaconda.com/) environment manager. |
+| Id                     | name    | Description                                                                    |
+| ---------------------- | ------- | ------------------------------------------------------------------------------ |
+| ms-python.python:pip   | `pip`   | Pip acts as the default package manager and it's typically built-in to Python. |
+| ms-python.python:conda | `conda` | The [Anaconda](https://www.anaconda.com/) environment manager.                 |
 
 ## Settings Reference
 
-| Setting (python-envs.) |	Default |	Description |
-| ----- | ----- | -----| 
-| defaultEnvManager | `"ms-python.python:venv"` |	The default environment manager used for creating and managing environments. |
-| defaultPackageManager | `"ms-python.python:pip"` |	The default package manager to use for installing and managing packages. This is often dictated by the default environment manager but can be customized. |
-| pythonProjects | `[]` |	A list of Python workspaces, specified by the path, in which you can set particular environment and package managers. You can set information for a workspace as `[{"path":  "/path/to/workspace", "envManager": "ms-python.python:venv", "packageManager": "ms-python.python:pip"]}`. |
+| Setting (python-envs.) | Default                   | Description                                                                                                                                                                                                                                                                            |
+| ---------------------- | ------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| defaultEnvManager      | `"ms-python.python:venv"` | The default environment manager used for creating and managing environments.                                                                                                                                                                                                           |
+| defaultPackageManager  | `"ms-python.python:pip"`  | The default package manager to use for installing and managing packages. This is often dictated by the default environment manager but can be customized.                                                                                                                              |
+| pythonProjects         | `[]`                      | A list of Python workspaces, specified by the path, in which you can set particular environment and package managers. You can set information for a workspace as `[{"path":  "/path/to/workspace", "envManager": "ms-python.python:venv", "packageManager": "ms-python.python:pip"]}`. |
 
+## API Reference (proposed)
 
-## API Reference
+See [api.ts](https://github.com/microsoft/vscode-python-environments/blob/main/src/api.ts) for the full list of Extension APIs.
 
-See `src\api.ts` for the full list of APIs.
+Consuming these APIs from your extension:
+
+```typescript
+let _extApi: PythonEnvironmentApi | undefined;
+async function getEnvExtApi(): Promise<PythonEnvironmentApi> {
+    if (_extApi) {
+        return _extApi;
+    }
+    const extension = getExtension(ENVS_EXTENSION_ID);
+    if (!extension) {
+        throw new Error('Python Environments extension not found.');
+    }
+    if (extension?.isActive) {
+        _extApi = extension.exports as PythonEnvironmentApi;
+        return _extApi;
+    }
+
+    await extension.activate();
+
+    _extApi = extension.exports as PythonEnvironmentApi;
+    return _extApi;
+}
+
+export async function activate(context: ExtensionContext) {
+    const envApi = await getEnvExtApi();
+
+    // Get the environment for the workspace folder or global python if no workspace is open
+    const uri = workspace.workspaceFolders ? workspace.workspaceFolders[0].uri : undefined;
+    const env = await envApi.getEnvironment(uri);
+}
+```
 
 ## Contributing
 
-This project welcomes contributions and suggestions.  Most contributions require you to agree to a
+This project welcomes contributions and suggestions. Most contributions require you to agree to a
 Contributor License Agreement (CLA) declaring that you have the right to, and actually do, grant us
 the rights to use your contribution. For details, visit https://cla.opensource.microsoft.com.
 
@@ -59,7 +90,6 @@ provided by the bot. You will only need to do this once across all repos using o
 This project has adopted the [Microsoft Open Source Code of Conduct](https://opensource.microsoft.com/codeofconduct/).
 For more information see the [Code of Conduct FAQ](https://opensource.microsoft.com/codeofconduct/faq/) or
 contact [opencode@microsoft.com](mailto:opencode@microsoft.com) with any additional questions or comments.
-
 
 ## Questions, issues, feature requests, and contributions
 
@@ -77,7 +107,7 @@ The Microsoft Python Extension for Visual Studio Code collects usage data and se
 
 ## Trademarks
 
-This project may contain trademarks or logos for projects, products, or services. Authorized use of Microsoft trademarks or logos is subject to and must follow 
+This project may contain trademarks or logos for projects, products, or services. Authorized use of Microsoft trademarks or logos is subject to and must follow
 [Microsoft's Trademark & Brand Guidelines](https://www.microsoft.com/en-us/legal/intellectualproperty/trademarks/usage/general).
 Use of Microsoft trademarks or logos in modified versions of this project must not cause confusion or imply Microsoft sponsorship.
 Any use of third-party trademarks or logos are subject to those third-party's policies.

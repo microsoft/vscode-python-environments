@@ -256,8 +256,8 @@ export async function refreshPackages(
     manager: PackageManager,
 ): Promise<Package[]> {
     if (!environment.execInfo) {
-        manager.logOutput?.error(`No executable found for python: ${environment.environmentPath.fsPath}`);
-        showErrorMessage(`No executable found for python: ${environment.environmentPath.fsPath}`, manager.logOutput);
+        manager.log?.error(`No executable found for python: ${environment.environmentPath.fsPath}`);
+        showErrorMessage(`No executable found for python: ${environment.environmentPath.fsPath}`, manager.log);
         return [];
     }
 
@@ -268,19 +268,14 @@ export async function refreshPackages(
             data = await runUV(
                 ['pip', 'list', '--python', environment.execInfo.run.executable],
                 undefined,
-                manager.logOutput,
+                manager.log,
             );
         } else {
-            data = await runPython(
-                environment.execInfo.run.executable,
-                ['-m', 'pip', 'list'],
-                undefined,
-                manager.logOutput,
-            );
+            data = await runPython(environment.execInfo.run.executable, ['-m', 'pip', 'list'], undefined, manager.log);
         }
     } catch (e) {
-        manager.logOutput?.error('Error refreshing packages', e);
-        showErrorMessage('Error refreshing packages', manager.logOutput);
+        manager.log?.error('Error refreshing packages', e);
+        showErrorMessage('Error refreshing packages', manager.log);
         return [];
     }
 
@@ -330,14 +325,14 @@ export async function installPackages(
             await runUV(
                 [...installArgs, '--python', environment.execInfo.run.executable, ...packages],
                 undefined,
-                manager.logOutput,
+                manager.log,
             );
         } else {
             await runPython(
                 environment.execInfo.run.executable,
                 ['-m', ...installArgs, ...packages],
                 undefined,
-                manager.logOutput,
+                manager.log,
             );
         }
 
@@ -376,14 +371,14 @@ export async function uninstallPackages(
             await runUV(
                 ['pip', 'uninstall', '--python', environment.execInfo.run.executable, ...remove],
                 undefined,
-                manager.logOutput,
+                manager.log,
             );
         } else {
             await runPython(
                 environment.execInfo.run.executable,
                 ['-m', 'pip', 'uninstall', '-y', ...remove],
                 undefined,
-                manager.logOutput,
+                manager.log,
             );
         }
         return refreshPackages(environment, api, manager);

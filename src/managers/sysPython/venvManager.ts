@@ -16,6 +16,7 @@ import {
     SetEnvironmentScope,
 } from '../../api';
 import {
+    clearVenvCache,
     createPythonVenv,
     findVirtualEnvironments,
     getGlobalVenvLocation,
@@ -283,6 +284,10 @@ export class VenvManager implements EnvironmentManager {
         }
 
         return undefined;
+    }
+
+    async clearCache(): Promise<void> {
+        await clearVenvCache();
     }
 
     private addEnvironment(environment: PythonEnvironment, raiseEvent?: boolean): void {

@@ -2,6 +2,7 @@ import { TreeItem, TreeItemCollapsibleState, MarkdownString, Command, ThemeIcon,
 import { InternalEnvironmentManager, InternalPackageManager } from '../../internal.api';
 import { PythonEnvironment, IconPath, Package, PythonProject } from '../../api';
 import { removable } from './utils';
+import { isActivatableEnvironment } from '../common/activation';
 
 export enum EnvTreeItemKind {
     manager = 'python-env-manager',
@@ -63,8 +64,9 @@ export class PythonEnvTreeItem implements EnvTreeItem {
     }
 
     private getContextValue() {
+        const activatable = isActivatableEnvironment(this.environment) ? '-activatable' : '';
         const remove = this.parent.manager.supportsRemove ? '-remove' : '';
-        return `pythonEnvironment${remove}`;
+        return `pythonEnvironment${remove}${activatable}`;
     }
 
     private setIcon(item: TreeItem) {

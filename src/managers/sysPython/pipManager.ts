@@ -36,7 +36,7 @@ export class PipPackageManager implements PackageManager, Disposable {
 
     constructor(
         private readonly api: PythonEnvironmentApi,
-        public readonly logOutput: LogOutputChannel,
+        public readonly log: LogOutputChannel,
         private readonly venv: VenvManager,
     ) {
         this.name = 'pip';
@@ -65,11 +65,11 @@ export class PipPackageManager implements PackageManager, Disposable {
                     this.packages.set(environment.envId.id, after);
                     this._onDidChangePackages.fire({ environment, manager: this, changes });
                 } catch (e) {
-                    this.logOutput.error('Error installing packages', e);
+                    this.log.error('Error installing packages', e);
                     setImmediate(async () => {
                         const result = await window.showErrorMessage('Error installing packages', 'View Output');
                         if (result === 'View Output') {
-                            this.logOutput.show();
+                            this.log.show();
                         }
                     });
                 }
@@ -91,11 +91,11 @@ export class PipPackageManager implements PackageManager, Disposable {
                     this.packages.set(environment.envId.id, after);
                     this._onDidChangePackages.fire({ environment: environment, manager: this, changes });
                 } catch (e) {
-                    this.logOutput.error('Error uninstalling packages', e);
+                    this.log.error('Error uninstalling packages', e);
                     setImmediate(async () => {
                         const result = await window.showErrorMessage('Error installing packages', 'View Output');
                         if (result === 'View Output') {
-                            this.logOutput.show();
+                            this.log.show();
                         }
                     });
                 }

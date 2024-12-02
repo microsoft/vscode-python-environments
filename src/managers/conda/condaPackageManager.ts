@@ -28,7 +28,7 @@ export class CondaPackageManager implements PackageManager, Disposable {
 
     private packages: Map<string, Package[]> = new Map();
 
-    constructor(public readonly api: PythonEnvironmentApi, public readonly logOutput: LogOutputChannel) {
+    constructor(public readonly api: PythonEnvironmentApi, public readonly log: LogOutputChannel) {
         this.name = 'conda';
         this.displayName = 'Conda';
         this.description = 'Conda package manager';
@@ -54,11 +54,11 @@ export class CondaPackageManager implements PackageManager, Disposable {
                     this.packages.set(environment.envId.id, after);
                     this._onDidChangePackages.fire({ environment: environment, manager: this, changes });
                 } catch (e) {
-                    this.logOutput.error('Error installing packages', e);
+                    this.log.error('Error installing packages', e);
                     setImmediate(async () => {
                         const result = await window.showErrorMessage('Error installing packages', 'View Output');
                         if (result === 'View Output') {
-                            this.logOutput.show();
+                            this.log.show();
                         }
                     });
                 }
@@ -80,11 +80,11 @@ export class CondaPackageManager implements PackageManager, Disposable {
                     this.packages.set(environment.envId.id, after);
                     this._onDidChangePackages.fire({ environment: environment, manager: this, changes });
                 } catch (e) {
-                    this.logOutput.error('Error uninstalling packages', e);
+                    this.log.error('Error uninstalling packages', e);
                     setImmediate(async () => {
                         const result = await window.showErrorMessage('Error installing packages', 'View Output');
                         if (result === 'View Output') {
-                            this.logOutput.show();
+                            this.log.show();
                         }
                     });
                 }

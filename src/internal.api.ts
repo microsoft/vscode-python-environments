@@ -203,8 +203,8 @@ export class InternalPackageManager implements PackageManager {
     public get iconPath(): IconPath | undefined {
         return this.manager.iconPath;
     }
-    public get logOutput(): LogOutputChannel | undefined {
-        return this.manager.logOutput;
+    public get log(): LogOutputChannel | undefined {
+        return this.manager.log;
     }
 
     install(environment: PythonEnvironment, packages: string[], options: PackageInstallOptions): Promise<void> {

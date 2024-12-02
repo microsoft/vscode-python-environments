@@ -6,7 +6,7 @@ export function removable(project: PythonProject): boolean {
     const workspace = getWorkspaceFolder(project.uri);
     if (workspace) {
         // If the project path is same as the workspace path, then we cannot remove the project.
-        path.normalize(workspace?.uri.fsPath).toLowerCase() !== path.normalize(project.uri.fsPath).toLowerCase();
+        return path.normalize(workspace?.uri.fsPath).toLowerCase() !== path.normalize(project.uri.fsPath).toLowerCase();
     }
     return true;
 }
