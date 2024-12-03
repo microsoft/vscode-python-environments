@@ -28,6 +28,7 @@ import {
     ProjectItem,
     ProjectEnvironment,
     ProjectPackageRootTreeItem,
+    GlobalProjectItem,
 } from './views/treeViewItems';
 import { Common } from '../common/localize';
 import { pickEnvironment } from '../common/pickers/environments';
@@ -213,10 +214,15 @@ export async function setEnvironmentCommand(
     if (context instanceof PythonEnvTreeItem) {
         try {
             const view = context as PythonEnvTreeItem;
-            const projects = await pickProjectMany(wm.getProjects());
-            if (projects && projects.length > 0) {
-                const uris = projects.map((p) => p.uri);
-                await em.setEnvironments(uris, view.environment);
+            const projects = wm.getProjects();
+            if (projects.length > 0) {
+                const selected = await pickProjectMany(projects);
+                if (selected && selected.length > 0) {
+                    const uris = selected.map((p) => p.uri);
+                    await em.setEnvironments(uris, view.environment);
+                }
+            } else {
+                await em.setEnvironments('global', view.environment);
             }
         } catch (ex) {
             if (ex === QuickInputButtons.Back) {
@@ -227,12 +233,14 @@ export async function setEnvironmentCommand(
     } else if (context instanceof ProjectItem) {
         const view = context as ProjectItem;
         await setEnvironmentCommand([view.project.uri], em, wm);
+    } else if (context instanceof GlobalProjectItem) {
+        await setEnvironmentCommand(undefined, em, wm);
     } else if (context instanceof Uri) {
         await setEnvironmentCommand([context], em, wm);
     } else if (context === undefined) {
         try {
             const projects = wm.getProjects();
-            if (projects && projects.length > 0) {
+            if (projects.length > 0) {
                 const selected = await pickProjectMany(projects);
                 if (selected && selected.length > 0) {
                     const uris = selected.map((p) => p.uri);
