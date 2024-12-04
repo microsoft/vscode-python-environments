@@ -24,10 +24,10 @@ import {
     setSystemEnvForGlobal,
     setSystemEnvForWorkspace,
 } from './utils';
-import { EXTENSION_ROOT_DIR } from '../../common/constants';
 import { NativePythonFinder } from '../common/nativePythonFinder';
 import { createDeferred, Deferred } from '../../common/utils/deferred';
 import { getLatest } from '../common/utils';
+import { EXTENSION_ROOT_DIR } from '../../common/constants';
 
 export class SysPythonManager implements EnvironmentManager {
     private collection: PythonEnvironment[] = [];
@@ -57,7 +57,10 @@ export class SysPythonManager implements EnvironmentManager {
         this.preferredPackageManagerId = 'ms-python.python:pip';
         this.description = 'Manages Global python installs';
         this.tooltip = new MarkdownString('$(globe) Python Environment Manager', true);
-        this.iconPath = Uri.file(path.join(EXTENSION_ROOT_DIR, 'files', '__icon__.py'));
+        this.iconPath = {
+            light: Uri.file(path.join(EXTENSION_ROOT_DIR, 'files', 'light_mode_icon.svg')),
+            dark: Uri.file(path.join(EXTENSION_ROOT_DIR, 'files', 'dark_mode_icon.svg')),
+        };
     }
 
     private _initialized: Deferred<void> | undefined;

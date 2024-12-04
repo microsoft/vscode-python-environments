@@ -1,4 +1,4 @@
-import { ProgressLocation, Uri, window, LogOutputChannel, EventEmitter, MarkdownString } from 'vscode';
+import { ProgressLocation, Uri, LogOutputChannel, EventEmitter, MarkdownString } from 'vscode';
 import {
     CreateEnvironmentScope,
     DidChangeEnvironmentEventArgs,
@@ -33,6 +33,7 @@ import { NativePythonFinder } from '../common/nativePythonFinder';
 import { ENVS_EXTENSION_ID, EXTENSION_ROOT_DIR } from '../../common/constants';
 import { createDeferred, Deferred } from '../../common/utils/deferred';
 import { getLatest, sortEnvironments } from '../common/utils';
+import { withProgress } from '../../common/window.apis';
 
 export class VenvManager implements EnvironmentManager {
     private collection: PythonEnvironment[] = [];
@@ -63,7 +64,10 @@ export class VenvManager implements EnvironmentManager {
         this.description = 'Manages virtual environments created using venv';
         this.tooltip = new MarkdownString('Manages virtual environments created using `venv`', true);
         this.preferredPackageManagerId = 'ms-python.python:pip';
-        this.iconPath = Uri.file(path.join(EXTENSION_ROOT_DIR, 'files', '__icon__.py'));
+        this.iconPath = {
+            light: Uri.file(path.join(EXTENSION_ROOT_DIR, 'files', 'light_mode_icon.svg')),
+            dark: Uri.file(path.join(EXTENSION_ROOT_DIR, 'files', 'dark_mode_icon.svg')),
+        };
     }
 
     private _initialized: Deferred<void> | undefined;
@@ -145,7 +149,7 @@ export class VenvManager implements EnvironmentManager {
     }
 
     private async internalRefresh(scope: RefreshEnvironmentsScope, hardRefresh: boolean, title: string): Promise<void> {
-        await window.withProgress(
+        await withProgress(
             {
                 location: ProgressLocation.Window,
                 title,

@@ -12,10 +12,10 @@ import {
     PythonEnvironmentApi,
 } from '../../api';
 import { installPackages, refreshPackages, uninstallPackages } from './utils';
-import { EXTENSION_ROOT_DIR } from '../../common/constants';
 import { Disposable } from 'vscode-jsonrpc';
 import { getProjectInstallable } from './venvUtils';
 import { VenvManager } from './venvManager';
+import { EXTENSION_ROOT_DIR } from '../../common/constants';
 
 function getChanges(before: Package[], after: Package[]): { kind: PackageChangeKind; pkg: Package }[] {
     const changes: { kind: PackageChangeKind; pkg: Package }[] = [];
@@ -43,7 +43,10 @@ export class PipPackageManager implements PackageManager, Disposable {
         this.displayName = 'Pip';
         this.description = 'This package manager for python installs using pip.';
         this.tooltip = new MarkdownString('This package manager for python installs using `pip`.');
-        this.iconPath = Uri.file(path.join(EXTENSION_ROOT_DIR, 'files', '__icon__.py'));
+        this.iconPath = {
+            light: Uri.file(path.join(EXTENSION_ROOT_DIR, 'files', 'light_mode_icon.svg')),
+            dark: Uri.file(path.join(EXTENSION_ROOT_DIR, 'files', 'dark_mode_icon.svg')),
+        };
     }
     readonly name: string;
     readonly displayName?: string;

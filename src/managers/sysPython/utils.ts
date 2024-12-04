@@ -196,7 +196,10 @@ function getPythonInfo(env: NativeEnvInfo): PythonEnvironmentInfo {
             version: env.version,
             description: env.executable,
             environmentPath: Uri.file(env.executable),
-            iconPath: Uri.file(path.join(EXTENSION_ROOT_DIR, 'files', '__icon__.py')),
+            iconPath: {
+                light: Uri.file(path.join(EXTENSION_ROOT_DIR, 'files', 'light_mode_icon.svg')),
+                dark: Uri.file(path.join(EXTENSION_ROOT_DIR, 'files', 'dark_mode_icon.svg')),
+            },
             sysPrefix: env.prefix,
             execInfo: {
                 run: {

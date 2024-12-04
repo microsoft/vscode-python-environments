@@ -21,7 +21,7 @@ import {
     terminals,
     withProgress,
 } from '../../common/window.apis';
-import { IconPath, PythonEnvironment, PythonProject, PythonTerminalOptions } from '../../api';
+import { PythonEnvironment, PythonProject, PythonTerminalOptions } from '../../api';
 import { getActivationCommand, getDeactivationCommand, isActivatableEnvironment } from '../common/activation';
 import { showErrorMessage } from '../../common/errors/utils';
 import { quoteArgs } from '../execution/execUtils';
@@ -29,13 +29,7 @@ import { createDeferred } from '../../common/utils/deferred';
 import { traceError, traceVerbose } from '../../common/logging';
 import { getConfiguration } from '../../common/workspace.apis';
 import { EnvironmentManagers } from '../../internal.api';
-
-function getIconPath(i: IconPath | undefined): IconPath | undefined {
-    if (i instanceof Uri) {
-        return i.fsPath.endsWith('__icon__.py') ? undefined : i;
-    }
-    return i;
-}
+import { EXTENSION_ROOT_DIR } from '../../common/constants';
 
 const SHELL_INTEGRATION_TIMEOUT = 500; // 0.5 seconds
 const SHELL_INTEGRATION_POLL_INTERVAL = 100; // 0.1 seconds
@@ -297,7 +291,10 @@ export class TerminalManagerImpl implements TerminalManager {
             env: options.env,
             strictEnv: options.strictEnv,
             message: options.message,
-            iconPath: options.iconPath ?? getIconPath(environment.iconPath),
+            iconPath: options.iconPath ?? {
+                light: Uri.file(path.join(EXTENSION_ROOT_DIR, 'files', 'light_mode_icon.svg')),
+                dark: Uri.file(path.join(EXTENSION_ROOT_DIR, 'files', 'dark_mode_icon.svg')),
+            },
             hideFromUser: options.hideFromUser,
             color: options.color,
             location: options.location,
