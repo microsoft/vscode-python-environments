@@ -479,6 +479,13 @@ export async function createTerminalCommand(
             terminal.show();
             return terminal;
         }
+    } else if (context instanceof GlobalProjectItem) {
+        const env = await api.getEnvironment(undefined);
+        if (env) {
+            const terminal = await tm.create(env, { cwd: undefined });
+            terminal.show();
+            return terminal;
+        }
     } else if (context instanceof PythonEnvTreeItem) {
         const view = context as PythonEnvTreeItem;
         const pw = await pickProject(api.getPythonProjects());
