@@ -90,13 +90,13 @@
             },
             {
                 "command": "python-envs.addPythonProject",
-                "title": "Add Python Workspace",
+                "title": "Add Python Project",
                 "category": "Python",
                 "icon": "$(new-folder)"
             },
             {
                 "command": "python-envs.removePythonProject",
-                "title": "Remove Python Workspace",
+                "title": "Remove Python Project",
                 "category": "Python",
                 "icon": "$(remove)"
             },
@@ -387,25 +387,25 @@
         "viewsContainers": {
             "activitybar": [
                 {
-                    "id": "python-environments",
-                    "title": "Python Environments",
+                    "id": "python",
+                    "title": "Python",
                     "icon": "files/logo.svg"
                 }
             ]
         },
         "views": {
-            "python-environments": [
+            "python": [
                 {
                     "id": "python-projects",
                     "name": "Python Projects",
                     "icon": "files/logo.svg",
-                    "contextualTitle": "Workspace Environment"
+                    "contextualTitle": "Python Projects"
                 },
                 {
                     "id": "env-managers",
                     "name": "Environment Managers",
                     "icon": "files/logo.svg",
-                    "contextualTitle": "Environment Manager"
+                    "contextualTitle": "Environment Managers"
                 }
             ]
         },
