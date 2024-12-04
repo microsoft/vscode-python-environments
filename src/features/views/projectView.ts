@@ -188,14 +188,15 @@ export class WorkspaceView implements TreeDataProvider<ProjectTreeItem> {
         if (element.kind === ProjectTreeItemKind.environment) {
             const environmentItem = element as ProjectEnvironment;
             const parent = environmentItem.parent;
-            const pkgManager = this.envManagers.getPackageManager(parent.project.uri);
+            const uri = parent.id === 'global' ? undefined : parent.project.uri;
+            const pkgManager = this.envManagers.getPackageManager(uri);
             const environment = environmentItem.environment;
 
             const views: ProjectTreeItem[] = [];
 
             if (pkgManager) {
                 const item = new ProjectPackageRootTreeItem(environmentItem, pkgManager, environment);
-                this.packageRoots.set(environmentItem.parent.project.uri.fsPath, item);
+                this.packageRoots.set(uri ? uri.fsPath : 'global', item);
                 views.push(item);
             } else {
                 views.push(new ProjectEnvironmentInfo(environmentItem, 'No package manager found'));
