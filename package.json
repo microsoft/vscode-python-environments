@@ -72,6 +72,16 @@
                             }
                         }
                     }
+                },
+                "python-envs.showActivateButton": {
+                    "type": "boolean",
+                    "description": "Show the activate button in the terminal",
+                    "default": false,
+                    "scope": "machine",
+                    "tags": [
+                        "onExP",
+                        "preview"
+                    ]
                 }
             }
         },
@@ -376,11 +386,11 @@
             "terminal/title/context": [
                 {
                     "command": "python-envs.terminal.activate",
-                    "when": "pythonTerminalActivation && !pythonTerminalActivated"
+                    "when": "config.python-envs.showActivateButton && pythonTerminalActivation && !pythonTerminalActivated"
                 },
                 {
                     "command": "python-envs.terminal.deactivate",
-                    "when": "pythonTerminalActivation && pythonTerminalActivated"
+                    "when": "config.python-envs.showActivateButton && pythonTerminalActivation && pythonTerminalActivated"
                 }
             ]
         },
