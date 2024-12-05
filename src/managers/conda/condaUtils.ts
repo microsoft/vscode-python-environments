@@ -591,7 +591,7 @@ export async function refreshPackages(
                     name: parts[0],
                     displayName: parts[0],
                     version: parts[1],
-                    description: parts[2],
+                    description: parts[1],
                 },
                 environment,
                 manager,
