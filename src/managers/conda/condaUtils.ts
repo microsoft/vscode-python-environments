@@ -12,7 +12,7 @@ import {
 import * as path from 'path';
 import * as os from 'os';
 import * as fsapi from 'fs-extra';
-import { LogOutputChannel, ProgressLocation, Uri, window } from 'vscode';
+import { CancellationError, CancellationToken, LogOutputChannel, ProgressLocation, Uri, window } from 'vscode';
 import { ENVS_EXTENSION_ID } from '../../common/constants';
 import { createDeferred } from '../../common/utils/deferred';
 import {
@@ -121,11 +121,16 @@ export async function getConda(): Promise<string> {
     throw new Error('Conda not found');
 }
 
-async function runConda(args: string[]): Promise<string> {
+async function runConda(args: string[], token?: CancellationToken): Promise<string> {
     const conda = await getConda();
 
     const deferred = createDeferred<string>();
     const proc = ch.spawn(conda, args, { shell: true });
+
+    token?.onCancellationRequested(() => {
+        proc.kill();
+        deferred.reject(new CancellationError());
+    });
 
     let stdout = '';
     let stderr = '';
@@ -608,6 +613,7 @@ export async function installPackages(
     options: PackageInstallOptions,
     api: PythonEnvironmentApi,
     manager: PackageManager,
+    token: CancellationToken,
 ): Promise<Package[]> {
     if (!packages || packages.length === 0) {
         // TODO: Ask user to pick packages
@@ -620,7 +626,7 @@ export async function installPackages(
     }
     args.push(...packages);
 
-    await runConda(args);
+    await runConda(args, token);
     return refreshPackages(environment, api, manager);
 }
 
@@ -629,6 +635,7 @@ export async function uninstallPackages(
     packages: PackageInfo[] | string[],
     api: PythonEnvironmentApi,
     manager: PackageManager,
+    token: CancellationToken,
 ): Promise<Package[]> {
     const remove = [];
     for (let pkg of packages) {
@@ -642,7 +649,7 @@ export async function uninstallPackages(
         throw new Error('No packages to remove');
     }
 
-    await runConda(['remove', '--prefix', environment.environmentPath.fsPath, '--yes', ...remove]);
+    await runConda(['remove', '--prefix', environment.environmentPath.fsPath, '--yes', ...remove], token);
 
     return refreshPackages(environment, api, manager);
 }

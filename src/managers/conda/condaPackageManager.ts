@@ -1,4 +1,13 @@
-import { Disposable, Event, EventEmitter, LogOutputChannel, MarkdownString, ProgressLocation, window } from 'vscode';
+import {
+    CancellationError,
+    Disposable,
+    Event,
+    EventEmitter,
+    LogOutputChannel,
+    MarkdownString,
+    ProgressLocation,
+    window,
+} from 'vscode';
 import {
     DidChangePackagesEventArgs,
     IconPath,
@@ -45,15 +54,20 @@ export class CondaPackageManager implements PackageManager, Disposable {
             {
                 location: ProgressLocation.Notification,
                 title: 'Installing packages',
+                cancellable: true,
             },
-            async () => {
+            async (_progress, token) => {
                 try {
                     const before = this.packages.get(environment.envId.id) ?? [];
-                    const after = await installPackages(environment, packages, options, this.api, this);
+                    const after = await installPackages(environment, packages, options, this.api, this, token);
                     const changes = getChanges(before, after);
                     this.packages.set(environment.envId.id, after);
                     this._onDidChangePackages.fire({ environment: environment, manager: this, changes });
                 } catch (e) {
+                    if (e instanceof CancellationError) {
+                        return;
+                    }
+
                     this.log.error('Error installing packages', e);
                     setImmediate(async () => {
                         const result = await window.showErrorMessage('Error installing packages', 'View Output');
@@ -71,15 +85,20 @@ export class CondaPackageManager implements PackageManager, Disposable {
             {
                 location: ProgressLocation.Notification,
                 title: 'Uninstalling packages',
+                cancellable: true,
             },
-            async () => {
+            async (_progress, token) => {
                 try {
                     const before = this.packages.get(environment.envId.id) ?? [];
-                    const after = await uninstallPackages(environment, packages, this.api, this);
+                    const after = await uninstallPackages(environment, packages, this.api, this, token);
                     const changes = getChanges(before, after);
                     this.packages.set(environment.envId.id, after);
                     this._onDidChangePackages.fire({ environment: environment, manager: this, changes });
                 } catch (e) {
+                    if (e instanceof CancellationError) {
+                        return;
+                    }
+
                     this.log.error('Error uninstalling packages', e);
                     setImmediate(async () => {
                         const result = await window.showErrorMessage('Error installing packages', 'View Output');
