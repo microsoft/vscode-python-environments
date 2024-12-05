@@ -59,11 +59,12 @@ export class PipPackageManager implements PackageManager, Disposable {
             {
                 location: ProgressLocation.Notification,
                 title: 'Installing packages',
+                cancellable: true,
             },
-            async () => {
+            async (_progress, token) => {
                 try {
                     const before = this.packages.get(environment.envId.id) ?? [];
-                    const after = await installPackages(environment, packages, options, this.api, this);
+                    const after = await installPackages(environment, packages, options, this.api, this, token);
                     const changes = getChanges(before, after);
                     this.packages.set(environment.envId.id, after);
                     this._onDidChangePackages.fire({ environment, manager: this, changes });
@@ -85,11 +86,12 @@ export class PipPackageManager implements PackageManager, Disposable {
             {
                 location: ProgressLocation.Notification,
                 title: 'Uninstalling packages',
+                cancellable: true,
             },
-            async () => {
+            async (_progress, token) => {
                 try {
                     const before = this.packages.get(environment.envId.id) ?? [];
-                    const after = await uninstallPackages(environment, this.api, this, packages);
+                    const after = await uninstallPackages(environment, this.api, this, packages, token);
                     const changes = getChanges(before, after);
                     this.packages.set(environment.envId.id, after);
                     this._onDidChangePackages.fire({ environment: environment, manager: this, changes });

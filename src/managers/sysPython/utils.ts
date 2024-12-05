@@ -1,5 +1,5 @@
 import * as path from 'path';
-import { LogOutputChannel, QuickPickItem, Uri, window } from 'vscode';
+import { CancellationError, CancellationToken, LogOutputChannel, QuickPickItem, Uri, window } from 'vscode';
 import {
     EnvironmentManager,
     Package,
@@ -110,10 +110,20 @@ export async function isUvInstalled(log?: LogOutputChannel): Promise<boolean> {
     return available.promise;
 }
 
-export async function runUV(args: string[], cwd?: string, log?: LogOutputChannel): Promise<string> {
+export async function runUV(
+    args: string[],
+    cwd?: string,
+    log?: LogOutputChannel,
+    token?: CancellationToken,
+): Promise<string> {
     log?.info(`Running: uv ${args.join(' ')}`);
     return new Promise<string>((resolve, reject) => {
         const proc = ch.spawn('uv', args, { cwd: cwd });
+        token?.onCancellationRequested(() => {
+            proc.kill();
+            reject(new CancellationError());
+        });
+
         let builder = '';
         proc.stdout?.on('data', (data) => {
             const s = data.toString('utf-8');
@@ -134,10 +144,20 @@ export async function runUV(args: string[], cwd?: string, log?: LogOutputChannel
     });
 }
 
-export async function runPython(python: string, args: string[], cwd?: string, log?: LogOutputChannel): Promise<string> {
+export async function runPython(
+    python: string,
+    args: string[],
+    cwd?: string,
+    log?: LogOutputChannel,
+    token?: CancellationToken,
+): Promise<string> {
     log?.info(`Running: ${python} ${args.join(' ')}`);
     return new Promise<string>((resolve, reject) => {
         const proc = ch.spawn(python, args, { cwd: cwd });
+        token?.onCancellationRequested(() => {
+            proc.kill();
+            reject(new CancellationError());
+        });
         let builder = '';
         proc.stdout?.on('data', (data) => {
             const s = data.toString('utf-8');
@@ -312,6 +332,7 @@ export async function installPackages(
     options: PackageInstallOptions,
     api: PythonEnvironmentApi,
     manager: PackageManager,
+    token?: CancellationToken,
 ): Promise<Package[]> {
     if (environment.execInfo) {
         if (packages.length === 0) {
@@ -329,6 +350,7 @@ export async function installPackages(
                 [...installArgs, '--python', environment.execInfo.run.executable, ...packages],
                 undefined,
                 manager.log,
+                token,
             );
         } else {
             await runPython(
@@ -336,6 +358,7 @@ export async function installPackages(
                 ['-m', ...installArgs, ...packages],
                 undefined,
                 manager.log,
+                token,
             );
         }
 
@@ -349,6 +372,7 @@ export async function uninstallPackages(
     api: PythonEnvironmentApi,
     manager: PackageManager,
     packages: string[] | Package[],
+    token?: CancellationToken,
 ): Promise<Package[]> {
     if (environment.execInfo) {
         const remove = [];
@@ -375,6 +399,7 @@ export async function uninstallPackages(
                 ['pip', 'uninstall', '--python', environment.execInfo.run.executable, ...remove],
                 undefined,
                 manager.log,
+                token,
             );
         } else {
             await runPython(
@@ -382,6 +407,7 @@ export async function uninstallPackages(
                 ['-m', 'pip', 'uninstall', '-y', ...remove],
                 undefined,
                 manager.log,
+                token,
             );
         }
         return refreshPackages(environment, api, manager);
