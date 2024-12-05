@@ -264,7 +264,6 @@ export async function createPythonVenv(
     const basePython = await pickEnvironmentFrom(sortEnvironments(filtered));
     if (!basePython || !basePython.execInfo) {
         log.error('No base python selected, cannot create virtual environment.');
-        showErrorMessage('No base python selected, cannot create virtual environment.');
         return;
     }
 
@@ -283,7 +282,6 @@ export async function createPythonVenv(
     });
     if (!name) {
         log.error('No name entered, cannot create virtual environment.');
-        showErrorMessage('No name entered, cannot create virtual environment.');
         return;
     }
 
