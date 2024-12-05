@@ -325,19 +325,21 @@ async function getCommonPackagesToInstall(
 export async function getPackagesToInstallFromPackageManager(
     packageManager: InternalPackageManager,
     environment: PythonEnvironment,
+    cachedInstallables?: Installable[],
 ): Promise<string[] | undefined> {
-    const packageType = packageManager.supportsGetInstallable
-        ? await getPackageType()
-        : PackageManagement.commonPackages;
+    let installable: Installable[] = cachedInstallables ?? [];
+    if (installable.length === 0 && packageManager.supportsGetInstallable) {
+        installable = await getInstallables(packageManager, environment);
+    }
+    const packageType = installable.length > 0 ? await getPackageType() : PackageManagement.commonPackages;
 
     if (packageType === PackageManagement.workspaceDependencies) {
         try {
-            const installable = await getInstallables(packageManager, environment);
             const result = await getWorkspacePackages(installable);
             return result;
         } catch (ex) {
             if (packageManager.supportsGetInstallable && ex === QuickInputButtons.Back) {
-                return getPackagesToInstallFromPackageManager(packageManager, environment);
+                return getPackagesToInstallFromPackageManager(packageManager, environment, installable);
             }
             if (ex === QuickInputButtons.Back) {
                 throw ex;
@@ -352,7 +354,7 @@ export async function getPackagesToInstallFromPackageManager(
             return result;
         } catch (ex) {
             if (packageManager.supportsGetInstallable && ex === QuickInputButtons.Back) {
-                return getPackagesToInstallFromPackageManager(packageManager, environment);
+                return getPackagesToInstallFromPackageManager(packageManager, environment, installable);
             }
             if (ex === QuickInputButtons.Back) {
                 throw ex;
