@@ -266,7 +266,7 @@ export class PythonEnvironmentImpl implements PythonEnvironment {
     public readonly description?: string;
     public readonly tooltip?: string | MarkdownString;
     public readonly iconPath?: IconPath;
-    public readonly execInfo?: PythonEnvironmentExecutionInfo;
+    public readonly execInfo: PythonEnvironmentExecutionInfo;
     public readonly sysPrefix: string;
 
     constructor(public readonly envId: PythonEnvironmentId, info: PythonEnvironmentInfo) {

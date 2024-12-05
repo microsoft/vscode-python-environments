@@ -193,10 +193,9 @@ export interface PythonEnvironmentInfo {
     readonly iconPath?: IconPath;
 
     /**
-     * Information on how to execute the Python environment. If not provided, {@link PythonEnvironmentApi.resolveEnvironment} will be
-     * used to to get the details at later point if needed. The recommendation is to fill this in if known.
+     * Information on how to execute the Python environment. This is required for executing Python code in the environment.
      */
-    readonly execInfo?: PythonEnvironmentExecutionInfo;
+    readonly execInfo: PythonEnvironmentExecutionInfo;
 
     /**
      * `sys.prefix` is the path to the base directory of the Python installation. Typically obtained by executing `sys.prefix` in the Python interpreter.

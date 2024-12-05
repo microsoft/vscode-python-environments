@@ -313,6 +313,10 @@ export async function installPackages(
     api: PythonEnvironmentApi,
     manager: PackageManager,
 ): Promise<Package[]> {
+    if (environment.version.startsWith('2.')) {
+        throw new Error('Python 2.* is not supported (deprecated)');
+    }
+
     if (environment.execInfo) {
         if (packages.length === 0) {
             throw new Error('No packages selected to install');
@@ -350,6 +354,10 @@ export async function uninstallPackages(
     manager: PackageManager,
     packages: string[] | Package[],
 ): Promise<Package[]> {
+    if (environment.version.startsWith('2.')) {
+        throw new Error('Python 2.* is not supported (deprecated)');
+    }
+
     if (environment.execInfo) {
         const remove = [];
         for (let pkg of packages) {

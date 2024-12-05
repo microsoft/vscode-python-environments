@@ -116,6 +116,7 @@ class PythonEnvironmentApiImpl implements PythonEnvironmentApi {
         };
         return new PythonEnvironmentImpl(envId, info);
     }
+
     async createEnvironment(scope: CreateEnvironmentScope): Promise<PythonEnvironment | undefined> {
         if (scope === 'global' || (!Array.isArray(scope) && scope instanceof Uri)) {
             const manager = this.envManagers.getEnvironmentManager(scope === 'global' ? undefined : scope);

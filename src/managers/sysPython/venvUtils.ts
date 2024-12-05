@@ -254,10 +254,19 @@ export async function createPythonVenv(
     basePythons: PythonEnvironment[],
     venvRoot: Uri,
 ): Promise<PythonEnvironment | undefined> {
-    const filtered = basePythons.filter((e) => e.execInfo);
-    if (filtered.length === 0) {
+    if (basePythons.length === 0) {
         log.error('No base python found');
         showErrorMessage('No base python found');
+        return;
+    }
+
+    const filtered = basePythons.filter((e) => e.version.startsWith('3.'));
+    if (filtered.length === 0) {
+        log.error('Did not find any base python 3.*');
+        showErrorMessage('Did not find any base python 3.*');
+        basePythons.forEach((e) => {
+            log.error(`available base python: ${e.version}`);
+        });
         return;
     }
 
@@ -265,6 +274,12 @@ export async function createPythonVenv(
     if (!basePython || !basePython.execInfo) {
         log.error('No base python selected, cannot create virtual environment.');
         showErrorMessage('No base python selected, cannot create virtual environment.');
+        return;
+    }
+
+    if (basePython.version.startsWith('2.')) {
+        log.error('Python 2.* is not supported for virtual env creation');
+        showErrorMessage('Python 2.* is not supported, use Python 3.*');
         return;
     }
 
