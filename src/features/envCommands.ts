@@ -358,7 +358,7 @@ export async function addPythonProject(
         return pw;
     }
 
-    if (resource === undefined) {
+    if (resource === undefined || resource instanceof ProjectItem) {
         const creator: PythonProjectCreator | undefined = await pickCreator(pc.getProjectCreators());
         if (!creator) {
             return;
