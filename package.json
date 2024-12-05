@@ -38,36 +38,36 @@
             "properties": {
                 "python-envs.defaultEnvManager": {
                     "type": "string",
-                    "description": "The default environment manager to use for creating and managing environments",
+                    "description": "%python-envs.defaultEnvManager.description%",
                     "default": "ms-python.python:venv",
                     "scope": "window"
                 },
                 "python-envs.defaultPackageManager": {
                     "type": "string",
-                    "description": "The default package manager to use for installing and managing packages",
+                    "description": "%python-envs.defaultPackageManager.description%",
                     "default": "ms-python.python:pip",
                     "scope": "window"
                 },
                 "python-envs.pythonProjects": {
                     "type": "array",
                     "default": [],
-                    "description": "The list of python workspaces",
+                    "description": "%python-envs.pythonProjects.description%",
                     "scope": "window",
                     "items": {
                         "type": "object",
                         "properties": {
                             "path": {
                                 "type": "string",
-                                "description": "The path to the workspace folder or a file"
+                                "description": "%python-envs.pythonProjects.path.description%"
                             },
                             "envManager": {
                                 "type": "string",
-                                "description": "The environment manager to use for this workspace",
+                                "description": "%python-envs.pythonProjects.envManager.description%",
                                 "default": "ms-python.python:venv"
                             },
                             "packageManager": {
                                 "type": "string",
-                                "description": "The package manager to use for this workspace",
+                                "description": "%python-envs.pythonProjects.packageManager.description%",
                                 "default": "ms-python.python:pip"
                             }
                         }
@@ -75,7 +75,7 @@
                 },
                 "python-envs.showActivateButton": {
                     "type": "boolean",
-                    "description": "Show the activate button in the terminal",
+                    "description": "%python-envs.showActivateButton.description%",
                     "default": false,
                     "scope": "machine",
                     "tags": [
@@ -88,124 +88,124 @@
         "commands": [
             {
                 "command": "python-envs.setEnvManager",
-                "title": "Set Environment Manager",
+                "title": "%python-envs.setEnvManager.title%",
                 "category": "Python",
                 "icon": "$(gear)"
             },
             {
                 "command": "python-envs.setPkgManager",
-                "title": "Set Package Manager",
+                "title": "%python-envs.setPkgManager.title%",
                 "category": "Python",
                 "icon": "$(package)"
             },
             {
                 "command": "python-envs.addPythonProject",
-                "title": "Add Python Project",
+                "title": "%python-envs.addPythonProject.title%",
                 "category": "Python",
                 "icon": "$(new-folder)"
             },
             {
                 "command": "python-envs.removePythonProject",
-                "title": "Remove Python Project",
+                "title": "%python-envs.removePythonProject.title%",
                 "category": "Python",
                 "icon": "$(remove)"
             },
             {
                 "command": "python-envs.create",
-                "title": "Create Environment",
+                "title": "%python-envs.create.title%",
                 "category": "Python",
                 "icon": "$(add)"
             },
             {
                 "command": "python-envs.createAny",
-                "title": "Create Environment",
+                "title": "%python-envs.createAny.title%",
                 "category": "Python",
                 "icon": "$(add)"
             },
             {
                 "command": "python-envs.set",
-                "title": "Set Workspace Environment",
+                "title": "%python-envs.set.title%",
                 "category": "Python",
                 "icon": "$(check)"
             },
             {
                 "command": "python-envs.setEnv",
-                "title": "Set As Workspace Environment",
+                "title": "%python-envs.setEnv.title%",
                 "category": "Python",
                 "icon": "$(check)"
             },
             {
                 "command": "python-envs.reset",
-                "title": "Reset Environment Selection to Default",
+                "title": "%python-envs.reset.title%",
                 "shortTitle": "Reset Environment",
                 "category": "Python",
                 "icon": "$(sync)"
             },
             {
                 "command": "python-envs.remove",
-                "title": "Delete Environment",
+                "title": "%python-envs.remove.title%",
                 "category": "Python",
                 "icon": "$(remove)"
             },
             {
                 "command": "python-envs.refreshAllManagers",
-                "title": "Refresh All Environment Managers",
+                "title": "%python-envs.refreshAllManagers.title%",
                 "shortTitle": "Refresh All",
                 "category": "Python",
                 "icon": "$(refresh)"
             },
             {
                 "command": "python-envs.refreshManager",
-                "title": "Refresh Environments List",
+                "title": "%python-envs.refreshManager.title%",
                 "category": "Python",
                 "icon": "$(refresh)"
             },
             {
                 "command": "python-envs.refreshPackages",
-                "title": "Refresh Packages List",
+                "title": "%python-envs.refreshPackages.title%",
                 "category": "Python",
                 "icon": "$(refresh)"
             },
             {
                 "command": "python-envs.packages",
-                "title": "Install or Remove Packages",
+                "title": "%python-envs.packages.title%",
                 "shortTitle": "Modify Packages",
                 "category": "Python",
                 "icon": "$(package)"
             },
             {
                 "command": "python-envs.clearCache",
-                "title": "Clear Cache",
+                "title": "%python-envs.clearCache.title%",
                 "category": "Python",
                 "icon": "$(trash)"
             },
             {
                 "command": "python-envs.runInTerminal",
-                "title": "Run in Terminal",
+                "title": "%python-envs.runInTerminal.title%",
                 "category": "Python Envs",
                 "icon": "$(play)"
             },
             {
                 "command": "python-envs.createTerminal",
-                "title": "Create Python Terminal",
+                "title": "%python-envs.createTerminal.title%",
                 "category": "Python Envs",
                 "icon": "$(terminal)"
             },
             {
                 "command": "python-envs.runAsTask",
-                "title": "Run as Task",
+                "title": "%python-envs.runAsTask.title%",
                 "category": "Python Envs",
                 "icon": "$(play)"
             },
             {
                 "command": "python-envs.terminal.activate",
-                "title": "Activate Environment in Current Terminal",
+                "title": "%python-envs.terminal.activate.title%",
                 "category": "Python Envs",
                 "icon": "$(zap)"
             },
             {
                 "command": "python-envs.terminal.deactivate",
-                "title": "Deactivate Environment in Current Terminal",
+                "title": "%python-envs.terminal.deactivate.title%",
                 "category": "Python Envs",
                 "icon": "$(circle-slash)"
             }
