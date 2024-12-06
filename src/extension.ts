@@ -52,8 +52,13 @@ import {
 import { PythonStatusBarImpl } from './features/views/pythonStatusBar';
 import { updateViewsAndStatus } from './features/views/revealHandler';
 import { EnvVarManager, PythonEnvVariableManager } from './features/execution/envVariableManager';
+import { StopWatch } from './common/stopWatch';
+import { sendTelemetryEvent } from './common/telemetry/sender';
+import { EventNames } from './common/telemetry/constants';
 
 export async function activate(context: ExtensionContext): Promise<PythonEnvironmentApi> {
+    const start = new StopWatch();
+
     // Logging should be set up before anything else.
     const outputChannel: LogOutputChannel = createLogOutputChannel('Python Environments');
     context.subscriptions.push(outputChannel, registerLogger(outputChannel));
@@ -222,8 +227,10 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
             registerSystemPythonFeatures(nativeFinder, context.subscriptions, outputChannel),
             registerCondaFeatures(nativeFinder, context.subscriptions, outputChannel),
         ]);
+        sendTelemetryEvent(EventNames.EXTENSION_MANAGER_REGISTRATION_DURATION, start.elapsedTime);
     });
 
+    sendTelemetryEvent(EventNames.EXTENSION_ACTIVATION_DURATION, start.elapsedTime);
     return api;
 }
 

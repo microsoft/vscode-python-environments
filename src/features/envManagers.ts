@@ -35,6 +35,8 @@ import {
     EnvironmentManagerAlreadyRegisteredError,
     PackageManagerAlreadyRegisteredError,
 } from '../common/errors/AlreadyRegisteredError';
+import { sendTelemetryEvent } from '../common/telemetry/sender';
+import { EventNames } from '../common/telemetry/constants';
 
 function generateId(name: string): string {
     return `${getCallingExtension()}:${name}`;
@@ -96,6 +98,11 @@ export class PythonEnvironmentManagers implements EnvironmentManagers {
 
         this._environmentManagers.set(managerId, mgr);
         this._onDidChangeEnvironmentManager.fire({ kind: 'registered', manager: mgr });
+
+        sendTelemetryEvent(EventNames.ENVIRONMENT_MANAGER_REGISTERED, undefined, {
+            managerId,
+        });
+
         return new Disposable(() => {
             this._environmentManagers.delete(managerId);
             disposables.forEach((d) => d.dispose());
@@ -129,6 +136,11 @@ export class PythonEnvironmentManagers implements EnvironmentManagers {
 
         this._packageManagers.set(managerId, mgr);
         this._onDidChangePackageManager.fire({ kind: 'registered', manager: mgr });
+
+        sendTelemetryEvent(EventNames.PACKAGE_MANAGER_REGISTERED, undefined, {
+            managerId,
+        });
+
         return new Disposable(() => {
             this._packageManagers.delete(managerId);
             disposables.forEach((d) => d.dispose());

@@ -22,6 +22,8 @@ import { createDeferred } from '../../common/utils/deferred';
 import { showErrorMessage } from '../../common/errors/utils';
 import { getWorkspacePersistentState } from '../../common/persistentState';
 import { shortVersion, sortEnvironments } from '../common/utils';
+import { sendTelemetryEvent } from '../../common/telemetry/sender';
+import { EventNames } from '../../common/telemetry/constants';
 
 export const SYSTEM_WORKSPACE_KEY = `${ENVS_EXTENSION_ID}:system:WORKSPACE_SELECTED`;
 export const SYSTEM_GLOBAL_KEY = `${ENVS_EXTENSION_ID}:system:GLOBAL_SELECTED`;
@@ -105,6 +107,9 @@ export async function isUvInstalled(log?: LogOutputChannel): Promise<boolean> {
     });
     proc.stdout.on('data', (d) => log?.info(d.toString()));
     proc.on('exit', (code) => {
+        if (code === 0) {
+            sendTelemetryEvent(EventNames.VENV_USING_UV);
+        }
         available.resolve(code === 0);
     });
     return available.promise;

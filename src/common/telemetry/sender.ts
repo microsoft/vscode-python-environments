@@ -57,14 +57,6 @@ export function sendTelemetryEvent<P extends IEventNamePropertyMapping, E extend
     } else {
         reporter.sendTelemetryEvent(eventNameSent, customProperties, measures);
     }
-
-    if (process.env?.VSC_PYTHON_LOG_TELEMETRY) {
-        console.info(
-            `Telemetry Event : ${eventNameSent} Measures: ${JSON.stringify(measures)} Props: ${JSON.stringify(
-                customProperties,
-            )}`,
-        );
-    }
 }
 
 type TypedMethodDescriptor<T> = (
