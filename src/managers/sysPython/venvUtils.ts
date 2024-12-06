@@ -7,7 +7,6 @@ import {
     PythonEnvironmentApi,
     PythonEnvironmentInfo,
     PythonProject,
-    ResolveEnvironmentContext,
     TerminalShellType,
 } from '../../api';
 import * as tomljs from '@iarna/toml';
@@ -479,18 +478,6 @@ export async function getProjectInstallable(
         },
     );
     return installable;
-}
-
-export async function resolveVenvPythonEnvironment(
-    context: ResolveEnvironmentContext,
-    nativeFinder: NativePythonFinder,
-    api: PythonEnvironmentApi,
-    manager: EnvironmentManager,
-    baseManager: EnvironmentManager,
-): Promise<PythonEnvironment | undefined> {
-    const fsPath = context instanceof Uri ? context.fsPath : context.environmentPath.fsPath;
-    const resolved = await resolveVenvPythonEnvironmentPath(fsPath, nativeFinder, api, manager, baseManager);
-    return resolved;
 }
 
 export async function resolveVenvPythonEnvironmentPath(

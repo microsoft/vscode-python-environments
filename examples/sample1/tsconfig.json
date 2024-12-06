@@ -16,6 +16,5 @@
         "noFallthroughCasesInSwitch": true,
         "resolveJsonModule": true,
         "removeComments": true
-    },
-    "exclude": ["examples"]
+    }
 }

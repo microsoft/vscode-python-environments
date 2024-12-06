@@ -23,7 +23,6 @@ import {
     getVenvForGlobal,
     getVenvForWorkspace,
     removeVenv,
-    resolveVenvPythonEnvironment,
     resolveVenvPythonEnvironmentPath,
     setVenvForGlobal,
     setVenvForWorkspace,
@@ -252,24 +251,10 @@ export class VenvManager implements EnvironmentManager {
                 // If it is in the collection, then it is a venv, and it should already be fully resolved.
                 return found;
             }
-        } else {
-            // We have received a partially or fully resolved environment.
-            const found =
-                this.collection.find((e) => e.envId.id === context.envId.id) ??
-                this.findEnvironmentByPath(context.environmentPath.fsPath);
-            if (found) {
-                // If it is in the collection, then it is a venv, and it should already be fully resolved.
-                return found;
-            }
-
-            if (context.execInfo) {
-                // This is a fully resolved environment, from venv perspective.
-                return context;
-            }
         }
 
-        const resolved = await resolveVenvPythonEnvironment(
-            context,
+        const resolved = await resolveVenvPythonEnvironmentPath(
+            context.fsPath,
             this.nativeFinder,
             this.api,
             this,

@@ -45,37 +45,8 @@ The extension uses `pip` as the default package manager. You can change this by 
 
 See [api.ts](https://github.com/microsoft/vscode-python-environments/blob/main/src/api.ts) for the full list of Extension APIs.
 
-Consuming these APIs from your extension:
-
-```typescript
-let _extApi: PythonEnvironmentApi | undefined;
-async function getEnvExtApi(): Promise<PythonEnvironmentApi> {
-    if (_extApi) {
-        return _extApi;
-    }
-    const extension = getExtension(ENVS_EXTENSION_ID);
-    if (!extension) {
-        throw new Error('Python Environments extension not found.');
-    }
-    if (extension?.isActive) {
-        _extApi = extension.exports as PythonEnvironmentApi;
-        return _extApi;
-    }
-
-    await extension.activate();
-
-    _extApi = extension.exports as PythonEnvironmentApi;
-    return _extApi;
-}
-
-export async function activate(context: ExtensionContext) {
-    const envApi = await getEnvExtApi();
-
-    // Get the environment for the workspace folder or global python if no workspace is open
-    const uri = workspace.workspaceFolders ? workspace.workspaceFolders[0].uri : undefined;
-    const env = await envApi.getEnvironment(uri);
-}
-```
+To consume these APIs you can look at the example here:
+https://github.com/microsoft/vscode-python-environments/blob/main/src/examples/README.md
 
 ## Contributing
 

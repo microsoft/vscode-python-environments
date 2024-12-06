@@ -38,8 +38,7 @@ import {
     PythonProjectManager,
 } from '../internal.api';
 import { createDeferred } from '../common/utils/deferred';
-import { traceError, traceInfo } from '../common/logging';
-import { showErrorMessage } from '../common/errors/utils';
+import { traceInfo } from '../common/logging';
 import { pickEnvironmentManager } from '../common/pickers/managers';
 import { handlePythonPath } from '../common/utils/pythonPath';
 import { TerminalManager } from './terminal/terminalManager';
@@ -197,38 +196,16 @@ class PythonEnvironmentApiImpl implements PythonEnvironmentApi {
     }
     onDidChangeEnvironment: Event<DidChangeEnvironmentEventArgs> = this._onDidChangeEnvironment.event;
     async resolveEnvironment(context: ResolveEnvironmentContext): Promise<PythonEnvironment | undefined> {
-        if (context instanceof Uri) {
-            const projects = this.projectManager.getProjects();
-            const projectEnvManagers: InternalEnvironmentManager[] = [];
-            projects.forEach((p) => {
-                const manager = this.envManagers.getEnvironmentManager(p.uri);
-                if (manager && !projectEnvManagers.includes(manager)) {
-                    projectEnvManagers.push(manager);
-                }
-            });
-
-            return await handlePythonPath(context, this.envManagers.managers, projectEnvManagers);
-        } else if ('envId' in context) {
-            const manager = this.envManagers.getEnvironmentManager(context);
-            if (!manager) {
-                const data = context instanceof Uri ? context.fsPath : context.environmentPath.fsPath;
-                traceError(`No environment manager found: ${data}`);
-                traceError(`Know environment managers: ${this.envManagers.managers.map((m) => m.name).join(', ')}`);
-                showErrorMessage('No environment manager found');
-                return undefined;
+        const projects = this.projectManager.getProjects();
+        const projectEnvManagers: InternalEnvironmentManager[] = [];
+        projects.forEach((p) => {
+            const manager = this.envManagers.getEnvironmentManager(p.uri);
+            if (manager && !projectEnvManagers.includes(manager)) {
+                projectEnvManagers.push(manager);
             }
-            const env = await manager.resolve(context);
-            if (env && !env.execInfo) {
-                traceError(`Environment wasn't resolved correctly, missing execution info: ${env.name}`);
-                traceError(`Environment: ${JSON.stringify(env)}`);
-                traceError(`Resolved by: ${manager.id}`);
-                showErrorMessage("Environment wasn't resolved correctly, missing execution info");
-                return undefined;
-            }
+        });
 
-            return env;
-        }
-        return undefined;
+        return await handlePythonPath(context, this.envManagers.managers, projectEnvManagers);
     }
 
     registerPackageManager(manager: PackageManager): Disposable {

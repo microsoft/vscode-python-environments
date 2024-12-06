@@ -8,7 +8,6 @@ import {
     PythonEnvironment,
     PythonEnvironmentApi,
     PythonEnvironmentInfo,
-    ResolveEnvironmentContext,
 } from '../../api';
 import * as ch from 'child_process';
 import { ENVS_EXTENSION_ID, EXTENSION_ROOT_DIR } from '../../common/constants';
@@ -421,18 +420,6 @@ export async function uninstallPackages(
         return refreshPackages(environment, api, manager);
     }
     throw new Error(`No executable found for python: ${environment.environmentPath.fsPath}`);
-}
-
-export async function resolveSystemPythonEnvironment(
-    context: ResolveEnvironmentContext,
-    nativeFinder: NativePythonFinder,
-
-    api: PythonEnvironmentApi,
-    manager: EnvironmentManager,
-): Promise<PythonEnvironment | undefined> {
-    const fsPath = context instanceof Uri ? context.fsPath : context.environmentPath.fsPath;
-    const resolved = await resolveSystemPythonEnvironmentPath(fsPath, nativeFinder, api, manager);
-    return resolved;
 }
 
 export async function resolveSystemPythonEnvironmentPath(

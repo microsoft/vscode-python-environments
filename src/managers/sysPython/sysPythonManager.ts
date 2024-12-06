@@ -19,7 +19,6 @@ import {
     getSystemEnvForGlobal,
     getSystemEnvForWorkspace,
     refreshPythons,
-    resolveSystemPythonEnvironment,
     resolveSystemPythonEnvironmentPath,
     setSystemEnvForGlobal,
     setSystemEnvForWorkspace,
@@ -157,32 +156,16 @@ export class SysPythonManager implements EnvironmentManager {
     }
 
     async resolve(context: ResolveEnvironmentContext): Promise<PythonEnvironment | undefined> {
-        if (context instanceof Uri) {
-            // NOTE: `environmentPath` for envs in `this.collection` for system envs always points to the python
-            // executable. This is set when we create the PythonEnvironment object.
-            const found = this.findEnvironmentByPath(context.fsPath);
-            if (found) {
-                // If it is in the collection, then it is a venv, and it should already be fully resolved.
-                return found;
-            }
-        } else {
-            // We have received a partially or fully resolved environment.
-            const found =
-                this.collection.find((e) => e.envId.id === context.envId.id) ??
-                this.findEnvironmentByPath(context.environmentPath.fsPath);
-            if (found) {
-                // If it is in the collection, then it is a venv, and it should already be fully resolved.
-                return found;
-            }
-
-            if (context.execInfo) {
-                // This is a fully resolved environment, from venv perspective.
-                return context;
-            }
+        // NOTE: `environmentPath` for envs in `this.collection` for system envs always points to the python
+        // executable. This is set when we create the PythonEnvironment object.
+        const found = this.findEnvironmentByPath(context.fsPath);
+        if (found) {
+            // If it is in the collection, then it is a venv, and it should already be fully resolved.
+            return found;
         }
 
         // This environment is unknown. Resolve it.
-        const resolved = await resolveSystemPythonEnvironment(context, this.nativeFinder, this.api, this);
+        const resolved = await resolveSystemPythonEnvironmentPath(context.fsPath, this.nativeFinder, this.api, this);
         if (resolved) {
             // This is just like finding a new environment or creating a new one.
             // Add it to collection, and trigger the added event.
