@@ -9,7 +9,7 @@
 
 ### Scaffolding
 
-Run `yo code` and follow the instructions to create a new extension. The following were the choices made for this example:
+Run `yo code` in your terminal and follow the instructions to create a new extension. The following were the choices made for this example:
 
 ```
 > yo code
@@ -22,7 +22,7 @@ Run `yo code` and follow the instructions to create a new extension. The followi
 ? Which package manager to use? npm
 ```
 
-The generator will provide additional instructions. Follow them to install the required dependencies and to build your extension.
+Follow the generator's additional instructions to install the required dependencies and build your extension.
 
 ### Update extension dependency
 
@@ -34,12 +34,11 @@ Add the following dependency to your extension `package.json` file:
     ],
 ```
 
-### Setting up the Python Envs API
+### Set up the Python Envs API
 
-The Python environments API is available via the extension export. Add the following file first to your extension [api.ts](https://github.com/microsoft/vscode-python-environments/blob/main/src/api.ts). You can rename the file as you see fit for your extension.
+The Python environments API is available via the extension export. First, add the following file to your extension [api.ts](https://github.com/microsoft/vscode-python-environments/blob/main/src/api.ts). You can rename the file as you see fit for your extension.
 
-Add another file to get the API:
-`pythonEnvsApi.ts`:
+Add a `pythonEnvsApi.ts` file to get the API and insert the following code:
 
 ```typescript
 import * as vscode from 'vscode';
