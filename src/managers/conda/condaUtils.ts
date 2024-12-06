@@ -441,7 +441,7 @@ async function createNamedCondaEnvironment(
     return await withProgress(
         {
             location: ProgressLocation.Notification,
-            title: l10n.t(`Creating conda environment: ${envName}`),
+            title: l10n.t('Creating conda environment: {0}', envName),
         },
         async () => {
             try {
@@ -483,7 +483,9 @@ async function createNamedCondaEnvironment(
                 return environment;
             } catch (e) {
                 log.error('Failed to create conda environment', e);
-                await showErrorMessage(CondaStrings.condaCreateFailed, log);
+                setImmediate(async () => {
+                    await showErrorMessage(CondaStrings.condaCreateFailed, log);
+                });
             }
         },
     );
@@ -503,7 +505,7 @@ async function createPrefixCondaEnvironment(
     if (await fsapi.pathExists(path.join(fsPath, '.conda'))) {
         log.warn(`Environment "${path.join(fsPath, '.conda')}" already exists`);
         const newName = await showInputBox({
-            prompt: l10n.t(`Environment "${name}" already exists. Enter a different name`),
+            prompt: l10n.t('Environment "{0}" already exists. Enter a different name', name),
             ignoreFocusOut: true,
             validateInput: (value) => {
                 if (value === name) {
@@ -555,8 +557,10 @@ async function createPrefixCondaEnvironment(
                 );
                 return environment;
             } catch (e) {
-                await showErrorMessage(CondaStrings.condaCreateFailed, log);
                 log.error('Failed to create conda environment', e);
+                setImmediate(async () => {
+                    await showErrorMessage(CondaStrings.condaCreateFailed, log);
+                });
             }
         },
     );
@@ -567,14 +571,16 @@ export async function deleteCondaEnvironment(environment: PythonEnvironment, log
     return await withProgress(
         {
             location: ProgressLocation.Notification,
-            title: l10n.t(`Deleting conda environment: ${environment.environmentPath.fsPath}`),
+            title: l10n.t('Deleting conda environment: {0}', environment.environmentPath.fsPath),
         },
         async () => {
             try {
                 await runConda(args);
             } catch (e) {
-                await showErrorMessage(CondaStrings.condaRemoveFailed, log);
                 log.error(`Failed to delete conda environment: ${e}`);
+                setImmediate(async () => {
+                    await showErrorMessage(CondaStrings.condaRemoveFailed, log);
+                });
                 return false;
             }
             return true;

@@ -290,7 +290,10 @@ export async function refreshPackages(
 ): Promise<Package[]> {
     if (!environment.execInfo) {
         manager.log?.error(`No executable found for python: ${environment.environmentPath.fsPath}`);
-        showErrorMessage(l10n.t(`No executable found for python: ${environment.environmentPath.fsPath}`), manager.log);
+        showErrorMessage(
+            l10n.t('No executable found for python: {0}', environment.environmentPath.fsPath),
+            manager.log,
+        );
         return [];
     }
 

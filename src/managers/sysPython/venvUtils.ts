@@ -359,7 +359,7 @@ export async function removeVenv(environment: PythonEnvironment, log: LogOutputC
         : environment.environmentPath.fsPath;
 
     const confirm = await showWarningMessage(
-        l10n.t(`Are you sure you want to remove ${envPath}?`),
+        l10n.t('Are you sure you want to remove {0}?', envPath),
         Common.yes,
         Common.no,
     );
