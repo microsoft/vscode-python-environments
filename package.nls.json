@@ -1,10 +1,10 @@
 {
-    "python-envs.defaultEnvManager.description": "The default environment manager to use for creating and managing environments.",
-    "python-envs.defaultPackageManager.description": "The default package manager to use for installing packages in environments.",
+    "python-envs.defaultEnvManager.description": "The default environment manager for creating and managing environments.",
+    "python-envs.defaultPackageManager.description": "The default package manager for installing packages in environments.",
     "python-envs.pythonProjects.description": "The list of Python projects.",
-    "python-envs.pythonProjects.path.description": "The path to a folder or file in the workspace to treat as Python project.",
-    "python-envs.pythonProjects.envManager.description": "The environment manager to use for creating and managing environments for this project.",
-    "python-envs.pythonProjects.packageManager.description": "The package manager to use for managing packages in environments for this project.",
+    "python-envs.pythonProjects.path.description": "The path to a folder or file in the workspace to be treated as a Python project.",
+    "python-envs.pythonProjects.envManager.description": "The environment manager for creating and managing environments for this project.",
+    "python-envs.pythonProjects.packageManager.description": "The package manager for managing packages in environments for this project.",
     "python-envs.showActivateButton.description": "Whether to show the 'Activate' button in the terminal menu",
 
     "python-envs.setEnvManager.title": "Set Environment Manager",
