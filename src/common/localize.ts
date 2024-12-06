@@ -73,8 +73,8 @@ export namespace VenvManagerStrings {
     export const venvGlobalFolder = l10n.t('Select a folder to create a global virtual environment');
     export const venvGlobalFoldersSetting = l10n.t('Venv Folders Setting');
 
-    export const venvErrorNoBasePython = l10n.t('No base python found');
-    export const venvErrorNoPython3 = l10n.t('Did not find any base python 3');
+    export const venvErrorNoBasePython = l10n.t('No base Python found');
+    export const venvErrorNoPython3 = l10n.t('Did not find any base Python 3');
 
     export const venvName = l10n.t('Enter a name for the virtual environment');
     export const venvNameErrorEmpty = l10n.t('Name cannot be empty');
@@ -91,7 +91,7 @@ export namespace VenvManagerStrings {
 }
 
 export namespace SysManagerStrings {
-    export const sysManagerDescription = l10n.t('Manages Global python installs');
+    export const sysManagerDescription = l10n.t('Manages Global Python installs');
     export const sysManagerRefreshing = l10n.t('Refreshing Global Python interpreters');
     export const sysManagerDiscovering = l10n.t('Discovering Global Python interpreters');
 
