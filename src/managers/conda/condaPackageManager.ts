@@ -6,7 +6,6 @@ import {
     LogOutputChannel,
     MarkdownString,
     ProgressLocation,
-    window,
 } from 'vscode';
 import {
     DidChangePackagesEventArgs,
@@ -19,6 +18,9 @@ import {
     PythonEnvironmentApi,
 } from '../../api';
 import { installPackages, refreshPackages, uninstallPackages } from './condaUtils';
+import { withProgress } from '../../common/window.apis';
+import { showErrorMessage } from '../../common/errors/utils';
+import { CondaStrings } from '../../common/localize';
 
 function getChanges(before: Package[], after: Package[]): { kind: PackageChangeKind; pkg: Package }[] {
     const changes: { kind: PackageChangeKind; pkg: Package }[] = [];
@@ -40,8 +42,8 @@ export class CondaPackageManager implements PackageManager, Disposable {
     constructor(public readonly api: PythonEnvironmentApi, public readonly log: LogOutputChannel) {
         this.name = 'conda';
         this.displayName = 'Conda';
-        this.description = 'Conda package manager';
-        this.tooltip = 'Conda package manager';
+        this.description = CondaStrings.condaPackageMgr;
+        this.tooltip = CondaStrings.condaPackageMgr;
     }
     name: string;
     displayName?: string;
@@ -50,10 +52,10 @@ export class CondaPackageManager implements PackageManager, Disposable {
     iconPath?: IconPath;
 
     async install(environment: PythonEnvironment, packages: string[], options: PackageInstallOptions): Promise<void> {
-        await window.withProgress(
+        await withProgress(
             {
                 location: ProgressLocation.Notification,
-                title: 'Installing packages',
+                title: CondaStrings.condaInstallingPackages,
                 cancellable: true,
             },
             async (_progress, token) => {
@@ -70,10 +72,7 @@ export class CondaPackageManager implements PackageManager, Disposable {
 
                     this.log.error('Error installing packages', e);
                     setImmediate(async () => {
-                        const result = await window.showErrorMessage('Error installing packages', 'View Output');
-                        if (result === 'View Output') {
-                            this.log.show();
-                        }
+                        await showErrorMessage(CondaStrings.condaInstallError, this.log);
                     });
                 }
             },
@@ -81,10 +80,10 @@ export class CondaPackageManager implements PackageManager, Disposable {
     }
 
     async uninstall(environment: PythonEnvironment, packages: Package[] | string[]): Promise<void> {
-        await window.withProgress(
+        await withProgress(
             {
                 location: ProgressLocation.Notification,
-                title: 'Uninstalling packages',
+                title: CondaStrings.condaUninstallingPackages,
                 cancellable: true,
             },
             async (_progress, token) => {
@@ -101,20 +100,17 @@ export class CondaPackageManager implements PackageManager, Disposable {
 
                     this.log.error('Error uninstalling packages', e);
                     setImmediate(async () => {
-                        const result = await window.showErrorMessage('Error installing packages', 'View Output');
-                        if (result === 'View Output') {
-                            this.log.show();
-                        }
+                        await showErrorMessage(CondaStrings.condaUninstallError, this.log);
                     });
                 }
             },
         );
     }
     async refresh(context: PythonEnvironment): Promise<void> {
-        await window.withProgress(
+        await withProgress(
             {
                 location: ProgressLocation.Window,
-                title: 'Refreshing packages',
+                title: CondaStrings.condaRefreshingPackages,
             },
             async () => {
                 this.packages.set(context.envId.id, await refreshPackages(context, this.api, this));

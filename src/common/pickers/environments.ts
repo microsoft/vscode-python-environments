@@ -1,7 +1,7 @@
 import { Uri, ThemeIcon, QuickPickItem, QuickPickItemKind, ProgressLocation, QuickInputButtons } from 'vscode';
 import { IconPath, PythonEnvironment, PythonProject } from '../../api';
 import { InternalEnvironmentManager } from '../../internal.api';
-import { Common, Interpreter } from '../localize';
+import { Common, Interpreter, Pickers } from '../localize';
 import { showQuickPickWithButtons, showQuickPick, showOpenDialog, withProgress } from '../window.apis';
 import { isWindows } from '../../managers/common/utils';
 import { traceError } from '../logging';
@@ -18,12 +18,8 @@ type QuickPickIcon =
     | undefined;
 
 function getIconPath(i: IconPath | undefined): QuickPickIcon {
-    if (i === undefined || i instanceof ThemeIcon) {
+    if (i === undefined || i instanceof ThemeIcon || i instanceof Uri) {
         return i;
-    }
-
-    if (i instanceof Uri) {
-        return i.fsPath.endsWith('__icon__.py') ? undefined : i;
     }
 
     if (typeof i === 'string') {
@@ -51,7 +47,7 @@ async function browseForPython(
         canSelectFolders: false,
         canSelectMany: false,
         filters,
-        title: 'Select Python executable',
+        title: Pickers.Environments.selectExecutable,
     });
     if (!uris || uris.length === 0) {
         return;
@@ -103,7 +99,7 @@ async function pickEnvironmentImpl(
     options: EnvironmentPickOptions,
 ): Promise<PythonEnvironment | undefined> {
     const selected = await showQuickPickWithButtons(items, {
-        placeHolder: `Select a Python Environment`,
+        placeHolder: Pickers.Environments.selectEnvironment,
         ignoreFocusOut: true,
         showBackButton: options?.showBackButton,
     });
@@ -184,7 +180,7 @@ export async function pickEnvironmentFrom(environments: PythonEnvironment[]): Pr
         iconPath: getIconPath(e.iconPath),
     }));
     const selected = await showQuickPick(items, {
-        placeHolder: 'Select Python Environment',
+        placeHolder: Pickers.Environments.selectEnvironment,
         ignoreFocusOut: true,
     });
     return (selected as { e: PythonEnvironment })?.e;

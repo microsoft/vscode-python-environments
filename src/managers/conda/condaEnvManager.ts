@@ -30,6 +30,7 @@ import {
 import { NativePythonFinder } from '../common/nativePythonFinder';
 import { createDeferred, Deferred } from '../../common/utils/deferred';
 import { withProgress } from '../../common/window.apis';
+import { CondaStrings } from '../../common/localize';
 
 export class CondaEnvManager implements EnvironmentManager, Disposable {
     private collection: PythonEnvironment[] = [];
@@ -51,8 +52,8 @@ export class CondaEnvManager implements EnvironmentManager, Disposable {
         this.name = 'conda';
         this.displayName = 'Conda';
         this.preferredPackageManagerId = 'ms-python.python:conda';
-        this.description = 'Conda environment manager';
-        this.tooltip = 'Conda environment manager';
+        this.description = CondaStrings.condaManager;
+        this.tooltip = CondaStrings.condaManager;
     }
 
     name: string;
@@ -77,7 +78,7 @@ export class CondaEnvManager implements EnvironmentManager, Disposable {
         await withProgress(
             {
                 location: ProgressLocation.Window,
-                title: 'Discovering Conda environments',
+                title: CondaStrings.condaDiscovering,
             },
             async () => {
                 this.collection = await refreshCondaEnvs(false, this.nativeFinder, this.api, this.log, this);
@@ -168,7 +169,7 @@ export class CondaEnvManager implements EnvironmentManager, Disposable {
             await withProgress(
                 {
                     location: ProgressLocation.Window,
-                    title: 'Refreshing Conda Environments',
+                    title: CondaStrings.condaRefreshingEnvs,
                 },
                 async () => {
                     this.log.info('Refreshing Conda Environments');

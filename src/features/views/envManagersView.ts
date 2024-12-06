@@ -21,6 +21,7 @@ import {
     PackageRootInfoTreeItem,
 } from './treeViewItems';
 import { createSimpleDebounce } from '../../common/utils/debounce';
+import { ProjectViews } from '../../common/localize';
 
 export class EnvManagerView implements TreeDataProvider<EnvTreeItem>, Disposable {
     private treeView: TreeView<EnvTreeItem>;
@@ -120,7 +121,7 @@ export class EnvManagerView implements TreeDataProvider<EnvTreeItem>, Disposable
                 this.packageRoots.set(environment.envId.id, item);
                 views.push(item);
             } else {
-                views.push(new EnvInfoTreeItem(parent, 'No package manager found'));
+                views.push(new EnvInfoTreeItem(parent, ProjectViews.noPackageManager));
             }
 
             return views;
@@ -137,7 +138,7 @@ export class EnvManagerView implements TreeDataProvider<EnvTreeItem>, Disposable
             if (packages) {
                 views.push(...packages.map((p) => new PackageTreeItem(p, root, manager)));
             } else {
-                views.push(new PackageRootInfoTreeItem(root, 'No packages found'));
+                views.push(new PackageRootInfoTreeItem(root, ProjectViews.noPackages));
             }
 
             return views;

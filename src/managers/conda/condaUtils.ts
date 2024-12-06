@@ -12,7 +12,7 @@ import {
 import * as path from 'path';
 import * as os from 'os';
 import * as fsapi from 'fs-extra';
-import { CancellationError, CancellationToken, LogOutputChannel, ProgressLocation, Uri, window } from 'vscode';
+import { CancellationError, CancellationToken, l10n, LogOutputChannel, ProgressLocation, Uri } from 'vscode';
 import { ENVS_EXTENSION_ID } from '../../common/constants';
 import { createDeferred } from '../../common/utils/deferred';
 import {
@@ -27,6 +27,9 @@ import { getGlobalPersistentState, getWorkspacePersistentState } from '../../com
 import which from 'which';
 import { shortVersion, sortEnvironments } from '../common/utils';
 import { pickProject } from '../../common/pickers/projects';
+import { CondaStrings } from '../../common/localize';
+import { showErrorMessage } from '../../common/errors/utils';
+import { showInputBox, showQuickPick, withProgress } from '../../common/window.apis';
 
 export const CONDA_PATH_KEY = `${ENVS_EXTENSION_ID}:conda:CONDA_PATH`;
 export const CONDA_PREFIXES_KEY = `${ENVS_EXTENSION_ID}:conda:CONDA_PREFIXES`;
@@ -398,20 +401,20 @@ export async function createCondaEnvironment(
         Array.isArray(uris) && uris.length > 1
             ? 'Named'
             : (
-                  await window.showQuickPick(
+                  await showQuickPick(
                       [
-                          { label: 'Named', description: 'Create a named conda environment' },
-                          { label: 'Prefix', description: 'Create environment in your workspace' },
+                          { label: CondaStrings.condaNamed, description: CondaStrings.condaNamedDescription },
+                          { label: CondaStrings.condaPrefix, description: CondaStrings.condaPrefixDescription },
                       ],
                       {
-                          placeHolder: 'Select the type of conda environment to create',
+                          placeHolder: CondaStrings.condaSelectEnvType,
                           ignoreFocusOut: true,
                       },
                   )
               )?.label;
 
     if (envType) {
-        return envType === 'Named'
+        return envType === CondaStrings.condaNamed
             ? await createNamedCondaEnvironment(api, log, manager, getName(api, uris ?? []))
             : await createPrefixCondaEnvironment(api, log, manager, await getLocation(api, uris ?? []));
     }
@@ -424,8 +427,8 @@ async function createNamedCondaEnvironment(
     manager: EnvironmentManager,
     name?: string,
 ): Promise<PythonEnvironment | undefined> {
-    name = await window.showInputBox({
-        prompt: 'Enter the name of the conda environment to create',
+    name = await showInputBox({
+        prompt: CondaStrings.condaNamedInput,
         value: name,
         ignoreFocusOut: true,
     });
@@ -435,10 +438,10 @@ async function createNamedCondaEnvironment(
 
     const envName: string = name;
 
-    return await window.withProgress(
+    return await withProgress(
         {
             location: ProgressLocation.Notification,
-            title: `Creating conda environment: ${envName}`,
+            title: l10n.t(`Creating conda environment: ${envName}`),
         },
         async () => {
             try {
@@ -479,8 +482,8 @@ async function createNamedCondaEnvironment(
                 );
                 return environment;
             } catch (e) {
-                window.showErrorMessage('Failed to create conda environment');
                 log.error('Failed to create conda environment', e);
+                await showErrorMessage(CondaStrings.condaCreateFailed, log);
             }
         },
     );
@@ -499,12 +502,12 @@ async function createPrefixCondaEnvironment(
     let name = `./.conda`;
     if (await fsapi.pathExists(path.join(fsPath, '.conda'))) {
         log.warn(`Environment "${path.join(fsPath, '.conda')}" already exists`);
-        const newName = await window.showInputBox({
-            prompt: `Environment "${name}" already exists. Enter a different name`,
+        const newName = await showInputBox({
+            prompt: l10n.t(`Environment "${name}" already exists. Enter a different name`),
             ignoreFocusOut: true,
             validateInput: (value) => {
                 if (value === name) {
-                    return 'Environment already exists';
+                    return CondaStrings.condaExists;
                 }
                 return undefined;
             },
@@ -517,7 +520,7 @@ async function createPrefixCondaEnvironment(
 
     const prefix: string = path.isAbsolute(name) ? name : path.join(fsPath, name);
 
-    return await window.withProgress(
+    return await withProgress(
         {
             location: ProgressLocation.Notification,
             title: `Creating conda environment: ${name}`,
@@ -552,7 +555,7 @@ async function createPrefixCondaEnvironment(
                 );
                 return environment;
             } catch (e) {
-                window.showErrorMessage('Failed to create conda environment');
+                await showErrorMessage(CondaStrings.condaCreateFailed, log);
                 log.error('Failed to create conda environment', e);
             }
         },
@@ -561,16 +564,16 @@ async function createPrefixCondaEnvironment(
 
 export async function deleteCondaEnvironment(environment: PythonEnvironment, log: LogOutputChannel): Promise<boolean> {
     let args = ['env', 'remove', '--yes', '--prefix', environment.environmentPath.fsPath];
-    return await window.withProgress(
+    return await withProgress(
         {
             location: ProgressLocation.Notification,
-            title: `Deleting conda environment: ${environment.environmentPath.fsPath}`,
+            title: l10n.t(`Deleting conda environment: ${environment.environmentPath.fsPath}`),
         },
         async () => {
             try {
                 await runConda(args);
             } catch (e) {
-                window.showErrorMessage('Failed to delete conda environment');
+                await showErrorMessage(CondaStrings.condaRemoveFailed, log);
                 log.error(`Failed to delete conda environment: ${e}`);
                 return false;
             }

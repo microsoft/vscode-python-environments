@@ -1,5 +1,5 @@
 import { activeTextEditor } from '../../common/window.apis';
-import { WorkspaceView } from './projectView';
+import { ProjectView } from './projectView';
 import { EnvManagerView } from './envManagersView';
 import { PythonStatusBar } from './pythonStatusBar';
 import { isPythonProjectFile } from '../../common/utils/fileNameUtils';
@@ -7,7 +7,7 @@ import { PythonEnvironmentApi } from '../../api';
 
 export function updateViewsAndStatus(
     statusBar: PythonStatusBar,
-    workspaceView: WorkspaceView,
+    workspaceView: ProjectView,
     managerView: EnvManagerView,
     api: PythonEnvironmentApi,
 ) {

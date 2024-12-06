@@ -35,7 +35,7 @@ import {
     registerAutoProjectProvider,
     registerExistingProjectProvider,
 } from './features/projectCreators';
-import { WorkspaceView } from './features/views/projectView';
+import { ProjectView } from './features/views/projectView';
 import { registerCompletionProvider } from './features/settings/settingCompletions';
 import { TerminalManager, TerminalManagerImpl } from './features/terminal/terminalManager';
 import {
@@ -93,7 +93,7 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
     const managerView = new EnvManagerView(envManagers);
     context.subscriptions.push(managerView);
 
-    const workspaceView = new WorkspaceView(envManagers, projectManager);
+    const workspaceView = new ProjectView(envManagers, projectManager);
     context.subscriptions.push(workspaceView);
 
     workspaceView.initialize();

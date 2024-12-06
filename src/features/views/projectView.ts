@@ -25,8 +25,9 @@ import {
 } from './treeViewItems';
 import { onDidChangeConfiguration } from '../../common/workspace.apis';
 import { createSimpleDebounce } from '../../common/utils/debounce';
+import { ProjectViews } from '../../common/localize';
 
-export class WorkspaceView implements TreeDataProvider<ProjectTreeItem> {
+export class ProjectView implements TreeDataProvider<ProjectTreeItem> {
     private treeView: TreeView<ProjectTreeItem>;
     private _treeDataChanged: EventEmitter<ProjectTreeItem | ProjectTreeItem[] | null | undefined> = new EventEmitter<
         ProjectTreeItem | ProjectTreeItem[] | null | undefined
@@ -149,7 +150,7 @@ export class WorkspaceView implements TreeDataProvider<ProjectTreeItem> {
                     new NoProjectEnvironment(
                         projectItem.project,
                         projectItem,
-                        'Waiting for environment managers to load',
+                        ProjectViews.waitingForEnvManager,
                         undefined,
                         undefined,
                         '$(loading~spin)',
@@ -164,8 +165,8 @@ export class WorkspaceView implements TreeDataProvider<ProjectTreeItem> {
                     new NoProjectEnvironment(
                         projectItem.project,
                         projectItem,
-                        'Environment manager not found',
-                        'Install an environment manager to get started. If you have installed then it might be loading.',
+                        ProjectViews.noEnvironmentManager,
+                        ProjectViews.noEnvironmentManagerDescription,
                     ),
                 ];
             }
@@ -176,7 +177,7 @@ export class WorkspaceView implements TreeDataProvider<ProjectTreeItem> {
                     new NoProjectEnvironment(
                         projectItem.project,
                         projectItem,
-                        `No environment provided by ${manager.displayName}`,
+                        `${ProjectViews.noEnvironmentProvided} ${manager.displayName}`,
                     ),
                 ];
             }
@@ -199,7 +200,7 @@ export class WorkspaceView implements TreeDataProvider<ProjectTreeItem> {
                 this.packageRoots.set(uri ? uri.fsPath : 'global', item);
                 views.push(item);
             } else {
-                views.push(new ProjectEnvironmentInfo(environmentItem, 'No package manager found'));
+                views.push(new ProjectEnvironmentInfo(environmentItem, ProjectViews.noPackageManager));
             }
             return views;
         }
@@ -214,7 +215,7 @@ export class WorkspaceView implements TreeDataProvider<ProjectTreeItem> {
             if (packages) {
                 return packages.map((p) => new ProjectPackage(root, p, manager));
             } else {
-                views.push(new ProjectPackageRootInfoTreeItem(root, 'No packages found'));
+                views.push(new ProjectPackageRootInfoTreeItem(root, ProjectViews.noPackages));
             }
         }
 

@@ -1,7 +1,7 @@
 import { QuickPickItem, QuickPickItemKind } from 'vscode';
 import { PythonProjectCreator } from '../../api';
 import { InternalEnvironmentManager, InternalPackageManager } from '../../internal.api';
-import { Common } from '../localize';
+import { Common, Pickers } from '../localize';
 import { showQuickPickWithButtons, showQuickPick } from '../window.apis';
 
 export async function pickEnvironmentManager(
@@ -44,7 +44,7 @@ export async function pickEnvironmentManager(
             })),
     );
     const item = await showQuickPickWithButtons(items, {
-        placeHolder: 'Select an environment manager',
+        placeHolder: Pickers.Managers.selectEnvironmentManager,
         ignoreFocusOut: true,
     });
     return (item as QuickPickItem & { id: string })?.id;
@@ -90,7 +90,7 @@ export async function pickPackageManager(
             })),
     );
     const item = await showQuickPickWithButtons(items, {
-        placeHolder: 'Select an package manager',
+        placeHolder: Pickers.Managers.selectPackageManager,
         ignoreFocusOut: true,
     });
     return (item as QuickPickItem & { id: string })?.id;
@@ -111,7 +111,7 @@ export async function pickCreator(creators: PythonProjectCreator[]): Promise<Pyt
         c: c,
     }));
     const selected = await showQuickPick(items, {
-        placeHolder: 'Select a project creator',
+        placeHolder: Pickers.Managers.selectProjectCreator,
         ignoreFocusOut: true,
     });
     return (selected as { c: PythonProjectCreator })?.c;

@@ -1,5 +1,6 @@
 import * as stackTrace from 'stack-trace';
 import { commands, LogOutputChannel, window } from 'vscode';
+import { Common } from '../localize';
 
 export function parseStack(ex: Error) {
     if (ex.stack && Array.isArray(ex.stack)) {
@@ -10,8 +11,8 @@ export function parseStack(ex: Error) {
 }
 
 export async function showErrorMessage(message: string, log?: LogOutputChannel) {
-    const result = await window.showErrorMessage(message, 'View Logs');
-    if (result === 'View Logs') {
+    const result = await window.showErrorMessage(message, Common.viewLogs);
+    if (result === Common.viewLogs) {
         if (log) {
             log.show();
         } else {
@@ -21,8 +22,8 @@ export async function showErrorMessage(message: string, log?: LogOutputChannel) 
 }
 
 export async function showWarningMessage(message: string, log?: LogOutputChannel) {
-    const result = await window.showWarningMessage(message, 'View Logs');
-    if (result === 'View Logs') {
+    const result = await window.showWarningMessage(message, Common.viewLogs);
+    if (result === Common.viewLogs) {
         if (log) {
             log.show();
         } else {

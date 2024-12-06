@@ -5,7 +5,7 @@ import { Installable, PythonEnvironment, Package } from '../../api';
 import { InternalPackageManager } from '../../internal.api';
 import { EXTENSION_ROOT_DIR } from '../constants';
 import { launchBrowser } from '../env.apis';
-import { Common, PackageManagement } from '../localize';
+import { Common, PackageManagement, Pickers } from '../localize';
 import { traceWarn } from '../logging';
 import { showQuickPick, showInputBoxWithButtons, showTextDocument, showQuickPickWithButtons } from '../window.apis';
 
@@ -13,15 +13,15 @@ export async function pickPackageOptions(): Promise<string | undefined> {
     const items = [
         {
             label: Common.install,
-            description: 'Install packages',
+            description: Pickers.Packages.installPackages,
         },
         {
             label: Common.uninstall,
-            description: 'Uninstall packages',
+            description: Pickers.Packages.uninstallPackages,
         },
     ];
     const selected = await showQuickPick(items, {
-        placeHolder: 'Select an option',
+        placeHolder: Pickers.Packages.selectOption,
         ignoreFocusOut: true,
     });
     return selected?.label;

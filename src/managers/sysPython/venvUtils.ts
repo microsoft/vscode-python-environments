@@ -1,4 +1,4 @@
-import { LogOutputChannel, ProgressLocation, QuickPickItem, QuickPickItemKind, ThemeIcon, Uri } from 'vscode';
+import { l10n, LogOutputChannel, ProgressLocation, QuickPickItem, QuickPickItemKind, ThemeIcon, Uri } from 'vscode';
 import {
     EnvironmentManager,
     Installable,
@@ -34,6 +34,7 @@ import {
 } from '../../common/window.apis';
 import { showErrorMessage } from '../../common/errors/utils';
 import { getPackagesToInstallFromInstallable } from '../../common/pickers/packages';
+import { Common, VenvManagerStrings } from '../../common/localize';
 
 export const VENV_WORKSPACE_KEY = `${ENVS_EXTENSION_ID}:venv:WORKSPACE_SELECTED`;
 export const VENV_GLOBAL_KEY = `${ENVS_EXTENSION_ID}:venv:GLOBAL_SELECTED`;
@@ -185,8 +186,8 @@ interface FolderQuickPickItem extends QuickPickItem {
 export async function getGlobalVenvLocation(): Promise<Uri | undefined> {
     const items: FolderQuickPickItem[] = [
         {
-            label: 'Browse',
-            description: 'Select a folder to create a global virtual environment',
+            label: Common.browse,
+            description: VenvManagerStrings.venvGlobalFolder,
         },
     ];
 
@@ -194,7 +195,7 @@ export async function getGlobalVenvLocation(): Promise<Uri | undefined> {
     if (venvPaths.length > 0) {
         items.push(
             {
-                label: 'Venv Folders Setting',
+                label: VenvManagerStrings.venvGlobalFoldersSetting,
                 kind: QuickPickItemKind.Separator,
             },
             ...venvPaths.map((p) => ({
@@ -208,11 +209,11 @@ export async function getGlobalVenvLocation(): Promise<Uri | undefined> {
     if (process.env.WORKON_HOME) {
         items.push(
             {
-                label: 'Virtualenvwrapper',
+                label: 'virtualenvwrapper',
                 kind: QuickPickItemKind.Separator,
             },
             {
-                label: 'WORKON_HOME',
+                label: 'WORKON_HOME (env variable)',
                 description: process.env.WORKON_HOME,
                 uri: Uri.file(process.env.WORKON_HOME),
             },
@@ -220,17 +221,17 @@ export async function getGlobalVenvLocation(): Promise<Uri | undefined> {
     }
 
     const selected = await showQuickPick(items, {
-        placeHolder: 'Select a folder to create a global virtual environment',
+        placeHolder: VenvManagerStrings.venvGlobalFolder,
         ignoreFocusOut: true,
     });
 
     if (selected) {
-        if (selected.label === 'Browse') {
+        if (selected.label === Common.browse) {
             const result = await showOpenDialog({
                 canSelectFiles: false,
                 canSelectFolders: true,
                 canSelectMany: false,
-                openLabel: 'Select Folder',
+                openLabel: Common.selectFolder,
             });
             if (result && result.length > 0) {
                 return result[0];
@@ -252,14 +253,14 @@ export async function createPythonVenv(
 ): Promise<PythonEnvironment | undefined> {
     if (basePythons.length === 0) {
         log.error('No base python found');
-        showErrorMessage('No base python found');
+        showErrorMessage(VenvManagerStrings.venvErrorNoBasePython);
         return;
     }
 
     const filtered = basePythons.filter((e) => e.version.startsWith('3.'));
     if (filtered.length === 0) {
         log.error('Did not find any base python 3.*');
-        showErrorMessage('Did not find any base python 3.*');
+        showErrorMessage(VenvManagerStrings.venvErrorNoPython3);
         basePythons.forEach((e) => {
             log.error(`available base python: ${e.version}`);
         });
@@ -272,22 +273,16 @@ export async function createPythonVenv(
         return;
     }
 
-    if (basePython.version.startsWith('2.')) {
-        log.error('Python 2.* is not supported for virtual env creation');
-        showErrorMessage('Python 2.* is not supported, use Python 3.*');
-        return;
-    }
-
     const name = await showInputBox({
-        prompt: 'Enter name for virtual environment',
+        prompt: VenvManagerStrings.venvName,
         value: '.venv',
         ignoreFocusOut: true,
         validateInput: async (value) => {
             if (!value) {
-                return 'Name cannot be empty';
+                return VenvManagerStrings.venvNameErrorEmpty;
             }
             if (await fsapi.pathExists(path.join(venvRoot.fsPath, value))) {
-                return 'Virtual environment already exists';
+                return VenvManagerStrings.venvNameErrorExists;
             }
         },
     });
@@ -315,7 +310,7 @@ export async function createPythonVenv(
     return await withProgress(
         {
             location: ProgressLocation.Notification,
-            title: 'Creating virtual environment',
+            title: VenvManagerStrings.venvCreating,
         },
         async () => {
             try {
@@ -349,7 +344,7 @@ export async function createPythonVenv(
                 return env;
             } catch (e) {
                 log.error(`Failed to create virtual environment: ${e}`);
-                showErrorMessage(`Failed to create virtual environment`);
+                showErrorMessage(VenvManagerStrings.venvCreateFailed);
                 return;
             }
         },
@@ -363,12 +358,16 @@ export async function removeVenv(environment: PythonEnvironment, log: LogOutputC
         ? path.dirname(path.dirname(environment.environmentPath.fsPath))
         : environment.environmentPath.fsPath;
 
-    const confirm = await showWarningMessage(`Are you sure you want to remove ${envPath}?`, 'Yes', 'No');
-    if (confirm === 'Yes') {
+    const confirm = await showWarningMessage(
+        l10n.t(`Are you sure you want to remove ${envPath}?`),
+        Common.yes,
+        Common.no,
+    );
+    if (confirm === Common.yes) {
         await withProgress(
             {
                 location: ProgressLocation.Notification,
-                title: 'Removing virtual environment',
+                title: VenvManagerStrings.venvRemoving,
             },
             async () => {
                 try {
@@ -376,6 +375,7 @@ export async function removeVenv(environment: PythonEnvironment, log: LogOutputC
                     return true;
                 } catch (e) {
                     log.error(`Failed to remove virtual environment: ${e}`);
+                    showErrorMessage(VenvManagerStrings.venvRemoveFailed);
                     return false;
                 }
             },
@@ -404,7 +404,7 @@ function getTomlInstallable(toml: tomljs.JsonMap, tomlPath: Uri): Installable[] 
     if (isPipInstallableToml(toml)) {
         extras.push({
             displayName: path.basename(tomlPath.fsPath),
-            description: 'Install project as editable',
+            description: VenvManagerStrings.installEditable,
             group: 'TOML',
             args: ['-e', path.dirname(tomlPath.fsPath)],
             uri: tomlPath,
@@ -437,10 +437,9 @@ export async function getProjectInstallable(
     await withProgress(
         {
             location: ProgressLocation.Window,
-            title: 'Searching dependencies',
+            title: VenvManagerStrings.searchingDependencies,
         },
-        async (progress, token) => {
-            progress.report({ message: 'Searching for Requirements and TOML files' });
+        async (_progress, token) => {
             const results: Uri[] = (
                 await Promise.all([
                     findFiles('**/*requirements*.txt', exclude, undefined, token),

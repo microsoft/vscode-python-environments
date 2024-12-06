@@ -33,6 +33,7 @@ import { ENVS_EXTENSION_ID } from '../../common/constants';
 import { createDeferred, Deferred } from '../../common/utils/deferred';
 import { getLatest, sortEnvironments } from '../common/utils';
 import { withProgress } from '../../common/window.apis';
+import { VenvManagerStrings } from '../../common/localize';
 
 export class VenvManager implements EnvironmentManager {
     private collection: PythonEnvironment[] = [];
@@ -60,8 +61,8 @@ export class VenvManager implements EnvironmentManager {
     ) {
         this.name = 'venv';
         this.displayName = 'venv Environments';
-        this.description = 'Manages virtual environments created using venv';
-        this.tooltip = new MarkdownString('Manages virtual environments created using `venv`', true);
+        this.description = VenvManagerStrings.venvManagerDescription;
+        this.tooltip = new MarkdownString(VenvManagerStrings.venvManagerDescription, true);
         this.preferredPackageManagerId = 'ms-python.python:pip';
         this.iconPath = new ThemeIcon('python');
     }
@@ -75,7 +76,7 @@ export class VenvManager implements EnvironmentManager {
         this._initialized = createDeferred();
 
         try {
-            await this.internalRefresh(undefined, false, 'Initializing virtual environments');
+            await this.internalRefresh(undefined, false, VenvManagerStrings.venvInitialize);
         } finally {
             this._initialized.resolve();
         }
@@ -141,7 +142,7 @@ export class VenvManager implements EnvironmentManager {
     }
 
     async refresh(scope: RefreshEnvironmentsScope): Promise<void> {
-        return this.internalRefresh(scope, true, 'Refreshing virtual environments');
+        return this.internalRefresh(scope, true, VenvManagerStrings.venvRefreshing);
     }
 
     private async internalRefresh(scope: RefreshEnvironmentsScope, hardRefresh: boolean, title: string): Promise<void> {

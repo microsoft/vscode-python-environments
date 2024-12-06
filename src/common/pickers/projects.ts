@@ -2,6 +2,7 @@ import path from 'path';
 import { QuickPickItem } from 'vscode';
 import { PythonProject } from '../../api';
 import { showQuickPick, showQuickPickWithButtons } from '../window.apis';
+import { Pickers } from '../localize';
 
 interface ProjectQuickPickItem extends QuickPickItem {
     project: PythonProject;
@@ -15,7 +16,7 @@ export async function pickProject(projects: ReadonlyArray<PythonProject>): Promi
             project: pw,
         }));
         const item = await showQuickPick(items, {
-            placeHolder: 'Select a project, folder or script',
+            placeHolder: Pickers.Project.selectProject,
             ignoreFocusOut: true,
         });
         if (item) {
@@ -38,7 +39,7 @@ export async function pickProjectMany(
             project: pw,
         }));
         const item = await showQuickPickWithButtons(items, {
-            placeHolder: 'Select a project, folder or script',
+            placeHolder: Pickers.Project.selectProjects,
             ignoreFocusOut: true,
             canPickMany: true,
             showBackButton: showBackButton,

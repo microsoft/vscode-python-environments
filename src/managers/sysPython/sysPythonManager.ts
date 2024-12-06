@@ -26,6 +26,7 @@ import {
 import { NativePythonFinder } from '../common/nativePythonFinder';
 import { createDeferred, Deferred } from '../../common/utils/deferred';
 import { getLatest } from '../common/utils';
+import { SysManagerStrings } from '../../common/localize';
 
 export class SysPythonManager implements EnvironmentManager {
     private collection: PythonEnvironment[] = [];
@@ -53,8 +54,8 @@ export class SysPythonManager implements EnvironmentManager {
         this.name = 'system';
         this.displayName = 'Global';
         this.preferredPackageManagerId = 'ms-python.python:pip';
-        this.description = 'Manages Global python installs';
-        this.tooltip = new MarkdownString('$(globe) Python Environment Manager', true);
+        this.description = SysManagerStrings.sysManagerDescription;
+        this.tooltip = new MarkdownString(SysManagerStrings.sysManagerDescription, true);
         this.iconPath = new ThemeIcon('globe');
     }
 
@@ -66,13 +67,13 @@ export class SysPythonManager implements EnvironmentManager {
 
         this._initialized = createDeferred();
 
-        await this.internalRefresh(false, 'Discovering Python environments');
+        await this.internalRefresh(false, SysManagerStrings.sysManagerDiscovering);
 
         this._initialized.resolve();
     }
 
     refresh(_scope: RefreshEnvironmentsScope): Promise<void> {
-        return this.internalRefresh(true, 'Refreshing Python environments');
+        return this.internalRefresh(true, SysManagerStrings.sysManagerRefreshing);
     }
 
     private async internalRefresh(hardRefresh: boolean, title: string) {

@@ -1,4 +1,13 @@
-import { CancellationError, CancellationToken, LogOutputChannel, QuickPickItem, ThemeIcon, Uri, window } from 'vscode';
+import {
+    CancellationError,
+    CancellationToken,
+    l10n,
+    LogOutputChannel,
+    QuickPickItem,
+    ThemeIcon,
+    Uri,
+    window,
+} from 'vscode';
 import {
     EnvironmentManager,
     Package,
@@ -22,6 +31,7 @@ import { getWorkspacePersistentState } from '../../common/persistentState';
 import { shortVersion, sortEnvironments } from '../common/utils';
 import { sendTelemetryEvent } from '../../common/telemetry/sender';
 import { EventNames } from '../../common/telemetry/constants';
+import { SysManagerStrings } from '../../common/localize';
 
 export const SYSTEM_WORKSPACE_KEY = `${ENVS_EXTENSION_ID}:system:WORKSPACE_SELECTED`;
 export const SYSTEM_GLOBAL_KEY = `${ENVS_EXTENSION_ID}:system:GLOBAL_SELECTED`;
@@ -82,7 +92,7 @@ export async function pickPackages(uninstall: boolean, packages: string[] | Pack
     });
 
     const result = await window.showQuickPick(items, {
-        placeHolder: uninstall ? 'Select packages to uninstall' : 'Select packages to install',
+        placeHolder: uninstall ? SysManagerStrings.selectUninstall : SysManagerStrings.selectInstall,
         canPickMany: true,
         ignoreFocusOut: true,
     });
@@ -280,7 +290,7 @@ export async function refreshPackages(
 ): Promise<Package[]> {
     if (!environment.execInfo) {
         manager.log?.error(`No executable found for python: ${environment.environmentPath.fsPath}`);
-        showErrorMessage(`No executable found for python: ${environment.environmentPath.fsPath}`, manager.log);
+        showErrorMessage(l10n.t(`No executable found for python: ${environment.environmentPath.fsPath}`), manager.log);
         return [];
     }
 
@@ -298,7 +308,7 @@ export async function refreshPackages(
         }
     } catch (e) {
         manager.log?.error('Error refreshing packages', e);
-        showErrorMessage('Error refreshing packages', manager.log);
+        showErrorMessage(SysManagerStrings.packageRefreshError, manager.log);
         return [];
     }
 
