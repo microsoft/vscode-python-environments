@@ -1,5 +1,4 @@
-import * as path from 'path';
-import { Event, EventEmitter, LogOutputChannel, MarkdownString, ProgressLocation, Uri, window } from 'vscode';
+import { Event, EventEmitter, LogOutputChannel, MarkdownString, ProgressLocation, ThemeIcon, window } from 'vscode';
 import {
     DidChangePackagesEventArgs,
     IconPath,
@@ -15,7 +14,6 @@ import { installPackages, refreshPackages, uninstallPackages } from './utils';
 import { Disposable } from 'vscode-jsonrpc';
 import { getProjectInstallable } from './venvUtils';
 import { VenvManager } from './venvManager';
-import { EXTENSION_ROOT_DIR } from '../../common/constants';
 
 function getChanges(before: Package[], after: Package[]): { kind: PackageChangeKind; pkg: Package }[] {
     const changes: { kind: PackageChangeKind; pkg: Package }[] = [];
@@ -43,10 +41,7 @@ export class PipPackageManager implements PackageManager, Disposable {
         this.displayName = 'Pip';
         this.description = 'This package manager for python installs using pip.';
         this.tooltip = new MarkdownString('This package manager for python installs using `pip`.');
-        this.iconPath = {
-            light: Uri.file(path.join(EXTENSION_ROOT_DIR, 'files', 'light_mode_icon.svg')),
-            dark: Uri.file(path.join(EXTENSION_ROOT_DIR, 'files', 'dark_mode_icon.svg')),
-        };
+        this.iconPath = new ThemeIcon('python');
     }
     readonly name: string;
     readonly displayName?: string;

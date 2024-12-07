@@ -29,7 +29,6 @@ import { createDeferred } from '../../common/utils/deferred';
 import { traceError, traceVerbose } from '../../common/logging';
 import { getConfiguration } from '../../common/workspace.apis';
 import { EnvironmentManagers } from '../../internal.api';
-import { EXTENSION_ROOT_DIR } from '../../common/constants';
 
 const SHELL_INTEGRATION_TIMEOUT = 500; // 0.5 seconds
 const SHELL_INTEGRATION_POLL_INTERVAL = 100; // 0.1 seconds
@@ -291,10 +290,7 @@ export class TerminalManagerImpl implements TerminalManager {
             env: options.env,
             strictEnv: options.strictEnv,
             message: options.message,
-            iconPath: options.iconPath ?? {
-                light: Uri.file(path.join(EXTENSION_ROOT_DIR, 'files', 'light_mode_icon.svg')),
-                dark: Uri.file(path.join(EXTENSION_ROOT_DIR, 'files', 'dark_mode_icon.svg')),
-            },
+            iconPath: options.iconPath,
             hideFromUser: options.hideFromUser,
             color: options.color,
             location: options.location,

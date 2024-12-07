@@ -1,5 +1,4 @@
-import * as path from 'path';
-import { CancellationError, CancellationToken, LogOutputChannel, QuickPickItem, Uri, window } from 'vscode';
+import { CancellationError, CancellationToken, LogOutputChannel, QuickPickItem, ThemeIcon, Uri, window } from 'vscode';
 import {
     EnvironmentManager,
     Package,
@@ -11,7 +10,7 @@ import {
     ResolveEnvironmentContext,
 } from '../../api';
 import * as ch from 'child_process';
-import { ENVS_EXTENSION_ID, EXTENSION_ROOT_DIR } from '../../common/constants';
+import { ENVS_EXTENSION_ID } from '../../common/constants';
 import {
     isNativeEnvInfo,
     NativeEnvInfo,
@@ -216,10 +215,7 @@ function getPythonInfo(env: NativeEnvInfo): PythonEnvironmentInfo {
             version: env.version,
             description: env.executable,
             environmentPath: Uri.file(env.executable),
-            iconPath: {
-                light: Uri.file(path.join(EXTENSION_ROOT_DIR, 'files', 'light_mode_icon.svg')),
-                dark: Uri.file(path.join(EXTENSION_ROOT_DIR, 'files', 'dark_mode_icon.svg')),
-            },
+            iconPath: new ThemeIcon('globe'),
             sysPrefix: env.prefix,
             execInfo: {
                 run: {

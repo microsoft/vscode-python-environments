@@ -1,4 +1,4 @@
-import { LogOutputChannel, ProgressLocation, QuickPickItem, QuickPickItemKind, Uri } from 'vscode';
+import { LogOutputChannel, ProgressLocation, QuickPickItem, QuickPickItemKind, ThemeIcon, Uri } from 'vscode';
 import {
     EnvironmentManager,
     Installable,
@@ -15,7 +15,7 @@ import * as path from 'path';
 import * as os from 'os';
 import * as fsapi from 'fs-extra';
 import { isUvInstalled, resolveSystemPythonEnvironmentPath, runPython, runUV } from './utils';
-import { ENVS_EXTENSION_ID, EXTENSION_ROOT_DIR } from '../../common/constants';
+import { ENVS_EXTENSION_ID } from '../../common/constants';
 import {
     isNativeEnvInfo,
     NativeEnvInfo,
@@ -129,10 +129,7 @@ function getPythonInfo(env: NativeEnvInfo): PythonEnvironmentInfo {
             version: env.version,
             description: env.executable,
             environmentPath: Uri.file(env.executable),
-            iconPath: {
-                light: Uri.file(path.join(EXTENSION_ROOT_DIR, 'files', 'light_mode_icon.svg')),
-                dark: Uri.file(path.join(EXTENSION_ROOT_DIR, 'files', 'dark_mode_icon.svg')),
-            },
+            iconPath: new ThemeIcon('python'),
             sysPrefix: env.prefix,
             execInfo: {
                 run: {
