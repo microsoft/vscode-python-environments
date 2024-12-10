@@ -1,6 +1,6 @@
 {
     "name": "vscode-python-envs",
-    "displayName": "Python Environment Manager",
+    "displayName": "Python Environments",
     "description": "Provides a unified python environment experience",
     "version": "0.1.0-dev",
     "publisher": "ms-python",
