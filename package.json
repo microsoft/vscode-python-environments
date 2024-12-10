@@ -4,6 +4,7 @@
     "description": "Provides a unified python environment experience",
     "version": "0.1.0-dev",
     "publisher": "ms-python",
+    "preview": true,
     "engines": {
         "vscode": "^1.96.0-insider"
     },
