@@ -55,6 +55,7 @@ import { EnvVarManager, PythonEnvVariableManager } from './features/execution/en
 import { StopWatch } from './common/stopWatch';
 import { sendTelemetryEvent } from './common/telemetry/sender';
 import { EventNames } from './common/telemetry/constants';
+import { ensureCorrectVersion } from './common/extVersion';
 
 export async function activate(context: ExtensionContext): Promise<PythonEnvironmentApi> {
     const start = new StopWatch();
@@ -62,6 +63,8 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
     // Logging should be set up before anything else.
     const outputChannel: LogOutputChannel = createLogOutputChannel('Python Environments');
     context.subscriptions.push(outputChannel, registerLogger(outputChannel));
+
+    ensureCorrectVersion();
 
     // Setup the persistent state for the extension.
     setPersistentState(context);
