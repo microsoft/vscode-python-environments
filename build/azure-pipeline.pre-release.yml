@@ -27,8 +27,7 @@ parameters:
 extends:
   template: azure-pipelines/extension/pre-release.yml@templates
   parameters:
-    # publishExtension: ${{ parameters.publishExtension }}
-    publishExtension: false
+    publishExtension: ${{ parameters.publishExtension }}
     ghCreateTag: false
     standardizedVersioning: true
     l10nSourcePaths: ./src
