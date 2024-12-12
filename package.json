@@ -74,9 +74,9 @@
                         }
                     }
                 },
-                "python-envs.showActivateButton": {
+                "python-envs.terminal.showActivateButton": {
                     "type": "boolean",
-                    "description": "%python-envs.showActivateButton.description%",
+                    "description": "%python-envs.terminal.showActivateButton.description%",
                     "default": false,
                     "scope": "machine",
                     "tags": [
@@ -202,7 +202,7 @@
                 "command": "python-envs.terminal.activate",
                 "title": "%python-envs.terminal.activate.title%",
                 "category": "Python Envs",
-                "icon": "$(zap)"
+                "icon": "$(python)"
             },
             {
                 "command": "python-envs.terminal.deactivate",
@@ -267,11 +267,11 @@
                 },
                 {
                     "command": "python-envs.terminal.activate",
-                    "when": "false"
+                    "when": "pythonTerminalActivation"
                 },
                 {
                     "command": "python-envs.terminal.deactivate",
-                    "when": "false"
+                    "when": "pythonTerminalActivation"
                 }
             ],
             "view/item/context": [
@@ -357,12 +357,12 @@
                 {
                     "command": "python-envs.terminal.activate",
                     "group": "navigation",
-                    "when": "view == terminal && pythonTerminalActivation && !pythonTerminalActivated"
+                    "when": "view == terminal && config.python-envs.terminal.showActivateButton && pythonTerminalActivation && !pythonTerminalActivated"
                 },
                 {
                     "command": "python-envs.terminal.deactivate",
                     "group": "navigation",
-                    "when": "view == terminal && pythonTerminalActivation && pythonTerminalActivated"
+                    "when": "view == terminal && config.python-envs.terminal.showActivateButton && pythonTerminalActivation && pythonTerminalActivated"
                 }
             ],
             "explorer/context": [
@@ -387,11 +387,11 @@
             "terminal/title/context": [
                 {
                     "command": "python-envs.terminal.activate",
-                    "when": "config.python-envs.showActivateButton && pythonTerminalActivation && !pythonTerminalActivated"
+                    "when": "pythonTerminalActivation && !pythonTerminalActivated"
                 },
                 {
                     "command": "python-envs.terminal.deactivate",
-                    "when": "config.python-envs.showActivateButton && pythonTerminalActivation && pythonTerminalActivated"
+                    "when": "pythonTerminalActivation && pythonTerminalActivated"
                 }
             ]
         },

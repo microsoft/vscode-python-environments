@@ -5,7 +5,7 @@
     "python-envs.pythonProjects.path.description": "The path to a folder or file in the workspace to be treated as a Python project.",
     "python-envs.pythonProjects.envManager.description": "The environment manager for creating and managing environments for this project.",
     "python-envs.pythonProjects.packageManager.description": "The package manager for managing packages in environments for this project.",
-    "python-envs.showActivateButton.description": "Whether to show the 'Activate' button in the terminal menu",
+    "python-envs.terminal.showActivateButton.description": "Whether to show the 'Activate' button in the terminal menu",
 
     "python-envs.setEnvManager.title": "Set Environment Manager",
     "python-envs.setPkgManager.title": "Set Package Manager",
