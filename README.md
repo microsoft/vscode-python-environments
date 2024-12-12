@@ -14,11 +14,11 @@ This extension provides an Environments view, which can be accessed via the VS C
 
 By default, the extension uses the `venv` environment manager. This default manager determines how environments are created, managed, and where packages are installed. However, users can change the default by setting the `python-envs.defaultEnvManager` to a different environment manager. The following environment managers are supported out of the box:
 
-| Id                      | name                    | Description                                                                                                                                                               |
-| ----------------------- | ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| ms-python.python:venv   | `venv`                  | The default environment manager. It is a built-in environment manager provided by the Python standard library.                                                            |
-| ms-python.python:system | System Installed Python | These are global Python installs on your system. These are typically installed with your OS, from [python.org](https://www.python.org/), or any other OS package manager. |
-| ms-python.python:conda  | `conda`                 | The [Anaconda](https://www.anaconda.com/) environment manager.                                                                                                            |
+| Id                      | name                    | Description                                                                                                                                                                                                   |
+| ----------------------- | ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| ms-python.python:venv   | `venv`                  | The default environment manager. It is a built-in environment manager provided by the Python standard library.                                                                                                |
+| ms-python.python:system | System Installed Python | These are global Python installs on your system. These are typically installed with your OS, from [python.org](https://www.python.org/), or any other OS package manager.                                     |
+| ms-python.python:conda  | `conda`                 | The [conda](https://conda.org) environment manager, as provided by conda distributions like [Anaconda Distribution](https://docs.anaconda.com/anaconda/) or [conda-forge](https://conda-forge.org/download/). |
 
 The environment manager is responsible for specifying which package manager will be used by default to install and manage Python packages within the environment. This ensures that packages are managed consistently according to the preferred tools and settings of the chosen environment manager.
 
@@ -28,10 +28,10 @@ This extension provides a package view for you to manage, install and uninstall 
 
 The extension uses `pip` as the default package manager. You can change this by setting the `python-envs.defaultPackageManager` setting to a different package manager. The following are package managers supported out of the box:
 
-| Id                     | name    | Description                                                                    |
-| ---------------------- | ------- | ------------------------------------------------------------------------------ |
-| ms-python.python:pip   | `pip`   | Pip acts as the default package manager and it's typically built-in to Python. |
-| ms-python.python:conda | `conda` | The [Anaconda](https://www.anaconda.com/) environment manager.                 |
+| Id                     | name    | Description                                                                                                                                                                                               |
+| ---------------------- | ------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| ms-python.python:pip   | `pip`   | Pip acts as the default package manager and it's typically built-in to Python.                                                                                                                            |
+| ms-python.python:conda | `conda` | The [conda](https://conda.org) package manager, as provided by conda distributions like [Anaconda Distribution](https://docs.anaconda.com/anaconda/) or [conda-forge](https://conda-forge.org/download/). |
 
 ## Settings Reference
 
