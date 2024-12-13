@@ -23,7 +23,7 @@ import {
     runInDedicatedTerminalCommand,
 } from './features/envCommands';
 import { registerCondaFeatures } from './managers/conda/main';
-import { registerSystemPythonFeatures } from './managers/sysPython/main';
+import { registerSystemPythonFeatures } from './managers/builtin/main';
 import { PythonProjectManagerImpl } from './features/projectManager';
 import { EnvironmentManagers, ProjectCreators, PythonProjectManager } from './internal.api';
 import { getPythonApi, setPythonApi } from './features/pythonApi';

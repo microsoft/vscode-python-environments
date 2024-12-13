@@ -6,7 +6,7 @@ import {
     PythonProjectCreator,
     PythonProjectCreatorOptions,
 } from '../../api';
-import { runUV } from './utils';
+import { runUV } from './helpers';
 import { pickProject } from '../../common/pickers/projects';
 
 export class UvProjectCreator implements PythonProjectCreator {

@@ -6,7 +6,7 @@ import { VenvManager } from './venvManager';
 import { getPythonApi } from '../../features/pythonApi';
 import { NativePythonFinder } from '../common/nativePythonFinder';
 import { UvProjectCreator } from './uvProjectCreator';
-import { isUvInstalled } from './utils';
+import { isUvInstalled } from './helpers';
 import { createFileSystemWatcher, onDidDeleteFiles } from '../../common/workspace.apis';
 import { createSimpleDebounce } from '../../common/utils/debounce';
 

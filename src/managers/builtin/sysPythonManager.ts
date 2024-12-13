@@ -14,19 +14,18 @@ import {
     ResolveEnvironmentContext,
     SetEnvironmentScope,
 } from '../../api';
-import {
-    clearSystemEnvCache,
-    getSystemEnvForGlobal,
-    getSystemEnvForWorkspace,
-    refreshPythons,
-    resolveSystemPythonEnvironmentPath,
-    setSystemEnvForGlobal,
-    setSystemEnvForWorkspace,
-} from './utils';
+import { refreshPythons, resolveSystemPythonEnvironmentPath } from './utils';
 import { NativePythonFinder } from '../common/nativePythonFinder';
 import { createDeferred, Deferred } from '../../common/utils/deferred';
 import { getLatest } from '../common/utils';
 import { SysManagerStrings } from '../../common/localize';
+import {
+    setSystemEnvForWorkspace,
+    setSystemEnvForGlobal,
+    clearSystemEnvCache,
+    getSystemEnvForGlobal,
+    getSystemEnvForWorkspace,
+} from './cache';
 
 export class SysPythonManager implements EnvironmentManager {
     private collection: PythonEnvironment[] = [];

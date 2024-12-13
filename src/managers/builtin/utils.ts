@@ -1,13 +1,4 @@
-import {
-    CancellationError,
-    CancellationToken,
-    l10n,
-    LogOutputChannel,
-    QuickPickItem,
-    ThemeIcon,
-    Uri,
-    window,
-} from 'vscode';
+import { CancellationToken, l10n, LogOutputChannel, QuickPickItem, ThemeIcon, Uri, window } from 'vscode';
 import {
     EnvironmentManager,
     Package,
@@ -17,64 +8,17 @@ import {
     PythonEnvironmentApi,
     PythonEnvironmentInfo,
 } from '../../api';
-import * as ch from 'child_process';
-import { ENVS_EXTENSION_ID } from '../../common/constants';
 import {
     isNativeEnvInfo,
     NativeEnvInfo,
     NativePythonEnvironmentKind,
     NativePythonFinder,
 } from '../common/nativePythonFinder';
-import { createDeferred } from '../../common/utils/deferred';
 import { showErrorMessage } from '../../common/errors/utils';
-import { getWorkspacePersistentState } from '../../common/persistentState';
 import { shortVersion, sortEnvironments } from '../common/utils';
-import { sendTelemetryEvent } from '../../common/telemetry/sender';
-import { EventNames } from '../../common/telemetry/constants';
 import { SysManagerStrings } from '../../common/localize';
-
-export const SYSTEM_WORKSPACE_KEY = `${ENVS_EXTENSION_ID}:system:WORKSPACE_SELECTED`;
-export const SYSTEM_GLOBAL_KEY = `${ENVS_EXTENSION_ID}:system:GLOBAL_SELECTED`;
-
-export async function clearSystemEnvCache(): Promise<void> {
-    const keys = [SYSTEM_WORKSPACE_KEY, SYSTEM_GLOBAL_KEY];
-    const state = await getWorkspacePersistentState();
-    await state.clear(keys);
-}
-
-export async function getSystemEnvForWorkspace(fsPath: string): Promise<string | undefined> {
-    const state = await getWorkspacePersistentState();
-    const data: { [key: string]: string } | undefined = await state.get(SYSTEM_WORKSPACE_KEY);
-    if (data) {
-        try {
-            return data[fsPath];
-        } catch {
-            return undefined;
-        }
-    }
-    return undefined;
-}
-
-export async function setSystemEnvForWorkspace(fsPath: string, envPath: string | undefined): Promise<void> {
-    const state = await getWorkspacePersistentState();
-    const data: { [key: string]: string } = (await state.get(SYSTEM_WORKSPACE_KEY)) ?? {};
-    if (envPath) {
-        data[fsPath] = envPath;
-    } else {
-        delete data[fsPath];
-    }
-    await state.set(SYSTEM_WORKSPACE_KEY, data);
-}
-
-export async function getSystemEnvForGlobal(): Promise<string | undefined> {
-    const state = await getWorkspacePersistentState();
-    return await state.get(SYSTEM_GLOBAL_KEY);
-}
-
-export async function setSystemEnvForGlobal(envPath: string | undefined): Promise<void> {
-    const state = await getWorkspacePersistentState();
-    await state.set(SYSTEM_GLOBAL_KEY, envPath);
-}
+import { isUvInstalled, runUV, runPython } from './helpers';
+import { parsePipList } from './pipListUtils';
 
 function asPackageQuickPickItem(name: string, version?: string): QuickPickItem {
     return {
@@ -101,96 +45,6 @@ export async function pickPackages(uninstall: boolean, packages: string[] | Pack
         return result.map((e) => e.label);
     }
     return [];
-}
-
-const available = createDeferred<boolean>();
-export async function isUvInstalled(log?: LogOutputChannel): Promise<boolean> {
-    if (available.completed) {
-        return available.promise;
-    }
-
-    const proc = ch.spawn('uv', ['--version']);
-    proc.on('error', () => {
-        available.resolve(false);
-    });
-    proc.stdout.on('data', (d) => log?.info(d.toString()));
-    proc.on('exit', (code) => {
-        if (code === 0) {
-            sendTelemetryEvent(EventNames.VENV_USING_UV);
-        }
-        available.resolve(code === 0);
-    });
-    return available.promise;
-}
-
-export async function runUV(
-    args: string[],
-    cwd?: string,
-    log?: LogOutputChannel,
-    token?: CancellationToken,
-): Promise<string> {
-    log?.info(`Running: uv ${args.join(' ')}`);
-    return new Promise<string>((resolve, reject) => {
-        const proc = ch.spawn('uv', args, { cwd: cwd });
-        token?.onCancellationRequested(() => {
-            proc.kill();
-            reject(new CancellationError());
-        });
-
-        let builder = '';
-        proc.stdout?.on('data', (data) => {
-            const s = data.toString('utf-8');
-            builder += s;
-            log?.append(s);
-        });
-        proc.stderr?.on('data', (data) => {
-            log?.append(data.toString('utf-8'));
-        });
-        proc.on('close', () => {
-            resolve(builder);
-        });
-        proc.on('exit', (code) => {
-            if (code !== 0) {
-                reject(new Error(`Failed to run python ${args.join(' ')}`));
-            }
-        });
-    });
-}
-
-export async function runPython(
-    python: string,
-    args: string[],
-    cwd?: string,
-    log?: LogOutputChannel,
-    token?: CancellationToken,
-): Promise<string> {
-    log?.info(`Running: ${python} ${args.join(' ')}`);
-    return new Promise<string>((resolve, reject) => {
-        const proc = ch.spawn(python, args, { cwd: cwd });
-        token?.onCancellationRequested(() => {
-            proc.kill();
-            reject(new CancellationError());
-        });
-        let builder = '';
-        proc.stdout?.on('data', (data) => {
-            const s = data.toString('utf-8');
-            builder += s;
-            log?.append(`python: ${s}`);
-        });
-        proc.stderr?.on('data', (data) => {
-            const s = data.toString('utf-8');
-            builder += s;
-            log?.append(`python: ${s}`);
-        });
-        proc.on('close', () => {
-            resolve(builder);
-        });
-        proc.on('exit', (code) => {
-            if (code !== 0) {
-                reject(new Error(`Failed to run python ${args.join(' ')}`));
-            }
-        });
-    });
 }
 
 function getKindName(kind: NativePythonEnvironmentKind | undefined): string | undefined {
@@ -315,28 +169,7 @@ export async function refreshPackages(
         return [];
     }
 
-    const collection: Package[] = [];
-
-    const lines = data.split('\n').splice(2);
-    for (let line of lines) {
-        const parts = line.split(' ').filter((e) => e);
-        if (parts.length > 1) {
-            const name = parts[0].trim();
-            const version = parts[1].trim();
-            const pkg = api.createPackageItem(
-                {
-                    name,
-                    version,
-                    displayName: name,
-                    description: version,
-                },
-                environment,
-                manager,
-            );
-            collection.push(pkg);
-        }
-    }
-    return collection;
+    return parsePipList(data).map((pkg) => api.createPackageItem(pkg, environment, manager));
 }
 
 export async function installPackages(

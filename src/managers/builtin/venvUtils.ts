@@ -13,7 +13,7 @@ import * as tomljs from '@iarna/toml';
 import * as path from 'path';
 import * as os from 'os';
 import * as fsapi from 'fs-extra';
-import { isUvInstalled, resolveSystemPythonEnvironmentPath, runPython, runUV } from './utils';
+import { resolveSystemPythonEnvironmentPath } from './utils';
 import { ENVS_EXTENSION_ID } from '../../common/constants';
 import {
     isNativeEnvInfo,
@@ -35,6 +35,7 @@ import {
 import { showErrorMessage } from '../../common/errors/utils';
 import { getPackagesToInstallFromInstallable } from '../../common/pickers/packages';
 import { Common, VenvManagerStrings } from '../../common/localize';
+import { isUvInstalled, runUV, runPython } from './helpers';
 
 export const VENV_WORKSPACE_KEY = `${ENVS_EXTENSION_ID}:venv:WORKSPACE_SELECTED`;
 export const VENV_GLOBAL_KEY = `${ENVS_EXTENSION_ID}:venv:GLOBAL_SELECTED`;
