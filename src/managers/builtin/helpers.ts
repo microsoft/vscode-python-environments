@@ -52,7 +52,7 @@ export async function runUV(
         });
         proc.on('exit', (code) => {
             if (code !== 0) {
-                reject(new Error(`Failed to run python ${args.join(' ')}`));
+                reject(new Error(`Failed to run uv ${args.join(' ')}`));
             }
         });
     });
