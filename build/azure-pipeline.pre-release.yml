@@ -105,9 +105,9 @@ extends:
             ThirdPartyNotices.txt
 
       - bash: |
-          ls -lf ./python-env-tools/bin
+          ls -l ./python-env-tools/bin
           chmod +x ./python-env-tools/bin/pet*
-          ls -lf ./python-env-tools/bin
+          ls -l ./python-env-tools/bin
         displayName: Set chmod for pet binary
 
       - script: npm run package
