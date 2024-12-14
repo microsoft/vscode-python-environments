@@ -30,11 +30,7 @@ import { getPythonApi, setPythonApi } from './features/pythonApi';
 import { setPersistentState } from './common/persistentState';
 import { createNativePythonFinder, NativePythonFinder } from './managers/common/nativePythonFinder';
 import { PythonEnvironmentApi } from './api';
-import {
-    ProjectCreatorsImpl,
-    registerAutoProjectProvider,
-    registerExistingProjectProvider,
-} from './features/projectCreators';
+import { AutoFindProjects, ExistingProjects, ProjectCreatorsImpl } from './features/creators/projectCreators';
 import { ProjectView } from './features/views/projectView';
 import { registerCompletionProvider } from './features/settings/settingCompletions';
 import { TerminalManager, TerminalManagerImpl } from './features/terminal/terminalManager';
@@ -87,8 +83,8 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
     const projectCreators: ProjectCreators = new ProjectCreatorsImpl();
     context.subscriptions.push(
         projectCreators,
-        registerExistingProjectProvider(projectCreators),
-        registerAutoProjectProvider(projectCreators),
+        projectCreators.registerPythonProjectCreator(new ExistingProjects()),
+        projectCreators.registerPythonProjectCreator(new AutoFindProjects(projectManager)),
     );
 
     setPythonApi(envManagers, projectManager, projectCreators, terminalManager, envVarManager);

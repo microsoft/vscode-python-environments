@@ -126,3 +126,13 @@ export namespace CondaStrings {
     export const condaRemoveFailed = l10n.t('Failed to remove conda environment');
     export const condaExists = l10n.t('Environment already exists');
 }
+
+export namespace ProjectCreatorString {
+    export const addExistingProjects = l10n.t('Add Existing Projects');
+    export const autoFindProjects = l10n.t('Auto Find Projects');
+    export const selectProjects = l10n.t('Select Python projects');
+    export const selectFilesOrFolders = l10n.t('Select Project folders or Python files');
+    export const autoFindProjectsDescription = l10n.t(
+        'Automatically find folders with `pyproject.toml` or `setup.py` files.',
+    );
+}
