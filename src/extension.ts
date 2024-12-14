@@ -30,7 +30,7 @@ import { getPythonApi, setPythonApi } from './features/pythonApi';
 import { setPersistentState } from './common/persistentState';
 import { createNativePythonFinder, NativePythonFinder } from './managers/common/nativePythonFinder';
 import { PythonEnvironmentApi } from './api';
-import { AutoFindProjects, ExistingProjects, ProjectCreatorsImpl } from './features/creators/projectCreators';
+import { ProjectCreatorsImpl } from './features/creators/projectCreators';
 import { ProjectView } from './features/views/projectView';
 import { registerCompletionProvider } from './features/settings/settingCompletions';
 import { TerminalManager, TerminalManagerImpl } from './features/terminal/terminalManager';
@@ -52,6 +52,8 @@ import { StopWatch } from './common/stopWatch';
 import { sendTelemetryEvent } from './common/telemetry/sender';
 import { EventNames } from './common/telemetry/constants';
 import { ensureCorrectVersion } from './common/extVersion';
+import { ExistingProjects } from './features/creators/existingProjects';
+import { AutoFindProjects } from './features/creators/autoFindProjects';
 
 export async function activate(context: ExtensionContext): Promise<PythonEnvironmentApi> {
     const start = new StopWatch();
