@@ -34,6 +34,19 @@ export async function setSystemEnvForWorkspace(fsPath: string, envPath: string |
     await state.set(SYSTEM_WORKSPACE_KEY, data);
 }
 
+export async function setSystemEnvForWorkspaces(fsPath: string[], envPath: string | undefined): Promise<void> {
+    const state = await getWorkspacePersistentState();
+    const data: { [key: string]: string } = (await state.get(SYSTEM_WORKSPACE_KEY)) ?? {};
+    fsPath.forEach((s) => {
+        if (envPath) {
+            data[s] = envPath;
+        } else {
+            delete data[s];
+        }
+    });
+    await state.set(SYSTEM_WORKSPACE_KEY, data);
+}
+
 export async function getSystemEnvForGlobal(): Promise<string | undefined> {
     const state = await getWorkspacePersistentState();
     return await state.get(SYSTEM_GLOBAL_KEY);

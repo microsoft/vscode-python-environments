@@ -79,6 +79,19 @@ export async function setCondaForWorkspace(fsPath: string, condaEnvPath: string 
     await state.set(CONDA_WORKSPACE_KEY, data);
 }
 
+export async function setCondaForWorkspaces(fsPath: string[], condaEnvPath: string | undefined): Promise<void> {
+    const state = await getWorkspacePersistentState();
+    const data: { [key: string]: string } = (await state.get(CONDA_WORKSPACE_KEY)) ?? {};
+    fsPath.forEach((s) => {
+        if (condaEnvPath) {
+            data[s] = condaEnvPath;
+        } else {
+            delete data[s];
+        }
+    });
+    await state.set(CONDA_WORKSPACE_KEY, data);
+}
+
 export async function getCondaForGlobal(): Promise<string | undefined> {
     const state = await getWorkspacePersistentState();
     return await state.get(CONDA_GLOBAL_KEY);

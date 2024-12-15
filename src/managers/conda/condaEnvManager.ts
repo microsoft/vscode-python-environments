@@ -26,6 +26,7 @@ import {
     resolveCondaPath,
     setCondaForGlobal,
     setCondaForWorkspace,
+    setCondaForWorkspaces,
 } from './condaUtils';
 import { NativePythonFinder } from '../common/nativePythonFinder';
 import { createDeferred, Deferred } from '../../common/utils/deferred';
@@ -206,6 +207,7 @@ export class CondaEnvManager implements EnvironmentManager, Disposable {
 
         return this.globalEnv;
     }
+
     async set(scope: SetEnvironmentScope, environment?: PythonEnvironment | undefined): Promise<void> {
         if (scope === undefined) {
             await setCondaForGlobal(environment?.environmentPath?.fsPath);
@@ -215,14 +217,43 @@ export class CondaEnvManager implements EnvironmentManager, Disposable {
             if (fsPath) {
                 if (environment) {
                     this.fsPathToEnv.set(fsPath, environment);
-                    await setCondaForWorkspace(fsPath, environment.environmentPath.fsPath);
                 } else {
                     this.fsPathToEnv.delete(fsPath);
-                    await setCondaForWorkspace(fsPath, undefined);
                 }
+                await setCondaForWorkspace(fsPath, environment?.environmentPath.fsPath);
             }
+        } else if (Array.isArray(scope) && scope.every((u) => u instanceof Uri)) {
+            const projects: PythonProject[] = [];
+            scope
+                .map((s) => this.api.getPythonProject(s))
+                .forEach((p) => {
+                    if (p) {
+                        projects.push(p);
+                    }
+                });
+
+            const before: Map<string, PythonEnvironment | undefined> = new Map();
+            projects.forEach((p) => {
+                before.set(p.uri.fsPath, this.fsPathToEnv.get(p.uri.fsPath));
+                if (environment) {
+                    this.fsPathToEnv.set(p.uri.fsPath, environment);
+                } else {
+                    this.fsPathToEnv.delete(p.uri.fsPath);
+                }
+            });
+
+            await setCondaForWorkspaces(
+                projects.map((p) => p.uri.fsPath),
+                environment?.environmentPath.fsPath,
+            );
+
+            projects.forEach((p) => {
+                const b = before.get(p.uri.fsPath);
+                if (b?.envId.id !== environment?.envId.id) {
+                    this._onDidChangeEnvironment.fire({ uri: p.uri, old: b, new: environment });
+                }
+            });
         }
-        return;
     }
 
     async resolve(context: ResolveEnvironmentContext): Promise<PythonEnvironment | undefined> {

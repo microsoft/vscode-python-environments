@@ -78,6 +78,19 @@ export async function setVenvForWorkspace(fsPath: string, envPath: string | unde
     await state.set(VENV_WORKSPACE_KEY, data);
 }
 
+export async function setVenvForWorkspaces(fsPaths: string[], envPath: string | undefined): Promise<void> {
+    const state = await getWorkspacePersistentState();
+    const data: { [key: string]: string } = (await state.get(VENV_WORKSPACE_KEY)) ?? {};
+    fsPaths.forEach((s) => {
+        if (envPath) {
+            data[s] = envPath;
+        } else {
+            delete data[s];
+        }
+    });
+    await state.set(VENV_WORKSPACE_KEY, data);
+}
+
 export async function getVenvForGlobal(): Promise<string | undefined> {
     const state = await getWorkspacePersistentState();
     const envPath: string | undefined = await state.get(VENV_GLOBAL_KEY);

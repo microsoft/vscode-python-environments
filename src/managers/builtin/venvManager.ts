@@ -26,10 +26,11 @@ import {
     resolveVenvPythonEnvironmentPath,
     setVenvForGlobal,
     setVenvForWorkspace,
+    setVenvForWorkspaces,
 } from './venvUtils';
 import * as path from 'path';
 import { NativePythonFinder } from '../common/nativePythonFinder';
-import { ENVS_EXTENSION_ID } from '../../common/constants';
+import { PYTHON_EXTENSION_ID } from '../../common/constants';
 import { createDeferred, Deferred } from '../../common/utils/deferred';
 import { getLatest, sortEnvironments } from '../common/utils';
 import { withProgress } from '../../common/window.apis';
@@ -229,14 +230,47 @@ export class VenvManager implements EnvironmentManager {
             const before = this.fsPathToEnv.get(pw.uri.fsPath);
             if (environment) {
                 this.fsPathToEnv.set(pw.uri.fsPath, environment);
-                await setVenvForWorkspace(pw.uri.fsPath, environment.environmentPath.fsPath);
             } else {
                 this.fsPathToEnv.delete(pw.uri.fsPath);
-                await setVenvForWorkspace(pw.uri.fsPath, undefined);
             }
+            await setVenvForWorkspace(pw.uri.fsPath, environment?.environmentPath.fsPath);
+
             if (before?.envId.id !== environment?.envId.id) {
                 this._onDidChangeEnvironment.fire({ uri: scope, old: before, new: environment });
             }
+        }
+
+        if (Array.isArray(scope) && scope.every((u) => u instanceof Uri)) {
+            const projects: PythonProject[] = [];
+            scope
+                .map((s) => this.api.getPythonProject(s))
+                .forEach((p) => {
+                    if (p) {
+                        projects.push(p);
+                    }
+                });
+
+            const before: Map<string, PythonEnvironment | undefined> = new Map();
+            projects.forEach((p) => {
+                before.set(p.uri.fsPath, this.fsPathToEnv.get(p.uri.fsPath));
+                if (environment) {
+                    this.fsPathToEnv.set(p.uri.fsPath, environment);
+                } else {
+                    this.fsPathToEnv.delete(p.uri.fsPath);
+                }
+            });
+
+            await setVenvForWorkspaces(
+                projects.map((p) => p.uri.fsPath),
+                environment?.environmentPath.fsPath,
+            );
+
+            projects.forEach((p) => {
+                const b = before.get(p.uri.fsPath);
+                if (b?.envId.id !== environment?.envId.id) {
+                    this._onDidChangeEnvironment.fire({ uri: p.uri, old: b, new: environment });
+                }
+            });
         }
     }
 
@@ -259,7 +293,7 @@ export class VenvManager implements EnvironmentManager {
             this.baseManager,
         );
         if (resolved) {
-            if (resolved.envId.managerId === `${ENVS_EXTENSION_ID}:venv`) {
+            if (resolved.envId.managerId === `${PYTHON_EXTENSION_ID}:venv`) {
                 // This is just like finding a new environment or creating a new one.
                 // Add it to collection, and trigger the added event.
                 this.addEnvironment(resolved, true);

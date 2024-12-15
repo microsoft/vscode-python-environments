@@ -218,7 +218,7 @@ export interface PythonEnvironment extends PythonEnvironmentInfo {
  * Type representing the scope for setting a Python environment.
  * Can be undefined or a URI.
  */
-export type SetEnvironmentScope = undefined | Uri;
+export type SetEnvironmentScope = undefined | Uri | Uri[];
 
 /**
  * Type representing the scope for getting a Python environment.

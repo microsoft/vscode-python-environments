@@ -10,6 +10,7 @@ import {
     IconPath,
     PythonEnvironment,
     PythonEnvironmentApi,
+    PythonProject,
     RefreshEnvironmentsScope,
     ResolveEnvironmentContext,
     SetEnvironmentScope,
@@ -25,6 +26,7 @@ import {
     clearSystemEnvCache,
     getSystemEnvForGlobal,
     getSystemEnvForWorkspace,
+    setSystemEnvForWorkspaces,
 } from './cache';
 
 export class SysPythonManager implements EnvironmentManager {
@@ -125,29 +127,62 @@ export class SysPythonManager implements EnvironmentManager {
     }
 
     async set(scope: SetEnvironmentScope, environment?: PythonEnvironment): Promise<void> {
-        if (scope instanceof Uri) {
-            const pw = this.api.getPythonProject(scope);
-            if (pw) {
-                if (environment) {
-                    this.fsPathToEnv.set(pw.uri.fsPath, environment);
-                    await setSystemEnvForWorkspace(pw.uri.fsPath, environment.environmentPath.fsPath);
-                } else {
-                    this.fsPathToEnv.delete(pw.uri.fsPath);
-                    await setSystemEnvForWorkspace(pw.uri.fsPath, undefined);
-                }
-                return;
-            }
-            this.log.warn(
-                `Unable to set environment for ${scope.fsPath}: Not a python project, folder or PEP723 script.`,
-                this.api.getPythonProjects().map((p) => p.uri.fsPath),
-            );
-        }
-
         if (scope === undefined) {
             this.globalEnv = environment ?? getLatest(this.collection);
             if (environment) {
                 await setSystemEnvForGlobal(environment.environmentPath.fsPath);
             }
+        }
+
+        if (scope instanceof Uri) {
+            const pw = this.api.getPythonProject(scope);
+            if (!pw) {
+                this.log.warn(
+                    `Unable to set environment for ${scope.fsPath}: Not a python project, folder or PEP723 script.`,
+                    this.api.getPythonProjects().map((p) => p.uri.fsPath),
+                );
+                return;
+            }
+
+            if (environment) {
+                this.fsPathToEnv.set(pw.uri.fsPath, environment);
+            } else {
+                this.fsPathToEnv.delete(pw.uri.fsPath);
+            }
+            await setSystemEnvForWorkspace(pw.uri.fsPath, environment?.environmentPath.fsPath);
+        }
+
+        if (Array.isArray(scope) && scope.every((u) => u instanceof Uri)) {
+            const projects: PythonProject[] = [];
+            scope
+                .map((s) => this.api.getPythonProject(s))
+                .forEach((p) => {
+                    if (p) {
+                        projects.push(p);
+                    }
+                });
+
+            const before: Map<string, PythonEnvironment | undefined> = new Map();
+            projects.forEach((p) => {
+                before.set(p.uri.fsPath, this.fsPathToEnv.get(p.uri.fsPath));
+                if (environment) {
+                    this.fsPathToEnv.set(p.uri.fsPath, environment);
+                } else {
+                    this.fsPathToEnv.delete(p.uri.fsPath);
+                }
+            });
+
+            await setSystemEnvForWorkspaces(
+                projects.map((p) => p.uri.fsPath),
+                environment?.environmentPath.fsPath,
+            );
+
+            projects.forEach((p) => {
+                const b = before.get(p.uri.fsPath);
+                if (b?.envId.id !== environment?.envId.id) {
+                    this._onDidChangeEnvironment.fire({ uri: p.uri, old: b, new: environment });
+                }
+            });
         }
     }
 

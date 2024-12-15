@@ -249,6 +249,10 @@ export class PythonEnvironmentManagers implements EnvironmentManagers {
     }
 
     public async setEnvironment(scope: SetEnvironmentScope, environment?: PythonEnvironment): Promise<void> {
+        if (Array.isArray(scope)) {
+            return this.setEnvironments(scope, environment);
+        }
+
         const customScope = environment ? environment : scope;
         const manager = this.getEnvironmentManager(customScope);
         if (!manager) {
@@ -300,9 +304,9 @@ export class PythonEnvironmentManagers implements EnvironmentManagers {
             const settings: EditAllManagerSettings[] = [];
             const events: DidChangeEnvironmentEventArgs[] = [];
             if (Array.isArray(scope) && scope.every((s) => s instanceof Uri)) {
+                promises.push(manager.set(scope, environment));
                 scope.forEach((uri) => {
                     const m = this.getEnvironmentManager(uri);
-                    promises.push(manager.set(uri, environment));
                     if (manager.id !== m?.id) {
                         settings.push({
                             project: this.pm.get(uri),
