@@ -23,13 +23,11 @@ export function getCallingExtension(): string {
     const frames = getFrameData();
 
     for (const frame of frames) {
-        for (const ext of otherExts) {
-            const filename = frame.filePath;
-            if (filename) {
-                const parts = filename.split(/\\\//);
-                if (parts.includes(ext)) {
-                    return ext;
-                }
+        const filename = frame.filePath;
+        if (filename) {
+            const ext = otherExts.find((ext) => filename.includes(ext));
+            if (ext) {
+                return ext;
             }
         }
     }
