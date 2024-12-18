@@ -30,7 +30,7 @@ import {
     PythonProjectManager,
     PythonProjectSettings,
 } from '../internal.api';
-import { getCallingExtension } from '../common/extensions.apis';
+import { getCallingExtension } from '../common/utils/frameUtils';
 import {
     EnvironmentManagerAlreadyRegisteredError,
     PackageManagerAlreadyRegisteredError,
