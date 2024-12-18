@@ -316,7 +316,9 @@ export interface EnvironmentManager {
     readonly displayName?: string;
 
     /**
-     * The preferred package manager ID for the environment manager.
+     * The preferred package manager ID for the environment manager. This is a combination
+     * of publisher id, extension id, and {@link EnvironmentManager.name package manager name}.
+     * `<publisher-id>.<extension-id>:<package-manager-name>`
      *
      * @example
      * 'ms-python.python:pip'
