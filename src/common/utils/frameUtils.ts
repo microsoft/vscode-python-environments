@@ -19,39 +19,35 @@ export function getCallingExtension(): string {
     const pythonExts = [ENVS_EXTENSION_ID, PYTHON_EXTENSION_ID];
 
     const extensions = allExtensions();
-    const otherExts = extensions.map((ext) => ext.id).filter((id) => !pythonExts.includes(id));
-    const frames = getFrameData();
+    const otherExts = extensions.filter((ext) => !pythonExts.includes(ext.id));
+    const frames = getFrameData().filter((frame) => !!frame.filePath);
 
     for (const frame of frames) {
         const filename = frame.filePath;
         if (filename) {
-            const ext = otherExts.find((ext) => filename.includes(ext));
+            const ext = otherExts.find((ext) => filename.includes(ext.id));
             if (ext) {
-                return ext;
+                return ext.id;
             }
         }
     }
 
-    // development mode
-    const otherExtPaths = extensions.map((ext) => ext.extensionPath);
-    const candidates = frames.filter((frame) => otherExtPaths.includes(frame.filePath));
+    // `ms-python.vscode-python-envs` extension in Development mode
+    const candidates = frames.filter((frame) => otherExts.some((s) => frame.filePath.includes(s.extensionPath)));
     const envsExtPath = getExtension(ENVS_EXTENSION_ID)?.extensionPath;
     if (!envsExtPath) {
         throw new Error('Something went wrong with feature registration');
     }
 
-    if (
-        candidates.length === 0 &&
-        frames.filter((frame) => !!frame.filePath).every((frame) => frame.filePath.startsWith(envsExtPath))
-    ) {
+    if (candidates.length === 0 && frames.every((frame) => frame.filePath.startsWith(envsExtPath))) {
         return PYTHON_EXTENSION_ID;
     }
 
-    // get package json for the environment in candidate
-    const candidateExt = extensions.find((ext) => ext.extensionPath === candidates[0].filePath);
+    // 3rd party extension in Development mode
+    const candidateExt = otherExts.find((ext) => candidates[0].filePath.includes(ext.extensionPath));
     if (candidateExt) {
         return candidateExt.id;
     }
 
-    throw new Error('Unable to determine calling extension');
+    throw new Error('Unable to determine calling extension id, registration failed');
 }
