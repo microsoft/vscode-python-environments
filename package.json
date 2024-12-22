@@ -278,11 +278,11 @@
                 {
                     "command": "python-envs.create",
                     "group": "inline",
-                    "when": "view == env-managers && viewItem =~ /.*pythonEnvManager.*-create.*/"
+                    "when": "view == env-managers && viewItem =~ /.*pythonEnvManager.*;create;.*/"
                 },
                 {
                     "command": "python-envs.remove",
-                    "when": "view == env-managers && viewItem =~ /.*pythonEnvironment.*-remove.*/"
+                    "when": "view == env-managers && viewItem =~ /.*pythonEnvironment.*;remove;.*/"
                 },
                 {
                     "command": "python-envs.setEnv",
@@ -297,7 +297,7 @@
                 {
                     "command": "python-envs.createTerminal",
                     "group": "inline",
-                    "when": "view == env-managers && viewItem =~ /.*pythonEnvironment.*activatable.*/"
+                    "when": "view == env-managers && viewItem =~ /.*pythonEnvironment.*;activatable;.*/"
                 },
                 {
                     "command": "python-envs.refreshPackages",
