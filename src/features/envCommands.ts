@@ -29,6 +29,7 @@ import {
     ProjectEnvironment,
     ProjectPackageRootTreeItem,
     GlobalProjectItem,
+    EnvTreeItemKind,
 } from './views/treeViewItems';
 import { Common } from '../common/localize';
 import { pickEnvironment } from '../common/pickers/environments';
@@ -156,7 +157,8 @@ export async function createAnyEnvironmentCommand(
 export async function removeEnvironmentCommand(context: unknown, managers: EnvironmentManagers): Promise<void> {
     if (context instanceof PythonEnvTreeItem) {
         const view = context as PythonEnvTreeItem;
-        const manager = view.parent.manager;
+        const manager =
+            view.parent.kind === EnvTreeItemKind.environmentGroup ? view.parent.parent.manager : view.parent.manager;
         await manager.remove(view.environment);
     } else if (context instanceof Uri) {
         const manager = managers.getEnvironmentManager(context as Uri);

@@ -24,6 +24,7 @@ import {
     ResolveEnvironmentContext,
     PackageInstallOptions,
     Installable,
+    EnvironmentGroupInfo,
 } from './api';
 import { CreateEnvironmentNotSupported, RemoveEnvironmentNotSupported } from './common/errors/NotSupportedError';
 
@@ -268,6 +269,7 @@ export class PythonEnvironmentImpl implements PythonEnvironment {
     public readonly iconPath?: IconPath;
     public readonly execInfo: PythonEnvironmentExecutionInfo;
     public readonly sysPrefix: string;
+    public readonly group?: string | EnvironmentGroupInfo;
 
     constructor(public readonly envId: PythonEnvironmentId, info: PythonEnvironmentInfo) {
         this.name = info.name;
@@ -281,6 +283,7 @@ export class PythonEnvironmentImpl implements PythonEnvironment {
         this.iconPath = info.iconPath;
         this.execInfo = info.execInfo;
         this.sysPrefix = info.sysPrefix;
+        this.group = info.group;
     }
 }
 

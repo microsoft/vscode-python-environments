@@ -1,12 +1,13 @@
 import { TreeItem, TreeItemCollapsibleState, MarkdownString, Command, ThemeIcon } from 'vscode';
 import { InternalEnvironmentManager, InternalPackageManager } from '../../internal.api';
-import { PythonEnvironment, IconPath, Package, PythonProject } from '../../api';
+import { PythonEnvironment, IconPath, Package, PythonProject, EnvironmentGroupInfo } from '../../api';
 import { removable } from './utils';
 import { isActivatableEnvironment } from '../common/activation';
 
 export enum EnvTreeItemKind {
     manager = 'python-env-manager',
     environment = 'python-env',
+    environmentGroup = 'python-env-group',
     noEnvironment = 'python-no-env',
     package = 'python-package',
     packageRoot = 'python-package-root',
@@ -42,11 +43,31 @@ export class EnvManagerTreeItem implements EnvTreeItem {
     }
 }
 
+export class PythonGroupEnvTreeItem implements EnvTreeItem {
+    public readonly kind = EnvTreeItemKind.environmentGroup;
+    public readonly treeItem: TreeItem;
+    constructor(public readonly parent: EnvManagerTreeItem, public readonly group: string | EnvironmentGroupInfo) {
+        const label = typeof group === 'string' ? group : group.name;
+        const item = new TreeItem(label, TreeItemCollapsibleState.Collapsed);
+        item.contextValue = 'pythonEnvGroup';
+        this.treeItem = item;
+
+        if (typeof group !== 'string') {
+            item.description = group.description;
+            item.tooltip = group.tooltip;
+            item.iconPath = group.iconPath;
+        }
+    }
+}
+
 export class PythonEnvTreeItem implements EnvTreeItem {
     public readonly kind = EnvTreeItemKind.environment;
     public readonly treeItem: TreeItem;
-    constructor(public readonly environment: PythonEnvironment, public readonly parent: EnvManagerTreeItem) {
-        const item = new TreeItem(environment.displayName, TreeItemCollapsibleState.Collapsed);
+    constructor(
+        public readonly environment: PythonEnvironment,
+        public readonly parent: EnvManagerTreeItem | PythonGroupEnvTreeItem,
+    ) {
+        const item = new TreeItem(environment.displayName ?? environment.name, TreeItemCollapsibleState.Collapsed);
         item.contextValue = this.getContextValue();
         item.description = environment.description;
         item.tooltip = environment.tooltip;
@@ -56,7 +77,12 @@ export class PythonEnvTreeItem implements EnvTreeItem {
 
     private getContextValue() {
         const activatable = isActivatableEnvironment(this.environment) ? 'activatable' : '';
-        const remove = this.parent.manager.supportsRemove ? 'remove' : '';
+        let remove = '';
+        if (this.parent.kind === EnvTreeItemKind.environmentGroup) {
+            remove = this.parent.parent.manager.supportsRemove ? 'remove' : '';
+        } else if (this.parent.kind === EnvTreeItemKind.manager) {
+            remove = this.parent.manager.supportsRemove ? 'remove' : '';
+        }
         const parts = ['pythonEnvironment', remove, activatable].filter(Boolean);
         return parts.join(';') + ';';
     }

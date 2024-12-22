@@ -270,6 +270,7 @@ function nativeToPythonEnv(
                     activation: [{ executable: conda, args: ['activate', e.prefix] }],
                     deactivation: [{ executable: conda, args: ['deactivate'] }],
                 },
+                group: 'Prefix',
             },
             manager,
         );
@@ -297,6 +298,7 @@ function nativeToPythonEnv(
                     activation: [{ executable: conda, args: ['activate', name] }],
                     deactivation: [{ executable: conda, args: ['deactivate'] }],
                 },
+                group: 'Named',
             },
             manager,
         );
@@ -490,6 +492,7 @@ async function createNamedCondaEnvironment(
                             run: { executable: path.join(envPath, bin) },
                         },
                         sysPrefix: envPath,
+                        group: 'Named',
                     },
                     manager,
                 );
@@ -565,6 +568,7 @@ async function createPrefixCondaEnvironment(
                             deactivation: [{ executable: 'conda', args: ['deactivate'] }],
                         },
                         sysPrefix: prefix,
+                        group: 'Prefix',
                     },
                     manager,
                 );

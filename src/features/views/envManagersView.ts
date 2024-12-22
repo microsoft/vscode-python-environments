@@ -1,5 +1,5 @@
 import { Disposable, Event, EventEmitter, ProviderResult, TreeDataProvider, TreeItem, TreeView, window } from 'vscode';
-import { PythonEnvironment } from '../../api';
+import { EnvironmentGroupInfo, PythonEnvironment } from '../../api';
 import {
     DidChangeEnvironmentManagerEventArgs,
     DidChangePackageManagerEventArgs,
@@ -19,6 +19,7 @@ import {
     NoPythonEnvTreeItem,
     EnvInfoTreeItem,
     PackageRootInfoTreeItem,
+    PythonGroupEnvTreeItem,
 } from './treeViewItems';
 import { createSimpleDebounce } from '../../common/utils/debounce';
 import { ProjectViews } from '../../common/localize';
@@ -97,10 +98,25 @@ export class EnvManagerView implements TreeDataProvider<EnvTreeItem>, Disposable
             const manager = (element as EnvManagerTreeItem).manager;
             const views: EnvTreeItem[] = [];
             const envs = await manager.getEnvironments('all');
-            envs.forEach((env) => {
+            envs.filter((e) => !e.group).forEach((env) => {
                 const view = new PythonEnvTreeItem(env, element as EnvManagerTreeItem);
                 views.push(view);
                 this.revealMap.set(env.envId.id, view);
+            });
+
+            const groups: string[] = [];
+            const groupObjects: (string | EnvironmentGroupInfo)[] = [];
+            envs.filter((e) => e.group).forEach((env) => {
+                const name =
+                    env.group && typeof env.group === 'string' ? env.group : (env.group as EnvironmentGroupInfo).name;
+                if (name && !groups.includes(name)) {
+                    groups.push(name);
+                    groupObjects.push(env.group as EnvironmentGroupInfo);
+                }
+            });
+
+            groupObjects.forEach((group) => {
+                views.push(new PythonGroupEnvTreeItem(element as EnvManagerTreeItem, group));
             });
 
             if (views.length === 0) {
@@ -109,9 +125,39 @@ export class EnvManagerView implements TreeDataProvider<EnvTreeItem>, Disposable
             return views;
         }
 
+        if (element.kind === EnvTreeItemKind.environmentGroup) {
+            const groupItem = element as PythonGroupEnvTreeItem;
+            const manager = groupItem.parent.manager;
+            const views: EnvTreeItem[] = [];
+            const envs = await manager.getEnvironments('all');
+            const groupName =
+                typeof groupItem.group === 'string' ? groupItem.group : (groupItem.group as EnvironmentGroupInfo).name;
+            const grouped = envs.filter((e) => {
+                if (e.group) {
+                    const name =
+                        e.group && typeof e.group === 'string' ? e.group : (e.group as EnvironmentGroupInfo).name;
+                    return name === groupName;
+                }
+                return false;
+            });
+
+            grouped.forEach((env) => {
+                const view = new PythonEnvTreeItem(env, groupItem);
+                views.push(view);
+                this.revealMap.set(env.envId.id, view);
+            });
+
+            return views;
+        }
+
         if (element.kind === EnvTreeItemKind.environment) {
-            const environment = (element as PythonEnvTreeItem).environment;
-            const envManager = (element as PythonEnvTreeItem).parent.manager;
+            const pythonEnvItem = element as PythonEnvTreeItem;
+            const environment = pythonEnvItem.environment;
+            const envManager =
+                pythonEnvItem.parent.kind === EnvTreeItemKind.environmentGroup
+                    ? pythonEnvItem.parent.parent.manager
+                    : pythonEnvItem.parent.manager;
+
             const pkgManager = this.getSupportedPackageManager(envManager);
             const parent = element as PythonEnvTreeItem;
             const views: EnvTreeItem[] = [];

@@ -144,6 +144,33 @@ export interface PythonEnvironmentId {
 }
 
 /**
+ * Display information for an environment group.
+ */
+export interface EnvironmentGroupInfo {
+    /**
+     * The name of the environment group. This is used as an identifier for the group.
+     *
+     * Note: The first instance of the group with the given name will be used in the UI.
+     */
+    readonly name: string;
+
+    /**
+     * The description of the environment group.
+     */
+    readonly description?: string;
+
+    /**
+     * The tooltip for the environment group, which can be a string or a Markdown string.
+     */
+    readonly tooltip?: string | MarkdownString;
+
+    /**
+     * The icon path for the environment group, which can be a string, Uri, or an object with light and dark theme paths.
+     */
+    readonly iconPath?: IconPath;
+}
+
+/**
  * Interface representing information about a Python environment.
  */
 export interface PythonEnvironmentInfo {
@@ -202,6 +229,11 @@ export interface PythonEnvironmentInfo {
      * This is required by extension like Jupyter, Pylance, and other extensions to provide better experience with python.
      */
     readonly sysPrefix: string;
+
+    /**
+     * Optional `group` for this environment. This is used to group environments in the Environment Manager UI.
+     */
+    readonly group?: string | EnvironmentGroupInfo;
 }
 
 /**
