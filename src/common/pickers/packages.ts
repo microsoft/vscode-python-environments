@@ -44,6 +44,7 @@ async function getCommonPackages(): Promise<Installable[]> {
 
     return packages.map((p) => {
         return {
+            name: p,
             displayName: p,
             args: [p],
             uri: Uri.parse(`https://pypi.org/project/${p}`),
@@ -77,13 +78,14 @@ function handleItemButton(uri?: Uri) {
 }
 
 interface PackageQuickPickItem extends QuickPickItem {
+    id: string;
     uri?: Uri;
     args?: string[];
 }
 
 function getDetail(i: Installable): string | undefined {
     if (i.args && i.args.length > 0) {
-        if (i.args.length === 1 && i.args[0] === i.displayName) {
+        if (i.args.length === 1 && i.args[0] === i.name) {
             return undefined;
         }
         return i.args.join(' ');
@@ -106,6 +108,7 @@ function installableToQuickPickItem(i: Installable): PackageQuickPickItem {
         buttons,
         uri: i.uri,
         args: i.args,
+        id: i.name,
     };
 }
 
@@ -153,6 +156,7 @@ function getGroupedItems(items: Installable[]): PackageQuickPickItem[] {
     const result: PackageQuickPickItem[] = [];
     groups.forEach((group, key) => {
         result.push({
+            id: key,
             label: key,
             kind: QuickPickItemKind.Separator,
         });
@@ -161,6 +165,7 @@ function getGroupedItems(items: Installable[]): PackageQuickPickItem[] {
 
     if (workspaceInstallable.length > 0) {
         result.push({
+            id: PackageManagement.workspaceDependencies,
             label: PackageManagement.workspaceDependencies,
             kind: QuickPickItemKind.Separator,
         });
@@ -190,6 +195,7 @@ async function getWorkspacePackages(
         const common = await getCommonPackages();
         items.push(
             {
+                id: PackageManagement.commonPackages,
                 label: PackageManagement.commonPackages,
                 kind: QuickPickItemKind.Separator,
             },
@@ -200,7 +206,7 @@ async function getWorkspacePackages(
     let preSelectedItems = items
         .filter((i) => i.kind !== QuickPickItemKind.Separator)
         .filter((i) =>
-            preSelected?.find((s) => s.label === i.label && s.description === i.description && s.detail === i.detail),
+            preSelected?.find((s) => s.id === i.id && s.description === i.description && s.detail === i.detail),
         );
     let selected: PackageQuickPickItem | PackageQuickPickItem[] | undefined;
     try {
@@ -227,6 +233,7 @@ async function getWorkspacePackages(
             const parts: PackageQuickPickItem[] = Array.isArray(ex.item) ? ex.item : [ex.item];
             selected = [
                 {
+                    id: PackageManagement.enterPackageNames,
                     label: PackageManagement.enterPackageNames,
                     alwaysShow: true,
                 },
@@ -293,6 +300,7 @@ async function getCommonPackagesToInstall(
             const parts: PackageQuickPickItem[] = Array.isArray(ex.item) ? ex.item : [ex.item];
             selected = [
                 {
+                    id: PackageManagement.enterPackageNames,
                     label: PackageManagement.enterPackageNames,
                     alwaysShow: true,
                 },
@@ -305,7 +313,7 @@ async function getCommonPackagesToInstall(
         if (selected.find((s) => s.label === PackageManagement.enterPackageNames)) {
             const filler = selected
                 .filter((s) => s.label !== PackageManagement.enterPackageNames)
-                .map((s) => s.label)
+                .map((s) => s.id)
                 .join(' ');
             try {
                 const result = await enterPackageManually(filler);
@@ -317,7 +325,7 @@ async function getCommonPackagesToInstall(
                 return undefined;
             }
         } else {
-            return selected.map((s) => s.label);
+            return selected.map((s) => s.id);
         }
     }
 }

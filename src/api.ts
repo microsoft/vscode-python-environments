@@ -751,9 +751,18 @@ export interface PackageInstallOptions {
     upgrade?: boolean;
 }
 
+/**
+ * Represents an object that could be a package, requirements file, other lock files,
+ * or custom steps, etc
+ */
 export interface Installable {
     /**
-     * The display name of the package, requirements, pyproject.toml or any other project file.
+     * The name of the package, requirements, lock files, or step name.
+     */
+    readonly name: string;
+
+    /**
+     * The name of the package, requirements, pyproject.toml or any other project file, etc.
      */
     readonly displayName: string;
 
@@ -765,7 +774,7 @@ export interface Installable {
      *  ['--pre', 'debugpy'] for `pip install --pre debugpy`.
      *  ['-r', 'requirements.txt'] for `pip install -r requirements.txt`.
      */
-    readonly args: string[];
+    readonly args?: string[];
 
     /**
      * Installable group name, this will be used to group installable items in the UI.

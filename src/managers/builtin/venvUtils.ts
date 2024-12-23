@@ -416,8 +416,10 @@ function getTomlInstallable(toml: tomljs.JsonMap, tomlPath: Uri): Installable[] 
     const extras: Installable[] = [];
 
     if (isPipInstallableToml(toml)) {
+        const name = path.basename(tomlPath.fsPath);
         extras.push({
-            displayName: path.basename(tomlPath.fsPath),
+            name,
+            displayName: name,
             description: VenvManagerStrings.installEditable,
             group: 'TOML',
             args: ['-e', path.dirname(tomlPath.fsPath)],
@@ -429,6 +431,7 @@ function getTomlInstallable(toml: tomljs.JsonMap, tomlPath: Uri): Installable[] 
         const deps = (toml.project as tomljs.JsonMap)['optional-dependencies'];
         for (const key of Object.keys(deps)) {
             extras.push({
+                name: key,
                 displayName: key,
                 group: 'TOML',
                 args: ['-e', `.[${key}]`],
@@ -476,9 +479,11 @@ export async function getProjectInstallable(
                         const toml = tomlParse(await fsapi.readFile(uri.fsPath, 'utf-8'));
                         installable.push(...getTomlInstallable(toml, uri));
                     } else {
+                        const name = path.basename(uri.fsPath);
                         installable.push({
+                            name,
                             uri,
-                            displayName: path.basename(uri.fsPath),
+                            displayName: name,
                             group: 'Requirements',
                             args: ['-r', uri.fsPath],
                         });
