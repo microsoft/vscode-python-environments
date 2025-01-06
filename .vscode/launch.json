@@ -24,7 +24,7 @@
                 "--recursive",
                 //"--grep", "<suite name>",
                 "--require=out/test/unittests.js",
-                "./out/test/**/treeViewItems.unit.test.js"
+                "./out/test/**/*.unit.test.js"
             ],
             "internalConsoleOptions": "openOnSessionStart",
             "program": "${workspaceFolder}/node_modules/mocha/bin/_mocha",
