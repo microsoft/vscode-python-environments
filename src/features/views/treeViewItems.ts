@@ -49,7 +49,7 @@ export class PythonGroupEnvTreeItem implements EnvTreeItem {
     constructor(public readonly parent: EnvManagerTreeItem, public readonly group: string | EnvironmentGroupInfo) {
         const label = typeof group === 'string' ? group : group.name;
         const item = new TreeItem(label, TreeItemCollapsibleState.Collapsed);
-        item.contextValue = `pythonEnvGroup;${label};`;
+        item.contextValue = `pythonEnvGroup;${this.parent.manager.id}:${label};`;
         this.treeItem = item;
 
         if (typeof group !== 'string') {
