@@ -49,14 +49,14 @@ export class PipPackageManager implements PackageManager, Disposable {
     readonly iconPath?: IconPath;
 
     async install(environment: PythonEnvironment, packages?: string[], options?: PackageInstallOptions): Promise<void> {
-        let selected: string[] | undefined = packages;
+        let selected: string[] = packages ?? [];
 
-        if (!selected) {
+        if (selected.length === 0) {
             const projects = this.venv.getProjectsByEnvironment(environment);
             selected = (await getWorkspacePackagesToInstall(this.api, projects)) ?? [];
         }
 
-        if (!selected || selected.length === 0) {
+        if (selected.length === 0) {
             return;
         }
 
@@ -88,16 +88,16 @@ export class PipPackageManager implements PackageManager, Disposable {
     }
 
     async uninstall(environment: PythonEnvironment, packages?: Package[] | string[]): Promise<void> {
-        let selected: Package[] | string[] | undefined = packages;
+        let selected: Package[] | string[] = packages ?? [];
         if (!selected) {
             const installPackages = await this.getPackages(environment);
             if (!installPackages) {
                 return;
             }
-            selected = await getPackagesToUninstall(installPackages);
+            selected = (await getPackagesToUninstall(installPackages)) ?? [];
         }
 
-        if (!selected || selected.length === 0) {
+        if (selected.length === 0) {
             return;
         }
 
