@@ -597,7 +597,7 @@ export interface PackageManager {
      * @param packages - The packages to install.
      * @returns A promise that resolves when the installation is complete.
      */
-    install(environment: PythonEnvironment, packages: string[], options: PackageInstallOptions): Promise<void>;
+    install(environment: PythonEnvironment, packages?: string[], options?: PackageInstallOptions): Promise<void>;
 
     /**
      * Uninstalls packages from the specified Python environment.
@@ -605,7 +605,7 @@ export interface PackageManager {
      * @param packages - The packages to uninstall, which can be an array of packages or strings.
      * @returns A promise that resolves when the uninstall is complete.
      */
-    uninstall(environment: PythonEnvironment, packages: Package[] | string[]): Promise<void>;
+    uninstall(environment: PythonEnvironment, packages?: Package[] | string[]): Promise<void>;
 
     /**
      * Refreshes the package list for the specified Python environment.
@@ -620,17 +620,6 @@ export interface PackageManager {
      * @returns An array of packages, or undefined if the packages could not be retrieved.
      */
     getPackages(environment: PythonEnvironment): Promise<Package[] | undefined>;
-
-    /**
-     * Get a list of installable items for a Python project.
-     *
-     * @param environment The Python environment for which to get installable items.
-     *
-     * Note: An environment can be used by multiple projects, so the installable items returned.
-     * should be for the environment. If you want to do it for a particular project, then you should
-     * ask user to select a project, and filter the installable items based on the project.
-     */
-    getInstallable?(environment: PythonEnvironment): Promise<Installable[]>;
 
     /**
      * Event that is fired when packages change.
@@ -749,54 +738,6 @@ export interface PackageInstallOptions {
      * Upgrade the packages if it is already installed.
      */
     upgrade?: boolean;
-}
-
-/**
- * Represents an object that could be a package, requirements file, other lock files,
- * or custom steps, etc
- */
-export interface Installable {
-    /**
-     * The name of the package, requirements, lock files, or step name.
-     */
-    readonly name: string;
-
-    /**
-     * The name of the package, requirements, pyproject.toml or any other project file, etc.
-     */
-    readonly displayName: string;
-
-    /**
-     * Arguments passed to the package manager to install the package.
-     *
-     * @example
-     *  ['debugpy==1.8.7'] for `pip install debugpy==1.8.7`.
-     *  ['--pre', 'debugpy'] for `pip install --pre debugpy`.
-     *  ['-r', 'requirements.txt'] for `pip install -r requirements.txt`.
-     */
-    readonly args?: string[];
-
-    /**
-     * Installable group name, this will be used to group installable items in the UI.
-     *
-     * @example
-     *  `Requirements` for any requirements file.
-     *  `Packages` for any package.
-     */
-    readonly group?: string;
-
-    /**
-     * Description about the installable item. This can also be path to the requirements,
-     * version of the package, or any other project file path.
-     */
-    readonly description?: string;
-
-    /**
-     * External Uri to the package on pypi or docs.
-     * @example
-     *  https://pypi.org/project/debugpy/ for `debugpy`.
-     */
-    readonly uri?: Uri;
 }
 
 export interface PythonProcess {

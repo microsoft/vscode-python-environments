@@ -2,7 +2,6 @@ import { Event, EventEmitter, LogOutputChannel, MarkdownString, ProgressLocation
 import {
     DidChangePackagesEventArgs,
     IconPath,
-    Installable,
     Package,
     PackageChangeKind,
     PackageInstallOptions,
@@ -12,8 +11,8 @@ import {
 } from '../../api';
 import { installPackages, refreshPackages, uninstallPackages } from './utils';
 import { Disposable } from 'vscode-jsonrpc';
-import { getProjectInstallable } from './venvUtils';
 import { VenvManager } from './venvManager';
+import { getPackagesToUninstall, getWorkspacePackagesToInstall } from './pipUtils';
 
 function getChanges(before: Package[], after: Package[]): { kind: PackageChangeKind; pkg: Package }[] {
     const changes: { kind: PackageChangeKind; pkg: Package }[] = [];
@@ -49,7 +48,19 @@ export class PipPackageManager implements PackageManager, Disposable {
     readonly tooltip?: string | MarkdownString;
     readonly iconPath?: IconPath;
 
-    async install(environment: PythonEnvironment, packages: string[], options: PackageInstallOptions): Promise<void> {
+    async install(environment: PythonEnvironment, packages?: string[], options?: PackageInstallOptions): Promise<void> {
+        let selected: string[] | undefined = packages;
+
+        if (!selected) {
+            const projects = this.venv.getProjectsByEnvironment(environment);
+            selected = (await getWorkspacePackagesToInstall(this.api, projects)) ?? [];
+        }
+
+        if (!selected || selected.length === 0) {
+            return;
+        }
+
+        const installOptions = options ?? { upgrade: false };
         await window.withProgress(
             {
                 location: ProgressLocation.Notification,
@@ -59,7 +70,7 @@ export class PipPackageManager implements PackageManager, Disposable {
             async (_progress, token) => {
                 try {
                     const before = this.packages.get(environment.envId.id) ?? [];
-                    const after = await installPackages(environment, packages, options, this.api, this, token);
+                    const after = await installPackages(environment, selected, installOptions, this.api, this, token);
                     const changes = getChanges(before, after);
                     this.packages.set(environment.envId.id, after);
                     this._onDidChangePackages.fire({ environment, manager: this, changes });
@@ -76,7 +87,20 @@ export class PipPackageManager implements PackageManager, Disposable {
         );
     }
 
-    async uninstall(environment: PythonEnvironment, packages: Package[] | string[]): Promise<void> {
+    async uninstall(environment: PythonEnvironment, packages?: Package[] | string[]): Promise<void> {
+        let selected: Package[] | string[] | undefined = packages;
+        if (!selected) {
+            const installPackages = await this.getPackages(environment);
+            if (!installPackages) {
+                return;
+            }
+            selected = await getPackagesToUninstall(installPackages);
+        }
+
+        if (!selected || selected.length === 0) {
+            return;
+        }
+
         await window.withProgress(
             {
                 location: ProgressLocation.Notification,
@@ -86,7 +110,7 @@ export class PipPackageManager implements PackageManager, Disposable {
             async (_progress, token) => {
                 try {
                     const before = this.packages.get(environment.envId.id) ?? [];
-                    const after = await uninstallPackages(environment, this.api, this, packages, token);
+                    const after = await uninstallPackages(environment, this.api, this, selected, token);
                     const changes = getChanges(before, after);
                     this.packages.set(environment.envId.id, after);
                     this._onDidChangePackages.fire({ environment: environment, manager: this, changes });
@@ -120,10 +144,7 @@ export class PipPackageManager implements PackageManager, Disposable {
         }
         return this.packages.get(environment.envId.id);
     }
-    async getInstallable(environment: PythonEnvironment): Promise<Installable[]> {
-        const projects = this.venv.getProjectsByEnvironment(environment);
-        return getProjectInstallable(this.api, projects);
-    }
+
     dispose(): void {
         this._onDidChangePackages.dispose();
         this.packages.clear();

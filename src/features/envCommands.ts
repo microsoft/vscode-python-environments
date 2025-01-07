@@ -34,11 +34,7 @@ import {
 import { Common } from '../common/localize';
 import { pickEnvironment } from '../common/pickers/environments';
 import { pickEnvironmentManager, pickPackageManager, pickCreator } from '../common/pickers/managers';
-import {
-    pickPackageOptions,
-    getPackagesToInstallFromPackageManager,
-    getPackagesToUninstall,
-} from '../common/pickers/packages';
+import { pickPackageOptions } from '../common/pickers/packages';
 import { pickProject, pickProjectMany } from '../common/pickers/projects';
 import { TerminalManager } from './terminal/terminalManager';
 import { runInTerminal } from './terminal/runInTerminal';
@@ -174,37 +170,20 @@ export async function removeEnvironmentCommand(context: unknown, managers: Envir
 export async function handlePackagesCommand(
     packageManager: InternalPackageManager,
     environment: PythonEnvironment,
-    packages?: string[],
 ): Promise<void> {
     const action = await pickPackageOptions();
 
-    if (action === Common.install) {
-        if (!packages || packages.length === 0) {
-            try {
-                packages = await getPackagesToInstallFromPackageManager(packageManager, environment);
-            } catch (ex) {
-                if (ex === QuickInputButtons.Back) {
-                    return handlePackagesCommand(packageManager, environment, packages);
-                }
-                throw ex;
-            }
+    try {
+        if (action === Common.install) {
+            await packageManager.install(environment);
+        } else if (action === Common.uninstall) {
+            await packageManager.uninstall(environment);
         }
-        if (packages && packages.length > 0) {
-            return packageManager.install(environment, packages, { upgrade: false });
+    } catch (ex) {
+        if (ex === QuickInputButtons.Back) {
+            return handlePackagesCommand(packageManager, environment);
         }
-    }
-
-    if (action === Common.uninstall) {
-        if (!packages || packages.length === 0) {
-            const allPackages = await packageManager.getPackages(environment);
-            if (allPackages && allPackages.length > 0) {
-                packages = (await getPackagesToUninstall(allPackages))?.map((p) => p.name);
-            }
-
-            if (packages && packages.length > 0) {
-                return packageManager.uninstall(environment, packages);
-            }
-        }
+        throw ex;
     }
 }
 

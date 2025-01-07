@@ -1,15 +1,12 @@
 import { l10n, LogOutputChannel, ProgressLocation, QuickPickItem, QuickPickItemKind, ThemeIcon, Uri } from 'vscode';
 import {
     EnvironmentManager,
-    Installable,
     PythonCommandRunConfiguration,
     PythonEnvironment,
     PythonEnvironmentApi,
     PythonEnvironmentInfo,
-    PythonProject,
     TerminalShellType,
 } from '../../api';
-import * as tomljs from '@iarna/toml';
 import * as path from 'path';
 import * as os from 'os';
 import * as fsapi from 'fs-extra';
@@ -23,7 +20,7 @@ import {
 } from '../common/nativePythonFinder';
 import { getWorkspacePersistentState } from '../../common/persistentState';
 import { shortVersion, sortEnvironments } from '../common/utils';
-import { findFiles, getConfiguration } from '../../common/workspace.apis';
+import { getConfiguration } from '../../common/workspace.apis';
 import { pickEnvironmentFrom } from '../../common/pickers/environments';
 import {
     showQuickPick,
@@ -33,9 +30,9 @@ import {
     showOpenDialog,
 } from '../../common/window.apis';
 import { showErrorMessage } from '../../common/errors/utils';
-import { getPackagesToInstallFromInstallable } from '../../common/pickers/packages';
 import { Common, VenvManagerStrings } from '../../common/localize';
 import { isUvInstalled, runUV, runPython } from './helpers';
+import { getWorkspacePackagesToInstall } from './pipUtils';
 
 export const VENV_WORKSPACE_KEY = `${ENVS_EXTENSION_ID}:venv:WORKSPACE_SELECTED`;
 export const VENV_GLOBAL_KEY = `${ENVS_EXTENSION_ID}:venv:GLOBAL_SELECTED`;
@@ -310,16 +307,7 @@ export async function createPythonVenv(
         os.platform() === 'win32' ? path.join(envPath, 'Scripts', 'python.exe') : path.join(envPath, 'bin', 'python');
 
     const project = api.getPythonProject(venvRoot);
-    const installable = await getProjectInstallable(api, project ? [project] : undefined);
-
-    let packages: string[] = [];
-    if (installable && installable.length > 0) {
-        const packagesToInstall = await getPackagesToInstallFromInstallable(installable);
-        if (!packagesToInstall) {
-            return;
-        }
-        packages = packagesToInstall;
-    }
+    const packages = await getWorkspacePackagesToInstall(api, project ? [project] : undefined);
 
     return await withProgress(
         {
@@ -352,7 +340,7 @@ export async function createPythonVenv(
 
                 const resolved = await nativeFinder.resolve(pythonPath);
                 const env = api.createPythonEnvironmentItem(getPythonInfo(resolved), manager);
-                if (packages?.length > 0) {
+                if (packages && packages?.length > 0) {
                     await api.installPackages(env, packages, { upgrade: false });
                 }
                 return env;
@@ -397,102 +385,6 @@ export async function removeVenv(environment: PythonEnvironment, log: LogOutputC
     }
 
     return false;
-}
-
-function tomlParse(content: string, log?: LogOutputChannel): tomljs.JsonMap {
-    try {
-        return tomljs.parse(content);
-    } catch (err) {
-        log?.error('Failed to parse `pyproject.toml`:', err);
-    }
-    return {};
-}
-
-function isPipInstallableToml(toml: tomljs.JsonMap): boolean {
-    return toml['build-system'] !== undefined && toml.project !== undefined;
-}
-
-function getTomlInstallable(toml: tomljs.JsonMap, tomlPath: Uri): Installable[] {
-    const extras: Installable[] = [];
-
-    if (isPipInstallableToml(toml)) {
-        const name = path.basename(tomlPath.fsPath);
-        extras.push({
-            name,
-            displayName: name,
-            description: VenvManagerStrings.installEditable,
-            group: 'TOML',
-            args: ['-e', path.dirname(tomlPath.fsPath)],
-            uri: tomlPath,
-        });
-    }
-
-    if (toml.project && (toml.project as tomljs.JsonMap)['optional-dependencies']) {
-        const deps = (toml.project as tomljs.JsonMap)['optional-dependencies'];
-        for (const key of Object.keys(deps)) {
-            extras.push({
-                name: key,
-                displayName: key,
-                group: 'TOML',
-                args: ['-e', `.[${key}]`],
-                uri: tomlPath,
-            });
-        }
-    }
-    return extras;
-}
-
-export async function getProjectInstallable(
-    api: PythonEnvironmentApi,
-    projects?: PythonProject[],
-): Promise<Installable[]> {
-    if (!projects) {
-        return [];
-    }
-    const exclude = '**/{.venv*,.git,.nox,.tox,.conda,site-packages,__pypackages__}/**';
-    const installable: Installable[] = [];
-    await withProgress(
-        {
-            location: ProgressLocation.Window,
-            title: VenvManagerStrings.searchingDependencies,
-        },
-        async (_progress, token) => {
-            const results: Uri[] = (
-                await Promise.all([
-                    findFiles('**/*requirements*.txt', exclude, undefined, token),
-                    findFiles('**/requirements/*.txt', exclude, undefined, token),
-                    findFiles('**/pyproject.toml', exclude, undefined, token),
-                ])
-            ).flat();
-
-            const fsPaths = projects.map((p) => p.uri.fsPath);
-            const filtered = results
-                .filter((uri) => {
-                    const p = api.getPythonProject(uri)?.uri.fsPath;
-                    return p && fsPaths.includes(p);
-                })
-                .sort();
-
-            await Promise.all(
-                filtered.map(async (uri) => {
-                    if (uri.fsPath.endsWith('.toml')) {
-                        const toml = tomlParse(await fsapi.readFile(uri.fsPath, 'utf-8'));
-                        installable.push(...getTomlInstallable(toml, uri));
-                    } else {
-                        const name = path.basename(uri.fsPath);
-                        installable.push({
-                            name,
-                            uri,
-                            displayName: name,
-                            group: 'Requirements',
-                            args: ['-r', uri.fsPath],
-                        });
-                    }
-                }),
-            );
-        },
-    );
-    return installable;
 }
 
 export async function resolveVenvPythonEnvironmentPath(

@@ -144,6 +144,33 @@ export interface PythonEnvironmentId {
 }
 
 /**
+ * Display information for an environment group.
+ */
+export interface EnvironmentGroupInfo {
+    /**
+     * The name of the environment group. This is used as an identifier for the group.
+     *
+     * Note: The first instance of the group with the given name will be used in the UI.
+     */
+    readonly name: string;
+
+    /**
+     * The description of the environment group.
+     */
+    readonly description?: string;
+
+    /**
+     * The tooltip for the environment group, which can be a string or a Markdown string.
+     */
+    readonly tooltip?: string | MarkdownString;
+
+    /**
+     * The icon path for the environment group, which can be a string, Uri, or an object with light and dark theme paths.
+     */
+    readonly iconPath?: IconPath;
+}
+
+/**
  * Interface representing information about a Python environment.
  */
 export interface PythonEnvironmentInfo {
@@ -202,6 +229,11 @@ export interface PythonEnvironmentInfo {
      * This is required by extension like Jupyter, Pylance, and other extensions to provide better experience with python.
      */
     readonly sysPrefix: string;
+
+    /**
+     * Optional `group` for this environment. This is used to group environments in the Environment Manager UI.
+     */
+    readonly group?: string | EnvironmentGroupInfo;
 }
 
 /**
@@ -218,7 +250,7 @@ export interface PythonEnvironment extends PythonEnvironmentInfo {
  * Type representing the scope for setting a Python environment.
  * Can be undefined or a URI.
  */
-export type SetEnvironmentScope = undefined | Uri;
+export type SetEnvironmentScope = undefined | Uri | Uri[];
 
 /**
  * Type representing the scope for getting a Python environment.
@@ -316,7 +348,9 @@ export interface EnvironmentManager {
     readonly displayName?: string;
 
     /**
-     * The preferred package manager ID for the environment manager.
+     * The preferred package manager ID for the environment manager. This is a combination
+     * of publisher id, extension id, and {@link EnvironmentManager.name package manager name}.
+     * `<publisher-id>.<extension-id>:<package-manager-name>`
      *
      * @example
      * 'ms-python.python:pip'
@@ -563,7 +597,7 @@ export interface PackageManager {
      * @param packages - The packages to install.
      * @returns A promise that resolves when the installation is complete.
      */
-    install(environment: PythonEnvironment, packages: string[], options: PackageInstallOptions): Promise<void>;
+    install(environment: PythonEnvironment, packages?: string[], options?: PackageInstallOptions): Promise<void>;
 
     /**
      * Uninstalls packages from the specified Python environment.
@@ -571,7 +605,7 @@ export interface PackageManager {
      * @param packages - The packages to uninstall, which can be an array of packages or strings.
      * @returns A promise that resolves when the uninstall is complete.
      */
-    uninstall(environment: PythonEnvironment, packages: Package[] | string[]): Promise<void>;
+    uninstall(environment: PythonEnvironment, packages?: Package[] | string[]): Promise<void>;
 
     /**
      * Refreshes the package list for the specified Python environment.
@@ -586,17 +620,6 @@ export interface PackageManager {
      * @returns An array of packages, or undefined if the packages could not be retrieved.
      */
     getPackages(environment: PythonEnvironment): Promise<Package[] | undefined>;
-
-    /**
-     * Get a list of installable items for a Python project.
-     *
-     * @param environment The Python environment for which to get installable items.
-     *
-     * Note: An environment can be used by multiple projects, so the installable items returned.
-     * should be for the environment. If you want to do it for a particular project, then you should
-     * ask user to select a project, and filter the installable items based on the project.
-     */
-    getInstallable?(environment: PythonEnvironment): Promise<Installable[]>;
 
     /**
      * Event that is fired when packages change.
@@ -715,45 +738,6 @@ export interface PackageInstallOptions {
      * Upgrade the packages if it is already installed.
      */
     upgrade?: boolean;
-}
-
-export interface Installable {
-    /**
-     * The display name of the package, requirements, pyproject.toml or any other project file.
-     */
-    readonly displayName: string;
-
-    /**
-     * Arguments passed to the package manager to install the package.
-     *
-     * @example
-     *  ['debugpy==1.8.7'] for `pip install debugpy==1.8.7`.
-     *  ['--pre', 'debugpy'] for `pip install --pre debugpy`.
-     *  ['-r', 'requirements.txt'] for `pip install -r requirements.txt`.
-     */
-    readonly args: string[];
-
-    /**
-     * Installable group name, this will be used to group installable items in the UI.
-     *
-     * @example
-     *  `Requirements` for any requirements file.
-     *  `Packages` for any package.
-     */
-    readonly group?: string;
-
-    /**
-     * Description about the installable item. This can also be path to the requirements,
-     * version of the package, or any other project file path.
-     */
-    readonly description?: string;
-
-    /**
-     * External Uri to the package on pypi or docs.
-     * @example
-     *  https://pypi.org/project/debugpy/ for `debugpy`.
-     */
-    readonly uri?: Uri;
 }
 
 export interface PythonProcess {

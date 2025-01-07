@@ -23,7 +23,6 @@ import {
     PythonProjectCreator,
     ResolveEnvironmentContext,
     PackageInstallOptions,
-    Installable,
     EnvironmentGroupInfo,
 } from './api';
 import { CreateEnvironmentNotSupported, RemoveEnvironmentNotSupported } from './common/errors/NotSupportedError';
@@ -208,10 +207,10 @@ export class InternalPackageManager implements PackageManager {
         return this.manager.log;
     }
 
-    install(environment: PythonEnvironment, packages: string[], options: PackageInstallOptions): Promise<void> {
+    install(environment: PythonEnvironment, packages?: string[], options?: PackageInstallOptions): Promise<void> {
         return this.manager.install(environment, packages, options);
     }
-    uninstall(environment: PythonEnvironment, packages: Package[] | string[]): Promise<void> {
+    uninstall(environment: PythonEnvironment, packages?: Package[] | string[]): Promise<void> {
         return this.manager.uninstall(environment, packages);
     }
     refresh(environment: PythonEnvironment): Promise<void> {
@@ -219,14 +218,6 @@ export class InternalPackageManager implements PackageManager {
     }
     getPackages(environment: PythonEnvironment): Promise<Package[] | undefined> {
         return this.manager.getPackages(environment);
-    }
-
-    public get supportsGetInstallable(): boolean {
-        return this.manager.getInstallable !== undefined;
-    }
-
-    getInstallable(environment: PythonEnvironment): Promise<Installable[]> {
-        return this.manager.getInstallable ? this.manager.getInstallable(environment) : Promise.resolve([]);
     }
 
     onDidChangePackages(handler: (e: DidChangePackagesEventArgs) => void): Disposable {
