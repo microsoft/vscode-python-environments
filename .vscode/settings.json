@@ -18,5 +18,7 @@
         "editor.defaultFormatter": "charliermarsh.ruff",
         "diffEditor.ignoreTrimWhitespace": false
     },
-    "prettier.tabWidth": 4
+    "prettier.tabWidth": 4,
+    "python-envs.defaultEnvManager": "ms-python.python:venv",
+    "python-envs.pythonProjects": []
 }

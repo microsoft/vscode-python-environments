@@ -15,6 +15,8 @@ export async function pickPackageOptions(): Promise<string | undefined> {
     const selected = await showQuickPick(items, {
         placeHolder: Pickers.Packages.selectOption,
         ignoreFocusOut: true,
+        matchOnDescription: false,
+        matchOnDetail: false,
     });
     return selected?.label;
 }

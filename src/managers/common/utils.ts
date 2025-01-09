@@ -1,5 +1,7 @@
 import * as os from 'os';
-import { PythonEnvironment } from '../../api';
+import { Package, PythonEnvironment } from '../../api';
+import { showQuickPick } from '../../common/window.apis';
+import { PackageManagement } from '../../common/localize';
 
 export function isWindows(): boolean {
     return process.platform === 'win32';
@@ -85,4 +87,18 @@ export function getLatest(collection: PythonEnvironment[]): PythonEnvironment | 
         }
     }
     return latest;
+}
+
+export async function getPackagesToUninstall(packages: Package[]): Promise<Package[] | undefined> {
+    const items = packages.map((p) => ({
+        label: p.name,
+        description: p.version,
+        p,
+    }));
+    const selected = await showQuickPick(items, {
+        placeHolder: PackageManagement.selectPackagesToUninstall,
+        ignoreFocusOut: true,
+        canPickMany: true,
+    });
+    return Array.isArray(selected) ? selected?.map((s) => s.p) : undefined;
 }

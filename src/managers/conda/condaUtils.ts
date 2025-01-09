@@ -11,9 +11,9 @@ import {
 } from '../../api';
 import * as path from 'path';
 import * as os from 'os';
-import * as fsapi from 'fs-extra';
+import * as fse from 'fs-extra';
 import { CancellationError, CancellationToken, l10n, LogOutputChannel, ProgressLocation, Uri } from 'vscode';
-import { ENVS_EXTENSION_ID } from '../../common/constants';
+import { ENVS_EXTENSION_ID, EXTENSION_ROOT_DIR } from '../../common/constants';
 import { createDeferred } from '../../common/utils/deferred';
 import {
     isNativeEnvInfo,
@@ -30,6 +30,7 @@ import { pickProject } from '../../common/pickers/projects';
 import { CondaStrings } from '../../common/localize';
 import { showErrorMessage } from '../../common/errors/utils';
 import { showInputBox, showQuickPick, withProgress } from '../../common/window.apis';
+import { Installable, selectFromCommonPackagesToInstall } from '../common/pickers';
 
 export const CONDA_PATH_KEY = `${ENVS_EXTENSION_ID}:conda:CONDA_PATH`;
 export const CONDA_PREFIXES_KEY = `${ENVS_EXTENSION_ID}:conda:CONDA_PREFIXES`;
@@ -193,10 +194,10 @@ async function getPrefixes(): Promise<string[]> {
 }
 
 async function getVersion(root: string): Promise<string> {
-    const files = await fsapi.readdir(path.join(root, 'conda-meta'));
+    const files = await fse.readdir(path.join(root, 'conda-meta'));
     for (let file of files) {
         if (file.startsWith('python-3') && file.endsWith('.json')) {
-            const content = fsapi.readJsonSync(path.join(root, 'conda-meta', file));
+            const content = fse.readJsonSync(path.join(root, 'conda-meta', file));
             return content['version'] as string;
         }
     }
@@ -467,7 +468,7 @@ async function createNamedCondaEnvironment(
                 const prefixes = await getPrefixes();
                 let envPath = '';
                 for (let prefix of prefixes) {
-                    if (await fsapi.pathExists(path.join(prefix, envName))) {
+                    if (await fse.pathExists(path.join(prefix, envName))) {
                         envPath = path.join(prefix, envName);
                         break;
                     }
@@ -518,7 +519,7 @@ async function createPrefixCondaEnvironment(
     }
 
     let name = `./.conda`;
-    if (await fsapi.pathExists(path.join(fsPath, '.conda'))) {
+    if (await fse.pathExists(path.join(fsPath, '.conda'))) {
         log.warn(`Environment "${path.join(fsPath, '.conda')}" already exists`);
         const newName = await showInputBox({
             prompt: l10n.t('Environment "{0}" already exists. Enter a different name', name),
@@ -678,4 +679,25 @@ export async function uninstallPackages(
     await runConda(['remove', '--prefix', environment.environmentPath.fsPath, '--yes', ...remove], token);
 
     return refreshPackages(environment, api, manager);
+}
+
+async function getCommonPackages(): Promise<Installable[]> {
+    const pipData = path.join(EXTENSION_ROOT_DIR, 'files', 'conda_packages.json');
+    const data = await fse.readFile(pipData, { encoding: 'utf-8' });
+    const packages = JSON.parse(data) as { name: string; description: string; uri: string }[];
+
+    return packages.map((p) => {
+        return {
+            name: p.name,
+            displayName: p.name,
+            uri: Uri.parse(p.uri),
+            description: p.description,
+        };
+    });
+}
+
+export async function getCommonCondaPackagesToInstall(): Promise<string[] | undefined> {
+    const common = await getCommonPackages();
+    const selected = await selectFromCommonPackagesToInstall(common);
+    return selected;
 }

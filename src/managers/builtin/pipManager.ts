@@ -12,7 +12,8 @@ import {
 import { installPackages, refreshPackages, uninstallPackages } from './utils';
 import { Disposable } from 'vscode-jsonrpc';
 import { VenvManager } from './venvManager';
-import { getPackagesToUninstall, getWorkspacePackagesToInstall } from './pipUtils';
+import { getWorkspacePackagesToInstall } from './pipUtils';
+import { getPackagesToUninstall } from '../common/utils';
 
 function getChanges(before: Package[], after: Package[]): { kind: PackageChangeKind; pkg: Package }[] {
     const changes: { kind: PackageChangeKind; pkg: Package }[] = [];
@@ -89,12 +90,12 @@ export class PipPackageManager implements PackageManager, Disposable {
 
     async uninstall(environment: PythonEnvironment, packages?: Package[] | string[]): Promise<void> {
         let selected: Package[] | string[] = packages ?? [];
-        if (!selected) {
-            const installPackages = await this.getPackages(environment);
-            if (!installPackages) {
+        if (selected.length === 0) {
+            const installed = await this.getPackages(environment);
+            if (!installed) {
                 return;
             }
-            selected = (await getPackagesToUninstall(installPackages)) ?? [];
+            selected = (await getPackagesToUninstall(installed)) ?? [];
         }
 
         if (selected.length === 0) {
