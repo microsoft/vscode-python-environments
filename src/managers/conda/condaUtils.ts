@@ -682,22 +682,29 @@ export async function uninstallPackages(
 }
 
 async function getCommonPackages(): Promise<Installable[]> {
-    const pipData = path.join(EXTENSION_ROOT_DIR, 'files', 'conda_packages.json');
-    const data = await fse.readFile(pipData, { encoding: 'utf-8' });
-    const packages = JSON.parse(data) as { name: string; description: string; uri: string }[];
+    try {
+        const pipData = path.join(EXTENSION_ROOT_DIR, 'files', 'conda_packages.json');
+        const data = await fse.readFile(pipData, { encoding: 'utf-8' });
+        const packages = JSON.parse(data) as { name: string; description: string; uri: string }[];
 
-    return packages.map((p) => {
-        return {
-            name: p.name,
-            displayName: p.name,
-            uri: Uri.parse(p.uri),
-            description: p.description,
-        };
-    });
+        return packages.map((p) => {
+            return {
+                name: p.name,
+                displayName: p.name,
+                uri: Uri.parse(p.uri),
+                description: p.description,
+            };
+        });
+    } catch {
+        return [];
+    }
 }
 
 export async function getCommonCondaPackagesToInstall(): Promise<string[] | undefined> {
     const common = await getCommonPackages();
+    if (common.length === 0) {
+        return undefined;
+    }
     const selected = await selectFromCommonPackagesToInstall(common);
     return selected;
 }

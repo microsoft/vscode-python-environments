@@ -9,8 +9,9 @@ import { findFiles } from '../../common/workspace.apis';
 import { EXTENSION_ROOT_DIR } from '../../common/constants';
 import { Installable, selectFromCommonPackagesToInstall, selectFromInstallableToInstall } from '../common/pickers';
 
-function tomlParse(content: string, log?: LogOutputChannel): tomljs.JsonMap {
+async function tomlParse(fsPath: string, log?: LogOutputChannel): Promise<tomljs.JsonMap> {
     try {
+        const content = await fse.readFile(fsPath, 'utf-8');
         return tomljs.parse(content);
     } catch (err) {
         log?.error('Failed to parse `pyproject.toml`:', err);
@@ -53,17 +54,21 @@ function getTomlInstallable(toml: tomljs.JsonMap, tomlPath: Uri): Installable[] 
 }
 
 async function getCommonPackages(): Promise<Installable[]> {
-    const pipData = path.join(EXTENSION_ROOT_DIR, 'files', 'common_pip_packages.json');
-    const data = await fse.readFile(pipData, { encoding: 'utf-8' });
-    const packages = JSON.parse(data) as { name: string; uri: string }[];
+    try {
+        const pipData = path.join(EXTENSION_ROOT_DIR, 'files', 'common_pip_packages.json');
+        const data = await fse.readFile(pipData, { encoding: 'utf-8' });
+        const packages = JSON.parse(data) as { name: string; uri: string }[];
 
-    return packages.map((p) => {
-        return {
-            name: p.name,
-            displayName: p.name,
-            uri: Uri.parse(p.uri),
-        };
-    });
+        return packages.map((p) => {
+            return {
+                name: p.name,
+                displayName: p.name,
+                uri: Uri.parse(p.uri),
+            };
+        });
+    } catch {
+        return [];
+    }
 }
 
 async function selectWorkspaceOrCommon(
@@ -106,7 +111,12 @@ async function selectWorkspaceOrCommon(
         }
         return undefined;
     }
-    return selectFromCommonPackagesToInstall(common);
+
+    if (common.length === 0) {
+        return selectFromCommonPackagesToInstall(common);
+    }
+
+    return undefined;
 }
 
 export async function getWorkspacePackagesToInstall(
@@ -152,7 +162,7 @@ export async function getProjectInstallable(
             await Promise.all(
                 filtered.map(async (uri) => {
                     if (uri.fsPath.endsWith('.toml')) {
-                        const toml = tomlParse(await fse.readFile(uri.fsPath, 'utf-8'));
+                        const toml = await tomlParse(uri.fsPath);
                         installable.push(...getTomlInstallable(toml, uri));
                     } else {
                         const name = path.basename(uri.fsPath);
