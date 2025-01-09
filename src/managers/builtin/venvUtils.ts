@@ -19,7 +19,7 @@ import {
     NativePythonFinder,
 } from '../common/nativePythonFinder';
 import { getWorkspacePersistentState } from '../../common/persistentState';
-import { shortVersion, sortEnvironments } from '../common/utils';
+import { isWindows, shortVersion, sortEnvironments } from '../common/utils';
 import { getConfiguration } from '../../common/workspace.apis';
 import { pickEnvironmentFrom } from '../../common/pickers/environments';
 import {
@@ -110,7 +110,7 @@ function getName(binPath: string): string {
     return path.basename(dir1);
 }
 
-function getPythonInfo(env: NativeEnvInfo): PythonEnvironmentInfo {
+async function getPythonInfo(env: NativeEnvInfo): Promise<PythonEnvironmentInfo> {
     if (env.executable && env.version && env.prefix) {
         const venvName = env.name ?? getName(env.executable);
         const sv = shortVersion(env.version);
@@ -119,18 +119,50 @@ function getPythonInfo(env: NativeEnvInfo): PythonEnvironmentInfo {
         const binDir = path.dirname(env.executable);
 
         const shellActivation: Map<TerminalShellType, PythonCommandRunConfiguration[]> = new Map();
+        const shellDeactivation: Map<TerminalShellType, PythonCommandRunConfiguration[]> = new Map();
+
+        // Commands for bash
         shellActivation.set(TerminalShellType.bash, [{ executable: 'source', args: [path.join(binDir, 'activate')] }]);
+        shellDeactivation.set(TerminalShellType.bash, [{ executable: 'deactivate' }]);
+
+        // Commands for csh
+        shellActivation.set(TerminalShellType.cshell, [
+            { executable: 'source', args: [path.join(binDir, 'activate')] },
+        ]);
+        shellDeactivation.set(TerminalShellType.cshell, [{ executable: 'deactivate' }]);
+
+        // Commands for zsh
+        shellActivation.set(TerminalShellType.zsh, [{ executable: 'source', args: [path.join(binDir, 'activate')] }]);
+        shellDeactivation.set(TerminalShellType.zsh, [{ executable: 'deactivate' }]);
+
+        // Commands for powershell
         shellActivation.set(TerminalShellType.powershell, [
             { executable: '&', args: [path.join(binDir, 'Activate.ps1')] },
         ]);
-        shellActivation.set(TerminalShellType.commandPrompt, [{ executable: path.join(binDir, 'activate.bat') }]);
-        shellActivation.set(TerminalShellType.unknown, [{ executable: path.join(binDir, 'activate') }]);
-
-        const shellDeactivation = new Map<TerminalShellType, PythonCommandRunConfiguration[]>();
-        shellDeactivation.set(TerminalShellType.bash, [{ executable: 'deactivate' }]);
         shellDeactivation.set(TerminalShellType.powershell, [{ executable: 'deactivate' }]);
+
+        // Commands for command prompt
+        shellActivation.set(TerminalShellType.commandPrompt, [{ executable: path.join(binDir, 'activate.bat') }]);
         shellDeactivation.set(TerminalShellType.commandPrompt, [{ executable: path.join(binDir, 'deactivate.bat') }]);
-        shellActivation.set(TerminalShellType.unknown, [{ executable: 'deactivate' }]);
+
+        // Commands for fish
+        if (await fsapi.pathExists(path.join(binDir, 'activate.fish'))) {
+            shellActivation.set(TerminalShellType.fish, [
+                { executable: 'source', args: [path.join(binDir, 'activate.fish')] },
+            ]);
+            shellDeactivation.set(TerminalShellType.fish, [{ executable: 'deactivate' }]);
+        }
+
+        // Commands for unknown cases
+        if (isWindows()) {
+            shellActivation.set(TerminalShellType.unknown, [{ executable: path.join(binDir, 'activate') }]);
+            shellDeactivation.set(TerminalShellType.unknown, [{ executable: 'deactivate' }]);
+        } else {
+            shellActivation.set(TerminalShellType.unknown, [
+                { executable: 'source', args: [path.join(binDir, 'activate')] },
+            ]);
+            shellDeactivation.set(TerminalShellType.unknown, [{ executable: 'deactivate' }]);
+        }
 
         return {
             name: name,
@@ -173,16 +205,16 @@ export async function findVirtualEnvironments(
         .map((e) => e as NativeEnvInfo)
         .filter((e) => e.kind === NativePythonEnvironmentKind.venv);
 
-    envs.forEach((e) => {
+    for (const e of envs) {
         if (!(e.prefix && e.executable && e.version)) {
             log.warn(`Invalid conda environment: ${JSON.stringify(e)}`);
-            return;
+            continue;
         }
 
-        const env = api.createPythonEnvironmentItem(getPythonInfo(e), manager);
+        const env = api.createPythonEnvironmentItem(await getPythonInfo(e), manager);
         collection.push(env);
         log.info(`Found venv environment: ${env.name}`);
-    });
+    }
     return collection;
 }
 
@@ -339,7 +371,7 @@ export async function createPythonVenv(
                 }
 
                 const resolved = await nativeFinder.resolve(pythonPath);
-                const env = api.createPythonEnvironmentItem(getPythonInfo(resolved), manager);
+                const env = api.createPythonEnvironmentItem(await getPythonInfo(resolved), manager);
                 if (packages && packages?.length > 0) {
                     await api.installPackages(env, packages, { upgrade: false });
                 }
@@ -397,7 +429,7 @@ export async function resolveVenvPythonEnvironmentPath(
     const resolved = await nativeFinder.resolve(fsPath);
 
     if (resolved.kind === NativePythonEnvironmentKind.venv) {
-        const envInfo = getPythonInfo(resolved);
+        const envInfo = await getPythonInfo(resolved);
         return api.createPythonEnvironmentItem(envInfo, manager);
     }
 
