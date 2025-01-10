@@ -6,6 +6,8 @@ The Python Environments and Package Manager extension for VS Code helps you mana
 
 > Note: This extension is in preview and its APIs and features are subject to change as the project continues to evolve.
 
+> Important: This extension currently requires the pre-release version of the Python extension (ms-python.python) to operate (version 2024.23.2025010901 or later).
+
 ## Features
 
 <img src=https://raw.githubusercontent.com/microsoft/vscode-python-environments/main/images/python-envs-overview.gif width=734 height=413>
