@@ -31,6 +31,7 @@ import { CondaStrings } from '../../common/localize';
 import { showErrorMessage } from '../../common/errors/utils';
 import { showInputBox, showQuickPick, withProgress } from '../../common/window.apis';
 import { Installable, selectFromCommonPackagesToInstall } from '../common/pickers';
+import { quoteArgs } from '../../features/execution/execUtils';
 
 export const CONDA_PATH_KEY = `${ENVS_EXTENSION_ID}:conda:CONDA_PATH`;
 export const CONDA_PREFIXES_KEY = `${ENVS_EXTENSION_ID}:conda:CONDA_PREFIXES`;
@@ -585,7 +586,7 @@ async function createPrefixCondaEnvironment(
 }
 
 export async function deleteCondaEnvironment(environment: PythonEnvironment, log: LogOutputChannel): Promise<boolean> {
-    let args = ['env', 'remove', '--yes', '--prefix', environment.environmentPath.fsPath];
+    let args = quoteArgs(['env', 'remove', '--yes', '--prefix', environment.environmentPath.fsPath]);
     return await withProgress(
         {
             location: ProgressLocation.Notification,
