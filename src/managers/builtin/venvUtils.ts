@@ -139,14 +139,14 @@ async function getPythonInfo(env: NativeEnvInfo): Promise<PythonEnvironmentInfo>
         shellActivation.set(TerminalShellType.powershell, [
             { executable: '&', args: [path.join(binDir, 'Activate.ps1')] },
         ]);
-        shellDeactivation.set(TerminalShellType.powershell, [{ executable: 'deactivate' }]);
-
-        // Commands for command prompt
         shellActivation.set(TerminalShellType.powershellCore, [
             { executable: '&', args: [path.join(binDir, 'Activate.ps1')] },
         ]);
-        shellActivation.set(TerminalShellType.commandPrompt, [{ executable: path.join(binDir, 'activate.bat') }]);
+        shellDeactivation.set(TerminalShellType.powershell, [{ executable: 'deactivate' }]);
         shellDeactivation.set(TerminalShellType.powershellCore, [{ executable: 'deactivate' }]);
+
+        // Commands for command prompt
+        shellActivation.set(TerminalShellType.commandPrompt, [{ executable: path.join(binDir, 'activate.bat') }]);
         shellDeactivation.set(TerminalShellType.commandPrompt, [{ executable: path.join(binDir, 'deactivate.bat') }]);
 
         // Commands for fish
