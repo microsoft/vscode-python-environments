@@ -112,7 +112,7 @@ async function selectWorkspaceOrCommon(
         return undefined;
     }
 
-    if (common.length === 0) {
+    if (common.length > 0) {
         return selectFromCommonPackagesToInstall(common);
     }
 
