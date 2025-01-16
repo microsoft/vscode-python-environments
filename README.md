@@ -61,15 +61,13 @@ This section is a brief overview of how the Python extension interacts with the 
 
 In the diagrams below, old tools refer to any extension that depends on the Python extension API for Python environment details. New tools depend on the Python Environments extension.
 
-### Eventual Dependency
+### Eventual API Dependency
 ```mermaid
 graph TD
     A[Python Environments] <-. Optional .-> B
     B[Python]
-    C[New Tools]
+    C["Linters, Formatters, Debugger"]
     E[Pylance] -. Optional .-> B
-    F[Old Tools]
-    B --> F
     A --> C
     A <--> P
 
@@ -93,10 +91,8 @@ graph TD
     end
 
     subgraph Only Trusted Code
-    F[Old Tools]
     A[Python Environments] <-. Optional .-> B
-    C[New Tools]
-    B --> F
+    C["Linters, Formatters, Debugger"]
     A --> C
     A <--> P
     P["pixi, pyenv, etc"]
