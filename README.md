@@ -74,6 +74,8 @@ If users don't need to execute code, or are in Virtual Workspaces, they can just
 
 ### Trust relation between Python extension and Python Environments extension
 
+VS Code allows trust management, and extensions have the ability to choose to run in trusted and untrusted scenarios. Typically, code execution and running tools that can change user environment, are not supported in the untrusted scenario. 
+
 ```mermaid
 graph TD
 
