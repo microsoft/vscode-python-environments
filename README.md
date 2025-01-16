@@ -59,19 +59,23 @@ https://github.com/microsoft/vscode-python-environments/blob/main/src/examples/R
 
 This section is a brief overview of how the Python extension interacts with the Python Environments and Package Manager extension, and other Tools extensions. Tools extension here include Debugpy, Linters (Pylint, Flake8, Mypy, etc), Formatters (Black, autopep8, etc), and Language Server extensions (Pylance, Jedi, etc), Environment and Package Manager extensions (Pixi, Conda, Hatch, etc). 
 
+In the diagrams below, old tools refer to any extension that depends on the Python extension API for Python environment details. New tools depend on the Python Environments extension.
+
 ### Eventual Dependency
 ```mermaid
 graph TD
-    A[Python Environments] -. Optional .-> B
+    A[Python Environments] <-. Optional .-> B
     B[Python]
     C[New Tools]
-    D[Debugpy]
     E[Pylance] -. Optional .-> B
     F[Old Tools]
-    J[Jedi] --> B
     B --> F
     A --> C
-    A --> D
+    A <--> P
+
+    subgraph Environment Extensions
+    P["pixi, pyenv, etc"]
+    end
 ```
 
 If users don't need to execute code, or are in Virtual Workspaces, they can just use Python Extension to get Language Features (Hover, Completion, Go-to definition, etc). For cases where code execution is needed in some form like running debugger, linter, formatter, creation or modification of environments, package installation or removal, etc will require Python Environments extension to provide the execution features.
@@ -90,13 +94,12 @@ graph TD
 
     subgraph Only Trusted Code
     F[Old Tools]
-    A[Python Environments] -. Optional .-> B
-    D[Debugpy] 
+    A[Python Environments] <-. Optional .-> B
     C[New Tools]
-    J[Jedi] --> B
     B --> F
     A --> C
-    A --> D
+    A <--> P
+    P["pixi, pyenv, etc"]
     end
 ```
 
