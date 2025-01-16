@@ -64,10 +64,14 @@ This section is a brief overview of how the Python extension interacts with the 
 graph TD
     A[Python Environments] -. Optional .-> B
     B[Python]
-    C[Debugpy] --> A
-    D[New Tools] --> A
+    C[New Tools]
+    D[Debugpy]
     E[Pylance] -. Optional .-> B
-    F[Old Tools] --> B
+    F[Old Tools]
+    J[Jedi] --> B
+    B --> F
+    A --> C
+    A --> D
 ```
 
 If users don't need to execute code, or are in Virtual Workspaces, they can just use Python Extension to get Language Features (Hover, Completion, Go-to definition, etc). For cases where code execution is needed in some form like running debugger, linter, formatter, creation or modification of environments, package installation or removal, etc will require Python Environments extension to provide the execution features.
@@ -85,10 +89,14 @@ graph TD
     end
 
     subgraph Only Trusted Code
-    F[Old Tools] --> B
+    F[Old Tools]
     A[Python Environments] -. Optional .-> B
-    C[Debugpy] --> A
-    D[New Tools] --> A
+    D[Debugpy] 
+    C[New Tools]
+    J[Jedi] --> B
+    B --> F
+    A --> C
+    A --> D
     end
 ```
 
