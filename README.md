@@ -57,34 +57,53 @@ https://github.com/microsoft/vscode-python-environments/blob/main/src/examples/R
 
 ## Extension Dependency
 
-This section is a brief overview of how the Python extension interacts with the Python Environments and Package Manager extension, and other Tools extensions. Tools extension here include Debugpy, Linters (Pylint, Flake8, Mypy, etc), Formatters (Black, autopep8, etc), and Language Server extensions (Pylance, Jedi, etc), Environment and Package Manager extensions (Pixi, Conda, Hatch, etc). 
+This section provides an overview of how the Python extension interacts with the Python Environments extension and other tool-specific extensions. The Python Environments extension allows users to create, manage, and remove Python environments and packages. It also provides an API that other extensions can use to support environment management or consume it for running Python tools or projects.  
+
+The tools that rely on these extensions include:
+- **Debuggers** (e.g., `debugpy`)
+- **Linters** (e.g., Pylint, Flake8, Mypy)
+- **Formatters** (e.g., Black, autopep8)
+- **Language Server extensions** (e.g., Pylance, Jedi)
+- **Environment and Package Manager extensions** (e.g., Pixi, Conda, Hatch)
 
 ### API Dependency
+The relationship between these extensions can be represented as follows:
+
 ```mermaid
 graph TD
+    subgraph Language Features
+    B[Python Extension]
+    E[Pylance]
+    end
+
+    subgraph Code Execution
     A[Python Environments] <-. Optional .-> B
-    B[Python]
     C["Linters, Formatters, Debugger"]
-    E[Pylance] -. Optional .-> B
+    E -. Optional .-> B
     A --> C
     A <--> P
 
     subgraph Environment Extensions
-    P["pixi, pyenv, etc"]
+    P["Pixi, Pyenv, etc"]
+    end
     end
 ```
 
-If users don't need to execute code, or are in Virtual Workspaces, they can just use Python Extension to get Language Features (Hover, Completion, Go-to definition, etc). For cases where code execution is needed in some form like running debugger, linter, formatter, creation or modification of environments, package installation or removal, etc will require Python Environments extension to provide the execution features.
+Users who do not need to execute code or work in **Virtual Workspaces** can use the Python extension to access language features like hover, completion, and go-to definition. However, executing code (e.g., running a debugger, linter, or formatter), creating/modifying environments, or managing packages requires the Python Environments extension to enable these functionalities.
 
-### Trust relation between Python extension and Python Environments extension
+---
 
-VS Code allows trust management, and extensions have the ability to choose to run in trusted and untrusted scenarios. Typically, code execution and running tools that can change user environment, are not supported in the untrusted scenario. 
+### Trust Relationship Between Python and Python Environments Extensions
+
+VS Code supports trust management, allowing extensions to function in either **trusted** or **untrusted** scenarios. Code execution and tools that can modify the user’s environment are typically unavailable in untrusted scenarios.  
+
+The relationship is illustrated below:
 
 ```mermaid
 graph TD
 
     subgraph Handles Untrusted Code
-    B[Python]
+    B[Python Extension]
     E[Pylance] -. Optional .-> B
     end
 
@@ -93,9 +112,13 @@ graph TD
     C["Linters, Formatters, Debugger"]
     A --> C
     A <--> P
-    P["pixi, pyenv, etc"]
+    subgraph Environment Extensions
+    P["Pixi, Pyenv, etc"]
+    end
     end
 ```
+
+In **trusted mode**, the Python Environments extension supports tasks like managing environments, installing/removing packages, and running tools. In **untrusted mode**, functionality is limited to language features, ensuring a secure and restricted environment.
 
 ## Contributing
 
