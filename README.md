@@ -54,6 +54,42 @@ See [api.ts](https://github.com/microsoft/vscode-python-environments/blob/main/s
 To consume these APIs you can look at the example here:
 https://github.com/microsoft/vscode-python-environments/blob/main/src/examples/README.md
 
+
+## Environments, Tools and Python Language Services
+
+This section is a brief overview of how the Python extension interacts with the Python Environments and Package Manager extension, and other Tools extensions. Tools extension here include Debugpy, Linters (Pylint, Flake8, Mypy, etc), Formatters (Black, autopep8, etc), and Language Server extensions (Pylance, Jedi, etc), Environment and Package Manager extensions (Pixi, Conda, Hatch, etc). 
+
+### Eventual Dependency
+```mermaid
+graph TD
+    A[Python Environments] -. Optional .-> B
+    B[Python]
+    C[Debugpy] --> A
+    D[New Tools] --> A
+    E[Pylance] -. Optional .-> B
+    F[Old Tools] --> B
+```
+
+If users don't need to execute code, or are in Virtual Workspaces, they can just use Python Extension to get Language Features (Hover, Completion, Go-to definition, etc). For cases where code execution is needed in some form like running debugger, linter, formatter, creation or modification of environments, package installation or removal, etc will require Python Environments extension to provide the execution features.
+
+### Trust relation between Python extension and Python Environments extension
+
+```mermaid
+graph TD
+
+    subgraph Handles Untrusted Code
+    B[Python]
+    E[Pylance] -. Optional .-> B
+    end
+
+    subgraph Only Trusted Code
+    F[Old Tools] --> B
+    A[Python Environments] -. Optional .-> B
+    C[Debugpy] --> A
+    D[New Tools] --> A
+    end
+```
+
 ## Contributing
 
 This project welcomes contributions and suggestions. Most contributions require you to agree to a
