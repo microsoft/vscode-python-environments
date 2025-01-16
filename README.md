@@ -55,13 +55,11 @@ To consume these APIs you can look at the example here:
 https://github.com/microsoft/vscode-python-environments/blob/main/src/examples/README.md
 
 
-## Environments, Tools and Python Language Services
+## Extension Dependency
 
 This section is a brief overview of how the Python extension interacts with the Python Environments and Package Manager extension, and other Tools extensions. Tools extension here include Debugpy, Linters (Pylint, Flake8, Mypy, etc), Formatters (Black, autopep8, etc), and Language Server extensions (Pylance, Jedi, etc), Environment and Package Manager extensions (Pixi, Conda, Hatch, etc). 
 
-In the diagrams below, old tools refer to any extension that depends on the Python extension API for Python environment details. New tools depend on the Python Environments extension.
-
-### Eventual API Dependency
+### API Dependency
 ```mermaid
 graph TD
     A[Python Environments] <-. Optional .-> B
