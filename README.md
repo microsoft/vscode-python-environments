@@ -91,8 +91,6 @@ graph TD
 
 Users who do not need to execute code or work in **Virtual Workspaces** can use the Python extension to access language features like hover, completion, and go-to definition. However, executing code (e.g., running a debugger, linter, or formatter), creating/modifying environments, or managing packages requires the Python Environments extension to enable these functionalities.
 
----
-
 ### Trust Relationship Between Python and Python Environments Extensions
 
 VS Code supports trust management, allowing extensions to function in either **trusted** or **untrusted** scenarios. Code execution and tools that can modify the user’s environment are typically unavailable in untrusted scenarios.  
