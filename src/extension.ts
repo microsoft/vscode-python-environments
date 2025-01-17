@@ -21,6 +21,7 @@ import {
     refreshPackagesCommand,
     createAnyEnvironmentCommand,
     runInDedicatedTerminalCommand,
+    handlePackageUninstall,
 } from './features/envCommands';
 import { registerCondaFeatures } from './managers/conda/main';
 import { registerSystemPythonFeatures } from './managers/builtin/main';
@@ -132,6 +133,9 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
                 projectManager,
             );
             await handlePackagesCommand(packageManager, environment);
+        }),
+        commands.registerCommand('python-envs.uninstallPackage', async (context: unknown) => {
+            await handlePackageUninstall(context, envManagers);
         }),
         commands.registerCommand('python-envs.set', async (item) => {
             await setEnvironmentCommand(item, envManagers, projectManager);
