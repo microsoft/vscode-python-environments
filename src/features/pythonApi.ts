@@ -26,7 +26,7 @@ import {
     PythonTaskExecutionOptions,
     PythonTerminalExecutionOptions,
     PythonBackgroundRunOptions,
-    PythonTerminalOptions,
+    PythonTerminalCreateOptions,
     DidChangeEnvironmentVariablesEventArgs,
 } from '../api';
 import {
@@ -275,7 +275,7 @@ class PythonEnvironmentApiImpl implements PythonEnvironmentApi {
     registerPythonProjectCreator(creator: PythonProjectCreator): Disposable {
         return this.projectCreators.registerPythonProjectCreator(creator);
     }
-    async createTerminal(environment: PythonEnvironment, options: PythonTerminalOptions): Promise<Terminal> {
+    async createTerminal(environment: PythonEnvironment, options: PythonTerminalCreateOptions): Promise<Terminal> {
         return this.terminalManager.create(environment, options);
     }
     async runInTerminal(environment: PythonEnvironment, options: PythonTerminalExecutionOptions): Promise<Terminal> {

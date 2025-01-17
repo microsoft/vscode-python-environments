@@ -70,9 +70,6 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
     const statusBar = new PythonStatusBarImpl();
     context.subscriptions.push(statusBar);
 
-    const terminalManager: TerminalManager = new TerminalManagerImpl();
-    context.subscriptions.push(terminalManager);
-
     const projectManager: PythonProjectManager = new PythonProjectManagerImpl();
     context.subscriptions.push(projectManager);
 
@@ -81,6 +78,9 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
 
     const envManagers: EnvironmentManagers = new PythonEnvironmentManagers(projectManager);
     context.subscriptions.push(envManagers);
+
+    const terminalManager: TerminalManager = new TerminalManagerImpl(projectManager, envManagers);
+    context.subscriptions.push(terminalManager);
 
     const projectCreators: ProjectCreators = new ProjectCreatorsImpl();
     context.subscriptions.push(
@@ -229,6 +229,7 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
             registerCondaFeatures(nativeFinder, context.subscriptions, outputChannel),
         ]);
         sendTelemetryEvent(EventNames.EXTENSION_MANAGER_REGISTRATION_DURATION, start.elapsedTime);
+        await terminalManager.initialize();
     });
 
     sendTelemetryEvent(EventNames.EXTENSION_ACTIVATION_DURATION, start.elapsedTime);
