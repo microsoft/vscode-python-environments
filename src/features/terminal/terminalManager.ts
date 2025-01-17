@@ -9,6 +9,7 @@ import {
     TerminalShellExecutionEndEvent,
     TerminalShellExecutionStartEvent,
     Uri,
+    TerminalOptions,
 } from 'vscode';
 import {
     createTerminal,
@@ -106,7 +107,7 @@ export class TerminalManagerImpl implements TerminalManager {
             this.onTerminalShellExecutionStartEmitter,
             this.onTerminalShellExecutionEndEmitter,
             this.onTerminalOpened(async (t) => {
-                if (this.skipActivationOnOpen.has(t)) {
+                if (this.skipActivationOnOpen.has(t) || (t.creationOptions as TerminalOptions)?.hideFromUser) {
                     return;
                 }
                 await this.autoActivateOnTerminalOpen(t);
