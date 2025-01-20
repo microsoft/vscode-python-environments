@@ -143,6 +143,7 @@ async function runConda(args: string[], token?: CancellationToken): Promise<stri
     const conda = await getConda();
 
     const deferred = createDeferred<string>();
+    args = quoteArgs(args);
     const proc = ch.spawn(conda, args, { shell: true });
 
     token?.onCancellationRequested(() => {
@@ -586,7 +587,7 @@ async function createPrefixCondaEnvironment(
 }
 
 export async function deleteCondaEnvironment(environment: PythonEnvironment, log: LogOutputChannel): Promise<boolean> {
-    let args = quoteArgs(['env', 'remove', '--yes', '--prefix', environment.environmentPath.fsPath]);
+    let args = ['env', 'remove', '--yes', '--prefix', environment.environmentPath.fsPath];
     return await withProgress(
         {
             location: ProgressLocation.Notification,
