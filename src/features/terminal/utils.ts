@@ -12,3 +12,8 @@ export async function waitForShellIntegration(terminal: Terminal): Promise<boole
     }
     return terminal.shellIntegration !== undefined;
 }
+
+export function isTaskTerminal(terminal: Terminal): boolean {
+    // TODO: Need API for core for this https://github.com/microsoft/vscode/issues/234440
+    return terminal.name.toLowerCase().includes('task');
+}

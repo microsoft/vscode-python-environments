@@ -27,7 +27,7 @@ import { createDeferred } from '../../common/utils/deferred';
 import { traceError, traceVerbose } from '../../common/logging';
 import { getConfiguration } from '../../common/workspace.apis';
 import { EnvironmentManagers, PythonProjectManager } from '../../internal.api';
-import { waitForShellIntegration } from './utils';
+import { isTaskTerminal, waitForShellIntegration } from './utils';
 import { setActivateMenuButtonContext } from './activateMenuButton';
 
 export interface TerminalActivation {
@@ -382,13 +382,8 @@ export class TerminalManagerImpl implements TerminalManager {
         return env?.envId.id === environment?.envId.id;
     }
 
-    private isTaskTerminal(terminal: Terminal): boolean {
-        // TODO: Need API for core for this https://github.com/microsoft/vscode/issues/234440
-        return terminal.name.toLowerCase().includes('task');
-    }
-
     private async activateInternal(terminal: Terminal, environment: PythonEnvironment): Promise<void> {
-        if (this.isTaskTerminal(terminal)) {
+        if (isTaskTerminal(terminal)) {
             return;
         }
 
@@ -426,7 +421,7 @@ export class TerminalManagerImpl implements TerminalManager {
     }
 
     private async deactivateInternal(terminal: Terminal, environment: PythonEnvironment): Promise<void> {
-        if (this.isTaskTerminal(terminal)) {
+        if (isTaskTerminal(terminal)) {
             return;
         }
 

@@ -6,6 +6,7 @@ import { PythonEnvironment } from '../../api';
 import { isActivatableEnvironment } from '../common/activation';
 import { executeCommand } from '../../common/command.api';
 import { getWorkspaceFolders } from '../../common/workspace.apis';
+import { isTaskTerminal } from './utils';
 
 async function getDistinctProjectEnvs(pm: PythonProjectManager, em: EnvironmentManagers): Promise<PythonEnvironment[]> {
     const projects = pm.getProjects();
@@ -99,8 +100,12 @@ export async function setActivateMenuButtonContext(
     terminal: Terminal,
     env: PythonEnvironment,
 ): Promise<void> {
-    const activatable = isActivatableEnvironment(env);
+    const activatable = isTaskTerminal(terminal) && isActivatableEnvironment(env);
     await executeCommand('setContext', 'pythonTerminalActivation', activatable);
+
+    if (!activatable) {
+        return;
+    }
 
     if (tm.isActivated(terminal)) {
         await executeCommand('setContext', 'pythonTerminalActivated', true);
