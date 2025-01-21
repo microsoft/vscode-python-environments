@@ -69,25 +69,7 @@ Tools that may rely on these APIs in their own extensions include:
 ### API Dependency
 The relationship between these extensions can be represented as follows:
 
-```mermaid
-graph TD
-    subgraph Language Features
-    B[Python Extension]
-    E[Pylance]
-    end
-
-    subgraph Code Execution
-    A[Python Environments] <-. Optional .-> B
-    C["Linters, Formatters, Debugger"]
-    E -. Optional .-> B
-    A --> C
-    A <--> P
-
-    subgraph Environment Extensions
-    P["Pixi, Pyenv, etc"]
-    end
-    end
-```
+<img src=https://raw.githubusercontent.com/microsoft/vscode-python-environments/main/images/extension_relationships.gif width=734 height=413>
 
 Users who do not need to execute code or work in **Virtual Workspaces** can use the Python extension to access language features like hover, completion, and go-to definition. However, executing code (e.g., running a debugger, linter, or formatter), creating/modifying environments, or managing packages requires the Python Environments extension to enable these functionalities.
 
@@ -97,24 +79,7 @@ VS Code supports trust management, allowing extensions to function in either **t
 
 The relationship is illustrated below:
 
-```mermaid
-graph TD
-
-    subgraph Handles Untrusted Code
-    B[Python Extension]
-    E[Pylance] -. Optional .-> B
-    end
-
-    subgraph Only Trusted Code
-    A[Python Environments] <-. Optional .-> B
-    C["Linters, Formatters, Debugger"]
-    A --> C
-    A <--> P
-    subgraph Environment Extensions
-    P["Pixi, Pyenv, etc"]
-    end
-    end
-```
+<img src=https://raw.githubusercontent.com/microsoft/vscode-python-environments/main/images/trust_relationships.gif width=734 height=413>
 
 In **trusted mode**, the Python Environments extension supports tasks like managing environments, installing/removing packages, and running tools. In **untrusted mode**, functionality is limited to language features, ensuring a secure and restricted environment.
 
