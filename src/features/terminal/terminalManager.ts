@@ -380,7 +380,16 @@ export class TerminalManagerImpl implements TerminalManager {
         return env?.envId.id === environment?.envId.id;
     }
 
+    private isTaskTerminal(terminal: Terminal): boolean {
+        // TODO: Need API for core for this https://github.com/microsoft/vscode/issues/234440
+        return terminal.name.toLowerCase().includes('task');
+    }
+
     private async activateInternal(terminal: Terminal, environment: PythonEnvironment): Promise<void> {
+        if (this.isTaskTerminal(terminal)) {
+            return;
+        }
+
         if (terminal.shellIntegration) {
             await this.activateUsingShellIntegration(terminal.shellIntegration, terminal, environment);
         } else {
@@ -415,6 +424,10 @@ export class TerminalManagerImpl implements TerminalManager {
     }
 
     private async deactivateInternal(terminal: Terminal, environment: PythonEnvironment): Promise<void> {
+        if (this.isTaskTerminal(terminal)) {
+            return;
+        }
+
         if (terminal.shellIntegration) {
             await this.deactivateUsingShellIntegration(terminal.shellIntegration, terminal, environment);
         } else {
