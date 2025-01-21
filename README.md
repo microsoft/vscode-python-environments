@@ -59,7 +59,7 @@ https://github.com/microsoft/vscode-python-environments/blob/main/src/examples/R
 
 This section provides an overview of how the Python extension interacts with the Python Environments extension and other tool-specific extensions. The Python Environments extension allows users to create, manage, and remove Python environments and packages. It also provides an API that other extensions can use to support environment management or consume it for running Python tools or projects.  
 
-The tools that rely on these extensions include:
+Tools that may rely on these APIs in their own extensions include:
 - **Debuggers** (e.g., `debugpy`)
 - **Linters** (e.g., Pylint, Flake8, Mypy)
 - **Formatters** (e.g., Black, autopep8)
