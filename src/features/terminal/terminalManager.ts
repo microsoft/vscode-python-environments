@@ -28,6 +28,7 @@ import { traceError, traceVerbose } from '../../common/logging';
 import { getConfiguration } from '../../common/workspace.apis';
 import { EnvironmentManagers, PythonProjectManager } from '../../internal.api';
 import { waitForShellIntegration } from './utils';
+import { setActivateMenuButtonContext } from './activateMenuButton';
 
 export interface TerminalActivation {
     isActivated(terminal: Terminal, environment?: PythonEnvironment): boolean;
@@ -240,6 +241,7 @@ export class TerminalManagerImpl implements TerminalManager {
                     await this.activate(terminal, env);
                 },
             );
+            await setActivateMenuButtonContext(this, terminal, env);
         }
     }
 
