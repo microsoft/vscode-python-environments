@@ -100,7 +100,7 @@ export async function setActivateMenuButtonContext(
     terminal: Terminal,
     env: PythonEnvironment,
 ): Promise<void> {
-    const activatable = isTaskTerminal(terminal) && isActivatableEnvironment(env);
+    const activatable = !isTaskTerminal(terminal) && isActivatableEnvironment(env);
     await executeCommand('setContext', 'pythonTerminalActivation', activatable);
 
     if (!activatable) {
