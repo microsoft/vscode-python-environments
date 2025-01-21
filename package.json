@@ -424,6 +424,28 @@
             {
                 "type": "python"
             }
+        ],
+        "languageModelTools": [
+            {
+                "name": "python_get_python_packages",
+                "displayName": "Get Python Packages",
+                "modelDescription": "Given a file path, finds the workspace and selected python environment for this file, and returns the list of installed packages.",
+                "toolReferenceName": "pythonGetPythonPackages",
+                "tags": [],
+                "icon": "$(files)",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "filePath": {
+                            "type": "string"
+                        }
+                    },
+                    "required": [
+                        "filePath"
+                    ]
+                },
+                "canBeReferencedInPrompt": true
+            }
         ]
     },
     "scripts": {

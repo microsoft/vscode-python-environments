@@ -54,9 +54,12 @@ import { EventNames } from './common/telemetry/constants';
 import { ensureCorrectVersion } from './common/extVersion';
 import { ExistingProjects } from './features/creators/existingProjects';
 import { AutoFindProjects } from './features/creators/autoFindProjects';
+import { registerChatTools } from './copilotTools';
 
 export async function activate(context: ExtensionContext): Promise<PythonEnvironmentApi> {
     const start = new StopWatch();
+
+    registerChatTools(context);
 
     // Logging should be set up before anything else.
     const outputChannel: LogOutputChannel = createLogOutputChannel('Python Environments');
