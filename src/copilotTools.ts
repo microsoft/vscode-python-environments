@@ -1,6 +1,5 @@
 import * as vscode from 'vscode';
-import { PythonEnvironmentApi } from './api';
-import { getPythonApi } from './features/pythonApi';
+import { GetEnvironmentScope, Package, PythonEnvironment } from './api';
 
 export interface IGetActiveFile {
     filePath?: string;
@@ -10,6 +9,19 @@ export interface IGetActiveFile {
  * A tool to get the list of installed Python packages in the active environment.
  */
 export class GetPackagesTool implements vscode.LanguageModelTool<IGetActiveFile> {
+    private apiGetEnvironment: (scope: GetEnvironmentScope) => Promise<PythonEnvironment | undefined>;
+    private apiGetPackages: (environment: PythonEnvironment) => Promise<Package[] | undefined>;
+
+    private apiRefreshPackages: (environment: PythonEnvironment) => Promise<void>;
+    constructor(
+        apiGetEnvironmentCon: (scope: GetEnvironmentScope) => Promise<PythonEnvironment | undefined>,
+        apiGetPackagesCon: (environment: PythonEnvironment) => Promise<Package[] | undefined>,
+        apiRefreshPackagesCon: (environment: PythonEnvironment) => Promise<void>,
+    ) {
+        this.apiGetEnvironment = apiGetEnvironmentCon;
+        this.apiGetPackages = apiGetPackagesCon;
+        this.apiRefreshPackages = apiRefreshPackagesCon;
+    }
     /**
      * Invokes the tool to get the list of installed packages.
      * @param options - The invocation options containing the file path.
@@ -22,24 +34,22 @@ export class GetPackagesTool implements vscode.LanguageModelTool<IGetActiveFile>
     ): Promise<vscode.LanguageModelToolResult> {
         const parameters: IGetActiveFile = options.input;
 
-        if (parameters.filePath === undefined) {
+        if (parameters.filePath === undefined || parameters.filePath === '') {
             throw new Error('Invalid input: filePath is required');
         }
         const fileUri = vscode.Uri.file(parameters.filePath);
 
-        // Check if the file is a notebook or a notebook cell
-        if (fileUri.fsPath.endsWith('.ipynb') || fileUri.scheme === 'vscode-notebook-cell') {
-            throw new Error('Unable to access Jupyter kernels for notebook cells');
-        }
-
         try {
-            const pythonApi: PythonEnvironmentApi = await getPythonApi();
-            const environment = await pythonApi.getEnvironment(fileUri);
+            const environment = await this.apiGetEnvironment(fileUri);
             if (!environment) {
+                // Check if the file is a notebook or a notebook cell to throw specific error messages.
+                if (fileUri.fsPath.endsWith('.ipynb') || fileUri.fsPath.includes('.ipynb#')) {
+                    throw new Error('Unable to access Jupyter kernels for notebook cells');
+                }
                 throw new Error('No environment found');
             }
-            await pythonApi.refreshPackages(environment);
-            const installedPackages = await pythonApi.getPackages(environment);
+            await this.apiRefreshPackages(environment);
+            const installedPackages = await this.apiGetPackages(environment);
 
             let resultMessage: string;
             if (!installedPackages || installedPackages.length === 0) {
@@ -54,12 +64,12 @@ export class GetPackagesTool implements vscode.LanguageModelTool<IGetActiveFile>
             }
 
             const textPart = new vscode.LanguageModelTextPart(resultMessage || '');
-            const result: vscode.LanguageModelToolResult = new vscode.LanguageModelToolResult([textPart]);
+            const result: vscode.LanguageModelToolResult = { content: [textPart] };
             return result;
         } catch (error) {
-            const errorMessage = `An error occurred while fetching packages: ${error.message}`;
+            const errorMessage: string = `An error occurred while fetching packages: ${error}`;
             const textPart = new vscode.LanguageModelTextPart(errorMessage);
-            return new vscode.LanguageModelToolResult([textPart]);
+            return { content: [textPart] } as vscode.LanguageModelToolResult;
         }
     }
 
@@ -79,12 +89,4 @@ export class GetPackagesTool implements vscode.LanguageModelTool<IGetActiveFile>
             invocationMessage: message,
         };
     }
-}
-
-/**
- * Registers the chat tools with the given extension context.
- * @param context - The extension context.
- */
-export function registerChatTools(context: vscode.ExtensionContext): void {
-    context.subscriptions.push(vscode.lm.registerTool('python_get_python_packages', new GetPackagesTool()));
 }

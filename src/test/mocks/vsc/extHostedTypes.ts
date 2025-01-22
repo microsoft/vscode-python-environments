@@ -1986,16 +1986,21 @@ export enum TreeItemCollapsibleState {
 
 export class TreeItem {
     label?: string;
+    id?: string;
+    description?: string | boolean;
 
     resourceUri?: vscUri.URI;
 
-    iconPath?: string | vscUri.URI | { light: string | vscUri.URI; dark: string | vscUri.URI };
-
+    iconPath?: string | vscode.IconPath;
     command?: vscode.Command;
 
     contextValue?: string;
 
     tooltip?: string;
+
+    checkboxState?: vscode.TreeItemCheckboxState;
+
+    accessibilityInformation?: vscode.AccessibilityInformation;
 
     constructor(label: string, collapsibleState?: vscode.TreeItemCollapsibleState);
 
