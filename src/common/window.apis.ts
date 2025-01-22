@@ -3,6 +3,7 @@ import {
     CancellationToken,
     Disposable,
     ExtensionTerminalOptions,
+    FileDecorationProvider,
     InputBox,
     InputBoxOptions,
     LogOutputChannel,
@@ -289,4 +290,8 @@ export function createOutputChannel(name: string, languageId?: string): OutputCh
 
 export function createLogOutputChannel(name: string): LogOutputChannel {
     return window.createOutputChannel(name, { log: true });
+}
+
+export function registerFileDecorationProvider(provider: FileDecorationProvider): Disposable {
+    return window.registerFileDecorationProvider(provider);
 }

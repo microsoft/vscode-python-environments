@@ -138,3 +138,7 @@ export namespace ProjectCreatorString {
 
     export const noProjectsFound = l10n.t('No projects found');
 }
+
+export namespace SelectedDecoratorStrings {
+    export const selectedToolTip = l10n.t('This environment is selected');
+}

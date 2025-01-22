@@ -72,6 +72,7 @@ export class PythonEnvTreeItem implements EnvTreeItem {
         item.description = environment.description;
         item.tooltip = environment.tooltip;
         item.iconPath = environment.iconPath;
+        item.resourceUri = environment.environmentPath;
         this.treeItem = item;
     }
 
@@ -261,6 +262,7 @@ export class ProjectEnvironment implements ProjectTreeItem {
         item.description = this.environment.description;
         item.tooltip = this.environment.tooltip;
         item.iconPath = this.environment.iconPath;
+        item.resourceUri = this.environment.environmentPath;
         this.treeItem = item;
     }
 
