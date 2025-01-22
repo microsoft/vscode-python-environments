@@ -55,7 +55,6 @@ import { EventNames } from './common/telemetry/constants';
 import { ensureCorrectVersion } from './common/extVersion';
 import { ExistingProjects } from './features/creators/existingProjects';
 import { AutoFindProjects } from './features/creators/autoFindProjects';
-import { registerSelectedDecorator } from './features/views/selectedDecorator';
 
 export async function activate(context: ExtensionContext): Promise<PythonEnvironmentApi> {
     const start = new StopWatch();
@@ -104,7 +103,6 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
 
     context.subscriptions.push(
         registerCompletionProvider(envManagers),
-        registerSelectedDecorator(api),
         commands.registerCommand('python-envs.viewLogs', () => outputChannel.show()),
         commands.registerCommand('python-envs.refreshManager', async (item) => {
             await refreshManagerCommand(item);
