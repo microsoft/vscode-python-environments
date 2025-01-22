@@ -104,6 +104,13 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
 
     context.subscriptions.push(
         registerCompletionProvider(envManagers),
+
+        registerTools(
+        'python_get_python_packages',
+        new GetPackagesTool(
+            api
+        ),
+    ),
         commands.registerCommand('python-envs.viewLogs', () => outputChannel.show()),
         commands.registerCommand('python-envs.refreshManager', async (item) => {
             await refreshManagerCommand(item);
@@ -239,9 +246,7 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
     registerTools(
         'python_get_python_packages',
         new GetPackagesTool(
-            (scope) => api.getEnvironment(scope),
-            (scope) => api.getPackages(scope),
-            (scope) => api.refreshPackages(scope),
+            api
         ),
     );
 

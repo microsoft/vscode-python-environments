@@ -5,25 +5,24 @@ import { GetPackagesTool } from '../copilotTools';
 import { IGetActiveFile } from '../copilotTools';
 import * as sinon from 'sinon';
 import * as typeMoq from 'typemoq';
-import { GetEnvironmentScope, Package, PythonEnvironment } from '../api';
+import { Package, PythonEnvironment, PythonPackageGetterApi, PythonProjectEnvironmentApi } from '../api';
+import { createDeferred } from '../common/utils/deferred';
 
 suite('GetPackagesTool Tests', () => {
     let tool: GetPackagesTool;
-    let mockGetEnvironment: typeMoq.IMock<(scope: GetEnvironmentScope) => Promise<PythonEnvironment | undefined>>;
-    let mockGetPackages: typeMoq.IMock<(environment: PythonEnvironment) => Promise<Package[] | undefined>>;
-    let mockRefreshPackages: typeMoq.IMock<(environment: PythonEnvironment) => Promise<void>>;
+    let mockApi: typeMoq.IMock<PythonProjectEnvironmentApi & PythonPackageGetterApi>;
     let mockEnvironment: typeMoq.IMock<PythonEnvironment>;
 
     setup(() => {
         // Create mock functions
-        mockGetEnvironment =
-            typeMoq.Mock.ofType<(scope: GetEnvironmentScope) => Promise<PythonEnvironment | undefined>>();
-        mockGetPackages = typeMoq.Mock.ofType<(environment: PythonEnvironment) => Promise<Package[] | undefined>>();
-        mockRefreshPackages = typeMoq.Mock.ofType<(environment: PythonEnvironment) => Promise<void>>();
+        mockApi = typeMoq.Mock.ofType<PythonProjectEnvironmentApi & PythonPackageGetterApi>();
         mockEnvironment = typeMoq.Mock.ofType<PythonEnvironment>();
 
+        // refresh will always return a resolved promise
+        mockApi.setup((x) => x.refreshPackages(typeMoq.It.isAny())).returns(() => Promise.resolve());
+
         // Create an instance of GetPackagesTool with the mock functions
-        tool = new GetPackagesTool(mockGetEnvironment.object, mockGetPackages.object, mockRefreshPackages.object);
+        tool = new GetPackagesTool(mockApi.object);
     });
 
     teardown(() => {
@@ -31,7 +30,8 @@ suite('GetPackagesTool Tests', () => {
     });
 
     test('should throw error if filePath is undefined', async () => {
-        mockGetEnvironment.setup((x) => x(typeMoq.It.isAny())).returns(async () => undefined);
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        mockEnvironment.setup((x: any) => x.then).returns(() => undefined);
 
         const testFile: IGetActiveFile = {
             filePath: '',
@@ -42,7 +42,8 @@ suite('GetPackagesTool Tests', () => {
     });
 
     test('should throw error for notebook files', async () => {
-        mockGetEnvironment.setup((x) => x(typeMoq.It.isAny())).returns(async () => undefined);
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        mockEnvironment.setup((x: any) => x.then).returns(() => undefined);
 
         const testFile: IGetActiveFile = {
             filePath: 'test.ipynb',
@@ -60,7 +61,8 @@ suite('GetPackagesTool Tests', () => {
     });
 
     test('should throw error for notebook cells', async () => {
-        mockGetEnvironment.setup((x) => x(typeMoq.It.isAny())).returns(async () => undefined);
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        mockEnvironment.setup((x: any) => x.then).returns(() => undefined);
 
         const testFile: IGetActiveFile = {
             filePath: 'test.ipynb#123',
@@ -78,16 +80,21 @@ suite('GetPackagesTool Tests', () => {
     });
 
     test('should return no packages message if no packages are installed', async () => {
-        mockGetEnvironment
-            .setup((x) => x(typeMoq.It.isAny()))
-            .returns(async () => {
-                console.log('hi');
-                return Promise.resolve(mockEnvironment.object);
-            });
-
         const testFile: IGetActiveFile = {
             filePath: 'test.py',
         };
+
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        mockEnvironment.setup((x: any) => x.then).returns(() => undefined);
+
+        mockApi
+            .setup((x) => x.getEnvironment(typeMoq.It.isAny()))
+            .returns(() => {
+                return Promise.resolve(mockEnvironment.object);
+            });
+
+        mockApi.setup((x) => x.getPackages(typeMoq.It.isAny())).returns(() => Promise.resolve([]));
+
         const options = { input: testFile, toolInvocationToken: undefined };
         const token = new vscode.CancellationTokenSource().token;
         const result = await tool.invoke(options, token);
@@ -97,88 +104,80 @@ suite('GetPackagesTool Tests', () => {
         assert.strictEqual(firstPart.value, 'No packages are installed in the current environment.');
     });
 
-    // test('should return installed packages', async () => {
-    //     const testFile: IGetActiveFile = {
-    //         filePath: 'abc.py',
-    //     };
-    //     const options = { input: testFile, toolInvocationToken: undefined };
-    //     const token = new vscode.CancellationTokenSource().token;
+    test('should return installed packages', async () => {
+        const testFile: IGetActiveFile = {
+            filePath: 'test.py',
+        };
 
-    //     // Mock the getEnvironment function to return a valid environment
-    //     const mockEnvironment: PythonEnvironment = {
-    //         name: 'env',
-    //         displayName: 'env',
-    //         displayPath: 'path/to/env',
-    //         version: '3.9.0',
-    //         environmentPath: vscode.Uri.file('path/to/env'),
-    //         sysPrefix: 'path/to/env',
-    //         execInfo: { run: { executable: 'python' } },
-    //         envId: { id: 'env1', managerId: 'manager1' },
-    //     };
-    //     mockGetEnvironment.resolves(mockEnvironment);
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        mockEnvironment.setup((x: any) => x.then).returns(() => undefined);
 
-    //     // Mock the getPackages function to return a list of packages
-    //     const mockPackages: Package[] = [
-    //         {
-    //             pkgId: { id: 'pkg1', managerId: 'pip', environmentId: 'env1' },
-    //             name: 'package1',
-    //             displayName: 'package1',
-    //         },
-    //         {
-    //             pkgId: { id: 'pkg2', managerId: 'pip', environmentId: 'env1' },
-    //             name: 'package2',
-    //             displayName: 'package2',
-    //         },
-    //     ];
-    //     mockGetPackages.resolves(mockPackages);
+        mockApi
+            .setup((x) => x.getEnvironment(typeMoq.It.isAny()))
+            .returns(() => {
+                return Promise.resolve(mockEnvironment.object);
+            });
 
-    //     const result = await tool.invoke(options, token);
-    //     assert.strictEqual(
-    //         result.parts[0].text,
-    //         'The packages installed in the current environment are as follows:\npackage1, package2',
-    //     );
-    // });
+        const mockPackages: Package[] = [
+            {
+                pkgId: { id: 'pkg1', managerId: 'pip', environmentId: 'env1' },
+                name: 'package1',
+                displayName: 'package1',
+            },
+            {
+                pkgId: { id: 'pkg2', managerId: 'pip', environmentId: 'env1' },
+                name: 'package2',
+                displayName: 'package2',
+            },
+        ];
 
-    // test('should handle cancellation', async () => {
-    //     const tokenSource = new vscode.CancellationTokenSource();
-    //     const token = tokenSource.token;
+        mockApi.setup((x) => x.refreshPackages(typeMoq.It.isAny())).returns(() => Promise.resolve());
+        mockApi.setup((x) => x.getPackages(typeMoq.It.isAny())).returns(() => Promise.resolve(mockPackages));
 
-    //     const testFile: IGetActiveFile = {
-    //         filePath: 'abc.py',
-    //     };
-    //     const options = { input: testFile, toolInvocationToken: undefined };
+        const options = { input: testFile, toolInvocationToken: undefined };
+        const token = new vscode.CancellationTokenSource().token;
+        const result = await tool.invoke(options, token);
+        const content = result.content as vscode.LanguageModelTextPart[];
+        const firstPart = content[0] as vscode.MarkdownString;
 
-    //     // Mock the getEnvironment function to return a valid environment
-    //     const mockEnvironment: PythonEnvironment = {
-    //         name: 'env',
-    //         displayName: 'env',
-    //         displayPath: 'path/to/env',
-    //         version: '3.9.0',
-    //         environmentPath: vscode.Uri.file('path/to/env'),
-    //         sysPrefix: 'path/to/env',
-    //         execInfo: { run: { executable: 'python' } },
-    //         envId: { id: 'env1', managerId: 'manager1' },
-    //     };
-    //     mockGetEnvironment.resolves(mockEnvironment);
+        assert.ok(
+            firstPart.value.includes('The packages installed in the current environment are as follows:') &&
+                firstPart.value.includes('package1') &&
+                firstPart.value.includes('package2'),
+        );
+    });
 
-    //     // Mock the getPackages function to return a list of packages
-    //     const mockPackages: Package[] = [
-    //         {
-    //             pkgId: { id: 'pkg1', managerId: 'pip', environmentId: 'env1' },
-    //             name: 'package1',
-    //             displayName: 'package1',
-    //         },
-    //         {
-    //             pkgId: { id: 'pkg2', managerId: 'pip', environmentId: 'env1' },
-    //             name: 'package2',
-    //             displayName: 'package2',
-    //         },
-    //     ];
-    //     mockGetPackages.resolves(mockPackages);
+    test('should handle cancellation', async () => {
+        const testFile: IGetActiveFile = {
+            filePath: 'test.py',
+        };
 
-    //     tool.invoke(options, token);
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        mockEnvironment.setup((x: any) => x.then).returns(() => undefined);
 
-    //     tokenSource.cancel();
-    //     await assert.rejects(tool.invoke(options, token), { message: 'Operation cancelled' });
-    // });
+        mockApi
+            .setup((x) => x.getEnvironment(typeMoq.It.isAny()))
+            .returns(async () => {
+                return Promise.resolve(mockEnvironment.object);
+            });
+
+        mockApi.setup((x) => x.refreshPackages(typeMoq.It.isAny())).returns(() => Promise.resolve());
+        mockApi.setup((x) => x.getPackages(typeMoq.It.isAny())).returns(() => Promise.resolve([]));
+
+        const options = { input: testFile, toolInvocationToken: undefined };
+        const tokenSource = new vscode.CancellationTokenSource();
+        const token = tokenSource.token;
+
+        const deferred = createDeferred();
+        tool.invoke(options, token).then((result) => {
+            const content = result.content as vscode.LanguageModelTextPart[];
+            const firstPart = content[0] as vscode.MarkdownString;
+
+            assert.strictEqual(firstPart.value, 'Operation cancelled by the user.');
+            deferred.resolve();
+        });
+
+        tokenSource.cancel();
+        await deferred.promise;
+    });
 });

@@ -8,7 +8,8 @@ import {
     PreparedToolInvocation,
     Uri,
 } from 'vscode';
-import { GetEnvironmentScope, Package, PythonEnvironment } from './api';
+import { PythonPackageGetterApi, PythonProjectEnvironmentApi } from './api';
+import { createDeferred } from './common/utils/deferred';
 
 export interface IGetActiveFile {
     filePath?: string;
@@ -18,19 +19,7 @@ export interface IGetActiveFile {
  * A tool to get the list of installed Python packages in the active environment.
  */
 export class GetPackagesTool implements LanguageModelTool<IGetActiveFile> {
-    private apiGetEnvironment: (scope: GetEnvironmentScope) => Promise<PythonEnvironment | undefined>;
-    private apiGetPackages: (environment: PythonEnvironment) => Promise<Package[] | undefined>;
-
-    private apiRefreshPackages: (environment: PythonEnvironment) => Promise<void>;
-    constructor(
-        apiGetEnvironmentCon: (scope: GetEnvironmentScope) => Promise<PythonEnvironment | undefined>,
-        apiGetPackagesCon: (environment: PythonEnvironment) => Promise<Package[] | undefined>,
-        apiRefreshPackagesCon: (environment: PythonEnvironment) => Promise<void>,
-    ) {
-        this.apiGetEnvironment = apiGetEnvironmentCon;
-        this.apiGetPackages = apiGetPackagesCon;
-        this.apiRefreshPackages = apiRefreshPackagesCon;
-    }
+    constructor(private readonly api: PythonProjectEnvironmentApi & PythonPackageGetterApi) {}
     /**
      * Invokes the tool to get the list of installed packages.
      * @param options - The invocation options containing the file path.
@@ -41,6 +30,12 @@ export class GetPackagesTool implements LanguageModelTool<IGetActiveFile> {
         options: LanguageModelToolInvocationOptions<IGetActiveFile>,
         token: CancellationToken,
     ): Promise<LanguageModelToolResult> {
+        const deferredReturn = createDeferred<LanguageModelToolResult>();
+        token.onCancellationRequested(() => {
+            const errorMessage: string = `Operation cancelled by the user.`;
+            deferredReturn.resolve({ content: [new LanguageModelTextPart(errorMessage)] } as LanguageModelToolResult);
+        });
+
         const parameters: IGetActiveFile = options.input;
 
         if (parameters.filePath === undefined || parameters.filePath === '') {
@@ -49,7 +44,7 @@ export class GetPackagesTool implements LanguageModelTool<IGetActiveFile> {
         const fileUri = Uri.file(parameters.filePath);
 
         try {
-            const environment = await this.apiGetEnvironment(fileUri);
+            const environment = await this.api.getEnvironment(fileUri);
             if (!environment) {
                 // Check if the file is a notebook or a notebook cell to throw specific error messages.
                 if (fileUri.fsPath.endsWith('.ipynb') || fileUri.fsPath.includes('.ipynb#')) {
@@ -57,8 +52,8 @@ export class GetPackagesTool implements LanguageModelTool<IGetActiveFile> {
                 }
                 throw new Error('No environment found');
             }
-            await this.apiRefreshPackages(environment);
-            const installedPackages = await this.apiGetPackages(environment);
+            await this.api.refreshPackages(environment);
+            const installedPackages = await this.api.getPackages(environment);
 
             let resultMessage: string;
             if (!installedPackages || installedPackages.length === 0) {
@@ -68,18 +63,13 @@ export class GetPackagesTool implements LanguageModelTool<IGetActiveFile> {
                 resultMessage = 'The packages installed in the current environment are as follows:\n' + packageNames;
             }
 
-            if (token.isCancellationRequested) {
-                throw new Error('Operation cancelled');
-            }
-
             const textPart = new LanguageModelTextPart(resultMessage || '');
-            const result: LanguageModelToolResult = { content: [textPart] };
-            return result;
+            deferredReturn.resolve({ content: [textPart] });
         } catch (error) {
             const errorMessage: string = `An error occurred while fetching packages: ${error}`;
-            const textPart = new LanguageModelTextPart(errorMessage);
-            return { content: [textPart] } as LanguageModelToolResult;
+            deferredReturn.resolve({ content: [new LanguageModelTextPart(errorMessage)] } as LanguageModelToolResult);
         }
+        return deferredReturn.promise;
     }
 
     /**
@@ -93,7 +83,6 @@ export class GetPackagesTool implements LanguageModelTool<IGetActiveFile> {
         _token: CancellationToken,
     ): Promise<PreparedToolInvocation> {
         const message = 'Preparing to fetch the list of installed Python packages...';
-        console.log(message);
         return {
             invocationMessage: message,
         };
