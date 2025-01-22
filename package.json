@@ -427,10 +427,10 @@
         ],
         "languageModelTools": [
             {
-                "name": "python_get_python_packages",
+                "name": "python_get_packages",
                 "displayName": "Get Python Packages",
                 "modelDescription": "Given a file path, finds the workspace and selected python environment for this file, and returns the list of installed packages.",
-                "toolReferenceName": "pythonGetPythonPackages",
+                "toolReferenceName": "pythonGetPackages",
                 "tags": [],
                 "icon": "$(files)",
                 "inputSchema": {

@@ -105,12 +105,7 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
     context.subscriptions.push(
         registerCompletionProvider(envManagers),
 
-        registerTools(
-        'python_get_python_packages',
-        new GetPackagesTool(
-            api
-        ),
-    ),
+        registerTools('python_get_packages', new GetPackagesTool(api)),
         commands.registerCommand('python-envs.viewLogs', () => outputChannel.show()),
         commands.registerCommand('python-envs.refreshManager', async (item) => {
             await refreshManagerCommand(item);
@@ -243,12 +238,7 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
     sendTelemetryEvent(EventNames.EXTENSION_ACTIVATION_DURATION, start.elapsedTime);
 
     // Register the tool for copilot
-    registerTools(
-        'python_get_python_packages',
-        new GetPackagesTool(
-            api
-        ),
-    );
+    registerTools('python_get_packages', new GetPackagesTool(api));
 
     return api;
 }
