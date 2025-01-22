@@ -431,7 +431,9 @@
                 "displayName": "Get Python Packages",
                 "modelDescription": "Given a file path, finds the workspace and selected python environment for this file, and returns the list of installed packages.",
                 "toolReferenceName": "pythonGetPackages",
-                "tags": [],
+                "tags": [
+                    "vscode_editing"
+                ],
                 "icon": "$(files)",
                 "inputSchema": {
                     "type": "object",
