@@ -1,4 +1,13 @@
-import * as vscode from 'vscode';
+import {
+    CancellationToken,
+    LanguageModelTextPart,
+    LanguageModelTool,
+    LanguageModelToolInvocationOptions,
+    LanguageModelToolInvocationPrepareOptions,
+    LanguageModelToolResult,
+    PreparedToolInvocation,
+    Uri,
+} from 'vscode';
 import { GetEnvironmentScope, Package, PythonEnvironment } from './api';
 
 export interface IGetActiveFile {
@@ -8,7 +17,7 @@ export interface IGetActiveFile {
 /**
  * A tool to get the list of installed Python packages in the active environment.
  */
-export class GetPackagesTool implements vscode.LanguageModelTool<IGetActiveFile> {
+export class GetPackagesTool implements LanguageModelTool<IGetActiveFile> {
     private apiGetEnvironment: (scope: GetEnvironmentScope) => Promise<PythonEnvironment | undefined>;
     private apiGetPackages: (environment: PythonEnvironment) => Promise<Package[] | undefined>;
 
@@ -29,15 +38,15 @@ export class GetPackagesTool implements vscode.LanguageModelTool<IGetActiveFile>
      * @returns The result containing the list of installed packages or an error message.
      */
     async invoke(
-        options: vscode.LanguageModelToolInvocationOptions<IGetActiveFile>,
-        token: vscode.CancellationToken,
-    ): Promise<vscode.LanguageModelToolResult> {
+        options: LanguageModelToolInvocationOptions<IGetActiveFile>,
+        token: CancellationToken,
+    ): Promise<LanguageModelToolResult> {
         const parameters: IGetActiveFile = options.input;
 
         if (parameters.filePath === undefined || parameters.filePath === '') {
             throw new Error('Invalid input: filePath is required');
         }
-        const fileUri = vscode.Uri.file(parameters.filePath);
+        const fileUri = Uri.file(parameters.filePath);
 
         try {
             const environment = await this.apiGetEnvironment(fileUri);
@@ -63,13 +72,13 @@ export class GetPackagesTool implements vscode.LanguageModelTool<IGetActiveFile>
                 throw new Error('Operation cancelled');
             }
 
-            const textPart = new vscode.LanguageModelTextPart(resultMessage || '');
-            const result: vscode.LanguageModelToolResult = { content: [textPart] };
+            const textPart = new LanguageModelTextPart(resultMessage || '');
+            const result: LanguageModelToolResult = { content: [textPart] };
             return result;
         } catch (error) {
             const errorMessage: string = `An error occurred while fetching packages: ${error}`;
-            const textPart = new vscode.LanguageModelTextPart(errorMessage);
-            return { content: [textPart] } as vscode.LanguageModelToolResult;
+            const textPart = new LanguageModelTextPart(errorMessage);
+            return { content: [textPart] } as LanguageModelToolResult;
         }
     }
 
@@ -80,9 +89,9 @@ export class GetPackagesTool implements vscode.LanguageModelTool<IGetActiveFile>
      * @returns The prepared tool invocation.
      */
     async prepareInvocation?(
-        _options: vscode.LanguageModelToolInvocationPrepareOptions<IGetActiveFile>,
-        _token: vscode.CancellationToken,
-    ): Promise<vscode.PreparedToolInvocation> {
+        _options: LanguageModelToolInvocationPrepareOptions<IGetActiveFile>,
+        _token: CancellationToken,
+    ): Promise<PreparedToolInvocation> {
         const message = 'Preparing to fetch the list of installed Python packages...';
         console.log(message);
         return {

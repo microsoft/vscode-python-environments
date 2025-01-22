@@ -51,7 +51,7 @@ suite('GetPackagesTool Tests', () => {
         const token = new vscode.CancellationTokenSource().token;
         const result = await tool.invoke(options, token);
         const content = result.content as vscode.LanguageModelTextPart[];
-        const firstPart = content[0] as vscode.MarkdownString;
+        const firstPart = content[0] as vscode.LanguageModelTextPart;
 
         assert.strictEqual(
             firstPart.value,
@@ -77,25 +77,25 @@ suite('GetPackagesTool Tests', () => {
         );
     });
 
-    // test('should return no packages message if no packages are installed', async () => {
-    //     mockGetEnvironment
-    //         .setup((x) => x(typeMoq.It.isAny()))
-    //         .returns(async () => {
-    //             console.log('hi');
-    //             return Promise.resolve(mockEnvironment.object);
-    //         });
+    test('should return no packages message if no packages are installed', async () => {
+        mockGetEnvironment
+            .setup((x) => x(typeMoq.It.isAny()))
+            .returns(async () => {
+                console.log('hi');
+                return Promise.resolve(mockEnvironment.object);
+            });
 
-    //     const testFile: IGetActiveFile = {
-    //         filePath: 'test.py',
-    //     };
-    //     const options = { input: testFile, toolInvocationToken: undefined };
-    //     const token = new vscode.CancellationTokenSource().token;
-    //     const result = await tool.invoke(options, token);
-    //     const content = result.content as vscode.LanguageModelTextPart[];
-    //     const firstPart = content[0] as vscode.MarkdownString;
+        const testFile: IGetActiveFile = {
+            filePath: 'test.py',
+        };
+        const options = { input: testFile, toolInvocationToken: undefined };
+        const token = new vscode.CancellationTokenSource().token;
+        const result = await tool.invoke(options, token);
+        const content = result.content as vscode.LanguageModelTextPart[];
+        const firstPart = content[0] as vscode.MarkdownString;
 
-    //     assert.strictEqual(firstPart.value, 'No packages are installed in the current environment.');
-    // });
+        assert.strictEqual(firstPart.value, 'No packages are installed in the current environment.');
+    });
 
     // test('should return installed packages', async () => {
     //     const testFile: IGetActiveFile = {
