@@ -237,8 +237,6 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
 
     sendTelemetryEvent(EventNames.EXTENSION_ACTIVATION_DURATION, start.elapsedTime);
 
-    // Register the tool for copilot
-    registerTools('python_get_packages', new GetPackagesTool(api));
 
     return api;
 }
