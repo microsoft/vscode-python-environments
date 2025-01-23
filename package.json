@@ -462,6 +462,7 @@
                             "type": "string"
                         }
                     },
+                    "description": "The path to the Python file or workspace to get the installed packages for.",
                     "required": [
                         "filePath"
                     ]
