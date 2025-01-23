@@ -25,7 +25,7 @@ import {
 import { getConfiguration } from '../../common/workspace.apis';
 import { getGlobalPersistentState, getWorkspacePersistentState } from '../../common/persistentState';
 import which from 'which';
-import { shortVersion, sortEnvironments } from '../common/utils';
+import { shortVersion, sortEnvironments, untildify } from '../common/utils';
 import { pickProject } from '../../common/pickers/projects';
 import { CondaStrings } from '../../common/localize';
 import { showErrorMessage } from '../../common/errors/utils';
@@ -54,7 +54,8 @@ async function setConda(conda: string): Promise<void> {
 
 export function getCondaPathSetting(): string | undefined {
     const config = getConfiguration('python');
-    return config.get<string>('condaPath');
+    const value = config.get<string>('condaPath');
+    return (value && typeof value === 'string') ? untildify(value) : value;
 }
 
 export async function getCondaForWorkspace(fsPath: string): Promise<string | undefined> {
@@ -113,20 +114,19 @@ async function findConda(): Promise<readonly string[] | undefined> {
 }
 
 export async function getConda(): Promise<string> {
-    const config = getConfiguration('python');
-    const conda = config.get<string>('condaPath');
+    const conda = getCondaPathSetting();
     if (conda) {
         return conda;
     }
 
     if (condaPath) {
-        return condaPath;
+        return untildify(condaPath);
     }
 
     const state = await getWorkspacePersistentState();
     condaPath = await state.get<string>(CONDA_PATH_KEY);
     if (condaPath) {
-        return condaPath;
+        return untildify(condaPath);
     }
 
     const paths = await findConda();
@@ -143,6 +143,7 @@ async function runConda(args: string[], token?: CancellationToken): Promise<stri
     const conda = await getConda();
 
     const deferred = createDeferred<string>();
+    args = quoteArgs(args);
     const proc = ch.spawn(conda, args, { shell: true });
 
     token?.onCancellationRequested(() => {
@@ -586,7 +587,7 @@ async function createPrefixCondaEnvironment(
 }
 
 export async function deleteCondaEnvironment(environment: PythonEnvironment, log: LogOutputChannel): Promise<boolean> {
-    let args = quoteArgs(['env', 'remove', '--yes', '--prefix', environment.environmentPath.fsPath]);
+    let args = ['env', 'remove', '--yes', '--prefix', environment.environmentPath.fsPath];
     return await withProgress(
         {
             location: ProgressLocation.Notification,

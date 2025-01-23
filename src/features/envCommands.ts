@@ -30,6 +30,8 @@ import {
     ProjectPackageRootTreeItem,
     GlobalProjectItem,
     EnvTreeItemKind,
+    PackageTreeItem,
+    ProjectPackage,
 } from './views/treeViewItems';
 import { Common } from '../common/localize';
 import { pickEnvironment } from '../common/pickers/environments';
@@ -185,6 +187,17 @@ export async function handlePackagesCommand(
         }
         throw ex;
     }
+}
+
+export async function handlePackageUninstall(context: unknown, em: EnvironmentManagers) {
+    if (context instanceof PackageTreeItem || context instanceof ProjectPackage) {
+        const moduleName = context.pkg.name;
+        const environment = context.parent.environment;
+        const packageManager = em.getPackageManager(environment);
+        await packageManager?.uninstall(environment, [moduleName]);
+        return;
+    }
+    traceError(`Invalid context for uninstall command: ${typeof context}`);
 }
 
 export async function setEnvironmentCommand(

@@ -6,7 +6,6 @@
     "python-envs.pythonProjects.envManager.description": "The environment manager for creating and managing environments for this project.",
     "python-envs.pythonProjects.packageManager.description": "The package manager for managing packages in environments for this project.",
     "python-envs.terminal.showActivateButton.description": "Whether to show the 'Activate' button in the terminal menu",
-
     "python-envs.setEnvManager.title": "Set Environment Manager",
     "python-envs.setPkgManager.title": "Set Package Manager",
     "python-envs.addPythonProject.title": "Add Python Project",
@@ -26,5 +25,6 @@
     "python-envs.createTerminal.title": "Create Python Terminal",
     "python-envs.runAsTask.title": "Run as Task",
     "python-envs.terminal.activate.title": "Activate Environment in Current Terminal",
-    "python-envs.terminal.deactivate.title": "Deactivate Environment in Current Terminal"
+    "python-envs.terminal.deactivate.title": "Deactivate Environment in Current Terminal",
+    "python-envs.uninstallPackage.title": "Uninstall Package"
 }

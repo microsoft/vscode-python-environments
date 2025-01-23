@@ -1000,9 +1000,9 @@ export interface PythonProjectModifyApi {
  */
 export interface PythonProjectApi extends PythonProjectCreationApi, PythonProjectGetterApi, PythonProjectModifyApi {}
 
-export interface PythonTerminalOptions extends TerminalOptions {
+export interface PythonTerminalCreateOptions extends TerminalOptions {
     /**
-     * Whether to show the terminal.
+     * Whether to disable activation on create.
      */
     disableActivation?: boolean;
 }
@@ -1016,7 +1016,7 @@ export interface PythonTerminalCreateApi {
      *
      * Note: Non-activatable environments have no effect on the terminal.
      */
-    createTerminal(environment: PythonEnvironment, options: PythonTerminalOptions): Promise<Terminal>;
+    createTerminal(environment: PythonEnvironment, options: PythonTerminalCreateOptions): Promise<Terminal>;
 }
 
 /**
