@@ -449,7 +449,7 @@
             {
                 "name": "python_get_packages",
                 "displayName": "Get Python Packages",
-                "modelDescription": "Given a file path, finds the workspace and selected python environment for this file, and returns the list of installed packages.",
+                "modelDescription": "Returns the packages installed in the given Python file's environment. You should call this when you want to generate Python code to determine the users preferred packages. Also call this to determine if you need to provide installation instructions in a response.",
                 "toolReferenceName": "pythonGetPackages",
                 "tags": [
                     "vscode_editing"
