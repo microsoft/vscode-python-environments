@@ -70,10 +70,6 @@ export class PythonEnvTreeItem implements EnvTreeItem {
         public readonly selected?: string,
     ) {
         let name = environment.displayName ?? environment.name;
-        if (selected) {
-            name = `★ ${name}`;
-        }
-
         let tooltip = environment.tooltip;
         if (selected) {
             const tooltipEnd = environment.tooltip ?? environment.description;
