@@ -15,7 +15,7 @@ export async function registerCondaFeatures(
     const api: PythonEnvironmentApi = await getPythonApi();
 
     try {
-        await getConda();
+        await getConda(nativeFinder);
         const envManager = new CondaEnvManager(nativeFinder, api, log);
         const packageManager = new CondaPackageManager(api, log);
 

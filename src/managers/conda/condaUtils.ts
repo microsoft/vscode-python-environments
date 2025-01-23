@@ -32,6 +32,7 @@ import { showErrorMessage } from '../../common/errors/utils';
 import { showInputBox, showQuickPick, withProgress } from '../../common/window.apis';
 import { Installable, selectFromCommonPackagesToInstall } from '../common/pickers';
 import { quoteArgs } from '../../features/execution/execUtils';
+import { traceInfo } from '../../common/logging';
 
 export const CONDA_PATH_KEY = `${ENVS_EXTENSION_ID}:conda:CONDA_PATH`;
 export const CONDA_PREFIXES_KEY = `${ENVS_EXTENSION_ID}:conda:CONDA_PREFIXES`;
@@ -55,7 +56,7 @@ async function setConda(conda: string): Promise<void> {
 export function getCondaPathSetting(): string | undefined {
     const config = getConfiguration('python');
     const value = config.get<string>('condaPath');
-    return (value && typeof value === 'string') ? untildify(value) : value;
+    return value && typeof value === 'string' ? untildify(value) : value;
 }
 
 export async function getCondaForWorkspace(fsPath: string): Promise<string | undefined> {
@@ -113,27 +114,45 @@ async function findConda(): Promise<readonly string[] | undefined> {
     }
 }
 
-export async function getConda(): Promise<string> {
+export async function getConda(native?: NativePythonFinder): Promise<string> {
     const conda = getCondaPathSetting();
     if (conda) {
+        traceInfo(`Using conda from settings: ${conda}`);
         return conda;
     }
 
     if (condaPath) {
+        traceInfo(`Using conda from cache: ${condaPath}`);
         return untildify(condaPath);
     }
 
     const state = await getWorkspacePersistentState();
     condaPath = await state.get<string>(CONDA_PATH_KEY);
     if (condaPath) {
+        traceInfo(`Using conda from persistent state: ${condaPath}`);
         return untildify(condaPath);
     }
 
     const paths = await findConda();
     if (paths && paths.length > 0) {
         condaPath = paths[0];
+        traceInfo(`Using conda from PATH: ${condaPath}`);
         await state.set(CONDA_PATH_KEY, condaPath);
         return condaPath;
+    }
+
+    if (native) {
+        const data = await native.refresh(false);
+        const managers = data
+            .filter((e) => !isNativeEnvInfo(e))
+            .map((e) => e as NativeEnvManagerInfo)
+            .filter((e) => e.tool.toLowerCase() === 'conda');
+        if (managers.length > 0) {
+            condaPath = managers[0].executable;
+            traceInfo(`Using conda from native finder: ${condaPath}`);
+            await state.set(CONDA_PATH_KEY, condaPath);
+            return condaPath;
+        }
     }
 
     throw new Error('Conda not found');
