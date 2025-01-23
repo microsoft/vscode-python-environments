@@ -104,7 +104,7 @@ suite('GetPackagesTool Tests', () => {
         assert.strictEqual(firstPart.value, 'No packages are installed in the current environment.');
     });
 
-    test('should return installed packages', async () => {
+    test('should return just packages if versions do not exist', async () => {
         const testFile: IGetActiveFile = {
             filePath: 'test.py',
         };
@@ -144,6 +144,51 @@ suite('GetPackagesTool Tests', () => {
             firstPart.value.includes('The packages installed in the current environment are as follows:') &&
                 firstPart.value.includes('package1') &&
                 firstPart.value.includes('package2'),
+        );
+    });
+
+    test('should return installed packages with versions', async () => {
+        const testFile: IGetActiveFile = {
+            filePath: 'test.py',
+        };
+
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        mockEnvironment.setup((x: any) => x.then).returns(() => undefined);
+
+        mockApi
+            .setup((x) => x.getEnvironment(typeMoq.It.isAny()))
+            .returns(() => {
+                return Promise.resolve(mockEnvironment.object);
+            });
+
+        const mockPackages: Package[] = [
+            {
+                pkgId: { id: 'pkg1', managerId: 'pip', environmentId: 'env1' },
+                name: 'package1',
+                displayName: 'package1',
+                version: '1.0.0',
+            },
+            {
+                pkgId: { id: 'pkg2', managerId: 'pip', environmentId: 'env1' },
+                name: 'package2',
+                displayName: 'package2',
+                version: '2.0.0',
+            },
+        ];
+
+        mockApi.setup((x) => x.refreshPackages(typeMoq.It.isAny())).returns(() => Promise.resolve());
+        mockApi.setup((x) => x.getPackages(typeMoq.It.isAny())).returns(() => Promise.resolve(mockPackages));
+
+        const options = { input: testFile, toolInvocationToken: undefined };
+        const token = new vscode.CancellationTokenSource().token;
+        const result = await tool.invoke(options, token);
+        const content = result.content as vscode.LanguageModelTextPart[];
+        const firstPart = content[0] as vscode.MarkdownString;
+
+        assert.ok(
+            firstPart.value.includes('The packages installed in the current environment are as follows:') &&
+                firstPart.value.includes('package1 (1.0.0)') &&
+                firstPart.value.includes('package2 (2.0.0)'),
         );
     });
 

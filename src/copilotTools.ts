@@ -59,7 +59,9 @@ export class GetPackagesTool implements LanguageModelTool<IGetActiveFile> {
             if (!installedPackages || installedPackages.length === 0) {
                 resultMessage = 'No packages are installed in the current environment.';
             } else {
-                const packageNames = installedPackages.map((pkg) => pkg.name).join(', ');
+                const packageNames = installedPackages
+                    .map((pkg) => pkg.version ? `${pkg.name} (${pkg.version})` : pkg.name)
+                    .join(', ');
                 resultMessage = 'The packages installed in the current environment are as follows:\n' + packageNames;
             }
 
