@@ -2,7 +2,7 @@ import { Uri, Progress, CancellationToken } from 'vscode';
 import { PythonEnvironment } from '../../api';
 import { InternalEnvironmentManager } from '../../internal.api';
 import { showErrorMessage } from '../errors/utils';
-import { traceInfo, traceVerbose, traceError } from '../logging';
+import { traceVerbose, traceError } from '../logging';
 import { PYTHON_EXTENSION_ID } from '../constants';
 
 const priorityOrder = [
@@ -47,10 +47,10 @@ export async function handlePythonPath(
             return;
         }
         reporter?.report({ message: `Checking ${manager.displayName}` });
-        traceInfo(`Checking ${manager.displayName} (${manager.id}) for ${interpreterUri.fsPath}`);
+        traceVerbose(`Checking ${manager.displayName} (${manager.id}) for ${interpreterUri.fsPath}`);
         const env = await manager.resolve(interpreterUri);
         if (env) {
-            traceInfo(`Using ${manager.displayName} (${manager.id}) to handle ${interpreterUri.fsPath}`);
+            traceVerbose(`Using ${manager.displayName} (${manager.id}) to handle ${interpreterUri.fsPath}`);
             return env;
         }
         traceVerbose(`Manager ${manager.displayName} (${manager.id}) cannot handle ${interpreterUri.fsPath}`);
@@ -66,10 +66,10 @@ export async function handlePythonPath(
             return;
         }
         reporter?.report({ message: `Checking ${manager.displayName}` });
-        traceInfo(`Checking ${manager.displayName} (${manager.id}) for ${interpreterUri.fsPath}`);
+        traceVerbose(`Checking ${manager.displayName} (${manager.id}) for ${interpreterUri.fsPath}`);
         const env = await manager.resolve(interpreterUri);
         if (env) {
-            traceInfo(`Using ${manager.displayName} (${manager.id}) to handle ${interpreterUri.fsPath}`);
+            traceVerbose(`Using ${manager.displayName} (${manager.id}) to handle ${interpreterUri.fsPath}`);
             return env;
         }
     }

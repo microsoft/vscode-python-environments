@@ -76,9 +76,10 @@ export class PythonEnvTreeItem implements EnvTreeItem {
 
         let tooltip = environment.tooltip;
         if (selected) {
+            const tooltipEnd = environment.tooltip ?? environment.description;
             tooltip =
                 selected === 'global' ? EnvViewStrings.selectedGlobalTooltip : EnvViewStrings.selectedWorkspaceTooltip;
-            tooltip = `${tooltip} ● ${environment.tooltip}`;
+            tooltip = tooltipEnd ? `${tooltip} ● ${tooltipEnd}` : tooltip;
         }
 
         const item = new TreeItem(name, TreeItemCollapsibleState.Collapsed);

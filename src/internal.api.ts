@@ -71,8 +71,26 @@ export interface EnvironmentManagers extends Disposable {
     registerEnvironmentManager(manager: EnvironmentManager): Disposable;
     registerPackageManager(manager: PackageManager): Disposable;
 
+    /**
+     * This event is fired when any environment manager changes its collection of environments.
+     * This can be any environment manager even if it is not the one selected by the user for the workspace.
+     */
     onDidChangeEnvironments: Event<InternalDidChangeEnvironmentsEventArgs>;
+
+    /**
+     * This event is fired when an environment manager changes the environment for
+     * a particular scope (global, uri, workspace, etc). This can be any environment manager even if it is not the
+     * one selected by the user for the workspace. It is also fired if the change
+     * involves unselected to selected or selected to unselected.
+     */
     onDidChangeEnvironment: Event<DidChangeEnvironmentEventArgs>;
+
+    /**
+     * This event is fired when a selected environment manager changes the environment
+     * for a particular scope (global, uri, workspace, etc). This is also only fired if
+     * the previous and current environments are different. It is also fired if the change
+     * involves unselected to selected or selected to unselected.
+     */
     onDidChangeEnvironmentFiltered: Event<DidChangeEnvironmentEventArgs>;
     onDidChangePackages: Event<InternalDidChangePackagesEventArgs>;
 

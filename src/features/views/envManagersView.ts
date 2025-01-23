@@ -1,5 +1,5 @@
 import { Disposable, Event, EventEmitter, ProviderResult, TreeDataProvider, TreeItem, TreeView, window } from 'vscode';
-import { EnvironmentGroupInfo, PythonEnvironment } from '../../api';
+import { DidChangeEnvironmentEventArgs, EnvironmentGroupInfo, PythonEnvironment } from '../../api';
 import {
     DidChangeEnvironmentManagerEventArgs,
     DidChangePackageManagerEventArgs,
@@ -61,30 +61,6 @@ export class EnvManagerView implements TreeDataProvider<EnvTreeItem>, Disposable
             }),
             this.providers.onDidChangePackageManager((p: DidChangePackageManagerEventArgs) => {
                 this.onDidChangePackageManager(p);
-            }),
-            this.providers.onDidChangeEnvironment((e) => {
-                const views = [];
-                if (e.old) {
-                    this.selected.delete(e.old.envId.id);
-                    let view: EnvTreeItem | undefined = this.packageRoots.get(e.old.envId.id);
-                    if (!view) {
-                        view = this.managerViews.get(e.old.envId.managerId);
-                    }
-                    if (view) {
-                        views.push(view);
-                    }
-                }
-                if (e.new) {
-                    this.selected.set(e.new.envId.id, e.uri === undefined ? 'global' : e.uri.fsPath);
-                    let view: EnvTreeItem | undefined = this.packageRoots.get(e.new.envId.id);
-                    if (!view) {
-                        view = this.managerViews.get(e.new.envId.managerId);
-                    }
-                    if (view && !views.includes(view)) {
-                        views.push(view);
-                    }
-                }
-                this.fireDataChanged(views);
             }),
         );
     }
@@ -252,5 +228,30 @@ export class EnvManagerView implements TreeDataProvider<EnvTreeItem>, Disposable
     private onDidChangePackageManager(args: DidChangePackageManagerEventArgs) {
         const roots = Array.from(this.packageRoots.values()).filter((r) => r.manager.id === args.manager.id);
         this.fireDataChanged(roots);
+    }
+
+    public environmentChanged(e: DidChangeEnvironmentEventArgs) {
+        const views = [];
+        if (e.old) {
+            this.selected.delete(e.old.envId.id);
+            let view: EnvTreeItem | undefined = this.packageRoots.get(e.old.envId.id);
+            if (!view) {
+                view = this.managerViews.get(e.old.envId.managerId);
+            }
+            if (view) {
+                views.push(view);
+            }
+        }
+        if (e.new) {
+            this.selected.set(e.new.envId.id, e.uri === undefined ? 'global' : e.uri.fsPath);
+            let view: EnvTreeItem | undefined = this.packageRoots.get(e.new.envId.id);
+            if (!view) {
+                view = this.managerViews.get(e.new.envId.managerId);
+            }
+            if (view && !views.includes(view)) {
+                views.push(view);
+            }
+        }
+        this.fireDataChanged(views);
     }
 }

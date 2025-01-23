@@ -212,6 +212,7 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
             updateViewsAndStatus(statusBar, workspaceView, managerView, api);
         }),
         envManagers.onDidChangeEnvironmentFiltered(async (e) => {
+            managerView.environmentChanged(e);
             const location = e.uri?.fsPath ?? 'global';
             traceInfo(
                 `Internal: Changed environment from ${e.old?.displayName} to ${e.new?.displayName} for: ${location}`,
