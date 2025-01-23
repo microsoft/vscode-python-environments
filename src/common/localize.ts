@@ -138,3 +138,8 @@ export namespace ProjectCreatorString {
 
     export const noProjectsFound = l10n.t('No projects found');
 }
+
+export namespace EnvViewStrings {
+    export const selectedGlobalTooltip = l10n.t('This environment is selected for non-workspace files');
+    export const selectedWorkspaceTooltip = l10n.t('This environment is selected for workspace files');
+}

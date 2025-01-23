@@ -32,6 +32,7 @@ export class EnvManagerView implements TreeDataProvider<EnvTreeItem>, Disposable
     private revealMap = new Map<string, PythonEnvTreeItem>();
     private managerViews = new Map<string, EnvManagerTreeItem>();
     private packageRoots = new Map<string, PackageRootTreeItem>();
+    private selected: Map<string, string> = new Map();
     private disposables: Disposable[] = [];
 
     public constructor(public providers: EnvironmentManagers) {
@@ -44,6 +45,7 @@ export class EnvManagerView implements TreeDataProvider<EnvTreeItem>, Disposable
                 this.packageRoots.clear();
                 this.revealMap.clear();
                 this.managerViews.clear();
+                this.selected.clear();
             }),
             this.treeView,
             this.treeDataChanged,
@@ -59,6 +61,30 @@ export class EnvManagerView implements TreeDataProvider<EnvTreeItem>, Disposable
             }),
             this.providers.onDidChangePackageManager((p: DidChangePackageManagerEventArgs) => {
                 this.onDidChangePackageManager(p);
+            }),
+            this.providers.onDidChangeEnvironment((e) => {
+                const views = [];
+                if (e.old) {
+                    this.selected.delete(e.old.envId.id);
+                    let view: EnvTreeItem | undefined = this.packageRoots.get(e.old.envId.id);
+                    if (!view) {
+                        view = this.managerViews.get(e.old.envId.managerId);
+                    }
+                    if (view) {
+                        views.push(view);
+                    }
+                }
+                if (e.new) {
+                    this.selected.set(e.new.envId.id, e.uri === undefined ? 'global' : e.uri.fsPath);
+                    let view: EnvTreeItem | undefined = this.packageRoots.get(e.new.envId.id);
+                    if (!view) {
+                        view = this.managerViews.get(e.new.envId.managerId);
+                    }
+                    if (view && !views.includes(view)) {
+                        views.push(view);
+                    }
+                }
+                this.fireDataChanged(views);
             }),
         );
     }
@@ -99,7 +125,7 @@ export class EnvManagerView implements TreeDataProvider<EnvTreeItem>, Disposable
             const views: EnvTreeItem[] = [];
             const envs = await manager.getEnvironments('all');
             envs.filter((e) => !e.group).forEach((env) => {
-                const view = new PythonEnvTreeItem(env, element as EnvManagerTreeItem);
+                const view = new PythonEnvTreeItem(env, element as EnvManagerTreeItem, this.selected.get(env.envId.id));
                 views.push(view);
                 this.revealMap.set(env.envId.id, view);
             });
@@ -142,7 +168,7 @@ export class EnvManagerView implements TreeDataProvider<EnvTreeItem>, Disposable
             });
 
             grouped.forEach((env) => {
-                const view = new PythonEnvTreeItem(env, groupItem);
+                const view = new PythonEnvTreeItem(env, groupItem, this.selected.get(env.envId.id));
                 views.push(view);
                 this.revealMap.set(env.envId.id, view);
             });

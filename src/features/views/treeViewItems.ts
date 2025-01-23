@@ -3,6 +3,7 @@ import { InternalEnvironmentManager, InternalPackageManager } from '../../intern
 import { PythonEnvironment, IconPath, Package, PythonProject, EnvironmentGroupInfo } from '../../api';
 import { removable } from './utils';
 import { isActivatableEnvironment } from '../common/activation';
+import { EnvViewStrings } from '../../common/localize';
 
 export enum EnvTreeItemKind {
     manager = 'python-env-manager',
@@ -66,11 +67,24 @@ export class PythonEnvTreeItem implements EnvTreeItem {
     constructor(
         public readonly environment: PythonEnvironment,
         public readonly parent: EnvManagerTreeItem | PythonGroupEnvTreeItem,
+        public readonly selected?: string,
     ) {
-        const item = new TreeItem(environment.displayName ?? environment.name, TreeItemCollapsibleState.Collapsed);
+        let name = environment.displayName ?? environment.name;
+        if (selected) {
+            name = `★ ${name}`;
+        }
+
+        let tooltip = environment.tooltip;
+        if (selected) {
+            tooltip =
+                selected === 'global' ? EnvViewStrings.selectedGlobalTooltip : EnvViewStrings.selectedWorkspaceTooltip;
+            tooltip = `${tooltip} ● ${environment.tooltip}`;
+        }
+
+        const item = new TreeItem(name, TreeItemCollapsibleState.Collapsed);
         item.contextValue = this.getContextValue();
         item.description = environment.description;
-        item.tooltip = environment.tooltip;
+        item.tooltip = tooltip;
         item.iconPath = environment.iconPath;
         this.treeItem = item;
     }
