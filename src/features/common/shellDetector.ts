@@ -3,6 +3,7 @@ import { isWindows } from '../../managers/common/utils';
 import * as os from 'os';
 import { vscodeShell } from '../../common/vscodeEnv.apis';
 import { getConfiguration } from '../../common/workspace.apis';
+import unsafeEntries from '../../common/utils/unsafeEntries';
 import { TerminalShellType } from '../../api';
 
 /*
@@ -30,20 +31,23 @@ const IS_TCSHELL = /(tcsh$)/i;
 const IS_NUSHELL = /(nu$)/i;
 const IS_XONSH = /(xonsh$)/i;
 
-const detectableShells = new Map<TerminalShellType, RegExp>();
-detectableShells.set(TerminalShellType.powershell, IS_POWERSHELL);
-detectableShells.set(TerminalShellType.gitbash, IS_GITBASH);
-detectableShells.set(TerminalShellType.bash, IS_BASH);
-detectableShells.set(TerminalShellType.wsl, IS_WSL);
-detectableShells.set(TerminalShellType.zsh, IS_ZSH);
-detectableShells.set(TerminalShellType.ksh, IS_KSH);
-detectableShells.set(TerminalShellType.commandPrompt, IS_COMMAND);
-detectableShells.set(TerminalShellType.fish, IS_FISH);
-detectableShells.set(TerminalShellType.tcshell, IS_TCSHELL);
-detectableShells.set(TerminalShellType.cshell, IS_CSHELL);
-detectableShells.set(TerminalShellType.nushell, IS_NUSHELL);
-detectableShells.set(TerminalShellType.powershellCore, IS_POWERSHELL_CORE);
-detectableShells.set(TerminalShellType.xonsh, IS_XONSH);
+type KnownShellType = Exclude<TerminalShellType, TerminalShellType.unknown>;
+const detectableShells = new Map<KnownShellType, RegExp>(unsafeEntries({
+    [TerminalShellType.powershell]: IS_POWERSHELL,
+    [TerminalShellType.gitbash]: IS_GITBASH,
+    [TerminalShellType.bash]: IS_BASH,
+    [TerminalShellType.wsl]: IS_WSL,
+    [TerminalShellType.zsh]: IS_ZSH,
+    [TerminalShellType.ksh]: IS_KSH,
+    [TerminalShellType.commandPrompt]: IS_COMMAND,
+    [TerminalShellType.fish]: IS_FISH,
+    [TerminalShellType.tcshell]: IS_TCSHELL,
+    [TerminalShellType.cshell]: IS_CSHELL,
+    [TerminalShellType.nushell]: IS_NUSHELL,
+    [TerminalShellType.powershellCore]: IS_POWERSHELL_CORE,
+    [TerminalShellType.xonsh]: IS_XONSH,
+// This `satisfies` makes sure all shells are covered
+} satisfies Record<KnownShellType, RegExp>));
 
 function identifyShellFromShellPath(shellPath: string): TerminalShellType {
     // Remove .exe extension so shells can be more consistently detected
