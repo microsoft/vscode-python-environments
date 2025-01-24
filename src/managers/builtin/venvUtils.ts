@@ -31,6 +31,7 @@ import {
 } from '../../common/window.apis';
 import { showErrorMessage } from '../../common/errors/utils';
 import { Common, VenvManagerStrings } from '../../common/localize';
+import unsafeEntries from '../../common/utils/unsafeEntries';
 import { isUvInstalled, runUV, runPython } from './helpers';
 import { getWorkspacePackagesToInstall } from './pipUtils';
 
@@ -117,44 +118,47 @@ async function getPythonInfo(env: NativeEnvInfo): Promise<PythonEnvironmentInfo>
         const name = `${venvName} (${sv})`;
 
         const binDir = path.dirname(env.executable);
+        
+        /** Venv activation/deactivation for a POSIXy shell */
+        const venvMgr = (suffix = '', executable = 'source') => ({
+            activate: { executable, args: [path.join(binDir, `activate${suffix}`)] },
+            deactivate: { executable: 'deactivate' },
+        });
+        // A Record to make sure all shells are covered
+        const venvManagers: Record<
+            Exclude<TerminalShellType, TerminalShellType.unknown>,
+            {activate: PythonCommandRunConfiguration, deactivate: PythonCommandRunConfiguration}
+        > = {
+            [TerminalShellType.bash]: venvMgr(),
+            [TerminalShellType.gitbash]: venvMgr(),
+            [TerminalShellType.zsh]: venvMgr(),
+            [TerminalShellType.wsl]: venvMgr(),
+            [TerminalShellType.ksh]: venvMgr('', '.'),
+            [TerminalShellType.cshell]: venvMgr('.csh'),
+            [TerminalShellType.tcshell]: venvMgr('.csh'),
+            [TerminalShellType.powershell]: venvMgr('.ps1', '&'),
+            [TerminalShellType.powershellCore]: venvMgr('.ps1', '&'),
+            [TerminalShellType.fish]: venvMgr('.fish'),
+            [TerminalShellType.commandPrompt]: {
+                activate: { executable: path.join(binDir, 'activate.bat') },
+                deactivate: { executable: path.join(binDir, 'deactivate.bat') },
+            },
+            [TerminalShellType.xonsh]: venvMgr('.xsh'),
+            [TerminalShellType.nushell]: {
+                activate: { executable: 'overlay', args: ['use', path.join(binDir, 'activate.nu')] },
+                deactivate: { executable: 'overlay', args: ['hide', 'activate'] },
+            },
+        };
 
         const shellActivation: Map<TerminalShellType, PythonCommandRunConfiguration[]> = new Map();
         const shellDeactivation: Map<TerminalShellType, PythonCommandRunConfiguration[]> = new Map();
 
-        // Commands for bash
-        shellActivation.set(TerminalShellType.bash, [{ executable: 'source', args: [path.join(binDir, 'activate')] }]);
-        shellDeactivation.set(TerminalShellType.bash, [{ executable: 'deactivate' }]);
-
-        // Commands for csh
-        shellActivation.set(TerminalShellType.cshell, [
-            { executable: 'source', args: [path.join(binDir, 'activate')] },
-        ]);
-        shellDeactivation.set(TerminalShellType.cshell, [{ executable: 'deactivate' }]);
-
-        // Commands for zsh
-        shellActivation.set(TerminalShellType.zsh, [{ executable: 'source', args: [path.join(binDir, 'activate')] }]);
-        shellDeactivation.set(TerminalShellType.zsh, [{ executable: 'deactivate' }]);
-
-        // Commands for powershell
-        shellActivation.set(TerminalShellType.powershell, [
-            { executable: '&', args: [path.join(binDir, 'Activate.ps1')] },
-        ]);
-        shellActivation.set(TerminalShellType.powershellCore, [
-            { executable: '&', args: [path.join(binDir, 'Activate.ps1')] },
-        ]);
-        shellDeactivation.set(TerminalShellType.powershell, [{ executable: 'deactivate' }]);
-        shellDeactivation.set(TerminalShellType.powershellCore, [{ executable: 'deactivate' }]);
-
-        // Commands for command prompt
-        shellActivation.set(TerminalShellType.commandPrompt, [{ executable: path.join(binDir, 'activate.bat') }]);
-        shellDeactivation.set(TerminalShellType.commandPrompt, [{ executable: path.join(binDir, 'deactivate.bat') }]);
-
-        // Commands for fish
-        if (await fsapi.pathExists(path.join(binDir, 'activate.fish'))) {
-            shellActivation.set(TerminalShellType.fish, [
-                { executable: 'source', args: [path.join(binDir, 'activate.fish')] },
-            ]);
-            shellDeactivation.set(TerminalShellType.fish, [{ executable: 'deactivate' }]);
+        for (const [shell, {activate, deactivate}] of unsafeEntries(venvManagers)) {
+            if (shell === TerminalShellType.fish && activate.args && !await fsapi.pathExists(activate?.args[0])) {
+                continue;
+            }
+            shellActivation.set(shell, [activate]);
+            shellDeactivation.set(shell, [deactivate]);
         }
 
         // Commands for unknown cases
