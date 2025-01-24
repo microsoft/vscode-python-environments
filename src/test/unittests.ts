@@ -130,4 +130,6 @@ mockedVSCode.LogLevel = vscodeMocks.LogLevel;
 (mockedVSCode as any).CancellationError = vscodeMocks.vscMockExtHostedTypes.CancellationError;
 (mockedVSCode as any).LSPCancellationError = vscodeMocks.vscMockExtHostedTypes.LSPCancellationError;
 mockedVSCode.TestRunProfileKind = vscodeMocks.TestRunProfileKind;
+mockedVSCode.LanguageModelTextPart = vscodeMocks.vscMockCopilotTools.LanguageModelTextPart;
+
 initialize();

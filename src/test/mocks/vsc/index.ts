@@ -8,6 +8,7 @@ import * as vscode from 'vscode';
 // export * from './selection';
 export * as vscMockExtHostedTypes from './extHostedTypes';
 export * as vscUri from './uri';
+export * as vscMockCopilotTools from './copilotTools';
 
 const escapeCodiconsRegex = /(\\)?\$\([a-z0-9\-]+?(?:~[a-z0-9\-]*?)?\)/gi;
 export function escapeCodicons(text: string): string {

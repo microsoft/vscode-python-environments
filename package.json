@@ -444,6 +444,31 @@
             {
                 "type": "python"
             }
+        ],
+        "languageModelTools": [
+            {
+                "name": "python_get_packages",
+                "displayName": "Get Python Packages",
+                "modelDescription": "Returns the packages installed in the given Python file's environment. You should call this when you want to generate Python code to determine the users preferred packages. Also call this to determine if you need to provide installation instructions in a response.",
+                "toolReferenceName": "pythonGetPackages",
+                "tags": [
+                    "vscode_editing"
+                ],
+                "icon": "$(files)",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "filePath": {
+                            "type": "string"
+                        }
+                    },
+                    "description": "The path to the Python file or workspace to get the installed packages for.",
+                    "required": [
+                        "filePath"
+                    ]
+                },
+                "canBeReferencedInPrompt": true
+            }
         ]
     },
     "scripts": {
@@ -465,7 +490,7 @@
         "@types/node": "20.2.5",
         "@types/sinon": "^17.0.3",
         "@types/stack-trace": "0.0.29",
-        "@types/vscode": "^1.93.0",
+        "@types/vscode": "^1.96.0",
         "@types/which": "^3.0.4",
         "@typescript-eslint/eslint-plugin": "^8.16.0",
         "@typescript-eslint/parser": "^8.16.0",
@@ -491,5 +516,10 @@
         "stack-trace": "0.0.10",
         "vscode-jsonrpc": "^9.0.0-next.5",
         "which": "^4.0.0"
-    }
+    },
+    "enabledApiProposals": [
+        "chatParticipantPrivate",
+        "chatParticipantAdditions",
+        "chatVariableResolver"
+    ]
 }
