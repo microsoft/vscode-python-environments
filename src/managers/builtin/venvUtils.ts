@@ -130,13 +130,13 @@ async function getPythonInfo(env: NativeEnvInfo): Promise<PythonEnvironmentInfo>
         const cmdMgr = (suffix = ''): VenvManager => ({
             activate: { executable: path.join(binDir, `activate${suffix}`) },
             deactivate: { executable: path.join(binDir, `deactivate${suffix}`) },
-            supportsStdlib: true,
+            supportsStdlib: ['', '.bat'].includes(suffix),
         });
         /** Venv activation/deactivation for a POSIXy shell */
         const sourceMgr = (suffix = '', executable = 'source'): VenvManager => ({
             activate: { executable, args: [path.join(binDir, `activate${suffix}`)] },
             deactivate: { executable: 'deactivate' },
-            supportsStdlib: ['', '.ps1'].includes(suffix)
+            supportsStdlib: ['', '.ps1'].includes(suffix),
         });
         // satisfies `Record` to make sure all shells are covered
         const venvManagers: Record<TerminalShellType, VenvManager> = {
