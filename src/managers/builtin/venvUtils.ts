@@ -119,50 +119,64 @@ async function getPythonInfo(env: NativeEnvInfo): Promise<PythonEnvironmentInfo>
 
         const binDir = path.dirname(env.executable);
         
+        interface VenvManager {
+            activate: PythonCommandRunConfiguration,
+            deactivate: PythonCommandRunConfiguration,
+            /// true if created by the builtin `venv` module and not just the `virtualenv` package.
+            supportsStdlib: boolean,
+        }
+        
         /** Venv activation/deactivation using a command */
-        const cmdMgr = (suffix = '') => ({
+        const cmdMgr = (suffix = ''): VenvManager => ({
             activate: { executable: path.join(binDir, `activate${suffix}`) },
             deactivate: { executable: path.join(binDir, `deactivate${suffix}`) },
+            supportsStdlib: true,
         });
         /** Venv activation/deactivation for a POSIXy shell */
-        const sourceMgr = (suffix = '', executable = 'source') => ({
+        const sourceMgr = (suffix = '', executable = 'source'): VenvManager => ({
             activate: { executable, args: [path.join(binDir, `activate${suffix}`)] },
             deactivate: { executable: 'deactivate' },
+            supportsStdlib: ['', '.ps1'].includes(suffix)
         });
         // satisfies `Record` to make sure all shells are covered
-        const venvManagers: Record<
-            TerminalShellType,
-            {activate: PythonCommandRunConfiguration, deactivate: PythonCommandRunConfiguration}
-        > = {
+        const venvManagers: Record<TerminalShellType, VenvManager> = {
+            // Shells supported by the builtin `venv` module
             [TerminalShellType.bash]: sourceMgr(),
             [TerminalShellType.gitbash]: sourceMgr(),
             [TerminalShellType.zsh]: sourceMgr(),
             [TerminalShellType.wsl]: sourceMgr(),
             [TerminalShellType.ksh]: sourceMgr('', '.'),
-            [TerminalShellType.cshell]: sourceMgr('.csh'),
-            [TerminalShellType.tcshell]: sourceMgr('.csh'),
             [TerminalShellType.powershell]: sourceMgr('.ps1', '&'),
             [TerminalShellType.powershellCore]: sourceMgr('.ps1', '&'),
-            [TerminalShellType.fish]: sourceMgr('.fish'),
             [TerminalShellType.commandPrompt]: cmdMgr('.bat'),
+            // Shells supported by the `virtualenv` package
+            [TerminalShellType.cshell]: sourceMgr('.csh'),
+            [TerminalShellType.tcshell]: sourceMgr('.csh'),
+            [TerminalShellType.fish]: sourceMgr('.fish'),
             [TerminalShellType.xonsh]: sourceMgr('.xsh'),
             [TerminalShellType.nushell]: {
                 activate: { executable: 'overlay', args: ['use', path.join(binDir, 'activate.nu')] },
                 deactivate: { executable: 'overlay', args: ['hide', 'activate'] },
+                supportsStdlib: false,
             },
+            // Fallback
             [TerminalShellType.unknown]: isWindows() ? cmdMgr() : sourceMgr(),
         };
 
         const shellActivation: Map<TerminalShellType, PythonCommandRunConfiguration[]> = new Map();
         const shellDeactivation: Map<TerminalShellType, PythonCommandRunConfiguration[]> = new Map();
 
-        for (const [shell, {activate, deactivate}] of unsafeEntries(venvManagers)) {
-            if (shell === TerminalShellType.fish && activate.args && !await fsapi.pathExists(activate?.args[0])) {
-                continue;
+        await Promise.all(unsafeEntries(venvManagers).map(async ([shell, mgr]) => {
+            if (
+                !mgr.supportsStdlib &&
+                mgr.activate.args &&
+                !await fsapi.pathExists(mgr.activate.args[mgr.activate.args.length - 1])
+            ) {
+                return;
             }
-            shellActivation.set(shell, [activate]);
-            shellDeactivation.set(shell, [deactivate]);
-        }
+            shellActivation.set(shell, [mgr.activate]);
+            shellDeactivation.set(shell, [mgr.deactivate]);
+        }));
 
         return {
             name: name,
