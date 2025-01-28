@@ -69,7 +69,7 @@ Tools that may rely on these APIs in their own extensions include:
 ### API Dependency
 The relationship between these extensions can be represented as follows:
 
-<img src=https://raw.githubusercontent.com/microsoft/vscode-python-environments/main/images/extension_relationships.gif width=734 height=413>
+<img src=https://raw.githubusercontent.com/microsoft/vscode-python-environments/refs/heads/main/images/extension_relationships.png width=734 height=413>
 
 Users who do not need to execute code or work in **Virtual Workspaces** can use the Python extension to access language features like hover, completion, and go-to definition. However, executing code (e.g., running a debugger, linter, or formatter), creating/modifying environments, or managing packages requires the Python Environments extension to enable these functionalities.
 
