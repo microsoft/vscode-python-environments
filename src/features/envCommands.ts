@@ -138,7 +138,7 @@ export async function createAnyEnvironmentCommand(
             }
             return env;
         }
-    } else if (projects && projects.length === 0) {
+    } else if (!projects || projects.length === 0) {
         const managerId = await pickEnvironmentManager(em.managers.filter((m) => m.supportsCreate));
 
         const manager = em.managers.find((m) => m.id === managerId);
