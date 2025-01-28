@@ -79,7 +79,7 @@ VS Code supports trust management, allowing extensions to function in either **t
 
 The relationship is illustrated below:
 
-<img src=https://raw.githubusercontent.com/microsoft/vscode-python-environments/main/images/trust_relationships.gif width=734 height=413>
+<img src=https://raw.githubusercontent.com/microsoft/vscode-python-environments/refs/heads/main/images/trust_relationships.png width=734 height=413>
 
 In **trusted mode**, the Python Environments extension supports tasks like managing environments, installing/removing packages, and running tools. In **untrusted mode**, functionality is limited to language features, ensuring a secure and restricted environment.
 
