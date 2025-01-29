@@ -49,6 +49,8 @@ export async function pickProjectMany(
         }
     } else if (projects.length === 1) {
         return [...projects];
+    } else if (projects.length === 0) {
+        return [];
     }
     return undefined;
 }

@@ -111,43 +111,46 @@ export async function createAnyEnvironmentCommand(
     options?: any,
 ): Promise<PythonEnvironment | undefined> {
     const select = options?.selectEnvironment;
-    const projects = await pickProjectMany(pm.getProjects());
-    if (projects && projects.length > 0) {
-        const defaultManagers: InternalEnvironmentManager[] = [];
-
-        projects.forEach((p) => {
-            const manager = em.getEnvironmentManager(p.uri);
-            if (manager && manager.supportsCreate && !defaultManagers.includes(manager)) {
-                defaultManagers.push(manager);
-            }
-        });
-
-        const managerId = await pickEnvironmentManager(
-            em.managers.filter((m) => m.supportsCreate),
-            defaultManagers,
-        );
-
-        const manager = em.managers.find((m) => m.id === managerId);
-        if (manager) {
-            const env = await manager.create(projects.map((p) => p.uri));
-            if (select) {
-                await em.setEnvironments(
-                    projects.map((p) => p.uri),
-                    env,
-                );
-            }
-            return env;
-        }
-    } else if (!projects || projects.length === 0) {
+    const projects = pm.getProjects();
+    if (projects.length === 0) {
         const managerId = await pickEnvironmentManager(em.managers.filter((m) => m.supportsCreate));
-
         const manager = em.managers.find((m) => m.id === managerId);
         if (manager) {
             const env = await manager.create('global');
-            if (select) {
+            if (select && env) {
                 await manager.set(undefined, env);
             }
             return env;
+        }
+    } else if (projects.length > 0) {
+        const selected = await pickProjectMany(projects);
+
+        if (selected && selected.length > 0) {
+            const defaultManagers: InternalEnvironmentManager[] = [];
+
+            selected.forEach((p) => {
+                const manager = em.getEnvironmentManager(p.uri);
+                if (manager && manager.supportsCreate && !defaultManagers.includes(manager)) {
+                    defaultManagers.push(manager);
+                }
+            });
+
+            const managerId = await pickEnvironmentManager(
+                em.managers.filter((m) => m.supportsCreate),
+                defaultManagers,
+            );
+
+            const manager = em.managers.find((m) => m.id === managerId);
+            if (manager) {
+                const env = await manager.create(selected.map((p) => p.uri));
+                if (select && env) {
+                    await em.setEnvironments(
+                        selected.map((p) => p.uri),
+                        env,
+                    );
+                }
+                return env;
+            }
         }
     }
 }
