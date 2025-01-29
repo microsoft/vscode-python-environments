@@ -18,6 +18,9 @@ suite('GetPackagesTool Tests', () => {
         mockApi = typeMoq.Mock.ofType<PythonProjectEnvironmentApi & PythonPackageGetterApi>();
         mockEnvironment = typeMoq.Mock.ofType<PythonEnvironment>();
 
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        mockEnvironment.setup((x: any) => x.then).returns(() => undefined);
+
         // refresh will always return a resolved promise
         mockApi.setup((x) => x.refreshPackages(typeMoq.It.isAny())).returns(() => Promise.resolve());
 
@@ -30,9 +33,6 @@ suite('GetPackagesTool Tests', () => {
     });
 
     test('should throw error if filePath is undefined', async () => {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        mockEnvironment.setup((x: any) => x.then).returns(() => undefined);
-
         const testFile: IGetActiveFile = {
             filePath: '',
         };
@@ -61,9 +61,6 @@ suite('GetPackagesTool Tests', () => {
     });
 
     test('should throw error for notebook cells', async () => {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        mockEnvironment.setup((x: any) => x.then).returns(() => undefined);
-
         const testFile: IGetActiveFile = {
             filePath: 'test.ipynb#123',
         };
@@ -83,9 +80,6 @@ suite('GetPackagesTool Tests', () => {
         const testFile: IGetActiveFile = {
             filePath: 'test.py',
         };
-
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        mockEnvironment.setup((x: any) => x.then).returns(() => undefined);
 
         mockApi
             .setup((x) => x.getEnvironment(typeMoq.It.isAny()))
@@ -108,9 +102,6 @@ suite('GetPackagesTool Tests', () => {
         const testFile: IGetActiveFile = {
             filePath: 'test.py',
         };
-
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        mockEnvironment.setup((x: any) => x.then).returns(() => undefined);
 
         mockApi
             .setup((x) => x.getEnvironment(typeMoq.It.isAny()))
@@ -151,9 +142,6 @@ suite('GetPackagesTool Tests', () => {
         const testFile: IGetActiveFile = {
             filePath: 'test.py',
         };
-
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        mockEnvironment.setup((x: any) => x.then).returns(() => undefined);
 
         mockApi
             .setup((x) => x.getEnvironment(typeMoq.It.isAny()))
@@ -196,9 +184,6 @@ suite('GetPackagesTool Tests', () => {
         const testFile: IGetActiveFile = {
             filePath: 'test.py',
         };
-
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        mockEnvironment.setup((x: any) => x.then).returns(() => undefined);
 
         mockApi
             .setup((x) => x.getEnvironment(typeMoq.It.isAny()))
