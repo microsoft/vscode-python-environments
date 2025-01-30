@@ -11,20 +11,20 @@ export enum EventNames {
 // Map all events to their properties
 export interface IEventNamePropertyMapping {
     /* __GDPR__
-       "extension_activation_duration": {
+       "extension.activation_duration": {
            "duration" : { "classification": "SystemMetaData", "purpose": "FeatureInsight", "owner": "karthiknadig" }
        }
     */
     [EventNames.EXTENSION_ACTIVATION_DURATION]: never | undefined;
     /* __GDPR__
-       "extension_manager_registration_duration": {
+       "extension.manager_registration_duration": {
            "duration" : { "classification": "SystemMetaData", "purpose": "FeatureInsight", "owner": "karthiknadig" }
        }
     */
     [EventNames.EXTENSION_MANAGER_REGISTRATION_DURATION]: never | undefined;
 
     /* __GDPR__
-        "environment_manager_registered": {
+        "environment_manager.registered": {
             "managerId" : { "classification": "SystemMetaData", "purpose": "FeatureInsight", "owner": "karthiknadig" }
         }
     */
@@ -33,7 +33,7 @@ export interface IEventNamePropertyMapping {
     };
 
     /* __GDPR__
-        "package_manager_registered": {
+        "package_manager.registered": {
             "managerId" : { "classification": "SystemMetaData", "purpose": "FeatureInsight", "owner": "karthiknadig" }
         }
     */
@@ -42,7 +42,7 @@ export interface IEventNamePropertyMapping {
     };
 
     /* __GDPR__
-        "venv_using_uv": {"owner": "karthiknadig" }
+        "venv.using_uv": {"owner": "karthiknadig" }
     */
     [EventNames.VENV_USING_UV]: never | undefined;
 }
