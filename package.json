@@ -2,7 +2,7 @@
     "name": "vscode-python-envs",
     "displayName": "Python Environments",
     "description": "Provides a unified python environment experience",
-    "version": "0.2.0",
+    "version": "0.3.0-dev",
     "publisher": "ms-python",
     "preview": true,
     "engines": {
