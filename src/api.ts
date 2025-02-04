@@ -58,7 +58,7 @@ export enum TerminalShellType {
     ksh = 'ksh',
     fish = 'fish',
     cshell = 'cshell',
-    tcshell = 'tshell',
+    tcshell = 'tcshell',
     nushell = 'nushell',
     wsl = 'wsl',
     xonsh = 'xonsh',
