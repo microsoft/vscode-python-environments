@@ -519,6 +519,7 @@
     "enabledApiProposals": [
         "chatParticipantPrivate",
         "chatParticipantAdditions",
-        "chatVariableResolver"
+        "chatVariableResolver",
+        "terminalShellType"
     ]
 }

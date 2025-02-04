@@ -1,4 +1,4 @@
-import { Terminal } from 'vscode';
+import { Terminal, TerminalShellType as TerminalShellTypeVscode } from 'vscode';
 import { isWindows } from '../../managers/common/utils';
 import * as os from 'os';
 import { vscodeShell } from '../../common/vscodeEnv.apis';
@@ -32,22 +32,24 @@ const IS_NUSHELL = /(nu$)/i;
 const IS_XONSH = /(xonsh$)/i;
 
 type KnownShellType = Exclude<TerminalShellType, TerminalShellType.unknown>;
-const detectableShells = new Map<KnownShellType, RegExp>(unsafeEntries({
-    [TerminalShellType.powershell]: IS_POWERSHELL,
-    [TerminalShellType.gitbash]: IS_GITBASH,
-    [TerminalShellType.bash]: IS_BASH,
-    [TerminalShellType.wsl]: IS_WSL,
-    [TerminalShellType.zsh]: IS_ZSH,
-    [TerminalShellType.ksh]: IS_KSH,
-    [TerminalShellType.commandPrompt]: IS_COMMAND,
-    [TerminalShellType.fish]: IS_FISH,
-    [TerminalShellType.tcshell]: IS_TCSHELL,
-    [TerminalShellType.cshell]: IS_CSHELL,
-    [TerminalShellType.nushell]: IS_NUSHELL,
-    [TerminalShellType.powershellCore]: IS_POWERSHELL_CORE,
-    [TerminalShellType.xonsh]: IS_XONSH,
-// This `satisfies` makes sure all shells are covered
-} satisfies Record<KnownShellType, RegExp>));
+const detectableShells = new Map<KnownShellType, RegExp>(
+    unsafeEntries({
+        [TerminalShellType.powershell]: IS_POWERSHELL,
+        [TerminalShellType.gitbash]: IS_GITBASH,
+        [TerminalShellType.bash]: IS_BASH,
+        [TerminalShellType.wsl]: IS_WSL,
+        [TerminalShellType.zsh]: IS_ZSH,
+        [TerminalShellType.ksh]: IS_KSH,
+        [TerminalShellType.commandPrompt]: IS_COMMAND,
+        [TerminalShellType.fish]: IS_FISH,
+        [TerminalShellType.tcshell]: IS_TCSHELL,
+        [TerminalShellType.cshell]: IS_CSHELL,
+        [TerminalShellType.nushell]: IS_NUSHELL,
+        [TerminalShellType.powershellCore]: IS_POWERSHELL_CORE,
+        [TerminalShellType.xonsh]: IS_XONSH,
+        // This `satisfies` makes sure all shells are covered
+    } satisfies Record<KnownShellType, RegExp>),
+);
 
 function identifyShellFromShellPath(shellPath: string): TerminalShellType {
     // Remove .exe extension so shells can be more consistently detected
@@ -122,8 +124,38 @@ function identifyShellFromSettings(): TerminalShellType {
     return shellPath ? identifyShellFromShellPath(shellPath) : TerminalShellType.unknown;
 }
 
+function fromShellTypeApi(terminal: Terminal): TerminalShellType {
+    switch (terminal.state.shellType) {
+        case TerminalShellTypeVscode.Sh:
+        case TerminalShellTypeVscode.Bash:
+            return TerminalShellType.bash;
+        case TerminalShellTypeVscode.Fish:
+            return TerminalShellType.fish;
+        case TerminalShellTypeVscode.Csh:
+            return TerminalShellType.cshell;
+        case TerminalShellTypeVscode.Ksh:
+            return TerminalShellType.ksh;
+        case TerminalShellTypeVscode.Zsh:
+            return TerminalShellType.zsh;
+        case TerminalShellTypeVscode.CommandPrompt:
+            return TerminalShellType.commandPrompt;
+        case TerminalShellTypeVscode.GitBash:
+            return TerminalShellType.gitbash;
+        case TerminalShellTypeVscode.PowerShell:
+            return TerminalShellType.powershellCore;
+        case TerminalShellTypeVscode.NuShell:
+            return TerminalShellType.nushell;
+        default:
+            return TerminalShellType.unknown;
+    }
+}
+
 export function identifyTerminalShell(terminal: Terminal): TerminalShellType {
-    let shellType = identifyShellFromTerminalName(terminal);
+    let shellType = fromShellTypeApi(terminal);
+
+    if (shellType === TerminalShellType.unknown) {
+        shellType = identifyShellFromTerminalName(terminal);
+    }
 
     if (shellType === TerminalShellType.unknown) {
         shellType = identifyShellFromSettings();
