@@ -520,6 +520,7 @@
         "chatParticipantPrivate",
         "chatParticipantAdditions",
         "chatVariableResolver",
+        "terminalShellEnv",
         "terminalShellType"
     ]
 }

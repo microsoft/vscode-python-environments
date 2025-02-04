@@ -375,6 +375,11 @@ export class TerminalManagerImpl implements TerminalManager {
     }
 
     public isActivated(terminal: Terminal, environment?: PythonEnvironment): boolean {
+        const envVar = terminal.shellIntegration?.env;
+        if (envVar) {
+            return !!envVar['VIRTUAL_ENV'];
+        }
+
         if (!environment) {
             return this.activatedTerminals.has(terminal);
         }
