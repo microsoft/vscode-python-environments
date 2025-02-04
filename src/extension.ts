@@ -55,8 +55,8 @@ import { EventNames } from './common/telemetry/constants';
 import { ensureCorrectVersion } from './common/extVersion';
 import { ExistingProjects } from './features/creators/existingProjects';
 import { AutoFindProjects } from './features/creators/autoFindProjects';
-import { GetPackagesTool } from './copilotTools';
 import { registerTools } from './common/lm.apis';
+import { GetPackagesTool } from './features/copilotTools';
 
 export async function activate(context: ExtensionContext): Promise<PythonEnvironmentApi> {
     const start = new StopWatch();
@@ -242,7 +242,6 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
     });
 
     sendTelemetryEvent(EventNames.EXTENSION_ACTIVATION_DURATION, start.elapsedTime);
-
 
     return api;
 }

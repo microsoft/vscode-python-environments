@@ -1,12 +1,10 @@
 import * as assert from 'assert';
 import * as vscode from 'vscode';
-import { GetPackagesTool } from '../copilotTools';
-//import { PythonEnvironment, Package } from '../api';
-import { IGetActiveFile } from '../copilotTools';
 import * as sinon from 'sinon';
 import * as typeMoq from 'typemoq';
 import { Package, PythonEnvironment, PythonPackageGetterApi, PythonProjectEnvironmentApi } from '../api';
 import { createDeferred } from '../common/utils/deferred';
+import { GetPackagesTool, IGetActiveFile } from '../features/copilotTools';
 
 suite('GetPackagesTool Tests', () => {
     let tool: GetPackagesTool;

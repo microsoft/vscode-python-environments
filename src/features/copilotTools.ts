@@ -8,8 +8,8 @@ import {
     PreparedToolInvocation,
     Uri,
 } from 'vscode';
-import { PythonPackageGetterApi, PythonProjectEnvironmentApi } from './api';
-import { createDeferred } from './common/utils/deferred';
+import { PythonPackageGetterApi, PythonProjectEnvironmentApi } from '../api';
+import { createDeferred } from '../common/utils/deferred';
 
 export interface IGetActiveFile {
     filePath?: string;
@@ -60,7 +60,7 @@ export class GetPackagesTool implements LanguageModelTool<IGetActiveFile> {
                 resultMessage = 'No packages are installed in the current environment.';
             } else {
                 const packageNames = installedPackages
-                    .map((pkg) => pkg.version ? `${pkg.name} (${pkg.version})` : pkg.name)
+                    .map((pkg) => (pkg.version ? `${pkg.name} (${pkg.version})` : pkg.name))
                     .join(', ');
                 resultMessage = 'The packages installed in the current environment are as follows:\n' + packageNames;
             }
