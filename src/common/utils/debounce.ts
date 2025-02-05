@@ -5,7 +5,7 @@ export interface SimpleDebounce {
 class SimpleDebounceImpl {
     private timeout: NodeJS.Timeout | undefined;
 
-    constructor(private readonly delay: number, private readonly callback: () => void) {}
+    constructor(private readonly ms: number, private readonly callback: () => void) {}
 
     public trigger() {
         if (this.timeout) {
@@ -13,10 +13,10 @@ class SimpleDebounceImpl {
         }
         this.timeout = setTimeout(() => {
             this.callback();
-        }, this.delay);
+        }, this.ms);
     }
 }
 
-export function createSimpleDebounce(delay: number, callback: () => void): SimpleDebounce {
-    return new SimpleDebounceImpl(delay, callback);
+export function createSimpleDebounce(ms: number, callback: () => void): SimpleDebounce {
+    return new SimpleDebounceImpl(ms, callback);
 }

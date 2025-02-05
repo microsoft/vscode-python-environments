@@ -110,6 +110,14 @@ export function onDidCloseTerminal(
     return window.onDidCloseTerminal(listener, thisArgs, disposables);
 }
 
+export function onDidChangeTerminalState(
+    listener: (e: Terminal) => any,
+    thisArgs?: any,
+    disposables?: Disposable[],
+): Disposable {
+    return window.onDidChangeTerminalState(listener, thisArgs, disposables);
+}
+
 export function showTextDocument(uri: Uri): Thenable<TextEditor> {
     return window.showTextDocument(uri);
 }

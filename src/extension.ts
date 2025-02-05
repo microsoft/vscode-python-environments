@@ -1,4 +1,4 @@
-import { commands, ExtensionContext, LogOutputChannel } from 'vscode';
+import { commands, ExtensionContext, LogOutputChannel, Terminal, Uri } from 'vscode';
 
 import { PythonEnvironmentManagers } from './features/envManagers';
 import { registerLogger, traceInfo } from './common/logging';
@@ -30,7 +30,7 @@ import { EnvironmentManagers, ProjectCreators, PythonProjectManager } from './in
 import { getPythonApi, setPythonApi } from './features/pythonApi';
 import { setPersistentState } from './common/persistentState';
 import { createNativePythonFinder, NativePythonFinder } from './managers/common/nativePythonFinder';
-import { PythonEnvironmentApi } from './api';
+import { PythonEnvironment, PythonEnvironmentApi } from './api';
 import { ProjectCreatorsImpl } from './features/creators/projectCreators';
 import { ProjectView } from './features/views/projectView';
 import { registerCompletionProvider } from './features/settings/settingCompletions';
@@ -40,12 +40,9 @@ import {
     createLogOutputChannel,
     onDidChangeActiveTerminal,
     onDidChangeActiveTextEditor,
+    onDidChangeTerminalShellIntegration,
 } from './common/window.apis';
-import {
-    getEnvironmentForTerminal,
-    setActivateMenuButtonContext,
-    updateActivateMenuButtonContext,
-} from './features/terminal/activateMenuButton';
+import { setActivateMenuButtonContext } from './features/terminal/activateMenuButton';
 import { PythonStatusBarImpl } from './features/views/pythonStatusBar';
 import { updateViewsAndStatus } from './features/views/revealHandler';
 import { EnvVarManager, PythonEnvVariableManager } from './features/execution/envVariableManager';
@@ -57,6 +54,8 @@ import { ExistingProjects } from './features/creators/existingProjects';
 import { AutoFindProjects } from './features/creators/autoFindProjects';
 import { registerTools } from './common/lm.apis';
 import { GetPackagesTool } from './features/copilotTools';
+import { TerminalActivationImpl } from './features/terminal/terminalActivationState';
+import { getEnvironmentForTerminal } from './features/terminal/utils';
 
 export async function activate(context: ExtensionContext): Promise<PythonEnvironmentApi> {
     const start = new StopWatch();
@@ -82,8 +81,9 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
     const envManagers: EnvironmentManagers = new PythonEnvironmentManagers(projectManager);
     context.subscriptions.push(envManagers);
 
-    const terminalManager: TerminalManager = new TerminalManagerImpl(projectManager, envManagers);
-    context.subscriptions.push(terminalManager);
+    const terminalActivation = new TerminalActivationImpl();
+    const terminalManager: TerminalManager = new TerminalManagerImpl(terminalActivation);
+    context.subscriptions.push(terminalActivation, terminalManager);
 
     const projectCreators: ProjectCreators = new ProjectCreatorsImpl();
     context.subscriptions.push(
@@ -103,9 +103,10 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
     workspaceView.initialize();
     const api = await getPythonApi();
 
+    const monitoredTerminals = new Map<Terminal, PythonEnvironment>();
+
     context.subscriptions.push(
         registerCompletionProvider(envManagers),
-
         registerTools('python_get_packages', new GetPackagesTool(api)),
         commands.registerCommand('python-envs.viewLogs', () => outputChannel.show()),
         commands.registerCommand('python-envs.refreshManager', async (item) => {
@@ -181,10 +182,9 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
         commands.registerCommand('python-envs.terminal.activate', async () => {
             const terminal = activeTerminal();
             if (terminal) {
-                const env = await getEnvironmentForTerminal(terminalManager, projectManager, envManagers, terminal);
+                const env = await getEnvironmentForTerminal(api, terminal);
                 if (env) {
                     await terminalManager.activate(terminal, env);
-                    await setActivateMenuButtonContext(terminalManager, terminal, env);
                 }
             }
         }),
@@ -192,27 +192,26 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
             const terminal = activeTerminal();
             if (terminal) {
                 await terminalManager.deactivate(terminal);
-                const env = await getEnvironmentForTerminal(terminalManager, projectManager, envManagers, terminal);
-                if (env) {
-                    await setActivateMenuButtonContext(terminalManager, terminal, env);
-                }
             }
         }),
-        envManagers.onDidChangeEnvironmentManager(async () => {
-            await updateActivateMenuButtonContext(terminalManager, projectManager, envManagers);
+        terminalActivation.onDidChangeTerminalActivationState(async (e) => {
+            await setActivateMenuButtonContext(e.terminal, e.environment, e.activated);
         }),
         onDidChangeActiveTerminal(async (t) => {
-            await updateActivateMenuButtonContext(terminalManager, projectManager, envManagers, t);
+            if (t) {
+                const env = terminalActivation.getEnvironment(t) ?? (await getEnvironmentForTerminal(api, t));
+                if (env) {
+                    await setActivateMenuButtonContext(t, env, terminalActivation.isActivated(t));
+                }
+            }
         }),
         onDidChangeActiveTextEditor(async () => {
             updateViewsAndStatus(statusBar, workspaceView, managerView, api);
         }),
         envManagers.onDidChangeEnvironment(async () => {
-            await updateActivateMenuButtonContext(terminalManager, projectManager, envManagers);
             updateViewsAndStatus(statusBar, workspaceView, managerView, api);
         }),
         envManagers.onDidChangeEnvironments(async () => {
-            await updateActivateMenuButtonContext(terminalManager, projectManager, envManagers);
             updateViewsAndStatus(statusBar, workspaceView, managerView, api);
         }),
         envManagers.onDidChangeEnvironmentFiltered(async (e) => {
@@ -221,8 +220,24 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
             traceInfo(
                 `Internal: Changed environment from ${e.old?.displayName} to ${e.new?.displayName} for: ${location}`,
             );
-            await updateActivateMenuButtonContext(terminalManager, projectManager, envManagers);
             updateViewsAndStatus(statusBar, workspaceView, managerView, api);
+        }),
+        onDidChangeTerminalShellIntegration(async (e) => {
+            const envVar = e.shellIntegration?.env;
+            if (envVar) {
+                if (envVar['VIRTUAL_ENV']) {
+                    const env = await api.resolveEnvironment(Uri.file(envVar['VIRTUAL_ENV']));
+                    if (env) {
+                        monitoredTerminals.set(e.terminal, env);
+                        terminalActivation.updateActivationState(e.terminal, env, true);
+                    }
+                } else if (monitoredTerminals.has(e.terminal)) {
+                    const env = monitoredTerminals.get(e.terminal);
+                    if (env) {
+                        terminalActivation.updateActivationState(e.terminal, env, false);
+                    }
+                }
+            }
         }),
     );
 
@@ -238,7 +253,7 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
             registerCondaFeatures(nativeFinder, context.subscriptions, outputChannel),
         ]);
         sendTelemetryEvent(EventNames.EXTENSION_MANAGER_REGISTRATION_DURATION, start.elapsedTime);
-        await terminalManager.initialize();
+        await terminalManager.initialize(api);
     });
 
     sendTelemetryEvent(EventNames.EXTENSION_ACTIVATION_DURATION, start.elapsedTime);
