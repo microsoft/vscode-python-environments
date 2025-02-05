@@ -12,7 +12,7 @@ export function ensureCorrectVersion() {
     const parts = version.split('.');
     const major = parseInt(parts[0]);
     const minor = parseInt(parts[1]);
-    if (major >= 2024 && minor >= 23) {
+    if (major >= 2025 || (major === 2024 && minor >= 23)) {
         return;
     }
     traceError('Incompatible Python extension. Please update `ms-python.python` to version 2024.23 or later.');
