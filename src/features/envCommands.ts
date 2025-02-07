@@ -575,5 +575,7 @@ export async function copyPathToClipboard(item: unknown): Promise<void> {
         const envPath = quoteArgs([run.executable, ...(run.args ?? [])]).join(' ');
         await clipboardWriteText(envPath);
         traceInfo(`Copied environment path to clipboard: ${envPath}`);
+    } else {
+        traceVerbose(`Invalid context for copy path to clipboard: ${item}`);
     }
 }
