@@ -1,4 +1,4 @@
-import { QuickInputButtons, TaskExecution, TaskRevealKind, Terminal, Uri, window } from 'vscode';
+import { QuickInputButtons, TaskExecution, TaskRevealKind, Terminal, Uri } from 'vscode';
 import {
     EnvironmentManagers,
     InternalEnvironmentManager,
@@ -40,6 +40,10 @@ import { pickPackageOptions } from '../common/pickers/packages';
 import { pickProject, pickProjectMany } from '../common/pickers/projects';
 import { TerminalManager } from './terminal/terminalManager';
 import { runInTerminal } from './terminal/runInTerminal';
+import { quoteArgs } from './execution/execUtils';
+import { showErrorMessage } from '../common/errors/utils';
+import { activeTextEditor } from '../common/window.apis';
+import { clipboardWriteText } from '../common/env.apis';
 
 export async function refreshManagerCommand(context: unknown): Promise<void> {
     if (context instanceof EnvManagerTreeItem) {
@@ -278,7 +282,7 @@ export async function setEnvironmentCommand(
         }
     } else {
         traceError(`Invalid context for setting environment command: ${context}`);
-        window.showErrorMessage('Invalid context for setting environment');
+        showErrorMessage('Invalid context for setting environment');
     }
 }
 
@@ -296,7 +300,7 @@ export async function resetEnvironmentCommand(
         if (manager) {
             manager.set(uri, undefined);
         } else {
-            window.showErrorMessage(`No environment manager found for: ${uri.fsPath}`);
+            showErrorMessage(`No environment manager found for: ${uri.fsPath}`);
             traceError(`No environment manager found for ${uri.fsPath}`);
         }
         return;
@@ -308,7 +312,7 @@ export async function resetEnvironmentCommand(
         return;
     }
     traceError(`Invalid context for unset environment command: ${context}`);
-    window.showErrorMessage('Invalid context for unset environment');
+    showErrorMessage('Invalid context for unset environment');
 }
 
 export async function setEnvManagerCommand(em: EnvironmentManagers, wm: PythonProjectManager): Promise<void> {
@@ -338,7 +342,7 @@ export async function addPythonProject(
     pc: ProjectCreators,
 ): Promise<PythonProject | PythonProject[] | undefined> {
     if (wm.getProjects().length === 0) {
-        window.showErrorMessage('Please open a folder/project before adding a workspace');
+        showErrorMessage('Please open a folder/project before adding a workspace');
         return;
     }
 
@@ -554,9 +558,22 @@ export async function runAsTaskCommand(item: unknown, api: PythonEnvironmentApi)
             );
         }
     } else if (item === undefined) {
-        const uri = window.activeTextEditor?.document.uri;
+        const uri = activeTextEditor()?.document.uri;
         if (uri) {
             return runAsTaskCommand(uri, api);
         }
+    }
+}
+
+export async function copyPathToClipboard(item: unknown): Promise<void> {
+    if (item instanceof ProjectItem) {
+        const projectPath = item.project.uri.fsPath;
+        await clipboardWriteText(projectPath);
+        traceInfo(`Copied project path to clipboard: ${projectPath}`);
+    } else if (item instanceof ProjectEnvironment || item instanceof PythonEnvTreeItem) {
+        const run = item.environment.execInfo.activatedRun ?? item.environment.execInfo.run;
+        const envPath = quoteArgs([run.executable, ...(run.args ?? [])]).join(' ');
+        await clipboardWriteText(envPath);
+        traceInfo(`Copied environment path to clipboard: ${envPath}`);
     }
 }

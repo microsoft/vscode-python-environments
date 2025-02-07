@@ -22,6 +22,7 @@ import {
     createAnyEnvironmentCommand,
     runInDedicatedTerminalCommand,
     handlePackageUninstall,
+    copyPathToClipboard,
 } from './features/envCommands';
 import { registerCondaFeatures } from './managers/conda/main';
 import { registerSystemPythonFeatures } from './managers/builtin/main';
@@ -177,6 +178,12 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
         }),
         commands.registerCommand('python-envs.createTerminal', (item) => {
             return createTerminalCommand(item, api, terminalManager);
+        }),
+        commands.registerCommand('python-envs.copyEnvPath', async (item) => {
+            await copyPathToClipboard(item);
+        }),
+        commands.registerCommand('python-envs.copyProjectPath', async (item) => {
+            await copyPathToClipboard(item);
         }),
         commands.registerCommand('python-envs.terminal.activate', async () => {
             const terminal = activeTerminal();

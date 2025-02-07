@@ -221,6 +221,18 @@
                 "title": "%python-envs.uninstallPackage.title%",
                 "category": "Python Envs",
                 "icon": "$(trash)"
+            },
+            {
+                "command": "python-envs.copyEnvPath",
+                "title": "%python-envs.copyEnvPath.title%",
+                "category": "Python Envs",
+                "icon": "$(copy)"
+            },
+            {
+                "command": "python-envs.copyProjectPath",
+                "title": "%python-envs.copyProjectPath.title%",
+                "category": "Python Envs",
+                "icon": "$(copy)"
             }
         ],
         "menus": {
@@ -288,6 +300,14 @@
                 {
                     "command": "python-envs.uninstallPackage",
                     "when": "false"
+                },
+                {
+                    "command": "python-envs.copyEnvPath",
+                    "when": "false"
+                },
+                {
+                    "command": "python-envs.copyProjectPath",
+                    "when": "false"
                 }
             ],
             "view/item/context": [
@@ -326,12 +346,22 @@
                     "when": "view == env-managers && viewItem =~ /.*pythonEnvironment.*/"
                 },
                 {
+                    "command": "python-envs.copyEnvPath",
+                    "group": "inline",
+                    "when": "view == env-managers && viewItem =~ /.*pythonEnvironment.*/"
+                },
+                {
                     "command": "python-envs.uninstallPackage",
                     "group": "inline",
                     "when": "view == env-managers && viewItem == python-package"
                 },
                 {
                     "command": "python-envs.packages",
+                    "group": "inline",
+                    "when": "view == python-projects && viewItem == python-env"
+                },
+                {
+                    "command": "python-envs.copyEnvPath",
                     "group": "inline",
                     "when": "view == python-projects && viewItem == python-env"
                 },
@@ -355,6 +385,11 @@
                 },
                 {
                     "command": "python-envs.createTerminal",
+                    "group": "inline",
+                    "when": "view == python-projects && viewItem =~ /.*python-workspace.*/"
+                },
+                {
+                    "command": "python-envs.copyProjectPath",
                     "group": "inline",
                     "when": "view == python-projects && viewItem =~ /.*python-workspace.*/"
                 },

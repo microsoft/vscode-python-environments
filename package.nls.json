@@ -10,6 +10,8 @@
     "python-envs.setPkgManager.title": "Set Package Manager",
     "python-envs.addPythonProject.title": "Add Python Project",
     "python-envs.removePythonProject.title": "Remove Python Project",
+    "python-envs.copyEnvPath.title": "Copy Environment Path",
+    "python-envs.copyProjectPath.title": "Copy Project Path",
     "python-envs.create.title": "Create Environment",
     "python-envs.createAny.title": "Create Environment",
     "python-envs.set.title": "Set Workspace Environment",
