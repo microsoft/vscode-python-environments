@@ -232,6 +232,7 @@ export class TerminalActivationImpl implements TerminalActivationInternal {
                     const execPromise = createDeferred<void>();
                     const execution = shellIntegration.executeCommand(command.executable, command.args ?? []);
                     const disposables: Disposable[] = [];
+                    let resolved = false;
 
                     disposables.push(
                         this.onTerminalShellExecutionEnd((e: TerminalShellExecutionEndEvent) => {
@@ -245,8 +246,10 @@ export class TerminalActivationImpl implements TerminalActivationInternal {
                                 } else {
                                     traceVerbose(`Activation execution completed with exit code: ${e.exitCode}`);
                                 }
-                                // Resolve even for all e.exitCode for now
-                                execPromise.resolve();
+                                if (!resolved) {
+                                    resolved = true;
+                                    execPromise.resolve();
+                                }
                             }
                         }),
                         this.onTerminalShellExecutionStart((e: TerminalShellExecutionStartEvent) => {
@@ -261,10 +264,13 @@ export class TerminalActivationImpl implements TerminalActivationInternal {
                         execPromise.promise,
                         new Promise<void>((resolve) => {
                             const timer = setTimeout(() => {
-                                resolve();
-                                traceError(
-                                    `Shell execution timed out: ${command.executable} ${command.args?.join(' ')}`,
-                                );
+                                if (!resolved) {
+                                    resolved = true;
+                                    resolve();
+                                    traceError(
+                                        `Shell execution timed out: ${command.executable} ${command.args?.join(' ')}`,
+                                    );
+                                }
                             }, 2000);
                             disposables.push(new Disposable(() => clearTimeout(timer)));
                         }),
@@ -288,7 +294,7 @@ export class TerminalActivationImpl implements TerminalActivationInternal {
                     const execPromise = createDeferred<void>();
                     const execution = shellIntegration.executeCommand(command.executable, command.args ?? []);
                     const disposables: Disposable[] = [];
-                    // TODO: same as activation exitCode
+                    let resolved = false;
 
                     disposables.push(
                         this.onTerminalShellExecutionEnd((e: TerminalShellExecutionEndEvent) => {
@@ -302,8 +308,10 @@ export class TerminalActivationImpl implements TerminalActivationInternal {
                                 } else {
                                     traceVerbose(`Deactivation execution completed with exit code: ${e.exitCode}`);
                                 }
-                                // Resolve even for all e.exitCode for now
-                                execPromise.resolve();
+                                if (!resolved) {
+                                    resolved = true;
+                                    execPromise.resolve();
+                                }
                             }
                         }),
                         this.onTerminalShellExecutionStart((e: TerminalShellExecutionStartEvent) => {
@@ -318,10 +326,13 @@ export class TerminalActivationImpl implements TerminalActivationInternal {
                         execPromise.promise,
                         new Promise<void>((resolve) => {
                             const timer = setTimeout(() => {
-                                resolve();
-                                traceError(
-                                    `Shell execution timed out: ${command.executable} ${command.args?.join(' ')}`,
-                                );
+                                if (!resolved) {
+                                    resolved = true;
+                                    resolve();
+                                    traceError(
+                                        `Shell execution timed out: ${command.executable} ${command.args?.join(' ')}`,
+                                    );
+                                }
                             }, 2000);
                             disposables.push(new Disposable(() => clearTimeout(timer)));
                         }),
