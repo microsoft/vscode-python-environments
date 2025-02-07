@@ -293,6 +293,16 @@ export class TerminalActivationImpl implements TerminalActivationInternal {
                     disposables.push(
                         this.onTerminalShellExecutionEnd((e: TerminalShellExecutionEndEvent) => {
                             if (e.execution === execution) {
+                                if (e.exitCode === undefined) {
+                                    traceVerbose(
+                                        `Terminal shell execution returned with undefined. Cannot guarentee deactivation`,
+                                    );
+                                    // TODO: Perhaps further deactivation attempts&checks might be required.
+                                    // There is a high chance user's deactivation process was interrupted.
+                                } else {
+                                    traceVerbose(`Deactivation execution completed with exit code: ${e.exitCode}`);
+                                }
+                                // Resolve even for all e.exitCode for now
                                 execPromise.resolve();
                             }
                         }),
@@ -304,8 +314,18 @@ export class TerminalActivationImpl implements TerminalActivationInternal {
                             }
                         }),
                     );
-
-                    await execPromise.promise;
+                    await Promise.race([
+                        execPromise.promise,
+                        new Promise<void>((resolve) => {
+                            const timer = setTimeout(() => {
+                                resolve();
+                                traceError(
+                                    `Shell execution timed out: ${command.executable} ${command.args?.join(' ')}`,
+                                );
+                            }, 2000);
+                            disposables.push(new Disposable(() => clearTimeout(timer)));
+                        }),
+                    ]);
                 }
             } finally {
                 this.activatedTerminals.delete(terminal);
