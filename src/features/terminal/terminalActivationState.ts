@@ -292,6 +292,7 @@ export class TerminalActivationImpl implements TerminalActivationInternal {
                     const execPromise = createDeferred<void>();
                     const execution = shellIntegration.executeCommand(command.executable, command.args ?? []);
                     const disposables: Disposable[] = [];
+                    // TODO: same as activation exitCode
                     let timer: NodeJS.Timeout | undefined = setTimeout(() => {
                         execPromise.resolve();
                         traceError(`Shell execution timed out: ${command.executable} ${command.args?.join(' ')}`);
