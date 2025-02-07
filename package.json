@@ -12,9 +12,6 @@
         "Other"
     ],
     "enabledApiProposals": [
-        "chatParticipantPrivate",
-        "chatParticipantAdditions",
-        "chatVariableResolver",
         "terminalShellType"
     ],
     "capabilities": {
