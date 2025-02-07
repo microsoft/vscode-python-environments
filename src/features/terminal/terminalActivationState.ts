@@ -232,18 +232,21 @@ export class TerminalActivationImpl implements TerminalActivationInternal {
                     const execPromise = createDeferred<void>();
                     const execution = shellIntegration.executeCommand(command.executable, command.args ?? []);
                     const disposables: Disposable[] = [];
-                    let timer: NodeJS.Timeout | undefined = setTimeout(() => {
-                        execPromise.resolve();
-                        traceError(`Shell execution timed out: ${command.executable} ${command.args?.join(' ')}`);
-                    }, 2000);
+
                     disposables.push(
                         this.onTerminalShellExecutionEnd((e: TerminalShellExecutionEndEvent) => {
                             if (e.execution === execution) {
-                                execPromise.resolve();
-                                if (timer) {
-                                    clearTimeout(timer);
-                                    timer = undefined;
+                                if (e.exitCode === undefined) {
+                                    traceVerbose(
+                                        `Terminal shell execution returned with undefined. Cannot guarentee activation`,
+                                    );
+                                    // TODO: Perhaps further activation attempts&checks might be required.
+                                    // There is a high chance user's activation process was interrupted.
+                                } else {
+                                    traceVerbose(`Activation execution completed with exit code: ${e.exitCode}`);
                                 }
+                                // Resolve even for all e.exitCode for now
+                                execPromise.resolve();
                             }
                         }),
                         this.onTerminalShellExecutionStart((e: TerminalShellExecutionStartEvent) => {
@@ -253,15 +256,20 @@ export class TerminalActivationImpl implements TerminalActivationInternal {
                                 );
                             }
                         }),
-                        new Disposable(() => {
-                            if (timer) {
-                                clearTimeout(timer);
-                                timer = undefined;
-                            }
-                        }),
                     );
                     try {
-                        await execPromise.promise;
+                        await Promise.race([
+                            execPromise.promise,
+                            new Promise<void>((resolve) => {
+                                const timer = setTimeout(() => {
+                                    resolve();
+                                    traceError(
+                                        `Shell execution timed out: ${command.executable} ${command.args?.join(' ')}`,
+                                    );
+                                }, 2000);
+                                disposables.push(new Disposable(() => clearTimeout(timer)));
+                            }),
+                        ]);
                     } finally {
                         disposables.forEach((d) => d.dispose());
                     }
