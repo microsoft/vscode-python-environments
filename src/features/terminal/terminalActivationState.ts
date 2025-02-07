@@ -257,22 +257,18 @@ export class TerminalActivationImpl implements TerminalActivationInternal {
                             }
                         }),
                     );
-                    try {
-                        await Promise.race([
-                            execPromise.promise,
-                            new Promise<void>((resolve) => {
-                                const timer = setTimeout(() => {
-                                    resolve();
-                                    traceError(
-                                        `Shell execution timed out: ${command.executable} ${command.args?.join(' ')}`,
-                                    );
-                                }, 2000);
-                                disposables.push(new Disposable(() => clearTimeout(timer)));
-                            }),
-                        ]);
-                    } finally {
-                        disposables.forEach((d) => d.dispose());
-                    }
+                    await Promise.race([
+                        execPromise.promise,
+                        new Promise<void>((resolve) => {
+                            const timer = setTimeout(() => {
+                                resolve();
+                                traceError(
+                                    `Shell execution timed out: ${command.executable} ${command.args?.join(' ')}`,
+                                );
+                            }, 2000);
+                            disposables.push(new Disposable(() => clearTimeout(timer)));
+                        }),
+                    ]);
                 }
             } finally {
                 this.activatedTerminals.set(terminal, environment);
@@ -293,18 +289,11 @@ export class TerminalActivationImpl implements TerminalActivationInternal {
                     const execution = shellIntegration.executeCommand(command.executable, command.args ?? []);
                     const disposables: Disposable[] = [];
                     // TODO: same as activation exitCode
-                    let timer: NodeJS.Timeout | undefined = setTimeout(() => {
-                        execPromise.resolve();
-                        traceError(`Shell execution timed out: ${command.executable} ${command.args?.join(' ')}`);
-                    }, 2000);
+
                     disposables.push(
                         this.onTerminalShellExecutionEnd((e: TerminalShellExecutionEndEvent) => {
                             if (e.execution === execution) {
                                 execPromise.resolve();
-                                if (timer) {
-                                    clearTimeout(timer);
-                                    timer = undefined;
-                                }
                             }
                         }),
                         this.onTerminalShellExecutionStart((e: TerminalShellExecutionStartEvent) => {
@@ -312,12 +301,6 @@ export class TerminalActivationImpl implements TerminalActivationInternal {
                                 traceVerbose(
                                     `Shell execution started: ${command.executable} ${command.args?.join(' ')}`,
                                 );
-                            }
-                        }),
-                        new Disposable(() => {
-                            if (timer) {
-                                clearTimeout(timer);
-                                timer = undefined;
                             }
                         }),
                     );
