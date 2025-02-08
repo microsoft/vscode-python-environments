@@ -2,7 +2,7 @@ import * as path from 'path';
 import { Terminal, TerminalOptions, Uri } from 'vscode';
 import { sleep } from '../../common/utils/asyncUtils';
 import { PythonEnvironment, PythonProject, PythonProjectEnvironmentApi, PythonProjectGetterApi } from '../../api';
-import { getWorkspaceFolders } from '../../common/workspace.apis';
+import { getConfiguration, getWorkspaceFolders } from '../../common/workspace.apis';
 
 const SHELL_INTEGRATION_TIMEOUT = 500; // 0.5 seconds
 const SHELL_INTEGRATION_POLL_INTERVAL = 20; // 0.02 seconds
@@ -88,4 +88,12 @@ export async function getEnvironmentForTerminal(
     }
 
     return env;
+}
+
+export function getAutoActivationType(): 'off' | 'command' | 'startup' {
+    // 'startup' auto-activation means terminal is activated via shell startup scripts.
+    // 'command' auto-activation means terminal is activated via a command.
+    // 'off' means no auto-activation.
+    const config = getConfiguration('python-envs');
+    return config.get<'off' | 'command' | 'startup'>('terminal.autoActivationType', 'command');
 }
