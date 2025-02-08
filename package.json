@@ -94,12 +94,12 @@
                     "enum": [
                         "command",
                         "startup",
-                        "none"
+                        "off"
                     ],
                     "enumDescriptions": [
                         "%python-envs.terminal.autoActivationType.command%",
                         "%python-envs.terminal.autoActivationType.startup%",
-                        "%python-envs.terminal.autoActivationType.none%"
+                        "%python-envs.terminal.autoActivationType.off%"
                     ],
                     "scope": "machine"
                 }
