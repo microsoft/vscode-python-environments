@@ -1,4 +1,4 @@
-# Python Environments and Package Manager (preview)
+# Python Environments and Package Manager (experimental)
 
 ## Overview
 
