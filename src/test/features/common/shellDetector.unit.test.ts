@@ -83,7 +83,7 @@ function getShellPath(shellType: string): string | undefined {
         case 'nushell':
             return '/usr/bin/nu';
         case 'tcshell':
-            return '/usr/bin/tsh';
+            return '/usr/bin/tcsh';
         case 'wsl':
             return '/mnt/c/Windows/System32/wsl.exe';
         case 'xonsh':
@@ -100,8 +100,9 @@ function expectedShellType(shellType: string): TerminalShellType {
         case 'bash':
             return TerminalShellType.bash;
         case 'powershell':
-        case 'pwsh':
             return TerminalShellType.powershell;
+        case 'pwsh':
+            return TerminalShellType.powershellCore;
         case 'cmd':
             return TerminalShellType.commandPrompt;
         case 'gitbash':
@@ -116,6 +117,12 @@ function expectedShellType(shellType: string): TerminalShellType {
             return TerminalShellType.cshell;
         case 'nushell':
             return TerminalShellType.nushell;
+        case 'tcshell':
+            return TerminalShellType.tcshell;
+        case 'wsl':
+            return TerminalShellType.wsl;
+        case 'xonsh':
+            return TerminalShellType.xonsh;
         default:
             return TerminalShellType.unknown;
     }
@@ -138,7 +145,8 @@ suite('Shell Detector', () => {
                 },
             } as Terminal;
             const detected = identifyTerminalShell(terminal);
-            assert.strictEqual(detected, expectedShellType(shellType));
+            const expected = expectedShellType(shellType);
+            assert.strictEqual(detected, expected);
         });
     });
 });

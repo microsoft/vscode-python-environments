@@ -74,6 +74,11 @@ function identifyShellFromShellPath(shellPath: string): TerminalShellType {
 }
 
 function identifyShellFromTerminalName(terminal: Terminal): TerminalShellType {
+    if (terminal.name === 'sh') {
+        // Specifically checking this because other shells have `sh` at the end of their name
+        // We can match and return bash for this case
+        return TerminalShellType.bash;
+    }
     return identifyShellFromShellPath(terminal.name);
 }
 
