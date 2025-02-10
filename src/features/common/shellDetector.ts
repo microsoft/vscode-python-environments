@@ -16,7 +16,7 @@ When identifying the shell use the following algorithm:
 
 // Types of shells can be found here:
 // 1. https://wiki.ubuntu.com/ChangingShells
-const IS_GITBASH = /(gitbash$|git.bin.bash$)/i;
+const IS_GITBASH = /(gitbash$|git.bin.bash$|git-bash$)/i;
 const IS_BASH = /(bash$)/i;
 const IS_WSL = /(wsl$)/i;
 const IS_ZSH = /(zsh$)/i;
