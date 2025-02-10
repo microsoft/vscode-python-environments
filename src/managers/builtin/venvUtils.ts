@@ -31,7 +31,6 @@ import {
 } from '../../common/window.apis';
 import { showErrorMessage } from '../../common/errors/utils';
 import { Common, VenvManagerStrings } from '../../common/localize';
-import unsafeEntries from '../../common/utils/unsafeEntries';
 import { isUvInstalled, runUV, runPython } from './helpers';
 import { getWorkspacePackagesToInstall } from './pipUtils';
 
@@ -111,6 +110,10 @@ function getName(binPath: string): string {
     return path.basename(dir1);
 }
 
+function pathForGitBash(binPath: string): string {
+    return isWindows() ? binPath.replace(/\\/g, '/') : binPath;
+}
+
 async function getPythonInfo(env: NativeEnvInfo): Promise<PythonEnvironmentInfo> {
     if (env.executable && env.version && env.prefix) {
         const venvName = env.name ?? getName(env.executable);
@@ -118,65 +121,114 @@ async function getPythonInfo(env: NativeEnvInfo): Promise<PythonEnvironmentInfo>
         const name = `${venvName} (${sv})`;
 
         const binDir = path.dirname(env.executable);
-        
-        interface VenvManager {
-            activate: PythonCommandRunConfiguration,
-            deactivate: PythonCommandRunConfiguration,
+
+        interface VenvCommand {
+            activate: PythonCommandRunConfiguration;
+            deactivate: PythonCommandRunConfiguration;
             /// true if created by the builtin `venv` module and not just the `virtualenv` package.
-            supportsStdlib: boolean,
+            supportsStdlib: boolean;
+            checkPath?: string;
         }
-        
-        /** Venv activation/deactivation using a command */
-        const cmdMgr = (suffix = ''): VenvManager => ({
-            activate: { executable: path.join(binDir, `activate${suffix}`) },
-            deactivate: { executable: path.join(binDir, `deactivate${suffix}`) },
-            supportsStdlib: ['', '.bat'].includes(suffix),
-        });
-        /** Venv activation/deactivation for a POSIXy shell */
-        const sourceMgr = (suffix = '', executable = 'source'): VenvManager => ({
-            activate: { executable, args: [path.join(binDir, `activate${suffix}`)] },
-            deactivate: { executable: 'deactivate' },
-            supportsStdlib: ['', '.ps1'].includes(suffix),
-        });
-        // satisfies `Record` to make sure all shells are covered
-        const venvManagers: Record<TerminalShellType, VenvManager> = {
+
+        const venvManagers: Record<TerminalShellType, VenvCommand> = {
             // Shells supported by the builtin `venv` module
-            [TerminalShellType.bash]: sourceMgr(),
-            [TerminalShellType.gitbash]: sourceMgr(),
-            [TerminalShellType.zsh]: sourceMgr(),
-            [TerminalShellType.wsl]: sourceMgr(),
-            [TerminalShellType.ksh]: sourceMgr('', '.'),
-            [TerminalShellType.powershell]: sourceMgr('.ps1', '&'),
-            [TerminalShellType.powershellCore]: sourceMgr('.ps1', '&'),
-            [TerminalShellType.commandPrompt]: cmdMgr('.bat'),
+            [TerminalShellType.bash]: {
+                activate: { executable: 'source', args: [path.join(binDir, `activate`)] },
+                deactivate: { executable: 'deactivate' },
+                supportsStdlib: true,
+            },
+            [TerminalShellType.gitbash]: {
+                activate: { executable: 'source', args: [pathForGitBash(path.join(binDir, `activate`))] },
+                deactivate: { executable: 'deactivate' },
+                supportsStdlib: true,
+            },
+            [TerminalShellType.zsh]: {
+                activate: { executable: 'source', args: [path.join(binDir, `activate`)] },
+                deactivate: { executable: 'deactivate' },
+                supportsStdlib: true,
+            },
+            [TerminalShellType.wsl]: {
+                activate: { executable: 'source', args: [path.join(binDir, `activate`)] },
+                deactivate: { executable: 'deactivate' },
+                supportsStdlib: true,
+            },
+            [TerminalShellType.ksh]: {
+                activate: { executable: '.', args: [path.join(binDir, `activate`)] },
+                deactivate: { executable: 'deactivate' },
+                supportsStdlib: true,
+            },
+            [TerminalShellType.powershell]: {
+                activate: { executable: '&', args: [path.join(binDir, `activate.ps1`)] },
+                deactivate: { executable: 'deactivate' },
+                supportsStdlib: true,
+            },
+            [TerminalShellType.powershellCore]: {
+                activate: { executable: '&', args: [path.join(binDir, `activate.ps1`)] },
+                deactivate: { executable: 'deactivate' },
+                supportsStdlib: true,
+            },
+            [TerminalShellType.commandPrompt]: {
+                activate: { executable: path.join(binDir, `activate.bat`) },
+                deactivate: { executable: path.join(binDir, `deactivate.bat`) },
+                supportsStdlib: true,
+            },
             // Shells supported by the `virtualenv` package
-            [TerminalShellType.cshell]: sourceMgr('.csh'),
-            [TerminalShellType.tcshell]: sourceMgr('.csh'),
-            [TerminalShellType.fish]: sourceMgr('.fish'),
-            [TerminalShellType.xonsh]: sourceMgr('.xsh'),
+            [TerminalShellType.cshell]: {
+                activate: { executable: 'source', args: [path.join(binDir, `activate.csh`)] },
+                deactivate: { executable: 'deactivate' },
+                supportsStdlib: false,
+                checkPath: path.join(binDir, `activate.csh`),
+            },
+            [TerminalShellType.tcshell]: {
+                activate: { executable: 'source', args: [path.join(binDir, `activate.csh`)] },
+                deactivate: { executable: 'deactivate' },
+                supportsStdlib: false,
+                checkPath: path.join(binDir, `activate.csh`),
+            },
+            [TerminalShellType.fish]: {
+                activate: { executable: 'source', args: [path.join(binDir, `activate.fish`)] },
+                deactivate: { executable: 'deactivate' },
+                supportsStdlib: false,
+                checkPath: path.join(binDir, `activate.fish`),
+            },
+            [TerminalShellType.xonsh]: {
+                activate: { executable: 'source', args: [path.join(binDir, `activate.xsh`)] },
+                deactivate: { executable: 'deactivate' },
+                supportsStdlib: false,
+                checkPath: path.join(binDir, `activate.xsh`),
+            },
             [TerminalShellType.nushell]: {
                 activate: { executable: 'overlay', args: ['use', path.join(binDir, 'activate.nu')] },
                 deactivate: { executable: 'overlay', args: ['hide', 'activate'] },
                 supportsStdlib: false,
+                checkPath: path.join(binDir, `activate.nu`),
             },
             // Fallback
-            [TerminalShellType.unknown]: isWindows() ? cmdMgr() : sourceMgr(),
-        };
+            [TerminalShellType.unknown]: isWindows()
+                ? {
+                      activate: { executable: path.join(binDir, `activate`) },
+                      deactivate: { executable: path.join(binDir, `deactivate`) },
+                      supportsStdlib: true,
+                  }
+                : {
+                      activate: { executable: 'source', args: [path.join(binDir, `activate`)] },
+                      deactivate: { executable: 'deactivate' },
+                      supportsStdlib: true,
+                  },
+        } satisfies Record<TerminalShellType, VenvCommand>;
 
         const shellActivation: Map<TerminalShellType, PythonCommandRunConfiguration[]> = new Map();
         const shellDeactivation: Map<TerminalShellType, PythonCommandRunConfiguration[]> = new Map();
 
-        await Promise.all(unsafeEntries(venvManagers).map(async ([shell, mgr]) => {
-            if (
-                !mgr.supportsStdlib &&
-                mgr.activate.args &&
-                !await fsapi.pathExists(mgr.activate.args[mgr.activate.args.length - 1])
-            ) {
-                return;
-            }
-            shellActivation.set(shell, [mgr.activate]);
-            shellDeactivation.set(shell, [mgr.deactivate]);
-        }));
+        await Promise.all(
+            (Object.entries(venvManagers) as [TerminalShellType, VenvCommand][]).map(async ([shell, mgr]) => {
+                if (!mgr.supportsStdlib && mgr.checkPath && !(await fsapi.pathExists(mgr.checkPath))) {
+                    return;
+                }
+                shellActivation.set(shell, [mgr.activate]);
+                shellDeactivation.set(shell, [mgr.deactivate]);
+            }),
+        );
 
         return {
             name: name,

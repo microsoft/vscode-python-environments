@@ -1,9 +1,8 @@
+import * as os from 'os';
 import { Terminal, TerminalShellType as TerminalShellTypeVscode } from 'vscode';
 import { isWindows } from '../../managers/common/utils';
-import * as os from 'os';
 import { vscodeShell } from '../../common/vscodeEnv.apis';
 import { getConfiguration } from '../../common/workspace.apis';
-import unsafeEntries from '../../common/utils/unsafeEntries';
 import { TerminalShellType } from '../../api';
 
 /*
@@ -17,7 +16,7 @@ When identifying the shell use the following algorithm:
 
 // Types of shells can be found here:
 // 1. https://wiki.ubuntu.com/ChangingShells
-const IS_GITBASH = /(gitbash$)/i;
+const IS_GITBASH = /(gitbash$|git.bin.bash$)/i;
 const IS_BASH = /(bash$)/i;
 const IS_WSL = /(wsl$)/i;
 const IS_ZSH = /(zsh$)/i;
@@ -31,9 +30,14 @@ const IS_TCSHELL = /(tcsh$)/i;
 const IS_NUSHELL = /(nu$)/i;
 const IS_XONSH = /(xonsh$)/i;
 
+/** Converts an object from a trusted source (i.e. without unknown entries) to a typed array */
+function _entries<T extends { [key: string]: object }, K extends keyof T>(o: T): [keyof T, T[K]][] {
+    return Object.entries(o) as [keyof T, T[K]][];
+}
+
 type KnownShellType = Exclude<TerminalShellType, TerminalShellType.unknown>;
 const detectableShells = new Map<KnownShellType, RegExp>(
-    unsafeEntries({
+    _entries({
         [TerminalShellType.powershell]: IS_POWERSHELL,
         [TerminalShellType.gitbash]: IS_GITBASH,
         [TerminalShellType.bash]: IS_BASH,
@@ -159,15 +163,15 @@ export function identifyTerminalShell(terminal: Terminal): TerminalShellType {
     let shellType = fromShellTypeApi(terminal);
 
     if (shellType === TerminalShellType.unknown) {
+        shellType = identifyShellFromVSC(terminal);
+    }
+
+    if (shellType === TerminalShellType.unknown) {
         shellType = identifyShellFromTerminalName(terminal);
     }
 
     if (shellType === TerminalShellType.unknown) {
         shellType = identifyShellFromSettings();
-    }
-
-    if (shellType === TerminalShellType.unknown) {
-        shellType = identifyShellFromVSC(terminal);
     }
 
     if (shellType === TerminalShellType.unknown) {
