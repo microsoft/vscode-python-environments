@@ -125,28 +125,32 @@ function identifyShellFromSettings(): TerminalShellType {
 }
 
 function fromShellTypeApi(terminal: Terminal): TerminalShellType {
-    switch (terminal.state.shellType) {
-        case TerminalShellTypeVscode.Sh:
-        case TerminalShellTypeVscode.Bash:
-            return TerminalShellType.bash;
-        case TerminalShellTypeVscode.Fish:
-            return TerminalShellType.fish;
-        case TerminalShellTypeVscode.Csh:
-            return TerminalShellType.cshell;
-        case TerminalShellTypeVscode.Ksh:
-            return TerminalShellType.ksh;
-        case TerminalShellTypeVscode.Zsh:
-            return TerminalShellType.zsh;
-        case TerminalShellTypeVscode.CommandPrompt:
-            return TerminalShellType.commandPrompt;
-        case TerminalShellTypeVscode.GitBash:
-            return TerminalShellType.gitbash;
-        case TerminalShellTypeVscode.PowerShell:
-            return TerminalShellType.powershellCore;
-        case TerminalShellTypeVscode.NuShell:
-            return TerminalShellType.nushell;
-        default:
-            return TerminalShellType.unknown;
+    try {
+        switch (terminal.state.shellType) {
+            case TerminalShellTypeVscode.Sh:
+            case TerminalShellTypeVscode.Bash:
+                return TerminalShellType.bash;
+            case TerminalShellTypeVscode.Fish:
+                return TerminalShellType.fish;
+            case TerminalShellTypeVscode.Csh:
+                return TerminalShellType.cshell;
+            case TerminalShellTypeVscode.Ksh:
+                return TerminalShellType.ksh;
+            case TerminalShellTypeVscode.Zsh:
+                return TerminalShellType.zsh;
+            case TerminalShellTypeVscode.CommandPrompt:
+                return TerminalShellType.commandPrompt;
+            case TerminalShellTypeVscode.GitBash:
+                return TerminalShellType.gitbash;
+            case TerminalShellTypeVscode.PowerShell:
+                return TerminalShellType.powershellCore;
+            case TerminalShellTypeVscode.NuShell:
+                return TerminalShellType.nushell;
+            default:
+                return TerminalShellType.unknown;
+        }
+    } catch {
+        return TerminalShellType.unknown;
     }
 }
 
