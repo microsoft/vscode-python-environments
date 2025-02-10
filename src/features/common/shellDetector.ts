@@ -150,6 +150,7 @@ function fromShellTypeApi(terminal: Terminal): TerminalShellType {
                 return TerminalShellType.unknown;
         }
     } catch {
+        // If the API is not available, return unknown
         return TerminalShellType.unknown;
     }
 }
