@@ -31,8 +31,10 @@ export class EnvManagerTreeItem implements EnvTreeItem {
     constructor(public readonly manager: InternalEnvironmentManager) {
         const item = new TreeItem(manager.displayName, TreeItemCollapsibleState.Collapsed);
         item.contextValue = this.getContextValue();
-        item.description = manager.description;
-        item.tooltip = manager.tooltip;
+        // Descriptions were a bit too visually noisy
+        // https://github.com/microsoft/vscode-python-environments/issues/167
+        item.description = undefined;
+        item.tooltip = manager.tooltip ?? manager.description;
         item.iconPath = manager.iconPath;
         this.treeItem = item;
     }
