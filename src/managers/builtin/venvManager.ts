@@ -62,7 +62,9 @@ export class VenvManager implements EnvironmentManager {
     ) {
         this.name = 'venv';
         this.displayName = 'venv';
-        this.description = VenvManagerStrings.venvManagerDescription;
+        // Descriptions were a bit too visually noisy
+        // https://github.com/microsoft/vscode-python-environments/issues/167
+        this.description = undefined;
         this.tooltip = new MarkdownString(VenvManagerStrings.venvManagerDescription, true);
         this.preferredPackageManagerId = 'ms-python.python:pip';
         this.iconPath = new ThemeIcon('python');

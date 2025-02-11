@@ -43,7 +43,7 @@ export class SysPythonManager implements EnvironmentManager {
     public readonly name: string;
     public readonly displayName: string;
     public readonly preferredPackageManagerId: string;
-    public readonly description: string;
+    public readonly description: string | undefined;
     public readonly tooltip: string | MarkdownString;
     public readonly iconPath: IconPath;
 
@@ -55,7 +55,7 @@ export class SysPythonManager implements EnvironmentManager {
         this.name = 'system';
         this.displayName = 'Global';
         this.preferredPackageManagerId = 'ms-python.python:pip';
-        this.description = SysManagerStrings.sysManagerDescription;
+        this.description = undefined;
         this.tooltip = new MarkdownString(SysManagerStrings.sysManagerDescription, true);
         this.iconPath = new ThemeIcon('globe');
     }

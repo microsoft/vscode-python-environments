@@ -270,7 +270,8 @@ function nativeToPythonEnv(
                 displayName: `base (${sv})`,
                 shortDisplayName: `base:${sv}`,
                 displayPath: e.name,
-                description: e.prefix,
+                description: undefined,
+                tooltip: e.prefix,
                 version: e.version,
                 sysPrefix: e.prefix,
                 execInfo: {
@@ -302,7 +303,8 @@ function nativeToPythonEnv(
                 displayName: `${basename} (${sv})`,
                 shortDisplayName: `${basename}:${sv}`,
                 displayPath: e.prefix,
-                description: e.prefix,
+                description: undefined,
+                tooltip: e.prefix,
                 version: e.version,
                 sysPrefix: e.prefix,
                 execInfo: {
@@ -340,7 +342,8 @@ function nativeToPythonEnv(
                 displayName: `${name} (${sv})`,
                 shortDisplayName: `${name}:${sv}`,
                 displayPath: e.prefix,
-                description: e.prefix,
+                description: undefined,
+                tooltip: e.prefix,
                 version: e.version,
                 sysPrefix: e.prefix,
                 execInfo: {
