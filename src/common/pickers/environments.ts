@@ -3,10 +3,10 @@ import { IconPath, PythonEnvironment, PythonProject } from '../../api';
 import { InternalEnvironmentManager } from '../../internal.api';
 import { Common, Interpreter, Pickers } from '../localize';
 import { showQuickPickWithButtons, showQuickPick, showOpenDialog, withProgress } from '../window.apis';
-import { isWindows } from '../../managers/common/utils';
 import { traceError } from '../logging';
 import { pickEnvironmentManager } from './managers';
 import { handlePythonPath } from '../utils/pythonPath';
+import { isWindows } from '../utils/platformUtils';
 
 type QuickPickIcon =
     | Uri

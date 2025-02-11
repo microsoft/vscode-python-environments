@@ -27,7 +27,7 @@ import {
 import { getConfiguration } from '../../common/workspace.apis';
 import { getGlobalPersistentState, getWorkspacePersistentState } from '../../common/persistentState';
 import which from 'which';
-import { isWindows, shortVersion, sortEnvironments, untildify } from '../common/utils';
+import { shortVersion, sortEnvironments } from '../common/utils';
 import { pickProject } from '../../common/pickers/projects';
 import { CondaStrings } from '../../common/localize';
 import { showErrorMessage } from '../../common/errors/utils';
@@ -35,6 +35,8 @@ import { showInputBox, showQuickPick, withProgress } from '../../common/window.a
 import { Installable, selectFromCommonPackagesToInstall } from '../common/pickers';
 import { quoteArgs } from '../../features/execution/execUtils';
 import { traceInfo } from '../../common/logging';
+import { untildify } from '../../common/utils/pathUtils';
+import { isWindows } from '../../common/utils/platformUtils';
 
 export const CONDA_PATH_KEY = `${ENVS_EXTENSION_ID}:conda:CONDA_PATH`;
 export const CONDA_PREFIXES_KEY = `${ENVS_EXTENSION_ID}:conda:CONDA_PREFIXES`;
