@@ -90,10 +90,10 @@ export async function getEnvironmentForTerminal(
     return env;
 }
 
-export function getAutoActivationType(): 'off' | 'command' | 'startup' {
+export function getAutoActivationType(): 'off' | 'command' | 'shellStartup' {
     // 'startup' auto-activation means terminal is activated via shell startup scripts.
     // 'command' auto-activation means terminal is activated via a command.
     // 'off' means no auto-activation.
     const config = getConfiguration('python-envs');
-    return config.get<'off' | 'command' | 'startup'>('terminal.autoActivationType', 'command');
+    return config.get<'off' | 'command' | 'shellStartup'>('terminal.autoActivationType', 'command');
 }
