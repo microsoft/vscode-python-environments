@@ -8,7 +8,7 @@
     "python-envs.terminal.showActivateButton.description": "Whether to show the 'Activate' button in the terminal menu",
     "python-envs.terminal.autoActivationType.description": "The type of activation to use when activating an environment in the terminal",
     "python-envs.terminal.autoActivationType.command": "Activation by executing a command in the terminal.",
-    "python-envs.terminal.autoActivationType.startup": "Activation by modifying the terminal shell startup script.",
+    "python-envs.terminal.autoActivationType.shellStartup": "Activation by modifying the terminal shell startup script.",
     "python-envs.terminal.autoActivationType.off": "No automatic activation of environments.",
     "python-envs.setEnvManager.title": "Set Environment Manager",
     "python-envs.setPkgManager.title": "Set Package Manager",
