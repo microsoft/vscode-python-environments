@@ -61,7 +61,7 @@ export class VenvManager implements EnvironmentManager {
         public readonly log: LogOutputChannel,
     ) {
         this.name = 'venv';
-        this.displayName = 'venv Environments';
+        this.displayName = 'venv';
         this.description = VenvManagerStrings.venvManagerDescription;
         this.tooltip = new MarkdownString(VenvManagerStrings.venvManagerDescription, true);
         this.preferredPackageManagerId = 'ms-python.python:pip';
