@@ -116,7 +116,7 @@ export class TerminalManagerImpl implements TerminalManager {
             }
         } else if (actType === 'off') {
             traceInfo(`"python-envs.terminal.autoActivationType" is set to "${actType}", skipping auto activation`);
-        } else if (actType === 'startup') {
+        } else if (actType === 'shellStartup') {
             traceInfo(
                 `"python-envs.terminal.autoActivationType" is set to "${actType}", terminal should be activated by shell startup script`,
             );
