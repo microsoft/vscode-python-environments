@@ -7,11 +7,10 @@ import {
     TerminalShellExecutionStartEvent,
     TerminalShellIntegration,
 } from 'vscode';
-import { PythonEnvironment } from '../../api';
+import { PythonCommandRunConfiguration, PythonEnvironment } from '../../api';
 import { onDidEndTerminalShellExecution, onDidStartTerminalShellExecution } from '../../common/window.apis';
 import { traceError, traceInfo, traceVerbose } from '../../common/logging';
 import { isTaskTerminal } from './utils';
-import { createDeferred } from '../../common/utils/deferred';
 import { getActivationCommand, getDeactivationCommand } from '../common/activation';
 import { quoteArgs } from '../execution/execUtils';
 
@@ -229,46 +228,14 @@ export class TerminalActivationImpl implements TerminalActivationInternal {
         if (activationCommands) {
             try {
                 for (const command of activationCommands) {
-                    const execPromise = createDeferred<void>();
-                    const execution = shellIntegration.executeCommand(command.executable, command.args ?? []);
-                    const disposables: Disposable[] = [];
-                    let timer: NodeJS.Timeout | undefined = setTimeout(() => {
-                        execPromise.resolve();
-                        traceError(`Shell execution timed out: ${command.executable} ${command.args?.join(' ')}`);
-                    }, 2000);
-                    disposables.push(
-                        this.onTerminalShellExecutionEnd((e: TerminalShellExecutionEndEvent) => {
-                            if (e.execution === execution) {
-                                execPromise.resolve();
-                                if (timer) {
-                                    clearTimeout(timer);
-                                    timer = undefined;
-                                }
-                            }
-                        }),
-                        this.onTerminalShellExecutionStart((e: TerminalShellExecutionStartEvent) => {
-                            if (e.execution === execution) {
-                                traceVerbose(
-                                    `Shell execution started: ${command.executable} ${command.args?.join(' ')}`,
-                                );
-                            }
-                        }),
-                        new Disposable(() => {
-                            if (timer) {
-                                clearTimeout(timer);
-                                timer = undefined;
-                            }
-                        }),
-                    );
-                    try {
-                        await execPromise.promise;
-                    } finally {
-                        disposables.forEach((d) => d.dispose());
-                    }
+                    await this.executeTerminalShellCommandInternal(shellIntegration, command);
                 }
-            } finally {
                 this.activatedTerminals.set(terminal, environment);
+            } catch {
+                traceError('Failed to activate environment using shell integration');
             }
+        } else {
+            traceVerbose('No activation commands found for terminal.');
         }
     }
 
@@ -281,43 +248,53 @@ export class TerminalActivationImpl implements TerminalActivationInternal {
         if (deactivationCommands) {
             try {
                 for (const command of deactivationCommands) {
-                    const execPromise = createDeferred<void>();
-                    const execution = shellIntegration.executeCommand(command.executable, command.args ?? []);
-                    const disposables: Disposable[] = [];
-                    let timer: NodeJS.Timeout | undefined = setTimeout(() => {
-                        execPromise.resolve();
-                        traceError(`Shell execution timed out: ${command.executable} ${command.args?.join(' ')}`);
-                    }, 2000);
-                    disposables.push(
-                        this.onTerminalShellExecutionEnd((e: TerminalShellExecutionEndEvent) => {
-                            if (e.execution === execution) {
-                                execPromise.resolve();
-                                if (timer) {
-                                    clearTimeout(timer);
-                                    timer = undefined;
-                                }
-                            }
-                        }),
-                        this.onTerminalShellExecutionStart((e: TerminalShellExecutionStartEvent) => {
-                            if (e.execution === execution) {
-                                traceVerbose(
-                                    `Shell execution started: ${command.executable} ${command.args?.join(' ')}`,
-                                );
-                            }
-                        }),
-                        new Disposable(() => {
-                            if (timer) {
-                                clearTimeout(timer);
-                                timer = undefined;
-                            }
-                        }),
-                    );
-
-                    await execPromise.promise;
+                    await this.executeTerminalShellCommandInternal(shellIntegration, command);
                 }
-            } finally {
                 this.activatedTerminals.delete(terminal);
+            } catch {
+                traceError('Failed to deactivate environment using shell integration');
             }
+        } else {
+            traceVerbose('No deactivation commands found for terminal.');
+        }
+    }
+
+    private async executeTerminalShellCommandInternal(
+        shellIntegration: TerminalShellIntegration,
+        command: PythonCommandRunConfiguration,
+    ): Promise<boolean> {
+        const execution = shellIntegration.executeCommand(command.executable, command.args ?? []);
+        const disposables: Disposable[] = [];
+
+        const promise = new Promise<void>((resolve) => {
+            const timer = setTimeout(() => {
+                traceError(`Shell execution timed out: ${command.executable} ${command.args?.join(' ')}`);
+                resolve();
+            }, 2000);
+
+            disposables.push(
+                new Disposable(() => clearTimeout(timer)),
+                this.onTerminalShellExecutionEnd((e: TerminalShellExecutionEndEvent) => {
+                    if (e.execution === execution) {
+                        resolve();
+                    }
+                }),
+                this.onTerminalShellExecutionStart((e: TerminalShellExecutionStartEvent) => {
+                    if (e.execution === execution) {
+                        traceVerbose(`Shell execution started: ${command.executable} ${command.args?.join(' ')}`);
+                    }
+                }),
+            );
+        });
+
+        try {
+            await promise;
+            return true;
+        } catch {
+            traceError(`Failed to execute shell command: ${command.executable} ${command.args?.join(' ')}`);
+            return false;
+        } finally {
+            disposables.forEach((d) => d.dispose());
         }
     }
 }
