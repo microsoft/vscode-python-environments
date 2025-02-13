@@ -232,17 +232,21 @@ export class TerminalActivationImpl implements TerminalActivationInternal {
                     const execPromise = createDeferred<void>();
                     const execution = shellIntegration.executeCommand(command.executable, command.args ?? []);
                     const disposables: Disposable[] = [];
-                    let timer: NodeJS.Timeout | undefined = setTimeout(() => {
-                        execPromise.resolve();
-                        traceError(`Shell execution timed out: ${command.executable} ${command.args?.join(' ')}`);
-                    }, 2000);
+
                     disposables.push(
                         this.onTerminalShellExecutionEnd((e: TerminalShellExecutionEndEvent) => {
                             if (e.execution === execution) {
-                                execPromise.resolve();
-                                if (timer) {
-                                    clearTimeout(timer);
-                                    timer = undefined;
+                                if (e.exitCode === undefined) {
+                                    traceVerbose(
+                                        `Terminal shell execution returned with undefined. Cannot guarentee activation`,
+                                    );
+                                    // TODO: Perhaps further activation attempts&checks might be required.
+                                    // There is a high chance user's activation process was interrupted.
+                                } else {
+                                    traceVerbose(`Activation execution completed with exit code: ${e.exitCode}`);
+                                }
+                                if (!execPromise.completed) {
+                                    execPromise.resolve();
                                 }
                             }
                         }),
@@ -253,18 +257,22 @@ export class TerminalActivationImpl implements TerminalActivationInternal {
                                 );
                             }
                         }),
-                        new Disposable(() => {
-                            if (timer) {
-                                clearTimeout(timer);
-                                timer = undefined;
-                            }
-                        }),
                     );
-                    try {
-                        await execPromise.promise;
-                    } finally {
-                        disposables.forEach((d) => d.dispose());
-                    }
+                    await Promise.race([
+                        execPromise.promise,
+                        new Promise<void>((resolve) => {
+                            const timer = setTimeout(() => {
+                                if (!execPromise.completed) {
+                                    traceError(
+                                        `Shell execution timed out: ${command.executable} ${command.args?.join(' ')}`,
+                                    );
+                                    execPromise.resolve();
+                                    resolve();
+                                }
+                            }, 2000);
+                            disposables.push(new Disposable(() => clearTimeout(timer)));
+                        }),
+                    ]);
                 }
             } finally {
                 this.activatedTerminals.set(terminal, environment);
@@ -284,17 +292,21 @@ export class TerminalActivationImpl implements TerminalActivationInternal {
                     const execPromise = createDeferred<void>();
                     const execution = shellIntegration.executeCommand(command.executable, command.args ?? []);
                     const disposables: Disposable[] = [];
-                    let timer: NodeJS.Timeout | undefined = setTimeout(() => {
-                        execPromise.resolve();
-                        traceError(`Shell execution timed out: ${command.executable} ${command.args?.join(' ')}`);
-                    }, 2000);
+
                     disposables.push(
                         this.onTerminalShellExecutionEnd((e: TerminalShellExecutionEndEvent) => {
                             if (e.execution === execution) {
-                                execPromise.resolve();
-                                if (timer) {
-                                    clearTimeout(timer);
-                                    timer = undefined;
+                                if (e.exitCode === undefined) {
+                                    traceVerbose(
+                                        `Terminal shell execution returned with undefined. Cannot guarentee deactivation`,
+                                    );
+                                    // TODO: Perhaps further deactivation attempts&checks might be required.
+                                    // There is a high chance user's deactivation process was interrupted.
+                                } else {
+                                    traceVerbose(`Deactivation execution completed with exit code: ${e.exitCode}`);
+                                }
+                                if (!execPromise.completed) {
+                                    execPromise.resolve();
                                 }
                             }
                         }),
@@ -305,15 +317,22 @@ export class TerminalActivationImpl implements TerminalActivationInternal {
                                 );
                             }
                         }),
-                        new Disposable(() => {
-                            if (timer) {
-                                clearTimeout(timer);
-                                timer = undefined;
-                            }
-                        }),
                     );
-
-                    await execPromise.promise;
+                    await Promise.race([
+                        execPromise.promise,
+                        new Promise<void>((resolve) => {
+                            const timer = setTimeout(() => {
+                                if (!execPromise.completed) {
+                                    traceError(
+                                        `Shell execution timed out: ${command.executable} ${command.args?.join(' ')}`,
+                                    );
+                                    execPromise.resolve();
+                                    resolve();
+                                }
+                            }, 2000);
+                            disposables.push(new Disposable(() => clearTimeout(timer)));
+                        }),
+                    ]);
                 }
             } finally {
                 this.activatedTerminals.delete(terminal);
