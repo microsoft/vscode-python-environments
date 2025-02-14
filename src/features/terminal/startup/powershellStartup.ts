@@ -1,6 +1,9 @@
 import * as fs from 'fs-extra';
 import { getUserHomeDir } from '../../../common/utils/pathUtils';
 import { isWindows } from '../../../common/utils/platformUtils';
+import { ShellStartupProvider } from './startupProvider';
+import { EnvironmentVariableScope, GlobalEnvironmentVariableCollection } from 'vscode';
+import { EnvironmentManagers } from '../../../internal.api';
 
 const pwshActivationEnvVarKey = 'VSCODE_PWSH_ACTIVATE';
 
@@ -74,7 +77,7 @@ async function getPowerShellProfile(): Promise<PowerShellProfile | undefined> {
     return existingProfiles.length > 0 ? existingProfiles.sort((a, b) => a.type - b.type)[0] : undefined;
 }
 
-export async function isPowerShellStartupSetup(): Promise<boolean> {
+async function isPowerShellStartupSetup(): Promise<boolean> {
     const profile = await getPowerShellProfile();
     if (profile) {
         const content = await fs.readFile(profile.path, 'utf8');
@@ -83,7 +86,7 @@ export async function isPowerShellStartupSetup(): Promise<boolean> {
     return false;
 }
 
-export async function setupPowerShellStartup(): Promise<void> {
+async function setupPowerShellStartup(): Promise<void> {
     const lineSep = isWindows() ? '\r\n' : '\n';
     const activationContent = `${lineSep}${lineSep}# VSCODE-PYTHON-ACTIVATION:START${lineSep}if ($env:${pwshActivationEnvVarKey} -ne $null) {${lineSep}    Invoke-Expression $env:${pwshActivationEnvVarKey}${lineSep}}${lineSep}# VSCODE-PYTHON-ACTIVATION:END${lineSep}`;
     const profile = await getPowerShellProfile();
@@ -95,7 +98,7 @@ export async function setupPowerShellStartup(): Promise<void> {
     }
 }
 
-export async function removePowerShellStartup(): Promise<void> {
+async function removePowerShellStartup(): Promise<void> {
     const profile = await getPowerShellProfile();
     if (profile) {
         const content = await fs.readFile(profile.path, 'utf8');
@@ -106,5 +109,32 @@ export async function removePowerShellStartup(): Promise<void> {
             );
             await fs.writeFile(profile.path, newContent);
         }
+    }
+}
+
+export class PowershellStartupProvider implements ShellStartupProvider {
+    constructor(private readonly em: EnvironmentManagers) {}
+    async isSetup(): Promise<boolean> {
+        return await isPowerShellStartupSetup();
+    }
+
+    async setupScripts(): Promise<void> {
+        await setupPowerShellStartup();
+    }
+
+    async teardownScripts(): Promise<void> {
+        await removePowerShellStartup();
+    }
+
+    async updateEnvVariables(
+        global: GlobalEnvironmentVariableCollection,
+        scope: EnvironmentVariableScope,
+    ): Promise<void> {
+        const envVars = global.getScoped(scope);
+    }
+
+    async removeEnvVariables(envCollection: GlobalEnvironmentVariableCollection): Promise<void> {
+        // Implementation for removing environment variables if needed
+        // Currently, this method is not implemented
     }
 }
