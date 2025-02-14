@@ -97,3 +97,26 @@ export function getAutoActivationType(): 'off' | 'command' | 'shellStartup' {
     const config = getConfiguration('python-envs');
     return config.get<'off' | 'command' | 'shellStartup'>('terminal.autoActivationType', 'command');
 }
+
+export async function getAllDistinctProjectEnvironments(
+    api: PythonProjectGetterApi & PythonProjectEnvironmentApi,
+): Promise<PythonEnvironment[] | undefined> {
+    const envs: PythonEnvironment[] | undefined = [];
+
+    const projects = api.getPythonProjects();
+    if (projects.length === 0) {
+        const env = await api.getEnvironment(undefined);
+        if (env) {
+            envs.push(env);
+        }
+    } else if (projects.length === 1) {
+        const env = await api.getEnvironment(projects[0].uri);
+        if (env) {
+            envs.push(env);
+        }
+    } else {
+        envs.push(...(await getDistinctProjectEnvs(api, projects)));
+    }
+
+    return envs.length > 0 ? envs : undefined;
+}
