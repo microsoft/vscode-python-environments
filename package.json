@@ -86,6 +86,21 @@
                         "onExP",
                         "preview"
                     ]
+                },
+                "python-envs.extensionPackageTrust": {
+                    "type": "object",
+                    "scope": "user",
+                    "properties": {
+                        "pub.name": {
+                            "type": "string",
+                            "enum": [
+                                "alwaysAllow",
+                                "alwaysAsk"
+                            ],
+                            "default": "alwaysAsk",
+                            "description": "Sets how installs by a given extension will be handled from the environment extension."
+                        }
+                    }
                 }
             }
         },

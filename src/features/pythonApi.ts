@@ -1,4 +1,4 @@
-import { Uri, Disposable, Event, EventEmitter, Terminal, TaskExecution } from 'vscode';
+import { Uri, Disposable, Event, EventEmitter, Terminal, TaskExecution, workspace } from 'vscode';
 import {
     PythonEnvironmentApi,
     PythonEnvironment,
@@ -46,7 +46,11 @@ import { runAsTask } from './execution/runAsTask';
 import { runInTerminal } from './terminal/runInTerminal';
 import { runInBackground } from './execution/runInBackground';
 import { EnvVarManager } from './execution/envVariableManager';
-
+import { getCallingExtension } from '../common/utils/frameUtils';
+import { getConfiguration } from '../common/workspace.apis';
+type SettingsPackageTrust = {
+    [key: string]: 'alwaysAllow' | 'alwaysAsk';
+};
 class PythonEnvironmentApiImpl implements PythonEnvironmentApi {
     private readonly _onDidChangeEnvironments = new EventEmitter<DidChangeEnvironmentsEventArgs>();
     private readonly _onDidChangeEnvironment = new EventEmitter<DidChangeEnvironmentEventArgs>();
@@ -217,6 +221,50 @@ class PythonEnvironmentApiImpl implements PythonEnvironmentApi {
         return new Disposable(() => disposables.forEach((d) => d.dispose()));
     }
     installPackages(context: PythonEnvironment, packages: string[], options: PackageInstallOptions): Promise<void> {
+        // call to see if this ext is ready to install
+        // check permissions
+        // get extension ID
+        // export function getCallingExtension(): string {
+        // use vscode config API
+        const callingExtension = getCallingExtension();
+        traceInfo(`Python API: Installing packages for extension: ${callingExtension}`);
+        let extPkgTrustConfig: SettingsPackageTrust | undefined =
+            getConfiguration('python-envs').get<SettingsPackageTrust>('extensionPackageTrust');
+        let callingExtensionTrustLevel;
+        let isConfigured = true;
+        if (extPkgTrustConfig === undefined) {
+            // no package trust config, default to alwaysAsk
+            callingExtensionTrustLevel = 'alwaysAsk';
+            isConfigured = false;
+        } else {
+            // check for package trust settings
+            callingExtensionTrustLevel = extPkgTrustConfig[callingExtension];
+            if (callingExtensionTrustLevel === undefined) {
+                // no specific package trust settings, checking wildcard in config
+                callingExtensionTrustLevel = extPkgTrustConfig['*'];
+                if (callingExtensionTrustLevel === undefined) {
+                    // no wildcard in config, default to alwaysAsk
+                    callingExtensionTrustLevel = 'alwaysAsk';
+                    isConfigured = false;
+                }
+            }
+        }
+        traceInfo(`package trust settings for ${callingExtension} is ${callingExtensionTrustLevel}`);
+
+        if (!isConfigured) {
+            // calling extension not in config, no wildcard setup
+            // prompt user to "alwaysAsk" or "alwaysAllow"
+        } else {
+            if (callingExtensionTrustLevel === 'alwaysAllow') {
+                traceInfo('Package installation is allowed.');
+            }
+            if (callingExtensionTrustLevel === 'alwaysAsk') {
+                traceInfo('Package installation is pending user confirmation due to trust settings.');
+                // prompt user to allow or deny package installation
+                
+            }
+        }
+
         const manager = this.envManagers.getPackageManager(context);
         if (!manager) {
             return Promise.reject(new Error('No package manager found'));
