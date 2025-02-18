@@ -3,7 +3,7 @@ import * as frameUtils from '../../common/utils/frameUtils';
 import * as workspaceApi from '../../common/workspace.apis';
 import { MockWorkspaceConfiguration } from '../mocks/mockWorkspaceConfig';
 import * as utils from '../../features/utils';
-import { InstallPermission, packageManagementFlow, SimpleResponse } from '../../features/packageManagement';
+import { InstallPermissionEnum, packageManagementFlow, SimpleResponseEnum } from '../../features/packageManagement';
 
 suite('packageManagementFlow Unit test', () => {
     let WorkspaceConfigurationMock: MockWorkspaceConfiguration;
@@ -18,7 +18,7 @@ suite('packageManagementFlow Unit test', () => {
         sinon.stub(frameUtils, 'getCallingExtension').returns('publisher.testExtension');
         const installPermissionsPromptStub = sinon
             .stub(utils, 'promptForInstallPermissions')
-            .returns(Promise.resolve(InstallPermission.AlwaysAsk));
+            .returns(Promise.resolve(InstallPermissionEnum.AlwaysAsk));
 
         WorkspaceConfigurationMock = new MockWorkspaceConfiguration({});
 
@@ -35,7 +35,7 @@ suite('packageManagementFlow Unit test', () => {
 
         const installPermissionsPromptStub = sinon
             .stub(utils, 'promptForInstallPermissions')
-            .returns(Promise.resolve(InstallPermission.AlwaysAsk));
+            .returns(Promise.resolve(InstallPermissionEnum.AlwaysAsk));
 
         WorkspaceConfigurationMock = new MockWorkspaceConfiguration({
             allowAutoPackageManagement: { 'random.extension': 'alwaysAllow' } as utils.SettingsPackageTrust,
@@ -51,7 +51,7 @@ suite('packageManagementFlow Unit test', () => {
         sinon.stub(frameUtils, 'getCallingExtension').returns('publisher.testExtension');
         const promptAlwaysAskStub = sinon
             .stub(utils, 'promptForAlwaysAsk')
-            .returns(Promise.resolve(SimpleResponse.YesInstall));
+            .returns(Promise.resolve(SimpleResponseEnum.YesInstall));
 
         WorkspaceConfigurationMock = new MockWorkspaceConfiguration({
             allowAutoPackageManagement: {
@@ -73,7 +73,7 @@ suite('packageManagementFlow Unit test', () => {
         sinon.stub(frameUtils, 'getCallingExtension').returns('publisher.testExtension');
         const promptAlwaysAskStub = sinon
             .stub(utils, 'promptForAlwaysAsk')
-            .returns(Promise.resolve(SimpleResponse.YesInstall));
+            .returns(Promise.resolve(SimpleResponseEnum.YesInstall));
         WorkspaceConfigurationMock = new MockWorkspaceConfiguration({
             allowAutoPackageManagement: {
                 'publisher.testExtension': 'alwaysAsk',
@@ -93,7 +93,7 @@ suite('packageManagementFlow Unit test', () => {
         sinon.stub(frameUtils, 'getCallingExtension').returns('publisher.testExtension');
         const promptForInstallPermissionsStub = sinon
             .stub(utils, 'promptForInstallPermissions')
-            .returns(Promise.resolve(InstallPermission.AlwaysAllow));
+            .returns(Promise.resolve(InstallPermissionEnum.AlwaysAllow));
 
         WorkspaceConfigurationMock = new MockWorkspaceConfiguration({});
 
@@ -110,7 +110,7 @@ suite('packageManagementFlow Unit test', () => {
         sinon.stub(frameUtils, 'getCallingExtension').returns('publisher.testExtension');
         const promptForInstallPermissionsStub = sinon
             .stub(utils, 'promptForInstallPermissions')
-            .returns(Promise.resolve(InstallPermission.InstallNoConfigure));
+            .returns(Promise.resolve(InstallPermissionEnum.InstallNoConfigure));
 
         WorkspaceConfigurationMock = new MockWorkspaceConfiguration({});
 
@@ -129,7 +129,7 @@ suite('packageManagementFlow Unit test', () => {
         sinon.stub(frameUtils, 'getCallingExtension').returns('publisher.testExtension');
         const promptForInstallPermissionsStub = sinon
             .stub(utils, 'promptForInstallPermissions')
-            .returns(Promise.resolve(InstallPermission.Cancel));
+            .returns(Promise.resolve(InstallPermissionEnum.Cancel));
 
         WorkspaceConfigurationMock = new MockWorkspaceConfiguration({});
 
@@ -147,7 +147,7 @@ suite('packageManagementFlow Unit test', () => {
         sinon.stub(frameUtils, 'getCallingExtension').returns('publisher.testExtension');
         const promptAlwaysAskStub = sinon
             .stub(utils, 'promptForAlwaysAsk')
-            .returns(Promise.resolve(SimpleResponse.NoInstall));
+            .returns(Promise.resolve(SimpleResponseEnum.NoInstall));
         WorkspaceConfigurationMock = new MockWorkspaceConfiguration({
             allowAutoPackageManagement: {
                 'publisher.testExtension': 'alwaysAsk',
@@ -167,7 +167,7 @@ suite('packageManagementFlow Unit test', () => {
         sinon.stub(frameUtils, 'getCallingExtension').returns('publisher.testExtension');
         const promptAlwaysAskStub = sinon
             .stub(utils, 'promptForAlwaysAsk')
-            .returns(Promise.resolve(SimpleResponse.YesInstall));
+            .returns(Promise.resolve(SimpleResponseEnum.YesInstall));
 
         WorkspaceConfigurationMock = new MockWorkspaceConfiguration({
             allowAutoPackageManagement: {

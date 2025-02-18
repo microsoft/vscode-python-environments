@@ -4,14 +4,14 @@ import { getCallingExtension } from '../common/utils/frameUtils';
 import { getConfiguration } from '../common/workspace.apis';
 import { SettingsPackageTrust, promptForInstallPermissions, promptForAlwaysAsk } from './utils';
 
-export enum InstallPermission {
+export enum InstallPermissionEnum {
     AlwaysAllow = 'alwaysAllow',
     AlwaysAsk = 'alwaysAsk',
     InstallNoConfigure = 'installNoConfigure',
     Cancel = 'cancel',
 }
 
-export enum SimpleResponse {
+export enum SimpleResponseEnum {
     YesInstall = 'yesInstall',
     NoInstall = 'noInstall',
     Cancel = 'cancel',
@@ -29,7 +29,7 @@ export async function packageManagementFlow(packages: string[]): Promise<void> {
     if (extPkgTrustConfig === undefined) {
         // TODO:s THIS DOESN'T WORK
         // no package trust config, default to alwaysAsk
-        callingExtensionTrustLevel = InstallPermission.AlwaysAsk;
+        callingExtensionTrustLevel = InstallPermissionEnum.AlwaysAsk;
         isConfigured = false;
     } else {
         // check for package trust settings
@@ -39,7 +39,7 @@ export async function packageManagementFlow(packages: string[]): Promise<void> {
             callingExtensionTrustLevel = extPkgTrustConfig['*'];
             if (callingExtensionTrustLevel === undefined) {
                 // no wildcard in config, default to alwaysAsk
-                callingExtensionTrustLevel = InstallPermission.AlwaysAsk;
+                callingExtensionTrustLevel = InstallPermissionEnum.AlwaysAsk;
                 isConfigured = false;
             }
         }
@@ -50,23 +50,23 @@ export async function packageManagementFlow(packages: string[]): Promise<void> {
         // calling extension has no config, user has no wildcard setup
         // prompt user to "alwaysAsk" or "alwaysAllow"
         const selectedOption = await promptForInstallPermissions(callingExtension, packages.join(', '));
-        if (selectedOption === InstallPermission.Cancel) {
+        if (selectedOption === InstallPermissionEnum.Cancel) {
             // user cancelled the prompt, exit
             window.showErrorMessage(`Package installation of ${packages.join(', ')} was canceled by the user.`);
             return Promise.reject('User cancelled the package installation.');
         }
-        if (selectedOption !== InstallPermission.InstallNoConfigure) {
+        if (selectedOption !== InstallPermissionEnum.InstallNoConfigure) {
             // meaning the user selected "alwaysAsk" or "alwaysAllow", update the config
             const newExtTrustConfig = { ...extPkgTrustConfig, [callingExtension]: selectedOption };
             config.update('allowAutoPackageManagement', newExtTrustConfig, true);
         }
     } else {
         // user has already configured package trust settings for this extension
-        if (callingExtensionTrustLevel === InstallPermission.AlwaysAsk) {
+        if (callingExtensionTrustLevel === InstallPermissionEnum.AlwaysAsk) {
             traceInfo('Package installation is pending user confirmation due to trust settings.');
             // prompt user to allow or deny package installation
             const simpleResponse = await promptForAlwaysAsk(callingExtension, packages.join(', '));
-            if (simpleResponse === SimpleResponse.NoInstall || simpleResponse === SimpleResponse.Cancel) {
+            if (simpleResponse === SimpleResponseEnum.NoInstall || simpleResponse === SimpleResponseEnum.Cancel) {
                 // user cancelled the prompt, exit
                 window.showErrorMessage(`Package installation of ${packages.join(', ')} was canceled by the user.`);
                 return Promise.reject('User cancelled the package installation.');

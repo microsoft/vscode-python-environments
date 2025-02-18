@@ -1,8 +1,8 @@
 import { window } from 'vscode';
-import { InstallPermission, SimpleResponse } from './packageManagement';
+import { InstallPermissionEnum, SimpleResponseEnum } from './packageManagement';
 
 export type SettingsPackageTrust = {
-    [key: string]: InstallPermission.AlwaysAllow | InstallPermission.AlwaysAsk;
+    [key: string]: InstallPermissionEnum.AlwaysAllow | InstallPermissionEnum.AlwaysAsk;
 };
 
 export const ALWAYS_ALLOW = 'Always Allow installs';
@@ -12,7 +12,7 @@ export const INSTALL_NO_CONFIGURE = 'Install without configuring';
 export const YES_INSTALL = 'Yes, Install';
 export const NO_INSTALL = 'Do Not Install';
 
-export function promptForInstallPermissions(extensionName: string, packages: string): Thenable<InstallPermission> {
+export function promptForInstallPermissions(extensionName: string, packages: string): Thenable<InstallPermissionEnum> {
     return new Promise((resolve) => {
         window
             .showInformationMessage(
@@ -28,16 +28,16 @@ export function promptForInstallPermissions(extensionName: string, packages: str
             .then((selectedOption) => {
                 switch (selectedOption) {
                     case ALWAYS_ALLOW:
-                        resolve(InstallPermission.AlwaysAllow);
+                        resolve(InstallPermissionEnum.AlwaysAllow);
                         break;
                     case ALWAYS_ASK:
-                        resolve(InstallPermission.AlwaysAsk);
+                        resolve(InstallPermissionEnum.AlwaysAsk);
                         break;
                     case INSTALL_NO_CONFIGURE:
-                        resolve(InstallPermission.InstallNoConfigure);
+                        resolve(InstallPermissionEnum.InstallNoConfigure);
                         break;
                     default:
-                        resolve(InstallPermission.Cancel);
+                        resolve(InstallPermissionEnum.Cancel);
                         break;
                 }
             });
@@ -59,13 +59,13 @@ export function promptForAlwaysAsk(extensionName: string, packages: string): The
             .then((selectedOption) => {
                 switch (selectedOption) {
                     case YES_INSTALL:
-                        resolve(SimpleResponse.YesInstall);
+                        resolve(SimpleResponseEnum.YesInstall);
                         break;
                     case NO_INSTALL:
-                        resolve(SimpleResponse.NoInstall);
+                        resolve(SimpleResponseEnum.NoInstall);
                         break;
                     default:
-                        resolve(SimpleResponse.Cancel);
+                        resolve(SimpleResponseEnum.Cancel);
                         break;
                 }
             });
