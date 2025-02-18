@@ -1,7 +1,10 @@
 import { window } from 'vscode';
+import { InstallPermission, SimpleResponse } from './packageManagement';
+
 export type SettingsPackageTrust = {
-    [key: string]: 'alwaysAllow' | 'alwaysAsk';
+    [key: string]: InstallPermission.AlwaysAllow | InstallPermission.AlwaysAsk;
 };
+
 export const ALWAYS_ALLOW = 'Always Allow installs';
 export const ALWAYS_ASK = 'Always Ask before installs';
 export const INSTALL_NO_CONFIGURE = 'Install without configuring';
@@ -9,7 +12,7 @@ export const INSTALL_NO_CONFIGURE = 'Install without configuring';
 export const YES_INSTALL = 'Yes, Install';
 export const NO_INSTALL = 'Do Not Install';
 
-export function promptForInstallPermissions(extensionName: string, packages: string): Thenable<string | undefined> {
+export function promptForInstallPermissions(extensionName: string, packages: string): Thenable<InstallPermission> {
     return new Promise((resolve) => {
         window
             .showInformationMessage(
@@ -25,16 +28,16 @@ export function promptForInstallPermissions(extensionName: string, packages: str
             .then((selectedOption) => {
                 switch (selectedOption) {
                     case ALWAYS_ALLOW:
-                        resolve('alwaysAllow');
+                        resolve(InstallPermission.AlwaysAllow);
                         break;
                     case ALWAYS_ASK:
-                        resolve('alwaysAsk');
+                        resolve(InstallPermission.AlwaysAsk);
                         break;
                     case INSTALL_NO_CONFIGURE:
-                        resolve('installNoConfigure');
+                        resolve(InstallPermission.InstallNoConfigure);
                         break;
                     default:
-                        resolve('cancel');
+                        resolve(InstallPermission.Cancel);
                         break;
                 }
             });
@@ -56,13 +59,13 @@ export function promptForAlwaysAsk(extensionName: string, packages: string): The
             .then((selectedOption) => {
                 switch (selectedOption) {
                     case YES_INSTALL:
-                        resolve('yesInstall');
+                        resolve(SimpleResponse.YesInstall);
                         break;
                     case NO_INSTALL:
-                        resolve('noInstall');
+                        resolve(SimpleResponse.NoInstall);
                         break;
                     default:
-                        resolve('cancel');
+                        resolve(SimpleResponse.Cancel);
                         break;
                 }
             });

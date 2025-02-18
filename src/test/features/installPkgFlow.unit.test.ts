@@ -3,7 +3,7 @@ import * as frameUtils from '../../common/utils/frameUtils';
 import * as workspaceApi from '../../common/workspace.apis';
 import { MockWorkspaceConfiguration } from '../mocks/mockWorkspaceConfig';
 import * as utils from '../../features/utils';
-import { packageManagementFlow } from '../../features/packageManagement';
+import { InstallPermission, packageManagementFlow, SimpleResponse } from '../../features/packageManagement';
 
 suite('packageManagementFlow Unit test', () => {
     let WorkspaceConfigurationMock: MockWorkspaceConfiguration;
@@ -18,7 +18,7 @@ suite('packageManagementFlow Unit test', () => {
         sinon.stub(frameUtils, 'getCallingExtension').returns('publisher.testExtension');
         const installPermissionsPromptStub = sinon
             .stub(utils, 'promptForInstallPermissions')
-            .returns(Promise.resolve('alwaysAsk'));
+            .returns(Promise.resolve(InstallPermission.AlwaysAsk));
 
         WorkspaceConfigurationMock = new MockWorkspaceConfiguration({});
 
@@ -35,7 +35,7 @@ suite('packageManagementFlow Unit test', () => {
 
         const installPermissionsPromptStub = sinon
             .stub(utils, 'promptForInstallPermissions')
-            .returns(Promise.resolve('alwaysAsk'));
+            .returns(Promise.resolve(InstallPermission.AlwaysAsk));
 
         WorkspaceConfigurationMock = new MockWorkspaceConfiguration({
             allowAutoPackageManagement: { 'random.extension': 'alwaysAllow' } as utils.SettingsPackageTrust,
@@ -49,7 +49,9 @@ suite('packageManagementFlow Unit test', () => {
     });
     test('should use wildcard config when ext config is not found', async () => {
         sinon.stub(frameUtils, 'getCallingExtension').returns('publisher.testExtension');
-        const promptAlwaysAskStub = sinon.stub(utils, 'promptForAlwaysAsk').returns(Promise.resolve('Yes, Install'));
+        const promptAlwaysAskStub = sinon
+            .stub(utils, 'promptForAlwaysAsk')
+            .returns(Promise.resolve(SimpleResponse.YesInstall));
 
         WorkspaceConfigurationMock = new MockWorkspaceConfiguration({
             allowAutoPackageManagement: {
@@ -69,7 +71,9 @@ suite('packageManagementFlow Unit test', () => {
     });
     test('should ignore wildcard config when ext config is found', async () => {
         sinon.stub(frameUtils, 'getCallingExtension').returns('publisher.testExtension');
-        const promptAlwaysAskStub = sinon.stub(utils, 'promptForAlwaysAsk').returns(Promise.resolve('Yes, Install'));
+        const promptAlwaysAskStub = sinon
+            .stub(utils, 'promptForAlwaysAsk')
+            .returns(Promise.resolve(SimpleResponse.YesInstall));
         WorkspaceConfigurationMock = new MockWorkspaceConfiguration({
             allowAutoPackageManagement: {
                 'publisher.testExtension': 'alwaysAsk',
@@ -89,7 +93,7 @@ suite('packageManagementFlow Unit test', () => {
         sinon.stub(frameUtils, 'getCallingExtension').returns('publisher.testExtension');
         const promptForInstallPermissionsStub = sinon
             .stub(utils, 'promptForInstallPermissions')
-            .returns(Promise.resolve('alwaysAsk'));
+            .returns(Promise.resolve(InstallPermission.AlwaysAllow));
 
         WorkspaceConfigurationMock = new MockWorkspaceConfiguration({});
 
@@ -106,7 +110,7 @@ suite('packageManagementFlow Unit test', () => {
         sinon.stub(frameUtils, 'getCallingExtension').returns('publisher.testExtension');
         const promptForInstallPermissionsStub = sinon
             .stub(utils, 'promptForInstallPermissions')
-            .returns(Promise.resolve('installNoConfigure'));
+            .returns(Promise.resolve(InstallPermission.InstallNoConfigure));
 
         WorkspaceConfigurationMock = new MockWorkspaceConfiguration({});
 
@@ -125,7 +129,7 @@ suite('packageManagementFlow Unit test', () => {
         sinon.stub(frameUtils, 'getCallingExtension').returns('publisher.testExtension');
         const promptForInstallPermissionsStub = sinon
             .stub(utils, 'promptForInstallPermissions')
-            .returns(Promise.resolve('cancel'));
+            .returns(Promise.resolve(InstallPermission.Cancel));
 
         WorkspaceConfigurationMock = new MockWorkspaceConfiguration({});
 
@@ -141,7 +145,9 @@ suite('packageManagementFlow Unit test', () => {
     });
     test('should cancel when user selects noInstall during promptForAlwaysAsk', async () => {
         sinon.stub(frameUtils, 'getCallingExtension').returns('publisher.testExtension');
-        const promptAlwaysAskStub = sinon.stub(utils, 'promptForAlwaysAsk').returns(Promise.resolve('noInstall'));
+        const promptAlwaysAskStub = sinon
+            .stub(utils, 'promptForAlwaysAsk')
+            .returns(Promise.resolve(SimpleResponse.NoInstall));
         WorkspaceConfigurationMock = new MockWorkspaceConfiguration({
             allowAutoPackageManagement: {
                 'publisher.testExtension': 'alwaysAsk',
@@ -159,7 +165,9 @@ suite('packageManagementFlow Unit test', () => {
 
     test('should prompt user for when configured to alwaysAsk', async () => {
         sinon.stub(frameUtils, 'getCallingExtension').returns('publisher.testExtension');
-        const promptAlwaysAskStub = sinon.stub(utils, 'promptForAlwaysAsk').returns(Promise.resolve('yesInstall'));
+        const promptAlwaysAskStub = sinon
+            .stub(utils, 'promptForAlwaysAsk')
+            .returns(Promise.resolve(SimpleResponse.YesInstall));
 
         WorkspaceConfigurationMock = new MockWorkspaceConfiguration({
             allowAutoPackageManagement: {

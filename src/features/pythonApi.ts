@@ -46,8 +46,7 @@ import { runAsTask } from './execution/runAsTask';
 import { runInTerminal } from './terminal/runInTerminal';
 import { runInBackground } from './execution/runInBackground';
 import { EnvVarManager } from './execution/envVariableManager';
-import { packageManagementFlow } from './utils';
-
+import { packageManagementFlow } from './packageManagement';
 class PythonEnvironmentApiImpl implements PythonEnvironmentApi {
     private readonly _onDidChangeEnvironments = new EventEmitter<DidChangeEnvironmentsEventArgs>();
     private readonly _onDidChangeEnvironment = new EventEmitter<DidChangeEnvironmentEventArgs>();
