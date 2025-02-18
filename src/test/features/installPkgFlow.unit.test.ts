@@ -1,74 +1,196 @@
 import * as sinon from 'sinon';
-import * as TypeMoq from 'typemoq';
 import * as frameUtils from '../../common/utils/frameUtils';
 import * as workspaceApi from '../../common/workspace.apis';
-import { EnvironmentManagers, PythonProjectManager, ProjectCreators } from '../../internal.api';
-import { PythonEnvironment, PackageInstallOptions, PythonEnvironmentApi } from '../../api';
-import { getPythonApi, setPythonApi, SettingsPackageTrust } from '../../features/pythonApi';
-import { TerminalManager } from '../../features/terminal/terminalManager';
-import { EnvVarManager } from '../../features/execution/envVariableManager';
 import { MockWorkspaceConfiguration } from '../mocks/mockWorkspaceConfig';
 import * as utils from '../../features/utils';
+import { packageManagementFlow } from '../../features/packageManagement';
 
-suite('installPackages Function', () => {
-    let envManagersMock: TypeMoq.IMock<EnvironmentManagers>;
-    let projectManagerMock: TypeMoq.IMock<PythonProjectManager>;
-    let projectCreatorsMock: TypeMoq.IMock<ProjectCreators>;
-    let terminalManagerMock: TypeMoq.IMock<TerminalManager>;
-    let envVarManagerMock: TypeMoq.IMock<EnvVarManager>;
-    let api: PythonEnvironmentApi;
+suite('packageManagementFlow Unit test', () => {
     let WorkspaceConfigurationMock: MockWorkspaceConfiguration;
 
-    setup(async () => {
-        envManagersMock = TypeMoq.Mock.ofType<EnvironmentManagers>();
-        projectManagerMock = TypeMoq.Mock.ofType<PythonProjectManager>();
-        projectCreatorsMock = TypeMoq.Mock.ofType<ProjectCreators>();
-        terminalManagerMock = TypeMoq.Mock.ofType<TerminalManager>();
-        envVarManagerMock = TypeMoq.Mock.ofType<EnvVarManager>();
-
-        setPythonApi(
-            envManagersMock.object,
-            projectManagerMock.object,
-            projectCreatorsMock.object,
-            terminalManagerMock.object,
-            envVarManagerMock.object,
-        );
-        api = await getPythonApi();
-    });
+    setup(async () => {});
 
     teardown(() => {
         sinon.restore();
     });
 
-    test('should install packages successfully', async () => {
+    test('should use permissions prompt user when no allowAutoPackageManagement config exists', async () => {
         sinon.stub(frameUtils, 'getCallingExtension').returns('publisher.testExtension');
-        sinon.stub(utils, 'promptForAlwaysAsk').returns(Promise.resolve('Yes, Install'));
+        const installPermissionsPromptStub = sinon
+            .stub(utils, 'promptForInstallPermissions')
+            .returns(Promise.resolve('alwaysAsk'));
+
+        WorkspaceConfigurationMock = new MockWorkspaceConfiguration({});
+
+        sinon.stub(workspaceApi, 'getConfiguration').returns(WorkspaceConfigurationMock);
+        const packages = ['package1', 'package2'];
+
+        await packageManagementFlow(packages);
+        // assert that the permissions prompt was shown
+        sinon.assert.calledOnce(installPermissionsPromptStub);
+    });
+
+    test('should use permissions prompt when no matching ext entry exists', async () => {
+        sinon.stub(frameUtils, 'getCallingExtension').returns('publisher.testExtension');
+
+        const installPermissionsPromptStub = sinon
+            .stub(utils, 'promptForInstallPermissions')
+            .returns(Promise.resolve('alwaysAsk'));
 
         WorkspaceConfigurationMock = new MockWorkspaceConfiguration({
-            extensionPackageTrust: {
-                'publisher.testExtension': 'alwaysAsk',
-                'publisher.testExtension2': 'alwaysAsk',
-            } as SettingsPackageTrust,
+            allowAutoPackageManagement: { 'random.extension': 'alwaysAllow' } as utils.SettingsPackageTrust,
         });
 
         sinon.stub(workspaceApi, 'getConfiguration').returns(WorkspaceConfigurationMock);
-        const context = TypeMoq.Mock.ofType<PythonEnvironment>().object;
         const packages = ['package1', 'package2'];
-        const options = TypeMoq.Mock.ofType<PackageInstallOptions>().object;
 
-        const installStub = sinon.stub().returns({
-            install: sinon.stub().resolves(),
+        await packageManagementFlow(packages);
+        sinon.assert.calledOnce(installPermissionsPromptStub);
+    });
+    test('should use wildcard config when ext config is not found', async () => {
+        sinon.stub(frameUtils, 'getCallingExtension').returns('publisher.testExtension');
+        const promptAlwaysAskStub = sinon.stub(utils, 'promptForAlwaysAsk').returns(Promise.resolve('Yes, Install'));
+
+        WorkspaceConfigurationMock = new MockWorkspaceConfiguration({
+            allowAutoPackageManagement: {
+                '*': 'alwaysAsk',
+            } as utils.SettingsPackageTrust,
         });
-        envManagersMock.setup((m) => m.getPackageManager(TypeMoq.It.isAny())).returns(installStub as any);
 
-        await api.installPackages(context, packages, options);
-        sinon.assert.calledOnce(installStub);
+        sinon.stub(workspaceApi, 'getConfiguration').returns(WorkspaceConfigurationMock);
+        const packages = ['package1', 'package2'];
+
+        await packageManagementFlow(packages);
+        // assert alwaysAsk prompt was shown
+        sinon.assert.notCalled(sinon.stub(utils, 'promptForInstallPermissions'));
+        sinon.assert.calledOnce(promptAlwaysAskStub);
+
+        sinon.assert.pass(true);
+    });
+    test('should ignore wildcard config when ext config is found', async () => {
+        sinon.stub(frameUtils, 'getCallingExtension').returns('publisher.testExtension');
+        const promptAlwaysAskStub = sinon.stub(utils, 'promptForAlwaysAsk').returns(Promise.resolve('Yes, Install'));
+        WorkspaceConfigurationMock = new MockWorkspaceConfiguration({
+            allowAutoPackageManagement: {
+                'publisher.testExtension': 'alwaysAsk',
+                '*': 'alwaysAllow',
+            } as utils.SettingsPackageTrust,
+        });
+
+        sinon.stub(workspaceApi, 'getConfiguration').returns(WorkspaceConfigurationMock);
+        const packages = ['package1', 'package2'];
+
+        await packageManagementFlow(packages);
+
+        sinon.assert.calledOnce(promptAlwaysAskStub);
+    });
+
+    test('should update config when user selects always ask or always allow', async () => {
+        sinon.stub(frameUtils, 'getCallingExtension').returns('publisher.testExtension');
+        const promptForInstallPermissionsStub = sinon
+            .stub(utils, 'promptForInstallPermissions')
+            .returns(Promise.resolve('alwaysAsk'));
+
+        WorkspaceConfigurationMock = new MockWorkspaceConfiguration({});
+
+        const updateStub = sinon.stub(WorkspaceConfigurationMock, 'update');
+        sinon.stub(workspaceApi, 'getConfiguration').returns(WorkspaceConfigurationMock);
+        const packages = ['package1', 'package2'];
+
+        await packageManagementFlow(packages);
+        sinon.assert.calledOnce(updateStub);
+        sinon.assert.calledOnce(promptForInstallPermissionsStub);
+    });
+
+    test('should not update config when user selects install no configure', async () => {
+        sinon.stub(frameUtils, 'getCallingExtension').returns('publisher.testExtension');
+        const promptForInstallPermissionsStub = sinon
+            .stub(utils, 'promptForInstallPermissions')
+            .returns(Promise.resolve('installNoConfigure'));
+
+        WorkspaceConfigurationMock = new MockWorkspaceConfiguration({});
+
+        const updateStub = sinon.stub(WorkspaceConfigurationMock, 'update');
+        sinon.stub(workspaceApi, 'getConfiguration').returns(WorkspaceConfigurationMock);
+        const packages = ['package1', 'package2'];
+
+        await packageManagementFlow(packages);
+        sinon.assert.notCalled(updateStub);
+        sinon.assert.calledOnce(promptForInstallPermissionsStub);
+
+        sinon.assert.pass(true);
+    });
+
+    test('should cancel installation when user cancels promptForInstallPermissions', async () => {
+        sinon.stub(frameUtils, 'getCallingExtension').returns('publisher.testExtension');
+        const promptForInstallPermissionsStub = sinon
+            .stub(utils, 'promptForInstallPermissions')
+            .returns(Promise.resolve('cancel'));
+
+        WorkspaceConfigurationMock = new MockWorkspaceConfiguration({});
+
+        sinon.stub(workspaceApi, 'getConfiguration').returns(WorkspaceConfigurationMock);
+        const packages = ['package1', 'package2'];
+
         try {
-            sinon.assert.calledWith(installStub().install, context, packages, options);
+            await packageManagementFlow(packages);
         } catch (error) {
-            console.error('Expected installStub to be called with:', context, packages, options);
-            console.error('But it was called with:', installStub.getCall(0).args);
-            throw error;
+            sinon.assert.match(error, 'User cancelled the package installation.');
         }
+        sinon.assert.calledOnce(promptForInstallPermissionsStub);
+    });
+    test('should cancel when user selects noInstall during promptForAlwaysAsk', async () => {
+        sinon.stub(frameUtils, 'getCallingExtension').returns('publisher.testExtension');
+        const promptAlwaysAskStub = sinon.stub(utils, 'promptForAlwaysAsk').returns(Promise.resolve('noInstall'));
+        WorkspaceConfigurationMock = new MockWorkspaceConfiguration({
+            allowAutoPackageManagement: {
+                'publisher.testExtension': 'alwaysAsk',
+            } as utils.SettingsPackageTrust,
+        });
+        sinon.stub(workspaceApi, 'getConfiguration').returns(WorkspaceConfigurationMock);
+        const packages = ['package1', 'package2'];
+        try {
+            await packageManagementFlow(packages);
+        } catch (error) {
+            sinon.assert.match(error, 'User cancelled the package installation.');
+        }
+        sinon.assert.calledOnce(promptAlwaysAskStub);
+    });
+
+    test('should prompt user for when configured to alwaysAsk', async () => {
+        sinon.stub(frameUtils, 'getCallingExtension').returns('publisher.testExtension');
+        const promptAlwaysAskStub = sinon.stub(utils, 'promptForAlwaysAsk').returns(Promise.resolve('yesInstall'));
+
+        WorkspaceConfigurationMock = new MockWorkspaceConfiguration({
+            allowAutoPackageManagement: {
+                'publisher.testExtension': 'alwaysAsk',
+            } as utils.SettingsPackageTrust,
+        });
+
+        sinon.stub(workspaceApi, 'getConfiguration').returns(WorkspaceConfigurationMock);
+        const packages = ['package1', 'package2'];
+
+        await packageManagementFlow(packages);
+        sinon.assert.calledOnce(promptAlwaysAskStub);
+        sinon.assert.notCalled(sinon.stub(utils, 'promptForInstallPermissions'));
+    });
+
+    test('should show no prompts when trust level is always allow', async () => {
+        sinon.stub(frameUtils, 'getCallingExtension').returns('publisher.testExtension');
+
+        WorkspaceConfigurationMock = new MockWorkspaceConfiguration({
+            allowAutoPackageManagement: {
+                'publisher.testExtension': 'alwaysAllow',
+            } as utils.SettingsPackageTrust,
+        });
+
+        sinon.stub(workspaceApi, 'getConfiguration').returns(WorkspaceConfigurationMock);
+        const packages = ['package1', 'package2'];
+
+        await packageManagementFlow(packages);
+        //  assert that the install prompt was not shown when always allow
+        sinon.assert.notCalled(sinon.stub(utils, 'promptForInstallPermissions'));
+        sinon.assert.notCalled(sinon.stub(utils, 'promptForAlwaysAsk'));
+        sinon.assert.pass(true);
     });
 });

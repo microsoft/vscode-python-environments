@@ -1,4 +1,4 @@
-import { Uri, Disposable, Event, EventEmitter, Terminal, TaskExecution, window } from 'vscode';
+import { Uri, Disposable, Event, EventEmitter, Terminal, TaskExecution } from 'vscode';
 import {
     PythonEnvironmentApi,
     PythonEnvironment,
@@ -46,12 +46,8 @@ import { runAsTask } from './execution/runAsTask';
 import { runInTerminal } from './terminal/runInTerminal';
 import { runInBackground } from './execution/runInBackground';
 import { EnvVarManager } from './execution/envVariableManager';
-import { getCallingExtension } from '../common/utils/frameUtils';
-import { getConfiguration } from '../common/workspace.apis';
-import { promptForInstallPermissions, promptForAlwaysAsk } from './utils';
-export type SettingsPackageTrust = {
-    [key: string]: 'alwaysAllow' | 'alwaysAsk';
-};
+import { packageManagementFlow } from './utils';
+
 class PythonEnvironmentApiImpl implements PythonEnvironmentApi {
     private readonly _onDidChangeEnvironments = new EventEmitter<DidChangeEnvironmentsEventArgs>();
     private readonly _onDidChangeEnvironment = new EventEmitter<DidChangeEnvironmentEventArgs>();
@@ -231,64 +227,7 @@ class PythonEnvironmentApiImpl implements PythonEnvironmentApi {
         if (!manager) {
             return Promise.reject(new Error('No package manager found'));
         }
-        // what does it mean to return, will we tell the calling extension about it?
-        //check to see if pkg was already installed?
-        const callingExtension = getCallingExtension();
-        traceInfo(`Python API: Installing packages for extension: ${callingExtension}`);
-        const config = getConfiguration('python-envs');
-        let extPkgTrustConfig: SettingsPackageTrust | undefined =
-            config.get<SettingsPackageTrust>('extensionPackageTrust');
-        let callingExtensionTrustLevel;
-        let isConfigured = true;
-        if (extPkgTrustConfig === undefined) {
-            // TODO:s THIS DOESN'T WORK
-            // no package trust config, default to alwaysAsk
-            callingExtensionTrustLevel = 'alwaysAsk';
-            isConfigured = false;
-        } else {
-            // check for package trust settings
-            callingExtensionTrustLevel = extPkgTrustConfig[callingExtension];
-            if (callingExtensionTrustLevel === undefined) {
-                // no specific package trust settings, checking wildcard in config
-                callingExtensionTrustLevel = extPkgTrustConfig['*'];
-                if (callingExtensionTrustLevel === undefined) {
-                    // no wildcard in config, default to alwaysAsk
-                    callingExtensionTrustLevel = 'alwaysAsk';
-                    isConfigured = false;
-                }
-            }
-        }
-        traceInfo(`package trust settings for ${callingExtension} is ${callingExtensionTrustLevel}`);
-
-        if (!isConfigured) {
-            // calling extension has no config, user has no wildcard setup
-            // prompt user to "alwaysAsk" or "alwaysAllow"
-            const selectedOption = await promptForInstallPermissions(callingExtension, packages.join(', '));
-            if (selectedOption === 'cancel') {
-                // user cancelled the prompt, exit
-                window.showErrorMessage(`Package installation of ${packages.join(', ')} was canceled by the user.`);
-                return Promise.resolve();
-            }
-            if (selectedOption !== 'installNoConfigure') {
-                // meaning the user selected "alwaysAsk" or "alwaysAllow", update the config
-                const newExtTrustConfig = { ...extPkgTrustConfig, [callingExtension]: selectedOption };
-                config.update('extensionPackageTrust', newExtTrustConfig, true);
-            }
-        } else {
-            // user has already configured package trust settings for this extension
-            if (callingExtensionTrustLevel === 'alwaysAsk') {
-                traceInfo('Package installation is pending user confirmation due to trust settings.');
-                // prompt user to allow or deny package installation
-                const simpleResponse = await promptForAlwaysAsk(callingExtension, packages.join(', '));
-                if (simpleResponse === 'noInstall' || simpleResponse === 'cancel') {
-                    // user cancelled the prompt, exit
-                    window.showErrorMessage(`Package installation of ${packages.join(', ')} was canceled by the user.`);
-                    return Promise.resolve();
-                }
-            }
-            // if callingExtensionTrustLevel is 'alwaysAllow' just continue to install
-        }
-        // actually install the packages
+        await packageManagementFlow(packages);
         traceInfo(`Python API: Triggering install for packages: ${packages.join(', ')}`);
         return manager.install(context, packages, options);
     }

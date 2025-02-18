@@ -1,5 +1,7 @@
 import { window } from 'vscode';
-
+export type SettingsPackageTrust = {
+    [key: string]: 'alwaysAllow' | 'alwaysAsk';
+};
 export const ALWAYS_ALLOW = 'Always Allow installs';
 export const ALWAYS_ASK = 'Always Ask before installs';
 export const INSTALL_NO_CONFIGURE = 'Install without configuring';

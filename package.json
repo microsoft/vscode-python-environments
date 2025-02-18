@@ -87,7 +87,7 @@
                         "preview"
                     ]
                 },
-                "python-envs.extensionPackageTrust": {
+                "python-envs.allowAutoPackageManagement": {
                     "type": "object",
                     "scope": "user",
                     "properties": {
