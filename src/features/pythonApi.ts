@@ -1,4 +1,4 @@
-import { Uri, Disposable, Event, EventEmitter, Terminal, TaskExecution, workspace } from 'vscode';
+import { Uri, Disposable, Event, EventEmitter, Terminal, TaskExecution, window } from 'vscode';
 import {
     PythonEnvironmentApi,
     PythonEnvironment,
@@ -48,7 +48,8 @@ import { runInBackground } from './execution/runInBackground';
 import { EnvVarManager } from './execution/envVariableManager';
 import { getCallingExtension } from '../common/utils/frameUtils';
 import { getConfiguration } from '../common/workspace.apis';
-type SettingsPackageTrust = {
+import { promptForInstallPermissions, promptForAlwaysAsk } from './utils';
+export type SettingsPackageTrust = {
     [key: string]: 'alwaysAllow' | 'alwaysAsk';
 };
 class PythonEnvironmentApiImpl implements PythonEnvironmentApi {
@@ -220,19 +221,27 @@ class PythonEnvironmentApiImpl implements PythonEnvironmentApi {
         }
         return new Disposable(() => disposables.forEach((d) => d.dispose()));
     }
-    installPackages(context: PythonEnvironment, packages: string[], options: PackageInstallOptions): Promise<void> {
-        // call to see if this ext is ready to install
-        // check permissions
-        // get extension ID
-        // export function getCallingExtension(): string {
-        // use vscode config API
+    async installPackages(
+        context: PythonEnvironment,
+        packages: string[],
+        options: PackageInstallOptions,
+    ): Promise<void> {
+        // get the package manager to exit if not found
+        const manager = this.envManagers.getPackageManager(context);
+        if (!manager) {
+            return Promise.reject(new Error('No package manager found'));
+        }
+        // what does it mean to return, will we tell the calling extension about it?
+        //check to see if pkg was already installed?
         const callingExtension = getCallingExtension();
         traceInfo(`Python API: Installing packages for extension: ${callingExtension}`);
+        const config = getConfiguration('python-envs');
         let extPkgTrustConfig: SettingsPackageTrust | undefined =
-            getConfiguration('python-envs').get<SettingsPackageTrust>('extensionPackageTrust');
+            config.get<SettingsPackageTrust>('extensionPackageTrust');
         let callingExtensionTrustLevel;
         let isConfigured = true;
         if (extPkgTrustConfig === undefined) {
+            // TODO:s THIS DOESN'T WORK
             // no package trust config, default to alwaysAsk
             callingExtensionTrustLevel = 'alwaysAsk';
             isConfigured = false;
@@ -252,23 +261,35 @@ class PythonEnvironmentApiImpl implements PythonEnvironmentApi {
         traceInfo(`package trust settings for ${callingExtension} is ${callingExtensionTrustLevel}`);
 
         if (!isConfigured) {
-            // calling extension not in config, no wildcard setup
+            // calling extension has no config, user has no wildcard setup
             // prompt user to "alwaysAsk" or "alwaysAllow"
-        } else {
-            if (callingExtensionTrustLevel === 'alwaysAllow') {
-                traceInfo('Package installation is allowed.');
+            const selectedOption = await promptForInstallPermissions(callingExtension, packages.join(', '));
+            if (selectedOption === 'cancel') {
+                // user cancelled the prompt, exit
+                window.showErrorMessage(`Package installation of ${packages.join(', ')} was canceled by the user.`);
+                return Promise.resolve();
             }
+            if (selectedOption !== 'installNoConfigure') {
+                // meaning the user selected "alwaysAsk" or "alwaysAllow", update the config
+                const newExtTrustConfig = { ...extPkgTrustConfig, [callingExtension]: selectedOption };
+                config.update('extensionPackageTrust', newExtTrustConfig, true);
+            }
+        } else {
+            // user has already configured package trust settings for this extension
             if (callingExtensionTrustLevel === 'alwaysAsk') {
                 traceInfo('Package installation is pending user confirmation due to trust settings.');
                 // prompt user to allow or deny package installation
-                
+                const simpleResponse = await promptForAlwaysAsk(callingExtension, packages.join(', '));
+                if (simpleResponse === 'noInstall' || simpleResponse === 'cancel') {
+                    // user cancelled the prompt, exit
+                    window.showErrorMessage(`Package installation of ${packages.join(', ')} was canceled by the user.`);
+                    return Promise.resolve();
+                }
             }
+            // if callingExtensionTrustLevel is 'alwaysAllow' just continue to install
         }
-
-        const manager = this.envManagers.getPackageManager(context);
-        if (!manager) {
-            return Promise.reject(new Error('No package manager found'));
-        }
+        // actually install the packages
+        traceInfo(`Python API: Triggering install for packages: ${packages.join(', ')}`);
         return manager.install(context, packages, options);
     }
     uninstallPackages(context: PythonEnvironment, packages: Package[] | string[]): Promise<void> {
