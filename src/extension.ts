@@ -230,7 +230,7 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
             updateViewsAndStatus(statusBar, workspaceView, managerView, api);
         }),
         onDidChangeTerminalShellIntegration(async (e) => {
-            const envVar = e.shellIntegration?.env;
+            const envVar = e.shellIntegration?.env.value;
             if (envVar) {
                 if (envVar['VIRTUAL_ENV']) {
                     const env = await api.resolveEnvironment(Uri.file(envVar['VIRTUAL_ENV']));
