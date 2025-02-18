@@ -5,9 +5,9 @@ export type SettingsPackageTrust = {
     [key: string]: InstallPermissionEnum.AlwaysAllow | InstallPermissionEnum.AlwaysAsk;
 };
 
-export const ALWAYS_ALLOW = 'Always Allow installs';
-export const ALWAYS_ASK = 'Always Ask before installs';
-export const INSTALL_NO_CONFIGURE = 'Install without configuring';
+export const ALWAYS_ALLOW = 'Always allow installs';
+export const ALWAYS_ASK = 'Always ask before installing';
+export const INSTALL_NO_CONFIGURE = 'Install without configuring permissions';
 
 export const YES_INSTALL = 'Yes, Install';
 export const NO_INSTALL = 'Do Not Install';
@@ -16,7 +16,7 @@ export function promptForInstallPermissions(extensionName: string, packages: str
     return new Promise((resolve) => {
         window
             .showInformationMessage(
-                'Select future permissions for package installs from the ' + extensionName + ' extension.',
+                'Would you like to set permissions for future package installs from the ' + extensionName + ' extension?',
                 {
                     detail: `package/s: "${packages}"`,
                     modal: true,
