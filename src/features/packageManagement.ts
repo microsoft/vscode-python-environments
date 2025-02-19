@@ -52,7 +52,7 @@ export async function packageManagementFlow(packages: string[]): Promise<void> {
         const selectedOption = await promptForInstallPermissions(callingExtension, packages.join(', '));
         if (selectedOption === InstallPermissionEnum.Cancel) {
             // user cancelled the prompt, exit
-            window.showErrorMessage(`Package installation of ${packages.join(', ')} was canceled by the user.`);
+            window.showErrorMessage(`Installation of ${packages.join(', ')} was canceled by the user.`);
             return Promise.reject('User cancelled the package installation.');
         }
         if (selectedOption !== InstallPermissionEnum.InstallNoConfigure) {
@@ -63,12 +63,12 @@ export async function packageManagementFlow(packages: string[]): Promise<void> {
     } else {
         // user has already configured package trust settings for this extension
         if (callingExtensionTrustLevel === InstallPermissionEnum.AlwaysAsk) {
-            traceInfo('Package installation is pending user confirmation due to trust settings.');
+            traceInfo('Installation is pending user confirmation due to permission settings.');
             // prompt user to allow or deny package installation
             const simpleResponse = await promptForAlwaysAsk(callingExtension, packages.join(', '));
             if (simpleResponse === SimpleResponseEnum.NoInstall || simpleResponse === SimpleResponseEnum.Cancel) {
                 // user cancelled the prompt, exit
-                window.showErrorMessage(`Package installation of ${packages.join(', ')} was canceled by the user.`);
+                window.showErrorMessage(`Installation of ${packages.join(', ')} was canceled by the user.`);
                 return Promise.reject('User cancelled the package installation.');
             }
         }
