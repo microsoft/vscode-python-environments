@@ -6,7 +6,7 @@
     "publisher": "ms-python",
     "preview": true,
     "engines": {
-        "vscode": "^1.97.0   ----> TODO: Pin to insiders after merging new shell env api shape" 
+        "vscode": "^1.98.0-20250221"
     },
     "categories": [
         "Other"
