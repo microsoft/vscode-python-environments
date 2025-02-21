@@ -2,7 +2,7 @@ import { TerminalShellType } from '../../../api';
 import { Terminal, TerminalShellType as VSCTerminalShellType } from 'vscode';
 import { identifyTerminalShell } from '../../../features/common/shellDetector';
 import assert from 'assert';
-import { isWindows } from '../../../managers/common/utils';
+import { isWindows } from '../../../common/utils/platformUtils';
 
 const testShellTypes: string[] = [
     'sh',
