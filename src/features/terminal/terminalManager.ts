@@ -20,6 +20,7 @@ import {
 } from './terminalActivationState';
 import { getPythonApi } from '../pythonApi';
 import { traceInfo, traceVerbose } from '../../common/logging';
+import { ShellStartupProvider } from './startup/startupProvider';
 
 export interface TerminalCreation {
     create(environment: PythonEnvironment, options: PythonTerminalCreateOptions): Promise<Terminal>;
@@ -64,7 +65,10 @@ export class TerminalManagerImpl implements TerminalManager {
     private onDidChangeTerminalActivationStateEmitter = new EventEmitter<DidChangeTerminalActivationStateEvent>();
     public onDidChangeTerminalActivationState = this.onDidChangeTerminalActivationStateEmitter.event;
 
-    constructor(private readonly ta: TerminalActivationInternal) {
+    constructor(
+        private readonly ta: TerminalActivationInternal,
+        private readonly startupProviders: ShellStartupProvider[],
+    ) {
         this.disposables.push(
             this.onTerminalOpenedEmitter,
             this.onTerminalClosedEmitter,
@@ -124,6 +128,20 @@ export class TerminalManagerImpl implements TerminalManager {
     }
 
     public async create(environment: PythonEnvironment, options: PythonTerminalCreateOptions): Promise<Terminal> {
+        const autoActType = getAutoActivationType();
+        let envVars = options.env;
+        if (autoActType === 'shellStartup') {
+            const vars = await Promise.all(this.startupProviders.map((p) => p.getEnvVariables(environment)));
+
+            vars.forEach((varMap) => {
+                if (varMap) {
+                    varMap.forEach((value, key) => {
+                        envVars = { ...envVars, [key]: value };
+                    });
+                }
+            });
+        }
+
         // https://github.com/microsoft/vscode-python-environments/issues/172
         // const name = options.name ?? `Python: ${environment.displayName}`;
         const newTerminal = createTerminal({
@@ -131,7 +149,7 @@ export class TerminalManagerImpl implements TerminalManager {
             shellPath: options.shellPath,
             shellArgs: options.shellArgs,
             cwd: options.cwd,
-            env: options.env,
+            env: envVars,
             strictEnv: options.strictEnv,
             message: options.message,
             iconPath: options.iconPath,
@@ -141,15 +159,17 @@ export class TerminalManagerImpl implements TerminalManager {
             isTransient: options.isTransient,
         });
 
-        if (options.disableActivation) {
-            this.skipActivationOnOpen.add(newTerminal);
-            return newTerminal;
-        }
+        if (autoActType === 'command') {
+            if (options.disableActivation) {
+                this.skipActivationOnOpen.add(newTerminal);
+                return newTerminal;
+            }
 
-        // We add it to skip activation on open to prevent double activation.
-        // We can activate it ourselves since we are creating it.
-        this.skipActivationOnOpen.add(newTerminal);
-        await this.autoActivateOnTerminalOpen(newTerminal, environment);
+            // We add it to skip activation on open to prevent double activation.
+            // We can activate it ourselves since we are creating it.
+            this.skipActivationOnOpen.add(newTerminal);
+            await this.autoActivateOnTerminalOpen(newTerminal, environment);
+        }
 
         return newTerminal;
     }
