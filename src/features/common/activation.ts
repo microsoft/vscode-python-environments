@@ -15,7 +15,13 @@ export function getActivationCommand(
     environment: PythonEnvironment,
 ): PythonCommandRunConfiguration[] | undefined {
     const shell = identifyTerminalShell(terminal);
+    return getActivationCommandForShell(environment, shell);
+}
 
+export function getActivationCommandForShell(
+    environment: PythonEnvironment,
+    shell: TerminalShellType,
+): PythonCommandRunConfiguration[] | undefined {
     let activation: PythonCommandRunConfiguration[] | undefined;
     if (environment.execInfo?.shellActivation) {
         activation = environment.execInfo.shellActivation.get(shell);

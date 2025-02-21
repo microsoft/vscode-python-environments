@@ -57,6 +57,8 @@ import { GetEnvironmentInfoTool, InstallPackageTool } from './features/copilotTo
 import { TerminalActivationImpl } from './features/terminal/terminalActivationState';
 import { getEnvironmentForTerminal } from './features/terminal/utils';
 import { sendManagerSelectionTelemetry } from './common/telemetry/helpers';
+import { PowershellStartupProvider } from './features/terminal/startup/powershellStartup';
+import { ShellStartupActivationManagerImpl } from './features/terminal/startup/activateUsingShellStartup';
 
 export async function activate(context: ExtensionContext): Promise<PythonEnvironmentApi> {
     const start = new StopWatch();
@@ -83,8 +85,14 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
     context.subscriptions.push(envManagers);
 
     const terminalActivation = new TerminalActivationImpl();
-    const terminalManager: TerminalManager = new TerminalManagerImpl(terminalActivation);
-    context.subscriptions.push(terminalActivation, terminalManager);
+    const shellStartupProviders = [new PowershellStartupProvider()];
+    const shellStartupActivationManager = new ShellStartupActivationManagerImpl(
+        context.environmentVariableCollection,
+        shellStartupProviders,
+        envManagers,
+    );
+    const terminalManager: TerminalManager = new TerminalManagerImpl(terminalActivation, shellStartupProviders);
+    context.subscriptions.push(terminalActivation, terminalManager, shellStartupActivationManager);
 
     const projectCreators: ProjectCreators = new ProjectCreatorsImpl();
     context.subscriptions.push(
@@ -94,15 +102,14 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
     );
 
     setPythonApi(envManagers, projectManager, projectCreators, terminalManager, envVarManager);
+    const api = await getPythonApi();
 
     const managerView = new EnvManagerView(envManagers);
     context.subscriptions.push(managerView);
 
     const workspaceView = new ProjectView(envManagers, projectManager);
     context.subscriptions.push(workspaceView);
-
     workspaceView.initialize();
-    const api = await getPythonApi();
 
     const monitoredTerminals = new Map<Terminal, PythonEnvironment>();
 
@@ -110,6 +117,9 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
         registerCompletionProvider(envManagers),
         registerTools('python_environment', new GetEnvironmentInfoTool(api, envManagers)),
         registerTools('python_install_package', new InstallPackageTool(api)),
+        commands.registerCommand('python-envs.terminal.revertStartupScriptChanges', async () => {
+            await shellStartupActivationManager.cleanupStartupScripts();
+        }),
         commands.registerCommand('python-envs.viewLogs', () => outputChannel.show()),
         commands.registerCommand('python-envs.refreshManager', async (item) => {
             await refreshManagerCommand(item);
@@ -267,6 +277,7 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
         await Promise.all([
             registerSystemPythonFeatures(nativeFinder, context.subscriptions, outputChannel),
             registerCondaFeatures(nativeFinder, context.subscriptions, outputChannel),
+            shellStartupActivationManager.initialize(),
         ]);
 
         sendTelemetryEvent(EventNames.EXTENSION_MANAGER_REGISTRATION_DURATION, start.elapsedTime);

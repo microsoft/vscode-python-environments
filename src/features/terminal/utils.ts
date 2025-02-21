@@ -98,6 +98,11 @@ export function getAutoActivationType(): 'off' | 'command' | 'shellStartup' {
     return config.get<'off' | 'command' | 'shellStartup'>('terminal.autoActivationType', 'command');
 }
 
+export async function setAutoActivationType(value: 'off' | 'command' | 'shellStartup'): Promise<void> {
+    const config = getConfiguration('python-envs');
+    return await config.update('terminal.autoActivationType', value, true);
+}
+
 export async function getAllDistinctProjectEnvironments(
     api: PythonProjectGetterApi & PythonProjectEnvironmentApi,
 ): Promise<PythonEnvironment[] | undefined> {

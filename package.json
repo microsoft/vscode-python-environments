@@ -89,14 +89,14 @@
                 },
                 "python-envs.terminal.autoActivationType": {
                     "type": "string",
-                    "description": "%python-envs.terminal.autoActivationType.description%",
+                    "markdownDescription": "%python-envs.terminal.autoActivationType.description%",
                     "default": "command",
                     "enum": [
                         "command",
                         "shellStartup",
                         "off"
                     ],
-                    "enumDescriptions": [
+                    "markdownEnumDescriptions": [
                         "%python-envs.terminal.autoActivationType.command%",
                         "%python-envs.terminal.autoActivationType.shellStartup%",
                         "%python-envs.terminal.autoActivationType.off%"
@@ -244,6 +244,12 @@
                 "title": "%python-envs.copyProjectPath.title%",
                 "category": "Python Envs",
                 "icon": "$(copy)"
+            },
+            {
+                "command": "python-envs.terminal.revertStartupScriptChanges",
+                "title": "%python-envs.terminal.revertStartupScriptChanges.title%",
+                "category": "Python Envs",
+                "icon": "$(discard)"
             }
         ],
         "menus": {

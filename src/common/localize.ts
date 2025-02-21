@@ -156,3 +156,13 @@ export namespace EnvViewStrings {
     export const selectedGlobalTooltip = l10n.t('This environment is selected for non-workspace files');
     export const selectedWorkspaceTooltip = l10n.t('This environment is selected for workspace files');
 }
+
+export namespace ShellStartupActivationStrings {
+    export const shellStartupScriptEditPrompt = l10n.t(
+        'To support `shellStartup` we need to modify your shell profile. Do you want to proceed?',
+    );
+    export const updateScript = l10n.t('Update Shell Profile');
+    export const revertToCommandActivation = l10n.t(
+        'Auto Shell Activation type set to "command", due to removing shell startup from profile.',
+    );
+}
