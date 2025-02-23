@@ -52,7 +52,7 @@ The extension uses `pip` as the default package manager. You can change this by 
 See [api.ts](https://github.com/microsoft/vscode-python-environments/blob/main/src/api.ts) for the full list of Extension APIs.
 
 To consume these APIs you can look at the example here:
-https://github.com/microsoft/vscode-python-environments/blob/main/src/examples/README.md
+https://github.com/microsoft/vscode-python-environments/blob/main/examples/README.md
 
 
 ## Extension Dependency
