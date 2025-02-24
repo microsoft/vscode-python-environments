@@ -46,7 +46,7 @@ import { runAsTask } from './execution/runAsTask';
 import { runInTerminal } from './terminal/runInTerminal';
 import { runInBackground } from './execution/runInBackground';
 import { EnvVarManager } from './execution/envVariableManager';
-
+import { packageManagementFlow } from './packageManagement';
 class PythonEnvironmentApiImpl implements PythonEnvironmentApi {
     private readonly _onDidChangeEnvironments = new EventEmitter<DidChangeEnvironmentsEventArgs>();
     private readonly _onDidChangeEnvironment = new EventEmitter<DidChangeEnvironmentEventArgs>();
@@ -216,11 +216,18 @@ class PythonEnvironmentApiImpl implements PythonEnvironmentApi {
         }
         return new Disposable(() => disposables.forEach((d) => d.dispose()));
     }
-    installPackages(context: PythonEnvironment, packages: string[], options: PackageInstallOptions): Promise<void> {
+    async installPackages(
+        context: PythonEnvironment,
+        packages: string[],
+        options: PackageInstallOptions,
+    ): Promise<void> {
+        // get the package manager to exit if not found
         const manager = this.envManagers.getPackageManager(context);
         if (!manager) {
             return Promise.reject(new Error('No package manager found'));
         }
+        await packageManagementFlow(packages);
+        traceInfo(`Python API: Triggering install for packages: ${packages.join(', ')}`);
         return manager.install(context, packages, options);
     }
     uninstallPackages(context: PythonEnvironment, packages: Package[] | string[]): Promise<void> {
