@@ -38,9 +38,9 @@ import which from 'which';
 import { shortVersion, sortEnvironments } from '../common/utils';
 import { pickProject } from '../../common/pickers/projects';
 import { CondaStrings, PackageManagement, Pickers } from '../../common/localize';
-import { showErrorMessage } from '../../common/errors/utils';
 import { showInputBox, showQuickPick, showQuickPickWithButtons, withProgress } from '../../common/window.apis';
-import { selectFromCommonPackagesToInstall } from '../common/pickers';
+import { showErrorMessageWithLogs } from '../../common/errors/utils';
+import { Installable, selectFromCommonPackagesToInstall } from '../common/pickers';
 import { quoteArgs } from '../../features/execution/execUtils';
 import { traceInfo } from '../../common/logging';
 import { untildify } from '../../common/utils/pathUtils';
@@ -547,7 +547,7 @@ async function createNamedCondaEnvironment(
             } catch (e) {
                 log.error('Failed to create conda environment', e);
                 setImmediate(async () => {
-                    await showErrorMessage(CondaStrings.condaCreateFailed, log);
+                    await showErrorMessageWithLogs(CondaStrings.condaCreateFailed, log);
                 });
             }
         },
@@ -675,7 +675,7 @@ export async function quickCreateConda(
             } catch (e) {
                 log.error('Failed to create conda environment', e);
                 setImmediate(async () => {
-                    await showErrorMessage(CondaStrings.condaCreateFailed, log);
+                    await showErrorMessageWithLogs(CondaStrings.condaCreateFailed, log);
                 });
             }
         },
@@ -695,7 +695,7 @@ export async function deleteCondaEnvironment(environment: PythonEnvironment, log
             } catch (e) {
                 log.error(`Failed to delete conda environment: ${e}`);
                 setImmediate(async () => {
-                    await showErrorMessage(CondaStrings.condaRemoveFailed, log);
+                    await showErrorMessageWithLogs(CondaStrings.condaRemoveFailed, log);
                 });
                 return false;
             }

@@ -1,95 +1,48 @@
 import * as fs from 'fs-extra';
-import { getUserHomeDir } from '../../../common/utils/pathUtils';
+import * as path from 'path';
+import * as cp from 'child_process';
 import { isWindows } from '../../../common/utils/platformUtils';
 import { ShellStartupProvider } from './startupProvider';
 import { EnvironmentVariableCollection } from 'vscode';
 import { PythonCommandRunConfiguration, PythonEnvironment, TerminalShellType } from '../../../api';
 import { getActivationCommandForShell } from '../../common/activation';
 import { quoteArgs } from '../../execution/execUtils';
-import { traceInfo } from '../../../common/logging';
+import { traceInfo, traceVerbose } from '../../../common/logging';
 
 const pwshActivationEnvVarKey = 'VSCODE_PWSH_ACTIVATE';
 
-enum PowerShellProfileType {
-    AllUsersAllHosts = 4,
-    AllUsersCurrentHost = 3,
-    CurrentUserAllHosts = 2,
-    CurrentUserCurrentHost = 1,
-}
-
-interface PowerShellProfile {
-    type: PowerShellProfileType;
-    path: string;
-}
-
-function getSearchPaths(): PowerShellProfile[] {
-    const profilePaths: PowerShellProfile[] = [];
-    const home = getUserHomeDir();
-    if (home) {
-        if (isWindows()) {
-            profilePaths.push(
-                {
-                    // powershell 5
-                    type: PowerShellProfileType.CurrentUserCurrentHost,
-                    path: `${home}\\Documents\\WindowsPowerShell\\Microsoft.PowerShell_profile.ps1`,
-                },
-                {
-                    // powershell 6+
-                    type: PowerShellProfileType.CurrentUserCurrentHost,
-                    path: `${home}\\Documents\\PowerShell\\Microsoft.PowerShell_profile.ps1`,
-                },
-                {
-                    // powershell 5
-                    type: PowerShellProfileType.CurrentUserAllHosts,
-                    path: `${home}\\Documents\\WindowsPowerShell\\profile.ps1`,
-                },
-                {
-                    // powershell 6+
-                    type: PowerShellProfileType.CurrentUserAllHosts,
-                    path: `${home}\\Documents\\PowerShell\\profile.ps1`,
-                },
-            );
-        } else {
-            profilePaths.push(
-                {
-                    type: PowerShellProfileType.CurrentUserAllHosts,
-                    path: `${home}/.config/powershell/profile.ps1`,
-                },
-                {
-                    type: PowerShellProfileType.CurrentUserCurrentHost,
-                    path: `${home}.config/powershell/Microsoft.PowerShell_profile.ps1`,
-                },
-            );
-        }
-    }
-
-    return profilePaths.sort((a, b) => b.type - a.type);
-}
-
-async function getPowerShellProfile(): Promise<PowerShellProfile | undefined> {
-    const profiles = getSearchPaths();
-    const existingProfiles: PowerShellProfile[] = [];
-    await Promise.all(
-        profiles.map(async (profile) => {
-            if (await fs.pathExists(profile.path)) {
-                existingProfiles.push(profile);
+async function runCommand(command: string): Promise<string | undefined> {
+    return new Promise((resolve) => {
+        cp.exec(command, (err, stdout) => {
+            if (err) {
+                traceVerbose(`Error running command: ${command}`, err);
+                resolve(undefined);
+            } else {
+                resolve(stdout?.trim());
             }
-        }),
-    );
-    const containsActivation: PowerShellProfile[] = [];
-    await Promise.all(
-        existingProfiles.map(async (profile) => {
-            const content = await fs.readFile(profile.path, 'utf8');
-            if (content.includes(pwshActivationEnvVarKey)) {
-                containsActivation.push(profile);
-            }
-        }),
-    );
+        });
+    });
+}
 
-    if (containsActivation.length > 0) {
-        return containsActivation.sort((a, b) => a.type - b.type)[0];
+interface PowerShellInfo {
+    shell: 'powershell' | 'pwsh';
+    profilePath: string;
+}
+
+async function getPowerShellProfiles(): Promise<PowerShellInfo[]> {
+    // Try to get profiles from both shells in parallel
+    const results = await Promise.all([getProfileForShell('pwsh'), getProfileForShell('powershell')]);
+
+    return results.filter((result): result is PowerShellInfo => result !== undefined);
+}
+
+async function getProfileForShell(shell: 'powershell' | 'pwsh'): Promise<PowerShellInfo | undefined> {
+    const profilePath = await runCommand(`${shell} -Command $profile`);
+    if (!profilePath) {
+        traceVerbose(`${shell} is not available or failed to get profile path`);
+        return undefined;
     }
-    return existingProfiles.length > 0 ? existingProfiles.sort((a, b) => a.type - b.type)[0] : undefined;
+    return { shell, profilePath };
 }
 
 const regionStart = '#region vscode python';
@@ -101,37 +54,92 @@ function getActivationContent(): string {
 }
 
 async function isPowerShellStartupSetup(): Promise<boolean> {
-    const profile = await getPowerShellProfile();
-    if (profile) {
-        const content = await fs.readFile(profile.path, 'utf8');
-        return content.match(new RegExp(`${regionStart}\\s*.*${regionEnd}\\s*`, 's')) !== null;
+    const profiles = await getPowerShellProfiles();
+    if (profiles.length === 0) {
+        return false;
     }
+
+    // Check if any profile has our activation content
+    for (const profile of profiles) {
+        if (!(await fs.pathExists(profile.profilePath))) {
+            continue;
+        }
+
+        const content = await fs.readFile(profile.profilePath, 'utf8');
+        if (content.includes(pwshActivationEnvVarKey)) {
+            return true;
+        }
+    }
+
     return false;
 }
 
-async function setupPowerShellStartup(): Promise<void> {
+async function setupPowerShellStartup(): Promise<boolean> {
+    const profiles = await getPowerShellProfiles();
+    if (profiles.length === 0) {
+        traceVerbose('Cannot setup PowerShell startup - No PowerShell versions available');
+        return false;
+    }
+
     const activationContent = getActivationContent();
-    const profile = await getPowerShellProfile();
-    if (profile) {
-        const content = await fs.readFile(profile.path, 'utf8');
-        if (!content.includes(pwshActivationEnvVarKey)) {
-            await fs.writeFile(profile.path, `${content}${activationContent}`);
+    let successfulUpdates = 0;
+
+    for (const profile of profiles) {
+        try {
+            // Create profile directory if it doesn't exist
+            await fs.mkdirp(path.dirname(profile.profilePath));
+
+            // Create or update profile
+            if (!(await fs.pathExists(profile.profilePath))) {
+                // Create new profile with our content
+                await fs.writeFile(profile.profilePath, activationContent);
+                traceInfo(`Created new ${profile.shell} profile at: ${profile.profilePath}\r\n${activationContent}`);
+                successfulUpdates++;
+            } else {
+                // Update existing profile
+                const content = await fs.readFile(profile.profilePath, 'utf8');
+                if (!content.includes(pwshActivationEnvVarKey)) {
+                    await fs.writeFile(profile.profilePath, `${content}${activationContent}`);
+                    traceInfo(
+                        `Updated existing ${profile.shell} profile at: ${profile.profilePath}\r\n${activationContent}`,
+                    );
+                    successfulUpdates++;
+                }
+            }
+        } catch (err) {
+            traceVerbose(`Failed to setup ${profile.shell} startup`, err);
         }
     }
-    traceInfo(`PowerShell profile setup for activation: ${profile?.path}`);
-    traceInfo(activationContent);
-    traceInfo(`PowerShell profile setup for activation complete.`);
+
+    return successfulUpdates === profiles.length;
 }
 
-async function removePowerShellStartup(): Promise<void> {
-    const profile = await getPowerShellProfile();
-    if (profile) {
-        const content = await fs.readFile(profile.path, 'utf8');
-        if (content.includes(pwshActivationEnvVarKey)) {
-            const newContent = content.replace(new RegExp(`${regionStart}\\s*.*${regionEnd}\\s*`, 's'), '');
-            await fs.writeFile(profile.path, newContent);
+async function removePowerShellStartup(): Promise<boolean> {
+    const profiles = await getPowerShellProfiles();
+    let successfulRemovals = 0;
+
+    for (const profile of profiles) {
+        if (!(await fs.pathExists(profile.profilePath))) {
+            successfulRemovals++; // Count as success if file doesn't exist since there's nothing to remove
+            continue;
+        }
+
+        try {
+            const content = await fs.readFile(profile.profilePath, 'utf8');
+            if (content.includes(pwshActivationEnvVarKey)) {
+                const newContent = content.replace(new RegExp(`${regionStart}\\s*.*${regionEnd}\\s*`, 's'), '');
+                await fs.writeFile(profile.profilePath, newContent);
+                traceInfo(`Removed activation from ${profile.shell} profile at: ${profile.profilePath}`);
+                successfulRemovals++;
+            } else {
+                successfulRemovals++; // Count as success if activation is not present since there's nothing to remove
+            }
+        } catch (err) {
+            traceVerbose(`Failed to remove ${profile.shell} startup`, err);
         }
     }
+
+    return profiles.length > 0 && successfulRemovals === profiles.length;
 }
 
 function getCommandAsString(command: PythonCommandRunConfiguration[]): string {
@@ -144,16 +152,17 @@ function getCommandAsString(command: PythonCommandRunConfiguration[]): string {
 }
 
 export class PowershellStartupProvider implements ShellStartupProvider {
+    public readonly name: string = 'PowerShell';
     async isSetup(): Promise<boolean> {
         return await isPowerShellStartupSetup();
     }
 
-    async setupScripts(): Promise<void> {
-        await setupPowerShellStartup();
+    async setupScripts(): Promise<boolean> {
+        return await setupPowerShellStartup();
     }
 
-    async teardownScripts(): Promise<void> {
-        await removePowerShellStartup();
+    async teardownScripts(): Promise<boolean> {
+        return await removePowerShellStartup();
     }
 
     async updateEnvVariables(collection: EnvironmentVariableCollection, env: PythonEnvironment): Promise<void> {

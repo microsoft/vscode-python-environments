@@ -45,8 +45,8 @@ import { pickProject, pickProjectMany } from '../common/pickers/projects';
 import { TerminalManager } from './terminal/terminalManager';
 import { runInTerminal } from './terminal/runInTerminal';
 import { quoteArgs } from './execution/execUtils';
-import { showErrorMessage } from '../common/errors/utils';
-import { activeTextEditor } from '../common/window.apis';
+import {} from '../common/errors/utils';
+import { activeTextEditor, showErrorMessage } from '../common/window.apis';
 import { clipboardWriteText } from '../common/env.apis';
 
 export async function refreshManagerCommand(context: unknown): Promise<void> {
