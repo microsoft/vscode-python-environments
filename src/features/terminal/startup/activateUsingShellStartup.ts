@@ -6,7 +6,7 @@ import { DidChangeEnvironmentEventArgs } from '../../../api';
 import { EnvironmentManagers } from '../../../internal.api';
 import { traceError, traceInfo } from '../../../common/logging';
 import { ShellStartupActivationStrings } from '../../../common/localize';
-import { showInformationMessage } from '../../../common/window.apis';
+import { showErrorMessage, showInformationMessage } from '../../../common/window.apis';
 
 export interface ShellStartupActivationManager extends Disposable {
     initialize(): Promise<void>;
@@ -21,6 +21,7 @@ export class ShellStartupActivationManagerImpl implements ShellStartupActivation
         private readonly shellStartupProviders: ShellStartupProvider[],
         private readonly em: EnvironmentManagers,
     ) {
+        this.envCollection.description = ShellStartupActivationStrings.envCollectionDescription;
         this.disposables.push(
             onDidChangeConfiguration((e: ConfigurationChangeEvent) => {
                 this.handleConfigurationChange(e);
@@ -93,9 +94,10 @@ export class ShellStartupActivationManagerImpl implements ShellStartupActivation
         const autoActType = getAutoActivationType();
         if (autoActType === 'shellStartup') {
             if (await this.isSetupRequired()) {
+                const shells = this.shellStartupProviders.map((provider) => provider.name).join(', ');
                 const result = await showInformationMessage(
                     ShellStartupActivationStrings.shellStartupScriptEditPrompt,
-                    { modal: true },
+                    { modal: true, detail: `${ShellStartupActivationStrings.updatingTheseProfiles}: ${shells}` },
                     ShellStartupActivationStrings.updateScript,
                 );
 
@@ -143,7 +145,25 @@ export class ShellStartupActivationManagerImpl implements ShellStartupActivation
     }
 
     public async updateStartupScripts(): Promise<void> {
-        await Promise.all(this.shellStartupProviders.map((provider) => provider.setupScripts()));
+        const results = await Promise.all(
+            this.shellStartupProviders.map(async (provider) => {
+                const result = await provider.setupScripts();
+                if (!result) {
+                    traceError(`Failed to setup shell startup scripts for ${provider.name}`);
+                }
+                return result;
+            }),
+        );
+
+        const success = results.every((result) => result);
+
+        // Intentionally not awaiting this message. We don’t need a response here, and awaiting here for user response can
+        // block setting up rest of the startup activation.
+        if (success) {
+            showInformationMessage(ShellStartupActivationStrings.shellStartupScriptEditComplete);
+        } else {
+            showErrorMessage(ShellStartupActivationStrings.shellStartupScriptEditFailed);
+        }
     }
 
     public async cleanupStartupScripts(): Promise<void> {

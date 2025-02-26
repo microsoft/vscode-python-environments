@@ -1,9 +1,9 @@
 import { Uri, Progress, CancellationToken } from 'vscode';
 import { PythonEnvironment } from '../../api';
 import { InternalEnvironmentManager } from '../../internal.api';
-import { showErrorMessage } from '../errors/utils';
 import { traceVerbose, traceError } from '../logging';
 import { PYTHON_EXTENSION_ID } from '../constants';
+import { showErrorMessage } from '../window.apis';
 
 const priorityOrder = [
     `${PYTHON_EXTENSION_ID}:pyenv`,
