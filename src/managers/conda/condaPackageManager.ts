@@ -19,7 +19,7 @@ import {
 } from '../../api';
 import { getCommonCondaPackagesToInstall, installPackages, refreshPackages, uninstallPackages } from './condaUtils';
 import { withProgress } from '../../common/window.apis';
-import { showErrorMessage } from '../../common/errors/utils';
+import { showErrorMessageWithLogs } from '../../common/errors/utils';
 import { CondaStrings } from '../../common/localize';
 import { getPackagesToUninstall } from '../common/utils';
 
@@ -84,7 +84,7 @@ export class CondaPackageManager implements PackageManager, Disposable {
 
                     this.log.error('Error installing packages', e);
                     setImmediate(async () => {
-                        await showErrorMessage(CondaStrings.condaInstallError, this.log);
+                        await showErrorMessageWithLogs(CondaStrings.condaInstallError, this.log);
                     });
                 }
             },
@@ -125,7 +125,7 @@ export class CondaPackageManager implements PackageManager, Disposable {
 
                     this.log.error('Error uninstalling packages', e);
                     setImmediate(async () => {
-                        await showErrorMessage(CondaStrings.condaUninstallError, this.log);
+                        await showErrorMessageWithLogs(CondaStrings.condaUninstallError, this.log);
                     });
                 }
             },
