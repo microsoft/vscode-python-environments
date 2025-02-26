@@ -1,9 +1,9 @@
 import * as os from 'os';
 import { Terminal, TerminalShellType as TerminalShellTypeVscode } from 'vscode';
-import { isWindows } from '../../managers/common/utils';
 import { vscodeShell } from '../../common/vscodeEnv.apis';
 import { getConfiguration } from '../../common/workspace.apis';
 import { TerminalShellType } from '../../api';
+import { isWindows } from '../../common/utils/platformUtils';
 
 /*
 When identifying the shell use the following algorithm:
