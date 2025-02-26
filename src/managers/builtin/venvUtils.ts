@@ -27,8 +27,8 @@ import {
     showWarningMessage,
     showInputBox,
     showOpenDialog,
+    showErrorMessage,
 } from '../../common/window.apis';
-import { showErrorMessage } from '../../common/errors/utils';
 import { Common, VenvManagerStrings } from '../../common/localize';
 import { isUvInstalled, runUV, runPython } from './helpers';
 import { getProjectInstallable, getWorkspacePackagesToInstall, PipPackages } from './pipUtils';
