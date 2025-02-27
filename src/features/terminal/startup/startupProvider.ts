@@ -8,5 +8,5 @@ export interface ShellStartupProvider {
     teardownScripts(): Promise<boolean>;
     updateEnvVariables(envVars: EnvironmentVariableCollection, env: PythonEnvironment): Promise<void>;
     removeEnvVariables(envVars: EnvironmentVariableCollection): Promise<void>;
-    getEnvVariables(env: PythonEnvironment): Promise<Map<string, string> | undefined>;
+    getEnvVariables(env?: PythonEnvironment): Promise<Map<string, string | undefined> | undefined>;
 }
