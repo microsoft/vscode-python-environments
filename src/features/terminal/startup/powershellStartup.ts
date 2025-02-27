@@ -1,6 +1,5 @@
 import * as fs from 'fs-extra';
 import * as path from 'path';
-import * as cp from 'child_process';
 import { isWindows } from '../../../common/utils/platformUtils';
 import { ShellStartupProvider } from './startupProvider';
 import { EnvironmentVariableCollection } from 'vscode';
@@ -8,21 +7,9 @@ import { PythonCommandRunConfiguration, PythonEnvironment, TerminalShellType } f
 import { getActivationCommandForShell } from '../../common/activation';
 import { quoteArgs } from '../../execution/execUtils';
 import { traceInfo, traceVerbose } from '../../../common/logging';
+import { runCommand } from './utils';
 
 const pwshActivationEnvVarKey = 'VSCODE_PWSH_ACTIVATE';
-
-async function runCommand(command: string): Promise<string | undefined> {
-    return new Promise((resolve) => {
-        cp.exec(command, (err, stdout) => {
-            if (err) {
-                traceVerbose(`Error running command: ${command}`, err);
-                resolve(undefined);
-            } else {
-                resolve(stdout?.trim());
-            }
-        });
-    });
-}
 
 interface PowerShellInfo {
     shell: 'powershell' | 'pwsh';
@@ -167,21 +154,11 @@ export class PowershellStartupProvider implements ShellStartupProvider {
 
     async updateEnvVariables(collection: EnvironmentVariableCollection, env: PythonEnvironment): Promise<void> {
         const pwshActivation = getActivationCommandForShell(env, TerminalShellType.powershell);
-
-        const curValue = collection.get(pwshActivationEnvVarKey);
-        if (curValue) {
-            if (pwshActivation) {
-                const command = getCommandAsString(pwshActivation);
-                if (curValue.value !== command) {
-                    collection.replace(pwshActivationEnvVarKey, command, { applyAtProcessCreation: true });
-                }
-            } else {
-                collection.delete(pwshActivationEnvVarKey);
-            }
-        } else if (pwshActivation) {
-            collection.replace(pwshActivationEnvVarKey, getCommandAsString(pwshActivation), {
-                applyAtProcessCreation: true,
-            });
+        if (pwshActivation) {
+            const command = getCommandAsString(pwshActivation);
+            collection.replace(pwshActivationEnvVarKey, command);
+        } else {
+            collection.delete(pwshActivationEnvVarKey);
         }
     }
 
@@ -189,8 +166,14 @@ export class PowershellStartupProvider implements ShellStartupProvider {
         envCollection.delete(pwshActivationEnvVarKey);
     }
 
-    async getEnvVariables(env: PythonEnvironment): Promise<Map<string, string> | undefined> {
-        const pwshActivation = getActivationCommandForShell(env, TerminalShellType.powershell);
-        return pwshActivation ? new Map([[pwshActivationEnvVarKey, getCommandAsString(pwshActivation)]]) : undefined;
+    async getEnvVariables(env?: PythonEnvironment): Promise<Map<string, string | undefined> | undefined> {
+        if (env) {
+            const pwshActivation = getActivationCommandForShell(env, TerminalShellType.powershell);
+            return pwshActivation
+                ? new Map([[pwshActivationEnvVarKey, getCommandAsString(pwshActivation)]])
+                : undefined;
+        } else {
+            return new Map([[pwshActivationEnvVarKey, undefined]]);
+        }
     }
 }
