@@ -3,11 +3,10 @@ import * as path from 'path';
 import { isWindows } from '../../../common/utils/platformUtils';
 import { ShellStartupProvider } from './startupProvider';
 import { EnvironmentVariableCollection } from 'vscode';
-import { PythonCommandRunConfiguration, PythonEnvironment, TerminalShellType } from '../../../api';
+import { PythonEnvironment, TerminalShellType } from '../../../api';
 import { getActivationCommandForShell } from '../../common/activation';
-import { quoteArgs } from '../../execution/execUtils';
 import { traceInfo, traceVerbose } from '../../../common/logging';
-import { runCommand } from './utils';
+import { getCommandAsString, runCommand } from './utils';
 
 const pwshActivationEnvVarKey = 'VSCODE_PWSH_ACTIVATE';
 
@@ -47,18 +46,19 @@ async function isPowerShellStartupSetup(): Promise<boolean> {
     }
 
     // Check if any profile has our activation content
-    for (const profile of profiles) {
-        if (!(await fs.pathExists(profile.profilePath))) {
-            continue;
-        }
+    const results = await Promise.all(
+        profiles.map(async (profile) => {
+            if (await fs.pathExists(profile.profilePath)) {
+                const content = await fs.readFile(profile.profilePath, 'utf8');
+                if (content.includes(pwshActivationEnvVarKey)) {
+                    return true;
+                }
+            }
+            return false;
+        }),
+    );
 
-        const content = await fs.readFile(profile.profilePath, 'utf8');
-        if (content.includes(pwshActivationEnvVarKey)) {
-            return true;
-        }
-    }
-
-    return false;
+    return results.some((result) => result);
 }
 
 async function setupPowerShellStartup(): Promise<boolean> {
@@ -129,15 +129,6 @@ async function removePowerShellStartup(): Promise<boolean> {
     return profiles.length > 0 && successfulRemovals === profiles.length;
 }
 
-function getCommandAsString(command: PythonCommandRunConfiguration[]): string {
-    const parts = [];
-    for (const cmd of command) {
-        const args = cmd.args ?? [];
-        parts.push(quoteArgs([cmd.executable, ...args]).join(' '));
-    }
-    return parts.join(' && ');
-}
-
 export class PowershellStartupProvider implements ShellStartupProvider {
     public readonly name: string = 'PowerShell';
     async isSetup(): Promise<boolean> {
@@ -155,7 +146,7 @@ export class PowershellStartupProvider implements ShellStartupProvider {
     async updateEnvVariables(collection: EnvironmentVariableCollection, env: PythonEnvironment): Promise<void> {
         const pwshActivation = getActivationCommandForShell(env, TerminalShellType.powershell);
         if (pwshActivation) {
-            const command = getCommandAsString(pwshActivation);
+            const command = getCommandAsString(pwshActivation, '&&');
             collection.replace(pwshActivationEnvVarKey, command);
         } else {
             collection.delete(pwshActivationEnvVarKey);
@@ -170,7 +161,7 @@ export class PowershellStartupProvider implements ShellStartupProvider {
         if (env) {
             const pwshActivation = getActivationCommandForShell(env, TerminalShellType.powershell);
             return pwshActivation
-                ? new Map([[pwshActivationEnvVarKey, getCommandAsString(pwshActivation)]])
+                ? new Map([[pwshActivationEnvVarKey, getCommandAsString(pwshActivation, '&&')]])
                 : undefined;
         } else {
             return new Map([[pwshActivationEnvVarKey, undefined]]);

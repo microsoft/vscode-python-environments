@@ -59,6 +59,7 @@ import { getEnvironmentForTerminal } from './features/terminal/utils';
 import { sendManagerSelectionTelemetry } from './common/telemetry/helpers';
 import { PowershellStartupProvider } from './features/terminal/startup/powershellStartup';
 import { ShellStartupActivationManagerImpl } from './features/terminal/startup/activateUsingShellStartup';
+import { BashStartupProvider } from './features/terminal/startup/bashStartup';
 
 export async function activate(context: ExtensionContext): Promise<PythonEnvironmentApi> {
     const start = new StopWatch();
@@ -85,7 +86,7 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
     context.subscriptions.push(envManagers);
 
     const terminalActivation = new TerminalActivationImpl();
-    const shellStartupProviders = [new PowershellStartupProvider()];
+    const shellStartupProviders = [new PowershellStartupProvider(), new BashStartupProvider()];
     const shellStartupActivationManager = new ShellStartupActivationManagerImpl(
         context.environmentVariableCollection,
         shellStartupProviders,
