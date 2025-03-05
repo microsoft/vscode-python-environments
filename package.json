@@ -489,9 +489,7 @@
                 "displayName": "Get Python Packages",
                 "modelDescription": "Returns the packages installed in the given Python file's environment. You should call this when you want to generate Python code to determine the users preferred packages. Also call this to determine if you need to provide installation instructions in a response.",
                 "toolReferenceName": "pythonGetPackages",
-                "tags": [
-                    "vscode_editing"
-                ],
+                "tags": [],
                 "icon": "$(files)",
                 "inputSchema": {
                     "type": "object",
