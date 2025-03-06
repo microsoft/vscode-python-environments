@@ -29,6 +29,7 @@ export namespace PackageManagement {
     export const selectPackagesToUninstall = l10n.t('Select packages to uninstall');
     export const enterPackagesPlaceHolder = l10n.t('Enter package names separated by space');
     export const editArguments = l10n.t('Edit arguments');
+    export const skipPackageInstallation = l10n.t('Skip package installation');
 }
 
 export namespace Pickers {

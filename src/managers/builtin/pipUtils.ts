@@ -8,6 +8,7 @@ import { PythonEnvironmentApi, PythonProject } from '../../api';
 import { findFiles } from '../../common/workspace.apis';
 import { EXTENSION_ROOT_DIR } from '../../common/constants';
 import { Installable, selectFromCommonPackagesToInstall, selectFromInstallableToInstall } from '../common/pickers';
+import { traceInfo } from '../../common/logging';
 
 async function tomlParse(fsPath: string, log?: LogOutputChannel): Promise<tomljs.JsonMap> {
     try {
@@ -75,47 +76,56 @@ async function selectWorkspaceOrCommon(
     installable: Installable[],
     common: Installable[],
 ): Promise<string[] | undefined> {
-    if (installable.length > 0) {
-        const selected = await showQuickPickWithButtons(
-            [
-                {
-                    label: PackageManagement.workspaceDependencies,
-                    description: PackageManagement.workspaceDependenciesDescription,
-                },
-                {
-                    label: PackageManagement.commonPackages,
-                    description: PackageManagement.commonPackagesDescription,
-                },
-            ],
-            {
-                placeHolder: Pickers.Packages.selectOption,
-                ignoreFocusOut: true,
-                showBackButton: true,
-                matchOnDescription: false,
-                matchOnDetail: false,
-            },
-        );
-        if (selected && !Array.isArray(selected)) {
-            try {
-                if (selected.label === PackageManagement.workspaceDependencies) {
-                    return await selectFromInstallableToInstall(installable);
-                } else if (selected.label === PackageManagement.commonPackages) {
-                    return await selectFromCommonPackagesToInstall(common);
-                }
-                // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            } catch (ex: any) {
-                if (ex === QuickInputButtons.Back) {
-                    return selectWorkspaceOrCommon(installable, common);
-                }
-            }
-        }
+    if (installable.length === 0 && common.length === 0) {
         return undefined;
     }
 
-    if (common.length > 0) {
-        return selectFromCommonPackagesToInstall(common);
+    const items = [];
+    if (installable.length > 0) {
+        items.push({
+            label: PackageManagement.workspaceDependencies,
+            description: PackageManagement.workspaceDependenciesDescription,
+        });
     }
 
+    if (common.length > 0) {
+        items.push({
+            label: PackageManagement.commonPackages,
+            description: PackageManagement.commonPackagesDescription,
+        });
+    }
+
+    if (items.length > 0) {
+        items.push({ label: PackageManagement.skipPackageInstallation });
+    } else {
+        return undefined;
+    }
+
+    const selected = await showQuickPickWithButtons(items, {
+        placeHolder: Pickers.Packages.selectOption,
+        ignoreFocusOut: true,
+        showBackButton: true,
+        matchOnDescription: false,
+        matchOnDetail: false,
+    });
+
+    if (selected && !Array.isArray(selected)) {
+        try {
+            if (selected.label === PackageManagement.workspaceDependencies) {
+                return await selectFromInstallableToInstall(installable);
+            } else if (selected.label === PackageManagement.commonPackages) {
+                return await selectFromCommonPackagesToInstall(common);
+            } else {
+                traceInfo('Package Installer: user selected skip package installation');
+                return undefined;
+            }
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        } catch (ex: any) {
+            if (ex === QuickInputButtons.Back) {
+                return selectWorkspaceOrCommon(installable, common);
+            }
+        }
+    }
     return undefined;
 }
 

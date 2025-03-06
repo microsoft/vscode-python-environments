@@ -14,7 +14,15 @@ import {
 import * as path from 'path';
 import * as os from 'os';
 import * as fse from 'fs-extra';
-import { CancellationError, CancellationToken, l10n, LogOutputChannel, ProgressLocation, Uri } from 'vscode';
+import {
+    CancellationError,
+    CancellationToken,
+    l10n,
+    LogOutputChannel,
+    ProgressLocation,
+    QuickInputButtons,
+    Uri,
+} from 'vscode';
 import { ENVS_EXTENSION_ID, EXTENSION_ROOT_DIR } from '../../common/constants';
 import { createDeferred } from '../../common/utils/deferred';
 import {
@@ -29,9 +37,9 @@ import { getGlobalPersistentState, getWorkspacePersistentState } from '../../com
 import which from 'which';
 import { isWindows, shortVersion, sortEnvironments, untildify } from '../common/utils';
 import { pickProject } from '../../common/pickers/projects';
-import { CondaStrings } from '../../common/localize';
+import { CondaStrings, PackageManagement, Pickers } from '../../common/localize';
 import { showErrorMessage } from '../../common/errors/utils';
-import { showInputBox, showQuickPick, withProgress } from '../../common/window.apis';
+import { showInputBox, showQuickPick, showQuickPickWithButtons, withProgress } from '../../common/window.apis';
 import { Installable, selectFromCommonPackagesToInstall } from '../common/pickers';
 import { quoteArgs } from '../../features/execution/execUtils';
 import { traceInfo } from '../../common/logging';
@@ -758,11 +766,53 @@ async function getCommonPackages(): Promise<Installable[]> {
     }
 }
 
-export async function getCommonCondaPackagesToInstall(): Promise<string[] | undefined> {
-    const common = await getCommonPackages();
+async function selectCommonPackagesOrSkip(common: Installable[]): Promise<string[] | undefined> {
     if (common.length === 0) {
         return undefined;
     }
-    const selected = await selectFromCommonPackagesToInstall(common);
+
+    const items = [];
+    if (common.length > 0) {
+        items.push({
+            label: PackageManagement.commonPackages,
+            description: PackageManagement.commonPackagesDescription,
+        });
+    }
+
+    if (items.length > 0) {
+        items.push({ label: PackageManagement.skipPackageInstallation });
+    } else {
+        return undefined;
+    }
+
+    const selected = await showQuickPickWithButtons(items, {
+        placeHolder: Pickers.Packages.selectOption,
+        ignoreFocusOut: true,
+        showBackButton: true,
+        matchOnDescription: false,
+        matchOnDetail: false,
+    });
+
+    if (selected && !Array.isArray(selected)) {
+        try {
+            if (selected.label === PackageManagement.commonPackages) {
+                return await selectFromCommonPackagesToInstall(common);
+            } else {
+                traceInfo('Package Installer: user selected skip package installation');
+                return undefined;
+            }
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        } catch (ex: any) {
+            if (ex === QuickInputButtons.Back) {
+                return selectCommonPackagesOrSkip(common);
+            }
+        }
+    }
+    return undefined;
+}
+
+export async function getCommonCondaPackagesToInstall(): Promise<string[] | undefined> {
+    const common = await getCommonPackages();
+    const selected = await selectCommonPackagesOrSkip(common);
     return selected;
 }
