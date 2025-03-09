@@ -19,7 +19,7 @@ import {
     NativePythonFinder,
 } from '../common/nativePythonFinder';
 import { getWorkspacePersistentState } from '../../common/persistentState';
-import { isWindows, shortVersion, sortEnvironments } from '../common/utils';
+import { shortVersion, sortEnvironments } from '../common/utils';
 import { getConfiguration } from '../../common/workspace.apis';
 import { pickEnvironmentFrom } from '../../common/pickers/environments';
 import {
@@ -28,11 +28,12 @@ import {
     showWarningMessage,
     showInputBox,
     showOpenDialog,
+    showErrorMessage,
 } from '../../common/window.apis';
-import { showErrorMessage } from '../../common/errors/utils';
 import { Common, VenvManagerStrings } from '../../common/localize';
 import { isUvInstalled, runUV, runPython } from './helpers';
 import { getWorkspacePackagesToInstall } from './pipUtils';
+import { isWindows } from '../../common/utils/platformUtils';
 
 export const VENV_WORKSPACE_KEY = `${ENVS_EXTENSION_ID}:venv:WORKSPACE_SELECTED`;
 export const VENV_GLOBAL_KEY = `${ENVS_EXTENSION_ID}:venv:GLOBAL_SELECTED`;

@@ -7,6 +7,8 @@ import {
     InputBox,
     InputBoxOptions,
     LogOutputChannel,
+    MessageItem,
+    MessageOptions,
     OpenDialogOptions,
     OutputChannel,
     Progress,
@@ -282,6 +284,36 @@ export async function showInputBoxWithButtons(
     } finally {
         disposables.forEach((d) => d.dispose());
     }
+}
+
+export function showInformationMessage<T extends string>(message: string, ...items: T[]): Thenable<T | undefined>;
+export function showInformationMessage<T extends MessageItem>(message: string, ...items: T[]): Thenable<T | undefined>;
+export function showInformationMessage<T extends string>(
+    message: string,
+    options: MessageOptions,
+    ...items: T[]
+): Thenable<T | undefined>;
+export function showInformationMessage<T extends MessageItem>(
+    message: string,
+    options: MessageOptions,
+    ...items: T[]
+): Thenable<T | undefined> {
+    return window.showInformationMessage(message, options, ...items);
+}
+
+export function showErrorMessage<T extends string>(message: string, ...items: T[]): Thenable<T | undefined>;
+export function showErrorMessage<T extends MessageItem>(message: string, ...items: T[]): Thenable<T | undefined>;
+export function showErrorMessage<T extends string>(
+    message: string,
+    options: MessageOptions,
+    ...items: T[]
+): Thenable<T | undefined>;
+export function showErrorMessage<T extends MessageItem>(
+    message: string,
+    options: MessageOptions,
+    ...items: T[]
+): Thenable<T | undefined> {
+    return window.showErrorMessage(message, options, ...items);
 }
 
 export function showWarningMessage(message: string, ...items: string[]): Thenable<string | undefined> {
