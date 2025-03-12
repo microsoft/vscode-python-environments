@@ -113,7 +113,7 @@ function getName(binPath: string): string {
 }
 
 function pathForGitBash(binPath: string): string {
-    return isWindows() ? binPath.replace(/\\/g, '/') : binPath;
+    return isWindows() ? binPath.replace(/\\/g, '/').replace(/^([a-zA-Z]):/, '/$1') : binPath;
 }
 
 async function getPythonInfo(env: NativeEnvInfo): Promise<PythonEnvironmentInfo> {

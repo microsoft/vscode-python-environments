@@ -211,3 +211,41 @@ export class BashStartupProvider implements ShellStartupProvider {
         }
     }
 }
+
+export class GitBashStartupProvider implements ShellStartupProvider {
+    async isSetup(): Promise<boolean> {
+        const bashProfiles = await getBashProfiles();
+        return await isStartupSetup(bashProfiles);
+    }
+    async setupScripts(): Promise<boolean> {
+        const bashProfiles = await getBashProfiles();
+        return await setupStartup(bashProfiles);
+    }
+    async teardownScripts(): Promise<boolean> {
+        const bashProfiles = await getBashProfiles();
+        return await removeBashStartup(bashProfiles);
+    }
+    async updateEnvVariables(envVars: EnvironmentVariableCollection, env: PythonEnvironment): Promise<void> {
+        const bashActivation = getActivationCommandForShell(env, TerminalShellType.gitbash);
+        if (bashActivation) {
+            const command = getCommandAsString(bashActivation);
+            envVars.replace(bashActivationEnvVarKey, command);
+        } else {
+            envVars.delete(bashActivationEnvVarKey);
+        }
+    }
+    async removeEnvVariables(envVars: EnvironmentVariableCollection): Promise<void> {
+        envVars.delete(bashActivationEnvVarKey);
+    }
+    async getEnvVariables(env?: PythonEnvironment): Promise<Map<string, string | undefined> | undefined> {
+        if (env) {
+            const bashActivation = getActivationCommandForShell(env, TerminalShellType.gitbash);
+            return bashActivation
+                ? new Map([[bashActivationEnvVarKey, getCommandAsString(bashActivation)]])
+                : undefined;
+        } else {
+            return new Map([[bashActivationEnvVarKey, undefined]]);
+        }
+    }
+    public readonly name: string = 'git-bash';
+}
