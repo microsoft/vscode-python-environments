@@ -363,6 +363,10 @@
                     "when": "view == python-projects && viewItem == python-env"
                 },
                 {
+                    "command": "python-envs.remove",
+                    "when": "view == python-projects && viewItem == python-env"
+                },
+                {
                     "command": "python-envs.refreshPackages",
                     "group": "inline",
                     "when": "view == python-projects && viewItem == python-package-root"

@@ -171,6 +171,10 @@ export async function removeEnvironmentCommand(context: unknown, managers: Envir
         if (environment) {
             await manager?.remove(environment);
         }
+    } else if (context instanceof ProjectEnvironment) {
+        const view = context as ProjectEnvironment;
+        const manager = managers.getEnvironmentManager(view.parent.project.uri);
+        await manager?.remove(view.environment);
     } else {
         traceError(`Invalid context for remove command: ${context}`);
     }
