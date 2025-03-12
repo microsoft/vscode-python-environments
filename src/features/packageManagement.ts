@@ -1,4 +1,3 @@
-import { window } from 'vscode';
 import { traceInfo } from '../common/logging';
 import { getCallingExtension } from '../common/utils/frameUtils';
 import { getConfiguration } from '../common/workspace.apis';
@@ -49,10 +48,9 @@ export async function packageManagementFlow(packages: string[]): Promise<void> {
     if (!isConfigured) {
         // calling extension has no config, user has no wildcard setup
         // prompt user to "alwaysAsk" or "alwaysAllow"
-        const selectedOption = await promptForInstallPermissions(callingExtension, packages.join(', '));
+        const selectedOption = await promptForInstallPermissions(callingExtension, packages);
         if (selectedOption === InstallPermissionEnum.Cancel) {
             // user cancelled the prompt, exit
-            window.showErrorMessage(`Installation of ${packages.join(', ')} was canceled by the user.`);
             return Promise.reject('User cancelled the package installation.');
         }
         if (selectedOption !== InstallPermissionEnum.InstallNoConfigure) {
@@ -65,10 +63,9 @@ export async function packageManagementFlow(packages: string[]): Promise<void> {
         if (callingExtensionTrustLevel === InstallPermissionEnum.AlwaysAsk) {
             traceInfo('Installation is pending user confirmation due to permission settings.');
             // prompt user to allow or deny package installation
-            const simpleResponse = await promptForAlwaysAsk(callingExtension, packages.join(', '));
+            const simpleResponse = await promptForAlwaysAsk(callingExtension, packages);
             if (simpleResponse === SimpleResponseEnum.NoInstall || simpleResponse === SimpleResponseEnum.Cancel) {
                 // user cancelled the prompt, exit
-                window.showErrorMessage(`Installation of ${packages.join(', ')} was canceled by the user.`);
                 return Promise.reject('User cancelled the package installation.');
             }
         }
