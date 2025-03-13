@@ -305,6 +305,10 @@
                 {
                     "command": "python-envs.copyProjectPath",
                     "when": "false"
+                },
+                {
+                    "command": "python-envs.createAny",
+                    "when": "false"
                 }
             ],
             "view/item/context": [
