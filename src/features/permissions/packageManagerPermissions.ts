@@ -1,9 +1,9 @@
 import { l10n, SecretStorage } from 'vscode';
-import { pickExtensionForPermissions } from './pickers';
+import { pickExtension } from './pickers';
 import { showInformationMessage, showWarningMessage } from '../../common/window.apis';
 import { PermissionsCommon } from '../../common/localize';
 import { traceLog } from '../../common/logging';
-import { allExternalExtensions } from '../../common/extension.apis';
+import { allExtensions } from '../../common/extension.apis';
 import { getCallingExtension } from '../../common/utils/frameUtils';
 
 type PermissionType = 'Ask' | 'Allow' | 'Deny';
@@ -42,7 +42,7 @@ export class PackageManagerPermissionsImpl implements PackageManagerPermissions 
     }
 
     async resetPermissions(): Promise<void> {
-        const ids = allExternalExtensions().map((e) => `python-envs.permissions.packageManagement.${e.id}`);
+        const ids = allExtensions().map((e) => `python-envs.permissions.packageManagement.${e.id}`);
         await Promise.all(ids.map((id) => this.secretStore.delete(id)));
         traceLog('All package management permissions have been reset.');
     }
@@ -69,72 +69,75 @@ function getPackageListAsString(packages: string[]): string {
     return result;
 }
 
-async function configureFirstTimePermissions(
-    extensionId: string,
-    pm: PackageManagerPermissions,
-): Promise<PermissionType> {
+async function configureFirstTimePermissions(extensionId: string, pm: PackageManagerPermissions) {
     const response = await showInformationMessage(
-        l10n.t('The {0} extension wants to make changes to packages in your Python environments', extensionId),
+        l10n.t(
+            'The extension {0} wants to install, upgrade, or uninstall packages from your Python environments',
+            extensionId,
+        ),
         { modal: true },
         {
-            title: PermissionsCommon.confirmEachTime,
+            title: PermissionsCommon.ask,
             isCloseAffordance: true,
         },
         { title: PermissionsCommon.allow },
         { title: PermissionsCommon.deny },
     );
-    if (response?.title === PermissionsCommon.confirmEachTime) {
+    if (response?.title === PermissionsCommon.ask) {
         await pm.setPermissions(extensionId, 'Ask');
         traceLog('Package management permissions set to "ask" for extension: ', extensionId);
-        return 'Ask';
+        return true;
     } else if (response?.title === PermissionsCommon.allow) {
         await pm.setPermissions(extensionId, 'Allow');
         traceLog('Package management permissions set to "allow" for extension: ', extensionId);
-        return 'Allow';
+        return true;
     } else if (response?.title === PermissionsCommon.deny) {
         await pm.setPermissions(extensionId, 'Deny');
         traceLog('Package management permissions set to "deny" for extension: ', extensionId);
-        return 'Deny';
+        return false;
     } else {
-        traceLog('Package management permissions not set (default: ask) for extension: ', extensionId);
-        return 'Ask';
+        traceLog('Package management permissions not changed for extension: ', extensionId);
+        return false;
     }
 }
 
-async function notifyPermissionsDenied(pm: PackageManagerPermissions, extensionId: string, mode: string) {
-    let message = l10n.t(
-        'The extension `{0}` is not permitted to install packages into your Python environment.',
-        extensionId,
-    );
-    if (mode === 'uninstall') {
-        message = l10n.t(
-            'The extension `{0}` is not permitted to uninstall packages from your Python environment.',
-            extensionId,
-        );
-    } else if (mode === 'changes') {
-        message = l10n.t(
-            'The extension `{0}` is not permitted to make changes to your Python environment.',
-            extensionId,
-        );
-    }
-    const response = await showWarningMessage(message, PermissionsCommon.updatePermissions);
-    if (response === PermissionsCommon.updatePermissions) {
-        handlePermissionsCommand(pm, extensionId);
-    }
-}
+export async function checkPackageManagementPermissions(
+    pm: PackageManagerPermissions,
+    mode: 'install' | 'uninstall' | 'changes',
+    packages?: string[],
+): Promise<boolean> {
+    const extensionId = getCallingExtension();
 
-async function handleAskForPermissions(extensionId: string, mode: string, packages?: string[]) {
+    const currentPermission = await pm.getPermissions(extensionId);
+    if (currentPermission === 'Allow') {
+        return true;
+    } else if (currentPermission === 'Deny') {
+        traceLog(`Package management permissions denied for extension: ${extensionId}`);
+        setImmediate(async () => {
+            const response = await showWarningMessage(
+                l10n.t(
+                    'The extension `{0}` is not allowed to {1} packages into your Python environment.',
+                    extensionId,
+                    mode,
+                ),
+                PermissionsCommon.setPermissions,
+            );
+            if (response === PermissionsCommon.setPermissions) {
+                handlePermissionsCommand(pm, extensionId);
+            }
+        });
+        return false;
+    } else if (currentPermission === undefined) {
+        return await configureFirstTimePermissions(extensionId, pm);
+    }
+
+    // Below handles Permission level is 'Ask'
     let message = l10n.t('The extension `{0}` wants to install packages into your Python environment.', extensionId);
     if (mode === 'uninstall') {
         message = l10n.t('The extension `{0}` wants to uninstall packages from your Python environment.', extensionId);
     } else if (mode === 'changes') {
         message = l10n.t('The extension `{0}` wants to make changes to your Python environment.', extensionId);
     }
-    traceLog(
-        `Asking for package management permissions for extension ${extensionId} to ${mode}: ${
-            packages ?? 'no packages listed'
-        }`,
-    );
 
     const response = await showInformationMessage(
         message,
@@ -146,41 +149,15 @@ async function handleAskForPermissions(extensionId: string, mode: string, packag
         { title: PermissionsCommon.deny, isCloseAffordance: true },
     );
     if (response?.title === PermissionsCommon.allow) {
-        traceLog(`Package management permissions granted for extension this time: ${extensionId}`);
+        traceLog(`Package management permissions granted for extension: ${extensionId}`);
         return true;
     }
-    traceLog(`Package management permissions denied for extension this time: ${extensionId}`);
+    traceLog(`Package management permissions denied for extension: ${extensionId}`);
     return false;
 }
 
-export async function checkPackageManagementPermissions(
-    pm: PackageManagerPermissions,
-    mode: 'install' | 'uninstall' | 'changes',
-    packages?: string[],
-): Promise<boolean> {
-    const extensionId = getCallingExtension();
-
-    let currentPermission = await pm.getPermissions(extensionId);
-    if (currentPermission === undefined) {
-        currentPermission = await configureFirstTimePermissions(extensionId, pm);
-    }
-
-    if (currentPermission === 'Allow') {
-        return true;
-    } else if (currentPermission === 'Deny') {
-        traceLog(`Package management permissions denied for extension: ${extensionId}`);
-        setImmediate(async () => {
-            await notifyPermissionsDenied(pm, extensionId, mode);
-        });
-        return false;
-    }
-
-    const result = await handleAskForPermissions(extensionId, mode, packages);
-    return result;
-}
-
 export async function handlePermissionsCommand(pm: PermissionsManager<PermissionType>, extensionId?: string) {
-    extensionId = extensionId ?? (await pickExtensionForPermissions());
+    extensionId = extensionId ?? (await pickExtension());
     if (!extensionId) {
         return;
     }
@@ -189,19 +166,19 @@ export async function handlePermissionsCommand(pm: PermissionsManager<Permission
 
     const response = await showInformationMessage(
         l10n.t(
-            'Set permissions for the {0} extension to make changes to packages in your Python environments',
+            'Set permissions for the extension {0} to install, upgrade, or uninstall packages from your Python environments',
             extensionId,
         ),
         {
             modal: true,
             detail: currentPermission ? l10n.t('Current permission: {0}', currentPermission) : undefined,
         },
-        PermissionsCommon.confirmEachTime,
+        PermissionsCommon.ask,
         PermissionsCommon.allow,
         PermissionsCommon.deny,
     );
 
-    if (response === PermissionsCommon.confirmEachTime) {
+    if (response === PermissionsCommon.ask) {
         await pm.setPermissions(extensionId, 'Ask');
         traceLog('Package management permissions set to "ask" for extension: ', extensionId);
     } else if (response === PermissionsCommon.allow) {
