@@ -231,6 +231,18 @@
                 "title": "%python-envs.copyProjectPath.title%",
                 "category": "Python Envs",
                 "icon": "$(copy)"
+            },
+            {
+                "command": "python-envs.permissions",
+                "title": "%python-envs.permissions.title%",
+                "category": "Python Envs",
+                "icon": "$(shield)"
+            },
+            {
+                "command": "python-envs.resetPermissions",
+                "title": "%python-envs.resetPermissions.title%",
+                "category": "Python Envs",
+                "icon": "$(sync)"
             }
         ],
         "menus": {
@@ -418,7 +430,15 @@
                 },
                 {
                     "command": "python-envs.refreshAllManagers",
+                    "when": "view == env-managers"
+                },
+                {
+                    "command": "python-envs.permissions",
                     "group": "navigation",
+                    "when": "view == env-managers"
+                },
+                {
+                    "command": "python-envs.resetPermissions",
                     "when": "view == env-managers"
                 },
                 {
