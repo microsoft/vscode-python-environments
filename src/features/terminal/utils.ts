@@ -3,6 +3,7 @@ import { Terminal, TerminalOptions, Uri } from 'vscode';
 import { sleep } from '../../common/utils/asyncUtils';
 import { PythonEnvironment, PythonProject, PythonProjectEnvironmentApi, PythonProjectGetterApi } from '../../api';
 import { getConfiguration, getWorkspaceFolders } from '../../common/workspace.apis';
+import { isWindows } from '../../common/utils/platformUtils';
 
 const SHELL_INTEGRATION_TIMEOUT = 500; // 0.5 seconds
 const SHELL_INTEGRATION_POLL_INTERVAL = 20; // 0.02 seconds
@@ -124,4 +125,13 @@ export async function getAllDistinctProjectEnvironments(
     }
 
     return envs.length > 0 ? envs : undefined;
+}
+
+export function normalizeShellPath(filePath: string, shellType?: string): string {
+    if (isWindows() && shellType) {
+        if (shellType.toLowerCase() === 'gitbash' || shellType.toLowerCase() === 'git-bash') {
+            return filePath.replace(/\\/g, '/').replace(/^\/([a-zA-Z])/, '$1:');
+        }
+    }
+    return filePath;
 }

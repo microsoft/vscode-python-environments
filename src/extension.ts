@@ -56,7 +56,7 @@ import { AutoFindProjects } from './features/creators/autoFindProjects';
 import { registerTools } from './common/lm.apis';
 import { GetPackagesTool } from './features/copilotTools';
 import { TerminalActivationImpl } from './features/terminal/terminalActivationState';
-import { getEnvironmentForTerminal } from './features/terminal/utils';
+import { getEnvironmentForTerminal, normalizeShellPath } from './features/terminal/utils';
 import { PowershellStartupProvider } from './features/terminal/startup/powershellStartup';
 import { ShellStartupActivationManagerImpl } from './features/terminal/startup/activateUsingShellStartup';
 import { BashStartupProvider, GitBashStartupProvider } from './features/terminal/startup/bashStartup';
@@ -251,7 +251,8 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
             const envVar = shellEnv.value;
             if (envVar) {
                 if (envVar['VIRTUAL_ENV']) {
-                    const env = await api.resolveEnvironment(Uri.file(envVar['VIRTUAL_ENV']));
+                    const envPath = normalizeShellPath(envVar['VIRTUAL_ENV'], e.terminal.state.shell);
+                    const env = await api.resolveEnvironment(Uri.file(envPath));
                     if (env) {
                         monitoredTerminals.set(e.terminal, env);
                         terminalActivation.updateActivationState(e.terminal, env, true);
