@@ -52,8 +52,8 @@ async function getZshProfiles(): Promise<string[]> {
     return result.map((p) => p.profilePath);
 }
 
-const regionStart = '# vscode python environment activation begin';
-const regionEnd = '# vscode python environment activation end';
+const regionStart = '# >>> vscode python';
+const regionEnd = '# <<< vscode python';
 
 function getActivationContent(): string {
     const lineSep = '\n';
