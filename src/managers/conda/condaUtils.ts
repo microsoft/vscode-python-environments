@@ -9,7 +9,6 @@ import {
     PythonEnvironment,
     PythonEnvironmentApi,
     PythonProject,
-    TerminalShellType,
 } from '../../api';
 import * as path from 'path';
 import * as os from 'os';
@@ -264,12 +263,10 @@ function nativeToPythonEnv(
     }
     const sv = shortVersion(e.version);
     if (e.name === 'base') {
-        const shellActivation: Map<TerminalShellType, PythonCommandRunConfiguration[]> = new Map();
-        const shellDeactivation: Map<TerminalShellType, PythonCommandRunConfiguration[]> = new Map();
-        shellActivation.set(TerminalShellType.gitbash, [
-            { executable: pathForGitBash(conda), args: ['activate', 'base'] },
-        ]);
-        shellDeactivation.set(TerminalShellType.gitbash, [{ executable: pathForGitBash(conda), args: ['deactivate'] }]);
+        const shellActivation: Map<string, PythonCommandRunConfiguration[]> = new Map();
+        const shellDeactivation: Map<string, PythonCommandRunConfiguration[]> = new Map();
+        shellActivation.set('gitbash', [{ executable: pathForGitBash(conda), args: ['activate', 'base'] }]);
+        shellDeactivation.set('gitbash', [{ executable: pathForGitBash(conda), args: ['deactivate'] }]);
 
         const environment = api.createPythonEnvironmentItem(
             {
@@ -296,12 +293,12 @@ function nativeToPythonEnv(
         log.info(`Found base environment: ${e.prefix}`);
         return environment;
     } else if (!isPrefixOf(condaPrefixes, e.prefix)) {
-        const shellActivation: Map<TerminalShellType, PythonCommandRunConfiguration[]> = new Map();
-        const shellDeactivation: Map<TerminalShellType, PythonCommandRunConfiguration[]> = new Map();
-        shellActivation.set(TerminalShellType.gitbash, [
+        const shellActivation: Map<string, PythonCommandRunConfiguration[]> = new Map();
+        const shellDeactivation: Map<string, PythonCommandRunConfiguration[]> = new Map();
+        shellActivation.set('gitbash', [
             { executable: pathForGitBash(conda), args: ['activate', pathForGitBash(e.prefix)] },
         ]);
-        shellDeactivation.set(TerminalShellType.gitbash, [{ executable: pathForGitBash(conda), args: ['deactivate'] }]);
+        shellDeactivation.set('gitbash', [{ executable: pathForGitBash(conda), args: ['deactivate'] }]);
 
         const basename = path.basename(e.prefix);
         const environment = api.createPythonEnvironmentItem(
@@ -336,12 +333,10 @@ function nativeToPythonEnv(
         const basename = path.basename(e.prefix);
         const name = e.name ?? basename;
 
-        const shellActivation: Map<TerminalShellType, PythonCommandRunConfiguration[]> = new Map();
-        const shellDeactivation: Map<TerminalShellType, PythonCommandRunConfiguration[]> = new Map();
-        shellActivation.set(TerminalShellType.gitbash, [
-            { executable: pathForGitBash(conda), args: ['activate', name] },
-        ]);
-        shellDeactivation.set(TerminalShellType.gitbash, [{ executable: pathForGitBash(conda), args: ['deactivate'] }]);
+        const shellActivation: Map<string, PythonCommandRunConfiguration[]> = new Map();
+        const shellDeactivation: Map<string, PythonCommandRunConfiguration[]> = new Map();
+        shellActivation.set('gitbash', [{ executable: pathForGitBash(conda), args: ['activate', name] }]);
+        shellDeactivation.set('gitbash', [{ executable: pathForGitBash(conda), args: ['deactivate'] }]);
 
         const environment = api.createPythonEnvironmentItem(
             {

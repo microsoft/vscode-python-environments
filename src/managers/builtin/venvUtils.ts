@@ -5,7 +5,6 @@ import {
     PythonEnvironment,
     PythonEnvironmentApi,
     PythonEnvironmentInfo,
-    TerminalShellType,
 } from '../../api';
 import * as path from 'path';
 import * as os from 'os';
@@ -130,81 +129,76 @@ async function getPythonInfo(env: NativeEnvInfo): Promise<PythonEnvironmentInfo>
             checkPath?: string;
         }
 
-        const venvManagers: Record<TerminalShellType, VenvCommand> = {
+        const venvManagers: Record<string, VenvCommand> = {
             // Shells supported by the builtin `venv` module
-            [TerminalShellType.bash]: {
+            ['sh']: {
                 activate: { executable: 'source', args: [path.join(binDir, `activate`)] },
                 deactivate: { executable: 'deactivate' },
                 supportsStdlib: true,
             },
-            [TerminalShellType.gitbash]: {
+            ['bash']: {
+                activate: { executable: 'source', args: [path.join(binDir, `activate`)] },
+                deactivate: { executable: 'deactivate' },
+                supportsStdlib: true,
+            },
+            ['gitbash']: {
                 activate: { executable: 'source', args: [pathForGitBash(path.join(binDir, `activate`))] },
                 deactivate: { executable: 'deactivate' },
                 supportsStdlib: true,
             },
-            [TerminalShellType.zsh]: {
+            ['zsh']: {
                 activate: { executable: 'source', args: [path.join(binDir, `activate`)] },
                 deactivate: { executable: 'deactivate' },
                 supportsStdlib: true,
             },
-            [TerminalShellType.wsl]: {
-                activate: { executable: 'source', args: [path.join(binDir, `activate`)] },
-                deactivate: { executable: 'deactivate' },
-                supportsStdlib: true,
-            },
-            [TerminalShellType.ksh]: {
+            ['ksh']: {
                 activate: { executable: '.', args: [path.join(binDir, `activate`)] },
                 deactivate: { executable: 'deactivate' },
                 supportsStdlib: true,
             },
-            [TerminalShellType.powershell]: {
+            ['pwsh']: {
                 activate: { executable: '&', args: [path.join(binDir, `activate.ps1`)] },
                 deactivate: { executable: 'deactivate' },
                 supportsStdlib: true,
             },
-            [TerminalShellType.powershellCore]: {
-                activate: { executable: '&', args: [path.join(binDir, `activate.ps1`)] },
-                deactivate: { executable: 'deactivate' },
-                supportsStdlib: true,
-            },
-            [TerminalShellType.commandPrompt]: {
+            ['cmd']: {
                 activate: { executable: path.join(binDir, `activate.bat`) },
                 deactivate: { executable: path.join(binDir, `deactivate.bat`) },
                 supportsStdlib: true,
             },
             // Shells supported by the `virtualenv` package
-            [TerminalShellType.cshell]: {
+            ['csh']: {
                 activate: { executable: 'source', args: [path.join(binDir, `activate.csh`)] },
                 deactivate: { executable: 'deactivate' },
                 supportsStdlib: false,
                 checkPath: path.join(binDir, `activate.csh`),
             },
-            [TerminalShellType.tcshell]: {
+            ['tcsh']: {
                 activate: { executable: 'source', args: [path.join(binDir, `activate.csh`)] },
                 deactivate: { executable: 'deactivate' },
                 supportsStdlib: false,
                 checkPath: path.join(binDir, `activate.csh`),
             },
-            [TerminalShellType.fish]: {
+            ['fish']: {
                 activate: { executable: 'source', args: [path.join(binDir, `activate.fish`)] },
                 deactivate: { executable: 'deactivate' },
                 supportsStdlib: false,
                 checkPath: path.join(binDir, `activate.fish`),
             },
-            [TerminalShellType.xonsh]: {
+            ['xonsh']: {
                 activate: { executable: 'source', args: [path.join(binDir, `activate.xsh`)] },
                 deactivate: { executable: 'deactivate' },
                 supportsStdlib: false,
                 checkPath: path.join(binDir, `activate.xsh`),
             },
-            [TerminalShellType.nushell]: {
+            ['nu']: {
                 activate: { executable: 'overlay', args: ['use', path.join(binDir, 'activate.nu')] },
                 deactivate: { executable: 'overlay', args: ['hide', 'activate'] },
                 supportsStdlib: false,
                 checkPath: path.join(binDir, `activate.nu`),
             },
             // Fallback
-            [TerminalShellType.unknown]: isWindows()
+            ['unknown']: isWindows()
                 ? {
                       activate: { executable: path.join(binDir, `activate`) },
                       deactivate: { executable: path.join(binDir, `deactivate`) },
@@ -215,13 +209,13 @@ async function getPythonInfo(env: NativeEnvInfo): Promise<PythonEnvironmentInfo>
                       deactivate: { executable: 'deactivate' },
                       supportsStdlib: true,
                   },
-        } satisfies Record<TerminalShellType, VenvCommand>;
+        } satisfies Record<string, VenvCommand>;
 
-        const shellActivation: Map<TerminalShellType, PythonCommandRunConfiguration[]> = new Map();
-        const shellDeactivation: Map<TerminalShellType, PythonCommandRunConfiguration[]> = new Map();
+        const shellActivation: Map<string, PythonCommandRunConfiguration[]> = new Map();
+        const shellDeactivation: Map<string, PythonCommandRunConfiguration[]> = new Map();
 
         await Promise.all(
-            (Object.entries(venvManagers) as [TerminalShellType, VenvCommand][]).map(async ([shell, mgr]) => {
+            (Object.entries(venvManagers) as [string, VenvCommand][]).map(async ([shell, mgr]) => {
                 if (!mgr.supportsStdlib && mgr.checkPath && !(await fsapi.pathExists(mgr.checkPath))) {
                     return;
                 }

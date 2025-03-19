@@ -48,23 +48,6 @@ export interface PythonCommandRunConfiguration {
     args?: string[];
 }
 
-export enum TerminalShellType {
-    powershell = 'powershell',
-    powershellCore = 'powershellCore',
-    commandPrompt = 'commandPrompt',
-    gitbash = 'gitbash',
-    bash = 'bash',
-    zsh = 'zsh',
-    ksh = 'ksh',
-    fish = 'fish',
-    cshell = 'cshell',
-    tcshell = 'tcshell',
-    nushell = 'nushell',
-    wsl = 'wsl',
-    xonsh = 'xonsh',
-    unknown = 'unknown',
-}
-
 /**
  * Contains details on how to use a particular python environment
  *
@@ -73,7 +56,7 @@ export enum TerminalShellType {
  * 2. If {@link PythonEnvironmentExecutionInfo.activatedRun} is not provided, then:
  *   - If {@link PythonEnvironmentExecutionInfo.shellActivation} is provided and shell type is known, then that will be used.
  *   - If {@link PythonEnvironmentExecutionInfo.shellActivation} is provided and shell type is not known, then:
- *     - {@link TerminalShellType.unknown} will be used if provided.
+ *     - 'unknown' will be used if provided.
  *     - {@link PythonEnvironmentExecutionInfo.activation} will be used otherwise.
  *   - If {@link PythonEnvironmentExecutionInfo.shellActivation} is not provided, then {@link PythonEnvironmentExecutionInfo.activation} will be used.
  *   - If {@link PythonEnvironmentExecutionInfo.activation} is not provided, then {@link PythonEnvironmentExecutionInfo.run} will be used.
@@ -82,7 +65,7 @@ export enum TerminalShellType {
  * 1. If {@link PythonEnvironmentExecutionInfo.shellActivation} is provided and shell type is known, then that will be used.
  * 2. If {@link PythonEnvironmentExecutionInfo.shellActivation} is provided and shell type is not known, then {@link PythonEnvironmentExecutionInfo.activation} will be used.
  * 3. If {@link PythonEnvironmentExecutionInfo.shellActivation} is not provided, then:
- *     - {@link TerminalShellType.unknown} will be used if provided.
+ *     - 'unknown' will be used if provided.
  *     - {@link PythonEnvironmentExecutionInfo.activation} will be used otherwise.
  * 4. If {@link PythonEnvironmentExecutionInfo.activation} is not provided, then {@link PythonEnvironmentExecutionInfo.run} will be used.
  *
@@ -107,11 +90,11 @@ export interface PythonEnvironmentExecutionInfo {
     /**
      * Details on how to activate an environment using a shell specific command.
      * If set this will override the {@link PythonEnvironmentExecutionInfo.activation}.
-     * {@link TerminalShellType.unknown} is used if shell type is not known.
-     * If {@link TerminalShellType.unknown} is not provided and shell type is not known then
+     * 'unknown' is used if shell type is not known.
+     * If 'unknown' is not provided and shell type is not known then
      * {@link PythonEnvironmentExecutionInfo.activation} if set.
      */
-    shellActivation?: Map<TerminalShellType, PythonCommandRunConfiguration[]>;
+    shellActivation?: Map<string, PythonCommandRunConfiguration[]>;
 
     /**
      * Details on how to deactivate an environment.
@@ -121,11 +104,11 @@ export interface PythonEnvironmentExecutionInfo {
     /**
      * Details on how to deactivate an environment using a shell specific command.
      * If set this will override the {@link PythonEnvironmentExecutionInfo.deactivation} property.
-     * {@link TerminalShellType.unknown} is used if shell type is not known.
-     * If {@link TerminalShellType.unknown} is not provided and shell type is not known then
+     * 'unknown' is used if shell type is not known.
+     * If 'unknown' is not provided and shell type is not known then
      * {@link PythonEnvironmentExecutionInfo.deactivation} if set.
      */
-    shellDeactivation?: Map<TerminalShellType, PythonCommandRunConfiguration[]>;
+    shellDeactivation?: Map<string, PythonCommandRunConfiguration[]>;
 }
 
 /**

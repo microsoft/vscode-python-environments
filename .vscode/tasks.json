@@ -32,6 +32,20 @@
             "label": "tasks: watch-tests",
             "dependsOn": ["npm: watch", "npm: watch-tests"],
             "problemMatcher": []
+        },
+        {
+            "type": "npm",
+            "script": "unittest",
+            "dependsOn": ["tasks: watch-tests"],
+            "problemMatcher": "$tsc",
+            "presentation": {
+                "reveal": "never",
+                "group": "test"
+            },
+            "group": {
+                "kind": "test",
+                "isDefault": false
+            }
         }
     ]
 }

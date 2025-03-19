@@ -1,5 +1,5 @@
 import { Terminal } from 'vscode';
-import { PythonCommandRunConfiguration, PythonEnvironment, TerminalShellType } from '../../api';
+import { PythonCommandRunConfiguration, PythonEnvironment } from '../../api';
 import { identifyTerminalShell } from './shellDetector';
 
 export function isActivatableEnvironment(environment: PythonEnvironment): boolean {
@@ -20,7 +20,7 @@ export function getActivationCommand(
     if (environment.execInfo?.shellActivation) {
         activation = environment.execInfo.shellActivation.get(shell);
         if (!activation) {
-            activation = environment.execInfo.shellActivation.get(TerminalShellType.unknown);
+            activation = environment.execInfo.shellActivation.get('unknown');
         }
     }
 
@@ -41,7 +41,7 @@ export function getDeactivationCommand(
     if (environment.execInfo?.shellDeactivation) {
         deactivation = environment.execInfo.shellDeactivation.get(shell);
         if (!deactivation) {
-            deactivation = environment.execInfo.shellDeactivation.get(TerminalShellType.unknown);
+            deactivation = environment.execInfo.shellDeactivation.get('unknown');
         }
     }
 

@@ -1,5 +1,4 @@
-import { TerminalShellType } from '../../../api';
-import { Terminal, TerminalShellType as VSCTerminalShellType } from 'vscode';
+import { Terminal } from 'vscode';
 import { identifyTerminalShell } from '../../../features/common/shellDetector';
 import assert from 'assert';
 import { isWindows } from '../../../managers/common/utils';
@@ -9,13 +8,18 @@ const testShellTypes: string[] = [
     'bash',
     'powershell',
     'pwsh',
+    'powershellcore',
     'cmd',
+    'commandPrompt',
     'gitbash',
     'zsh',
     'ksh',
     'fish',
+    'csh',
     'cshell',
+    'tcsh',
     'tcshell',
+    'nu',
     'nushell',
     'wsl',
     'xonsh',
@@ -24,38 +28,6 @@ const testShellTypes: string[] = [
 
 function getNameByShellType(shellType: string): string {
     return shellType === 'unknown' ? '' : shellType;
-}
-
-function getVSCShellType(shellType: string): VSCTerminalShellType | undefined {
-    try {
-        switch (shellType) {
-            case 'sh':
-                return VSCTerminalShellType.Sh;
-            case 'bash':
-                return VSCTerminalShellType.Bash;
-            case 'powershell':
-            case 'pwsh':
-                return VSCTerminalShellType.PowerShell;
-            case 'cmd':
-                return VSCTerminalShellType.CommandPrompt;
-            case 'gitbash':
-                return VSCTerminalShellType.GitBash;
-            case 'zsh':
-                return VSCTerminalShellType.Zsh;
-            case 'ksh':
-                return VSCTerminalShellType.Ksh;
-            case 'fish':
-                return VSCTerminalShellType.Fish;
-            case 'cshell':
-                return VSCTerminalShellType.Csh;
-            case 'nushell':
-                return VSCTerminalShellType.NuShell;
-            default:
-                return undefined;
-        }
-    } catch {
-        return undefined;
-    }
 }
 
 function getShellPath(shellType: string): string | undefined {
@@ -67,8 +39,10 @@ function getShellPath(shellType: string): string | undefined {
         case 'powershell':
             return 'C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe';
         case 'pwsh':
+        case 'powershellcore':
             return 'C:\\Program Files\\PowerShell\\7\\pwsh.exe';
         case 'cmd':
+        case 'commandPrompt':
             return 'C:\\Windows\\System32\\cmd.exe';
         case 'gitbash':
             return isWindows() ? 'C:\\Program Files\\Git\\bin\\bash.exe' : '/usr/bin/gitbash';
@@ -78,10 +52,13 @@ function getShellPath(shellType: string): string | undefined {
             return '/bin/ksh';
         case 'fish':
             return '/usr/bin/fish';
+        case 'csh':
         case 'cshell':
             return '/bin/csh';
+        case 'nu':
         case 'nushell':
             return '/usr/bin/nu';
+        case 'tcsh':
         case 'tcshell':
             return '/usr/bin/tcsh';
         case 'wsl':
@@ -93,59 +70,62 @@ function getShellPath(shellType: string): string | undefined {
     }
 }
 
-function expectedShellType(shellType: string): TerminalShellType {
+function expectedShellType(shellType: string): string {
     switch (shellType) {
         case 'sh':
-            return TerminalShellType.bash;
+            return 'sh';
         case 'bash':
-            return TerminalShellType.bash;
-        case 'powershell':
-            return TerminalShellType.powershell;
+            return 'bash';
         case 'pwsh':
-            return TerminalShellType.powershellCore;
+        case 'powershell':
+        case 'powershellcore':
+            return 'pwsh';
         case 'cmd':
-            return TerminalShellType.commandPrompt;
+        case 'commandPrompt':
+            return 'cmd';
         case 'gitbash':
-            return TerminalShellType.gitbash;
+            return 'gitbash';
         case 'zsh':
-            return TerminalShellType.zsh;
+            return 'zsh';
         case 'ksh':
-            return TerminalShellType.ksh;
+            return 'ksh';
         case 'fish':
-            return TerminalShellType.fish;
+            return 'fish';
+        case 'csh':
         case 'cshell':
-            return TerminalShellType.cshell;
+            return 'csh';
+        case 'nu':
         case 'nushell':
-            return TerminalShellType.nushell;
+            return 'nu';
+        case 'tcsh':
         case 'tcshell':
-            return TerminalShellType.tcshell;
-        case 'wsl':
-            return TerminalShellType.wsl;
+            return 'tcsh';
         case 'xonsh':
-            return TerminalShellType.xonsh;
+            return 'xonsh';
+        case 'wsl':
+            return 'wsl';
         default:
-            return TerminalShellType.unknown;
+            return 'unknown';
     }
 }
 
 suite('Shell Detector', () => {
-    testShellTypes.forEach((shellType) => {
-        if (shellType === TerminalShellType.unknown) {
+    testShellTypes.forEach((shell) => {
+        if (shell === 'unknown') {
             return;
         }
 
-        const name = getNameByShellType(shellType);
-        const vscShellType = getVSCShellType(shellType);
-        test(`Detect ${shellType}`, () => {
+        const name = getNameByShellType(shell);
+        test(`Detect ${shell}`, () => {
             const terminal = {
                 name,
-                state: { shellType: vscShellType },
+                state: { shell },
                 creationOptions: {
-                    shellPath: getShellPath(shellType),
+                    shellPath: getShellPath(shell),
                 },
             } as Terminal;
             const detected = identifyTerminalShell(terminal);
-            const expected = expectedShellType(shellType);
+            const expected = expectedShellType(shell);
             assert.strictEqual(detected, expected);
         });
     });

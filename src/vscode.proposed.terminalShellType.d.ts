@@ -6,33 +6,18 @@
 declare module 'vscode' {
     // https://github.com/microsoft/vscode/issues/230165
 
-    /**
-     * Known terminal shell types.
-     */
-    export enum TerminalShellType {
-        Sh = 1,
-        Bash = 2,
-        Fish = 3,
-        Csh = 4,
-        Ksh = 5,
-        Zsh = 6,
-        CommandPrompt = 7,
-        GitBash = 8,
-        PowerShell = 9,
-        Python = 10,
-        Julia = 11,
-        NuShell = 12,
-        Node = 13,
-    }
-
     // Part of TerminalState since the shellType can change multiple times and this comes with an event.
     export interface TerminalState {
         /**
-         * The current detected shell type of the terminal. New shell types may be added in the
-         * future in which case they will be returned as a number that is not part of
-         * {@link TerminalShellType}.
-         * Includes number type to prevent the breaking change when new enum members are added?
+         * The detected shell type of the {@link Terminal}. This will be `undefined` when there is
+         * not a clear signal as to what the shell is, or the shell is not supported yet. This
+         * value should change to the shell type of a sub-shell when launched (for example, running
+         * `bash` inside `zsh`).
+         *
+         * Note that the possible values are currently defined as any of the following:
+         * 'bash', 'cmd', 'csh', 'fish', 'gitbash', 'julia', 'ksh', 'node', 'nu', 'pwsh', 'python',
+         * 'sh', 'wsl', 'zsh'.
          */
-        readonly shellType?: TerminalShellType | number | undefined;
+        readonly shell: string | undefined;
     }
 }
