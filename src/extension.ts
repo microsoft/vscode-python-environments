@@ -57,7 +57,7 @@ import { GetEnvironmentInfoTool, InstallPackageTool } from './features/copilotTo
 import { TerminalActivationImpl } from './features/terminal/terminalActivationState';
 import { sendManagerSelectionTelemetry } from './common/telemetry/helpers';
 import { getEnvironmentForTerminal, normalizeShellPath } from './features/terminal/utils';
-import { PowerShellStartupProvider } from './features/terminal/startup/powershellStartup';
+import { PwshStartupProvider } from './features/terminal/startup/powershellStartup';
 import { ShellStartupActivationManagerImpl } from './features/terminal/startup/activateUsingShellStartup';
 import {
     BashStartupProvider,
@@ -66,6 +66,8 @@ import {
 } from './features/terminal/startup/bashStartup';
 import { FishStartupProvider } from './features/terminal/startup/fishStartup';
 import { isWindows } from './common/utils/platformUtils';
+import { CmdStartupProvider } from './features/terminal/startup/cmdStartup';
+import { NuShellStartupProvider } from './features/terminal/startup/nuShellStartup';
 
 export async function activate(context: ExtensionContext): Promise<PythonEnvironmentApi> {
     const start = new StopWatch();
@@ -93,12 +95,13 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
 
     const terminalActivation = new TerminalActivationImpl();
     const shellStartupProviders = isWindows()
-        ? [new PowerShellStartupProvider(), new GitBashStartupProvider()]
+        ? [new PwshStartupProvider(), new GitBashStartupProvider(), new CmdStartupProvider()]
         : [
-              new PowerShellStartupProvider(),
+              new PwshStartupProvider(),
               new BashStartupProvider(),
               new ZshStartupProvider(),
               new FishStartupProvider(),
+              new NuShellStartupProvider(),
           ];
     const shellStartupActivationManager = new ShellStartupActivationManagerImpl(
         context.environmentVariableCollection,

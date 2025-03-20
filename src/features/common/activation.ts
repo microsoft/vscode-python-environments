@@ -20,7 +20,7 @@ export function getActivationCommand(
 
 export function getActivationCommandForShell(
     environment: PythonEnvironment,
-    shell: TerminalShellType,
+    shell: string,
 ): PythonCommandRunConfiguration[] | undefined {
     let activation: PythonCommandRunConfiguration[] | undefined;
     if (environment.execInfo?.shellActivation) {

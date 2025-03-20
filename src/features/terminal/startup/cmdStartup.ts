@@ -4,13 +4,14 @@ import * as os from 'os';
 import { isWindows } from '../../../common/utils/platformUtils';
 import { ShellScriptEditState, ShellSetupState, ShellStartupProvider } from './startupProvider';
 import { EnvironmentVariableCollection } from 'vscode';
-import { PythonEnvironment, TerminalShellType } from '../../../api';
+import { PythonEnvironment } from '../../../api';
 import { getActivationCommandForShell } from '../../common/activation';
 import { traceError, traceInfo, traceVerbose } from '../../../common/logging';
 import { getCommandAsString } from './utils';
 import which from 'which';
 import * as cp from 'child_process';
 import { promisify } from 'util';
+import { ShellConstants } from '../../common/shellConstants';
 
 const exec = promisify(cp.exec);
 
@@ -276,7 +277,7 @@ export class CmdStartupProvider implements ShellStartupProvider {
 
     async updateEnvVariables(collection: EnvironmentVariableCollection, env: PythonEnvironment): Promise<void> {
         try {
-            const cmdActivation = getActivationCommandForShell(env, TerminalShellType.commandPrompt);
+            const cmdActivation = getActivationCommandForShell(env, ShellConstants.CMD);
             if (cmdActivation) {
                 const command = getCommandAsString(cmdActivation, '&');
                 collection.replace(this.cmdActivationEnvVarKey, command);
@@ -299,7 +300,7 @@ export class CmdStartupProvider implements ShellStartupProvider {
         }
 
         try {
-            const cmdActivation = getActivationCommandForShell(env, TerminalShellType.commandPrompt);
+            const cmdActivation = getActivationCommandForShell(env, ShellConstants.CMD);
             return cmdActivation
                 ? new Map([[this.cmdActivationEnvVarKey, getCommandAsString(cmdActivation, '&')]])
                 : undefined;

@@ -3,11 +3,12 @@ import * as path from 'path';
 import * as os from 'os';
 import { ShellScriptEditState, ShellSetupState, ShellStartupProvider } from './startupProvider';
 import { EnvironmentVariableCollection } from 'vscode';
-import { PythonCommandRunConfiguration, PythonEnvironment, TerminalShellType } from '../../../api';
+import { PythonCommandRunConfiguration, PythonEnvironment } from '../../../api';
 import { getActivationCommandForShell } from '../../common/activation';
 import { quoteArgs } from '../../execution/execUtils';
 import { traceError, traceInfo, traceVerbose } from '../../../common/logging';
 import which from 'which';
+import { ShellConstants } from '../../common/shellConstants';
 
 async function isFishInstalled(): Promise<boolean> {
     try {
@@ -161,7 +162,7 @@ export class FishStartupProvider implements ShellStartupProvider {
 
     async updateEnvVariables(collection: EnvironmentVariableCollection, env: PythonEnvironment): Promise<void> {
         try {
-            const fishActivation = getActivationCommandForShell(env, TerminalShellType.fish);
+            const fishActivation = getActivationCommandForShell(env, ShellConstants.FISH);
             if (fishActivation) {
                 const command = getCommandAsString(fishActivation);
                 collection.replace(this.fishActivationEnvVarKey, command);
@@ -184,7 +185,7 @@ export class FishStartupProvider implements ShellStartupProvider {
         }
 
         try {
-            const fishActivation = getActivationCommandForShell(env, TerminalShellType.fish);
+            const fishActivation = getActivationCommandForShell(env, ShellConstants.FISH);
             return fishActivation
                 ? new Map([[this.fishActivationEnvVarKey, getCommandAsString(fishActivation)]])
                 : undefined;
