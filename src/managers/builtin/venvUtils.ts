@@ -459,10 +459,13 @@ export async function removeVenv(environment: PythonEnvironment, log: LogOutputC
 
     const confirm = await showWarningMessage(
         l10n.t('Are you sure you want to remove {0}?', envPath),
-        Common.yes,
-        Common.no,
+        {
+            modal: true,
+        },
+        { title: Common.yes },
+        { title: Common.no, isCloseAffordance: true },
     );
-    if (confirm === Common.yes) {
+    if (confirm?.title === Common.yes) {
         await withProgress(
             {
                 location: ProgressLocation.Notification,
