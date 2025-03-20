@@ -3,11 +3,12 @@ import * as path from 'path';
 import { isWindows } from '../../../common/utils/platformUtils';
 import { ShellScriptEditState, ShellSetupState, ShellStartupProvider } from './startupProvider';
 import { EnvironmentVariableCollection } from 'vscode';
-import { PythonEnvironment, TerminalShellType } from '../../../api';
+import { PythonEnvironment } from '../../../api';
 import { getActivationCommandForShell } from '../../common/activation';
 import { traceError, traceInfo, traceVerbose } from '../../../common/logging';
 import { getCommandAsString, runCommand } from './utils';
 import which from 'which';
+import { ShellConstants } from '../../common/shellConstants';
 
 async function isPowerShellInstalled(): Promise<boolean> {
     const result = await Promise.all([which('powershell', { nothrow: true }), which('pwsh', { nothrow: true })]);
@@ -141,7 +142,7 @@ async function removePowerShellStartup(key: string): Promise<boolean> {
     return profiles.length > 0 && successfulRemovals === profiles.length;
 }
 
-export class PowerShellStartupProvider implements ShellStartupProvider {
+export class PwshStartupProvider implements ShellStartupProvider {
     public readonly name: string = 'PowerShell';
     private readonly pwshActivationEnvVarKey = 'VSCODE_PWSH_ACTIVATE';
 
@@ -195,7 +196,7 @@ export class PowerShellStartupProvider implements ShellStartupProvider {
 
     async updateEnvVariables(collection: EnvironmentVariableCollection, env: PythonEnvironment): Promise<void> {
         try {
-            const pwshActivation = getActivationCommandForShell(env, TerminalShellType.powershell);
+            const pwshActivation = getActivationCommandForShell(env, ShellConstants.PWSH);
             if (pwshActivation) {
                 const command = getCommandAsString(pwshActivation, '&&');
                 collection.replace(this.pwshActivationEnvVarKey, command);
@@ -218,7 +219,7 @@ export class PowerShellStartupProvider implements ShellStartupProvider {
         }
 
         try {
-            const pwshActivation = getActivationCommandForShell(env, TerminalShellType.powershell);
+            const pwshActivation = getActivationCommandForShell(env, ShellConstants.PWSH);
             return pwshActivation
                 ? new Map([[this.pwshActivationEnvVarKey, getCommandAsString(pwshActivation, '&&')]])
                 : undefined;

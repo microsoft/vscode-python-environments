@@ -3,11 +3,12 @@ import * as path from 'path';
 import * as os from 'os';
 import { ShellScriptEditState, ShellSetupState, ShellStartupProvider } from './startupProvider';
 import { EnvironmentVariableCollection } from 'vscode';
-import { PythonCommandRunConfiguration, PythonEnvironment, TerminalShellType } from '../../../api';
+import { PythonCommandRunConfiguration, PythonEnvironment } from '../../../api';
 import { getActivationCommandForShell } from '../../common/activation';
 import { quoteArgs } from '../../execution/execUtils';
 import { traceError, traceInfo, traceVerbose } from '../../../common/logging';
 import which from 'which';
+import { ShellConstants } from '../../common/shellConstants';
 
 async function isBashLikeInstalled(): Promise<boolean> {
     const result = await Promise.all([which('bash', { nothrow: true }), which('sh', { nothrow: true })]);
@@ -245,7 +246,7 @@ export class BashStartupProvider implements ShellStartupProvider {
 
     async updateEnvVariables(collection: EnvironmentVariableCollection, env: PythonEnvironment): Promise<void> {
         try {
-            const bashActivation = getActivationCommandForShell(env, TerminalShellType.bash);
+            const bashActivation = getActivationCommandForShell(env, ShellConstants.BASH);
             if (bashActivation) {
                 const command = getCommandAsString(bashActivation);
                 collection.replace(this.bashActivationEnvVarKey, command);
@@ -268,7 +269,7 @@ export class BashStartupProvider implements ShellStartupProvider {
         }
 
         try {
-            const bashActivation = getActivationCommandForShell(env, TerminalShellType.bash);
+            const bashActivation = getActivationCommandForShell(env, ShellConstants.BASH);
             return bashActivation
                 ? new Map([[this.bashActivationEnvVarKey, getCommandAsString(bashActivation)]])
                 : undefined;
@@ -338,7 +339,7 @@ export class ZshStartupProvider implements ShellStartupProvider {
 
     async updateEnvVariables(envVars: EnvironmentVariableCollection, env: PythonEnvironment): Promise<void> {
         try {
-            const zshActivation = getActivationCommandForShell(env, TerminalShellType.zsh);
+            const zshActivation = getActivationCommandForShell(env, ShellConstants.ZSH);
             if (zshActivation) {
                 const command = getCommandAsString(zshActivation);
                 envVars.replace(this.zshActivationEnvVarKey, command);
@@ -361,7 +362,7 @@ export class ZshStartupProvider implements ShellStartupProvider {
         }
 
         try {
-            const zshActivation = getActivationCommandForShell(env, TerminalShellType.zsh);
+            const zshActivation = getActivationCommandForShell(env, ShellConstants.ZSH);
             return zshActivation
                 ? new Map([[this.zshActivationEnvVarKey, getCommandAsString(zshActivation)]])
                 : undefined;
@@ -429,7 +430,7 @@ export class GitBashStartupProvider implements ShellStartupProvider {
     }
     async updateEnvVariables(envVars: EnvironmentVariableCollection, env: PythonEnvironment): Promise<void> {
         try {
-            const bashActivation = getActivationCommandForShell(env, TerminalShellType.gitbash);
+            const bashActivation = getActivationCommandForShell(env, ShellConstants.GITBASH);
             if (bashActivation) {
                 const command = getCommandAsString(bashActivation);
                 envVars.replace(this.gitBashActivationEnvVarKey, command);
@@ -450,7 +451,7 @@ export class GitBashStartupProvider implements ShellStartupProvider {
         }
 
         try {
-            const zshActivation = getActivationCommandForShell(env, TerminalShellType.zsh);
+            const zshActivation = getActivationCommandForShell(env, ShellConstants.GITBASH);
             return zshActivation
                 ? new Map([[this.gitBashActivationEnvVarKey, getCommandAsString(zshActivation)]])
                 : undefined;

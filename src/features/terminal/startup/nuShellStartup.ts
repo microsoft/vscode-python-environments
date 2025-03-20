@@ -3,11 +3,12 @@ import * as path from 'path';
 import * as os from 'os';
 import { ShellScriptEditState, ShellSetupState, ShellStartupProvider } from './startupProvider';
 import { EnvironmentVariableCollection } from 'vscode';
-import { PythonCommandRunConfiguration, PythonEnvironment, TerminalShellType } from '../../../api';
+import { PythonCommandRunConfiguration, PythonEnvironment } from '../../../api';
 import { getActivationCommandForShell } from '../../common/activation';
 import { quoteArgs } from '../../execution/execUtils';
 import { traceError, traceInfo, traceVerbose } from '../../../common/logging';
 import which from 'which';
+import { ShellConstants } from '../../common/shellConstants';
 
 async function isNuShellInstalled(): Promise<boolean> {
     try {
@@ -171,7 +172,7 @@ export class NuShellStartupProvider implements ShellStartupProvider {
 
     async updateEnvVariables(collection: EnvironmentVariableCollection, env: PythonEnvironment): Promise<void> {
         try {
-            const nuShellActivation = getActivationCommandForShell(env, TerminalShellType.nushell);
+            const nuShellActivation = getActivationCommandForShell(env, ShellConstants.NU);
             if (nuShellActivation) {
                 const command = getCommandAsString(nuShellActivation);
                 collection.replace(this.nuShellActivationEnvVarKey, command);
@@ -194,7 +195,7 @@ export class NuShellStartupProvider implements ShellStartupProvider {
         }
 
         try {
-            const nuShellActivation = getActivationCommandForShell(env, TerminalShellType.nushell);
+            const nuShellActivation = getActivationCommandForShell(env, ShellConstants.NU);
             return nuShellActivation
                 ? new Map([[this.nuShellActivationEnvVarKey, getCommandAsString(nuShellActivation)]])
                 : undefined;
