@@ -400,7 +400,11 @@ export async function createPythonVenv(
         os.platform() === 'win32' ? path.join(envPath, 'Scripts', 'python.exe') : path.join(envPath, 'bin', 'python');
 
     const project = api.getPythonProject(venvRoot);
-    const packages = await getWorkspacePackagesToInstall(api, project ? [project] : undefined);
+    const packages = await getWorkspacePackagesToInstall(
+        api,
+        { showSkipOption: true },
+        project ? [project] : undefined,
+    );
 
     return await withProgress(
         {
