@@ -148,6 +148,6 @@ export namespace EnvViewStrings {
 export namespace PermissionsCommon {
     export const allow = l10n.t('Allow');
     export const deny = l10n.t('Deny');
-    export const ask = l10n.t('Ask');
-    export const setPermissions = l10n.t('Set Permissions');
+    export const confirmEachTime = l10n.t('Confirm each time');
+    export const updatePermissions = l10n.t('Update permissions');
 }
