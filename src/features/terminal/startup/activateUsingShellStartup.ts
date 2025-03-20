@@ -1,7 +1,7 @@
 import { ConfigurationChangeEvent, Disposable, GlobalEnvironmentVariableCollection } from 'vscode';
 import { getWorkspaceFolder, getWorkspaceFolders, onDidChangeConfiguration } from '../../../common/workspace.apis';
 import { getAutoActivationType, setAutoActivationType } from '../utils';
-import { ShellStartupProvider } from './startupProvider';
+import { ShellScriptEditState, ShellSetupState, ShellStartupProvider } from './startupProvider';
 import { DidChangeEnvironmentEventArgs } from '../../../api';
 import { EnvironmentManagers } from '../../../internal.api';
 import { traceError, traceInfo } from '../../../common/logging';
@@ -87,7 +87,9 @@ export class ShellStartupActivationManagerImpl implements ShellStartupActivation
 
     private async isSetupRequired(): Promise<boolean> {
         const results = await Promise.all(this.shellStartupProviders.map((provider) => provider.isSetup()));
-        return results.some((result) => !result);
+        return results
+            .filter((r) => r !== ShellSetupState.NotInstalled)
+            .some((result) => result === ShellSetupState.NotSetup);
     }
 
     public async initialize(): Promise<void> {
@@ -145,17 +147,11 @@ export class ShellStartupActivationManagerImpl implements ShellStartupActivation
     }
 
     public async updateStartupScripts(): Promise<void> {
-        const results = await Promise.all(
-            this.shellStartupProviders.map(async (provider) => {
-                const result = await provider.setupScripts();
-                if (!result) {
-                    traceError(`Failed to setup shell startup scripts for ${provider.name}`);
-                }
-                return result;
-            }),
-        );
+        const results = await Promise.all(this.shellStartupProviders.map(async (provider) => provider.setupScripts()));
 
-        const success = results.every((result) => result);
+        const success = results
+            .filter((r) => r !== ShellScriptEditState.NotInstalled)
+            .every((result) => result === ShellScriptEditState.Edited);
 
         // Intentionally not awaiting this message. We don’t need a response here, and awaiting here for user response can
         // block setting up rest of the startup activation.
