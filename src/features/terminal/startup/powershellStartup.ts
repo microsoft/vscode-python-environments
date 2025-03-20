@@ -1,15 +1,18 @@
 import * as fs from 'fs-extra';
 import * as path from 'path';
 import { isWindows } from '../../../common/utils/platformUtils';
-import { ShellStartupProvider } from './startupProvider';
+import { ShellScriptEditState, ShellSetupState, ShellStartupProvider } from './startupProvider';
 import { EnvironmentVariableCollection } from 'vscode';
 import { PythonEnvironment, TerminalShellType } from '../../../api';
 import { getActivationCommandForShell } from '../../common/activation';
-import { traceInfo, traceVerbose } from '../../../common/logging';
+import { traceError, traceInfo, traceVerbose } from '../../../common/logging';
 import { getCommandAsString, runCommand } from './utils';
+import which from 'which';
 
-const pwshActivationEnvVarKey = 'VSCODE_PWSH_ACTIVATE';
-
+async function isPowerShellInstalled(): Promise<boolean> {
+    const result = await Promise.all([which('powershell', { nothrow: true }), which('pwsh', { nothrow: true })]);
+    return result.some((r) => r !== null);
+}
 interface PowerShellInfo {
     shell: 'powershell' | 'pwsh';
     profilePath: string;
@@ -33,13 +36,22 @@ async function getProfileForShell(shell: 'powershell' | 'pwsh'): Promise<PowerSh
 
 const regionStart = '#region vscode python';
 const regionEnd = '#endregion vscode python';
-function getActivationContent(): string {
+function getActivationContent(key: string): string {
     const lineSep = isWindows() ? '\r\n' : '\n';
-    const activationContent = `${lineSep}${lineSep}${regionStart}${lineSep}if ($null -ne $env:${pwshActivationEnvVarKey}) {${lineSep}    Invoke-Expression $env:${pwshActivationEnvVarKey}${lineSep}}${lineSep}${regionEnd}${lineSep}`;
+    const activationContent = [
+        '',
+        '',
+        regionStart,
+        `if ($null -ne $env:${key}) {`,
+        `    Invoke-Expression $env:${key}`,
+        '}',
+        regionEnd,
+        '',
+    ].join(lineSep);
     return activationContent;
 }
 
-async function isPowerShellStartupSetup(): Promise<boolean> {
+async function isPowerShellStartupSetup(key: string): Promise<boolean> {
     const profiles = await getPowerShellProfiles();
     if (profiles.length === 0) {
         return false;
@@ -50,7 +62,7 @@ async function isPowerShellStartupSetup(): Promise<boolean> {
         profiles.map(async (profile) => {
             if (await fs.pathExists(profile.profilePath)) {
                 const content = await fs.readFile(profile.profilePath, 'utf8');
-                if (content.includes(pwshActivationEnvVarKey)) {
+                if (content.includes(key)) {
                     return true;
                 }
             }
@@ -61,14 +73,14 @@ async function isPowerShellStartupSetup(): Promise<boolean> {
     return results.some((result) => result);
 }
 
-async function setupPowerShellStartup(): Promise<boolean> {
+async function setupPowerShellStartup(key: string): Promise<boolean> {
     const profiles = await getPowerShellProfiles();
     if (profiles.length === 0) {
         traceVerbose('Cannot setup PowerShell startup - No PowerShell versions available');
         return false;
     }
 
-    const activationContent = getActivationContent();
+    const activationContent = getActivationContent(key);
     let successfulUpdates = 0;
 
     for (const profile of profiles) {
@@ -85,7 +97,7 @@ async function setupPowerShellStartup(): Promise<boolean> {
             } else {
                 // Update existing profile
                 const content = await fs.readFile(profile.profilePath, 'utf8');
-                if (!content.includes(pwshActivationEnvVarKey)) {
+                if (!content.includes(key)) {
                     await fs.writeFile(profile.profilePath, `${content}${activationContent}`);
                     traceInfo(
                         `Updated existing ${profile.shell} profile at: ${profile.profilePath}\r\n${activationContent}`,
@@ -101,7 +113,7 @@ async function setupPowerShellStartup(): Promise<boolean> {
     return successfulUpdates === profiles.length;
 }
 
-async function removePowerShellStartup(): Promise<boolean> {
+async function removePowerShellStartup(key: string): Promise<boolean> {
     const profiles = await getPowerShellProfiles();
     let successfulRemovals = 0;
 
@@ -113,7 +125,7 @@ async function removePowerShellStartup(): Promise<boolean> {
 
         try {
             const content = await fs.readFile(profile.profilePath, 'utf8');
-            if (content.includes(pwshActivationEnvVarKey)) {
+            if (content.includes(key)) {
                 const newContent = content.replace(new RegExp(`${regionStart}\\s*.*${regionEnd}\\s*`, 's'), '');
                 await fs.writeFile(profile.profilePath, newContent);
                 traceInfo(`Removed activation from ${profile.shell} profile at: ${profile.profilePath}`);
@@ -129,42 +141,90 @@ async function removePowerShellStartup(): Promise<boolean> {
     return profiles.length > 0 && successfulRemovals === profiles.length;
 }
 
-export class PowershellStartupProvider implements ShellStartupProvider {
+export class PowerShellStartupProvider implements ShellStartupProvider {
     public readonly name: string = 'PowerShell';
-    async isSetup(): Promise<boolean> {
-        return await isPowerShellStartupSetup();
+    private readonly pwshActivationEnvVarKey = 'VSCODE_PWSH_ACTIVATE';
+
+    async isSetup(): Promise<ShellSetupState> {
+        const isInstalled = await isPowerShellInstalled();
+        if (!isInstalled) {
+            traceVerbose('PowerShell is not installed');
+            return ShellSetupState.NotInstalled;
+        }
+
+        try {
+            const isSetup = await isPowerShellStartupSetup(this.pwshActivationEnvVarKey);
+            return isSetup ? ShellSetupState.Setup : ShellSetupState.NotSetup;
+        } catch (err) {
+            traceError('Failed to check if PowerShell startup is setup', err);
+            return ShellSetupState.NotSetup;
+        }
     }
 
-    async setupScripts(): Promise<boolean> {
-        return await setupPowerShellStartup();
+    async setupScripts(): Promise<ShellScriptEditState> {
+        const isInstalled = await isPowerShellInstalled();
+        if (!isInstalled) {
+            traceVerbose('PowerShell is not installed');
+            return ShellScriptEditState.NotInstalled;
+        }
+
+        try {
+            const success = await setupPowerShellStartup(this.pwshActivationEnvVarKey);
+            return success ? ShellScriptEditState.Edited : ShellScriptEditState.NotEdited;
+        } catch (err) {
+            traceError('Failed to setup PowerShell startup', err);
+            return ShellScriptEditState.NotEdited;
+        }
     }
 
-    async teardownScripts(): Promise<boolean> {
-        return await removePowerShellStartup();
+    async teardownScripts(): Promise<ShellScriptEditState> {
+        const isInstalled = await isPowerShellInstalled();
+        if (!isInstalled) {
+            traceVerbose('PowerShell is not installed');
+            return ShellScriptEditState.NotInstalled;
+        }
+
+        try {
+            const success = await removePowerShellStartup(this.pwshActivationEnvVarKey);
+            return success ? ShellScriptEditState.Edited : ShellScriptEditState.NotEdited;
+        } catch (err) {
+            traceError('Failed to remove PowerShell startup', err);
+            return ShellScriptEditState.NotEdited;
+        }
     }
 
     async updateEnvVariables(collection: EnvironmentVariableCollection, env: PythonEnvironment): Promise<void> {
-        const pwshActivation = getActivationCommandForShell(env, TerminalShellType.powershell);
-        if (pwshActivation) {
-            const command = getCommandAsString(pwshActivation, '&&');
-            collection.replace(pwshActivationEnvVarKey, command);
-        } else {
-            collection.delete(pwshActivationEnvVarKey);
+        try {
+            const pwshActivation = getActivationCommandForShell(env, TerminalShellType.powershell);
+            if (pwshActivation) {
+                const command = getCommandAsString(pwshActivation, '&&');
+                collection.replace(this.pwshActivationEnvVarKey, command);
+            } else {
+                collection.delete(this.pwshActivationEnvVarKey);
+            }
+        } catch (err) {
+            traceError('Failed to update PowerShell environment variables', err);
+            collection.delete(this.pwshActivationEnvVarKey);
         }
     }
 
     async removeEnvVariables(envCollection: EnvironmentVariableCollection): Promise<void> {
-        envCollection.delete(pwshActivationEnvVarKey);
+        envCollection.delete(this.pwshActivationEnvVarKey);
     }
 
     async getEnvVariables(env?: PythonEnvironment): Promise<Map<string, string | undefined> | undefined> {
-        if (env) {
+        if (!env) {
+            return new Map([[this.pwshActivationEnvVarKey, undefined]]);
+        }
+
+        try {
             const pwshActivation = getActivationCommandForShell(env, TerminalShellType.powershell);
             return pwshActivation
-                ? new Map([[pwshActivationEnvVarKey, getCommandAsString(pwshActivation, '&&')]])
+                ? new Map([[this.pwshActivationEnvVarKey, getCommandAsString(pwshActivation, '&&')]])
                 : undefined;
-        } else {
-            return new Map([[pwshActivationEnvVarKey, undefined]]);
+        } catch (err) {
+            traceError('Failed to get PowerShell environment variables', err);
+            return undefined;
         }
     }
 }
