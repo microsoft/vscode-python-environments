@@ -23,7 +23,7 @@ async function isZshInstalled(): Promise<boolean> {
 async function isGitBashInstalled(): Promise<boolean> {
     const gitPath = await which('git', { nothrow: true });
     if (gitPath) {
-        const gitBashPath = path.join(path.dirname(gitPath), 'bin', 'bash.exe');
+        const gitBashPath = path.join(path.dirname(path.dirname(gitPath)), 'bin', 'bash.exe');
         return await fs.pathExists(gitBashPath);
     }
     return false;
@@ -31,7 +31,7 @@ async function isGitBashInstalled(): Promise<boolean> {
 
 async function getBashProfiles(): Promise<string[]> {
     const homeDir = os.homedir();
-    const profiles: string[] = [path.join(homeDir, '.bashrc'), path.join(homeDir, '.bash_profile')];
+    const profiles: string[] = [path.join(homeDir, '.bashrc')];
 
     // Filter to only existing profiles or the first one if none exist
     const existingProfiles = await Promise.all(
