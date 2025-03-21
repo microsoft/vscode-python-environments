@@ -61,7 +61,7 @@ const regionEnd = 'rem <<< vscode python';
 
 function getActivationContent(key: string): string {
     const lineSep = isWindows() ? '\r\n' : '\n';
-    return ['', '', regionStart, `if defined ${key} (`, `    %${key}%`, ')', regionEnd, ''].join(lineSep);
+    return ['', '', regionStart, `if defined ${key} (`, `    call "%${key}%"`, ')', regionEnd, ''].join(lineSep);
 }
 
 function getMainBatchFileContent(startupFile: string, existingContent?: string): string {
@@ -86,7 +86,7 @@ function getMainBatchFileContent(startupFile: string, existingContent?: string):
     return content.join(lineSep);
 }
 
-async function checkRegistryAutoRun(regMainBatchFile: string): Promise<boolean> {
+async function checkRegistryAutoRun(mainBatchFile: string, regMainBatchFile: string): Promise<boolean> {
     if (!isWindows()) {
         return false;
     }
@@ -98,7 +98,7 @@ async function checkRegistryAutoRun(regMainBatchFile: string): Promise<boolean> 
         });
 
         // Check if the output contains our batch file path
-        return stdout.includes(regMainBatchFile);
+        return stdout.includes(regMainBatchFile) || stdout.includes(mainBatchFile);
     } catch {
         // If the command fails, the registry key might not exist
         return false;
@@ -160,15 +160,18 @@ async function isCmdStartupSetup(cmdFiles: CmdFilePaths, key: string): Promise<b
     }
 
     const mainFileExists = await fs.pathExists(cmdFiles.mainBatchFile);
-    const mainFileHasContent = mainFileExists
-        ? (await fs.readFile(cmdFiles.mainBatchFile, 'utf8')).includes(cmdFiles.regStartupFile)
-        : false;
+    let mainFileHasContent = false;
+    if (mainFileExists) {
+        const mainFileContent = await fs.readFile(cmdFiles.mainBatchFile, 'utf8');
+        mainFileHasContent =
+            mainFileContent.includes(cmdFiles.regStartupFile) || mainFileContent.includes(cmdFiles.startupFile);
+    }
 
     if (!mainFileHasContent) {
         return false;
     }
 
-    const registrySetup = await checkRegistryAutoRun(cmdFiles.regMainBatchFile);
+    const registrySetup = await checkRegistryAutoRun(cmdFiles.regMainBatchFile, cmdFiles.mainBatchFile);
     return registrySetup;
 }
 
