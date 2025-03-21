@@ -27,12 +27,17 @@ async function getPowerShellProfiles(): Promise<PowerShellInfo[]> {
 }
 
 async function getProfileForShell(shell: 'powershell' | 'pwsh'): Promise<PowerShellInfo | undefined> {
-    const profilePath = await runCommand(`${shell} -Command $profile`);
-    if (!profilePath) {
-        traceVerbose(`${shell} is not available or failed to get profile path`);
+    try {
+        const profilePath = await runCommand(`${shell} -Command $profile`);
+        if (!profilePath) {
+            traceVerbose(`${shell} is not available or failed to get profile path`);
+            return undefined;
+        }
+        return { shell, profilePath };
+    } catch (err) {
+        traceVerbose(`${shell} is not available or failed to get profile path`, err);
         return undefined;
     }
-    return { shell, profilePath };
 }
 
 const regionStart = '#region vscode python';
