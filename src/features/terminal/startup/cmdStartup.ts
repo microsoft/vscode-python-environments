@@ -34,11 +34,25 @@ async function isCmdInstalled(): Promise<boolean> {
     }
 }
 
-async function getCmdFilePaths(): Promise<{ startupFile: string; mainBatchFile: string }> {
-    const homeDir = os.homedir();
+interface CmdFilePaths {
+    startupFile: string;
+    regStartupFile: string;
+    mainBatchFile: string;
+    regMainBatchFile: string;
+}
+
+async function getCmdFilePaths(): Promise<CmdFilePaths> {
+    const homeDir = process.env.USERPROFILE ?? os.homedir();
+    const cmdrcDir = path.join(homeDir, '.cmdrc');
+
+    // Ensure the directory exists
+    await fs.ensureDir(cmdrcDir);
+
     return {
-        mainBatchFile: path.join(homeDir, 'cmd_startup.bat'),
-        startupFile: path.join(homeDir, 'vscode-python-cmd-init.cmd'),
+        mainBatchFile: path.join(cmdrcDir, 'cmd_startup.bat'),
+        regMainBatchFile: path.join('%USERPROFILE%', '.cmdrc', 'cmd_startup.bat'),
+        startupFile: path.join(cmdrcDir, 'vscode-python-cmd-init.cmd'),
+        regStartupFile: path.join('%USERPROFILE%', '.cmdrc', 'vscode-python-cmd-init.cmd'),
     };
 }
 
@@ -56,24 +70,23 @@ function getMainBatchFileContent(startupFile: string, existingContent?: string):
 
     // Add header
     content.push('@echo off');
-    content.push('rem This file is managed by VS Code Python extension');
+    content.push('rem startup used in HKCU\\Software\\Microsoft\\Command Processor key AutoRun');
     content.push('');
-
-    // Add existing AutoRun content if any
-    if (existingContent && existingContent.trim()) {
-        content.push('rem Original AutoRun content');
-        content.push(existingContent);
-        content.push('');
-    }
 
     // Add our startup file call
     content.push('rem VS Code Python environment activation');
     content.push(`if exist "${startupFile}" call "${startupFile}"`);
 
+    // Add existing AutoRun content if any
+    if (existingContent && existingContent.trim()) {
+        content.push(existingContent);
+        content.push('');
+    }
+
     return content.join(lineSep);
 }
 
-async function checkRegistryAutoRun(mainBatchFile: string): Promise<boolean> {
+async function checkRegistryAutoRun(regMainBatchFile: string): Promise<boolean> {
     if (!isWindows()) {
         return false;
     }
@@ -85,7 +98,7 @@ async function checkRegistryAutoRun(mainBatchFile: string): Promise<boolean> {
         });
 
         // Check if the output contains our batch file path
-        return stdout.includes(mainBatchFile);
+        return stdout.includes(regMainBatchFile);
     } catch {
         // If the command fails, the registry key might not exist
         return false;
@@ -138,34 +151,42 @@ async function setupRegistryAutoRun(mainBatchFile: string): Promise<boolean> {
     }
 }
 
-async function isCmdStartupSetup(startupFile: string, mainBatchFile: string, key: string): Promise<boolean> {
+async function isCmdStartupSetup(cmdFiles: CmdFilePaths, key: string): Promise<boolean> {
     // Check both the startup file and registry AutoRun setting
-    const fileExists = await fs.pathExists(startupFile);
-    const fileHasContent = fileExists ? (await fs.readFile(startupFile, 'utf8')).includes(key) : false;
+    const fileExists = await fs.pathExists(cmdFiles.startupFile);
+    const fileHasContent = fileExists ? (await fs.readFile(cmdFiles.startupFile, 'utf8')).includes(key) : false;
+    if (!fileHasContent) {
+        return false;
+    }
 
-    const mainFileExists = await fs.pathExists(mainBatchFile);
-    const registrySetup = await checkRegistryAutoRun(mainBatchFile);
+    const mainFileExists = await fs.pathExists(cmdFiles.mainBatchFile);
+    const mainFileHasContent = mainFileExists
+        ? (await fs.readFile(cmdFiles.mainBatchFile, 'utf8')).includes(cmdFiles.regStartupFile)
+        : false;
 
-    return fileHasContent && mainFileExists && registrySetup;
+    if (!mainFileHasContent) {
+        return false;
+    }
+
+    const registrySetup = await checkRegistryAutoRun(cmdFiles.regMainBatchFile);
+    return registrySetup;
 }
 
-async function setupCmdStartup(startupFile: string, mainBatchFile: string, key: string): Promise<boolean> {
+async function setupCmdStartup(cmdFiles: CmdFilePaths, key: string): Promise<boolean> {
     try {
         const activationContent = getActivationContent(key);
 
         // Step 1: Create or update the activation file
-        if (!(await fs.pathExists(startupFile))) {
-            // Create new file with our content
-            await fs.writeFile(startupFile, activationContent);
-            traceInfo(`Created new CMD activation file at: ${startupFile}\r\n${activationContent}`);
+        if (!(await fs.pathExists(cmdFiles.startupFile))) {
+            await fs.writeFile(cmdFiles.startupFile, activationContent);
+            traceInfo(`Created new CMD activation file at: ${cmdFiles.startupFile}\r\n${activationContent}`);
         } else {
-            // Update existing file if it doesn't have our content
-            const content = await fs.readFile(startupFile, 'utf8');
+            const content = await fs.readFile(cmdFiles.startupFile, 'utf8');
             if (!content.includes(key)) {
-                await fs.writeFile(startupFile, `${content}${activationContent}`);
-                traceInfo(`Updated existing CMD activation file at: ${startupFile}\r\n${activationContent}`);
+                await fs.writeFile(cmdFiles.startupFile, `${content}${activationContent}`);
+                traceInfo(`Updated existing CMD activation file at: ${cmdFiles.startupFile}\r\n${activationContent}`);
             } else {
-                traceInfo(`CMD activation file at ${startupFile} already contains activation code`);
+                traceInfo(`CMD activation file at ${cmdFiles.startupFile} already contains activation code`);
             }
         }
 
@@ -173,12 +194,12 @@ async function setupCmdStartup(startupFile: string, mainBatchFile: string, key: 
         const existingAutoRun = await getExistingAutoRun();
 
         // Step 3: Create or update the main batch file
-        const mainBatchContent = getMainBatchFileContent(startupFile, existingAutoRun);
-        await fs.writeFile(mainBatchFile, mainBatchContent);
-        traceInfo(`Created/Updated main batch file at: ${mainBatchFile}`);
+        const mainBatchContent = getMainBatchFileContent(cmdFiles.regStartupFile, existingAutoRun);
+        await fs.writeFile(cmdFiles.mainBatchFile, mainBatchContent);
+        traceInfo(`Created/Updated main batch file at: ${cmdFiles.mainBatchFile}`);
 
         // Step 4: Setup registry AutoRun to call our main batch file
-        const registrySetup = await setupRegistryAutoRun(mainBatchFile);
+        const registrySetup = await setupRegistryAutoRun(cmdFiles.mainBatchFile);
 
         return registrySetup;
     } catch (err) {
@@ -232,8 +253,8 @@ export class CmdStartupProvider implements ShellStartupProvider {
         }
 
         try {
-            const { startupFile, mainBatchFile } = await getCmdFilePaths();
-            const isSetup = await isCmdStartupSetup(startupFile, mainBatchFile, this.cmdActivationEnvVarKey);
+            const cmdFiles = await getCmdFilePaths();
+            const isSetup = await isCmdStartupSetup(cmdFiles, this.cmdActivationEnvVarKey);
             return isSetup ? ShellSetupState.Setup : ShellSetupState.NotSetup;
         } catch (err) {
             traceError('Failed to check if CMD startup is setup', err);
@@ -249,8 +270,8 @@ export class CmdStartupProvider implements ShellStartupProvider {
         }
 
         try {
-            const { startupFile, mainBatchFile } = await getCmdFilePaths();
-            const success = await setupCmdStartup(startupFile, mainBatchFile, this.cmdActivationEnvVarKey);
+            const cmdFiles = await getCmdFilePaths();
+            const success = await setupCmdStartup(cmdFiles, this.cmdActivationEnvVarKey);
             return success ? ShellScriptEditState.Edited : ShellScriptEditState.NotEdited;
         } catch (err) {
             traceError('Failed to setup CMD startup', err);
