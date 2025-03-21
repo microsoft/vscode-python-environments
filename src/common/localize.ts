@@ -1,4 +1,5 @@
 import { l10n } from 'vscode';
+import { Commands } from './commands';
 
 export namespace Common {
     export const recommended = l10n.t('Recommended');
@@ -143,4 +144,24 @@ export namespace ProjectCreatorString {
 export namespace EnvViewStrings {
     export const selectedGlobalTooltip = l10n.t('This environment is selected for non-workspace files');
     export const selectedWorkspaceTooltip = l10n.t('This environment is selected for workspace files');
+}
+
+export namespace ShellStartupActivationStrings {
+    export const shellStartupScriptEditPrompt = l10n.t(
+        'To support Python Terminal activation using `shellStartup` we need to modify your shell profile. Do you want to proceed?',
+    );
+    export const updatingTheseProfiles = l10n.t('Updating these profiles');
+    export const updateScript = l10n.t('Update Shell Profile');
+    export const revertToCommandActivation = l10n.t(
+        'Auto Shell Activation type set to "command", due to removing shell startup from profile.',
+    );
+    export const envCollectionDescription = l10n.t('Environment variables for shell activation');
+    export const shellStartupScriptEditComplete = l10n.t(
+        'Shell startup profile updated. See [logs](command:{0})',
+        Commands.viewLogs,
+    );
+    export const shellStartupScriptEditFailed = l10n.t(
+        'Failed to update shell startup profile. See [logs](command:{0})',
+        Commands.viewLogs,
+    );
 }

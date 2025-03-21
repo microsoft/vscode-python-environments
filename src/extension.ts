@@ -56,7 +56,18 @@ import { AutoFindProjects } from './features/creators/autoFindProjects';
 import { registerTools } from './common/lm.apis';
 import { GetPackagesTool } from './features/copilotTools';
 import { TerminalActivationImpl } from './features/terminal/terminalActivationState';
-import { getEnvironmentForTerminal } from './features/terminal/utils';
+import { getEnvironmentForTerminal, normalizeShellPath } from './features/terminal/utils';
+import { PwshStartupProvider } from './features/terminal/startup/powershellStartup';
+import { ShellStartupActivationManagerImpl } from './features/terminal/startup/activateUsingShellStartup';
+import {
+    BashStartupProvider,
+    GitBashStartupProvider,
+    ZshStartupProvider,
+} from './features/terminal/startup/bashStartup';
+import { FishStartupProvider } from './features/terminal/startup/fishStartup';
+import { isWindows } from './common/utils/platformUtils';
+import { CmdStartupProvider } from './features/terminal/startup/cmdStartup';
+import { NuShellStartupProvider } from './features/terminal/startup/nuShellStartup';
 
 export async function activate(context: ExtensionContext): Promise<PythonEnvironmentApi> {
     const start = new StopWatch();
@@ -83,8 +94,22 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
     context.subscriptions.push(envManagers);
 
     const terminalActivation = new TerminalActivationImpl();
-    const terminalManager: TerminalManager = new TerminalManagerImpl(terminalActivation);
-    context.subscriptions.push(terminalActivation, terminalManager);
+    const shellStartupProviders = isWindows()
+        ? [new PwshStartupProvider(), new GitBashStartupProvider(), new CmdStartupProvider()]
+        : [
+              new PwshStartupProvider(),
+              new BashStartupProvider(),
+              new ZshStartupProvider(),
+              new FishStartupProvider(),
+              new NuShellStartupProvider(),
+          ];
+    const shellStartupActivationManager = new ShellStartupActivationManagerImpl(
+        context.environmentVariableCollection,
+        shellStartupProviders,
+        envManagers,
+    );
+    const terminalManager: TerminalManager = new TerminalManagerImpl(terminalActivation, shellStartupProviders);
+    context.subscriptions.push(terminalActivation, terminalManager, shellStartupActivationManager);
 
     const projectCreators: ProjectCreators = new ProjectCreatorsImpl();
     context.subscriptions.push(
@@ -94,21 +119,23 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
     );
 
     setPythonApi(envManagers, projectManager, projectCreators, terminalManager, envVarManager);
+    const api = await getPythonApi();
 
     const managerView = new EnvManagerView(envManagers);
     context.subscriptions.push(managerView);
 
     const workspaceView = new ProjectView(envManagers, projectManager);
     context.subscriptions.push(workspaceView);
-
     workspaceView.initialize();
-    const api = await getPythonApi();
 
     const monitoredTerminals = new Map<Terminal, PythonEnvironment>();
 
     context.subscriptions.push(
         registerCompletionProvider(envManagers),
         registerTools('python_get_packages', new GetPackagesTool(api)),
+        commands.registerCommand('python-envs.terminal.revertStartupScriptChanges', async () => {
+            await shellStartupActivationManager.cleanupStartupScripts();
+        }),
         commands.registerCommand('python-envs.viewLogs', () => outputChannel.show()),
         commands.registerCommand('python-envs.refreshManager', async (item) => {
             await refreshManagerCommand(item);
@@ -237,7 +264,8 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
             const envVar = shellEnv.value;
             if (envVar) {
                 if (envVar['VIRTUAL_ENV']) {
-                    const env = await api.resolveEnvironment(Uri.file(envVar['VIRTUAL_ENV']));
+                    const envPath = normalizeShellPath(envVar['VIRTUAL_ENV'], e.terminal.state.shell);
+                    const env = await api.resolveEnvironment(Uri.file(envPath));
                     if (env) {
                         monitoredTerminals.set(e.terminal, env);
                         terminalActivation.updateActivationState(e.terminal, env, true);
@@ -262,6 +290,7 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
         await Promise.all([
             registerSystemPythonFeatures(nativeFinder, context.subscriptions, outputChannel),
             registerCondaFeatures(nativeFinder, context.subscriptions, outputChannel),
+            shellStartupActivationManager.initialize(),
         ]);
         sendTelemetryEvent(EventNames.EXTENSION_MANAGER_REGISTRATION_DURATION, start.elapsedTime);
         await terminalManager.initialize(api);
