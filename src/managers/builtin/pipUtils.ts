@@ -4,7 +4,7 @@ import * as tomljs from '@iarna/toml';
 import { LogOutputChannel, ProgressLocation, QuickInputButtons, Uri } from 'vscode';
 import { showQuickPickWithButtons, withProgress } from '../../common/window.apis';
 import { PackageManagement, Pickers, VenvManagerStrings } from '../../common/localize';
-import { PythonEnvironmentApi, PythonProject } from '../../api';
+import { PackageInstallOptions, PythonEnvironmentApi, PythonProject } from '../../api';
 import { findFiles } from '../../common/workspace.apis';
 import { EXTENSION_ROOT_DIR } from '../../common/constants';
 import { Installable, selectFromCommonPackagesToInstall, selectFromInstallableToInstall } from '../common/pickers';
@@ -75,6 +75,7 @@ async function getCommonPackages(): Promise<Installable[]> {
 async function selectWorkspaceOrCommon(
     installable: Installable[],
     common: Installable[],
+    showSkipOption: boolean,
 ): Promise<string[] | undefined> {
     if (installable.length === 0 && common.length === 0) {
         return undefined;
@@ -95,19 +96,20 @@ async function selectWorkspaceOrCommon(
         });
     }
 
-    if (items.length > 0) {
+    if (showSkipOption && items.length > 0) {
         items.push({ label: PackageManagement.skipPackageInstallation });
-    } else {
-        return undefined;
     }
 
-    const selected = await showQuickPickWithButtons(items, {
-        placeHolder: Pickers.Packages.selectOption,
-        ignoreFocusOut: true,
-        showBackButton: true,
-        matchOnDescription: false,
-        matchOnDetail: false,
-    });
+    const selected =
+        items.length === 1
+            ? items[0]
+            : await showQuickPickWithButtons(items, {
+                  placeHolder: Pickers.Packages.selectOption,
+                  ignoreFocusOut: true,
+                  showBackButton: true,
+                  matchOnDescription: false,
+                  matchOnDetail: false,
+              });
 
     if (selected && !Array.isArray(selected)) {
         try {
@@ -122,7 +124,7 @@ async function selectWorkspaceOrCommon(
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
         } catch (ex: any) {
             if (ex === QuickInputButtons.Back) {
-                return selectWorkspaceOrCommon(installable, common);
+                return selectWorkspaceOrCommon(installable, common, showSkipOption);
             }
         }
     }
@@ -131,11 +133,12 @@ async function selectWorkspaceOrCommon(
 
 export async function getWorkspacePackagesToInstall(
     api: PythonEnvironmentApi,
+    options?: PackageInstallOptions,
     project?: PythonProject[],
 ): Promise<string[] | undefined> {
     const installable = (await getProjectInstallable(api, project)) ?? [];
     const common = await getCommonPackages();
-    return selectWorkspaceOrCommon(installable, common);
+    return selectWorkspaceOrCommon(installable, common, !!options?.showSkipOption);
 }
 
 export async function getProjectInstallable(

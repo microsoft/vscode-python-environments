@@ -286,7 +286,19 @@ export async function showInputBoxWithButtons(
     }
 }
 
-export function showWarningMessage(message: string, ...items: string[]): Thenable<string | undefined> {
+export function showWarningMessage<T extends string>(message: string, ...items: T[]): Thenable<T | undefined>;
+export function showWarningMessage<T extends string>(
+    message: string,
+    options: MessageOptions,
+    ...items: T[]
+): Thenable<T | undefined>;
+export function showWarningMessage<T extends MessageItem>(message: string, ...items: T[]): Thenable<T | undefined>;
+export function showWarningMessage<T extends MessageItem>(
+    message: string,
+    options: MessageOptions,
+    ...items: T[]
+): Thenable<T | undefined>;
+export function showWarningMessage(message: string, ...items: any[]): Thenable<string | undefined> {
     return window.showWarningMessage(message, ...items);
 }
 

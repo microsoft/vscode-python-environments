@@ -188,7 +188,7 @@ export async function handlePackagesCommand(
 
     try {
         if (action === Common.install) {
-            await packageManager.install(environment);
+            await packageManager.install(environment, undefined, { showSkipOption: false });
         } else if (action === Common.uninstall) {
             await packageManager.uninstall(environment);
         }

@@ -54,7 +54,7 @@ export class PipPackageManager implements PackageManager, Disposable {
 
         if (selected.length === 0) {
             const projects = this.venv.getProjectsByEnvironment(environment);
-            selected = (await getWorkspacePackagesToInstall(this.api, projects)) ?? [];
+            selected = (await getWorkspacePackagesToInstall(this.api, options, projects)) ?? [];
         }
 
         if (selected.length === 0) {

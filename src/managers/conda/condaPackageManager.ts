@@ -56,7 +56,7 @@ export class CondaPackageManager implements PackageManager, Disposable {
         let selected: string[] = packages ?? [];
 
         if (selected.length === 0) {
-            selected = (await getCommonCondaPackagesToInstall()) ?? [];
+            selected = (await getCommonCondaPackagesToInstall(options)) ?? [];
         }
 
         if (selected.length === 0) {

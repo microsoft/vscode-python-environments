@@ -721,6 +721,11 @@ export interface PackageInstallOptions {
      * Upgrade the packages if it is already installed.
      */
     upgrade?: boolean;
+
+    /**
+     * Show option to skip package installation
+     */
+    showSkipOption?: boolean;
 }
 
 export interface PythonProcess {

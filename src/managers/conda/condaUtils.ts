@@ -761,7 +761,10 @@ async function getCommonPackages(): Promise<Installable[]> {
     }
 }
 
-async function selectCommonPackagesOrSkip(common: Installable[]): Promise<string[] | undefined> {
+async function selectCommonPackagesOrSkip(
+    common: Installable[],
+    showSkipOption: boolean,
+): Promise<string[] | undefined> {
     if (common.length === 0) {
         return undefined;
     }
@@ -774,19 +777,20 @@ async function selectCommonPackagesOrSkip(common: Installable[]): Promise<string
         });
     }
 
-    if (items.length > 0) {
+    if (showSkipOption && items.length > 0) {
         items.push({ label: PackageManagement.skipPackageInstallation });
-    } else {
-        return undefined;
     }
 
-    const selected = await showQuickPickWithButtons(items, {
-        placeHolder: Pickers.Packages.selectOption,
-        ignoreFocusOut: true,
-        showBackButton: true,
-        matchOnDescription: false,
-        matchOnDetail: false,
-    });
+    const selected =
+        items.length === 1
+            ? items[0]
+            : await showQuickPickWithButtons(items, {
+                  placeHolder: Pickers.Packages.selectOption,
+                  ignoreFocusOut: true,
+                  showBackButton: true,
+                  matchOnDescription: false,
+                  matchOnDetail: false,
+              });
 
     if (selected && !Array.isArray(selected)) {
         try {
@@ -799,15 +803,15 @@ async function selectCommonPackagesOrSkip(common: Installable[]): Promise<string
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
         } catch (ex: any) {
             if (ex === QuickInputButtons.Back) {
-                return selectCommonPackagesOrSkip(common);
+                return selectCommonPackagesOrSkip(common, showSkipOption);
             }
         }
     }
     return undefined;
 }
 
-export async function getCommonCondaPackagesToInstall(): Promise<string[] | undefined> {
+export async function getCommonCondaPackagesToInstall(options?: PackageInstallOptions): Promise<string[] | undefined> {
     const common = await getCommonPackages();
-    const selected = await selectCommonPackagesOrSkip(common);
+    const selected = await selectCommonPackagesOrSkip(common, !!options?.showSkipOption);
     return selected;
 }
