@@ -1,5 +1,5 @@
 import { Extension, QuickPickItem } from 'vscode';
-import { allExtensions } from '../../common/extension.apis';
+import { allExternalExtensions } from '../../common/extension.apis';
 import { showQuickPick } from '../../common/window.apis';
 
 function getExtensionName(ext: Extension<unknown>): string {
@@ -11,7 +11,7 @@ function getExtensionName(ext: Extension<unknown>): string {
 }
 
 function getExtensionItems(): QuickPickItem[] {
-    const extensions = allExtensions();
+    const extensions = allExternalExtensions();
     return extensions.map((ext) => {
         return {
             description: ext.id,
@@ -20,7 +20,7 @@ function getExtensionItems(): QuickPickItem[] {
     });
 }
 
-export async function pickExtension(): Promise<string | undefined> {
+export async function pickExtensionForPermissions(): Promise<string | undefined> {
     const items = getExtensionItems();
 
     const result = await showQuickPick(items, {

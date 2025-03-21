@@ -1,9 +1,9 @@
 import { l10n, SecretStorage } from 'vscode';
-import { pickExtension } from './pickers';
+import { pickExtensionForPermissions } from './pickers';
 import { showInformationMessage, showWarningMessage } from '../../common/window.apis';
 import { PermissionsCommon } from '../../common/localize';
 import { traceLog } from '../../common/logging';
-import { allExtensions } from '../../common/extension.apis';
+import { allExternalExtensions } from '../../common/extension.apis';
 import { getCallingExtension } from '../../common/utils/frameUtils';
 
 type PermissionType = 'Ask' | 'Allow' | 'Deny';
@@ -42,7 +42,7 @@ export class PackageManagerPermissionsImpl implements PackageManagerPermissions 
     }
 
     async resetPermissions(): Promise<void> {
-        const ids = allExtensions().map((e) => `python-envs.permissions.packageManagement.${e.id}`);
+        const ids = allExternalExtensions().map((e) => `python-envs.permissions.packageManagement.${e.id}`);
         await Promise.all(ids.map((id) => this.secretStore.delete(id)));
         traceLog('All package management permissions have been reset.');
     }
@@ -180,7 +180,7 @@ export async function checkPackageManagementPermissions(
 }
 
 export async function handlePermissionsCommand(pm: PermissionsManager<PermissionType>, extensionId?: string) {
-    extensionId = extensionId ?? (await pickExtension());
+    extensionId = extensionId ?? (await pickExtensionForPermissions());
     if (!extensionId) {
         return;
     }
