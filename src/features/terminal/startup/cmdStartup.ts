@@ -61,7 +61,7 @@ const regionEnd = 'rem <<< vscode python';
 
 function getActivationContent(key: string): string {
     const lineSep = isWindows() ? '\r\n' : '\n';
-    return ['', '', regionStart, `if defined ${key} (`, `    call "%${key}%"`, ')', regionEnd, ''].join(lineSep);
+    return ['', '', regionStart, `if defined ${key} (`, `    call %${key}%`, ')', regionEnd, ''].join(lineSep);
 }
 
 function getMainBatchFileContent(startupFile: string, existingContent?: string): string {
