@@ -9,20 +9,67 @@ import { quoteArgs } from '../../execution/execUtils';
 import { traceError, traceInfo, traceVerbose } from '../../../common/logging';
 import which from 'which';
 import { ShellConstants } from '../../common/shellConstants';
+import { runCommand } from './utils';
+import { isWindows } from '../../../common/utils/platformUtils';
 
 async function isNuShellInstalled(): Promise<boolean> {
     try {
-        await which('nu');
+        const binPath = await which('nu');
+        traceInfo(`SHELL: Nu shell binary found at ${binPath}`);
         return true;
     } catch {
         return false;
     }
 }
 
+async function getDefaultConfigPath(): Promise<string | undefined> {
+    try {
+        const configPath = await runCommand('nu -c $nu.default-config-dir');
+
+        return configPath ? configPath.trim() : undefined;
+    } catch (err) {
+        traceError(`Failed to get default config path`, err);
+        return undefined;
+    }
+}
+
 async function getNuShellProfile(): Promise<string> {
-    const homeDir = os.homedir();
-    // Nu shell configuration is typically at ~/.config/nushell/config.nu
-    return path.join(homeDir, '.config', 'nushell', 'config.nu');
+    const pathsToCheck: string[] = [];
+
+    const defaultConfigPath = await getDefaultConfigPath();
+    if (defaultConfigPath) {
+        pathsToCheck.push(path.join(defaultConfigPath, 'config.nu'));
+    }
+
+    if (isWindows()) {
+        const appDataPath = process.env.APPDATA || path.join(os.homedir(), 'AppData', 'Roaming');
+        pathsToCheck.push(path.join(appDataPath, 'nushell', 'config.nu'), path.join(appDataPath, 'nu', 'config.nu'));
+    }
+
+    pathsToCheck.push(
+        path.join(os.homedir(), '.config', 'nushell', 'config.nu'),
+        path.join(os.homedir(), '.config', 'nu', 'config.nu'),
+        path.join(os.homedir(), '.nushell', 'config.nu'),
+        path.join(os.homedir(), '.nu', 'config.nu'),
+    );
+
+    for (const profilePath of pathsToCheck) {
+        if (await fs.pathExists(profilePath)) {
+            traceInfo(`SHELL: Nu shell profile found at ${profilePath}`);
+            return profilePath;
+        }
+    }
+
+    // Nothing worked so return the default path
+    if (isWindows()) {
+        const defaultPath = path.join(os.homedir(), 'AppData', 'Roaming', 'nushell', 'config.nu');
+        traceInfo(`SHELL: Nu shell profile not found, using default path ${defaultPath}`);
+        return defaultPath;
+    }
+
+    const defaultPath = path.join(os.homedir(), '.config', 'nushell', 'config.nu');
+    traceInfo(`SHELL: Nu shell profile not found, using default path ${defaultPath}`);
+    return defaultPath;
 }
 
 const regionStart = '# >>> vscode python';

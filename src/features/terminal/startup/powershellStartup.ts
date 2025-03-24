@@ -33,6 +33,7 @@ async function getProfileForShell(shell: 'powershell' | 'pwsh'): Promise<PowerSh
             traceVerbose(`${shell} is not available or failed to get profile path`);
             return undefined;
         }
+        traceInfo(`SHELL: ${shell} profile found at: ${profilePath}`);
         return { shell, profilePath };
     } catch (err) {
         traceVerbose(`${shell} is not available or failed to get profile path`, err);
@@ -98,7 +99,9 @@ async function setupPowerShellStartup(key: string): Promise<boolean> {
             if (!(await fs.pathExists(profile.profilePath))) {
                 // Create new profile with our content
                 await fs.writeFile(profile.profilePath, activationContent);
-                traceInfo(`Created new ${profile.shell} profile at: ${profile.profilePath}\r\n${activationContent}`);
+                traceInfo(
+                    `SHELL: Created new ${profile.shell} profile at: ${profile.profilePath}\r\n${activationContent}`,
+                );
                 successfulUpdates++;
             } else {
                 // Update existing profile
@@ -106,9 +109,13 @@ async function setupPowerShellStartup(key: string): Promise<boolean> {
                 if (!content.includes(key)) {
                     await fs.writeFile(profile.profilePath, `${content}${activationContent}`);
                     traceInfo(
-                        `Updated existing ${profile.shell} profile at: ${profile.profilePath}\r\n${activationContent}`,
+                        `SHELL: Updated existing ${profile.shell} profile at: ${profile.profilePath}\r\n${activationContent}`,
                     );
                     successfulUpdates++;
+                } else {
+                    traceInfo(
+                        `SHELL: ${profile.shell} profile at ${profile.profilePath} already contains activation code`,
+                    );
                 }
             }
         } catch (err) {

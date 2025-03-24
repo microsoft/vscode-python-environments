@@ -375,7 +375,7 @@ export class ZshStartupProvider implements ShellStartupProvider {
 
 export class GitBashStartupProvider implements ShellStartupProvider {
     public readonly name: string = 'git-bash';
-    private readonly gitBashActivationEnvVarKey = 'VSCODE_GIT_BASH_ACTIVATE';
+    private readonly gitBashActivationEnvVarKey = 'VSCODE_BASH_ACTIVATE';
 
     private async checkShellInstalled(): Promise<boolean> {
         const found = await isGitBashInstalled();
@@ -444,6 +444,7 @@ export class GitBashStartupProvider implements ShellStartupProvider {
     }
     async removeEnvVariables(envVars: EnvironmentVariableCollection): Promise<void> {
         envVars.delete(this.gitBashActivationEnvVarKey);
+        envVars.delete('VSCODE_GIT_BASH_ACTIVATE');
     }
     async getEnvVariables(env?: PythonEnvironment): Promise<Map<string, string | undefined> | undefined> {
         if (!env) {
