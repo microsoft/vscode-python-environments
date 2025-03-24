@@ -147,12 +147,12 @@ async function setupRegistryAutoRun(mainBatchFile: string): Promise<boolean> {
     }
 }
 
-async function isCmdStartupSetup(cmdFiles: CmdFilePaths, key: string): Promise<boolean> {
+async function isCmdStartupSetup(cmdFiles: CmdFilePaths, key: string): Promise<ShellSetupState> {
     // Check both the startup file and registry AutoRun setting
     const fileExists = await fs.pathExists(cmdFiles.startupFile);
     const fileHasContent = fileExists ? (await fs.readFile(cmdFiles.startupFile, 'utf8')).includes(key) : false;
     if (!fileHasContent) {
-        return false;
+        return ShellSetupState.NotSetup;
     }
 
     const mainFileExists = await fs.pathExists(cmdFiles.mainBatchFile);
@@ -164,11 +164,11 @@ async function isCmdStartupSetup(cmdFiles: CmdFilePaths, key: string): Promise<b
     }
 
     if (!mainFileHasContent) {
-        return false;
+        return ShellSetupState.NotSetup;
     }
 
     const registrySetup = await checkRegistryAutoRun(cmdFiles.regMainBatchFile, cmdFiles.mainBatchFile);
-    return registrySetup;
+    return registrySetup ? ShellSetupState.Setup : ShellSetupState.NotSetup;
 }
 
 async function setupCmdStartup(cmdFiles: CmdFilePaths, key: string): Promise<boolean> {
@@ -264,7 +264,7 @@ export class CmdStartupProvider implements ShellStartupProvider {
         try {
             const cmdFiles = await getCmdFilePaths();
             const isSetup = await isCmdStartupSetup(cmdFiles, this.cmdActivationEnvVarKey);
-            return isSetup ? ShellSetupState.Setup : ShellSetupState.NotSetup;
+            return isSetup;
         } catch (err) {
             traceError('Failed to check if CMD startup is setup', err);
             return ShellSetupState.NotSetup;

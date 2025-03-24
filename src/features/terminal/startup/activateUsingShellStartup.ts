@@ -86,16 +86,16 @@ export class ShellStartupActivationManagerImpl implements ShellStartupActivation
     }
 
     private async getSetupRequired(): Promise<ShellStartupProvider[]> {
-        const providers: ShellStartupProvider[] = [];
-
-        await Promise.all(
+        const results = await Promise.all(
             this.shellStartupProviders.map(async (provider) => {
-                if (await provider.isSetup()) {
-                    providers.push(provider);
+                if (!(await provider.isSetup())) {
+                    return provider;
                 }
+                return undefined;
             }),
         );
 
+        const providers = results.filter((provider): provider is ShellStartupProvider => provider !== undefined);
         return providers;
     }
 
