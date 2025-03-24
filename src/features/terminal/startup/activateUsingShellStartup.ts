@@ -1,7 +1,7 @@
 import { ConfigurationChangeEvent, Disposable, GlobalEnvironmentVariableCollection } from 'vscode';
 import { getWorkspaceFolder, getWorkspaceFolders, onDidChangeConfiguration } from '../../../common/workspace.apis';
 import { getAutoActivationType, setAutoActivationType } from '../utils';
-import { ShellScriptEditState, ShellSetupState, ShellStartupProvider } from './startupProvider';
+import { ShellScriptEditState, ShellStartupProvider } from './startupProvider';
 import { DidChangeEnvironmentEventArgs } from '../../../api';
 import { EnvironmentManagers } from '../../../internal.api';
 import { traceError, traceInfo } from '../../../common/logging';
@@ -85,18 +85,26 @@ export class ShellStartupActivationManagerImpl implements ShellStartupActivation
         }
     }
 
-    private async isSetupRequired(): Promise<boolean> {
-        const results = await Promise.all(this.shellStartupProviders.map((provider) => provider.isSetup()));
-        return results
-            .filter((r) => r !== ShellSetupState.NotInstalled)
-            .some((result) => result === ShellSetupState.NotSetup);
+    private async getSetupRequired(): Promise<ShellStartupProvider[]> {
+        const providers: ShellStartupProvider[] = [];
+
+        await Promise.all(
+            this.shellStartupProviders.map(async (provider) => {
+                if (await provider.isSetup()) {
+                    providers.push(provider);
+                }
+            }),
+        );
+
+        return providers;
     }
 
     public async initialize(): Promise<void> {
         const autoActType = getAutoActivationType();
         if (autoActType === 'shellStartup') {
-            if (await this.isSetupRequired()) {
-                const shells = this.shellStartupProviders.map((provider) => provider.name).join(', ');
+            const providers = await this.getSetupRequired();
+            if (providers.length > 0) {
+                const shells = providers.map((provider) => provider.name).join(', ');
                 const result = await showInformationMessage(
                     ShellStartupActivationStrings.shellStartupScriptEditPrompt,
                     { modal: true, detail: `${ShellStartupActivationStrings.updatingTheseProfiles}: ${shells}` },
