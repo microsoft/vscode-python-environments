@@ -28,7 +28,7 @@ async function getPowerShellProfiles(): Promise<PowerShellInfo[]> {
 
 async function getProfileForShell(shell: 'powershell' | 'pwsh'): Promise<PowerShellInfo | undefined> {
     try {
-        const profilePath = await runCommand(`${shell} -Command $profile`);
+        const profilePath = await runCommand(isWindows() ? `${shell} -Command $profile`: `${shell} -Command \\$profile`);
         if (!profilePath) {
             traceVerbose(`${shell} is not available or failed to get profile path`);
             return undefined;
