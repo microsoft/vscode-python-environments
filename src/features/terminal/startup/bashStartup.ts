@@ -124,7 +124,7 @@ function getCommandAsString(command: PythonCommandRunConfiguration[]): string {
 }
 
 export class BashStartupProvider implements ShellStartupProvider {
-    public readonly name: string = 'sh|bash';
+    public readonly name: string = 'Bash';
     private readonly bashActivationEnvVarKey = 'VSCODE_BASH_ACTIVATE';
 
     private async checkShellInstalled(): Promise<boolean> {
@@ -222,7 +222,7 @@ export class BashStartupProvider implements ShellStartupProvider {
 }
 
 export class ZshStartupProvider implements ShellStartupProvider {
-    public readonly name: string = 'zsh';
+    public readonly name: string = 'Zsh';
     private readonly zshActivationEnvVarKey = 'VSCODE_ZSH_ACTIVATE';
 
     private async checkShellInstalled(): Promise<boolean> {
@@ -315,7 +315,7 @@ export class ZshStartupProvider implements ShellStartupProvider {
 }
 
 export class GitBashStartupProvider implements ShellStartupProvider {
-    public readonly name: string = 'git-bash';
+    public readonly name: string = 'GitBash';
     private readonly gitBashActivationEnvVarKey = 'VSCODE_BASH_ACTIVATE';
 
     private async checkShellInstalled(): Promise<boolean> {
