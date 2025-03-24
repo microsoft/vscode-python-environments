@@ -95,7 +95,12 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
 
     const terminalActivation = new TerminalActivationImpl();
     const shellStartupProviders = isWindows()
-        ? [new PwshStartupProvider(), new GitBashStartupProvider(), new CmdStartupProvider()]
+        ? [
+              new PwshStartupProvider(),
+              new GitBashStartupProvider(),
+              new CmdStartupProvider(),
+              new NuShellStartupProvider(),
+          ]
         : [
               new PwshStartupProvider(),
               new BashStartupProvider(),

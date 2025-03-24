@@ -118,10 +118,6 @@ async function getExistingAutoRun(): Promise<string | undefined> {
         const match = stdout.match(/AutoRun\s+REG_SZ\s+(.*)/);
         if (match && match[1]) {
             const content = match[1].trim();
-            // Don't return our own batch file calls
-            if (content.includes('cmd_startup.bat')) {
-                return undefined;
-            }
             return content;
         }
     } catch {
@@ -182,14 +178,16 @@ async function setupCmdStartup(cmdFiles: CmdFilePaths, key: string): Promise<boo
         // Step 1: Create or update the activation file
         if (!(await fs.pathExists(cmdFiles.startupFile))) {
             await fs.writeFile(cmdFiles.startupFile, activationContent);
-            traceInfo(`Created new CMD activation file at: ${cmdFiles.startupFile}\r\n${activationContent}`);
+            traceInfo(`SHELL: Created new CMD activation file at: ${cmdFiles.startupFile}\r\n${activationContent}`);
         } else {
             const content = await fs.readFile(cmdFiles.startupFile, 'utf8');
             if (!content.includes(key)) {
                 await fs.writeFile(cmdFiles.startupFile, `${content}${activationContent}`);
-                traceInfo(`Updated existing CMD activation file at: ${cmdFiles.startupFile}\r\n${activationContent}`);
+                traceInfo(
+                    `SHELL: Updated existing CMD activation file at: ${cmdFiles.startupFile}\r\n${activationContent}`,
+                );
             } else {
-                traceInfo(`CMD activation file at ${cmdFiles.startupFile} already contains activation code`);
+                traceInfo(`SHELL: CMD activation file at ${cmdFiles.startupFile} already contains activation code`);
             }
         }
 
@@ -198,13 +196,21 @@ async function setupCmdStartup(cmdFiles: CmdFilePaths, key: string): Promise<boo
 
         // Step 3: Create or update the main batch file
         const mainBatchContent = getMainBatchFileContent(cmdFiles.regStartupFile, existingAutoRun);
-        await fs.writeFile(cmdFiles.mainBatchFile, mainBatchContent);
-        traceInfo(`Created/Updated main batch file at: ${cmdFiles.mainBatchFile}`);
+        if (mainBatchContent.includes(cmdFiles.regMainBatchFile) || mainBatchContent.includes(cmdFiles.mainBatchFile)) {
+            traceInfo(`SHELL: CMD main batch file already contains our startup file`);
+        } else {
+            await fs.writeFile(cmdFiles.mainBatchFile, mainBatchContent);
+            traceInfo(`SHELL: Created/Updated main batch file at: ${cmdFiles.mainBatchFile}`);
+        }
 
         // Step 4: Setup registry AutoRun to call our main batch file
-        const registrySetup = await setupRegistryAutoRun(cmdFiles.mainBatchFile);
-
-        return registrySetup;
+        if (existingAutoRun?.includes(cmdFiles.regMainBatchFile) || existingAutoRun?.includes(cmdFiles.mainBatchFile)) {
+            traceInfo(`SHELL: CMD AutoRun registry key already contains our main batch file`);
+        } else {
+            const registrySetup = await setupRegistryAutoRun(cmdFiles.mainBatchFile);
+            return registrySetup;
+        }
+        return true;
     } catch (err) {
         traceVerbose(`Failed to setup CMD startup`, err);
         return false;

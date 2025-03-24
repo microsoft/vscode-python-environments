@@ -22,7 +22,9 @@ async function isFishInstalled(): Promise<boolean> {
 async function getFishProfile(): Promise<string> {
     const homeDir = os.homedir();
     // Fish configuration is typically at ~/.config/fish/config.fish
-    return path.join(homeDir, '.config', 'fish', 'config.fish');
+    const profilePath = path.join(homeDir, '.config', 'fish', 'config.fish');
+    traceInfo(`SHELL: fish profile found at: ${profilePath}`);
+    return profilePath;
 }
 
 const regionStart = '# >>> vscode python';
@@ -55,16 +57,16 @@ async function setupStartup(profilePath: string, key: string): Promise<boolean> 
         if (!(await fs.pathExists(profilePath))) {
             // Create new profile with our content
             await fs.writeFile(profilePath, activationContent);
-            traceInfo(`Created new fish profile at: ${profilePath}\n${activationContent}`);
+            traceInfo(`SHELL: Created new fish profile at: ${profilePath}\n${activationContent}`);
         } else {
             // Update existing profile
             const content = await fs.readFile(profilePath, 'utf8');
             if (!content.includes(key)) {
                 await fs.writeFile(profilePath, `${content}${activationContent}`);
-                traceInfo(`Updated existing fish profile at: ${profilePath}\n${activationContent}`);
+                traceInfo(`SHELL: Updated existing fish profile at: ${profilePath}\n${activationContent}`);
             } else {
                 // Already contains our activation code
-                traceInfo(`Fish profile at ${profilePath} already contains activation code`);
+                traceInfo(`SHELL: Fish profile at ${profilePath} already contains activation code`);
             }
         }
         return true;
