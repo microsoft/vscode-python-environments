@@ -29,46 +29,18 @@ async function isGitBashInstalled(): Promise<boolean> {
     return false;
 }
 
-async function getBashProfiles(): Promise<string[]> {
+async function getBashProfiles(): Promise<string> {
     const homeDir = os.homedir();
-    const profiles: string[] = [path.join(homeDir, '.bashrc')];
+    const profile: string = path.join(homeDir, '.bashrc');
 
-    // Filter to only existing profiles or the first one if none exist
-    const existingProfiles = await Promise.all(
-        profiles.map(async (profile) => ({
-            profilePath: profile,
-            exists: await fs.pathExists(profile),
-        })),
-    );
-
-    const result = existingProfiles.filter((p) => p.exists);
-    if (result.length === 0) {
-        // If no profile exists, return the first one so we can create it
-        return [profiles[0]];
-    }
-
-    return result.map((p) => p.profilePath);
+    return profile;
 }
 
-async function getZshProfiles(): Promise<string[]> {
+async function getZshProfiles(): Promise<string> {
     const homeDir = os.homedir();
-    const profiles: string[] = [path.join(homeDir, '.zshrc')];
+    const profile: string = path.join(homeDir, '.zshrc');
 
-    // Filter to only existing profiles or the first one if none exist
-    const existingProfiles = await Promise.all(
-        profiles.map(async (profile) => ({
-            profilePath: profile,
-            exists: await fs.pathExists(profile),
-        })),
-    );
-
-    const result = existingProfiles.filter((p) => p.exists);
-    if (result.length === 0) {
-        // If no profile exists, return the first one so we can create it
-        return [profiles[0]];
-    }
-
-    return result.map((p) => p.profilePath);
+    return profile;
 }
 
 const regionStart = '# >>> vscode python';
@@ -80,96 +52,65 @@ function getActivationContent(key: string): string {
     return ['', '', regionStart, `if [ -n "$${key}" ]; then`, `    eval "$${key}"`, 'fi', regionEnd, ''].join(lineSep);
 }
 
-async function isStartupSetup(profiles: string[], key: string): Promise<ShellSetupState> {
-    if (profiles.length === 0) {
+async function isStartupSetup(profile: string, key: string): Promise<ShellSetupState> {
+    if (await fs.pathExists(profile)) {
+        const content = await fs.readFile(profile, 'utf8');
+        return content.includes(key) ? ShellSetupState.Setup : ShellSetupState.NotSetup;
+    } else {
         return ShellSetupState.NotSetup;
     }
-
-    // Check if any profile has our activation content
-    const results = await Promise.all(
-        profiles.map(async (profile) => {
-            if (await fs.pathExists(profile)) {
-                const content = await fs.readFile(profile, 'utf8');
-                if (content.includes(key)) {
-                    return true;
-                }
-            }
-            return false;
-        }),
-    );
-
-    return results.some((result) => result) ? ShellSetupState.Setup : ShellSetupState.NotSetup;
 }
 
-async function setupStartup(profiles: string[], key: string): Promise<boolean> {
-    if (profiles.length === 0) {
-        traceVerbose('Cannot setup Bash startup - No profiles found');
+async function setupStartup(profile: string, key: string): Promise<boolean> {
+    const activationContent = getActivationContent(key);
+
+    try {
+        // Create profile directory if it doesn't exist
+        await fs.mkdirp(path.dirname(profile));
+
+        // Create or update profile
+        if (!(await fs.pathExists(profile))) {
+            // Create new profile with our content
+            await fs.writeFile(profile, activationContent);
+            traceInfo(`SHELL: Created new profile at: ${profile}\n${activationContent}`);
+        } else {
+            // Update existing profile
+            const content = await fs.readFile(profile, 'utf8');
+            if (!content.includes(key)) {
+                await fs.writeFile(profile, `${content}${activationContent}`);
+                traceInfo(`SHELL: Updated existing profile at: ${profile}\n${activationContent}`);
+            } else {
+                // Already contains our activation code
+                traceInfo(`SHELL: Profile already contains activation code at: ${profile}`);
+            }
+        }
+        return true;
+    } catch (err) {
+        traceError(`SHELL: Failed to setup startup for profile at: ${profile}`, err);
         return false;
     }
-
-    const activationContent = getActivationContent(key);
-    let successfulUpdates = 0;
-
-    for (const profile of profiles) {
-        try {
-            // Create profile directory if it doesn't exist
-            await fs.mkdirp(path.dirname(profile));
-
-            // Create or update profile
-            if (!(await fs.pathExists(profile))) {
-                // Create new profile with our content
-                await fs.writeFile(profile, activationContent);
-                traceInfo(`Created new profile at: ${profile}\n${activationContent}`);
-                successfulUpdates++;
-            } else {
-                // Update existing profile
-                const content = await fs.readFile(profile, 'utf8');
-                if (!content.includes(key)) {
-                    await fs.writeFile(profile, `${content}${activationContent}`);
-                    traceInfo(`Updated existing profile at: ${profile}\n${activationContent}`);
-                    successfulUpdates++;
-                } else {
-                    // Already contains our activation code
-                    successfulUpdates++;
-                }
-            }
-        } catch (err) {
-            traceVerbose(`Failed to setup ${profile} startup`, err);
-        }
-    }
-
-    // Return true only if all profiles were successfully updated
-    return profiles.length > 0 && successfulUpdates === profiles.length;
 }
 
-async function removeStartup(profiles: string[], key: string): Promise<boolean> {
-    let successfulRemovals = 0;
-
-    for (const profile of profiles) {
-        if (!(await fs.pathExists(profile))) {
-            successfulRemovals++; // Count as success if file doesn't exist since there's nothing to remove
-            continue;
+async function removeStartup(profile: string, key: string): Promise<boolean> {
+    if (!(await fs.pathExists(profile))) {
+        return true;
+    } // If the file doesn't exist, we're done. No need to remove anything. Return true to indicate success.
+    try {
+        const content = await fs.readFile(profile, 'utf8');
+        if (content.includes(key)) {
+            // Use regex to remove the entire region including newlines
+            const pattern = new RegExp(`${regionStart}[\\s\\S]*?${regionEnd}\\n?`, 'g');
+            const newContent = content.replace(pattern, '');
+            await fs.writeFile(profile, newContent);
+            traceInfo(`SHELL: Removed activation from profile at: ${profile}`);
+        } else {
+            traceVerbose(`Profile at ${profile} does not contain activation code`);
         }
-
-        try {
-            const content = await fs.readFile(profile, 'utf8');
-            if (content.includes(key)) {
-                // Use regex to remove the entire region including newlines
-                const pattern = new RegExp(`${regionStart}[\\s\\S]*?${regionEnd}\\n?`, 'g');
-                const newContent = content.replace(pattern, '');
-                await fs.writeFile(profile, newContent);
-                traceInfo(`Removed activation from profile at: ${profile}`);
-                successfulRemovals++;
-            } else {
-                successfulRemovals++; // Count as success if activation is not present
-            }
-        } catch (err) {
-            traceVerbose(`Failed to remove ${profile} startup`, err);
-        }
+        return true;
+    } catch (err) {
+        traceVerbose(`Failed to remove ${profile} startup`, err);
+        return false;
     }
-
-    // Return true only if all profiles were successfully processed
-    return profiles.length > 0 && successfulRemovals === profiles.length;
 }
 
 function getCommandAsString(command: PythonCommandRunConfiguration[]): string {
@@ -204,8 +145,8 @@ export class BashStartupProvider implements ShellStartupProvider {
         }
 
         try {
-            const bashProfiles = await getBashProfiles();
-            return await isStartupSetup(bashProfiles, this.bashActivationEnvVarKey);
+            const bashProfile = await getBashProfiles();
+            return await isStartupSetup(bashProfile, this.bashActivationEnvVarKey);
         } catch (err) {
             traceError('Failed to check bash startup scripts', err);
             return ShellSetupState.NotSetup;
@@ -235,8 +176,8 @@ export class BashStartupProvider implements ShellStartupProvider {
         }
 
         try {
-            const bashProfiles = await getBashProfiles();
-            const result = await removeStartup(bashProfiles, this.bashActivationEnvVarKey);
+            const bashProfile = await getBashProfiles();
+            const result = await removeStartup(bashProfile, this.bashActivationEnvVarKey);
             return result ? ShellScriptEditState.Edited : ShellScriptEditState.NotEdited;
         } catch (err) {
             traceError('Failed to teardown bash startup scripts', err);
