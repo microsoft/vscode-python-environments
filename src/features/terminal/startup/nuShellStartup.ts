@@ -24,7 +24,9 @@ async function isNuShellInstalled(): Promise<boolean> {
 
 async function getDefaultConfigPath(): Promise<string | undefined> {
     try {
-        const configPath = await runCommand('nu -c $nu.default-config-dir');
+        const configPath = await runCommand(
+            isWindows() ? 'nu -c $nu.default-config-dir' : 'nu -c \\$nu.default-config-dir',
+        );
 
         return configPath ? configPath.trim() : undefined;
     } catch (err) {
@@ -36,9 +38,10 @@ async function getDefaultConfigPath(): Promise<string | undefined> {
 async function getNuShellProfile(): Promise<string> {
     const pathsToCheck: string[] = [];
 
-    const defaultConfigPath = await getDefaultConfigPath();
+    let defaultConfigPath = await getDefaultConfigPath();
     if (defaultConfigPath) {
-        pathsToCheck.push(path.join(defaultConfigPath, 'config.nu'));
+        defaultConfigPath = path.join(defaultConfigPath, 'config.nu');
+        return defaultConfigPath;
     }
 
     if (isWindows()) {
