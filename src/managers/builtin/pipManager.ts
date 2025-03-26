@@ -135,7 +135,13 @@ export class PipPackageManager implements PackageManager, Disposable {
                 title: 'Refreshing packages',
             },
             async () => {
-                this.packages.set(environment.envId.id, await refreshPackages(environment, this.api, this));
+                const before = this.packages.get(environment.envId.id) ?? [];
+                const after = await refreshPackages(environment, this.api, this);
+                const changes = getChanges(before, after);
+                this.packages.set(environment.envId.id, after);
+                if (changes.length > 0) {
+                    this._onDidChangePackages.fire({ environment, manager: this, changes });
+                }
             },
         );
     }
