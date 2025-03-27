@@ -24,6 +24,17 @@ async function isNuShellInstalled(): Promise<boolean> {
 
 async function getDefaultConfigPath(): Promise<string | undefined> {
     try {
+        const configPath = await runCommand(isWindows() ? 'nu -c $nu.config-path' : 'nu -c \\$nu.config-path');
+
+        return configPath ? configPath.trim() : undefined;
+    } catch (err) {
+        traceError(`Failed to get default config path`, err);
+        return undefined;
+    }
+}
+
+async function getDefaultConfigDir(): Promise<string | undefined> {
+    try {
         const configPath = await runCommand(
             isWindows() ? 'nu -c $nu.default-config-dir' : 'nu -c \\$nu.default-config-dir',
         );
@@ -38,10 +49,21 @@ async function getDefaultConfigPath(): Promise<string | undefined> {
 async function getNuShellProfile(): Promise<string> {
     const pathsToCheck: string[] = [];
 
-    let defaultConfigPath = await getDefaultConfigPath();
-    if (defaultConfigPath) {
-        defaultConfigPath = path.join(defaultConfigPath, 'config.nu');
+    const defaultConfigPath = await getDefaultConfigPath();
+    if (defaultConfigPath && (await fs.pathExists(defaultConfigPath))) {
+        // If the default config path exists, use it as the profile path
+        traceInfo(`SHELL: Nu shell profile found at ${defaultConfigPath}`);
         return defaultConfigPath;
+    }
+
+    let defaultConfigDir = await getDefaultConfigDir();
+    if (defaultConfigDir) {
+        defaultConfigDir = path.join(defaultConfigDir, 'config.nu');
+        if (await fs.pathExists(defaultConfigDir)) {
+            traceInfo(`SHELL: Nu shell profile found at ${defaultConfigDir}`);
+            return defaultConfigDir;
+        }
+        return defaultConfigDir;
     }
 
     if (isWindows()) {
@@ -85,9 +107,9 @@ function getActivationContent(key: string): string {
         '',
         '',
         regionStart,
-        `if (env | where name == "${key}" | is-empty | not)`,
-        `    do $env.${key}`,
-        'end',
+        `if (not ($env | get -i "${key}" | is-empty)) {`,
+        `    eval $env.${key}`,
+        '}',
         regionEnd,
         '',
     ].join(lineSep);
