@@ -28,5 +28,7 @@
     "python-envs.runAsTask.title": "Run as Task",
     "python-envs.terminal.activate.title": "Activate Environment in Current Terminal",
     "python-envs.terminal.deactivate.title": "Deactivate Environment in Current Terminal",
-    "python-envs.uninstallPackage.title": "Uninstall Package"
+    "python-envs.uninstallPackage.title": "Uninstall Package",
+    "python-envs.permissions.title": "Package Manager Permissions",
+    "python-envs.resetPermissions.title": "Reset Package Manager Permissions"
 }

@@ -302,6 +302,22 @@ export function showWarningMessage(message: string, ...items: any[]): Thenable<s
     return window.showWarningMessage(message, ...items);
 }
 
+export function showInformationMessage<T extends string>(message: string, ...items: T[]): Thenable<T | undefined>;
+export function showInformationMessage<T extends string>(
+    message: string,
+    options: MessageOptions,
+    ...items: T[]
+): Thenable<T | undefined>;
+export function showInformationMessage<T extends MessageItem>(message: string, ...items: T[]): Thenable<T | undefined>;
+export function showInformationMessage<T extends MessageItem>(
+    message: string,
+    options: MessageOptions,
+    ...items: T[]
+): Thenable<T | undefined>;
+export function showInformationMessage(message: string, ...items: any[]): Thenable<string | undefined> {
+    return window.showInformationMessage(message, ...items);
+}
+
 export function showInputBox(options?: InputBoxOptions, token?: CancellationToken): Thenable<string | undefined> {
     return window.showInputBox(options, token);
 }
