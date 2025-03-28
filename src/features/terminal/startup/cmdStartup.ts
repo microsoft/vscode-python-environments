@@ -139,10 +139,12 @@ async function setupRegistryAutoRun(mainBatchFile: string): Promise<boolean> {
             { windowsHide: true },
         );
 
-        traceInfo(`Set CMD AutoRun registry key to call: ${mainBatchFile}`);
+        traceInfo(
+            `Set CMD AutoRun registry key [HKCU\\Software\\Microsoft\\Command Processor] to call: ${mainBatchFile}`,
+        );
         return true;
     } catch (err) {
-        traceError('Failed to set CMD AutoRun registry key', err);
+        traceError('Failed to set CMD AutoRun registry key [HKCU\\Software\\Microsoft\\Command Processor]', err);
         return false;
     }
 }
