@@ -61,7 +61,7 @@ async function isStartupSetup(profile: string, key: string): Promise<ShellSetupS
     }
 }
 
-async function setupStartup(profile: string, key: string): Promise<boolean> {
+async function setupStartup(profile: string, key: string, name: string): Promise<boolean> {
     const activationContent = getActivationContent(key);
 
     try {
@@ -72,16 +72,16 @@ async function setupStartup(profile: string, key: string): Promise<boolean> {
         if (!(await fs.pathExists(profile))) {
             // Create new profile with our content
             await fs.writeFile(profile, activationContent);
-            traceInfo(`SHELL: Created new profile at: ${profile}\n${activationContent}`);
+            traceInfo(`SHELL: Created new ${name} profile at: ${profile}\n${activationContent}`);
         } else {
             // Update existing profile
             const content = await fs.readFile(profile, 'utf8');
             if (!content.includes(key)) {
                 await fs.writeFile(profile, `${content}${activationContent}`);
-                traceInfo(`SHELL: Updated existing profile at: ${profile}\n${activationContent}`);
+                traceInfo(`SHELL: Updated existing ${name} profile at: ${profile}\n${activationContent}`);
             } else {
                 // Already contains our activation code
-                traceInfo(`SHELL: Profile already contains activation code at: ${profile}`);
+                traceInfo(`SHELL: ${name} profile already contains activation code at: ${profile}`);
             }
         }
         return true;
@@ -161,7 +161,7 @@ export class BashStartupProvider implements ShellStartupProvider {
 
         try {
             const bashProfiles = await getBashProfiles();
-            const result = await setupStartup(bashProfiles, this.bashActivationEnvVarKey);
+            const result = await setupStartup(bashProfiles, this.bashActivationEnvVarKey, this.name);
             return result ? ShellScriptEditState.Edited : ShellScriptEditState.NotEdited;
         } catch (err) {
             traceError('Failed to setup bash startup scripts', err);
@@ -255,7 +255,7 @@ export class ZshStartupProvider implements ShellStartupProvider {
         }
         try {
             const zshProfiles = await getZshProfiles();
-            const result = await setupStartup(zshProfiles, this.zshActivationEnvVarKey);
+            const result = await setupStartup(zshProfiles, this.zshActivationEnvVarKey, this.name);
             return result ? ShellScriptEditState.Edited : ShellScriptEditState.NotEdited;
         } catch (err) {
             traceError('Failed to setup zsh startup scripts', err);
@@ -347,7 +347,7 @@ export class GitBashStartupProvider implements ShellStartupProvider {
 
         try {
             const bashProfiles = await getBashProfiles();
-            const result = await setupStartup(bashProfiles, this.gitBashActivationEnvVarKey);
+            const result = await setupStartup(bashProfiles, this.gitBashActivationEnvVarKey, this.name);
             return result ? ShellScriptEditState.Edited : ShellScriptEditState.NotEdited;
         } catch (err) {
             traceError('Failed to setup git bash startup scripts', err);
