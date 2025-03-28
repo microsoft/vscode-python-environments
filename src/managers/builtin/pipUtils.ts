@@ -4,7 +4,7 @@ import * as tomljs from '@iarna/toml';
 import { LogOutputChannel, ProgressLocation, QuickInputButtons, Uri } from 'vscode';
 import { showQuickPickWithButtons, withProgress } from '../../common/window.apis';
 import { PackageManagement, Pickers, VenvManagerStrings } from '../../common/localize';
-import { PackageInstallOptions, PythonEnvironmentApi, PythonProject } from '../../api';
+import { PackageInstallOptions, PythonEnvironment, PythonEnvironmentApi, PythonProject } from '../../api';
 import { findFiles } from '../../common/workspace.apis';
 import { EXTENSION_ROOT_DIR } from '../../common/constants';
 import { Installable, selectFromCommonPackagesToInstall, selectFromInstallableToInstall } from '../common/pickers';
@@ -76,6 +76,7 @@ async function selectWorkspaceOrCommon(
     installable: Installable[],
     common: Installable[],
     showSkipOption: boolean,
+    installed?: string[],
 ): Promise<string[] | undefined> {
     if (installable.length === 0 && common.length === 0) {
         return undefined;
@@ -116,7 +117,7 @@ async function selectWorkspaceOrCommon(
             if (selected.label === PackageManagement.workspaceDependencies) {
                 return await selectFromInstallableToInstall(installable);
             } else if (selected.label === PackageManagement.commonPackages) {
-                return await selectFromCommonPackagesToInstall(common);
+                return await selectFromCommonPackagesToInstall(common, installed);
             } else {
                 traceInfo('Package Installer: user selected skip package installation');
                 return undefined;
@@ -135,10 +136,15 @@ export async function getWorkspacePackagesToInstall(
     api: PythonEnvironmentApi,
     options?: PackageInstallOptions,
     project?: PythonProject[],
+    environment?: PythonEnvironment,
 ): Promise<string[] | undefined> {
     const installable = (await getProjectInstallable(api, project)) ?? [];
     const common = await getCommonPackages();
-    return selectWorkspaceOrCommon(installable, common, !!options?.showSkipOption);
+    let installed: string[] | undefined;
+    if (environment) {
+        installed = (await api.getPackages(environment))?.map((pkg) => pkg.name);
+    }
+    return selectWorkspaceOrCommon(installable, common, !!options?.showSkipOption, installed);
 }
 
 export async function getProjectInstallable(

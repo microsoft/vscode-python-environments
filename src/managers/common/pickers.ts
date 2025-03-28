@@ -119,14 +119,13 @@ async function enterPackageManually(filler?: string): Promise<string[] | undefin
 
 export async function selectFromCommonPackagesToInstall(
     common: Installable[],
+    installed?: string[],
     preSelected?: PackageQuickPickItem[] | undefined,
 ): Promise<string[] | undefined> {
     const items: PackageQuickPickItem[] = common.map(installableToQuickPickItem);
     const preSelectedItems = items
         .filter((i) => i.kind !== QuickPickItemKind.Separator)
-        .filter((i) =>
-            preSelected?.find((s) => s.label === i.label && s.description === i.description && s.detail === i.detail),
-        );
+        .filter((i) => installed?.find((p) => i.id === p) || preSelected?.find((s) => s.id === i.id));
 
     let selected: PackageQuickPickItem | PackageQuickPickItem[] | undefined;
     try {
@@ -173,7 +172,7 @@ export async function selectFromCommonPackagesToInstall(
                 return result;
             } catch (ex) {
                 if (ex === QuickInputButtons.Back) {
-                    return selectFromCommonPackagesToInstall(common, selected);
+                    return selectFromCommonPackagesToInstall(common, installed, selected);
                 }
                 return undefined;
             }
