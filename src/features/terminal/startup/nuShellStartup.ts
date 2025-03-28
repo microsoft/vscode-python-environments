@@ -188,7 +188,7 @@ function getCommandAsString(command: PythonCommandRunConfiguration[]): string {
 }
 
 export class NuShellStartupProvider implements ShellStartupProvider {
-    public readonly name: string = 'Nu';
+    public readonly name: string = 'Nushell';
     public readonly nuShellActivationEnvVarKey = 'VSCODE_NU_ACTIVATE';
 
     async isSetup(): Promise<ShellSetupState> {
