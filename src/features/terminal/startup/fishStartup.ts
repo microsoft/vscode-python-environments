@@ -108,7 +108,7 @@ function getCommandAsString(command: PythonCommandRunConfiguration[]): string {
 }
 
 export class FishStartupProvider implements ShellStartupProvider {
-    public readonly name: string = 'fish';
+    public readonly name: string = 'Fish';
     public readonly fishActivationEnvVarKey = 'VSCODE_FISH_ACTIVATE';
 
     async isSetup(): Promise<ShellSetupState> {
