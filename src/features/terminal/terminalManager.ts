@@ -11,7 +11,7 @@ import {
 import { PythonEnvironment, PythonEnvironmentApi, PythonProject, PythonTerminalCreateOptions } from '../../api';
 import { isActivatableEnvironment } from '../common/activation';
 import { getConfiguration } from '../../common/workspace.apis';
-import { getEnvironmentForTerminal, waitForShellIntegration } from './utils';
+import { getAutoActivationType, getEnvironmentForTerminal, waitForShellIntegration } from './utils';
 import {
     DidChangeTerminalActivationStateEvent,
     TerminalActivation,
@@ -19,6 +19,8 @@ import {
     TerminalEnvironment,
 } from './terminalActivationState';
 import { getPythonApi } from '../pythonApi';
+import { traceInfo, traceVerbose } from '../../common/logging';
+import { ShellStartupProvider } from './startup/startupProvider';
 
 export interface TerminalCreation {
     create(environment: PythonEnvironment, options: PythonTerminalCreateOptions): Promise<Terminal>;
@@ -63,7 +65,10 @@ export class TerminalManagerImpl implements TerminalManager {
     private onDidChangeTerminalActivationStateEmitter = new EventEmitter<DidChangeTerminalActivationStateEvent>();
     public onDidChangeTerminalActivationState = this.onDidChangeTerminalActivationStateEmitter.event;
 
-    constructor(private readonly ta: TerminalActivationInternal) {
+    constructor(
+        private readonly ta: TerminalActivationInternal,
+        private readonly startupProviders: ShellStartupProvider[],
+    ) {
         this.disposables.push(
             this.onTerminalOpenedEmitter,
             this.onTerminalClosedEmitter,
@@ -97,33 +102,54 @@ export class TerminalManagerImpl implements TerminalManager {
     }
 
     private async autoActivateOnTerminalOpen(terminal: Terminal, environment: PythonEnvironment): Promise<void> {
-        const config = getConfiguration('python');
-        if (!config.get<boolean>('terminal.activateEnvironment', false)) {
-            return;
-        }
-
-        if (isActivatableEnvironment(environment)) {
-            await withProgress(
-                {
-                    location: ProgressLocation.Window,
-                    title: `Activating environment: ${environment.environmentPath.fsPath}`,
-                },
-                async () => {
-                    await waitForShellIntegration(terminal);
-                    await this.activate(terminal, environment);
-                },
+        const actType = getAutoActivationType();
+        if (actType === 'command') {
+            if (isActivatableEnvironment(environment)) {
+                await withProgress(
+                    {
+                        location: ProgressLocation.Window,
+                        title: `Activating environment: ${environment.environmentPath.fsPath}`,
+                    },
+                    async () => {
+                        await waitForShellIntegration(terminal);
+                        await this.activate(terminal, environment);
+                    },
+                );
+            } else {
+                traceVerbose(`Environment ${environment.environmentPath.fsPath} is not activatable`);
+            }
+        } else if (actType === 'off') {
+            traceInfo(`"python-envs.terminal.autoActivationType" is set to "${actType}", skipping auto activation`);
+        } else if (actType === 'shellStartup') {
+            traceInfo(
+                `"python-envs.terminal.autoActivationType" is set to "${actType}", terminal should be activated by shell startup script`,
             );
         }
     }
 
     public async create(environment: PythonEnvironment, options: PythonTerminalCreateOptions): Promise<Terminal> {
+        const autoActType = getAutoActivationType();
+        let envVars = options.env;
+        if (autoActType === 'shellStartup') {
+            const vars = await Promise.all(this.startupProviders.map((p) => p.getEnvVariables(environment)));
+
+            vars.forEach((varMap) => {
+                if (varMap) {
+                    varMap.forEach((value, key) => {
+                        envVars = { ...envVars, [key]: value };
+                    });
+                }
+            });
+        }
+
+        // https://github.com/microsoft/vscode-python-environments/issues/172
         // const name = options.name ?? `Python: ${environment.displayName}`;
         const newTerminal = createTerminal({
             name: options.name,
             shellPath: options.shellPath,
             shellArgs: options.shellArgs,
             cwd: options.cwd,
-            env: options.env,
+            env: envVars,
             strictEnv: options.strictEnv,
             message: options.message,
             iconPath: options.iconPath,
@@ -133,15 +159,17 @@ export class TerminalManagerImpl implements TerminalManager {
             isTransient: options.isTransient,
         });
 
-        if (options.disableActivation) {
-            this.skipActivationOnOpen.add(newTerminal);
-            return newTerminal;
-        }
+        if (autoActType === 'command') {
+            if (options.disableActivation) {
+                this.skipActivationOnOpen.add(newTerminal);
+                return newTerminal;
+            }
 
-        // We add it to skip activation on open to prevent double activation.
-        // We can activate it ourselves since we are creating it.
-        this.skipActivationOnOpen.add(newTerminal);
-        await this.autoActivateOnTerminalOpen(newTerminal, environment);
+            // We add it to skip activation on open to prevent double activation.
+            // We can activate it ourselves since we are creating it.
+            this.skipActivationOnOpen.add(newTerminal);
+            await this.autoActivateOnTerminalOpen(newTerminal, environment);
+        }
 
         return newTerminal;
     }
@@ -214,8 +242,7 @@ export class TerminalManagerImpl implements TerminalManager {
     }
 
     public async initialize(api: PythonEnvironmentApi): Promise<void> {
-        const config = getConfiguration('python');
-        if (config.get<boolean>('terminal.activateEnvInCurrentTerminal', false)) {
+        if (getAutoActivationType() === 'command') {
             await Promise.all(
                 terminals().map(async (t) => {
                     this.skipActivationOnOpen.add(t);
