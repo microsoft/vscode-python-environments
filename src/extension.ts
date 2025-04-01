@@ -67,7 +67,6 @@ import {
 import { FishStartupProvider } from './features/terminal/startup/fishStartup';
 import { isWindows } from './common/utils/platformUtils';
 import { CmdStartupProvider } from './features/terminal/startup/cmdStartup';
-import { NuShellStartupProvider } from './features/terminal/startup/nuShellStartup';
 
 export async function activate(context: ExtensionContext): Promise<PythonEnvironmentApi> {
     const start = new StopWatch();
@@ -95,19 +94,8 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
 
     const terminalActivation = new TerminalActivationImpl();
     const shellStartupProviders = isWindows()
-        ? [
-              new PwshStartupProvider(),
-              new GitBashStartupProvider(),
-              new CmdStartupProvider(),
-              new NuShellStartupProvider(),
-          ]
-        : [
-              new PwshStartupProvider(),
-              new BashStartupProvider(),
-              new ZshStartupProvider(),
-              new FishStartupProvider(),
-              new NuShellStartupProvider(),
-          ];
+        ? [new PwshStartupProvider(), new GitBashStartupProvider(), new CmdStartupProvider()]
+        : [new PwshStartupProvider(), new BashStartupProvider(), new ZshStartupProvider(), new FishStartupProvider()];
     const shellStartupActivationManager = new ShellStartupActivationManagerImpl(
         context.environmentVariableCollection,
         shellStartupProviders,
