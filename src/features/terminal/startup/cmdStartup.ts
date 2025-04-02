@@ -73,15 +73,19 @@ function getMainBatchFileContent(startupFile: string, existingContent?: string):
     content.push('rem startup used in HKCU\\Software\\Microsoft\\Command Processor key AutoRun');
     content.push('');
 
-    // Add our startup file call
-    content.push('rem VS Code Python environment activation');
-    content.push(`if exist "${startupFile}" call "${startupFile}"`);
-
     // Add existing AutoRun content if any
     if (existingContent && existingContent.trim()) {
         content.push(existingContent);
         content.push('');
     }
+
+    // Add our startup file call
+    content.push('rem VS Code Python environment activation');
+    content.push('if not defined VSCODE_PYTHON_AUTOACTIVATE_GUARD (');
+    content.push('    set "VSCODE_PYTHON_AUTOACTIVATE_GUARD=1"');
+    content.push(`    if exist "${startupFile}" call "${startupFile}"`);
+    content.push(')');
+    content.push('');
 
     return content.join(lineSep);
 }
