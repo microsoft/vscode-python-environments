@@ -144,3 +144,10 @@ export namespace EnvViewStrings {
     export const selectedGlobalTooltip = l10n.t('This environment is selected for non-workspace files');
     export const selectedWorkspaceTooltip = l10n.t('This environment is selected for workspace files');
 }
+
+export namespace PermissionsCommon {
+    export const allow = l10n.t('Allow');
+    export const deny = l10n.t('Deny');
+    export const ask = l10n.t('Ask');
+    export const setPermissions = l10n.t('Set Permissions');
+}

@@ -23,6 +23,7 @@ import {
     runInDedicatedTerminalCommand,
     handlePackageUninstall,
     copyPathToClipboard,
+    getUninstallPackages,
 } from './features/envCommands';
 import { registerCondaFeatures } from './managers/conda/main';
 import { registerSystemPythonFeatures } from './managers/builtin/main';
@@ -57,6 +58,11 @@ import { registerTools } from './common/lm.apis';
 import { GetPackagesTool } from './features/copilotTools';
 import { TerminalActivationImpl } from './features/terminal/terminalActivationState';
 import { getEnvironmentForTerminal } from './features/terminal/utils';
+import {
+    checkPackageManagementPermissions,
+    handlePermissionsCommand,
+    PackageManagerPermissionsImpl,
+} from './features/permissions/packageManagerPermissions';
 
 export async function activate(context: ExtensionContext): Promise<PythonEnvironmentApi> {
     const start = new StopWatch();
@@ -93,7 +99,9 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
         projectCreators.registerPythonProjectCreator(new AutoFindProjects(projectManager)),
     );
 
-    setPythonApi(envManagers, projectManager, projectCreators, terminalManager, envVarManager);
+    const pkgPerm = new PackageManagerPermissionsImpl(context.secrets);
+
+    setPythonApi(envManagers, projectManager, projectCreators, terminalManager, envVarManager, pkgPerm);
 
     const managerView = new EnvManagerView(envManagers);
     context.subscriptions.push(managerView);
@@ -109,6 +117,12 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
     context.subscriptions.push(
         registerCompletionProvider(envManagers),
         registerTools('python_get_packages', new GetPackagesTool(api)),
+        commands.registerCommand('python-envs.permissions', async () => {
+            await handlePermissionsCommand(pkgPerm);
+        }),
+        commands.registerCommand('python-envs.resetPermissions', async () => {
+            await pkgPerm.resetPermissions();
+        }),
         commands.registerCommand('python-envs.viewLogs', () => outputChannel.show()),
         commands.registerCommand('python-envs.refreshManager', async (item) => {
             await refreshManagerCommand(item);
@@ -138,9 +152,20 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
                 envManagers,
                 projectManager,
             );
-            await handlePackagesCommand(packageManager, environment);
+
+            const result = await checkPackageManagementPermissions(pkgPerm, 'changes');
+            if (!result) {
+                return;
+            }
+
+            await handlePackagesCommand(environment, packageManager);
         }),
         commands.registerCommand('python-envs.uninstallPackage', async (context: unknown) => {
+            const result = await checkPackageManagementPermissions(pkgPerm, 'uninstall', getUninstallPackages(context));
+            if (!result) {
+                return;
+            }
+
             await handlePackageUninstall(context, envManagers);
         }),
         commands.registerCommand('python-envs.set', async (item) => {

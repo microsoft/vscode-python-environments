@@ -181,8 +181,8 @@ export async function removeEnvironmentCommand(context: unknown, managers: Envir
 }
 
 export async function handlePackagesCommand(
-    packageManager: InternalPackageManager,
     environment: PythonEnvironment,
+    packageManager: InternalPackageManager,
 ): Promise<void> {
     const action = await pickPackageOptions();
 
@@ -194,10 +194,19 @@ export async function handlePackagesCommand(
         }
     } catch (ex) {
         if (ex === QuickInputButtons.Back) {
-            return handlePackagesCommand(packageManager, environment);
+            return handlePackagesCommand(environment, packageManager);
         }
         throw ex;
     }
+}
+
+export function getUninstallPackages(context: unknown): string[] | undefined {
+    if (context instanceof PackageTreeItem) {
+        return [(context as PackageTreeItem).pkg.name];
+    } else if (context instanceof ProjectPackage) {
+        return [(context as ProjectPackage).pkg.name];
+    }
+    return undefined;
 }
 
 export async function handlePackageUninstall(context: unknown, em: EnvironmentManagers) {

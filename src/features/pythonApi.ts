@@ -46,6 +46,7 @@ import { runAsTask } from './execution/runAsTask';
 import { runInTerminal } from './terminal/runInTerminal';
 import { runInBackground } from './execution/runInBackground';
 import { EnvVarManager } from './execution/envVariableManager';
+import { checkPackageManagementPermissions, PackageManagerPermissions } from './permissions/packageManagerPermissions';
 
 class PythonEnvironmentApiImpl implements PythonEnvironmentApi {
     private readonly _onDidChangeEnvironments = new EventEmitter<DidChangeEnvironmentsEventArgs>();
@@ -60,6 +61,7 @@ class PythonEnvironmentApiImpl implements PythonEnvironmentApi {
         private readonly projectCreators: ProjectCreators,
         private readonly terminalManager: TerminalManager,
         private readonly envVarManager: EnvVarManager,
+        private readonly pkgPerm: PackageManagerPermissions,
         private readonly disposables: Disposable[] = [],
     ) {
         this.disposables.push(
@@ -216,14 +218,28 @@ class PythonEnvironmentApiImpl implements PythonEnvironmentApi {
         }
         return new Disposable(() => disposables.forEach((d) => d.dispose()));
     }
-    installPackages(context: PythonEnvironment, packages: string[], options: PackageInstallOptions): Promise<void> {
+    async installPackages(
+        context: PythonEnvironment,
+        packages: string[],
+        options: PackageInstallOptions,
+    ): Promise<void> {
+        const result = await checkPackageManagementPermissions(this.pkgPerm, 'install', packages);
+        if (!result) {
+            return Promise.reject(new Error('Permission denied'));
+        }
+
         const manager = this.envManagers.getPackageManager(context);
         if (!manager) {
             return Promise.reject(new Error('No package manager found'));
         }
         return manager.install(context, packages, options);
     }
-    uninstallPackages(context: PythonEnvironment, packages: Package[] | string[]): Promise<void> {
+    async uninstallPackages(context: PythonEnvironment, packages: string[]): Promise<void> {
+        const result = await checkPackageManagementPermissions(this.pkgPerm, 'uninstall', packages);
+        if (!result) {
+            return Promise.reject(new Error('Permission denied'));
+        }
+
         const manager = this.envManagers.getPackageManager(context);
         if (!manager) {
             return Promise.reject(new Error('No package manager found'));
@@ -324,9 +340,10 @@ export function setPythonApi(
     projectCreators: ProjectCreators,
     terminalManager: TerminalManager,
     envVarManager: EnvVarManager,
+    pkgPerm: PackageManagerPermissions,
 ) {
     _deferred.resolve(
-        new PythonEnvironmentApiImpl(envMgr, projectMgr, projectCreators, terminalManager, envVarManager),
+        new PythonEnvironmentApiImpl(envMgr, projectMgr, projectCreators, terminalManager, envVarManager, pkgPerm),
     );
 }
 

@@ -8,3 +8,14 @@ export function getExtension<T = any>(extensionId: string): Extension<T> | undef
 export function allExtensions(): readonly Extension<any>[] {
     return extensions.all;
 }
+
+export function allExternalExtensions(): readonly Extension<any>[] {
+    return allExtensions().filter((extension) => {
+        try {
+            return extension.packageJSON.publisher !== 'vscode';
+        } catch {
+            // No publisher
+            return false;
+        }
+    });
+}

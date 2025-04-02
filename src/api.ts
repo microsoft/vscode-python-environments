@@ -923,7 +923,7 @@ export interface PythonPackageManagementApi {
      * @param environment The Python Environment from which packages are to be uninstalled.
      * @param packages The packages to uninstall.
      */
-    uninstallPackages(environment: PythonEnvironment, packages: PackageInfo[] | string[]): Promise<void>;
+    uninstallPackages(environment: PythonEnvironment, packages: string[]): Promise<void>;
 }
 
 export interface PythonPackageManagerApi
