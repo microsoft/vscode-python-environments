@@ -1,4 +1,3 @@
-import * as path from 'path';
 import { Uri } from 'vscode';
 import { ENVS_EXTENSION_ID, PYTHON_EXTENSION_ID } from '../constants';
 import { parseStack } from '../errors/utils';
@@ -26,7 +25,6 @@ function getPathFromFrame(frame: FrameData): string {
 
 export function getCallingExtension(): string {
     const pythonExts = [ENVS_EXTENSION_ID, PYTHON_EXTENSION_ID];
-    const execPath = normalizePath(path.dirname(process.execPath));
     const extensions = allExtensions();
     const otherExts = extensions.filter((ext) => !pythonExts.includes(ext.id));
     const frames = getFrameData();
@@ -41,7 +39,7 @@ export function getCallingExtension(): string {
             continue;
         }
 
-        if (filePath.startsWith(execPath) && filePath.endsWith('extensionhostprocess.js')) {
+        if (filePath.toLowerCase().endsWith('extensionhostprocess.js')) {
             continue;
         }
 
