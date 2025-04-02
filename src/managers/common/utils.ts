@@ -1,19 +1,6 @@
-import * as os from 'os';
 import { Package, PythonEnvironment } from '../../api';
 import { showQuickPick } from '../../common/window.apis';
 import { PackageManagement } from '../../common/localize';
-
-export function isWindows(): boolean {
-    return process.platform === 'win32';
-}
-
-export function untildify(path: string): string {
-    return path.replace(/^~($|\/|\\)/, `${os.homedir()}$1`);
-}
-
-export function getUserHomeDir(): string {
-    return os.homedir();
-}
 
 export function noop() {
     // do nothing
