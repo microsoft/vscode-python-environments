@@ -2,7 +2,7 @@ import * as fs from 'fs-extra';
 import * as path from 'path';
 import * as os from 'os';
 import { isWindows } from '../../../common/utils/platformUtils';
-import { ShellScriptEditState, ShellSetupState, ShellStartupProvider } from './startupProvider';
+import { ShellScriptEditState, ShellSetupState, ShellStartupScriptProvider } from './startupProvider';
 import { EnvironmentVariableCollection } from 'vscode';
 import { PythonEnvironment } from '../../../api';
 import { getActivationCommandForShell } from '../../common/activation';
@@ -256,7 +256,7 @@ async function removeCmdStartup(startupFile: string): Promise<boolean> {
     return success;
 }
 
-export class CmdStartupProvider implements ShellStartupProvider {
+export class CmdStartupProvider implements ShellStartupScriptProvider {
     public readonly name: string = 'Command Prompt';
     private readonly cmdActivationEnvVarKey = 'VSCODE_CMD_ACTIVATE';
 
