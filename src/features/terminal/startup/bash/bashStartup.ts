@@ -1,14 +1,10 @@
 import * as fs from 'fs-extra';
 import * as path from 'path';
 import * as os from 'os';
-import { ShellScriptEditState, ShellSetupState, ShellStartupProvider } from './startupProvider';
-import { EnvironmentVariableCollection } from 'vscode';
-import { PythonCommandRunConfiguration, PythonEnvironment } from '../../../api';
-import { getActivationCommandForShell } from '../../common/activation';
-import { quoteArgs } from '../../execution/execUtils';
-import { traceError, traceInfo, traceVerbose } from '../../../common/logging';
+import { ShellScriptEditState, ShellSetupState, ShellStartupScriptProvider } from '../startupProvider';
+import { traceError, traceInfo, traceVerbose } from '../../../../common/logging';
 import which from 'which';
-import { ShellConstants } from '../../common/shellConstants';
+import { BASH_ENV_KEY, ZSH_ENV_KEY } from './bashConstants';
 
 async function isBashLikeInstalled(): Promise<boolean> {
     const result = await Promise.all([which('bash', { nothrow: true }), which('sh', { nothrow: true })]);
@@ -49,7 +45,16 @@ const regionEnd = '# <<< vscode python';
 function getActivationContent(key: string): string {
     const lineSep = '\n';
 
-    return ['', '', regionStart, `if [ -n "$${key}" ]; then`, `    eval "$${key}"`, 'fi', regionEnd, ''].join(lineSep);
+    return [
+        '',
+        '',
+        regionStart,
+        `if [ -n "$${key}" ] && [ "$TERM_PROGRAM" = "vscode" ]; then`,
+        `    . "$${key}"`,
+        'fi',
+        regionEnd,
+        '',
+    ].join(lineSep);
 }
 
 async function isStartupSetup(profile: string, key: string): Promise<ShellSetupState> {
@@ -113,19 +118,8 @@ async function removeStartup(profile: string, key: string): Promise<boolean> {
     }
 }
 
-function getCommandAsString(command: PythonCommandRunConfiguration[]): string {
-    const parts = [];
-    for (const cmd of command) {
-        const args = cmd.args ?? [];
-        // For bash, we need to ensure proper quoting
-        parts.push(quoteArgs([cmd.executable, ...args]).join(' '));
-    }
-    return parts.join(' && ');
-}
-
-export class BashStartupProvider implements ShellStartupProvider {
+export class BashStartupProvider implements ShellStartupScriptProvider {
     public readonly name: string = 'Bash';
-    private readonly bashActivationEnvVarKey = 'VSCODE_BASH_ACTIVATE';
 
     private async checkShellInstalled(): Promise<boolean> {
         const found = await isBashLikeInstalled();
@@ -146,7 +140,7 @@ export class BashStartupProvider implements ShellStartupProvider {
 
         try {
             const bashProfile = await getBashProfiles();
-            return await isStartupSetup(bashProfile, this.bashActivationEnvVarKey);
+            return await isStartupSetup(bashProfile, BASH_ENV_KEY);
         } catch (err) {
             traceError('Failed to check bash startup scripts', err);
             return ShellSetupState.NotSetup;
@@ -161,7 +155,7 @@ export class BashStartupProvider implements ShellStartupProvider {
 
         try {
             const bashProfiles = await getBashProfiles();
-            const result = await setupStartup(bashProfiles, this.bashActivationEnvVarKey, this.name);
+            const result = await setupStartup(bashProfiles, BASH_ENV_KEY, this.name);
             return result ? ShellScriptEditState.Edited : ShellScriptEditState.NotEdited;
         } catch (err) {
             traceError('Failed to setup bash startup scripts', err);
@@ -177,53 +171,17 @@ export class BashStartupProvider implements ShellStartupProvider {
 
         try {
             const bashProfile = await getBashProfiles();
-            const result = await removeStartup(bashProfile, this.bashActivationEnvVarKey);
+            const result = await removeStartup(bashProfile, BASH_ENV_KEY);
             return result ? ShellScriptEditState.Edited : ShellScriptEditState.NotEdited;
         } catch (err) {
             traceError('Failed to teardown bash startup scripts', err);
             return ShellScriptEditState.NotEdited;
         }
     }
-
-    async updateEnvVariables(collection: EnvironmentVariableCollection, env: PythonEnvironment): Promise<void> {
-        try {
-            const bashActivation = getActivationCommandForShell(env, ShellConstants.BASH);
-            if (bashActivation) {
-                const command = getCommandAsString(bashActivation);
-                collection.replace(this.bashActivationEnvVarKey, command);
-            } else {
-                collection.delete(this.bashActivationEnvVarKey);
-            }
-        } catch (err) {
-            traceError('Failed to update env variables for bash', err);
-            collection.delete(this.bashActivationEnvVarKey);
-        }
-    }
-
-    async removeEnvVariables(envCollection: EnvironmentVariableCollection): Promise<void> {
-        envCollection.delete(this.bashActivationEnvVarKey);
-    }
-
-    async getEnvVariables(env?: PythonEnvironment): Promise<Map<string, string | undefined> | undefined> {
-        if (!env) {
-            return new Map([[this.bashActivationEnvVarKey, undefined]]);
-        }
-
-        try {
-            const bashActivation = getActivationCommandForShell(env, ShellConstants.BASH);
-            return bashActivation
-                ? new Map([[this.bashActivationEnvVarKey, getCommandAsString(bashActivation)]])
-                : undefined;
-        } catch (err) {
-            traceError('Failed to get env variables for bash', err);
-            return undefined;
-        }
-    }
 }
 
-export class ZshStartupProvider implements ShellStartupProvider {
+export class ZshStartupProvider implements ShellStartupScriptProvider {
     public readonly name: string = 'Zsh';
-    private readonly zshActivationEnvVarKey = 'VSCODE_ZSH_ACTIVATE';
 
     private async checkShellInstalled(): Promise<boolean> {
         const found = await isZshInstalled();
@@ -241,7 +199,7 @@ export class ZshStartupProvider implements ShellStartupProvider {
 
         try {
             const zshProfiles = await getZshProfiles();
-            return await isStartupSetup(zshProfiles, this.zshActivationEnvVarKey);
+            return await isStartupSetup(zshProfiles, ZSH_ENV_KEY);
         } catch (err) {
             traceError('Failed to check zsh startup scripts', err);
             return ShellSetupState.NotSetup;
@@ -255,7 +213,7 @@ export class ZshStartupProvider implements ShellStartupProvider {
         }
         try {
             const zshProfiles = await getZshProfiles();
-            const result = await setupStartup(zshProfiles, this.zshActivationEnvVarKey, this.name);
+            const result = await setupStartup(zshProfiles, ZSH_ENV_KEY, this.name);
             return result ? ShellScriptEditState.Edited : ShellScriptEditState.NotEdited;
         } catch (err) {
             traceError('Failed to setup zsh startup scripts', err);
@@ -270,53 +228,17 @@ export class ZshStartupProvider implements ShellStartupProvider {
         }
         try {
             const zshProfiles = await getZshProfiles();
-            const result = await removeStartup(zshProfiles, this.zshActivationEnvVarKey);
+            const result = await removeStartup(zshProfiles, ZSH_ENV_KEY);
             return result ? ShellScriptEditState.Edited : ShellScriptEditState.NotEdited;
         } catch (err) {
             traceError('Failed to teardown zsh startup scripts', err);
             return ShellScriptEditState.NotEdited;
         }
     }
-
-    async updateEnvVariables(envVars: EnvironmentVariableCollection, env: PythonEnvironment): Promise<void> {
-        try {
-            const zshActivation = getActivationCommandForShell(env, ShellConstants.ZSH);
-            if (zshActivation) {
-                const command = getCommandAsString(zshActivation);
-                envVars.replace(this.zshActivationEnvVarKey, command);
-            } else {
-                envVars.delete(this.zshActivationEnvVarKey);
-            }
-        } catch (err) {
-            traceError('Failed to update env variables for zsh', err);
-            envVars.delete(this.zshActivationEnvVarKey);
-        }
-    }
-
-    async removeEnvVariables(envVars: EnvironmentVariableCollection): Promise<void> {
-        envVars.delete(this.zshActivationEnvVarKey);
-    }
-
-    async getEnvVariables(env?: PythonEnvironment): Promise<Map<string, string | undefined> | undefined> {
-        if (!env) {
-            return new Map([[this.zshActivationEnvVarKey, undefined]]);
-        }
-
-        try {
-            const zshActivation = getActivationCommandForShell(env, ShellConstants.ZSH);
-            return zshActivation
-                ? new Map([[this.zshActivationEnvVarKey, getCommandAsString(zshActivation)]])
-                : undefined;
-        } catch (err) {
-            traceError('Failed to get env variables for zsh', err);
-            return undefined;
-        }
-    }
 }
 
-export class GitBashStartupProvider implements ShellStartupProvider {
+export class GitBashStartupProvider implements ShellStartupScriptProvider {
     public readonly name: string = 'GitBash';
-    private readonly gitBashActivationEnvVarKey = 'VSCODE_BASH_ACTIVATE';
 
     private async checkShellInstalled(): Promise<boolean> {
         const found = await isGitBashInstalled();
@@ -333,7 +255,7 @@ export class GitBashStartupProvider implements ShellStartupProvider {
         }
         try {
             const bashProfiles = await getBashProfiles();
-            return await isStartupSetup(bashProfiles, this.gitBashActivationEnvVarKey);
+            return await isStartupSetup(bashProfiles, BASH_ENV_KEY);
         } catch (err) {
             traceError('Failed to check git bash startup scripts', err);
             return ShellSetupState.NotSetup;
@@ -347,7 +269,7 @@ export class GitBashStartupProvider implements ShellStartupProvider {
 
         try {
             const bashProfiles = await getBashProfiles();
-            const result = await setupStartup(bashProfiles, this.gitBashActivationEnvVarKey, this.name);
+            const result = await setupStartup(bashProfiles, BASH_ENV_KEY, this.name);
             return result ? ShellScriptEditState.Edited : ShellScriptEditState.NotEdited;
         } catch (err) {
             traceError('Failed to setup git bash startup scripts', err);
@@ -362,44 +284,11 @@ export class GitBashStartupProvider implements ShellStartupProvider {
 
         try {
             const bashProfiles = await getBashProfiles();
-            const result = await removeStartup(bashProfiles, this.gitBashActivationEnvVarKey);
+            const result = await removeStartup(bashProfiles, BASH_ENV_KEY);
             return result ? ShellScriptEditState.Edited : ShellScriptEditState.NotEdited;
         } catch (err) {
             traceError('Failed to teardown git bash startup scripts', err);
             return ShellScriptEditState.NotEdited;
-        }
-    }
-    async updateEnvVariables(envVars: EnvironmentVariableCollection, env: PythonEnvironment): Promise<void> {
-        try {
-            const bashActivation = getActivationCommandForShell(env, ShellConstants.GITBASH);
-            if (bashActivation) {
-                const command = getCommandAsString(bashActivation);
-                envVars.replace(this.gitBashActivationEnvVarKey, command);
-            } else {
-                envVars.delete(this.gitBashActivationEnvVarKey);
-            }
-        } catch (err) {
-            traceError('Failed to update env variables for git bash', err);
-            envVars.delete(this.gitBashActivationEnvVarKey);
-        }
-    }
-    async removeEnvVariables(envVars: EnvironmentVariableCollection): Promise<void> {
-        envVars.delete(this.gitBashActivationEnvVarKey);
-        envVars.delete('VSCODE_GIT_BASH_ACTIVATE');
-    }
-    async getEnvVariables(env?: PythonEnvironment): Promise<Map<string, string | undefined> | undefined> {
-        if (!env) {
-            return new Map([[this.gitBashActivationEnvVarKey, undefined]]);
-        }
-
-        try {
-            const zshActivation = getActivationCommandForShell(env, ShellConstants.GITBASH);
-            return zshActivation
-                ? new Map([[this.gitBashActivationEnvVarKey, getCommandAsString(zshActivation)]])
-                : undefined;
-        } catch (err) {
-            traceError('Failed to get env variables for git bash', err);
-            return undefined;
         }
     }
 }

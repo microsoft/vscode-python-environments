@@ -20,7 +20,7 @@ import {
 } from './terminalActivationState';
 import { getPythonApi } from '../pythonApi';
 import { traceInfo, traceVerbose } from '../../common/logging';
-import { ShellStartupProvider } from './startup/startupProvider';
+import { ShellEnvsProvider } from './startup/startupProvider';
 
 export interface TerminalCreation {
     create(environment: PythonEnvironment, options: PythonTerminalCreateOptions): Promise<Terminal>;
@@ -67,7 +67,7 @@ export class TerminalManagerImpl implements TerminalManager {
 
     constructor(
         private readonly ta: TerminalActivationInternal,
-        private readonly startupProviders: ShellStartupProvider[],
+        private readonly startupProviders: ShellEnvsProvider[],
     ) {
         this.disposables.push(
             this.onTerminalOpenedEmitter,

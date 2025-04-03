@@ -92,6 +92,11 @@ export class TerminalActivationImpl implements TerminalActivationInternal {
             return;
         }
 
+        if (terminal.shellIntegration?.env?.value?.['TERM_PROGRAM'] !== 'vscode') {
+            traceVerbose('Terminal is not a VS Code terminal, skipping activation');
+            return;
+        }
+
         if (this.deactivatingTerminals.has(terminal)) {
             traceVerbose('Terminal is being deactivated, cannot activate.');
             return this.deactivatingTerminals.get(terminal);

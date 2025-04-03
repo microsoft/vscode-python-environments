@@ -1,7 +1,7 @@
 import * as fs from 'fs-extra';
 import * as path from 'path';
 import * as os from 'os';
-import { ShellScriptEditState, ShellSetupState, ShellStartupProvider } from './startupProvider';
+import { ShellScriptEditState, ShellSetupState, ShellStartupScriptProvider } from './startupProvider';
 import { EnvironmentVariableCollection } from 'vscode';
 import { PythonCommandRunConfiguration, PythonEnvironment } from '../../../api';
 import { getActivationCommandForShell } from '../../common/activation';
@@ -107,7 +107,7 @@ function getCommandAsString(command: PythonCommandRunConfiguration[]): string {
     return parts.join('; and '); // Fish uses 'and' instead of '&&'
 }
 
-export class FishStartupProvider implements ShellStartupProvider {
+export class FishStartupProvider implements ShellStartupScriptProvider {
     public readonly name: string = 'Fish';
     public readonly fishActivationEnvVarKey = 'VSCODE_FISH_ACTIVATE';
 

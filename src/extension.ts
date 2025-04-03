@@ -57,13 +57,13 @@ import { GetEnvironmentInfoTool, InstallPackageTool } from './features/copilotTo
 import { TerminalActivationImpl } from './features/terminal/terminalActivationState';
 import { sendManagerSelectionTelemetry } from './common/telemetry/helpers';
 import { getEnvironmentForTerminal, normalizeShellPath } from './features/terminal/utils';
-import { PwshStartupProvider } from './features/terminal/startup/powershellStartup';
+import { PwshStartupProvider } from './features/terminal/startup/pwsh/pwshStartup';
 import { ShellStartupActivationManagerImpl } from './features/terminal/startup/activateUsingShellStartup';
 import {
     BashStartupProvider,
     GitBashStartupProvider,
     ZshStartupProvider,
-} from './features/terminal/startup/bashStartup';
+} from './features/terminal/startup/bash/bashStartup';
 import { FishStartupProvider } from './features/terminal/startup/fishStartup';
 import { isWindows } from './common/utils/platformUtils';
 import { CmdStartupProvider } from './features/terminal/startup/cmdStartup';
