@@ -1,7 +1,7 @@
 import { ConfigurationChangeEvent, Disposable, GlobalEnvironmentVariableCollection } from 'vscode';
 import { getWorkspaceFolder, getWorkspaceFolders, onDidChangeConfiguration } from '../../../common/workspace.apis';
 import { getAutoActivationType, setAutoActivationType } from '../utils';
-import { ShellScriptEditState, ShellStartupProvider } from './startupProvider';
+import { ShellScriptEditState, ShellStartupScriptProvider } from './startupProvider';
 import { DidChangeEnvironmentEventArgs } from '../../../api';
 import { EnvironmentManagers } from '../../../internal.api';
 import { traceError, traceInfo } from '../../../common/logging';
@@ -18,7 +18,7 @@ export class ShellStartupActivationManagerImpl implements ShellStartupActivation
     private readonly disposables: Disposable[] = [];
     constructor(
         private readonly envCollection: GlobalEnvironmentVariableCollection,
-        private readonly shellStartupProviders: ShellStartupProvider[],
+        private readonly shellStartupProviders: ShellStartupScriptProvider[],
         private readonly em: EnvironmentManagers,
     ) {
         this.envCollection.description = ShellStartupActivationStrings.envCollectionDescription;
@@ -85,7 +85,7 @@ export class ShellStartupActivationManagerImpl implements ShellStartupActivation
         }
     }
 
-    private async getSetupRequired(): Promise<ShellStartupProvider[]> {
+    private async getSetupRequired(): Promise<ShellStartupScriptProvider[]> {
         const results = await Promise.all(
             this.shellStartupProviders.map(async (provider) => {
                 if (!(await provider.isSetup())) {
@@ -95,7 +95,7 @@ export class ShellStartupActivationManagerImpl implements ShellStartupActivation
             }),
         );
 
-        const providers = results.filter((provider): provider is ShellStartupProvider => provider !== undefined);
+        const providers = results.filter((provider): provider is ShellStartupScriptProvider => provider !== undefined);
         return providers;
     }
 
