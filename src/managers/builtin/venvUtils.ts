@@ -31,7 +31,7 @@ import {
 import { showErrorMessage } from '../../common/errors/utils';
 import { Common, VenvManagerStrings } from '../../common/localize';
 import { isUvInstalled, runUV, runPython } from './helpers';
-import { getWorkspacePackagesToInstall } from './pipUtils';
+import { getProjectInstallable, getWorkspacePackagesToInstall } from './pipUtils';
 
 export const VENV_WORKSPACE_KEY = `${ENVS_EXTENSION_ID}:venv:WORKSPACE_SELECTED`;
 export const VENV_GLOBAL_KEY = `${ENVS_EXTENSION_ID}:venv:GLOBAL_SELECTED`;
@@ -347,64 +347,45 @@ export async function getGlobalVenvLocation(): Promise<Uri | undefined> {
     return undefined;
 }
 
-export async function createPythonVenv(
+async function createWithCustomization(version: string): Promise<boolean | undefined> {
+    const selection: QuickPickItem | undefined = await showQuickPick(
+        [
+            {
+                label: VenvManagerStrings.quickCreate,
+                description: VenvManagerStrings.quickCreateDescription,
+                detail: l10n.t(`Will use Python version ${version} and install workspace dependencies .`),
+            },
+            {
+                label: VenvManagerStrings.customize,
+                description: VenvManagerStrings.customizeDescription,
+            },
+        ],
+        {
+            placeHolder: VenvManagerStrings.selectQuickOrCustomize,
+            ignoreFocusOut: true,
+        },
+    );
+
+    if (selection === undefined) {
+        return undefined;
+    } else if (selection.label === VenvManagerStrings.quickCreate) {
+        return false;
+    }
+    return true;
+}
+
+async function createWithProgress(
     nativeFinder: NativePythonFinder,
     api: PythonEnvironmentApi,
     log: LogOutputChannel,
     manager: EnvironmentManager,
-    basePythons: PythonEnvironment[],
+    basePython: PythonEnvironment,
     venvRoot: Uri,
-): Promise<PythonEnvironment | undefined> {
-    if (basePythons.length === 0) {
-        log.error('No base python found');
-        showErrorMessage(VenvManagerStrings.venvErrorNoBasePython);
-        return;
-    }
-
-    const filtered = basePythons.filter((e) => e.version.startsWith('3.'));
-    if (filtered.length === 0) {
-        log.error('Did not find any base python 3.*');
-        showErrorMessage(VenvManagerStrings.venvErrorNoPython3);
-        basePythons.forEach((e) => {
-            log.error(`available base python: ${e.version}`);
-        });
-        return;
-    }
-
-    const basePython = await pickEnvironmentFrom(sortEnvironments(filtered));
-    if (!basePython || !basePython.execInfo) {
-        log.error('No base python selected, cannot create virtual environment.');
-        return;
-    }
-
-    const name = await showInputBox({
-        prompt: VenvManagerStrings.venvName,
-        value: '.venv',
-        ignoreFocusOut: true,
-        validateInput: async (value) => {
-            if (!value) {
-                return VenvManagerStrings.venvNameErrorEmpty;
-            }
-            if (await fsapi.pathExists(path.join(venvRoot.fsPath, value))) {
-                return VenvManagerStrings.venvNameErrorExists;
-            }
-        },
-    });
-    if (!name) {
-        log.error('No name entered, cannot create virtual environment.');
-        return;
-    }
-
-    const envPath = path.join(venvRoot.fsPath, name);
+    envPath: string,
+    packages?: string[],
+) {
     const pythonPath =
         os.platform() === 'win32' ? path.join(envPath, 'Scripts', 'python.exe') : path.join(envPath, 'bin', 'python');
-
-    const project = api.getPythonProject(venvRoot);
-    const packages = await getWorkspacePackagesToInstall(
-        api,
-        { showSkipOption: true },
-        project ? [project] : undefined,
-    );
 
     return await withProgress(
         {
@@ -448,6 +429,85 @@ export async function createPythonVenv(
             }
         },
     );
+}
+
+export async function createPythonVenv(
+    nativeFinder: NativePythonFinder,
+    api: PythonEnvironmentApi,
+    log: LogOutputChannel,
+    manager: EnvironmentManager,
+    basePythons: PythonEnvironment[],
+    venvRoot: Uri,
+): Promise<PythonEnvironment | undefined> {
+    if (basePythons.length === 0) {
+        log.error('No base python found');
+        showErrorMessage(VenvManagerStrings.venvErrorNoBasePython);
+        return;
+    }
+
+    const filtered = basePythons.filter((e) => e.version.startsWith('3.'));
+    if (filtered.length === 0) {
+        log.error('Did not find any base python 3.*');
+        showErrorMessage(VenvManagerStrings.venvErrorNoPython3);
+        basePythons.forEach((e) => {
+            log.error(`available base python: ${e.version}`);
+        });
+        return;
+    }
+
+    const sortedEnvs = sortEnvironments(filtered);
+    const project = api.getPythonProject(venvRoot);
+
+    const customize = await createWithCustomization(sortedEnvs[0].version);
+    if (customize === undefined) {
+        return;
+    } else if (customize === false) {
+        const installables = await getProjectInstallable(api, project ? [project] : undefined);
+        return await createWithProgress(
+            nativeFinder,
+            api,
+            log,
+            manager,
+            sortedEnvs[0],
+            venvRoot,
+            path.join(venvRoot.fsPath, '.venv'),
+            installables?.flatMap((i) => i.args ?? []),
+        );
+    }
+
+    const basePython = await pickEnvironmentFrom(sortedEnvs);
+    if (!basePython || !basePython.execInfo) {
+        log.error('No base python selected, cannot create virtual environment.');
+        return;
+    }
+
+    const name = await showInputBox({
+        prompt: VenvManagerStrings.venvName,
+        value: '.venv',
+        ignoreFocusOut: true,
+        validateInput: async (value) => {
+            if (!value) {
+                return VenvManagerStrings.venvNameErrorEmpty;
+            }
+            if (await fsapi.pathExists(path.join(venvRoot.fsPath, value))) {
+                return VenvManagerStrings.venvNameErrorExists;
+            }
+        },
+    });
+    if (!name) {
+        log.error('No name entered, cannot create virtual environment.');
+        return;
+    }
+
+    const envPath = path.join(venvRoot.fsPath, name);
+
+    const packages = await getWorkspacePackagesToInstall(
+        api,
+        { showSkipOption: true },
+        project ? [project] : undefined,
+    );
+
+    return await createWithProgress(nativeFinder, api, log, manager, basePython, venvRoot, envPath, packages);
 }
 
 export async function removeVenv(environment: PythonEnvironment, log: LogOutputChannel): Promise<boolean> {
