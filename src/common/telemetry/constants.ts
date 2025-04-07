@@ -1,11 +1,12 @@
 export enum EventNames {
-    EXTENSION_ACTIVATION_DURATION = "EXTENSION.ACTIVATION_DURATION",
-    EXTENSION_MANAGER_REGISTRATION_DURATION = "EXTENSION.MANAGER_REGISTRATION_DURATION",
+    EXTENSION_ACTIVATION_DURATION = 'EXTENSION.ACTIVATION_DURATION',
+    EXTENSION_MANAGER_REGISTRATION_DURATION = 'EXTENSION.MANAGER_REGISTRATION_DURATION',
 
-    ENVIRONMENT_MANAGER_REGISTERED = "ENVIRONMENT_MANAGER.REGISTERED",
-    PACKAGE_MANAGER_REGISTERED = "PACKAGE_MANAGER.REGISTERED",
+    ENVIRONMENT_MANAGER_REGISTERED = 'ENVIRONMENT_MANAGER.REGISTERED',
+    PACKAGE_MANAGER_REGISTERED = 'PACKAGE_MANAGER.REGISTERED',
 
-    VENV_USING_UV = "VENV.USING_UV",
+    VENV_USING_UV = 'VENV.USING_UV',
+    VENV_CREATION = 'VENV.CREATION',
 }
 
 // Map all events to their properties
@@ -45,4 +46,13 @@ export interface IEventNamePropertyMapping {
         "venv.using_uv": {"owner": "karthiknadig" }
     */
     [EventNames.VENV_USING_UV]: never | undefined;
+
+    /* __GDPR__
+        "venv.creation": {
+            "creationType": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "owner": "karthiknadig" }
+        }
+    */
+    [EventNames.VENV_CREATION]: {
+        creationType: 'quick' | 'custom';
+    };
 }

@@ -32,6 +32,8 @@ import { showErrorMessage } from '../../common/errors/utils';
 import { Common, VenvManagerStrings } from '../../common/localize';
 import { isUvInstalled, runUV, runPython } from './helpers';
 import { getProjectInstallable, getWorkspacePackagesToInstall } from './pipUtils';
+import { sendTelemetryEvent } from '../../common/telemetry/sender';
+import { EventNames } from '../../common/telemetry/constants';
 
 export const VENV_WORKSPACE_KEY = `${ENVS_EXTENSION_ID}:venv:WORKSPACE_SELECTED`;
 export const VENV_GLOBAL_KEY = `${ENVS_EXTENSION_ID}:venv:GLOBAL_SELECTED`;
@@ -462,6 +464,7 @@ export async function createPythonVenv(
     if (customize === undefined) {
         return;
     } else if (customize === false) {
+        sendTelemetryEvent(EventNames.VENV_CREATION, undefined, { creationType: 'quick' });
         const installables = await getProjectInstallable(api, project ? [project] : undefined);
         return await createWithProgress(
             nativeFinder,
@@ -473,6 +476,8 @@ export async function createPythonVenv(
             path.join(venvRoot.fsPath, '.venv'),
             installables?.flatMap((i) => i.args ?? []),
         );
+    } else {
+        sendTelemetryEvent(EventNames.VENV_CREATION, undefined, { creationType: 'custom' });
     }
 
     const basePython = await pickEnvironmentFrom(sortedEnvs);
