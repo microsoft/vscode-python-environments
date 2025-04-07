@@ -3,6 +3,7 @@ import { PythonEnvironment, PythonTerminalExecutionOptions } from '../../api';
 import { onDidEndTerminalShellExecution } from '../../common/window.apis';
 import { createDeferred } from '../../common/utils/deferred';
 import { quoteArgs } from '../execution/execUtils';
+import { identifyTerminalShell } from '../common/shellDetector';
 
 export async function runInTerminal(
     environment: PythonEnvironment,
@@ -28,9 +29,14 @@ export async function runInTerminal(
             }
         });
         execution = terminal.shellIntegration.executeCommand(executable, allArgs);
-        return deferred.promise;
+        await deferred.promise;
     } else {
-        const text = quoteArgs([executable, ...allArgs]).join(' ');
+        const shellType = identifyTerminalShell(terminal);
+        let text = quoteArgs([executable, ...allArgs]).join(' ');
+        if (shellType === 'pwsh' && !text.startsWith('&')) {
+            // PowerShell requires commands to be prefixed with '&' to run them.
+            text = `& ${text}`;
+        }
         terminal.sendText(`${text}\n`);
     }
 }
