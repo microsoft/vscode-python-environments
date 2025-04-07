@@ -353,7 +353,7 @@ async function createWithCustomization(version: string): Promise<boolean | undef
             {
                 label: VenvManagerStrings.quickCreate,
                 description: VenvManagerStrings.quickCreateDescription,
-                detail: l10n.t(`Will use Python version ${version} and install workspace dependencies .`),
+                detail: l10n.t('Will use Python version {0} and install workspace dependencies .', version),
             },
             {
                 label: VenvManagerStrings.customize,
