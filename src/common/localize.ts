@@ -90,11 +90,11 @@ export namespace VenvManagerStrings {
     export const installEditable = l10n.t('Install project as editable');
     export const searchingDependencies = l10n.t('Searching for dependencies');
 
-    export const selectQuickOrCustomize = l10n.t('Select Quick Create or Customize');
+    export const selectQuickOrCustomize = l10n.t('Select environment creation mode');
     export const quickCreate = l10n.t('Quick Create');
     export const quickCreateDescription = l10n.t('Create a virtual environment in the workspace root');
-    export const customize = l10n.t('Customize');
-    export const customizeDescription = l10n.t('Select python version, location, packages, etc.');
+    export const customize = l10n.t('Custom');
+    export const customizeDescription = l10n.t('Choose python version, location, packages, name, etc.');
 }
 
 export namespace SysManagerStrings {
