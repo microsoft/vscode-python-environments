@@ -99,9 +99,11 @@ export class PythonEnvironmentManagers implements EnvironmentManagers {
         this._environmentManagers.set(managerId, mgr);
         this._onDidChangeEnvironmentManager.fire({ kind: 'registered', manager: mgr });
 
-        sendTelemetryEvent(EventNames.ENVIRONMENT_MANAGER_REGISTERED, undefined, {
-            managerId,
-        });
+        if (!managerId.toLowerCase().startsWith('undefined_publisher.')) {
+            sendTelemetryEvent(EventNames.ENVIRONMENT_MANAGER_REGISTERED, undefined, {
+                managerId,
+            });
+        }
 
         return new Disposable(() => {
             this._environmentManagers.delete(managerId);
@@ -137,9 +139,11 @@ export class PythonEnvironmentManagers implements EnvironmentManagers {
         this._packageManagers.set(managerId, mgr);
         this._onDidChangePackageManager.fire({ kind: 'registered', manager: mgr });
 
-        sendTelemetryEvent(EventNames.PACKAGE_MANAGER_REGISTERED, undefined, {
-            managerId,
-        });
+        if (!managerId.toLowerCase().startsWith('undefined_publisher.')) {
+            sendTelemetryEvent(EventNames.PACKAGE_MANAGER_REGISTERED, undefined, {
+                managerId,
+            });
+        }
 
         return new Disposable(() => {
             this._packageManagers.delete(managerId);
