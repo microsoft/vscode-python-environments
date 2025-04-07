@@ -92,7 +92,7 @@ export namespace VenvManagerStrings {
 
     export const selectQuickOrCustomize = l10n.t('Select Quick Create or Customize');
     export const quickCreate = l10n.t('Quick Create');
-    export const quickCreateDescription = l10n.t('Create a .venv environment in the workspace root');
+    export const quickCreateDescription = l10n.t('Create a virtual environment in the workspace root');
     export const customize = l10n.t('Customize');
     export const customizeDescription = l10n.t('Select python version, location, packages, etc.');
 }
