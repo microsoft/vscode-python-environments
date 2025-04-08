@@ -1,10 +1,9 @@
-import * as path from 'path';
+import { isWindows } from '../../managers/common/utils';
 
-export function areSamePaths(a: string, b: string): boolean {
-    return path.resolve(a) === path.resolve(b);
-}
-
-export function isParentPath(parent: string, child: string): boolean {
-    const relative = path.relative(path.resolve(parent), path.resolve(child));
-    return !!relative && !relative.startsWith('..') && !path.isAbsolute(relative);
+export function normalizePath(path: string): string {
+    const path1 = path.replace(/\\/g, '/');
+    if (isWindows()) {
+        return path1.toLowerCase();
+    }
+    return path1;
 }
