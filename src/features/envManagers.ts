@@ -283,9 +283,10 @@ export class PythonEnvironmentManagers implements EnvironmentManagers {
             }
         }
 
-        const oldEnv = this._previousEnvironments.get(project?.uri.toString() ?? 'global');
+        const key = project ? project.uri.toString() : 'global';
+        const oldEnv = this._previousEnvironments.get(key);
         if (oldEnv?.envId.id !== environment?.envId.id) {
-            this._previousEnvironments.set(project?.uri.toString() ?? 'global', environment);
+            this._previousEnvironments.set(key, environment);
             setImmediate(() =>
                 this._onDidChangeEnvironmentFiltered.fire({ uri: project?.uri, new: environment, old: oldEnv }),
             );
@@ -320,9 +321,10 @@ export class PythonEnvironmentManagers implements EnvironmentManagers {
                     }
 
                     const project = this.pm.get(uri);
-                    const oldEnv = this._previousEnvironments.get(project?.uri.toString() ?? 'global');
+                    const key = project ? project.uri.toString() : 'global';
+                    const oldEnv = this._previousEnvironments.get(key);
                     if (oldEnv?.envId.id !== environment?.envId.id) {
-                        this._previousEnvironments.set(project?.uri.toString() ?? 'global', environment);
+                        this._previousEnvironments.set(key, environment);
                         events.push({ uri: project?.uri, new: environment, old: oldEnv });
                     }
                 });
@@ -361,9 +363,10 @@ export class PythonEnvironmentManagers implements EnvironmentManagers {
                             // Always get the new first, then compare with the old. This has minor impact on the ordering of
                             // events. But it ensures that we always get the latest environment at the time of this call.
                             const newEnv = await manager.get(uri);
-                            const oldEnv = this._previousEnvironments.get(project?.uri.toString() ?? 'global');
+                            const key = project ? project.uri.toString() : 'global';
+                            const oldEnv = this._previousEnvironments.get(key);
                             if (oldEnv?.envId.id !== newEnv?.envId.id) {
-                                this._previousEnvironments.set(project?.uri.toString() ?? 'global', newEnv);
+                                this._previousEnvironments.set(key, newEnv);
                                 events.push({ uri: project?.uri, new: newEnv, old: oldEnv });
                             }
                         };
@@ -404,9 +407,10 @@ export class PythonEnvironmentManagers implements EnvironmentManagers {
         // Always get the new first, then compare with the old. This has minor impact on the ordering of
         // events. But it ensures that we always get the latest environment at the time of this call.
         const newEnv = await manager.get(scope);
-        const oldEnv = this._previousEnvironments.get(project?.uri.toString() ?? 'global');
+        const key = project ? project.uri.toString() : 'global';
+        const oldEnv = this._previousEnvironments.get(key);
         if (oldEnv?.envId.id !== newEnv?.envId.id) {
-            this._previousEnvironments.set(project?.uri.toString() ?? 'global', newEnv);
+            this._previousEnvironments.set(key, newEnv);
             setImmediate(() =>
                 this._onDidChangeEnvironmentFiltered.fire({ uri: project?.uri, new: newEnv, old: oldEnv }),
             );

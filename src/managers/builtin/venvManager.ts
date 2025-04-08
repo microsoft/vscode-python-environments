@@ -40,6 +40,7 @@ export class VenvManager implements EnvironmentManager {
     private collection: PythonEnvironment[] = [];
     private readonly fsPathToEnv: Map<string, PythonEnvironment> = new Map();
     private globalEnv: PythonEnvironment | undefined;
+    private skipWatcherRefresh = false;
 
     private readonly _onDidChangeEnvironment = new EventEmitter<DidChangeEnvironmentEventArgs>();
     public readonly onDidChangeEnvironment = this._onDidChangeEnvironment.event;
@@ -86,44 +87,55 @@ export class VenvManager implements EnvironmentManager {
     }
 
     async create(scope: CreateEnvironmentScope): Promise<PythonEnvironment | undefined> {
-        let isGlobal = scope === 'global';
-        if (Array.isArray(scope) && scope.length > 1) {
-            isGlobal = true;
-        }
-        let uri: Uri | undefined = undefined;
-        if (isGlobal) {
-            uri = await getGlobalVenvLocation();
-        } else {
-            uri = scope instanceof Uri ? scope : (scope as Uri[])[0];
-        }
+        try {
+            this.skipWatcherRefresh = true;
+            let isGlobal = scope === 'global';
+            if (Array.isArray(scope) && scope.length > 1) {
+                isGlobal = true;
+            }
+            let uri: Uri | undefined = undefined;
+            if (isGlobal) {
+                uri = await getGlobalVenvLocation();
+            } else {
+                uri = scope instanceof Uri ? scope : (scope as Uri[])[0];
+            }
 
-        if (!uri) {
-            return;
-        }
+            if (!uri) {
+                return;
+            }
 
-        const venvRoot: Uri = uri;
-        const globals = await this.baseManager.getEnvironments('global');
-        const environment = await createPythonVenv(this.nativeFinder, this.api, this.log, this, globals, venvRoot);
-        if (environment) {
-            this.addEnvironment(environment, true);
+            const venvRoot: Uri = uri;
+            const globals = await this.baseManager.getEnvironments('global');
+            const environment = await createPythonVenv(this.nativeFinder, this.api, this.log, this, globals, venvRoot);
+            if (environment) {
+                this.addEnvironment(environment, true);
+            }
+            return environment;
+        } finally {
+            this.skipWatcherRefresh = false;
         }
-        return environment;
     }
 
     async remove(environment: PythonEnvironment): Promise<void> {
-        await removeVenv(environment, this.log);
-        this.updateCollection(environment);
-        this._onDidChangeEnvironments.fire([{ environment, kind: EnvironmentChangeKind.remove }]);
+        try {
+            this.skipWatcherRefresh = true;
 
-        const changedUris = this.updateFsPathToEnv(environment);
+            await removeVenv(environment, this.log);
+            this.updateCollection(environment);
+            this._onDidChangeEnvironments.fire([{ environment, kind: EnvironmentChangeKind.remove }]);
 
-        for (const uri of changedUris) {
-            const newEnv = await this.get(uri);
-            this._onDidChangeEnvironment.fire({ uri, old: environment, new: newEnv });
-        }
+            const changedUris = this.updateFsPathToEnv(environment);
 
-        if (this.globalEnv?.envId.id === environment.envId.id) {
-            await this.set(undefined, undefined);
+            for (const uri of changedUris) {
+                const newEnv = await this.get(uri);
+                this._onDidChangeEnvironment.fire({ uri, old: environment, new: newEnv });
+            }
+
+            if (this.globalEnv?.envId.id === environment.envId.id) {
+                await this.set(undefined, undefined);
+            }
+        } finally {
+            this.skipWatcherRefresh = false;
         }
     }
 
@@ -148,10 +160,22 @@ export class VenvManager implements EnvironmentManager {
         return this.internalRefresh(scope, true, VenvManagerStrings.venvRefreshing);
     }
 
-    private async internalRefresh(scope: RefreshEnvironmentsScope, hardRefresh: boolean, title: string): Promise<void> {
+    async watcherRefresh(): Promise<void> {
+        if (this.skipWatcherRefresh) {
+            return;
+        }
+        return this.internalRefresh(undefined, false, VenvManagerStrings.venvRefreshing);
+    }
+
+    private async internalRefresh(
+        scope: RefreshEnvironmentsScope,
+        hardRefresh: boolean,
+        title: string,
+        location: ProgressLocation = ProgressLocation.Window,
+    ): Promise<void> {
         await withProgress(
             {
-                location: ProgressLocation.Window,
+                location,
                 title,
             },
             async () => {

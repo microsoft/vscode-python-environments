@@ -27,7 +27,7 @@ export async function registerSystemPythonFeatures(
     );
 
     const venvDebouncedRefresh = createSimpleDebounce(500, () => {
-        venvManager.refresh(undefined);
+        venvManager.watcherRefresh();
     });
     const watcher = createFileSystemWatcher('{**/pyenv.cfg,**/bin/python,**/python.exe}', false, true, false);
     disposables.push(
