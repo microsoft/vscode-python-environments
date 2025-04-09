@@ -57,33 +57,35 @@ export class GetEnvironmentInfoTool implements LanguageModelTool<IResourceRefere
         }
         const resourcePath: Uri = Uri.file(parameters.resourcePath);
 
-        try {
-            // environment info set to default values
-            const envInfo: EnvironmentInfo = {
-                type: 'no type found',
-                version: 'no version found',
-                packages: 'no packages found',
-                runCommand: 'no run command found',
-            };
+        // environment info set to default values
+        const envInfo: EnvironmentInfo = {
+            type: 'no type found',
+            version: 'no version found',
+            packages: 'no packages found',
+            runCommand: 'no run command found',
+        };
 
+        try {
             // environment
             const environment: PythonEnvironment | undefined = await this.api.getEnvironment(resourcePath);
             if (!environment) {
-                // Check if the file is a notebook or a notebook cell to throw specific error messages.
-                if (resourcePath.fsPath.endsWith('.ipynb') || resourcePath.fsPath.includes('.ipynb#')) {
-                    throw new Error('Unable to access Jupyter kernels for notebook cells');
-                }
                 throw new Error('No environment found for the provided resource path: ' + resourcePath.fsPath);
             }
 
             const execInfo: PythonEnvironmentExecutionInfo = environment.execInfo;
             const run: PythonCommandRunConfiguration = execInfo.run;
             envInfo.runCommand = run.executable + (run.args && run.args.length > 0 ? ` ${run.args.join(' ')}` : '');
-            // TODO: check if this is the right way to get type
-            envInfo.type = environment.envId.managerId.split(':')[1];
             envInfo.version = environment.version;
 
-            // does this need to be refreshed prior to returning to get any new packages?
+            // get the environment type or manager if type is not available
+            try {
+                envInfo.type =
+                    environment.envId.managerId?.split(':')[1] || environment.envId.managerId || 'cannot be determined';
+            } catch {
+                envInfo.type = environment.envId.managerId || 'cannot be determined';
+            }
+
+            // refresh and get packages
             await this.api.refreshPackages(environment);
             const installedPackages = await this.api.getPackages(environment);
             if (!installedPackages || installedPackages.length === 0) {
@@ -99,7 +101,9 @@ export class GetEnvironmentInfoTool implements LanguageModelTool<IResourceRefere
             deferredReturn.resolve({ content: [textPart] });
         } catch (error) {
             const errorMessage: string = `An error occurred while fetching environment information: ${error}`;
-            deferredReturn.resolve({ content: [new LanguageModelTextPart(errorMessage)] } as LanguageModelToolResult);
+            const partialContent = BuildEnvironmentInfoContent(envInfo);
+            const combinedContent = new LanguageModelTextPart(`${errorMessage}\n\n${partialContent.value}`);
+            deferredReturn.resolve({ content: [combinedContent] } as LanguageModelToolResult);
         }
         return deferredReturn.promise;
     }
@@ -127,7 +131,7 @@ function BuildEnvironmentInfoContent(envInfo: EnvironmentInfo): LanguageModelTex
   "environmentType": ${JSON.stringify(envInfo.type)},
   // python version of the environment
   "pythonVersion": ${JSON.stringify(envInfo.version)},
-  // command to run python in this environment, will include command with active environment if applicable
+  // command to run python in this environment, will include command with active environment if applicable. Opt to use this command to run python in this environment. 
   "runCommand": ${JSON.stringify(envInfo.runCommand)},
   // installed python packages and their versions if know in the format <name> (<version>), empty array is returned if no packages are installed.
   "packages": ${JSON.stringify(Array.isArray(envInfo.packages) ? envInfo.packages : envInfo.packages, null, 2)}
