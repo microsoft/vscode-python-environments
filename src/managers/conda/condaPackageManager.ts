@@ -12,16 +12,15 @@ import {
     IconPath,
     Package,
     PackageChangeKind,
-    PackageInstallOptions,
+    PackageManagementOptions,
     PackageManager,
     PythonEnvironment,
     PythonEnvironmentApi,
 } from '../../api';
-import { getCommonCondaPackagesToInstall, installPackages, refreshPackages, uninstallPackages } from './condaUtils';
+import { getCommonCondaPackagesToInstall, managePackages, refreshPackages } from './condaUtils';
 import { withProgress } from '../../common/window.apis';
 import { showErrorMessage } from '../../common/errors/utils';
 import { CondaStrings } from '../../common/localize';
-import { getPackagesToUninstall } from '../common/utils';
 
 function getChanges(before: Package[], after: Package[]): { kind: PackageChangeKind; pkg: Package }[] {
     const changes: { kind: PackageChangeKind; pkg: Package }[] = [];
@@ -52,18 +51,25 @@ export class CondaPackageManager implements PackageManager, Disposable {
     tooltip?: string | MarkdownString;
     iconPath?: IconPath;
 
-    async install(environment: PythonEnvironment, packages?: string[], options?: PackageInstallOptions): Promise<void> {
-        let selected: string[] = packages ?? [];
+    async manage(environment: PythonEnvironment, options: PackageManagementOptions): Promise<void> {
+        let toInstall: string[] = [...(options.install ?? [])];
+        let toUninstall: string[] = [...(options.uninstall ?? [])];
 
-        if (selected.length === 0) {
-            selected = (await getCommonCondaPackagesToInstall(options)) ?? [];
+        if (toInstall.length === 0 && toUninstall.length === 0) {
+            const result = await getCommonCondaPackagesToInstall(environment, options, this.api);
+            if (result) {
+                toInstall = result.install;
+                toUninstall = result.uninstall;
+            } else {
+                return;
+            }
         }
 
-        if (selected.length === 0) {
-            return;
-        }
-
-        const installOptions = options ?? { upgrade: false };
+        const manageOptions = {
+            ...options,
+            install: toInstall,
+            uninstall: toUninstall,
+        };
         await withProgress(
             {
                 location: ProgressLocation.Notification,
@@ -73,7 +79,7 @@ export class CondaPackageManager implements PackageManager, Disposable {
             async (_progress, token) => {
                 try {
                     const before = this.packages.get(environment.envId.id) ?? [];
-                    const after = await installPackages(environment, selected, installOptions, this.api, this, token);
+                    const after = await managePackages(environment, manageOptions, this.api, this, token);
                     const changes = getChanges(before, after);
                     this.packages.set(environment.envId.id, after);
                     this._onDidChangePackages.fire({ environment: environment, manager: this, changes });
@@ -91,46 +97,6 @@ export class CondaPackageManager implements PackageManager, Disposable {
         );
     }
 
-    async uninstall(environment: PythonEnvironment, packages?: Package[] | string[]): Promise<void> {
-        let selected: Package[] | string[] = packages ?? [];
-        if (selected.length === 0) {
-            const installed = await this.getPackages(environment);
-            if (!installed) {
-                return;
-            }
-            selected = (await getPackagesToUninstall(installed)) ?? [];
-        }
-
-        if (selected.length === 0) {
-            return;
-        }
-
-        await withProgress(
-            {
-                location: ProgressLocation.Notification,
-                title: CondaStrings.condaUninstallingPackages,
-                cancellable: true,
-            },
-            async (_progress, token) => {
-                try {
-                    const before = this.packages.get(environment.envId.id) ?? [];
-                    const after = await uninstallPackages(environment, selected, this.api, this, token);
-                    const changes = getChanges(before, after);
-                    this.packages.set(environment.envId.id, after);
-                    this._onDidChangePackages.fire({ environment: environment, manager: this, changes });
-                } catch (e) {
-                    if (e instanceof CancellationError) {
-                        return;
-                    }
-
-                    this.log.error('Error uninstalling packages', e);
-                    setImmediate(async () => {
-                        await showErrorMessage(CondaStrings.condaUninstallError, this.log);
-                    });
-                }
-            },
-        );
-    }
     async refresh(environment: PythonEnvironment): Promise<void> {
         await withProgress(
             {

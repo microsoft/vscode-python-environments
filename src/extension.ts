@@ -8,7 +8,6 @@ import {
     createEnvironmentCommand,
     createTerminalCommand,
     getPackageCommandOptions,
-    handlePackagesCommand,
     refreshManagerCommand,
     removeEnvironmentCommand,
     removePythonProject,
@@ -138,7 +137,7 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
                 envManagers,
                 projectManager,
             );
-            await handlePackagesCommand(packageManager, environment);
+            packageManager.manage(environment, { install: [] });
         }),
         commands.registerCommand('python-envs.uninstallPackage', async (context: unknown) => {
             await handlePackageUninstall(context, envManagers);

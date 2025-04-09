@@ -33,10 +33,8 @@ import {
     PackageTreeItem,
     ProjectPackage,
 } from './views/treeViewItems';
-import { Common } from '../common/localize';
 import { pickEnvironment } from '../common/pickers/environments';
 import { pickEnvironmentManager, pickPackageManager, pickCreator } from '../common/pickers/managers';
-import { pickPackageOptions } from '../common/pickers/packages';
 import { pickProject, pickProjectMany } from '../common/pickers/projects';
 import { TerminalManager } from './terminal/terminalManager';
 import { runInTerminal } from './terminal/runInTerminal';
@@ -180,32 +178,12 @@ export async function removeEnvironmentCommand(context: unknown, managers: Envir
     }
 }
 
-export async function handlePackagesCommand(
-    packageManager: InternalPackageManager,
-    environment: PythonEnvironment,
-): Promise<void> {
-    const action = await pickPackageOptions();
-
-    try {
-        if (action === Common.install) {
-            await packageManager.install(environment, undefined, { showSkipOption: false });
-        } else if (action === Common.uninstall) {
-            await packageManager.uninstall(environment);
-        }
-    } catch (ex) {
-        if (ex === QuickInputButtons.Back) {
-            return handlePackagesCommand(packageManager, environment);
-        }
-        throw ex;
-    }
-}
-
 export async function handlePackageUninstall(context: unknown, em: EnvironmentManagers) {
     if (context instanceof PackageTreeItem || context instanceof ProjectPackage) {
         const moduleName = context.pkg.name;
         const environment = context.parent.environment;
         const packageManager = em.getPackageManager(environment);
-        await packageManager?.uninstall(environment, [moduleName]);
+        await packageManager?.manage(environment, { uninstall: [moduleName], install: [] });
         return;
     }
     traceError(`Invalid context for uninstall command: ${typeof context}`);

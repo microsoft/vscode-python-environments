@@ -575,20 +575,12 @@ export interface PackageManager {
     log?: LogOutputChannel;
 
     /**
-     * Installs packages in the specified Python environment.
+     * Installs/Uninstall packages in the specified Python environment.
      * @param environment - The Python environment in which to install packages.
      * @param packages - The packages to install.
      * @returns A promise that resolves when the installation is complete.
      */
-    install(environment: PythonEnvironment, packages?: string[], options?: PackageInstallOptions): Promise<void>;
-
-    /**
-     * Uninstalls packages from the specified Python environment.
-     * @param environment - The Python environment from which to uninstall packages.
-     * @param packages - The packages to uninstall, which can be an array of packages or strings.
-     * @returns A promise that resolves when the uninstall is complete.
-     */
-    uninstall(environment: PythonEnvironment, packages?: Package[] | string[]): Promise<void>;
+    manage(environment: PythonEnvironment, options: PackageManagementOptions): Promise<void>;
 
     /**
      * Refreshes the package list for the specified Python environment.
@@ -713,20 +705,47 @@ export interface DidChangePythonProjectsEventArgs {
     removed: PythonProject[];
 }
 
-/**
- * Options for package installation.
- */
-export interface PackageInstallOptions {
-    /**
-     * Upgrade the packages if it is already installed.
-     */
-    upgrade?: boolean;
+export type PackageManagementOptions =
+    | {
+          /**
+           * Upgrade the packages if it is already installed.
+           */
+          upgrade?: boolean;
 
-    /**
-     * Show option to skip package installation
-     */
-    showSkipOption?: boolean;
-}
+          /**
+           * Show option to skip package installation
+           */
+          showSkipOption?: boolean;
+          /**
+           * The list of packages to install.
+           */
+          install: string[];
+
+          /**
+           * The list of packages to uninstall.
+           */
+          uninstall?: string[];
+      }
+    | {
+          /**
+           * Upgrade the packages if it is already installed.
+           */
+          upgrade?: boolean;
+
+          /**
+           * Show option to skip package installation
+           */
+          showSkipOption?: boolean;
+          /**
+           * The list of packages to install.
+           */
+          install?: string[];
+
+          /**
+           * The list of packages to uninstall.
+           */
+          uninstall: string[];
+      };
 
 export interface PythonProcess {
     /**
@@ -909,21 +928,13 @@ export interface PythonPackageItemApi {
 
 export interface PythonPackageManagementApi {
     /**
-     * Install packages into a Python Environment.
+     * Install/Uninstall packages into a Python Environment.
      *
      * @param environment The Python Environment into which packages are to be installed.
      * @param packages The packages to install.
      * @param options Options for installing packages.
      */
-    installPackages(environment: PythonEnvironment, packages: string[], options?: PackageInstallOptions): Promise<void>;
-
-    /**
-     * Uninstall packages from a Python Environment.
-     *
-     * @param environment The Python Environment from which packages are to be uninstalled.
-     * @param packages The packages to uninstall.
-     */
-    uninstallPackages(environment: PythonEnvironment, packages: PackageInfo[] | string[]): Promise<void>;
+    managePackages(environment: PythonEnvironment, options: PackageManagementOptions): Promise<void>;
 }
 
 export interface PythonPackageManagerApi

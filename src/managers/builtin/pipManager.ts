@@ -4,16 +4,15 @@ import {
     IconPath,
     Package,
     PackageChangeKind,
-    PackageInstallOptions,
+    PackageManagementOptions,
     PackageManager,
     PythonEnvironment,
     PythonEnvironmentApi,
 } from '../../api';
-import { installPackages, refreshPackages, uninstallPackages } from './utils';
+import { managePackages, refreshPackages } from './utils';
 import { Disposable } from 'vscode-jsonrpc';
 import { VenvManager } from './venvManager';
 import { getWorkspacePackagesToInstall } from './pipUtils';
-import { getPackagesToUninstall } from '../common/utils';
 
 function getChanges(before: Package[], after: Package[]): { kind: PackageChangeKind; pkg: Package }[] {
     const changes: { kind: PackageChangeKind; pkg: Package }[] = [];
@@ -49,19 +48,26 @@ export class PipPackageManager implements PackageManager, Disposable {
     readonly tooltip?: string | MarkdownString;
     readonly iconPath?: IconPath;
 
-    async install(environment: PythonEnvironment, packages?: string[], options?: PackageInstallOptions): Promise<void> {
-        let selected: string[] = packages ?? [];
+    async manage(environment: PythonEnvironment, options: PackageManagementOptions): Promise<void> {
+        let toInstall: string[] = [...(options.install ?? [])];
+        let toUninstall: string[] = [...(options.uninstall ?? [])];
 
-        if (selected.length === 0) {
+        if (toInstall.length === 0 && toUninstall.length === 0) {
             const projects = this.venv.getProjectsByEnvironment(environment);
-            selected = (await getWorkspacePackagesToInstall(this.api, options, projects, environment)) ?? [];
+            const result = await getWorkspacePackagesToInstall(this.api, options, projects, environment);
+            if (result) {
+                toInstall = result.install;
+                toUninstall = result.uninstall;
+            } else {
+                return;
+            }
         }
 
-        if (selected.length === 0) {
-            return;
-        }
-
-        const installOptions = options ?? { upgrade: false };
+        const manageOptions = {
+            ...options,
+            install: toInstall,
+            uninstall: toUninstall,
+        };
         await window.withProgress(
             {
                 location: ProgressLocation.Notification,
@@ -71,54 +77,14 @@ export class PipPackageManager implements PackageManager, Disposable {
             async (_progress, token) => {
                 try {
                     const before = this.packages.get(environment.envId.id) ?? [];
-                    const after = await installPackages(environment, selected, installOptions, this.api, this, token);
+                    const after = await managePackages(environment, manageOptions, this.api, this, token);
                     const changes = getChanges(before, after);
                     this.packages.set(environment.envId.id, after);
                     this._onDidChangePackages.fire({ environment, manager: this, changes });
                 } catch (e) {
-                    this.log.error('Error installing packages', e);
+                    this.log.error('Error managing packages', e);
                     setImmediate(async () => {
-                        const result = await window.showErrorMessage('Error installing packages', 'View Output');
-                        if (result === 'View Output') {
-                            this.log.show();
-                        }
-                    });
-                }
-            },
-        );
-    }
-
-    async uninstall(environment: PythonEnvironment, packages?: Package[] | string[]): Promise<void> {
-        let selected: Package[] | string[] = packages ?? [];
-        if (selected.length === 0) {
-            const installed = await this.getPackages(environment);
-            if (!installed) {
-                return;
-            }
-            selected = (await getPackagesToUninstall(installed)) ?? [];
-        }
-
-        if (selected.length === 0) {
-            return;
-        }
-
-        await window.withProgress(
-            {
-                location: ProgressLocation.Notification,
-                title: 'Uninstalling packages',
-                cancellable: true,
-            },
-            async (_progress, token) => {
-                try {
-                    const before = this.packages.get(environment.envId.id) ?? [];
-                    const after = await uninstallPackages(environment, this.api, this, selected, token);
-                    const changes = getChanges(before, after);
-                    this.packages.set(environment.envId.id, after);
-                    this._onDidChangePackages.fire({ environment: environment, manager: this, changes });
-                } catch (e) {
-                    this.log.error('Error uninstalling packages', e);
-                    setImmediate(async () => {
-                        const result = await window.showErrorMessage('Error installing packages', 'View Output');
+                        const result = await window.showErrorMessage('Error managing packages', 'View Output');
                         if (result === 'View Output') {
                             this.log.show();
                         }

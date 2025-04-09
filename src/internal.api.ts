@@ -22,7 +22,7 @@ import {
     PackageInfo,
     PythonProjectCreator,
     ResolveEnvironmentContext,
-    PackageInstallOptions,
+    PackageManagementOptions,
     EnvironmentGroupInfo,
 } from './api';
 import { CreateEnvironmentNotSupported, RemoveEnvironmentNotSupported } from './common/errors/NotSupportedError';
@@ -225,15 +225,14 @@ export class InternalPackageManager implements PackageManager {
         return this.manager.log;
     }
 
-    install(environment: PythonEnvironment, packages?: string[], options?: PackageInstallOptions): Promise<void> {
-        return this.manager.install(environment, packages, options);
+    manage(environment: PythonEnvironment, options: PackageManagementOptions): Promise<void> {
+        return this.manager.manage(environment, options);
     }
-    uninstall(environment: PythonEnvironment, packages?: Package[] | string[]): Promise<void> {
-        return this.manager.uninstall(environment, packages);
-    }
+
     refresh(environment: PythonEnvironment): Promise<void> {
         return this.manager.refresh(environment);
     }
+
     getPackages(environment: PythonEnvironment): Promise<Package[] | undefined> {
         return this.manager.getPackages(environment);
     }
@@ -241,6 +240,7 @@ export class InternalPackageManager implements PackageManager {
     onDidChangePackages(handler: (e: DidChangePackagesEventArgs) => void): Disposable {
         return this.manager.onDidChangePackages ? this.manager.onDidChangePackages(handler) : new Disposable(() => {});
     }
+
     equals(other: PackageManager): boolean {
         return this.manager === other;
     }

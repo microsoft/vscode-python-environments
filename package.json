@@ -6,13 +6,12 @@
     "publisher": "ms-python",
     "preview": true,
     "engines": {
-        "vscode": "^1.99.0-20250317"
+        "vscode": "^1.100.0-20250407"
     },
     "categories": [
         "Other"
     ],
     "enabledApiProposals": [
-        "terminalShellType",
         "terminalShellEnv"
     ],
     "capabilities": {
@@ -142,7 +141,6 @@
             {
                 "command": "python-envs.reset",
                 "title": "%python-envs.reset.title%",
-                "shortTitle": "Reset Environment",
                 "category": "Python",
                 "icon": "$(sync)"
             },
@@ -174,7 +172,6 @@
             {
                 "command": "python-envs.packages",
                 "title": "%python-envs.packages.title%",
-                "shortTitle": "Modify Packages",
                 "category": "Python",
                 "icon": "$(package)"
             },
@@ -534,7 +531,7 @@
         "@types/node": "20.2.5",
         "@types/sinon": "^17.0.3",
         "@types/stack-trace": "0.0.29",
-        "@types/vscode": "^1.97.0",
+        "@types/vscode": "^1.99.0",
         "@types/which": "^3.0.4",
         "@typescript-eslint/eslint-plugin": "^8.16.0",
         "@typescript-eslint/parser": "^8.16.0",

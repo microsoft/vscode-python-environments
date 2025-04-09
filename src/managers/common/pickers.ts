@@ -117,20 +117,65 @@ async function enterPackageManually(filler?: string): Promise<string[] | undefin
     return input?.split(' ');
 }
 
+interface GroupingResult {
+    items: QuickPickItem[];
+    installedItems: PackageQuickPickItem[];
+}
+
+function groupByInstalled(items: PackageQuickPickItem[], installed?: string[]): GroupingResult {
+    const installedItems: PackageQuickPickItem[] = [];
+    const result: PackageQuickPickItem[] = [];
+    items.forEach((i) => {
+        if (installed?.find((p) => i.id === p)) {
+            installedItems.push(i);
+        } else {
+            result.push(i);
+        }
+    });
+    const installedSeparator: QuickPickItem = {
+        label: PackageManagement.installed,
+        kind: QuickPickItemKind.Separator,
+    };
+    const commonPackages: QuickPickItem = {
+        label: PackageManagement.commonPackages,
+        kind: QuickPickItemKind.Separator,
+    };
+    return {
+        items: [installedSeparator, ...installedItems, commonPackages, ...result],
+        installedItems,
+    };
+}
+
+export interface CommonPackagesResult {
+    install: string[];
+    uninstall: string[];
+}
+
+function selectionsToResult(selections: string[], installed: string[]): CommonPackagesResult {
+    const install: string[] = selections;
+    const uninstall: string[] = [];
+    installed.forEach((i) => {
+        if (!selections.find((s) => i === s)) {
+            uninstall.push(i);
+        }
+    });
+    return {
+        install,
+        uninstall,
+    };
+}
+
 export async function selectFromCommonPackagesToInstall(
     common: Installable[],
-    installed?: string[],
+    installed: string[],
     preSelected?: PackageQuickPickItem[] | undefined,
-): Promise<string[] | undefined> {
-    const items: PackageQuickPickItem[] = common.map(installableToQuickPickItem);
-    const preSelectedItems = items
-        .filter((i) => i.kind !== QuickPickItemKind.Separator)
-        .filter((i) => installed?.find((p) => i.id === p) || preSelected?.find((s) => s.id === i.id));
-
+): Promise<CommonPackagesResult | undefined> {
+    const { installedItems, items } = groupByInstalled(common.map(installableToQuickPickItem), installed);
+    const preSelectedItems = [...installedItems, ...(preSelected ?? [])];
     let selected: PackageQuickPickItem | PackageQuickPickItem[] | undefined;
     try {
         selected = await showQuickPickWithButtons(
-            items,
+            items as PackageQuickPickItem[],
             {
                 placeHolder: PackageManagement.selectPackagesToInstall,
                 ignoreFocusOut: true,
@@ -168,8 +213,11 @@ export async function selectFromCommonPackagesToInstall(
                 .map((s) => s.id)
                 .join(' ');
             try {
-                const result = await enterPackageManually(filler);
-                return result;
+                const selections = await enterPackageManually(filler);
+                if (selections) {
+                    return selectionsToResult(selections, installed);
+                }
+                return undefined;
             } catch (ex) {
                 if (ex === QuickInputButtons.Back) {
                     return selectFromCommonPackagesToInstall(common, installed, selected);
@@ -177,7 +225,10 @@ export async function selectFromCommonPackagesToInstall(
                 return undefined;
             }
         } else {
-            return selected.map((s) => s.id);
+            return selectionsToResult(
+                selected.map((s) => s.id),
+                installed,
+            );
         }
     }
 }

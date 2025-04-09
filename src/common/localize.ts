@@ -20,10 +20,14 @@ export namespace Interpreter {
 }
 
 export namespace PackageManagement {
+    export const install = l10n.t('Install');
+    export const uninstall = l10n.t('Uninstall');
+    export const installed = l10n.t('Installed');
+    export const commonPackages = l10n.t('Common Packages');
     export const selectPackagesToInstall = l10n.t('Select packages to install');
     export const enterPackageNames = l10n.t('Enter package names');
-    export const commonPackages = l10n.t('Search common `PyPI` packages');
-    export const commonPackagesDescription = l10n.t('Search and Install common `PyPI` packages');
+    export const searchCommonPackages = l10n.t('Search common `PyPI` packages');
+    export const searchCommonPackagesDescription = l10n.t('Search and Install common `PyPI` packages');
     export const workspaceDependencies = l10n.t('Install workspace dependencies');
     export const workspaceDependenciesDescription = l10n.t('Install dependencies found in the current workspace.');
     export const selectPackagesToUninstall = l10n.t('Select packages to uninstall');
@@ -40,8 +44,6 @@ export namespace Pickers {
 
     export namespace Packages {
         export const selectOption = l10n.t('Select an option');
-        export const installPackages = l10n.t('Install packages');
-        export const uninstallPackages = l10n.t('Uninstall packages');
     }
 
     export namespace Managers {

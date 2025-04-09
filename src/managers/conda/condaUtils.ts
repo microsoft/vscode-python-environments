@@ -2,8 +2,7 @@ import * as ch from 'child_process';
 import {
     EnvironmentManager,
     Package,
-    PackageInfo,
-    PackageInstallOptions,
+    PackageManagementOptions,
     PackageManager,
     PythonCommandRunConfiguration,
     PythonEnvironment,
@@ -695,50 +694,27 @@ export async function refreshPackages(
     return packages;
 }
 
-export async function installPackages(
+export async function managePackages(
     environment: PythonEnvironment,
-    packages: string[],
-    options: PackageInstallOptions,
+    options: PackageManagementOptions,
     api: PythonEnvironmentApi,
     manager: PackageManager,
     token: CancellationToken,
 ): Promise<Package[]> {
-    if (!packages || packages.length === 0) {
-        // TODO: Ask user to pick packages
-        throw new Error('No packages to install');
+    if (options.uninstall && options.uninstall.length > 0) {
+        await runConda(
+            ['remove', '--prefix', environment.environmentPath.fsPath, '--yes', ...options.uninstall],
+            token,
+        );
     }
-
-    const args = ['install', '--prefix', environment.environmentPath.fsPath, '--yes'];
-    if (options.upgrade) {
-        args.push('--update-all');
-    }
-    args.push(...packages);
-
-    await runConda(args, token);
-    return refreshPackages(environment, api, manager);
-}
-
-export async function uninstallPackages(
-    environment: PythonEnvironment,
-    packages: PackageInfo[] | string[],
-    api: PythonEnvironmentApi,
-    manager: PackageManager,
-    token: CancellationToken,
-): Promise<Package[]> {
-    const remove = [];
-    for (let pkg of packages) {
-        if (typeof pkg === 'string') {
-            remove.push(pkg);
-        } else {
-            remove.push(pkg.name);
+    if (options.install && options.install.length > 0) {
+        const args = ['install', '--prefix', environment.environmentPath.fsPath, '--yes'];
+        if (options.upgrade) {
+            args.push('--update-all');
         }
+        args.push(...options.install);
+        await runConda(args, token);
     }
-    if (remove.length === 0) {
-        throw new Error('No packages to remove');
-    }
-
-    await runConda(['remove', '--prefix', environment.environmentPath.fsPath, '--yes', ...remove], token);
-
     return refreshPackages(environment, api, manager);
 }
 
@@ -761,10 +737,16 @@ async function getCommonPackages(): Promise<Installable[]> {
     }
 }
 
+interface CondaPackagesResult {
+    install: string[];
+    uninstall: string[];
+}
+
 async function selectCommonPackagesOrSkip(
     common: Installable[],
+    installed: string[],
     showSkipOption: boolean,
-): Promise<string[] | undefined> {
+): Promise<CondaPackagesResult | undefined> {
     if (common.length === 0) {
         return undefined;
     }
@@ -772,8 +754,8 @@ async function selectCommonPackagesOrSkip(
     const items = [];
     if (common.length > 0) {
         items.push({
-            label: PackageManagement.commonPackages,
-            description: PackageManagement.commonPackagesDescription,
+            label: PackageManagement.searchCommonPackages,
+            description: PackageManagement.searchCommonPackagesDescription,
         });
     }
 
@@ -794,8 +776,8 @@ async function selectCommonPackagesOrSkip(
 
     if (selected && !Array.isArray(selected)) {
         try {
-            if (selected.label === PackageManagement.commonPackages) {
-                return await selectFromCommonPackagesToInstall(common);
+            if (selected.label === PackageManagement.searchCommonPackages) {
+                return await selectFromCommonPackagesToInstall(common, installed);
             } else {
                 traceInfo('Package Installer: user selected skip package installation');
                 return undefined;
@@ -803,15 +785,20 @@ async function selectCommonPackagesOrSkip(
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
         } catch (ex: any) {
             if (ex === QuickInputButtons.Back) {
-                return selectCommonPackagesOrSkip(common, showSkipOption);
+                return selectCommonPackagesOrSkip(common, installed, showSkipOption);
             }
         }
     }
     return undefined;
 }
 
-export async function getCommonCondaPackagesToInstall(options?: PackageInstallOptions): Promise<string[] | undefined> {
+export async function getCommonCondaPackagesToInstall(
+    environment: PythonEnvironment,
+    options: PackageManagementOptions,
+    api: PythonEnvironmentApi,
+): Promise<CondaPackagesResult | undefined> {
     const common = await getCommonPackages();
-    const selected = await selectCommonPackagesOrSkip(common, !!options?.showSkipOption);
+    const installed = (await api.getPackages(environment))?.map((p) => p.name);
+    const selected = await selectCommonPackagesOrSkip(common, installed ?? [], !!options.showSkipOption);
     return selected;
 }

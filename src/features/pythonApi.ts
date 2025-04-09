@@ -21,7 +21,7 @@ import {
     PackageId,
     PythonProjectCreator,
     ResolveEnvironmentContext,
-    PackageInstallOptions,
+    PackageManagementOptions,
     PythonProcess,
     PythonTaskExecutionOptions,
     PythonTerminalExecutionOptions,
@@ -216,19 +216,12 @@ class PythonEnvironmentApiImpl implements PythonEnvironmentApi {
         }
         return new Disposable(() => disposables.forEach((d) => d.dispose()));
     }
-    installPackages(context: PythonEnvironment, packages: string[], options: PackageInstallOptions): Promise<void> {
+    managePackages(context: PythonEnvironment, options: PackageManagementOptions): Promise<void> {
         const manager = this.envManagers.getPackageManager(context);
         if (!manager) {
             return Promise.reject(new Error('No package manager found'));
         }
-        return manager.install(context, packages, options);
-    }
-    uninstallPackages(context: PythonEnvironment, packages: Package[] | string[]): Promise<void> {
-        const manager = this.envManagers.getPackageManager(context);
-        if (!manager) {
-            return Promise.reject(new Error('No package manager found'));
-        }
-        return manager.uninstall(context, packages);
+        return manager.manage(context, options);
     }
     refreshPackages(context: PythonEnvironment): Promise<void> {
         const manager = this.envManagers.getPackageManager(context);

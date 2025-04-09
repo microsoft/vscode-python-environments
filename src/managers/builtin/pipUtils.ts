@@ -4,7 +4,7 @@ import * as tomljs from '@iarna/toml';
 import { LogOutputChannel, ProgressLocation, QuickInputButtons, Uri } from 'vscode';
 import { showQuickPickWithButtons, withProgress } from '../../common/window.apis';
 import { PackageManagement, Pickers, VenvManagerStrings } from '../../common/localize';
-import { PackageInstallOptions, PythonEnvironment, PythonEnvironmentApi, PythonProject } from '../../api';
+import { PackageManagementOptions, PythonEnvironment, PythonEnvironmentApi, PythonProject } from '../../api';
 import { findFiles } from '../../common/workspace.apis';
 import { EXTENSION_ROOT_DIR } from '../../common/constants';
 import { Installable, selectFromCommonPackagesToInstall, selectFromInstallableToInstall } from '../common/pickers';
@@ -76,8 +76,8 @@ async function selectWorkspaceOrCommon(
     installable: Installable[],
     common: Installable[],
     showSkipOption: boolean,
-    installed?: string[],
-): Promise<string[] | undefined> {
+    installed: string[],
+): Promise<PipPackages | undefined> {
     if (installable.length === 0 && common.length === 0) {
         return undefined;
     }
@@ -92,8 +92,8 @@ async function selectWorkspaceOrCommon(
 
     if (common.length > 0) {
         items.push({
-            label: PackageManagement.commonPackages,
-            description: PackageManagement.commonPackagesDescription,
+            label: PackageManagement.searchCommonPackages,
+            description: PackageManagement.searchCommonPackagesDescription,
         });
     }
 
@@ -115,8 +115,9 @@ async function selectWorkspaceOrCommon(
     if (selected && !Array.isArray(selected)) {
         try {
             if (selected.label === PackageManagement.workspaceDependencies) {
-                return await selectFromInstallableToInstall(installable);
-            } else if (selected.label === PackageManagement.commonPackages) {
+                const installArgs = await selectFromInstallableToInstall(installable);
+                return { install: installArgs ?? [], uninstall: [] };
+            } else if (selected.label === PackageManagement.searchCommonPackages) {
                 return await selectFromCommonPackagesToInstall(common, installed);
             } else {
                 traceInfo('Package Installer: user selected skip package installation');
@@ -125,26 +126,31 @@ async function selectWorkspaceOrCommon(
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
         } catch (ex: any) {
             if (ex === QuickInputButtons.Back) {
-                return selectWorkspaceOrCommon(installable, common, showSkipOption);
+                return selectWorkspaceOrCommon(installable, common, showSkipOption, installed);
             }
         }
     }
     return undefined;
 }
 
+export interface PipPackages {
+    install: string[];
+    uninstall: string[];
+}
+
 export async function getWorkspacePackagesToInstall(
     api: PythonEnvironmentApi,
-    options?: PackageInstallOptions,
+    options: PackageManagementOptions,
     project?: PythonProject[],
     environment?: PythonEnvironment,
-): Promise<string[] | undefined> {
+): Promise<PipPackages | undefined> {
     const installable = (await getProjectInstallable(api, project)) ?? [];
     const common = await getCommonPackages();
     let installed: string[] | undefined;
     if (environment) {
         installed = (await api.getPackages(environment))?.map((pkg) => pkg.name);
     }
-    return selectWorkspaceOrCommon(installable, common, !!options?.showSkipOption, installed);
+    return selectWorkspaceOrCommon(installable, common, !!options.showSkipOption, installed ?? []);
 }
 
 export async function getProjectInstallable(

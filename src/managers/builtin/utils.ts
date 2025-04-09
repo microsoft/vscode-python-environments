@@ -2,7 +2,7 @@ import { CancellationToken, l10n, LogOutputChannel, QuickPickItem, ThemeIcon, Ur
 import {
     EnvironmentManager,
     Package,
-    PackageInstallOptions,
+    PackageManagementOptions,
     PackageManager,
     PythonEnvironment,
     PythonEnvironmentApi,
@@ -173,10 +173,9 @@ export async function refreshPackages(
     return parsePipList(data).map((pkg) => api.createPackageItem(pkg, environment, manager));
 }
 
-export async function installPackages(
+export async function managePackages(
     environment: PythonEnvironment,
-    packages: string[],
-    options: PackageInstallOptions,
+    options: PackageManagementOptions,
     api: PythonEnvironmentApi,
     manager: PackageManager,
     token?: CancellationToken,
@@ -185,20 +184,36 @@ export async function installPackages(
         throw new Error('Python 2.* is not supported (deprecated)');
     }
 
-    if (environment.execInfo) {
-        if (packages.length === 0) {
-            throw new Error('No packages selected to install');
-        }
-
-        const useUv = await isUvInstalled();
-
-        const installArgs = ['pip', 'install'];
-        if (options.upgrade) {
-            installArgs.push('--upgrade');
-        }
+    const useUv = await isUvInstalled();
+    const uninstallArgs = ['pip', 'uninstall'];
+    if (options.uninstall && options.uninstall.length > 0) {
         if (useUv) {
             await runUV(
-                [...installArgs, '--python', environment.execInfo.run.executable, ...packages],
+                [...uninstallArgs, '--python', environment.execInfo.run.executable, ...options.uninstall],
+                undefined,
+                manager.log,
+                token,
+            );
+        } else {
+            uninstallArgs.push('--yes');
+            await runPython(
+                environment.execInfo.run.executable,
+                ['-m', ...uninstallArgs, ...options.uninstall],
+                undefined,
+                manager.log,
+                token,
+            );
+        }
+    }
+
+    const installArgs = ['pip', 'install'];
+    if (options.upgrade) {
+        installArgs.push('--upgrade');
+    }
+    if (options.install && options.install.length > 0) {
+        if (useUv) {
+            await runUV(
+                [...installArgs, '--python', environment.execInfo.run.executable, ...options.install],
                 undefined,
                 manager.log,
                 token,
@@ -206,68 +221,15 @@ export async function installPackages(
         } else {
             await runPython(
                 environment.execInfo.run.executable,
-                ['-m', ...installArgs, ...packages],
+                ['-m', ...installArgs, ...options.install],
                 undefined,
                 manager.log,
                 token,
             );
         }
-
-        return refreshPackages(environment, api, manager);
-    }
-    throw new Error(`No executable found for python: ${environment.environmentPath.fsPath}`);
-}
-
-export async function uninstallPackages(
-    environment: PythonEnvironment,
-    api: PythonEnvironmentApi,
-    manager: PackageManager,
-    packages: string[] | Package[],
-    token?: CancellationToken,
-): Promise<Package[]> {
-    if (environment.version.startsWith('2.')) {
-        throw new Error('Python 2.* is not supported (deprecated)');
     }
 
-    if (environment.execInfo) {
-        const remove = [];
-        for (let pkg of packages) {
-            if (typeof pkg === 'string') {
-                remove.push(pkg);
-            } else {
-                remove.push(pkg.name);
-            }
-        }
-        if (remove.length === 0) {
-            const installed = await manager.getPackages(environment);
-            if (installed) {
-                const packages = await pickPackages(true, installed);
-                if (packages.length === 0) {
-                    throw new Error('No packages selected to uninstall');
-                }
-            }
-        }
-
-        const useUv = await isUvInstalled();
-        if (useUv) {
-            await runUV(
-                ['pip', 'uninstall', '--python', environment.execInfo.run.executable, ...remove],
-                undefined,
-                manager.log,
-                token,
-            );
-        } else {
-            await runPython(
-                environment.execInfo.run.executable,
-                ['-m', 'pip', 'uninstall', '-y', ...remove],
-                undefined,
-                manager.log,
-                token,
-            );
-        }
-        return refreshPackages(environment, api, manager);
-    }
-    throw new Error(`No executable found for python: ${environment.environmentPath.fsPath}`);
+    return refreshPackages(environment, api, manager);
 }
 
 export async function resolveSystemPythonEnvironmentPath(

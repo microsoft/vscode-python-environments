@@ -31,7 +31,7 @@ import {
 import { showErrorMessage } from '../../common/errors/utils';
 import { Common, VenvManagerStrings } from '../../common/localize';
 import { isUvInstalled, runUV, runPython } from './helpers';
-import { getProjectInstallable, getWorkspacePackagesToInstall } from './pipUtils';
+import { getProjectInstallable, getWorkspacePackagesToInstall, PipPackages } from './pipUtils';
 import { sendTelemetryEvent } from '../../common/telemetry/sender';
 import { EventNames } from '../../common/telemetry/constants';
 
@@ -384,7 +384,7 @@ async function createWithProgress(
     basePython: PythonEnvironment,
     venvRoot: Uri,
     envPath: string,
-    packages?: string[],
+    packages?: PipPackages,
 ) {
     const pythonPath =
         os.platform() === 'win32' ? path.join(envPath, 'Scripts', 'python.exe') : path.join(envPath, 'bin', 'python');
@@ -420,8 +420,12 @@ async function createWithProgress(
 
                 const resolved = await nativeFinder.resolve(pythonPath);
                 const env = api.createPythonEnvironmentItem(await getPythonInfo(resolved), manager);
-                if (packages && packages?.length > 0) {
-                    await api.installPackages(env, packages, { upgrade: false });
+                if (packages && (packages.install.length > 0 || packages.uninstall.length > 0)) {
+                    await api.managePackages(env, {
+                        upgrade: false,
+                        install: packages?.install,
+                        uninstall: packages?.uninstall ?? [],
+                    });
                 }
                 return env;
             } catch (e) {
@@ -474,7 +478,7 @@ export async function createPythonVenv(
             sortedEnvs[0],
             venvRoot,
             path.join(venvRoot.fsPath, '.venv'),
-            installables?.flatMap((i) => i.args ?? []),
+            { install: installables?.flatMap((i) => i.args ?? []), uninstall: [] },
         );
     } else {
         sendTelemetryEvent(EventNames.VENV_CREATION, undefined, { creationType: 'custom' });
@@ -508,7 +512,7 @@ export async function createPythonVenv(
 
     const packages = await getWorkspacePackagesToInstall(
         api,
-        { showSkipOption: true },
+        { showSkipOption: true, install: [] },
         project ? [project] : undefined,
     );
 
