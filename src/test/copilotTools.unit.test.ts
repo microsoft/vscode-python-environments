@@ -343,11 +343,6 @@ suite('GetEnvironmentInfoTool Tests', () => {
             .returns(async () => {
                 return Promise.resolve(mockEnvironmentSuccess.object);
             });
-        mockApi
-            .setup((x) => x.getEnvironment(typeMoq.It.isAny()))
-            .returns(async () => {
-                return Promise.resolve(mockEnvironmentSuccess.object);
-            });
         mockApi.setup((x) => x.refreshPackages(typeMoq.It.isAny())).returns(() => Promise.resolve());
 
         const packageAId: PackageId = {
@@ -379,7 +374,59 @@ suite('GetEnvironmentInfoTool Tests', () => {
         const content = result.content as vscode.LanguageModelTextPart[];
         const firstPart = content[0] as vscode.MarkdownString;
         console.log('result', firstPart.value);
-        assert.strictEqual(firstPart.value.includes('Python version: 3.9.1'), true);
-        assert.strictEqual(firstPart.value, '');
+        assert.strictEqual(firstPart.value.includes('3.9.1'), true);
+        assert.strictEqual(firstPart.value.includes('package1 (1.0.0)'), true);
+        assert.strictEqual(firstPart.value.includes('package2 (2.0.0)'), true);
+        assert.strictEqual(firstPart.value.includes(`"conda run -n env_name python"`), true);
+        assert.strictEqual(firstPart.value.includes('venv'), true);
+    });
+    test('should return successful with weird environment info', async () => {
+        // create mock of PythonEnvironment
+        const mockEnvironmentSuccess = typeMoq.Mock.ofType<PythonEnvironment>();
+        // mockEnvironment = typeMoq.Mock.ofType<PythonEnvironment>();
+
+        // // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        mockEnvironmentSuccess.setup((x: any) => x.then).returns(() => undefined);
+        mockEnvironmentSuccess.setup((x) => x.version).returns(() => '3.12.1');
+        const mockEnvId = typeMoq.Mock.ofType<PythonEnvironmentId>();
+        mockEnvId.setup((x) => x.managerId).returns(() => 'ms-python.python:sys');
+        mockEnvironmentSuccess.setup((x) => x.envId).returns(() => mockEnvId.object);
+        mockEnvironmentSuccess
+            .setup((x) => x.execInfo)
+            .returns(() => ({
+                run: {
+                    executable: 'path/to/venv/bin/python',
+                    args: [],
+                },
+            }));
+
+        mockApi
+            .setup((x) => x.getEnvironment(typeMoq.It.isAny()))
+            .returns(async () => {
+                return Promise.resolve(mockEnvironmentSuccess.object);
+            });
+        mockApi.setup((x) => x.refreshPackages(typeMoq.It.isAny())).returns(() => Promise.resolve());
+
+        mockApi
+            .setup((x) => x.getPackages(typeMoq.It.isAny()))
+            .returns(async () => {
+                return Promise.resolve([]);
+            });
+
+        const testFile: IResourceReference = {
+            resourcePath: 'this/is/a/test/path.ipynb',
+        };
+        const options = { input: testFile, toolInvocationToken: undefined };
+        const token = new vscode.CancellationTokenSource().token;
+        // run
+        const result = await getEnvironmentInfoTool.invoke(options, token);
+        // assert
+        const content = result.content as vscode.LanguageModelTextPart[];
+        const firstPart = content[0] as vscode.MarkdownString;
+        console.log('result', firstPart.value);
+        assert.strictEqual(firstPart.value.includes('3.12.1'), true);
+        assert.strictEqual(firstPart.value.includes('"packages": []'), true);
+        assert.strictEqual(firstPart.value.includes(`"path/to/venv/bin/python"`), true);
+        assert.strictEqual(firstPart.value.includes('sys'), true);
     });
 });

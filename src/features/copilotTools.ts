@@ -78,7 +78,7 @@ export class GetEnvironmentInfoTool implements LanguageModelTool<IResourceRefere
 
             const execInfo: PythonEnvironmentExecutionInfo = environment.execInfo;
             const run: PythonCommandRunConfiguration = execInfo.run;
-            envInfo.runCommand = run.executable + (run.args ? ` ${run.args.join(' ')}` : '');
+            envInfo.runCommand = run.executable + (run.args && run.args.length > 0 ? ` ${run.args.join(' ')}` : '');
             // TODO: check if this is the right way to get type
             envInfo.type = environment.envId.managerId.split(':')[1];
             envInfo.version = environment.version;
