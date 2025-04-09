@@ -2,18 +2,31 @@ import * as assert from 'assert';
 import * as vscode from 'vscode';
 import * as sinon from 'sinon';
 import * as typeMoq from 'typemoq';
-import { Package, PythonEnvironment, PythonPackageGetterApi, PythonProjectEnvironmentApi } from '../api';
+import {
+    PythonCommandRunConfiguration,
+    PythonEnvironment,
+    PythonPackageGetterApi,
+    PythonPackageManagementApi,
+    PythonProjectEnvironmentApi,
+} from '../api';
 import { createDeferred } from '../common/utils/deferred';
-import { GetPackagesTool, IGetActiveFile } from '../features/copilotTools';
+import {
+    GetEnvironmentInfoTool,
+    IInstallPackageInput,
+    InstallPackageTool,
+    IResourceReference,
+} from '../features/copilotTools';
 
-suite('GetPackagesTool Tests', () => {
-    let tool: GetPackagesTool;
-    let mockApi: typeMoq.IMock<PythonProjectEnvironmentApi & PythonPackageGetterApi>;
+suite('InstallPackageTool Tests', () => {
+    let installPackageTool: InstallPackageTool;
+    let mockApi: typeMoq.IMock<PythonProjectEnvironmentApi & PythonPackageGetterApi & PythonPackageManagementApi>;
     let mockEnvironment: typeMoq.IMock<PythonEnvironment>;
 
     setup(() => {
         // Create mock functions
-        mockApi = typeMoq.Mock.ofType<PythonProjectEnvironmentApi & PythonPackageGetterApi>();
+        mockApi = typeMoq.Mock.ofType<
+            PythonProjectEnvironmentApi & PythonPackageGetterApi & PythonPackageManagementApi
+        >();
         mockEnvironment = typeMoq.Mock.ofType<PythonEnvironment>();
 
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -22,165 +35,74 @@ suite('GetPackagesTool Tests', () => {
         // refresh will always return a resolved promise
         mockApi.setup((x) => x.refreshPackages(typeMoq.It.isAny())).returns(() => Promise.resolve());
 
-        // Create an instance of GetPackagesTool with the mock functions
-        tool = new GetPackagesTool(mockApi.object);
+        // Create an instance of InstallPackageTool with the mock functions
+        installPackageTool = new InstallPackageTool(mockApi.object);
     });
 
     teardown(() => {
         sinon.restore();
     });
 
-    test('should throw error if filePath is undefined', async () => {
-        const testFile: IGetActiveFile = {
-            filePath: '',
+    test('should throw error if workspacePath is an empty string', async () => {
+        const testFile: IInstallPackageInput = {
+            workspacePath: '',
+            packageList: ['package1', 'package2'],
         };
         const options = { input: testFile, toolInvocationToken: undefined };
         const token = new vscode.CancellationTokenSource().token;
-        await assert.rejects(tool.invoke(options, token), { message: 'Invalid input: filePath is required' });
+        await assert.rejects(installPackageTool.invoke(options, token), {
+            message: 'Invalid input: workspacePath is required',
+        });
     });
 
     test('should throw error for notebook files', async () => {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         mockEnvironment.setup((x: any) => x.then).returns(() => undefined);
 
-        const testFile: IGetActiveFile = {
-            filePath: 'test.ipynb',
+        const testFile: IInstallPackageInput = {
+            workspacePath: 'this/is/a/test/path.ipynb',
+            packageList: ['package1', 'package2'],
         };
         const options = { input: testFile, toolInvocationToken: undefined };
         const token = new vscode.CancellationTokenSource().token;
-        const result = await tool.invoke(options, token);
+        const result = await installPackageTool.invoke(options, token);
         const content = result.content as vscode.LanguageModelTextPart[];
         const firstPart = content[0] as vscode.LanguageModelTextPart;
 
-        assert.strictEqual(
-            firstPart.value,
-            'An error occurred while fetching packages: Error: Unable to access Jupyter kernels for notebook cells',
-        );
+        assert.strictEqual(firstPart.value.includes('An error occurred while installing packages'), true);
     });
 
     test('should throw error for notebook cells', async () => {
-        const testFile: IGetActiveFile = {
-            filePath: 'test.ipynb#123',
+        const testFile: IInstallPackageInput = {
+            workspacePath: 'this/is/a/test/path.ipynb#cell',
+            packageList: ['package1', 'package2'],
         };
         const options = { input: testFile, toolInvocationToken: undefined };
         const token = new vscode.CancellationTokenSource().token;
-        const result = await tool.invoke(options, token);
+        const result = await installPackageTool.invoke(options, token);
         const content = result.content as vscode.LanguageModelTextPart[];
-        const firstPart = content[0] as vscode.MarkdownString;
+        const firstPart = content[0] as vscode.LanguageModelTextPart;
 
-        assert.strictEqual(
-            firstPart.value,
-            'An error occurred while fetching packages: Error: Unable to access Jupyter kernels for notebook cells',
-        );
+        assert.strictEqual(firstPart.value.includes('An error occurred while installing packages'), true);
     });
 
-    test('should return no packages message if no packages are installed', async () => {
-        const testFile: IGetActiveFile = {
-            filePath: 'test.py',
+    test('should throw error if packageList passed in is empty', async () => {
+        const testFile: IInstallPackageInput = {
+            workspacePath: 'path/to/workspace',
+            packageList: [],
         };
-
-        mockApi
-            .setup((x) => x.getEnvironment(typeMoq.It.isAny()))
-            .returns(() => {
-                return Promise.resolve(mockEnvironment.object);
-            });
-
-        mockApi.setup((x) => x.getPackages(typeMoq.It.isAny())).returns(() => Promise.resolve([]));
 
         const options = { input: testFile, toolInvocationToken: undefined };
         const token = new vscode.CancellationTokenSource().token;
-        const result = await tool.invoke(options, token);
-        const content = result.content as vscode.LanguageModelTextPart[];
-        const firstPart = content[0] as vscode.MarkdownString;
-
-        assert.strictEqual(firstPart.value, 'No packages are installed in the current environment.');
-    });
-
-    test('should return just packages if versions do not exist', async () => {
-        const testFile: IGetActiveFile = {
-            filePath: 'test.py',
-        };
-
-        mockApi
-            .setup((x) => x.getEnvironment(typeMoq.It.isAny()))
-            .returns(() => {
-                return Promise.resolve(mockEnvironment.object);
-            });
-
-        const mockPackages: Package[] = [
-            {
-                pkgId: { id: 'pkg1', managerId: 'pip', environmentId: 'env1' },
-                name: 'package1',
-                displayName: 'package1',
-            },
-            {
-                pkgId: { id: 'pkg2', managerId: 'pip', environmentId: 'env1' },
-                name: 'package2',
-                displayName: 'package2',
-            },
-        ];
-
-        mockApi.setup((x) => x.refreshPackages(typeMoq.It.isAny())).returns(() => Promise.resolve());
-        mockApi.setup((x) => x.getPackages(typeMoq.It.isAny())).returns(() => Promise.resolve(mockPackages));
-
-        const options = { input: testFile, toolInvocationToken: undefined };
-        const token = new vscode.CancellationTokenSource().token;
-        const result = await tool.invoke(options, token);
-        const content = result.content as vscode.LanguageModelTextPart[];
-        const firstPart = content[0] as vscode.MarkdownString;
-
-        assert.ok(
-            firstPart.value.includes('The packages installed in the current environment are as follows:') &&
-                firstPart.value.includes('package1') &&
-                firstPart.value.includes('package2'),
-        );
-    });
-
-    test('should return installed packages with versions', async () => {
-        const testFile: IGetActiveFile = {
-            filePath: 'test.py',
-        };
-
-        mockApi
-            .setup((x) => x.getEnvironment(typeMoq.It.isAny()))
-            .returns(() => {
-                return Promise.resolve(mockEnvironment.object);
-            });
-
-        const mockPackages: Package[] = [
-            {
-                pkgId: { id: 'pkg1', managerId: 'pip', environmentId: 'env1' },
-                name: 'package1',
-                displayName: 'package1',
-                version: '1.0.0',
-            },
-            {
-                pkgId: { id: 'pkg2', managerId: 'pip', environmentId: 'env1' },
-                name: 'package2',
-                displayName: 'package2',
-                version: '2.0.0',
-            },
-        ];
-
-        mockApi.setup((x) => x.refreshPackages(typeMoq.It.isAny())).returns(() => Promise.resolve());
-        mockApi.setup((x) => x.getPackages(typeMoq.It.isAny())).returns(() => Promise.resolve(mockPackages));
-
-        const options = { input: testFile, toolInvocationToken: undefined };
-        const token = new vscode.CancellationTokenSource().token;
-        const result = await tool.invoke(options, token);
-        const content = result.content as vscode.LanguageModelTextPart[];
-        const firstPart = content[0] as vscode.MarkdownString;
-
-        assert.ok(
-            firstPart.value.includes('The packages installed in the current environment are as follows:') &&
-                firstPart.value.includes('package1 (1.0.0)') &&
-                firstPart.value.includes('package2 (2.0.0)'),
-        );
+        await assert.rejects(installPackageTool.invoke(options, token), {
+            message: 'Invalid input: packageList is required and cannot be empty',
+        });
     });
 
     test('should handle cancellation', async () => {
-        const testFile: IGetActiveFile = {
-            filePath: 'test.py',
+        const testFile: IInstallPackageInput = {
+            workspacePath: 'path/to/workspace',
+            packageList: ['package1', 'package2'],
         };
 
         mockApi
@@ -190,14 +112,13 @@ suite('GetPackagesTool Tests', () => {
             });
 
         mockApi.setup((x) => x.refreshPackages(typeMoq.It.isAny())).returns(() => Promise.resolve());
-        mockApi.setup((x) => x.getPackages(typeMoq.It.isAny())).returns(() => Promise.resolve([]));
 
         const options = { input: testFile, toolInvocationToken: undefined };
         const tokenSource = new vscode.CancellationTokenSource();
         const token = tokenSource.token;
 
         const deferred = createDeferred();
-        tool.invoke(options, token).then((result) => {
+        installPackageTool.invoke(options, token).then((result) => {
             const content = result.content as vscode.LanguageModelTextPart[];
             const firstPart = content[0] as vscode.MarkdownString;
 
@@ -208,4 +129,178 @@ suite('GetPackagesTool Tests', () => {
         tokenSource.cancel();
         await deferred.promise;
     });
+
+    test('should handle packages installation', async () => {
+        const testFile: IInstallPackageInput = {
+            workspacePath: 'path/to/workspace',
+            packageList: ['package1', 'package2'],
+        };
+
+        mockApi
+            .setup((x) => x.getEnvironment(typeMoq.It.isAny()))
+            .returns(async () => {
+                return Promise.resolve(mockEnvironment.object);
+            });
+
+        mockApi.setup((x) => x.refreshPackages(typeMoq.It.isAny())).returns(() => Promise.resolve());
+        mockApi
+            .setup((x) => x.installPackages(typeMoq.It.isAny(), typeMoq.It.isAny()))
+            .returns(() => {
+                const deferred = createDeferred<void>();
+                deferred.resolve();
+                return deferred.promise;
+            });
+
+        const options = { input: testFile, toolInvocationToken: undefined };
+        const token = new vscode.CancellationTokenSource().token;
+
+        const result = await installPackageTool.invoke(options, token);
+        const content = result.content as vscode.LanguageModelTextPart[];
+        const firstPart = content[0] as vscode.MarkdownString;
+
+        assert.strictEqual(firstPart.value.includes('Successfully installed packages'), true);
+        assert.strictEqual(firstPart.value.includes('package1'), true);
+        assert.strictEqual(firstPart.value.includes('package2'), true);
+    });
+    test('should handle package installation failure', async () => {
+        const testFile: IInstallPackageInput = {
+            workspacePath: 'path/to/workspace',
+            packageList: ['package1', 'package2'],
+        };
+
+        mockApi
+            .setup((x) => x.getEnvironment(typeMoq.It.isAny()))
+            .returns(async () => {
+                return Promise.resolve(mockEnvironment.object);
+            });
+
+        mockApi.setup((x) => x.refreshPackages(typeMoq.It.isAny())).returns(() => Promise.resolve());
+        mockApi
+            .setup((x) => x.installPackages(typeMoq.It.isAny(), typeMoq.It.isAny()))
+            .returns(() => {
+                const deferred = createDeferred<void>();
+                deferred.reject(new Error('Installation failed'));
+                return deferred.promise;
+            });
+
+        const options = { input: testFile, toolInvocationToken: undefined };
+        const token = new vscode.CancellationTokenSource().token;
+
+        const result = await installPackageTool.invoke(options, token);
+        const content = result.content as vscode.LanguageModelTextPart[];
+        const firstPart = content[0] as vscode.MarkdownString;
+
+        console.log('result', firstPart.value);
+        assert.strictEqual(
+            firstPart.value.includes('An error occurred while installing packages'),
+            true,
+            `error message was ${firstPart.value}`,
+        );
+    });
+    test('should handle error occurs when getting environment', async () => {
+        const testFile: IInstallPackageInput = {
+            workspacePath: 'path/to/workspace',
+            packageList: ['package1', 'package2'],
+        };
+        mockApi
+            .setup((x) => x.getEnvironment(typeMoq.It.isAny()))
+            .returns(async () => {
+                return Promise.reject(new Error('Unable to get environment'));
+            });
+
+        const options = { input: testFile, toolInvocationToken: undefined };
+        const token = new vscode.CancellationTokenSource().token;
+        const result = await installPackageTool.invoke(options, token);
+        const content = result.content as vscode.LanguageModelTextPart[];
+        const firstPart = content[0] as vscode.MarkdownString;
+        assert.strictEqual(firstPart.value.includes('An error occurred while installing packages'), true);
+    });
+    test('correct plurality in package installation message', async () => {
+        const testFile: IInstallPackageInput = {
+            workspacePath: 'path/to/workspace',
+            packageList: ['package1'],
+        };
+        mockApi
+            .setup((x) => x.getEnvironment(typeMoq.It.isAny()))
+            .returns(async () => {
+                return Promise.resolve(mockEnvironment.object);
+            });
+        mockApi.setup((x) => x.refreshPackages(typeMoq.It.isAny())).returns(() => Promise.resolve());
+        mockApi
+            .setup((x) => x.installPackages(typeMoq.It.isAny(), typeMoq.It.isAny()))
+            .returns(() => {
+                const deferred = createDeferred<void>();
+                deferred.resolve();
+                return deferred.promise;
+            });
+        const options = { input: testFile, toolInvocationToken: undefined };
+        const token = new vscode.CancellationTokenSource().token;
+        const result = await installPackageTool.invoke(options, token);
+        const content = result.content as vscode.LanguageModelTextPart[];
+        const firstPart = content[0] as vscode.MarkdownString;
+        assert.strictEqual(firstPart.value.includes('packages'), false);
+        assert.strictEqual(firstPart.value.includes('package'), true);
+    });
+});
+
+suite('GetEnvironmentInfoTool Tests', () => {
+    let getEnvironmentInfoTool: GetEnvironmentInfoTool;
+    let mockApi: typeMoq.IMock<PythonProjectEnvironmentApi & PythonPackageGetterApi & PythonPackageManagementApi>;
+    let mockEnvironment: typeMoq.IMock<PythonEnvironment>;
+
+    setup(() => {
+        // Create mock functions
+        mockApi = typeMoq.Mock.ofType<
+            PythonProjectEnvironmentApi & PythonPackageGetterApi & PythonPackageManagementApi
+        >();
+        mockEnvironment = typeMoq.Mock.ofType<PythonEnvironment>();
+
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        mockEnvironment.setup((x: any) => x.then).returns(() => undefined);
+
+        // Create an instance of GetEnvironmentInfoTool with the mock functions
+        getEnvironmentInfoTool = new GetEnvironmentInfoTool(mockApi.object);
+
+        // runConfig valid / not valid
+        const runConfigValid: PythonCommandRunConfiguration = {
+            executable: 'conda',
+            args: ['run', '-n', 'env_name', 'python'],
+        };
+        const runConfigValidString = 'conda run -n env_name python';
+        const runConfigNoArgs: PythonCommandRunConfiguration = {
+            executable: '.venv/bin/python',
+            args: [],
+        };
+        const runConfigNoArgsString = '.venv/bin/python';
+
+        // managerId valid / not valid
+        const managerIdValid = `'ms-python.python:venv'`;
+        const typeValidString = 'venv';
+        const managerIdInvalid = `vscode-python, there is no such manager`;
+
+        // environment valid
+        const envInfoVersion = '3.9.1';
+
+        //package valid / not valid
+        const installedPackagesValid = [{ name: 'package1', version: '1.0.0' }, { name: 'package2' }];
+        const installedPackagesValidString = 'package1 1.0.0\npackage2 2.0.0';
+        const installedPackagesInvalid = undefined;
+    });
+
+    teardown(() => {
+        sinon.restore();
+    });
+    test('should throw error if resourcePath is an empty string', async () => {
+        const testFile: IResourceReference = {
+            resourcePath: '',
+        };
+        const options = { input: testFile, toolInvocationToken: undefined };
+        const token = new vscode.CancellationTokenSource().token;
+        await assert.rejects(getEnvironmentInfoTool.invoke(options, token), {
+            message: 'Invalid input: resourcePath is required',
+        });
+    });
+    // test should throw error if environment is not found
+    //
+    // cancellation token should work if called
 });

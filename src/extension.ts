@@ -53,7 +53,7 @@ import { ensureCorrectVersion } from './common/extVersion';
 import { ExistingProjects } from './features/creators/existingProjects';
 import { AutoFindProjects } from './features/creators/autoFindProjects';
 import { registerTools } from './common/lm.apis';
-import { GetPackagesTool } from './features/copilotTools';
+import { GetEnvironmentInfoTool, InstallPackageTool } from './features/copilotTools';
 import { TerminalActivationImpl } from './features/terminal/terminalActivationState';
 import { getEnvironmentForTerminal } from './features/terminal/utils';
 
@@ -107,7 +107,8 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
 
     context.subscriptions.push(
         registerCompletionProvider(envManagers),
-        registerTools('python_get_packages', new GetPackagesTool(api)),
+        registerTools('python_environment_tool', new GetEnvironmentInfoTool(api)),
+        registerTools('python_install_package_tool', new InstallPackageTool(api)),
         commands.registerCommand('python-envs.viewLogs', () => outputChannel.show()),
         commands.registerCommand('python-envs.refreshManager', async (item) => {
             await refreshManagerCommand(item);

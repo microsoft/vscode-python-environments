@@ -491,22 +491,52 @@
         ],
         "languageModelTools": [
             {
-                "name": "python_get_packages",
-                "displayName": "Get Python Packages",
-                "modelDescription": "Returns the packages installed in the given Python file's environment. You should call this when you want to generate Python code to determine the users preferred packages. Also call this to determine if you need to provide installation instructions in a response.",
-                "toolReferenceName": "pythonGetPackages",
+                "name": "python_environment_tool",
+                "displayName": "Get Python Environment Information",
+                "modelDescription": "Returns the information about the Python environment for the given file or workspace. Information includes environment type, python version, run command and installed packages with versions.",
+                "toolReferenceName": "pythonGetEnvironmentInfo",
                 "tags": [],
                 "icon": "$(files)",
+                "canBeReferencedInPrompt": true,
                 "inputSchema": {
                     "type": "object",
                     "properties": {
-                        "filePath": {
+                        "resourcePath": {
                             "type": "string"
                         }
                     },
-                    "description": "The path to the Python file or workspace to get the installed packages for.",
+                    "description": "The path to the Python file or workspace to get the environment information for.",
                     "required": [
-                        "filePath"
+                        "resourcePath"
+                    ]
+                }
+            },
+            {
+                "name": "python_install_package_tool",
+                "displayName": "Install Python Package",
+                "modelDescription": "Installs Python packages in a workspace. You should call this when you want to install packages in the user's environment.",
+                "toolReferenceName": "pythonInstallPackage",
+                "tags": [],
+                "icon": "$(package)",
+                "canBeReferencedInPrompt": true,
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "packageList": {
+                            "type": "array",
+                            "items": {
+                                "type": "string"
+                            },
+                            "description": "The list of packages to install."
+                        },
+                        "workspacePath": {
+                            "type": "string",
+                            "description": "The path to the Python workspace to identify which environment to install packages in."
+                        }
+                    },
+                    "required": [
+                        "packageList",
+                        "workspacePath"
                     ]
                 }
             }
