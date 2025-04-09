@@ -33,12 +33,12 @@ import {
 import { getConfiguration } from '../../common/workspace.apis';
 import { getGlobalPersistentState, getWorkspacePersistentState } from '../../common/persistentState';
 import which from 'which';
-import { isWindows, shortVersion, sortEnvironments, untildify } from '../common/utils';
+import { Installable, isWindows, shortVersion, sortEnvironments, untildify } from '../common/utils';
 import { pickProject } from '../../common/pickers/projects';
 import { CondaStrings, PackageManagement, Pickers } from '../../common/localize';
 import { showErrorMessage } from '../../common/errors/utils';
 import { showInputBox, showQuickPick, showQuickPickWithButtons, withProgress } from '../../common/window.apis';
-import { Installable, selectFromCommonPackagesToInstall } from '../common/pickers';
+import { selectFromCommonPackagesToInstall } from '../common/pickers';
 import { quoteArgs } from '../../features/execution/execUtils';
 import { traceInfo } from '../../common/logging';
 

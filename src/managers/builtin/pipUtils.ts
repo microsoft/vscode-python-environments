@@ -7,8 +7,9 @@ import { PackageManagement, Pickers, VenvManagerStrings } from '../../common/loc
 import { PackageManagementOptions, PythonEnvironment, PythonEnvironmentApi, PythonProject } from '../../api';
 import { findFiles } from '../../common/workspace.apis';
 import { EXTENSION_ROOT_DIR } from '../../common/constants';
-import { Installable, selectFromCommonPackagesToInstall, selectFromInstallableToInstall } from '../common/pickers';
+import { selectFromCommonPackagesToInstall, selectFromInstallableToInstall } from '../common/pickers';
 import { traceInfo } from '../../common/logging';
+import { Installable, mergePackages } from '../common/utils';
 
 async function tomlParse(fsPath: string, log?: LogOutputChannel): Promise<tomljs.JsonMap> {
     try {
@@ -145,10 +146,11 @@ export async function getWorkspacePackagesToInstall(
     environment?: PythonEnvironment,
 ): Promise<PipPackages | undefined> {
     const installable = (await getProjectInstallable(api, project)) ?? [];
-    const common = await getCommonPackages();
+    let common = await getCommonPackages();
     let installed: string[] | undefined;
     if (environment) {
         installed = (await api.getPackages(environment))?.map((pkg) => pkg.name);
+        common = mergePackages(common, installed ?? []);
     }
     return selectWorkspaceOrCommon(installable, common, !!options.showSkipOption, installed ?? []);
 }
