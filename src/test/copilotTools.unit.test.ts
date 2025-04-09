@@ -314,9 +314,10 @@ suite('GetEnvironmentInfoTool Tests', () => {
 
         const options = { input: testFile, toolInvocationToken: undefined };
         const token = new vscode.CancellationTokenSource().token;
-        await assert.rejects(getEnvironmentInfoTool.invoke(options, token), {
-            message: 'Unable to get environment',
-        });
+        const result = getEnvironmentInfoTool.invoke(options, token);
+        const content = (await result).content as vscode.LanguageModelTextPart[];
+        const firstPart = content[0] as vscode.MarkdownString;
+        assert.strictEqual(firstPart.value.includes('An error occurred while fetching environment information'), true);
     });
     test('should return successful with environment info', async () => {
         // create mock of PythonEnvironment
