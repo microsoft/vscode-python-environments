@@ -3,8 +3,10 @@ import * as vscode from 'vscode';
 import * as sinon from 'sinon';
 import * as typeMoq from 'typemoq';
 import {
-    PythonCommandRunConfiguration,
+    Package,
+    PackageId,
     PythonEnvironment,
+    PythonEnvironmentId,
     PythonPackageGetterApi,
     PythonPackageManagementApi,
     PythonProjectEnvironmentApi,
@@ -262,29 +264,29 @@ suite('GetEnvironmentInfoTool Tests', () => {
         getEnvironmentInfoTool = new GetEnvironmentInfoTool(mockApi.object);
 
         // runConfig valid / not valid
-        const runConfigValid: PythonCommandRunConfiguration = {
-            executable: 'conda',
-            args: ['run', '-n', 'env_name', 'python'],
-        };
-        const runConfigValidString = 'conda run -n env_name python';
-        const runConfigNoArgs: PythonCommandRunConfiguration = {
-            executable: '.venv/bin/python',
-            args: [],
-        };
-        const runConfigNoArgsString = '.venv/bin/python';
+        // const runConfigValid: PythonCommandRunConfiguration = {
+        //     executable: 'conda',
+        //     args: ['run', '-n', 'env_name', 'python'],
+        // };
+        // const runConfigValidString = 'conda run -n env_name python';
+        // const runConfigNoArgs: PythonCommandRunConfiguration = {
+        //     executable: '.venv/bin/python',
+        //     args: [],
+        // };
+        // const runConfigNoArgsString = '.venv/bin/python';
 
-        // managerId valid / not valid
-        const managerIdValid = `'ms-python.python:venv'`;
-        const typeValidString = 'venv';
-        const managerIdInvalid = `vscode-python, there is no such manager`;
+        // // managerId valid / not valid
+        // const managerIdValid = `'ms-python.python:venv'`;
+        // const typeValidString = 'venv';
+        // const managerIdInvalid = `vscode-python, there is no such manager`;
 
-        // environment valid
-        const envInfoVersion = '3.9.1';
+        // // environment valid
+        // const envInfoVersion = '3.9.1';
 
-        //package valid / not valid
-        const installedPackagesValid = [{ name: 'package1', version: '1.0.0' }, { name: 'package2' }];
-        const installedPackagesValidString = 'package1 1.0.0\npackage2 2.0.0';
-        const installedPackagesInvalid = undefined;
+        // //package valid / not valid
+        // const installedPackagesValid = [{ name: 'package1', version: '1.0.0' }, { name: 'package2' }];
+        // const installedPackagesValidString = 'package1 1.0.0\npackage2 2.0.0';
+        // const installedPackagesInvalid = undefined;
     });
 
     teardown(() => {
@@ -300,7 +302,84 @@ suite('GetEnvironmentInfoTool Tests', () => {
             message: 'Invalid input: resourcePath is required',
         });
     });
-    // test should throw error if environment is not found
-    //
-    // cancellation token should work if called
+    test('should throw error if environment is not found', async () => {
+        const testFile: IResourceReference = {
+            resourcePath: 'this/is/a/test/path.ipynb',
+        };
+        mockApi
+            .setup((x) => x.getEnvironment(typeMoq.It.isAny()))
+            .returns(async () => {
+                return Promise.reject(new Error('Unable to get environment'));
+            });
+
+        const options = { input: testFile, toolInvocationToken: undefined };
+        const token = new vscode.CancellationTokenSource().token;
+        await assert.rejects(getEnvironmentInfoTool.invoke(options, token), {
+            message: 'Unable to get environment',
+        });
+    });
+    test('should return successful with environment info', async () => {
+        // create mock of PythonEnvironment
+        const mockEnvironmentSuccess = typeMoq.Mock.ofType<PythonEnvironment>();
+        // mockEnvironment = typeMoq.Mock.ofType<PythonEnvironment>();
+
+        // // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        mockEnvironmentSuccess.setup((x: any) => x.then).returns(() => undefined);
+        mockEnvironmentSuccess.setup((x) => x.version).returns(() => '3.9.1');
+        const mockEnvId = typeMoq.Mock.ofType<PythonEnvironmentId>();
+        mockEnvId.setup((x) => x.managerId).returns(() => 'ms-python.python:venv');
+        mockEnvironmentSuccess.setup((x) => x.envId).returns(() => mockEnvId.object);
+        mockEnvironmentSuccess
+            .setup((x) => x.execInfo)
+            .returns(() => ({
+                run: {
+                    executable: 'conda',
+                    args: ['run', '-n', 'env_name', 'python'],
+                },
+            }));
+
+        mockApi
+            .setup((x) => x.getEnvironment(typeMoq.It.isAny()))
+            .returns(async () => {
+                return Promise.resolve(mockEnvironmentSuccess.object);
+            });
+        mockApi
+            .setup((x) => x.getEnvironment(typeMoq.It.isAny()))
+            .returns(async () => {
+                return Promise.resolve(mockEnvironmentSuccess.object);
+            });
+        mockApi.setup((x) => x.refreshPackages(typeMoq.It.isAny())).returns(() => Promise.resolve());
+
+        const packageAId: PackageId = {
+            id: 'package1',
+            managerId: 'ms-python.python:venv',
+            environmentId: 'env_id',
+        };
+        const packageBId: PackageId = {
+            id: 'package2',
+            managerId: 'ms-python.python:venv',
+            environmentId: 'env_id',
+        };
+        const packageA: Package = { name: 'package1', displayName: 'Package 1', version: '1.0.0', pkgId: packageAId };
+        const packageB: Package = { name: 'package2', displayName: 'Package 2', version: '2.0.0', pkgId: packageBId };
+        mockApi
+            .setup((x) => x.getPackages(typeMoq.It.isAny()))
+            .returns(async () => {
+                return Promise.resolve([packageA, packageB]);
+            });
+
+        const testFile: IResourceReference = {
+            resourcePath: 'this/is/a/test/path.ipynb',
+        };
+        const options = { input: testFile, toolInvocationToken: undefined };
+        const token = new vscode.CancellationTokenSource().token;
+        // run
+        const result = await getEnvironmentInfoTool.invoke(options, token);
+        // assert
+        const content = result.content as vscode.LanguageModelTextPart[];
+        const firstPart = content[0] as vscode.MarkdownString;
+        console.log('result', firstPart.value);
+        assert.strictEqual(firstPart.value.includes('Python version: 3.9.1'), true);
+        assert.strictEqual(firstPart.value, '');
+    });
 });
