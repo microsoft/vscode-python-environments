@@ -48,23 +48,6 @@ export interface PythonCommandRunConfiguration {
     args?: string[];
 }
 
-export enum TerminalShellType {
-    powershell = 'powershell',
-    powershellCore = 'powershellCore',
-    commandPrompt = 'commandPrompt',
-    gitbash = 'gitbash',
-    bash = 'bash',
-    zsh = 'zsh',
-    ksh = 'ksh',
-    fish = 'fish',
-    cshell = 'cshell',
-    tcshell = 'tcshell',
-    nushell = 'nushell',
-    wsl = 'wsl',
-    xonsh = 'xonsh',
-    unknown = 'unknown',
-}
-
 /**
  * Contains details on how to use a particular python environment
  *
@@ -73,7 +56,7 @@ export enum TerminalShellType {
  * 2. If {@link PythonEnvironmentExecutionInfo.activatedRun} is not provided, then:
  *   - If {@link PythonEnvironmentExecutionInfo.shellActivation} is provided and shell type is known, then that will be used.
  *   - If {@link PythonEnvironmentExecutionInfo.shellActivation} is provided and shell type is not known, then:
- *     - {@link TerminalShellType.unknown} will be used if provided.
+ *     - 'unknown' will be used if provided.
  *     - {@link PythonEnvironmentExecutionInfo.activation} will be used otherwise.
  *   - If {@link PythonEnvironmentExecutionInfo.shellActivation} is not provided, then {@link PythonEnvironmentExecutionInfo.activation} will be used.
  *   - If {@link PythonEnvironmentExecutionInfo.activation} is not provided, then {@link PythonEnvironmentExecutionInfo.run} will be used.
@@ -82,7 +65,7 @@ export enum TerminalShellType {
  * 1. If {@link PythonEnvironmentExecutionInfo.shellActivation} is provided and shell type is known, then that will be used.
  * 2. If {@link PythonEnvironmentExecutionInfo.shellActivation} is provided and shell type is not known, then {@link PythonEnvironmentExecutionInfo.activation} will be used.
  * 3. If {@link PythonEnvironmentExecutionInfo.shellActivation} is not provided, then:
- *     - {@link TerminalShellType.unknown} will be used if provided.
+ *     - 'unknown' will be used if provided.
  *     - {@link PythonEnvironmentExecutionInfo.activation} will be used otherwise.
  * 4. If {@link PythonEnvironmentExecutionInfo.activation} is not provided, then {@link PythonEnvironmentExecutionInfo.run} will be used.
  *
@@ -107,11 +90,11 @@ export interface PythonEnvironmentExecutionInfo {
     /**
      * Details on how to activate an environment using a shell specific command.
      * If set this will override the {@link PythonEnvironmentExecutionInfo.activation}.
-     * {@link TerminalShellType.unknown} is used if shell type is not known.
-     * If {@link TerminalShellType.unknown} is not provided and shell type is not known then
+     * 'unknown' is used if shell type is not known.
+     * If 'unknown' is not provided and shell type is not known then
      * {@link PythonEnvironmentExecutionInfo.activation} if set.
      */
-    shellActivation?: Map<TerminalShellType, PythonCommandRunConfiguration[]>;
+    shellActivation?: Map<string, PythonCommandRunConfiguration[]>;
 
     /**
      * Details on how to deactivate an environment.
@@ -121,11 +104,11 @@ export interface PythonEnvironmentExecutionInfo {
     /**
      * Details on how to deactivate an environment using a shell specific command.
      * If set this will override the {@link PythonEnvironmentExecutionInfo.deactivation} property.
-     * {@link TerminalShellType.unknown} is used if shell type is not known.
-     * If {@link TerminalShellType.unknown} is not provided and shell type is not known then
+     * 'unknown' is used if shell type is not known.
+     * If 'unknown' is not provided and shell type is not known then
      * {@link PythonEnvironmentExecutionInfo.deactivation} if set.
      */
-    shellDeactivation?: Map<TerminalShellType, PythonCommandRunConfiguration[]>;
+    shellDeactivation?: Map<string, PythonCommandRunConfiguration[]>;
 }
 
 /**
@@ -592,20 +575,12 @@ export interface PackageManager {
     log?: LogOutputChannel;
 
     /**
-     * Installs packages in the specified Python environment.
+     * Installs/Uninstall packages in the specified Python environment.
      * @param environment - The Python environment in which to install packages.
      * @param packages - The packages to install.
      * @returns A promise that resolves when the installation is complete.
      */
-    install(environment: PythonEnvironment, packages?: string[], options?: PackageInstallOptions): Promise<void>;
-
-    /**
-     * Uninstalls packages from the specified Python environment.
-     * @param environment - The Python environment from which to uninstall packages.
-     * @param packages - The packages to uninstall, which can be an array of packages or strings.
-     * @returns A promise that resolves when the uninstall is complete.
-     */
-    uninstall(environment: PythonEnvironment, packages?: Package[] | string[]): Promise<void>;
+    manage(environment: PythonEnvironment, options: PackageManagementOptions): Promise<void>;
 
     /**
      * Refreshes the package list for the specified Python environment.
@@ -730,15 +705,47 @@ export interface DidChangePythonProjectsEventArgs {
     removed: PythonProject[];
 }
 
-/**
- * Options for package installation.
- */
-export interface PackageInstallOptions {
-    /**
-     * Upgrade the packages if it is already installed.
-     */
-    upgrade?: boolean;
-}
+export type PackageManagementOptions =
+    | {
+          /**
+           * Upgrade the packages if it is already installed.
+           */
+          upgrade?: boolean;
+
+          /**
+           * Show option to skip package installation
+           */
+          showSkipOption?: boolean;
+          /**
+           * The list of packages to install.
+           */
+          install: string[];
+
+          /**
+           * The list of packages to uninstall.
+           */
+          uninstall?: string[];
+      }
+    | {
+          /**
+           * Upgrade the packages if it is already installed.
+           */
+          upgrade?: boolean;
+
+          /**
+           * Show option to skip package installation
+           */
+          showSkipOption?: boolean;
+          /**
+           * The list of packages to install.
+           */
+          install?: string[];
+
+          /**
+           * The list of packages to uninstall.
+           */
+          uninstall: string[];
+      };
 
 export interface PythonProcess {
     /**
@@ -921,21 +928,13 @@ export interface PythonPackageItemApi {
 
 export interface PythonPackageManagementApi {
     /**
-     * Install packages into a Python Environment.
+     * Install/Uninstall packages into a Python Environment.
      *
      * @param environment The Python Environment into which packages are to be installed.
      * @param packages The packages to install.
      * @param options Options for installing packages.
      */
-    installPackages(environment: PythonEnvironment, packages: string[], options?: PackageInstallOptions): Promise<void>;
-
-    /**
-     * Uninstall packages from a Python Environment.
-     *
-     * @param environment The Python Environment from which packages are to be uninstalled.
-     * @param packages The packages to uninstall.
-     */
-    uninstallPackages(environment: PythonEnvironment, packages: PackageInfo[] | string[]): Promise<void>;
+    managePackages(environment: PythonEnvironment, options: PackageManagementOptions): Promise<void>;
 }
 
 export interface PythonPackageManagerApi
