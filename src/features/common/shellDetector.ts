@@ -139,8 +139,8 @@ function fromShellTypeApi(terminal: Terminal): string {
             'wsl',
             'zsh',
         ];
-        if (terminal.state.shell && known.includes(terminal.state.shell)) {
-            return terminal.state.shell;
+        if (terminal.state.shell && known.includes(terminal.state.shell.toLowerCase())) {
+            return terminal.state.shell.toLowerCase();
         }
     } catch {
         // If the API is not available, return unknown

@@ -123,108 +123,71 @@ async function getPythonInfo(env: NativeEnvInfo): Promise<PythonEnvironmentInfo>
 
         const binDir = path.dirname(env.executable);
 
-        interface VenvCommand {
-            activate: PythonCommandRunConfiguration;
-            deactivate: PythonCommandRunConfiguration;
-            /// true if created by the builtin `venv` module and not just the `virtualenv` package.
-            supportsStdlib: boolean;
-            checkPath?: string;
-        }
-
-        const venvManagers: Record<string, VenvCommand> = {
-            // Shells supported by the builtin `venv` module
-            ['sh']: {
-                activate: { executable: 'source', args: [path.join(binDir, `activate`)] },
-                deactivate: { executable: 'deactivate' },
-                supportsStdlib: true,
-            },
-            ['bash']: {
-                activate: { executable: 'source', args: [path.join(binDir, `activate`)] },
-                deactivate: { executable: 'deactivate' },
-                supportsStdlib: true,
-            },
-            ['gitbash']: {
-                activate: { executable: 'source', args: [pathForGitBash(path.join(binDir, `activate`))] },
-                deactivate: { executable: 'deactivate' },
-                supportsStdlib: true,
-            },
-            ['zsh']: {
-                activate: { executable: 'source', args: [path.join(binDir, `activate`)] },
-                deactivate: { executable: 'deactivate' },
-                supportsStdlib: true,
-            },
-            ['ksh']: {
-                activate: { executable: '.', args: [path.join(binDir, `activate`)] },
-                deactivate: { executable: 'deactivate' },
-                supportsStdlib: true,
-            },
-            ['pwsh']: {
-                activate: { executable: '&', args: [path.join(binDir, `activate.ps1`)] },
-                deactivate: { executable: 'deactivate' },
-                supportsStdlib: true,
-            },
-            ['cmd']: {
-                activate: { executable: path.join(binDir, `activate.bat`) },
-                deactivate: { executable: path.join(binDir, `deactivate.bat`) },
-                supportsStdlib: true,
-            },
-            // Shells supported by the `virtualenv` package
-            ['csh']: {
-                activate: { executable: 'source', args: [path.join(binDir, `activate.csh`)] },
-                deactivate: { executable: 'deactivate' },
-                supportsStdlib: false,
-                checkPath: path.join(binDir, `activate.csh`),
-            },
-            ['tcsh']: {
-                activate: { executable: 'source', args: [path.join(binDir, `activate.csh`)] },
-                deactivate: { executable: 'deactivate' },
-                supportsStdlib: false,
-                checkPath: path.join(binDir, `activate.csh`),
-            },
-            ['fish']: {
-                activate: { executable: 'source', args: [path.join(binDir, `activate.fish`)] },
-                deactivate: { executable: 'deactivate' },
-                supportsStdlib: false,
-                checkPath: path.join(binDir, `activate.fish`),
-            },
-            ['xonsh']: {
-                activate: { executable: 'source', args: [path.join(binDir, `activate.xsh`)] },
-                deactivate: { executable: 'deactivate' },
-                supportsStdlib: false,
-                checkPath: path.join(binDir, `activate.xsh`),
-            },
-            ['nu']: {
-                activate: { executable: 'overlay', args: ['use', path.join(binDir, 'activate.nu')] },
-                deactivate: { executable: 'overlay', args: ['hide', 'activate'] },
-                supportsStdlib: false,
-                checkPath: path.join(binDir, `activate.nu`),
-            },
-            // Fallback
-            ['unknown']: isWindows()
-                ? {
-                      activate: { executable: path.join(binDir, `activate`) },
-                      deactivate: { executable: path.join(binDir, `deactivate`) },
-                      supportsStdlib: true,
-                  }
-                : {
-                      activate: { executable: 'source', args: [path.join(binDir, `activate`)] },
-                      deactivate: { executable: 'deactivate' },
-                      supportsStdlib: true,
-                  },
-        } satisfies Record<string, VenvCommand>;
-
         const shellActivation: Map<string, PythonCommandRunConfiguration[]> = new Map();
         const shellDeactivation: Map<string, PythonCommandRunConfiguration[]> = new Map();
 
-        await Promise.all(
-            (Object.entries(venvManagers) as [string, VenvCommand][]).map(async ([shell, mgr]) => {
-                if (!mgr.supportsStdlib && mgr.checkPath && !(await fsapi.pathExists(mgr.checkPath))) {
-                    return;
-                }
-                shellActivation.set(shell, [mgr.activate]);
-                shellDeactivation.set(shell, [mgr.deactivate]);
-            }),
-        );
+        if (isWindows()) {
+            shellActivation.set('unknown', [{ executable: path.join(binDir, `activate`) }]);
+            shellDeactivation.set('unknown', [{ executable: path.join(binDir, `deactivate`) }]);
+        } else {
+            shellActivation.set('unknown', [{ executable: 'source', args: [path.join(binDir, `activate`)] }]);
+            shellDeactivation.set('unknown', [{ executable: 'deactivate' }]);
+        }
+
+        if (await fsapi.pathExists(path.join(binDir, 'activate'))) {
+            shellActivation.set('sh', [{ executable: 'source', args: [path.join(binDir, `activate`)] }]);
+            shellDeactivation.set('sh', [{ executable: 'deactivate' }]);
+
+            shellActivation.set('bash', [{ executable: 'source', args: [path.join(binDir, `activate`)] }]);
+            shellDeactivation.set('bash', [{ executable: 'deactivate' }]);
+
+            shellActivation.set('gitbash', [
+                { executable: 'source', args: [pathForGitBash(path.join(binDir, `activate`))] },
+            ]);
+            shellDeactivation.set('gitbash', [{ executable: 'deactivate' }]);
+
+            shellActivation.set('zsh', [{ executable: 'source', args: [path.join(binDir, `activate`)] }]);
+            shellDeactivation.set('zsh', [{ executable: 'deactivate' }]);
+
+            shellActivation.set('ksh', [{ executable: '.', args: [path.join(binDir, `activate`)] }]);
+            shellDeactivation.set('ksh', [{ executable: 'deactivate' }]);
+        }
+
+        if (await fsapi.pathExists(path.join(binDir, 'Activate.ps1'))) {
+            shellActivation.set('pwsh', [{ executable: '&', args: [path.join(binDir, `Activate.ps1`)] }]);
+            shellDeactivation.set('pwsh', [{ executable: 'deactivate' }]);
+        } else if (await fsapi.pathExists(path.join(binDir, 'activate.ps1'))) {
+            shellActivation.set('pwsh', [{ executable: '&', args: [path.join(binDir, `activate.ps1`)] }]);
+            shellDeactivation.set('pwsh', [{ executable: 'deactivate' }]);
+        }
+
+        if (await fsapi.pathExists(path.join(binDir, 'activate.bat'))) {
+            shellActivation.set('cmd', [{ executable: path.join(binDir, `activate.bat`) }]);
+            shellDeactivation.set('cmd', [{ executable: path.join(binDir, `deactivate.bat`) }]);
+        }
+
+        if (await fsapi.pathExists(path.join(binDir, 'activate.csh'))) {
+            shellActivation.set('csh', [{ executable: 'source', args: [path.join(binDir, `activate.csh`)] }]);
+            shellDeactivation.set('csh', [{ executable: 'deactivate' }]);
+
+            shellActivation.set('tcsh', [{ executable: 'source', args: [path.join(binDir, `activate.csh`)] }]);
+            shellDeactivation.set('tcsh', [{ executable: 'deactivate' }]);
+        }
+
+        if (await fsapi.pathExists(path.join(binDir, 'activate.fish'))) {
+            shellActivation.set('fish', [{ executable: 'source', args: [path.join(binDir, `activate.fish`)] }]);
+            shellDeactivation.set('fish', [{ executable: 'deactivate' }]);
+        }
+
+        if (await fsapi.pathExists(path.join(binDir, 'activate.xsh'))) {
+            shellActivation.set('xonsh', [{ executable: 'source', args: [path.join(binDir, `activate.xsh`)] }]);
+            shellDeactivation.set('xonsh', [{ executable: 'deactivate' }]);
+        }
+
+        if (await fsapi.pathExists(path.join(binDir, 'activate.nu'))) {
+            shellActivation.set('nu', [{ executable: 'overlay', args: ['use', path.join(binDir, 'activate.nu')] }]);
+            shellDeactivation.set('nu', [{ executable: 'overlay', args: ['hide', 'activate'] }]);
+        }
 
         return {
             name: name,

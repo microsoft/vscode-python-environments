@@ -8,6 +8,7 @@ import {
     PythonCommandRunConfiguration,
     PythonEnvironment,
     PythonEnvironmentApi,
+    PythonEnvironmentInfo,
     PythonProject,
 } from '../../api';
 import * as path from 'path';
@@ -249,6 +250,82 @@ function pathForGitBash(binPath: string): string {
     return isWindows() ? binPath.replace(/\\/g, '/') : binPath;
 }
 
+function getNamedCondaPythonInfo(
+    name: string,
+    prefix: string,
+    executable: string,
+    version: string,
+    conda: string,
+): PythonEnvironmentInfo {
+    const sv = shortVersion(version);
+    const shellActivation: Map<string, PythonCommandRunConfiguration[]> = new Map();
+    const shellDeactivation: Map<string, PythonCommandRunConfiguration[]> = new Map();
+    shellActivation.set('gitbash', [{ executable: pathForGitBash(conda), args: ['activate', name] }]);
+    shellDeactivation.set('gitbash', [{ executable: pathForGitBash(conda), args: ['deactivate'] }]);
+
+    return {
+        name: name,
+        environmentPath: Uri.file(prefix),
+        displayName: `${name} (${sv})`,
+        shortDisplayName: `${name}:${sv}`,
+        displayPath: prefix,
+        description: undefined,
+        tooltip: prefix,
+        version: version,
+        sysPrefix: prefix,
+        execInfo: {
+            run: { executable: path.join(executable) },
+            activatedRun: {
+                executable: conda,
+                args: ['run', '--live-stream', '--name', name, 'python'],
+            },
+            activation: [{ executable: conda, args: ['activate', name] }],
+            deactivation: [{ executable: conda, args: ['deactivate'] }],
+            shellActivation,
+            shellDeactivation,
+        },
+        group: 'Named',
+    };
+}
+
+function getPrefixesCondaPythonInfo(
+    prefix: string,
+    executable: string,
+    version: string,
+    conda: string,
+): PythonEnvironmentInfo {
+    const sv = shortVersion(version);
+    const shellActivation: Map<string, PythonCommandRunConfiguration[]> = new Map();
+    const shellDeactivation: Map<string, PythonCommandRunConfiguration[]> = new Map();
+    shellActivation.set('gitbash', [{ executable: pathForGitBash(conda), args: ['activate', prefix] }]);
+    shellDeactivation.set('gitbash', [{ executable: pathForGitBash(conda), args: ['deactivate'] }]);
+
+    const basename = path.basename(prefix);
+    return {
+        name: basename,
+        environmentPath: Uri.file(prefix),
+        displayName: `${basename} (${sv})`,
+        shortDisplayName: `${basename}:${sv}`,
+        displayPath: prefix,
+        description: undefined,
+        tooltip: prefix,
+        version: version,
+        sysPrefix: prefix,
+        execInfo: {
+            run: { executable: path.join(executable) },
+            activatedRun: {
+                executable: conda,
+                args: ['run', '--live-stream', '--prefix', prefix, 'python'],
+            },
+            activation: [{ executable: conda, args: ['activate', prefix] }],
+            deactivation: [{ executable: conda, args: ['deactivate'] }],
+            shellActivation,
+            shellDeactivation,
+        },
+        group: 'Prefix',
+    };
+}
+
 function nativeToPythonEnv(
     e: NativeEnvInfo,
     api: PythonEnvironmentApi,
@@ -261,70 +338,17 @@ function nativeToPythonEnv(
         log.warn(`Invalid conda environment: ${JSON.stringify(e)}`);
         return;
     }
-    const sv = shortVersion(e.version);
-    if (e.name === 'base') {
-        const shellActivation: Map<string, PythonCommandRunConfiguration[]> = new Map();
-        const shellDeactivation: Map<string, PythonCommandRunConfiguration[]> = new Map();
-        shellActivation.set('gitbash', [{ executable: pathForGitBash(conda), args: ['activate', 'base'] }]);
-        shellDeactivation.set('gitbash', [{ executable: pathForGitBash(conda), args: ['deactivate'] }]);
 
+    if (e.name === 'base') {
         const environment = api.createPythonEnvironmentItem(
-            {
-                name: 'base',
-                environmentPath: Uri.file(e.prefix),
-                displayName: `base (${sv})`,
-                shortDisplayName: `base:${sv}`,
-                displayPath: e.name,
-                description: undefined,
-                tooltip: e.prefix,
-                version: e.version,
-                sysPrefix: e.prefix,
-                execInfo: {
-                    run: { executable: e.executable },
-                    activatedRun: { executable: conda, args: ['run', '--live-stream', '--name', 'base', 'python'] },
-                    activation: [{ executable: conda, args: ['activate', 'base'] }],
-                    deactivation: [{ executable: conda, args: ['deactivate'] }],
-                    shellActivation,
-                    shellDeactivation,
-                },
-            },
+            getNamedCondaPythonInfo('base', e.prefix, e.executable, e.version, conda),
             manager,
         );
         log.info(`Found base environment: ${e.prefix}`);
         return environment;
     } else if (!isPrefixOf(condaPrefixes, e.prefix)) {
-        const shellActivation: Map<string, PythonCommandRunConfiguration[]> = new Map();
-        const shellDeactivation: Map<string, PythonCommandRunConfiguration[]> = new Map();
-        shellActivation.set('gitbash', [
-            { executable: pathForGitBash(conda), args: ['activate', pathForGitBash(e.prefix)] },
-        ]);
-        shellDeactivation.set('gitbash', [{ executable: pathForGitBash(conda), args: ['deactivate'] }]);
-
-        const basename = path.basename(e.prefix);
         const environment = api.createPythonEnvironmentItem(
-            {
-                name: basename,
-                environmentPath: Uri.file(e.prefix),
-                displayName: `${basename} (${sv})`,
-                shortDisplayName: `${basename}:${sv}`,
-                displayPath: e.prefix,
-                description: undefined,
-                tooltip: e.prefix,
-                version: e.version,
-                sysPrefix: e.prefix,
-                execInfo: {
-                    run: { executable: path.join(e.executable) },
-                    activatedRun: {
-                        executable: conda,
-                        args: ['run', '--live-stream', '--prefix', e.prefix, 'python'],
-                    },
-                    activation: [{ executable: conda, args: ['activate', e.prefix] }],
-                    deactivation: [{ executable: conda, args: ['deactivate'] }],
-                    shellActivation,
-                    shellDeactivation,
-                },
-                group: 'Prefix',
-            },
+            getPrefixesCondaPythonInfo(e.prefix, e.executable, e.version, conda),
             manager,
         );
         log.info(`Found prefix environment: ${e.prefix}`);
@@ -332,36 +356,8 @@ function nativeToPythonEnv(
     } else {
         const basename = path.basename(e.prefix);
         const name = e.name ?? basename;
-
-        const shellActivation: Map<string, PythonCommandRunConfiguration[]> = new Map();
-        const shellDeactivation: Map<string, PythonCommandRunConfiguration[]> = new Map();
-        shellActivation.set('gitbash', [{ executable: pathForGitBash(conda), args: ['activate', name] }]);
-        shellDeactivation.set('gitbash', [{ executable: pathForGitBash(conda), args: ['deactivate'] }]);
-
         const environment = api.createPythonEnvironmentItem(
-            {
-                name: name,
-                environmentPath: Uri.file(e.prefix),
-                displayName: `${name} (${sv})`,
-                shortDisplayName: `${name}:${sv}`,
-                displayPath: e.prefix,
-                description: undefined,
-                tooltip: e.prefix,
-                version: e.version,
-                sysPrefix: e.prefix,
-                execInfo: {
-                    run: { executable: path.join(e.executable) },
-                    activatedRun: {
-                        executable: conda,
-                        args: ['run', '--live-stream', '--name', name, 'python'],
-                    },
-                    activation: [{ executable: conda, args: ['activate', name] }],
-                    deactivation: [{ executable: conda, args: ['deactivate'] }],
-                    shellActivation,
-                    shellDeactivation,
-                },
-                group: 'Named',
-            },
+            getNamedCondaPythonInfo(name, e.prefix, e.executable, e.version, conda),
             manager,
         );
         log.info(`Found named environment: ${e.prefix}`);
@@ -537,25 +533,7 @@ async function createNamedCondaEnvironment(
                 const version = await getVersion(envPath);
 
                 const environment = api.createPythonEnvironmentItem(
-                    {
-                        name: envName,
-                        environmentPath: Uri.file(envPath),
-                        displayName: `${version} (${envName})`,
-                        displayPath: envPath,
-                        description: envPath,
-                        version,
-                        execInfo: {
-                            activatedRun: {
-                                executable: 'conda',
-                                args: ['run', '--live-stream', '-n', envName, 'python'],
-                            },
-                            activation: [{ executable: 'conda', args: ['activate', envName] }],
-                            deactivation: [{ executable: 'conda', args: ['deactivate'] }],
-                            run: { executable: path.join(envPath, bin) },
-                        },
-                        sysPrefix: envPath,
-                        group: 'Named',
-                    },
+                    getNamedCondaPythonInfo(envName, envPath, path.join(envPath, bin), version, await getConda()),
                     manager,
                 );
                 return environment;
@@ -613,25 +591,7 @@ async function createPrefixCondaEnvironment(
                 const version = await getVersion(prefix);
 
                 const environment = api.createPythonEnvironmentItem(
-                    {
-                        name: path.basename(prefix),
-                        environmentPath: Uri.file(prefix),
-                        displayName: `${version} (${name})`,
-                        displayPath: prefix,
-                        description: prefix,
-                        version,
-                        execInfo: {
-                            run: { executable: path.join(prefix, bin) },
-                            activatedRun: {
-                                executable: 'conda',
-                                args: ['run', '--live-stream', '-p', prefix, 'python'],
-                            },
-                            activation: [{ executable: 'conda', args: ['activate', prefix] }],
-                            deactivation: [{ executable: 'conda', args: ['deactivate'] }],
-                        },
-                        sysPrefix: prefix,
-                        group: 'Prefix',
-                    },
+                    getPrefixesCondaPythonInfo(prefix, path.join(prefix, bin), version, await getConda()),
                     manager,
                 );
                 return environment;
