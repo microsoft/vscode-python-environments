@@ -18,6 +18,7 @@ import {
     InstallPackageTool,
     IResourceReference,
 } from '../features/copilotTools';
+import { EnvironmentManagers, InternalEnvironmentManager } from '../internal.api';
 
 suite('InstallPackageTool Tests', () => {
     let installPackageTool: InstallPackageTool;
@@ -249,6 +250,8 @@ suite('GetEnvironmentInfoTool Tests', () => {
     let getEnvironmentInfoTool: GetEnvironmentInfoTool;
     let mockApi: typeMoq.IMock<PythonProjectEnvironmentApi & PythonPackageGetterApi & PythonPackageManagementApi>;
     let mockEnvironment: typeMoq.IMock<PythonEnvironment>;
+    let em: typeMoq.IMock<EnvironmentManagers>;
+    let manager: typeMoq.IMock<InternalEnvironmentManager>;
 
     setup(() => {
         // Create mock functions
@@ -261,7 +264,16 @@ suite('GetEnvironmentInfoTool Tests', () => {
         mockEnvironment.setup((x: any) => x.then).returns(() => undefined);
 
         // Create an instance of GetEnvironmentInfoTool with the mock functions
-        getEnvironmentInfoTool = new GetEnvironmentInfoTool(mockApi.object);
+        manager = typeMoq.Mock.ofType<InternalEnvironmentManager>();
+        manager.setup((m) => m.id).returns(() => 'ms-python.python:venv');
+        manager.setup((m) => m.name).returns(() => 'venv');
+        manager.setup((m) => m.displayName).returns(() => 'Test Manager');
+
+        em = typeMoq.Mock.ofType<EnvironmentManagers>();
+        em.setup((e) => e.managers).returns(() => [manager.object]);
+        em.setup((e) => e.getEnvironmentManager(typeMoq.It.isAnyString())).returns(() => manager.object);
+
+        getEnvironmentInfoTool = new GetEnvironmentInfoTool(mockApi.object, em.object);
 
         // runConfig valid / not valid
         // const runConfigValid: PythonCommandRunConfiguration = {
@@ -390,7 +402,8 @@ suite('GetEnvironmentInfoTool Tests', () => {
         mockEnvironmentSuccess.setup((x: any) => x.then).returns(() => undefined);
         mockEnvironmentSuccess.setup((x) => x.version).returns(() => '3.12.1');
         const mockEnvId = typeMoq.Mock.ofType<PythonEnvironmentId>();
-        mockEnvId.setup((x) => x.managerId).returns(() => 'ms-python.python:sys');
+        mockEnvId.setup((x) => x.managerId).returns(() => 'ms-python.python:system');
+        manager.setup((m) => m.name).returns(() => 'system');
         mockEnvironmentSuccess.setup((x) => x.envId).returns(() => mockEnvId.object);
         mockEnvironmentSuccess
             .setup((x) => x.execInfo)

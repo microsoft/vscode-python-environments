@@ -9,11 +9,8 @@ import {
     Uri,
 } from 'vscode';
 import {
-    EnvironmentManager,
-    PythonCommandRunConfiguration,
     PythonEnvironment,
     PythonEnvironmentExecutionInfo,
-    PythonEnvironmentManagementApi,
     PythonPackageGetterApi,
     PythonPackageManagementApi,
     PythonProjectEnvironmentApi,
@@ -79,8 +76,9 @@ export class GetEnvironmentInfoTool implements LanguageModelTool<IResourceRefere
             }
 
             const execInfo: PythonEnvironmentExecutionInfo = environment.execInfo;
-            const run: PythonCommandRunConfiguration = execInfo.run;
-            envInfo.runCommand = run.executable + (run.args && run.args.length > 0 ? ` ${run.args.join(' ')}` : '');
+            const executable = execInfo?.activatedRun?.executable ?? execInfo?.run.executable ?? 'python';
+            const args = execInfo?.activatedRun?.args ?? execInfo?.run.args ?? [];
+            envInfo.runCommand = args.length > 0 ? `${executable} ${args.join(' ')}` : executable;
             envInfo.version = environment.version;
 
             // get the environment type or manager if type is not available
@@ -209,8 +207,6 @@ export class InstallPackageTool implements LanguageModelTool<IInstallPackageInpu
             // Install the packages
             await this.api.installPackages(environment, parameters.packageList);
             const resultMessage = `Successfully installed ${packagePlurality}: ${parameters.packageList.join(', ')}`;
-
-
 
             deferredReturn.resolve({
                 content: [new LanguageModelTextPart(resultMessage)],
