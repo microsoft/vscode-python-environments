@@ -80,7 +80,10 @@ async function createEnvironment(
     const manager = managers.find((m) => m.id === managerId);
     if (manager) {
         try {
-            const env = await manager.create(options.projects.map((p) => p.uri));
+            const env = await manager.create(
+                options.projects.map((p) => p.uri),
+                undefined,
+            );
             return env;
         } catch (ex) {
             if (ex === QuickInputButtons.Back) {

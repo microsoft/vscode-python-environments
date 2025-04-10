@@ -4,6 +4,20 @@ import { InternalEnvironmentManager, InternalPackageManager } from '../../intern
 import { Common, Pickers } from '../localize';
 import { showQuickPickWithButtons, showQuickPick } from '../window.apis';
 
+function getDescription(mgr: InternalEnvironmentManager | InternalPackageManager): string | undefined {
+    if (mgr.description) {
+        return mgr.description;
+    }
+    if (mgr.tooltip) {
+        const tooltip = mgr.tooltip;
+        if (typeof tooltip === 'string') {
+            return tooltip;
+        }
+        return tooltip.value;
+    }
+    return undefined;
+}
+
 export async function pickEnvironmentManager(
     managers: InternalEnvironmentManager[],
     defaultManagers?: InternalEnvironmentManager[],
@@ -18,14 +32,25 @@ export async function pickEnvironmentManager(
 
     const items: (QuickPickItem | (QuickPickItem & { id: string }))[] = [];
     if (defaultManagers && defaultManagers.length > 0) {
+        items.push({
+            label: Common.recommended,
+            kind: QuickPickItemKind.Separator,
+        });
+        if (defaultManagers.length === 1 && defaultManagers[0].supportsQuickCreate) {
+            const details = defaultManagers[0].quickCreateConfig();
+            if (details) {
+                items.push({
+                    label: Common.quickCreate,
+                    description: details.description,
+                    detail: details.detail,
+                    id: `QuickCreate#${defaultManagers[0].id}`,
+                });
+            }
+        }
         items.push(
-            {
-                label: Common.recommended,
-                kind: QuickPickItemKind.Separator,
-            },
             ...defaultManagers.map((defaultMgr) => ({
                 label: defaultMgr.displayName,
-                description: defaultMgr.description,
+                description: getDescription(defaultMgr),
                 id: defaultMgr.id,
             })),
             {
@@ -39,7 +64,7 @@ export async function pickEnvironmentManager(
             .filter((m) => !defaultManagers?.includes(m))
             .map((m) => ({
                 label: m.displayName,
-                description: m.description,
+                description: getDescription(m),
                 id: m.id,
             })),
     );
@@ -71,7 +96,7 @@ export async function pickPackageManager(
             },
             ...defaultManagers.map((defaultMgr) => ({
                 label: defaultMgr.displayName,
-                description: defaultMgr.description,
+                description: getDescription(defaultMgr),
                 id: defaultMgr.id,
             })),
             {
@@ -85,7 +110,7 @@ export async function pickPackageManager(
             .filter((m) => !defaultManagers?.includes(m))
             .map((m) => ({
                 label: m.displayName,
-                description: m.description,
+                description: getDescription(m),
                 id: m.id,
             })),
     );

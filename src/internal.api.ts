@@ -24,6 +24,8 @@ import {
     ResolveEnvironmentContext,
     PackageManagementOptions,
     EnvironmentGroupInfo,
+    QuickCreateConfig,
+    CreateEnvironmentOptions,
 } from './api';
 import { CreateEnvironmentNotSupported, RemoveEnvironmentNotSupported } from './common/errors/NotSupportedError';
 
@@ -141,12 +143,26 @@ export class InternalEnvironmentManager implements EnvironmentManager {
         return this.manager.create !== undefined;
     }
 
-    create(scope: CreateEnvironmentScope): Promise<PythonEnvironment | undefined> {
+    create(
+        scope: CreateEnvironmentScope,
+        options: CreateEnvironmentOptions | undefined,
+    ): Promise<PythonEnvironment | undefined> {
         if (this.manager.create) {
-            return this.manager.create(scope);
+            return this.manager.create(scope, options);
         }
 
         return Promise.reject(new CreateEnvironmentNotSupported(`Create Environment not supported by: ${this.id}`));
+    }
+
+    public get supportsQuickCreate(): boolean {
+        return this.manager.quickCreateConfig !== undefined;
+    }
+
+    quickCreateConfig(): QuickCreateConfig | undefined {
+        if (this.manager.quickCreateConfig) {
+            return this.manager.quickCreateConfig();
+        }
+        throw new CreateEnvironmentNotSupported(`Quick Create Environment not supported by: ${this.id}`);
     }
 
     public get supportsRemove(): boolean {

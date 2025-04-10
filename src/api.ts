@@ -316,6 +316,18 @@ export type DidChangeEnvironmentsEventArgs = {
  */
 export type ResolveEnvironmentContext = Uri;
 
+export interface QuickCreateConfig {
+    /**
+     * The description of the quick create step.
+     */
+    readonly description: string;
+
+    /**
+     * The detail of the quick create step.
+     */
+    readonly detail?: string;
+}
+
 /**
  * Interface representing an environment manager.
  */
@@ -361,11 +373,21 @@ export interface EnvironmentManager {
     readonly log?: LogOutputChannel;
 
     /**
+     * The quick create details for the environment manager. Having this method also enables the quick create feature
+     * for the environment manager.
+     */
+    quickCreateConfig?(): QuickCreateConfig | undefined;
+
+    /**
      * Creates a new Python environment within the specified scope.
      * @param scope - The scope within which to create the environment.
+     * @param options - Optional parameters for creating the Python environment.
      * @returns A promise that resolves to the created Python environment, or undefined if creation failed.
      */
-    create?(scope: CreateEnvironmentScope): Promise<PythonEnvironment | undefined>;
+    create?(
+        scope: CreateEnvironmentScope,
+        options: CreateEnvironmentOptions | undefined,
+    ): Promise<PythonEnvironment | undefined>;
 
     /**
      * Removes the specified Python environment.
@@ -747,6 +769,25 @@ export type PackageManagementOptions =
           uninstall: string[];
       };
 
+/**
+ * Options for creating a Python environment.
+ */
+export interface CreateEnvironmentOptions {
+    /**
+     * Provides some context about quick create based on user input.
+     *   - if true, the environment should be created without any user input or prompts.
+     *   - if false, the environment creation can show user input or prompts.
+     *     This also means user explicitly skipped the quick create option.
+     *   - if undefined, the environment creation can show user input or prompts.
+     *     You can show quick create option to the user if you support it.
+     */
+    quickCreate?: boolean;
+    /**
+     * Packages to install in addition to the automatically picked packages as a part of creating environment.
+     */
+    additionalPackages?: string[];
+}
+
 export interface PythonProcess {
     /**
      * The process ID of the Python process.
@@ -807,9 +848,13 @@ export interface PythonEnvironmentManagementApi {
      * Create a Python environment using environment manager associated with the scope.
      *
      * @param scope Where the environment is to be created.
+     * @param options Optional parameters for creating the Python environment.
      * @returns The Python environment created. `undefined` if not created.
      */
-    createEnvironment(scope: CreateEnvironmentScope): Promise<PythonEnvironment | undefined>;
+    createEnvironment(
+        scope: CreateEnvironmentScope,
+        options: CreateEnvironmentOptions | undefined,
+    ): Promise<PythonEnvironment | undefined>;
 
     /**
      * Remove a Python environment.

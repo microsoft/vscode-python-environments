@@ -7,7 +7,13 @@ import {
     PythonProjectManager,
 } from '../internal.api';
 import { traceError, traceInfo, traceVerbose } from '../common/logging';
-import { PythonEnvironment, PythonEnvironmentApi, PythonProject, PythonProjectCreator } from '../api';
+import {
+    CreateEnvironmentOptions,
+    PythonEnvironment,
+    PythonEnvironmentApi,
+    PythonProject,
+    PythonProjectCreator,
+} from '../api';
 import * as path from 'path';
 import {
     setEnvironmentManager,
@@ -75,7 +81,7 @@ export async function createEnvironmentCommand(
         const manager = (context as EnvManagerTreeItem).manager;
         const projects = pm.getProjects();
         if (projects.length === 0) {
-            const env = await manager.create('global');
+            const env = await manager.create('global', undefined);
             if (env) {
                 await em.setEnvironments('global', env);
             }
@@ -84,7 +90,7 @@ export async function createEnvironmentCommand(
             const selected = await pickProjectMany(projects);
             if (selected) {
                 const scope = selected.length === 0 ? 'global' : selected.map((p) => p.uri);
-                const env = await manager.create(scope);
+                const env = await manager.create(scope, undefined);
                 if (env) {
                     await em.setEnvironments(scope, env);
                 }
@@ -97,7 +103,7 @@ export async function createEnvironmentCommand(
         const manager = em.getEnvironmentManager(context as Uri);
         const project = pm.get(context as Uri);
         if (project) {
-            return await manager?.create(project.uri);
+            return await manager?.create(project.uri, undefined);
         } else {
             traceError(`No project found for ${context}`);
         }
@@ -109,8 +115,7 @@ export async function createEnvironmentCommand(
 export async function createAnyEnvironmentCommand(
     em: EnvironmentManagers,
     pm: PythonProjectManager,
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    options?: any,
+    options?: CreateEnvironmentOptions & { selectEnvironment: boolean },
 ): Promise<PythonEnvironment | undefined> {
     const select = options?.selectEnvironment;
     const projects = pm.getProjects();
@@ -118,7 +123,7 @@ export async function createAnyEnvironmentCommand(
         const managerId = await pickEnvironmentManager(em.managers.filter((m) => m.supportsCreate));
         const manager = em.managers.find((m) => m.id === managerId);
         if (manager) {
-            const env = await manager.create('global');
+            const env = await manager.create('global', { ...options });
             if (select && env) {
                 await manager.set(undefined, env);
             }
@@ -137,14 +142,22 @@ export async function createAnyEnvironmentCommand(
                 }
             });
 
-            const managerId = await pickEnvironmentManager(
+            let managerId = await pickEnvironmentManager(
                 em.managers.filter((m) => m.supportsCreate),
                 defaultManagers,
             );
+            let quickCreate = false;
+            if (managerId?.startsWith('QuickCreate#')) {
+                quickCreate = true;
+                managerId = managerId.replace('QuickCreate#', '');
+            }
 
             const manager = em.managers.find((m) => m.id === managerId);
             if (manager) {
-                const env = await manager.create(selected.map((p) => p.uri));
+                const env = await manager.create(
+                    selected.map((p) => p.uri),
+                    { ...options, quickCreate },
+                );
                 if (select && env) {
                     await em.setEnvironments(
                         selected.map((p) => p.uri),

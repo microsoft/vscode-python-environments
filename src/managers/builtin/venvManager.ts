@@ -1,5 +1,6 @@
-import { ProgressLocation, Uri, LogOutputChannel, EventEmitter, MarkdownString, ThemeIcon } from 'vscode';
+import { ProgressLocation, Uri, LogOutputChannel, EventEmitter, MarkdownString, ThemeIcon, l10n } from 'vscode';
 import {
+    CreateEnvironmentOptions,
     CreateEnvironmentScope,
     DidChangeEnvironmentEventArgs,
     DidChangeEnvironmentsEventArgs,
@@ -11,6 +12,7 @@ import {
     PythonEnvironment,
     PythonEnvironmentApi,
     PythonProject,
+    QuickCreateConfig,
     RefreshEnvironmentsScope,
     ResolveEnvironmentContext,
     SetEnvironmentScope,
@@ -19,9 +21,11 @@ import {
     clearVenvCache,
     createPythonVenv,
     findVirtualEnvironments,
+    getDefaultGlobalVenvLocation,
     getGlobalVenvLocation,
     getVenvForGlobal,
     getVenvForWorkspace,
+    quickCreateVenv,
     removeVenv,
     resolveVenvPythonEnvironmentPath,
     setVenvForGlobal,
@@ -35,6 +39,7 @@ import { createDeferred, Deferred } from '../../common/utils/deferred';
 import { getLatest, sortEnvironments } from '../common/utils';
 import { withProgress } from '../../common/window.apis';
 import { VenvManagerStrings } from '../../common/localize';
+import { showErrorMessage } from '../../common/errors/utils';
 
 export class VenvManager implements EnvironmentManager {
     private collection: PythonEnvironment[] = [];
@@ -49,7 +54,7 @@ export class VenvManager implements EnvironmentManager {
     public readonly onDidChangeEnvironments = this._onDidChangeEnvironments.event;
 
     readonly name: string;
-    readonly displayName?: string | undefined;
+    readonly displayName: string;
     readonly preferredPackageManagerId: string;
     readonly description?: string | undefined;
     readonly tooltip?: string | MarkdownString | undefined;
@@ -86,7 +91,21 @@ export class VenvManager implements EnvironmentManager {
         }
     }
 
-    async create(scope: CreateEnvironmentScope): Promise<PythonEnvironment | undefined> {
+    quickCreateConfig(): QuickCreateConfig | undefined {
+        if (!this.globalEnv || !this.globalEnv.version.startsWith('3.')) {
+            return undefined;
+        }
+
+        return {
+            description: l10n.t('Create a virtual environment in workspace root'),
+            detail: l10n.t('Uses Python version {0} and installs workspace dependencies.', this.globalEnv.version),
+        };
+    }
+
+    async create(
+        scope: CreateEnvironmentScope,
+        options: CreateEnvironmentOptions | undefined,
+    ): Promise<PythonEnvironment | undefined> {
         try {
             this.skipWatcherRefresh = true;
             let isGlobal = scope === 'global';
@@ -95,7 +114,7 @@ export class VenvManager implements EnvironmentManager {
             }
             let uri: Uri | undefined = undefined;
             if (isGlobal) {
-                uri = await getGlobalVenvLocation();
+                uri = options?.quickCreate ? await getDefaultGlobalVenvLocation() : await getGlobalVenvLocation();
             } else {
                 uri = scope instanceof Uri ? scope : (scope as Uri[])[0];
             }
@@ -106,7 +125,36 @@ export class VenvManager implements EnvironmentManager {
 
             const venvRoot: Uri = uri;
             const globals = await this.baseManager.getEnvironments('global');
-            const environment = await createPythonVenv(this.nativeFinder, this.api, this.log, this, globals, venvRoot);
+            let environment: PythonEnvironment | undefined = undefined;
+            if (options?.quickCreate) {
+                if (this.globalEnv && this.globalEnv.version.startsWith('3.')) {
+                    environment = await quickCreateVenv(
+                        this.nativeFinder,
+                        this.api,
+                        this.log,
+                        this,
+                        this.globalEnv,
+                        venvRoot,
+                    );
+                } else if (!this.globalEnv) {
+                    this.log.error('No base python found');
+                    showErrorMessage(VenvManagerStrings.venvErrorNoBasePython);
+                    throw new Error('No base python found');
+                } else if (!this.globalEnv.version.startsWith('3.')) {
+                    this.log.error('Did not find any base python 3.*');
+                    globals.forEach((e, i) => {
+                        this.log.error(`${i}: ${e.version} : ${e.environmentPath.fsPath}`);
+                    });
+                    showErrorMessage(VenvManagerStrings.venvErrorNoPython3);
+                    throw new Error('Did not find any base python 3.*');
+                }
+            } else {
+                environment = await createPythonVenv(this.nativeFinder, this.api, this.log, this, globals, venvRoot, {
+                    // If quickCreate is not set that means the user triggered this method from
+                    // environment manager View, by selecting the venv manager.
+                    showQuickAndCustomOptions: options?.quickCreate === undefined,
+                });
+            }
             if (environment) {
                 this.addEnvironment(environment, true);
             }

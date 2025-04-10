@@ -28,6 +28,7 @@ import {
     PythonBackgroundRunOptions,
     PythonTerminalCreateOptions,
     DidChangeEnvironmentVariablesEventArgs,
+    CreateEnvironmentOptions,
 } from '../api';
 import {
     EnvironmentManagers,
@@ -116,7 +117,10 @@ class PythonEnvironmentApiImpl implements PythonEnvironmentApi {
         return new PythonEnvironmentImpl(envId, info);
     }
 
-    async createEnvironment(scope: CreateEnvironmentScope): Promise<PythonEnvironment | undefined> {
+    async createEnvironment(
+        scope: CreateEnvironmentScope,
+        options: CreateEnvironmentOptions | undefined,
+    ): Promise<PythonEnvironment | undefined> {
         if (scope === 'global' || (!Array.isArray(scope) && scope instanceof Uri)) {
             const manager = this.envManagers.getEnvironmentManager(scope === 'global' ? undefined : scope);
             if (!manager) {
@@ -125,9 +129,9 @@ class PythonEnvironmentApiImpl implements PythonEnvironmentApi {
             if (!manager.supportsCreate) {
                 throw new Error(`Environment manager does not support creating environments: ${manager.id}`);
             }
-            return manager.create(scope);
+            return manager.create(scope, options);
         } else if (Array.isArray(scope) && scope.length === 1 && scope[0] instanceof Uri) {
-            return this.createEnvironment(scope[0]);
+            return this.createEnvironment(scope[0], options);
         } else if (Array.isArray(scope) && scope.length > 0 && scope.every((s) => s instanceof Uri)) {
             const managers: InternalEnvironmentManager[] = [];
             scope.forEach((s) => {
@@ -151,7 +155,7 @@ class PythonEnvironmentApiImpl implements PythonEnvironmentApi {
                 throw new Error('No environment manager found');
             }
 
-            const result = await manager.create(scope);
+            const result = await manager.create(scope, options);
             return result;
         }
     }

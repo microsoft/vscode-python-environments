@@ -11,6 +11,7 @@ export namespace Common {
     export const viewLogs = l10n.t('View Logs');
     export const yes = l10n.t('Yes');
     export const no = l10n.t('No');
+    export const quickCreate = l10n.t('Quick Create');
 }
 
 export namespace Interpreter {
