@@ -9,14 +9,17 @@ import {
     Uri,
 } from 'vscode';
 import {
+    EnvironmentManager,
     PythonCommandRunConfiguration,
     PythonEnvironment,
     PythonEnvironmentExecutionInfo,
+    PythonEnvironmentManagementApi,
     PythonPackageGetterApi,
     PythonPackageManagementApi,
     PythonProjectEnvironmentApi,
 } from '../api';
 import { createDeferred } from '../common/utils/deferred';
+import { EnvironmentManagers } from '../internal.api';
 
 export interface IResourceReference {
     resourcePath?: string;
@@ -33,7 +36,10 @@ interface EnvironmentInfo {
  * A tool to get the information about the Python environment.
  */
 export class GetEnvironmentInfoTool implements LanguageModelTool<IResourceReference> {
-    constructor(private readonly api: PythonProjectEnvironmentApi & PythonPackageGetterApi) {}
+    constructor(
+        private readonly api: PythonProjectEnvironmentApi & PythonPackageGetterApi,
+        private readonly envManagers: EnvironmentManagers,
+    ) {}
     /**
      * Invokes the tool to get the information about the Python environment.
      * @param options - The invocation options containing the file path.
@@ -79,13 +85,14 @@ export class GetEnvironmentInfoTool implements LanguageModelTool<IResourceRefere
 
             // get the environment type or manager if type is not available
             try {
-                envInfo.type =
-                    environment.envId.managerId?.split(':')[1] || environment.envId.managerId || 'cannot be determined';
+                const managerId = environment.envId.managerId;
+                const manager = this.envManagers.getEnvironmentManager(managerId);
+                envInfo.type = manager?.name || 'cannot be determined';
             } catch {
                 envInfo.type = environment.envId.managerId || 'cannot be determined';
             }
 
-            // refresh and get packages
+            // TODO: remove refreshPackages here eventually once terminal isn't being used as a fallback
             await this.api.refreshPackages(environment);
             const installedPackages = await this.api.getPackages(environment);
             if (!installedPackages || installedPackages.length === 0) {
@@ -126,12 +133,17 @@ export class GetEnvironmentInfoTool implements LanguageModelTool<IResourceRefere
 
 function BuildEnvironmentInfoContent(envInfo: EnvironmentInfo): LanguageModelTextPart {
     // Create a formatted string that looks like JSON but preserves comments
+    let envTypeStr: string = `This environment is managed by ${envInfo.type} environment manager. Use the install tool to install packages into this environment.`;
+
+    if (envInfo.type === 'system') {
+        envTypeStr =
+            'System pythons are pythons that ship with the OS or are installed globally. These python installs may be used by the OS for running services and core functionality. Confirm with the user before installing packages into this environment, as it can lead to issues with any services on the OS';
+    }
     const content = `{
-  // type of python environment; sys means it is the system python
-  "environmentType": ${JSON.stringify(envInfo.type)},
+  "environmentType": ${JSON.stringify(envTypeStr)},
   // python version of the environment
   "pythonVersion": ${JSON.stringify(envInfo.version)},
-  // command to run python in this environment, will include command with active environment if applicable. Opt to use this command to run python in this environment. 
+  // Use this command to run python script or code in the terminal.
   "runCommand": ${JSON.stringify(envInfo.runCommand)},
   // installed python packages and their versions if know in the format <name> (<version>), empty array is returned if no packages are installed.
   "packages": ${JSON.stringify(Array.isArray(envInfo.packages) ? envInfo.packages : envInfo.packages, null, 2)}
@@ -198,9 +210,7 @@ export class InstallPackageTool implements LanguageModelTool<IInstallPackageInpu
             await this.api.installPackages(environment, parameters.packageList);
             const resultMessage = `Successfully installed ${packagePlurality}: ${parameters.packageList.join(', ')}`;
 
-            // Refresh packages after installation to update the package view
-            //TODO: do I want the await?
-            await this.api.refreshPackages(environment);
+
 
             deferredReturn.resolve({
                 content: [new LanguageModelTextPart(resultMessage)],
