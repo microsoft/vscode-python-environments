@@ -1,5 +1,6 @@
 import { MarkdownString, LogOutputChannel, Event } from 'vscode';
 import {
+    CreateEnvironmentOptions,
     CreateEnvironmentScope,
     DidChangeEnvironmentEventArgs,
     DidChangeEnvironmentsEventArgs,
@@ -8,6 +9,7 @@ import {
     GetEnvironmentsScope,
     IconPath,
     PythonEnvironment,
+    QuickCreateConfig,
     RefreshEnvironmentsScope,
     ResolveEnvironmentContext,
     SetEnvironmentScope,
@@ -31,7 +33,13 @@ export class SampleEnvManager implements EnvironmentManager {
         this.log = log;
     }
 
-    create?(scope: CreateEnvironmentScope): Promise<PythonEnvironment | undefined> {
+    quickCreateConfig(): QuickCreateConfig | undefined {
+        // Code to provide quick create configuration goes here
+
+        throw new Error('Method not implemented.');
+    }
+
+    create?(scope: CreateEnvironmentScope, options?: CreateEnvironmentOptions): Promise<PythonEnvironment | undefined> {
         // Code to handle creating environments goes here
 
         throw new Error('Method not implemented.');

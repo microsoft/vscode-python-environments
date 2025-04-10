@@ -384,10 +384,7 @@ export interface EnvironmentManager {
      * @param options - Optional parameters for creating the Python environment.
      * @returns A promise that resolves to the created Python environment, or undefined if creation failed.
      */
-    create?(
-        scope: CreateEnvironmentScope,
-        options: CreateEnvironmentOptions | undefined,
-    ): Promise<PythonEnvironment | undefined>;
+    create?(scope: CreateEnvironmentScope, options?: CreateEnvironmentOptions): Promise<PythonEnvironment | undefined>;
 
     /**
      * Removes the specified Python environment.
@@ -788,6 +785,9 @@ export interface CreateEnvironmentOptions {
     additionalPackages?: string[];
 }
 
+/**
+ * Object representing the process started using run in background API.
+ */
 export interface PythonProcess {
     /**
      * The process ID of the Python process.
@@ -853,7 +853,7 @@ export interface PythonEnvironmentManagementApi {
      */
     createEnvironment(
         scope: CreateEnvironmentScope,
-        options: CreateEnvironmentOptions | undefined,
+        options?: CreateEnvironmentOptions,
     ): Promise<PythonEnvironment | undefined>;
 
     /**
