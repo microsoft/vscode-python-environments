@@ -132,19 +132,20 @@ export class GetEnvironmentInfoTool implements LanguageModelTool<IResourceRefere
 
 function BuildEnvironmentInfoContent(envInfo: EnvironmentInfo): LanguageModelTextPart {
     // Create a formatted string that looks like JSON but preserves comments
-    let envTypeStr: string = `This environment is managed by ${envInfo.type} environment manager. Use the install tool to install packages into this environment.`;
+    let envTypeDescriptor: string = `This environment is managed by ${envInfo.type} environment manager. Use the install tool to install packages into this environment.`;
 
     if (envInfo.type === 'system') {
-        envTypeStr =
-            'System pythons are pythons that ship with the OS or are installed globally. These python installs may be used by the OS for running services and core functionality. Confirm with the user before installing packages into this environment, as it can lead to issues with any services on the OS';
+        envTypeDescriptor =
+            'System pythons are pythons that ship with the OS or are installed globally. These python installs may be used by the OS for running services and core functionality. Confirm with the user before installing packages into this environment, as it can lead to issues with any services on the OS.';
     }
     const content = `{
-  "environmentType": ${JSON.stringify(envTypeStr)},
-  // python version of the environment
+    // ${JSON.stringify(envTypeDescriptor)}
+  "environmentType": ${JSON.stringify(envInfo.type)},
+  // Python version of the environment
   "pythonVersion": ${JSON.stringify(envInfo.version)},
-  // Use this command to run python script or code in the terminal.
+  // Use this command to run Python script or code in the terminal.
   "runCommand": ${JSON.stringify(envInfo.runCommand)},
-  // installed python packages and their versions if know in the format <name> (<version>), empty array is returned if no packages are installed.
+  // Installed Python packages, each in the format <name> or <name> (<version>). The version may be omitted if unknown. Returns an empty array if no packages are installed.
   "packages": ${JSON.stringify(Array.isArray(envInfo.packages) ? envInfo.packages : envInfo.packages, null, 2)}
 }`;
 

@@ -186,7 +186,6 @@ suite('InstallPackageTool Tests', () => {
         const content = result.content as vscode.LanguageModelTextPart[];
         const firstPart = content[0] as vscode.MarkdownString;
 
-        console.log('result', firstPart.value);
         assert.strictEqual(
             firstPart.value.includes('An error occurred while installing packages'),
             true,
@@ -243,7 +242,7 @@ suite('GetEnvironmentInfoTool Tests', () => {
     let mockApi: typeMoq.IMock<PythonProjectEnvironmentApi & PythonPackageGetterApi & PythonPackageManagementApi>;
     let mockEnvironment: typeMoq.IMock<PythonEnvironment>;
     let em: typeMoq.IMock<EnvironmentManagers>;
-    let manager: typeMoq.IMock<InternalEnvironmentManager>;
+    let managerSys: typeMoq.IMock<InternalEnvironmentManager>;
 
     setup(() => {
         // Create mock functions
@@ -255,42 +254,11 @@ suite('GetEnvironmentInfoTool Tests', () => {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         mockEnvironment.setup((x: any) => x.then).returns(() => undefined);
 
-        // Create an instance of GetEnvironmentInfoTool with the mock functions
-        manager = typeMoq.Mock.ofType<InternalEnvironmentManager>();
-        manager.setup((m) => m.id).returns(() => 'ms-python.python:venv');
-        manager.setup((m) => m.name).returns(() => 'venv');
-        manager.setup((m) => m.displayName).returns(() => 'Test Manager');
-
         em = typeMoq.Mock.ofType<EnvironmentManagers>();
-        em.setup((e) => e.managers).returns(() => [manager.object]);
-        em.setup((e) => e.getEnvironmentManager(typeMoq.It.isAnyString())).returns(() => manager.object);
+        em.setup((e) => e.managers).returns(() => [managerSys.object]);
+        em.setup((e) => e.getEnvironmentManager(typeMoq.It.isAnyString())).returns(() => managerSys.object);
 
         getEnvironmentInfoTool = new GetEnvironmentInfoTool(mockApi.object, em.object);
-
-        // runConfig valid / not valid
-        // const runConfigValid: PythonCommandRunConfiguration = {
-        //     executable: 'conda',
-        //     args: ['run', '-n', 'env_name', 'python'],
-        // };
-        // const runConfigValidString = 'conda run -n env_name python';
-        // const runConfigNoArgs: PythonCommandRunConfiguration = {
-        //     executable: '.venv/bin/python',
-        //     args: [],
-        // };
-        // const runConfigNoArgsString = '.venv/bin/python';
-
-        // // managerId valid / not valid
-        // const managerIdValid = `'ms-python.python:venv'`;
-        // const typeValidString = 'venv';
-        // const managerIdInvalid = `vscode-python, there is no such manager`;
-
-        // // environment valid
-        // const envInfoVersion = '3.9.1';
-
-        // //package valid / not valid
-        // const installedPackagesValid = [{ name: 'package1', version: '1.0.0' }, { name: 'package2' }];
-        // const installedPackagesValidString = 'package1 1.0.0\npackage2 2.0.0';
-        // const installedPackagesInvalid = undefined;
     });
 
     teardown(() => {
@@ -324,11 +292,19 @@ suite('GetEnvironmentInfoTool Tests', () => {
         assert.strictEqual(firstPart.value.includes('An error occurred while fetching environment information'), true);
     });
     test('should return successful with environment info', async () => {
+        // Create an instance of GetEnvironmentInfoTool with the mock functions
+        managerSys = typeMoq.Mock.ofType<InternalEnvironmentManager>();
+        managerSys.setup((m) => m.id).returns(() => 'ms-python.python:venv');
+        managerSys.setup((m) => m.name).returns(() => 'venv');
+        managerSys.setup((m) => m.displayName).returns(() => 'Test Manager');
+
+        em = typeMoq.Mock.ofType<EnvironmentManagers>();
+        em.setup((e) => e.managers).returns(() => [managerSys.object]);
+        em.setup((e) => e.getEnvironmentManager(typeMoq.It.isAnyString())).returns(() => managerSys.object);
         // create mock of PythonEnvironment
         const mockEnvironmentSuccess = typeMoq.Mock.ofType<PythonEnvironment>();
-        // mockEnvironment = typeMoq.Mock.ofType<PythonEnvironment>();
 
-        // // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         mockEnvironmentSuccess.setup((x: any) => x.then).returns(() => undefined);
         mockEnvironmentSuccess.setup((x) => x.version).returns(() => '3.9.1');
         const mockEnvId = typeMoq.Mock.ofType<PythonEnvironmentId>();
@@ -378,7 +354,6 @@ suite('GetEnvironmentInfoTool Tests', () => {
         // assert
         const content = result.content as vscode.LanguageModelTextPart[];
         const firstPart = content[0] as vscode.MarkdownString;
-        console.log('result', firstPart.value);
         assert.strictEqual(firstPart.value.includes('3.9.1'), true);
         assert.strictEqual(firstPart.value.includes('package1 (1.0.0)'), true);
         assert.strictEqual(firstPart.value.includes('package2 (2.0.0)'), true);
@@ -388,14 +363,24 @@ suite('GetEnvironmentInfoTool Tests', () => {
     test('should return successful with weird environment info', async () => {
         // create mock of PythonEnvironment
         const mockEnvironmentSuccess = typeMoq.Mock.ofType<PythonEnvironment>();
-        // mockEnvironment = typeMoq.Mock.ofType<PythonEnvironment>();
 
-        // // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        // Create an instance of GetEnvironmentInfoTool with the mock functions
+        let managerSys = typeMoq.Mock.ofType<InternalEnvironmentManager>();
+        managerSys.setup((m) => m.id).returns(() => 'ms-python.python:system');
+        managerSys.setup((m) => m.name).returns(() => 'system');
+        managerSys.setup((m) => m.displayName).returns(() => 'Test Manager');
+
+        let emSys = typeMoq.Mock.ofType<EnvironmentManagers>();
+        emSys.setup((e) => e.managers).returns(() => [managerSys.object]);
+        emSys.setup((e) => e.getEnvironmentManager(typeMoq.It.isAnyString())).returns(() => managerSys.object);
+        getEnvironmentInfoTool = new GetEnvironmentInfoTool(mockApi.object, emSys.object);
+
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         mockEnvironmentSuccess.setup((x: any) => x.then).returns(() => undefined);
         mockEnvironmentSuccess.setup((x) => x.version).returns(() => '3.12.1');
         const mockEnvId = typeMoq.Mock.ofType<PythonEnvironmentId>();
         mockEnvId.setup((x) => x.managerId).returns(() => 'ms-python.python:system');
-        manager.setup((m) => m.name).returns(() => 'system');
+        managerSys.setup((m) => m.name).returns(() => 'system');
         mockEnvironmentSuccess.setup((x) => x.envId).returns(() => mockEnvId.object);
         mockEnvironmentSuccess
             .setup((x) => x.execInfo)
@@ -429,10 +414,9 @@ suite('GetEnvironmentInfoTool Tests', () => {
         // assert
         const content = result.content as vscode.LanguageModelTextPart[];
         const firstPart = content[0] as vscode.MarkdownString;
-        console.log('result', firstPart.value);
         assert.strictEqual(firstPart.value.includes('3.12.1'), true);
         assert.strictEqual(firstPart.value.includes('"packages": []'), true);
         assert.strictEqual(firstPart.value.includes(`"path/to/venv/bin/python"`), true);
-        assert.strictEqual(firstPart.value.includes('sys'), true);
+        assert.strictEqual(firstPart.value.includes('system'), true);
     });
 });
