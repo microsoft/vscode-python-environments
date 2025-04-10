@@ -35,9 +35,6 @@ suite('InstallPackageTool Tests', () => {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         mockEnvironment.setup((x: any) => x.then).returns(() => undefined);
 
-        // refresh will always return a resolved promise
-        mockApi.setup((x) => x.refreshPackages(typeMoq.It.isAny())).returns(() => Promise.resolve());
-
         // Create an instance of InstallPackageTool with the mock functions
         installPackageTool = new InstallPackageTool(mockApi.object);
     });
@@ -114,8 +111,6 @@ suite('InstallPackageTool Tests', () => {
                 return Promise.resolve(mockEnvironment.object);
             });
 
-        mockApi.setup((x) => x.refreshPackages(typeMoq.It.isAny())).returns(() => Promise.resolve());
-
         const options = { input: testFile, toolInvocationToken: undefined };
         const tokenSource = new vscode.CancellationTokenSource();
         const token = tokenSource.token;
@@ -145,9 +140,8 @@ suite('InstallPackageTool Tests', () => {
                 return Promise.resolve(mockEnvironment.object);
             });
 
-        mockApi.setup((x) => x.refreshPackages(typeMoq.It.isAny())).returns(() => Promise.resolve());
         mockApi
-            .setup((x) => x.installPackages(typeMoq.It.isAny(), typeMoq.It.isAny()))
+            .setup((x) => x.managePackages(typeMoq.It.isAny(), typeMoq.It.isAny()))
             .returns(() => {
                 const deferred = createDeferred<void>();
                 deferred.resolve();
@@ -177,9 +171,8 @@ suite('InstallPackageTool Tests', () => {
                 return Promise.resolve(mockEnvironment.object);
             });
 
-        mockApi.setup((x) => x.refreshPackages(typeMoq.It.isAny())).returns(() => Promise.resolve());
         mockApi
-            .setup((x) => x.installPackages(typeMoq.It.isAny(), typeMoq.It.isAny()))
+            .setup((x) => x.managePackages(typeMoq.It.isAny(), typeMoq.It.isAny()))
             .returns(() => {
                 const deferred = createDeferred<void>();
                 deferred.reject(new Error('Installation failed'));
@@ -228,9 +221,8 @@ suite('InstallPackageTool Tests', () => {
             .returns(async () => {
                 return Promise.resolve(mockEnvironment.object);
             });
-        mockApi.setup((x) => x.refreshPackages(typeMoq.It.isAny())).returns(() => Promise.resolve());
         mockApi
-            .setup((x) => x.installPackages(typeMoq.It.isAny(), typeMoq.It.isAny()))
+            .setup((x) => x.managePackages(typeMoq.It.isAny(), typeMoq.It.isAny()))
             .returns(() => {
                 const deferred = createDeferred<void>();
                 deferred.resolve();

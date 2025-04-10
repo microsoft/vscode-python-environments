@@ -9,6 +9,7 @@ import {
     Uri,
 } from 'vscode';
 import {
+    PackageManagementOptions,
     PythonEnvironment,
     PythonEnvironmentExecutionInfo,
     PythonPackageGetterApi,
@@ -205,7 +206,10 @@ export class InstallPackageTool implements LanguageModelTool<IInstallPackageInpu
             }
 
             // Install the packages
-            await this.api.installPackages(environment, parameters.packageList);
+            const pkgManagementOptions: PackageManagementOptions = {
+                install: parameters.packageList,
+            };
+            await this.api.managePackages(environment, pkgManagementOptions);
             const resultMessage = `Successfully installed ${packagePlurality}: ${parameters.packageList.join(', ')}`;
 
             deferredReturn.resolve({
