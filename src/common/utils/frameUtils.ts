@@ -28,9 +28,19 @@ export function getCallingExtension(): string {
     const extensions = allExtensions();
     const otherExts = extensions.filter((ext) => !pythonExts.includes(ext.id));
     const frames = getFrameData();
-    const filePaths: string[] = [];
 
-    for (const frame of frames) {
+    const registerEnvManagerFrameIndex = frames.findIndex(
+        (frame) =>
+            frame.functionName &&
+            (frame.functionName.includes('registerEnvironmentManager') ||
+                frame.functionName.includes('registerPackageManager')),
+    );
+
+    const relevantFrames =
+        registerEnvManagerFrameIndex !== -1 ? frames.slice(registerEnvManagerFrameIndex + 1) : frames;
+
+    const filePaths: string[] = [];
+    for (const frame of relevantFrames) {
         if (!frame || !frame.filePath) {
             continue;
         }
@@ -55,25 +65,24 @@ export function getCallingExtension(): string {
         }
     }
 
-    // `ms-python.vscode-python-envs` extension in Development mode
-    const candidates = filePaths.filter((filePath) =>
-        otherExts.some((s) => filePath.includes(normalizePath(s.extensionPath))),
-    );
     const envExt = getExtension(ENVS_EXTENSION_ID);
-
-    if (!envExt) {
+    const pythonExt = getExtension(PYTHON_EXTENSION_ID);
+    if (!envExt || !pythonExt) {
         throw new Error('Something went wrong with feature registration');
     }
     const envsExtPath = normalizePath(envExt.extensionPath);
-    if (candidates.length === 0 && filePaths.every((filePath) => filePath.startsWith(envsExtPath))) {
+
+    if (filePaths.every((filePath) => filePath.startsWith(envsExtPath))) {
         return PYTHON_EXTENSION_ID;
-    } else if (candidates.length > 0) {
-        // 3rd party extension in Development mode
-        const candidateExt = otherExts.find((ext) => candidates[0].includes(ext.extensionPath));
-        if (candidateExt) {
-            return candidateExt.id;
+    }
+
+    for (const ext of otherExts) {
+        const extPath = normalizePath(ext.extensionPath);
+        if (filePaths.some((filePath) => filePath.startsWith(extPath))) {
+            return ext.id;
         }
     }
 
-    throw new Error('Unable to determine calling extension id, registration failed');
+    // Fallback - we're likely being called from Python extension in conda registration
+    return PYTHON_EXTENSION_ID;
 }
