@@ -1,6 +1,7 @@
 import * as path from 'path';
-import { Disposable, EventEmitter, LogOutputChannel, MarkdownString, ProgressLocation, Uri } from 'vscode';
+import { Disposable, EventEmitter, l10n, LogOutputChannel, MarkdownString, ProgressLocation, Uri } from 'vscode';
 import {
+    CreateEnvironmentOptions,
     CreateEnvironmentScope,
     DidChangeEnvironmentEventArgs,
     DidChangeEnvironmentsEventArgs,
@@ -12,6 +13,7 @@ import {
     PythonEnvironment,
     PythonEnvironmentApi,
     PythonProject,
+    QuickCreateConfig,
     RefreshEnvironmentsScope,
     ResolveEnvironmentContext,
     SetEnvironmentScope,
@@ -20,8 +22,11 @@ import {
     clearCondaCache,
     createCondaEnvironment,
     deleteCondaEnvironment,
+    generateName,
     getCondaForGlobal,
     getCondaForWorkspace,
+    getDefaultCondaPrefix,
+    quickCreateConda,
     refreshCondaEnvs,
     resolveCondaPath,
     setCondaForGlobal,
@@ -32,6 +37,7 @@ import { NativePythonFinder } from '../common/nativePythonFinder';
 import { createDeferred, Deferred } from '../../common/utils/deferred';
 import { withProgress } from '../../common/window.apis';
 import { CondaStrings } from '../../common/localize';
+import { showErrorMessage } from '../../common/errors/utils';
 
 export class CondaEnvManager implements EnvironmentManager, Disposable {
     private collection: PythonEnvironment[] = [];
@@ -116,29 +122,67 @@ export class CondaEnvManager implements EnvironmentManager, Disposable {
         return [];
     }
 
-    async create(context: CreateEnvironmentScope): Promise<PythonEnvironment | undefined> {
+    quickCreateConfig(): QuickCreateConfig | undefined {
+        if (!this.globalEnv) {
+            return undefined;
+        }
+
+        return {
+            description: l10n.t('Create a conda virtual environment in workspace root'),
+            detail: l10n.t('Uses Python version {0} and installs workspace dependencies.', this.globalEnv.version),
+        };
+    }
+
+    async create(
+        context: CreateEnvironmentScope,
+        options?: CreateEnvironmentOptions,
+    ): Promise<PythonEnvironment | undefined> {
         try {
-            const result = await createCondaEnvironment(
-                this.api,
-                this.log,
-                this,
-                context === 'global' ? undefined : context,
-            );
-            if (!result) {
-                return undefined;
+            let result: PythonEnvironment | undefined;
+            if (options?.quickCreate) {
+                let envRoot: string | undefined = undefined;
+                let name: string | undefined = './.conda';
+                if (context === 'global' || (Array.isArray(context) && context.length > 1)) {
+                    envRoot = await getDefaultCondaPrefix();
+                    name = await generateName(envRoot);
+                } else {
+                    const folder = this.api.getPythonProject(context instanceof Uri ? context : context[0]);
+                    envRoot = folder?.uri.fsPath;
+                }
+                if (!envRoot) {
+                    showErrorMessage(CondaStrings.quickCreateCondaNoEnvRoot);
+                    return undefined;
+                }
+                if (!name) {
+                    showErrorMessage(CondaStrings.quickCreateCondaNoName);
+                    return undefined;
+                }
+                result = await quickCreateConda(this.api, this.log, this, envRoot, name, options?.additionalPackages);
+            } else {
+                result = await createCondaEnvironment(
+                    this.api,
+                    this.log,
+                    this,
+                    context === 'global' ? undefined : context,
+                );
             }
-            this.disposablesMap.set(
-                result.envId.id,
-                new Disposable(() => {
-                    this.collection = this.collection.filter((env) => env.envId.id !== result.envId.id);
-                    Array.from(this.fsPathToEnv.entries())
-                        .filter(([, env]) => env.envId.id === result.envId.id)
-                        .forEach(([uri]) => this.fsPathToEnv.delete(uri));
-                    this.disposablesMap.delete(result.envId.id);
-                }),
-            );
-            this.collection.push(result);
-            this._onDidChangeEnvironments.fire([{ kind: EnvironmentChangeKind.add, environment: result }]);
+            if (result) {
+                this.disposablesMap.set(
+                    result.envId.id,
+                    new Disposable(() => {
+                        if (result) {
+                            this.collection = this.collection.filter((env) => env.envId.id !== result?.envId.id);
+                            Array.from(this.fsPathToEnv.entries())
+                                .filter(([, env]) => env.envId.id === result?.envId.id)
+                                .forEach(([uri]) => this.fsPathToEnv.delete(uri));
+                            this.disposablesMap.delete(result.envId.id);
+                        }
+                    }),
+                );
+                this.collection.push(result);
+                this._onDidChangeEnvironments.fire([{ kind: EnvironmentChangeKind.add, environment: result }]);
+            }
+
             return result;
         } catch (error) {
             this.log.error('Failed to create conda environment:', error);

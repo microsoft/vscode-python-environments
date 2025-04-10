@@ -222,6 +222,11 @@ async function getPrefixes(): Promise<string[]> {
     return prefixes;
 }
 
+export async function getDefaultCondaPrefix(): Promise<string> {
+    const prefixes = await getPrefixes();
+    return prefixes.length > 0 ? prefixes[0] : path.join(os.homedir(), '.conda', 'envs');
+}
+
 async function getVersion(root: string): Promise<string> {
     const files = await fse.readdir(path.join(root, 'conda-meta'));
     for (let file of files) {
@@ -609,6 +614,76 @@ async function createPrefixCondaEnvironment(
                 const bin = os.platform() === 'win32' ? 'python.exe' : 'python';
                 const output = await runConda(['create', '--yes', '--prefix', prefix, 'python']);
                 log.info(output);
+                const version = await getVersion(prefix);
+
+                const environment = api.createPythonEnvironmentItem(
+                    {
+                        name: path.basename(prefix),
+                        environmentPath: Uri.file(prefix),
+                        displayName: `${version} (${name})`,
+                        displayPath: prefix,
+                        description: prefix,
+                        version,
+                        execInfo: {
+                            run: { executable: path.join(prefix, bin) },
+                            activatedRun: {
+                                executable: 'conda',
+                                args: ['run', '--live-stream', '-p', prefix, 'python'],
+                            },
+                            activation: [{ executable: 'conda', args: ['activate', prefix] }],
+                            deactivation: [{ executable: 'conda', args: ['deactivate'] }],
+                        },
+                        sysPrefix: prefix,
+                        group: 'Prefix',
+                    },
+                    manager,
+                );
+                return environment;
+            } catch (e) {
+                log.error('Failed to create conda environment', e);
+                setImmediate(async () => {
+                    await showErrorMessage(CondaStrings.condaCreateFailed, log);
+                });
+            }
+        },
+    );
+}
+
+export async function generateName(fsPath: string): Promise<string | undefined> {
+    let attempts = 0;
+    while (attempts < 5) {
+        const randomStr = Math.random().toString(36).substring(2);
+        const name = `env_${randomStr}`;
+        const prefix = path.join(fsPath, name);
+        if (!(await fse.exists(prefix))) {
+            return name;
+        }
+    }
+    return undefined;
+}
+
+export async function quickCreateConda(
+    api: PythonEnvironmentApi,
+    log: LogOutputChannel,
+    manager: EnvironmentManager,
+    fsPath: string,
+    name: string,
+    additionalPackages?: string[],
+): Promise<PythonEnvironment | undefined> {
+    const prefix = path.join(fsPath, name);
+
+    return await withProgress(
+        {
+            location: ProgressLocation.Notification,
+            title: `Creating conda environment: ${name}`,
+        },
+        async () => {
+            try {
+                const bin = os.platform() === 'win32' ? 'python.exe' : 'python';
+                log.info(await runConda(['create', '--yes', '--prefix', prefix, 'python']));
+                if (additionalPackages && additionalPackages.length > 0) {
+                    log.info(await runConda(['install', '--yes', '--prefix', prefix, ...additionalPackages]));
+                }
                 const version = await getVersion(prefix);
 
                 const environment = api.createPythonEnvironmentItem(

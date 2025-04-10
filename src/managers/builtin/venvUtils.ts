@@ -470,11 +470,17 @@ export async function quickCreateVenv(
     manager: EnvironmentManager,
     baseEnv: PythonEnvironment,
     venvRoot: Uri,
+    additionalPackages?: string[],
 ): Promise<PythonEnvironment | undefined> {
     const project = api.getPythonProject(venvRoot);
 
     sendTelemetryEvent(EventNames.VENV_CREATION, undefined, { creationType: 'quick' });
     const installables = await getProjectInstallable(api, project ? [project] : undefined);
+    const allPackages = [];
+    allPackages.push(...(installables?.flatMap((i) => i.args ?? []) ?? []));
+    if (additionalPackages) {
+        allPackages.push(...additionalPackages);
+    }
     return await createWithProgress(
         nativeFinder,
         api,
@@ -483,7 +489,7 @@ export async function quickCreateVenv(
         baseEnv,
         venvRoot,
         path.join(venvRoot.fsPath, '.venv'),
-        installables?.flatMap((i) => i.args ?? []),
+        allPackages.length > 0 ? allPackages : undefined,
     );
 }
 
@@ -494,7 +500,7 @@ export async function createPythonVenv(
     manager: EnvironmentManager,
     basePythons: PythonEnvironment[],
     venvRoot: Uri,
-    options: { showQuickAndCustomOptions: boolean },
+    options: { showQuickAndCustomOptions: boolean; additionalPackages?: string[] },
 ): Promise<PythonEnvironment | undefined> {
     const sortedEnvs = ensureGlobalEnv(basePythons, log);
     const project = api.getPythonProject(venvRoot);
@@ -509,6 +515,11 @@ export async function createPythonVenv(
     } else if (customize === false) {
         sendTelemetryEvent(EventNames.VENV_CREATION, undefined, { creationType: 'quick' });
         const installables = await getProjectInstallable(api, project ? [project] : undefined);
+        const allPackages = [];
+        allPackages.push(...(installables?.flatMap((i) => i.args ?? []) ?? []));
+        if (options.additionalPackages) {
+            allPackages.push(...options.additionalPackages);
+        }
         return await createWithProgress(
             nativeFinder,
             api,
@@ -517,7 +528,7 @@ export async function createPythonVenv(
             sortedEnvs[0],
             venvRoot,
             path.join(venvRoot.fsPath, '.venv'),
-            { install: installables?.flatMap((i) => i.args ?? []), uninstall: [] },
+            { install: allPackages, uninstall: [] },
         );
     } else {
         sendTelemetryEvent(EventNames.VENV_CREATION, undefined, { creationType: 'custom' });
@@ -554,8 +565,19 @@ export async function createPythonVenv(
         { showSkipOption: true, install: [] },
         project ? [project] : undefined,
     );
+    const allPackages = [];
+    allPackages.push(...(packages ?? []), ...(options.additionalPackages ?? []));
 
-    return await createWithProgress(nativeFinder, api, log, manager, basePython, venvRoot, envPath, packages);
+    return await createWithProgress(
+        nativeFinder,
+        api,
+        log,
+        manager,
+        basePython,
+        venvRoot,
+        envPath,
+        allPackages.length > 0 ? allPackages : undefined,
+    );
 }
 
 export async function removeVenv(environment: PythonEnvironment, log: LogOutputChannel): Promise<boolean> {
