@@ -57,7 +57,7 @@ suite('Create Any Environment Command Tests', () => {
     test('Create global venv (no-workspace): no-select', async () => {
         pm.setup((p) => p.getProjects()).returns(() => []);
         manager
-            .setup((m) => m.create('global', undefined))
+            .setup((m) => m.create('global', typeMoq.It.isAny()))
             .returns(() => Promise.resolve(env.object))
             .verifiable(typeMoq.Times.once());
 
@@ -75,7 +75,7 @@ suite('Create Any Environment Command Tests', () => {
     test('Create global venv (no-workspace): select', async () => {
         pm.setup((p) => p.getProjects()).returns(() => []);
         manager
-            .setup((m) => m.create('global', undefined))
+            .setup((m) => m.create('global', typeMoq.It.isAny()))
             .returns(() => Promise.resolve(env.object))
             .verifiable(typeMoq.Times.once());
 
@@ -93,7 +93,7 @@ suite('Create Any Environment Command Tests', () => {
     test('Create workspace venv: no-select', async () => {
         pm.setup((p) => p.getProjects()).returns(() => [project]);
         manager
-            .setup((m) => m.create([project.uri], undefined))
+            .setup((m) => m.create([project.uri], typeMoq.It.isAny()))
             .returns(() => Promise.resolve(env.object))
             .verifiable(typeMoq.Times.once());
 
@@ -113,7 +113,7 @@ suite('Create Any Environment Command Tests', () => {
     test('Create workspace venv: select', async () => {
         pm.setup((p) => p.getProjects()).returns(() => [project]);
         manager
-            .setup((m) => m.create([project.uri], undefined))
+            .setup((m) => m.create([project.uri], typeMoq.It.isAny()))
             .returns(() => Promise.resolve(env.object))
             .verifiable(typeMoq.Times.once());
 
@@ -134,7 +134,7 @@ suite('Create Any Environment Command Tests', () => {
     test('Create multi-workspace venv: select all', async () => {
         pm.setup((p) => p.getProjects()).returns(() => [project, project2, project3]);
         manager
-            .setup((m) => m.create([project.uri, project2.uri, project3.uri], undefined))
+            .setup((m) => m.create([project.uri, project2.uri, project3.uri], typeMoq.It.isAny()))
             .returns(() => Promise.resolve(env.object))
             .verifiable(typeMoq.Times.once());
 
@@ -157,7 +157,7 @@ suite('Create Any Environment Command Tests', () => {
     test('Create multi-workspace venv: select some', async () => {
         pm.setup((p) => p.getProjects()).returns(() => [project, project2, project3]);
         manager
-            .setup((m) => m.create([project.uri, project3.uri], undefined))
+            .setup((m) => m.create([project.uri, project3.uri], typeMoq.It.isAny()))
             .returns(() => Promise.resolve(env.object))
             .verifiable(typeMoq.Times.once());
 
