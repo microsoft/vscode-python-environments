@@ -489,7 +489,7 @@ export async function quickCreateVenv(
         baseEnv,
         venvRoot,
         path.join(venvRoot.fsPath, '.venv'),
-        allPackages.length > 0 ? allPackages : undefined,
+        { install: allPackages, uninstall: [] },
     );
 }
 
@@ -566,18 +566,12 @@ export async function createPythonVenv(
         project ? [project] : undefined,
     );
     const allPackages = [];
-    allPackages.push(...(packages ?? []), ...(options.additionalPackages ?? []));
+    allPackages.push(...(packages?.install ?? []), ...(options.additionalPackages ?? []));
 
-    return await createWithProgress(
-        nativeFinder,
-        api,
-        log,
-        manager,
-        basePython,
-        venvRoot,
-        envPath,
-        allPackages.length > 0 ? allPackages : undefined,
-    );
+    return await createWithProgress(nativeFinder, api, log, manager, basePython, venvRoot, envPath, {
+        install: allPackages,
+        uninstall: [],
+    });
 }
 
 export async function removeVenv(environment: PythonEnvironment, log: LogOutputChannel): Promise<boolean> {
