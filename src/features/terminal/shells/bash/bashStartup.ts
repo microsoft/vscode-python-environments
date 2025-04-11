@@ -5,19 +5,15 @@ import { ShellScriptEditState, ShellSetupState, ShellStartupScriptProvider } fro
 import { traceError, traceInfo, traceVerbose } from '../../../../common/logging';
 import which from 'which';
 import { BASH_ENV_KEY, ZSH_ENV_KEY } from './bashConstants';
-import { ShellConstants } from '../../../common/shellConstants';
 import { hasStartupCode, insertStartupCode, removeStartupCode } from '../common/editUtils';
 
 async function isBashLikeInstalled(): Promise<boolean> {
-    const result = await Promise.all([
-        which(ShellConstants.BASH, { nothrow: true }),
-        which(ShellConstants.SH, { nothrow: true }),
-    ]);
+    const result = await Promise.all([which('bash', { nothrow: true }), which('sh', { nothrow: true })]);
     return result.some((r) => r !== null);
 }
 
 async function isZshInstalled(): Promise<boolean> {
-    const result = await which(ShellConstants.ZSH, { nothrow: true });
+    const result = await which('zsh', { nothrow: true });
     return result !== null;
 }
 
@@ -67,20 +63,20 @@ async function setupStartup(profile: string, key: string, name: string): Promise
     const activationContent = getActivationContent(key);
 
     try {
-        await fs.mkdirp(path.dirname(profile));
-
-        if (!(await fs.pathExists(profile))) {
-            await fs.writeFile(profile, activationContent);
-            traceInfo(`SHELL: Created new ${name} profile at: ${profile}\n${activationContent}`);
-        } else {
+        if (await fs.pathExists(profile)) {
             const content = await fs.readFile(profile, 'utf8');
             if (hasStartupCode(content, regionStart, regionEnd, [key])) {
                 traceInfo(`SHELL: ${name} profile already contains activation code at: ${profile}`);
             } else {
-                await fs.appendFile(profile, insertStartupCode(content, regionStart, regionEnd, activationContent));
+                await fs.writeFile(profile, insertStartupCode(content, regionStart, regionEnd, activationContent));
                 traceInfo(`SHELL: Updated existing ${name} profile at: ${profile}\n${activationContent}`);
             }
+        } else {
+            await fs.mkdirp(path.dirname(profile));
+            await fs.writeFile(profile, insertStartupCode('', regionStart, regionEnd, activationContent));
+            traceInfo(`SHELL: Created new ${name} profile at: ${profile}\n${activationContent}`);
         }
+
         return true;
     } catch (err) {
         traceError(`SHELL: Failed to setup startup for profile at: ${profile}`, err);
