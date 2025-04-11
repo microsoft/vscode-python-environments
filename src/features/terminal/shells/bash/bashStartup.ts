@@ -5,14 +5,19 @@ import { ShellScriptEditState, ShellSetupState, ShellStartupScriptProvider } fro
 import { traceError, traceInfo, traceVerbose } from '../../../../common/logging';
 import which from 'which';
 import { BASH_ENV_KEY, ZSH_ENV_KEY } from './bashConstants';
+import { ShellConstants } from '../../../common/shellConstants';
+import { hasStartupCode, insertStartupCode, removeStartupCode } from '../common/editUtils';
 
 async function isBashLikeInstalled(): Promise<boolean> {
-    const result = await Promise.all([which('bash', { nothrow: true }), which('sh', { nothrow: true })]);
+    const result = await Promise.all([
+        which(ShellConstants.BASH, { nothrow: true }),
+        which(ShellConstants.SH, { nothrow: true }),
+    ]);
     return result.some((r) => r !== null);
 }
 
 async function isZshInstalled(): Promise<boolean> {
-    const result = await which('zsh', { nothrow: true });
+    const result = await which(ShellConstants.ZSH, { nothrow: true });
     return result !== null;
 }
 
@@ -44,23 +49,15 @@ const regionEnd = '# <<< vscode python';
 
 function getActivationContent(key: string): string {
     const lineSep = '\n';
-
-    return [
-        '',
-        '',
-        regionStart,
-        `if [ -n "$${key}" ] && [ "$TERM_PROGRAM" = "vscode" ]; then`,
-        `    . "$${key}"`,
-        'fi',
-        regionEnd,
-        '',
-    ].join(lineSep);
+    return [`if [ -n "$${key}" ] && [ "$TERM_PROGRAM" = "vscode" ]; then`, `    . "$${key}"`, 'fi'].join(lineSep);
 }
 
 async function isStartupSetup(profile: string, key: string): Promise<ShellSetupState> {
     if (await fs.pathExists(profile)) {
         const content = await fs.readFile(profile, 'utf8');
-        return content.includes(key) ? ShellSetupState.Setup : ShellSetupState.NotSetup;
+        return hasStartupCode(content, regionStart, regionEnd, [key])
+            ? ShellSetupState.Setup
+            : ShellSetupState.NotSetup;
     } else {
         return ShellSetupState.NotSetup;
     }
@@ -70,23 +67,18 @@ async function setupStartup(profile: string, key: string, name: string): Promise
     const activationContent = getActivationContent(key);
 
     try {
-        // Create profile directory if it doesn't exist
         await fs.mkdirp(path.dirname(profile));
 
-        // Create or update profile
         if (!(await fs.pathExists(profile))) {
-            // Create new profile with our content
             await fs.writeFile(profile, activationContent);
             traceInfo(`SHELL: Created new ${name} profile at: ${profile}\n${activationContent}`);
         } else {
-            // Update existing profile
             const content = await fs.readFile(profile, 'utf8');
-            if (!content.includes(key)) {
-                await fs.writeFile(profile, `${content}${activationContent}`);
-                traceInfo(`SHELL: Updated existing ${name} profile at: ${profile}\n${activationContent}`);
-            } else {
-                // Already contains our activation code
+            if (hasStartupCode(content, regionStart, regionEnd, [key])) {
                 traceInfo(`SHELL: ${name} profile already contains activation code at: ${profile}`);
+            } else {
+                await fs.appendFile(profile, insertStartupCode(content, regionStart, regionEnd, activationContent));
+                traceInfo(`SHELL: Updated existing ${name} profile at: ${profile}\n${activationContent}`);
             }
         }
         return true;
@@ -99,14 +91,12 @@ async function setupStartup(profile: string, key: string, name: string): Promise
 async function removeStartup(profile: string, key: string): Promise<boolean> {
     if (!(await fs.pathExists(profile))) {
         return true;
-    } // If the file doesn't exist, we're done. No need to remove anything. Return true to indicate success.
+    }
+
     try {
         const content = await fs.readFile(profile, 'utf8');
-        if (content.includes(key)) {
-            // Use regex to remove the entire region including newlines
-            const pattern = new RegExp(`${regionStart}[\\s\\S]*?${regionEnd}\\n?`, 'g');
-            const newContent = content.replace(pattern, '');
-            await fs.writeFile(profile, newContent);
+        if (hasStartupCode(content, regionStart, regionEnd, [key])) {
+            await fs.writeFile(profile, removeStartupCode(content, regionStart, regionEnd));
             traceInfo(`SHELL: Removed activation from profile at: ${profile}`);
         } else {
             traceVerbose(`Profile at ${profile} does not contain activation code`);

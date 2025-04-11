@@ -11,6 +11,10 @@
             "presentation": {
                 "reveal": "never",
                 "group": "watchers"
+            },
+            "group": {
+                "kind": "build",
+                "isDefault": true
             }
         },
         {
@@ -30,10 +34,6 @@
             "presentation": {
                 "reveal": "never",
                 "group": "watchers"
-            },
-            "group": {
-                "kind": "build",
-                "isDefault": true
             }
         },
         {
