@@ -55,3 +55,21 @@ export function getShellActivationCommand(
 
     return activation;
 }
+export function getShellDeactivationCommand(
+    shell: string,
+    environment: PythonEnvironment,
+): PythonCommandRunConfiguration[] | undefined {
+    let deactivation: PythonCommandRunConfiguration[] | undefined;
+    if (environment.execInfo?.shellDeactivation) {
+        deactivation = environment.execInfo.shellDeactivation.get(shell);
+        if (!deactivation) {
+            deactivation = environment.execInfo.shellDeactivation.get('unknown');
+        }
+    }
+
+    if (!deactivation) {
+        deactivation = environment.execInfo?.deactivation;
+    }
+
+    return deactivation;
+}
