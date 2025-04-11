@@ -1,4 +1,5 @@
 import { PythonEnvironment } from '../../api';
+import { Installable } from './types';
 
 export function noop() {
     // do nothing
