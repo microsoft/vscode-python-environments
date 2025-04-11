@@ -40,11 +40,12 @@ import { pickProject } from '../../common/pickers/projects';
 import { CondaStrings, PackageManagement, Pickers } from '../../common/localize';
 import { showInputBox, showQuickPick, showQuickPickWithButtons, withProgress } from '../../common/window.apis';
 import { showErrorMessageWithLogs } from '../../common/errors/utils';
-import { Installable, selectFromCommonPackagesToInstall } from '../common/pickers';
+import { selectFromCommonPackagesToInstall } from '../common/pickers';
 import { quoteArgs } from '../../features/execution/execUtils';
 import { traceInfo } from '../../common/logging';
 import { untildify } from '../../common/utils/pathUtils';
 import { isWindows } from '../../common/utils/platformUtils';
+import { Installable } from '../common/types';
 
 export const CONDA_PATH_KEY = `${ENVS_EXTENSION_ID}:conda:CONDA_PATH`;
 export const CONDA_PREFIXES_KEY = `${ENVS_EXTENSION_ID}:conda:CONDA_PREFIXES`;

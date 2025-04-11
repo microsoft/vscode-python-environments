@@ -9,8 +9,9 @@ import { findFiles } from '../../common/workspace.apis';
 import { EXTENSION_ROOT_DIR } from '../../common/constants';
 import { selectFromCommonPackagesToInstall, selectFromInstallableToInstall } from '../common/pickers';
 import { traceInfo } from '../../common/logging';
-import { Installable, mergePackages } from '../common/utils';
 import { refreshPipPackages } from './utils';
+import { mergePackages } from '../common/utils';
+import { Installable } from '../common/types';
 
 async function tomlParse(fsPath: string, log?: LogOutputChannel): Promise<tomljs.JsonMap> {
     try {
