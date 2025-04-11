@@ -288,7 +288,7 @@ function getNamedCondaPythonInfo(
             shellActivation,
             shellDeactivation,
         },
-        group: 'Named',
+        group: name !== 'base' ? 'Named' : undefined,
     };
 }
 
