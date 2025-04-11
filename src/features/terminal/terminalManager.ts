@@ -20,7 +20,7 @@ import {
 } from './terminalActivationState';
 import { getPythonApi } from '../pythonApi';
 import { traceInfo, traceVerbose } from '../../common/logging';
-import { ShellEnvsProvider } from './startup/startupProvider';
+import { ShellEnvsProvider } from './shells/startupProvider';
 
 export interface TerminalCreation {
     create(environment: PythonEnvironment, options: PythonTerminalCreateOptions): Promise<Terminal>;
