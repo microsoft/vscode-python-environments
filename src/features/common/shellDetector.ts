@@ -1,8 +1,9 @@
 import * as os from 'os';
 import { Terminal } from 'vscode';
-import { isWindows } from '../../managers/common/utils';
 import { vscodeShell } from '../../common/vscodeEnv.apis';
 import { getConfiguration } from '../../common/workspace.apis';
+import { isWindows } from '../../common/utils/platformUtils';
+import { ShellConstants } from './shellConstants';
 
 /*
 When identifying the shell use the following algorithm:
@@ -29,18 +30,18 @@ const IS_NUSHELL = /(nu$)/i;
 const IS_XONSH = /(xonsh$)/i;
 
 const detectableShells = new Map<string, RegExp>([
-    ['pwsh', IS_POWERSHELL],
-    ['gitbash', IS_GITBASH],
-    ['bash', IS_BASH],
-    ['wsl', IS_WSL],
-    ['zsh', IS_ZSH],
-    ['ksh', IS_KSH],
-    ['cmd', IS_COMMAND],
-    ['fish', IS_FISH],
-    ['tcsh', IS_TCSHELL],
-    ['csh', IS_CSHELL],
-    ['nu', IS_NUSHELL],
-    ['xonsh', IS_XONSH],
+    [ShellConstants.PWSH, IS_POWERSHELL],
+    [ShellConstants.GITBASH, IS_GITBASH],
+    [ShellConstants.BASH, IS_BASH],
+    [ShellConstants.WSL, IS_WSL],
+    [ShellConstants.ZSH, IS_ZSH],
+    [ShellConstants.KSH, IS_KSH],
+    [ShellConstants.CMD, IS_COMMAND],
+    [ShellConstants.FISH, IS_FISH],
+    [ShellConstants.TCSH, IS_TCSHELL],
+    [ShellConstants.CSH, IS_CSHELL],
+    [ShellConstants.NU, IS_NUSHELL],
+    [ShellConstants.XONSH, IS_XONSH],
 ]);
 
 function identifyShellFromShellPath(shellPath: string): string {
@@ -62,10 +63,10 @@ function identifyShellFromShellPath(shellPath: string): string {
 }
 
 function identifyShellFromTerminalName(terminal: Terminal): string {
-    if (terminal.name === 'sh') {
+    if (terminal.name === ShellConstants.SH) {
         // Specifically checking this because other shells have `sh` at the end of their name
         // We can match and return bash for this case
-        return 'bash';
+        return ShellConstants.BASH;
     }
     return identifyShellFromShellPath(terminal.name);
 }
@@ -124,20 +125,20 @@ function identifyShellFromSettings(): string {
 function fromShellTypeApi(terminal: Terminal): string {
     try {
         const known = [
-            'bash',
-            'cmd',
-            'csh',
-            'fish',
-            'gitbash',
+            ShellConstants.BASH,
+            ShellConstants.CMD,
+            ShellConstants.CSH,
+            ShellConstants.FISH,
+            ShellConstants.GITBASH,
             'julia',
-            'ksh',
+            ShellConstants.KSH,
             'node',
-            'nu',
-            'pwsh',
+            ShellConstants.NU,
+            ShellConstants.PWSH,
             'python',
-            'sh',
+            ShellConstants.SH,
             'wsl',
-            'zsh',
+            ShellConstants.ZSH,
         ];
         if (terminal.state.shell && known.includes(terminal.state.shell.toLowerCase())) {
             return terminal.state.shell.toLowerCase();

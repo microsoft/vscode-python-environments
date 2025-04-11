@@ -1,40 +1,13 @@
 import { commands, ExtensionContext, LogOutputChannel, Terminal, Uri } from 'vscode';
 
-import { PythonEnvironmentManagers } from './features/envManagers';
-import { registerLogger, traceInfo } from './common/logging';
-import { EnvManagerView } from './features/views/envManagersView';
-import {
-    addPythonProject,
-    createEnvironmentCommand,
-    createTerminalCommand,
-    getPackageCommandOptions,
-    refreshManagerCommand,
-    removeEnvironmentCommand,
-    removePythonProject,
-    runAsTaskCommand,
-    runInTerminalCommand,
-    setEnvManagerCommand,
-    setEnvironmentCommand,
-    setPackageManagerCommand,
-    resetEnvironmentCommand,
-    refreshPackagesCommand,
-    createAnyEnvironmentCommand,
-    runInDedicatedTerminalCommand,
-    handlePackageUninstall,
-    copyPathToClipboard,
-} from './features/envCommands';
-import { registerCondaFeatures } from './managers/conda/main';
-import { registerSystemPythonFeatures } from './managers/builtin/main';
-import { PythonProjectManagerImpl } from './features/projectManager';
-import { EnvironmentManagers, ProjectCreators, PythonProjectManager } from './internal.api';
-import { getPythonApi, setPythonApi } from './features/pythonApi';
-import { setPersistentState } from './common/persistentState';
-import { createNativePythonFinder, NativePythonFinder } from './managers/common/nativePythonFinder';
 import { PythonEnvironment, PythonEnvironmentApi } from './api';
-import { ProjectCreatorsImpl } from './features/creators/projectCreators';
-import { ProjectView } from './features/views/projectView';
-import { registerCompletionProvider } from './features/settings/settingCompletions';
-import { TerminalManager, TerminalManagerImpl } from './features/terminal/terminalManager';
+import { ensureCorrectVersion } from './common/extVersion';
+import { registerTools } from './common/lm.apis';
+import { registerLogger, traceInfo } from './common/logging';
+import { setPersistentState } from './common/persistentState';
+import { StopWatch } from './common/stopWatch';
+import { EventNames } from './common/telemetry/constants';
+import { sendTelemetryEvent } from './common/telemetry/sender';
 import {
     activeTerminal,
     createLogOutputChannel,
@@ -42,20 +15,50 @@ import {
     onDidChangeActiveTextEditor,
     onDidChangeTerminalShellIntegration,
 } from './common/window.apis';
+import { GetEnvironmentInfoTool, InstallPackageTool } from './features/copilotTools';
+import { AutoFindProjects } from './features/creators/autoFindProjects';
+import { ExistingProjects } from './features/creators/existingProjects';
+import { ProjectCreatorsImpl } from './features/creators/projectCreators';
+import {
+    addPythonProject,
+    copyPathToClipboard,
+    createAnyEnvironmentCommand,
+    createEnvironmentCommand,
+    createTerminalCommand,
+    getPackageCommandOptions,
+    handlePackageUninstall,
+    refreshManagerCommand,
+    refreshPackagesCommand,
+    removeEnvironmentCommand,
+    removePythonProject,
+    resetEnvironmentCommand,
+    runAsTaskCommand,
+    runInDedicatedTerminalCommand,
+    runInTerminalCommand,
+    setEnvironmentCommand,
+    setEnvManagerCommand,
+    setPackageManagerCommand,
+} from './features/envCommands';
+import { PythonEnvironmentManagers } from './features/envManagers';
+import { EnvVarManager, PythonEnvVariableManager } from './features/execution/envVariableManager';
+import { PythonProjectManagerImpl } from './features/projectManager';
+import { getPythonApi, setPythonApi } from './features/pythonApi';
+import { registerCompletionProvider } from './features/settings/settingCompletions';
 import { setActivateMenuButtonContext } from './features/terminal/activateMenuButton';
+import { ShellStartupActivationManagerImpl } from './features/terminal/shells/activateUsingShellStartup';
+import { normalizeShellPath } from './features/terminal/shells/common/shellUtils';
+import { createShellEnvProviders, createShellStartupProviders } from './features/terminal/shells/providers';
+import { TerminalActivationImpl } from './features/terminal/terminalActivationState';
+import { TerminalManager, TerminalManagerImpl } from './features/terminal/terminalManager';
+import { getEnvironmentForTerminal } from './features/terminal/utils';
+import { EnvManagerView } from './features/views/envManagersView';
+import { ProjectView } from './features/views/projectView';
 import { PythonStatusBarImpl } from './features/views/pythonStatusBar';
 import { updateViewsAndStatus } from './features/views/revealHandler';
-import { EnvVarManager, PythonEnvVariableManager } from './features/execution/envVariableManager';
-import { StopWatch } from './common/stopWatch';
-import { sendTelemetryEvent } from './common/telemetry/sender';
-import { EventNames } from './common/telemetry/constants';
-import { ensureCorrectVersion } from './common/extVersion';
-import { ExistingProjects } from './features/creators/existingProjects';
-import { AutoFindProjects } from './features/creators/autoFindProjects';
-import { registerTools } from './common/lm.apis';
-import { GetEnvironmentInfoTool, InstallPackageTool } from './features/copilotTools';
-import { TerminalActivationImpl } from './features/terminal/terminalActivationState';
-import { getEnvironmentForTerminal } from './features/terminal/utils';
+import { EnvironmentManagers, ProjectCreators, PythonProjectManager } from './internal.api';
+import { registerSystemPythonFeatures } from './managers/builtin/main';
+import { createNativePythonFinder, NativePythonFinder } from './managers/common/nativePythonFinder';
+import { registerCondaFeatures } from './managers/conda/main';
 
 export async function activate(context: ExtensionContext): Promise<PythonEnvironmentApi> {
     const start = new StopWatch();
@@ -82,8 +85,16 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
     context.subscriptions.push(envManagers);
 
     const terminalActivation = new TerminalActivationImpl();
-    const terminalManager: TerminalManager = new TerminalManagerImpl(terminalActivation);
-    context.subscriptions.push(terminalActivation, terminalManager);
+    const shellEnvsProviders = createShellEnvProviders();
+    const shellStartupProviders = createShellStartupProviders();
+    const shellStartupActivationManager = new ShellStartupActivationManagerImpl(
+        context.environmentVariableCollection,
+        shellStartupProviders,
+        shellEnvsProviders,
+        envManagers,
+    );
+    const terminalManager: TerminalManager = new TerminalManagerImpl(terminalActivation, shellEnvsProviders);
+    context.subscriptions.push(terminalActivation, terminalManager, shellStartupActivationManager);
 
     const projectCreators: ProjectCreators = new ProjectCreatorsImpl();
     context.subscriptions.push(
@@ -93,15 +104,14 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
     );
 
     setPythonApi(envManagers, projectManager, projectCreators, terminalManager, envVarManager);
+    const api = await getPythonApi();
 
     const managerView = new EnvManagerView(envManagers);
     context.subscriptions.push(managerView);
 
     const workspaceView = new ProjectView(envManagers, projectManager);
     context.subscriptions.push(workspaceView);
-
     workspaceView.initialize();
-    const api = await getPythonApi();
 
     const monitoredTerminals = new Map<Terminal, PythonEnvironment>();
 
@@ -109,6 +119,9 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
         registerCompletionProvider(envManagers),
         registerTools('python_environment_tool', new GetEnvironmentInfoTool(api, envManagers)),
         registerTools('python_install_package_tool', new InstallPackageTool(api)),
+        commands.registerCommand('python-envs.terminal.revertStartupScriptChanges', async () => {
+            await shellStartupActivationManager.cleanupStartupScripts();
+        }),
         commands.registerCommand('python-envs.viewLogs', () => outputChannel.show()),
         commands.registerCommand('python-envs.refreshManager', async (item) => {
             await refreshManagerCommand(item);
@@ -237,7 +250,8 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
             const envVar = shellEnv.value;
             if (envVar) {
                 if (envVar['VIRTUAL_ENV']) {
-                    const env = await api.resolveEnvironment(Uri.file(envVar['VIRTUAL_ENV']));
+                    const envPath = normalizeShellPath(envVar['VIRTUAL_ENV'], e.terminal.state.shell);
+                    const env = await api.resolveEnvironment(Uri.file(envPath));
                     if (env) {
                         monitoredTerminals.set(e.terminal, env);
                         terminalActivation.updateActivationState(e.terminal, env, true);
@@ -262,6 +276,7 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
         await Promise.all([
             registerSystemPythonFeatures(nativeFinder, context.subscriptions, outputChannel),
             registerCondaFeatures(nativeFinder, context.subscriptions, outputChannel),
+            shellStartupActivationManager.initialize(),
         ]);
         sendTelemetryEvent(EventNames.EXTENSION_MANAGER_REGISTRATION_DURATION, start.elapsedTime);
         await terminalManager.initialize(api);
