@@ -47,7 +47,7 @@ import { runAsTask } from './execution/runAsTask';
 import { runInTerminal } from './terminal/runInTerminal';
 import { runInBackground } from './execution/runInBackground';
 import { EnvVarManager } from './execution/envVariableManager';
-import { convertNotebookCellUriToNotebookUri } from '../common/utils/pathUtils';
+import { checkUri } from '../common/utils/pathUtils';
 
 class PythonEnvironmentApiImpl implements PythonEnvironmentApi {
     private readonly _onDidChangeEnvironments = new EventEmitter<DidChangeEnvironmentsEventArgs>();
@@ -168,13 +168,11 @@ class PythonEnvironmentApiImpl implements PythonEnvironmentApi {
         return manager.remove(environment);
     }
     async refreshEnvironments(scope: RefreshEnvironmentsScope): Promise<void> {
-        if (scope === undefined) {
+        let currentScope = checkUri(scope) as RefreshEnvironmentsScope;
+
+        if (currentScope === undefined) {
             await Promise.all(this.envManagers.managers.map((manager) => manager.refresh(scope)));
             return Promise.resolve();
-        }
-        let currentScope: GetEnvironmentScope = scope;
-        if (scope instanceof Uri && scope.scheme === 'vscode-notebook-cell') {
-            currentScope = convertNotebookCellUriToNotebookUri(scope);
         }
         const manager = this.envManagers.getEnvironmentManager(currentScope);
         if (!manager) {
@@ -183,10 +181,7 @@ class PythonEnvironmentApiImpl implements PythonEnvironmentApi {
         return manager.refresh(currentScope);
     }
     async getEnvironments(scope: GetEnvironmentsScope): Promise<PythonEnvironment[]> {
-        let currentScope: GetEnvironmentsScope = scope;
-        if (currentScope instanceof Uri && currentScope.scheme === 'vscode-notebook-cell') {
-            currentScope = convertNotebookCellUriToNotebookUri(currentScope);
-        }
+        let currentScope = checkUri(scope) as GetEnvironmentsScope;
         if (currentScope === 'all' || currentScope === 'global') {
             const promises = this.envManagers.managers.map((manager) => manager.getEnvironments(currentScope));
             const items = await Promise.all(promises);
@@ -202,26 +197,10 @@ class PythonEnvironmentApiImpl implements PythonEnvironmentApi {
     }
     onDidChangeEnvironments: Event<DidChangeEnvironmentsEventArgs> = this._onDidChangeEnvironments.event;
     setEnvironment(scope: SetEnvironmentScope, environment?: PythonEnvironment): Promise<void> {
-        let currentScope = scope;
-
-        if (scope instanceof Uri && scope.scheme === 'vscode-notebook-cell') {
-            currentScope = convertNotebookCellUriToNotebookUri(scope);
-        }
-
-        if (Array.isArray(scope) && scope.length > 0) {
-            currentScope = scope.map((s) =>
-                s instanceof Uri && s.scheme === 'vscode-notebook-cell' ? convertNotebookCellUriToNotebookUri(s) : s,
-            );
-        }
-
-        return this.envManagers.setEnvironment(currentScope, environment);
+        return this.envManagers.setEnvironment(checkUri(scope) as SetEnvironmentScope, environment);
     }
     async getEnvironment(scope: GetEnvironmentScope): Promise<PythonEnvironment | undefined> {
-        let currentScope: GetEnvironmentScope = scope;
-        if (scope instanceof Uri && scope.scheme === 'vscode-notebook-cell') {
-            currentScope = convertNotebookCellUriToNotebookUri(scope);
-        }
-        return this.envManagers.getEnvironment(currentScope);
+        return this.envManagers.getEnvironment(checkUri(scope) as GetEnvironmentScope);
     }
     onDidChangeEnvironment: Event<DidChangeEnvironmentEventArgs> = this._onDidChangeEnvironment.event;
     async resolveEnvironment(context: ResolveEnvironmentContext): Promise<PythonEnvironment | undefined> {
@@ -292,8 +271,7 @@ class PythonEnvironmentApiImpl implements PythonEnvironmentApi {
     }
     onDidChangePythonProjects: Event<DidChangePythonProjectsEventArgs> = this._onDidChangePythonProjects.event;
     getPythonProject(uri: Uri): PythonProject | undefined {
-        let currentUri = uri.scheme === 'vscode-notebook-cell' ? convertNotebookCellUriToNotebookUri(uri) : uri;
-        return this.projectManager.get(currentUri);
+        return this.projectManager.get(checkUri(uri) as Uri);
     }
     registerPythonProjectCreator(creator: PythonProjectCreator): Disposable {
         return this.projectCreators.registerPythonProjectCreator(creator);
@@ -336,9 +314,7 @@ class PythonEnvironmentApiImpl implements PythonEnvironmentApi {
         overrides?: ({ [key: string]: string | undefined } | Uri)[],
         baseEnvVar?: { [key: string]: string | undefined },
     ): Promise<{ [key: string]: string | undefined }> {
-        let currentUri: GetEnvironmentScope =
-            uri.scheme === 'vscode-notebook-cell' ? convertNotebookCellUriToNotebookUri(uri) : uri;
-        return this.envVarManager.getEnvironmentVariables(currentUri, overrides, baseEnvVar);
+        return this.envVarManager.getEnvironmentVariables(checkUri(uri) as Uri, overrides, baseEnvVar);
     }
 }
 

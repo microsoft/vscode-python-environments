@@ -1,15 +1,22 @@
 import { Uri } from 'vscode';
 import { isWindows } from '../../managers/common/utils';
 
-export function convertNotebookCellUriToNotebookUri(uri: Uri): Uri {
-    if (uri.scheme !== 'vscode-notebook-cell') {
-        throw new Error('URI is not of scheme vscode-notebook-cell');
+export function checkUri(scope?: Uri | Uri[] | string): Uri | Uri[] | string | undefined {
+    if (scope instanceof Uri) {
+        if (scope.scheme === 'vscode-notebook-cell') {
+            return Uri.from({
+                scheme: 'vscode-notebook',
+                path: scope.path,
+                authority: scope.authority,
+            });
+        }
     }
-    return Uri.from({
-        scheme: 'vscode-notebook',
-        path: uri.path,
-        authority: uri.authority,
-    });
+    if (Array.isArray(scope)) {
+        return scope.map((item) => {
+            return checkUri(item) as Uri;
+        });
+    }
+    return scope;
 }
 
 export function normalizePath(path: string): string {
