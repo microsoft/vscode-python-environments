@@ -1,4 +1,5 @@
 import * as assert from 'assert';
+import { isWindows } from '../../../../../common/utils/platformUtils';
 import {
     hasStartupCode,
     insertStartupCode,
@@ -80,9 +81,10 @@ suite('Shell Edit Utils', () => {
             const start = '# START';
             const end = '# END';
             const code = 'new code';
+            const lineEndings = isWindows() ? '\r\n' : '\n';
 
             const result = insertStartupCode(content, start, end, code);
-            const expected = 'existing content\n# START\nnew code\n# END\n';
+            const expected = `existing content${lineEndings}# START${lineEndings}new code${lineEndings}# END${lineEndings}`;
 
             assert.strictEqual(result, expected);
         });

@@ -1,5 +1,6 @@
+import { isWindows } from '../../../../common/utils/platformUtils';
+
 export function hasStartupCode(content: string, start: string, end: string, keys: string[]): boolean {
-    // Normalize line endings to \n
     const normalizedContent = content.replace(/\r\n/g, '\n');
     const startIndex = normalizedContent.indexOf(start);
     const endIndex = normalizedContent.indexOf(end);
@@ -10,18 +11,24 @@ export function hasStartupCode(content: string, start: string, end: string, keys
     return contentBetween.length > 0 && keys.every((key) => contentBetween.includes(key));
 }
 
-export function insertStartupCode(content: string, start: string, end: string, code: string): string {
-    // Detect line ending style from content (default to \n if cannot determine)
-    const lineEnding = content.includes('\r\n') ? '\r\n' : '\n';
+function getLineEndings(content: string): string {
+    if (content.includes('\r\n')) {
+        return '\r\n';
+    } else if (content.includes('\n')) {
+        return '\n';
+    }
+    return isWindows() ? '\r\n' : '\n';
+}
 
-    // Normalize line endings to \n for processing
+export function insertStartupCode(content: string, start: string, end: string, code: string): string {
+    let lineEnding = getLineEndings(content);
     const normalizedContent = content.replace(/\r\n/g, '\n');
+
     const startIndex = normalizedContent.indexOf(start);
     const endIndex = normalizedContent.indexOf(end);
 
     let result: string;
     if (startIndex !== -1 && endIndex !== -1 && startIndex < endIndex) {
-        // Both markers exist in correct order
         result =
             normalizedContent.substring(0, startIndex + start.length) +
             '\n' +
@@ -29,14 +36,11 @@ export function insertStartupCode(content: string, start: string, end: string, c
             '\n' +
             normalizedContent.substring(endIndex);
     } else if (startIndex !== -1) {
-        // Only start marker exists - truncate everything after the start marker
         result = normalizedContent.substring(0, startIndex + start.length) + '\n' + code + '\n' + end + '\n';
     } else {
-        // No markers or only end marker exists
         result = normalizedContent + '\n' + start + '\n' + code + '\n' + end + '\n';
     }
 
-    // Restore original line ending style
     if (lineEnding === '\r\n') {
         result = result.replace(/\n/g, '\r\n');
     }
@@ -44,11 +48,9 @@ export function insertStartupCode(content: string, start: string, end: string, c
 }
 
 export function removeStartupCode(content: string, start: string, end: string): string {
-    // Detect line ending style from content (default to \n if cannot determine)
-    const lineEnding = content.includes('\r\n') ? '\r\n' : '\n';
-
-    // Normalize line endings to \n for processing
+    let lineEnding = getLineEndings(content);
     const normalizedContent = content.replace(/\r\n/g, '\n');
+
     const startIndex = normalizedContent.indexOf(start);
     const endIndex = normalizedContent.indexOf(end);
 
@@ -67,7 +69,6 @@ export function removeStartupCode(content: string, start: string, end: string): 
             result = before + after;
         }
 
-        // Restore original line ending style
         if (lineEnding === '\r\n') {
             result = result.replace(/\n/g, '\r\n');
         }
