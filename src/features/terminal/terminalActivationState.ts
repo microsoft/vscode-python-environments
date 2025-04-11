@@ -7,12 +7,11 @@ import {
     TerminalShellExecutionStartEvent,
     TerminalShellIntegration,
 } from 'vscode';
-import { PythonCommandRunConfiguration, PythonEnvironment } from '../../api';
-import { onDidEndTerminalShellExecution, onDidStartTerminalShellExecution } from '../../common/window.apis';
+import { PythonEnvironment } from '../../api';
 import { traceError, traceInfo, traceVerbose } from '../../common/logging';
-import { isTaskTerminal } from './utils';
+import { onDidEndTerminalShellExecution, onDidStartTerminalShellExecution } from '../../common/window.apis';
 import { getActivationCommand, getDeactivationCommand } from '../common/activation';
-import { quoteArgs } from '../execution/execUtils';
+import { isTaskTerminal } from './utils';
 
 export interface DidChangeTerminalActivationStateEvent {
     terminal: Terminal;
@@ -89,11 +88,6 @@ export class TerminalActivationImpl implements TerminalActivationInternal {
     async activate(terminal: Terminal, environment: PythonEnvironment): Promise<void> {
         if (isTaskTerminal(terminal)) {
             traceVerbose('Cannot activate environment in a task terminal');
-            return;
-        }
-
-        if (terminal.shellIntegration?.env?.value?.['TERM_PROGRAM'] !== 'vscode') {
-            traceVerbose('Terminal is not a VS Code terminal, skipping activation');
             return;
         }
 
@@ -203,11 +197,7 @@ export class TerminalActivationImpl implements TerminalActivationInternal {
     private activateLegacy(terminal: Terminal, environment: PythonEnvironment) {
         const activationCommands = getActivationCommand(terminal, environment);
         if (activationCommands) {
-            for (const command of activationCommands) {
-                const args = command.args ?? [];
-                const text = quoteArgs([command.executable, ...args]).join(' ');
-                terminal.sendText(text);
-            }
+            terminal.sendText(activationCommands);
             this.activatedTerminals.set(terminal, environment);
         }
     }
@@ -215,11 +205,7 @@ export class TerminalActivationImpl implements TerminalActivationInternal {
     private deactivateLegacy(terminal: Terminal, environment: PythonEnvironment) {
         const deactivationCommands = getDeactivationCommand(terminal, environment);
         if (deactivationCommands) {
-            for (const command of deactivationCommands) {
-                const args = command.args ?? [];
-                const text = quoteArgs([command.executable, ...args]).join(' ');
-                terminal.sendText(text);
-            }
+            terminal.sendText(deactivationCommands);
             this.activatedTerminals.delete(terminal);
         }
     }
@@ -229,12 +215,10 @@ export class TerminalActivationImpl implements TerminalActivationInternal {
         terminal: Terminal,
         environment: PythonEnvironment,
     ): Promise<void> {
-        const activationCommands = getActivationCommand(terminal, environment);
-        if (activationCommands) {
+        const activationCommand = getActivationCommand(terminal, environment);
+        if (activationCommand) {
             try {
-                for (const command of activationCommands) {
-                    await this.executeTerminalShellCommandInternal(shellIntegration, command);
-                }
+                await this.executeTerminalShellCommandInternal(shellIntegration, activationCommand);
                 this.activatedTerminals.set(terminal, environment);
             } catch {
                 traceError('Failed to activate environment using shell integration');
@@ -249,12 +233,10 @@ export class TerminalActivationImpl implements TerminalActivationInternal {
         terminal: Terminal,
         environment: PythonEnvironment,
     ): Promise<void> {
-        const deactivationCommands = getDeactivationCommand(terminal, environment);
-        if (deactivationCommands) {
+        const deactivationCommand = getDeactivationCommand(terminal, environment);
+        if (deactivationCommand) {
             try {
-                for (const command of deactivationCommands) {
-                    await this.executeTerminalShellCommandInternal(shellIntegration, command);
-                }
+                await this.executeTerminalShellCommandInternal(shellIntegration, deactivationCommand);
                 this.activatedTerminals.delete(terminal);
             } catch {
                 traceError('Failed to deactivate environment using shell integration');
@@ -266,14 +248,14 @@ export class TerminalActivationImpl implements TerminalActivationInternal {
 
     private async executeTerminalShellCommandInternal(
         shellIntegration: TerminalShellIntegration,
-        command: PythonCommandRunConfiguration,
+        command: string,
     ): Promise<boolean> {
-        const execution = shellIntegration.executeCommand(command.executable, command.args ?? []);
+        const execution = shellIntegration.executeCommand(command);
         const disposables: Disposable[] = [];
 
         const promise = new Promise<void>((resolve) => {
             const timer = setTimeout(() => {
-                traceError(`Shell execution timed out: ${command.executable} ${command.args?.join(' ')}`);
+                traceError(`Shell execution timed out: ${command}`);
                 resolve();
             }, 2000);
 
@@ -286,7 +268,7 @@ export class TerminalActivationImpl implements TerminalActivationInternal {
                 }),
                 this.onTerminalShellExecutionStart((e: TerminalShellExecutionStartEvent) => {
                     if (e.execution === execution) {
-                        traceVerbose(`Shell execution started: ${command.executable} ${command.args?.join(' ')}`);
+                        traceVerbose(`Shell execution started: ${command}`);
                     }
                 }),
             );
@@ -296,7 +278,7 @@ export class TerminalActivationImpl implements TerminalActivationInternal {
             await promise;
             return true;
         } catch {
-            traceError(`Failed to execute shell command: ${command.executable} ${command.args?.join(' ')}`);
+            traceError(`Failed to execute shell command: ${command}`);
             return false;
         } finally {
             disposables.forEach((d) => d.dispose());

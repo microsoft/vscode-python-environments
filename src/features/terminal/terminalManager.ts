@@ -1,6 +1,8 @@
-import * as path from 'path';
 import * as fsapi from 'fs-extra';
-import { Disposable, EventEmitter, ProgressLocation, Terminal, Uri, TerminalOptions } from 'vscode';
+import * as path from 'path';
+import { Disposable, EventEmitter, ProgressLocation, Terminal, TerminalOptions, Uri } from 'vscode';
+import { PythonEnvironment, PythonEnvironmentApi, PythonProject, PythonTerminalCreateOptions } from '../../api';
+import { traceInfo, traceVerbose } from '../../common/logging';
 import {
     createTerminal,
     onDidCloseTerminal,
@@ -8,19 +10,18 @@ import {
     terminals,
     withProgress,
 } from '../../common/window.apis';
-import { PythonEnvironment, PythonEnvironmentApi, PythonProject, PythonTerminalCreateOptions } from '../../api';
-import { isActivatableEnvironment } from '../common/activation';
 import { getConfiguration } from '../../common/workspace.apis';
-import { getAutoActivationType, getEnvironmentForTerminal, waitForShellIntegration } from './utils';
+import { isActivatableEnvironment } from '../common/activation';
+import { identifyTerminalShell } from '../common/shellDetector';
+import { getPythonApi } from '../pythonApi';
+import { ShellEnvsProvider } from './shells/startupProvider';
 import {
     DidChangeTerminalActivationStateEvent,
     TerminalActivation,
     TerminalActivationInternal,
     TerminalEnvironment,
 } from './terminalActivationState';
-import { getPythonApi } from '../pythonApi';
-import { traceInfo, traceVerbose } from '../../common/logging';
-import { ShellEnvsProvider } from './shells/startupProvider';
+import { getAutoActivationType, getEnvironmentForTerminal, waitForShellIntegration } from './utils';
 
 export interface TerminalCreation {
     create(environment: PythonEnvironment, options: PythonTerminalCreateOptions): Promise<Terminal>;
@@ -102,7 +103,12 @@ export class TerminalManagerImpl implements TerminalManager {
     }
 
     private async autoActivateOnTerminalOpen(terminal: Terminal, environment: PythonEnvironment): Promise<void> {
-        const actType = getAutoActivationType();
+        let actType = getAutoActivationType();
+        const shellType = identifyTerminalShell(terminal);
+        if (shellType === 'shellStartup' && !this.startupProviders.some((p) => p.shellType === shellType)) {
+            actType = 'command';
+            traceInfo(`Shell startup not supported for ${shellType}, using command activation`);
+        }
         if (actType === 'command') {
             if (isActivatableEnvironment(environment)) {
                 await withProgress(
