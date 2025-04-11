@@ -1,6 +1,7 @@
-import { Terminal } from 'vscode';
+import { Terminal, window } from 'vscode';
 import { PythonCommandRunConfiguration, PythonEnvironment } from '../../api';
 import { identifyTerminalShell } from './shellDetector';
+import { traceLog } from '../../common/logging';
 
 export function isActivatableEnvironment(environment: PythonEnvironment): boolean {
     return !!environment.execInfo?.activation || !!environment.execInfo?.shellActivation;
@@ -15,6 +16,11 @@ export function getActivationCommand(
     environment: PythonEnvironment,
 ): PythonCommandRunConfiguration[] | undefined {
     const shell = identifyTerminalShell(terminal);
+    traceLog('getActivationCommand: Shell type from API:', shell);
+    window.onDidChangeTerminalState((e) => {
+        // traceLog('getActivationCommand: Terminal state changed:', e);
+        traceLog('the shell type from API inside the listener:', e.state.shell);
+    });
 
     let activation: PythonCommandRunConfiguration[] | undefined;
     if (environment.execInfo?.shellActivation) {
