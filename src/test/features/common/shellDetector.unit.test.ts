@@ -1,8 +1,8 @@
-import { Terminal } from 'vscode';
-import { identifyTerminalShell } from '../../../features/common/shellDetector';
 import assert from 'assert';
+import { Terminal } from 'vscode';
 import { isWindows } from '../../../common/utils/platformUtils';
 import { ShellConstants } from '../../../features/common/shellConstants';
+import { identifyTerminalShell } from '../../../features/common/shellDetector';
 
 const testShellTypes: string[] = [
     'sh',
@@ -100,7 +100,7 @@ function expectedShellType(shellType: string): string {
             return ShellConstants.NU;
         case 'tcsh':
         case 'tcshell':
-            return ShellConstants.FISH;
+            return ShellConstants.TCSH;
         case 'xonsh':
             return ShellConstants.XONSH;
         case 'wsl':
