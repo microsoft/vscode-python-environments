@@ -1,12 +1,12 @@
 import { ConfigurationChangeEvent, Disposable, GlobalEnvironmentVariableCollection } from 'vscode';
-import { getWorkspaceFolder, getWorkspaceFolders, onDidChangeConfiguration } from '../../../common/workspace.apis';
-import { getAutoActivationType, setAutoActivationType } from '../utils';
-import { ShellScriptEditState, ShellStartupScriptProvider } from './startupProvider';
 import { DidChangeEnvironmentEventArgs } from '../../../api';
-import { EnvironmentManagers } from '../../../internal.api';
-import { traceError, traceInfo } from '../../../common/logging';
 import { ShellStartupActivationStrings } from '../../../common/localize';
+import { traceError, traceInfo } from '../../../common/logging';
 import { showErrorMessage, showInformationMessage } from '../../../common/window.apis';
+import { getWorkspaceFolder, getWorkspaceFolders, onDidChangeConfiguration } from '../../../common/workspace.apis';
+import { EnvironmentManagers } from '../../../internal.api';
+import { getAutoActivationType, setAutoActivationType } from '../utils';
+import { ShellEnvsProvider, ShellScriptEditState, ShellStartupScriptProvider } from './startupProvider';
 
 export interface ShellStartupActivationManager extends Disposable {
     initialize(): Promise<void>;
@@ -19,6 +19,7 @@ export class ShellStartupActivationManagerImpl implements ShellStartupActivation
     constructor(
         private readonly envCollection: GlobalEnvironmentVariableCollection,
         private readonly shellStartupProviders: ShellStartupScriptProvider[],
+        private readonly shellEnvsProviders: ShellEnvsProvider[],
         private readonly em: EnvironmentManagers,
     ) {
         this.envCollection.description = ShellStartupActivationStrings.envCollectionDescription;
@@ -46,14 +47,14 @@ export class ShellStartupActivationManagerImpl implements ShellStartupActivation
                     workspaces.forEach((workspace) => {
                         const collection = this.envCollection.getScoped({ workspaceFolder: workspace });
                         promises.push(
-                            ...this.shellStartupProviders.map((provider) => provider.removeEnvVariables(collection)),
+                            ...this.shellEnvsProviders.map((provider) => provider.removeEnvVariables(collection)),
                         );
                     });
                     await Promise.all(promises);
                 } else {
                     // User has no workspaces open
                     await Promise.all(
-                        this.shellStartupProviders.map((provider) => provider.removeEnvVariables(this.envCollection)),
+                        this.shellEnvsProviders.map((provider) => provider.removeEnvVariables(this.envCollection)),
                     );
                 }
             }
@@ -72,7 +73,7 @@ export class ShellStartupActivationManagerImpl implements ShellStartupActivation
                 const envVars = this.envCollection.getScoped({ workspaceFolder: wf });
                 if (envVars) {
                     await Promise.all(
-                        this.shellStartupProviders.map(async (provider) => {
+                        this.shellEnvsProviders.map(async (provider) => {
                             if (e.new) {
                                 await provider.updateEnvVariables(envVars, e.new);
                             } else {
@@ -128,7 +129,7 @@ export class ShellStartupActivationManagerImpl implements ShellStartupActivation
                 workspaces.forEach((workspace) => {
                     const collection = this.envCollection.getScoped({ workspaceFolder: workspace });
                     promises.push(
-                        ...this.shellStartupProviders.map(async (provider) => {
+                        ...this.shellEnvsProviders.map(async (provider) => {
                             const env = await this.em.getEnvironment(workspace.uri);
                             if (env) {
                                 await provider.updateEnvVariables(collection, env);
@@ -141,7 +142,7 @@ export class ShellStartupActivationManagerImpl implements ShellStartupActivation
                 await Promise.all(promises);
             } else {
                 await Promise.all(
-                    this.shellStartupProviders.map(async (provider) => {
+                    this.shellEnvsProviders.map(async (provider) => {
                         const env = await this.em.getEnvironment(undefined);
                         if (env) {
                             await provider.updateEnvVariables(this.envCollection, env);
