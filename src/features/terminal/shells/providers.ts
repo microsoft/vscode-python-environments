@@ -1,24 +1,35 @@
 import { isWindows } from '../../../common/utils/platformUtils';
 import { ShellConstants } from '../../common/shellConstants';
-import { BashEnvsProvider } from './bash/bashEnvs';
+import { BashEnvsProvider, ZshEnvsProvider } from './bash/bashEnvs';
+import { BashStartupProvider, GitBashStartupProvider, ZshStartupProvider } from './bash/bashStartup';
+import { CmdEnvsProvider } from './cmd/cmdEnvs';
+import { CmdStartupProvider } from './cmd/cmdStartup';
+import { FishEnvsProvider } from './fish/fishEnvs';
+import { FishStartupProvider } from './fish/fishStartup';
 import { PowerShellEnvsProvider } from './pwsh/pwshEnvs';
-import {
-    PowerShellClassicStartupProvider as PowerShellClassicStartupScriptProvider,
-    PwshStartupProvider,
-} from './pwsh/pwshStartup';
+import { PowerShellClassicStartupProvider, PwshStartupProvider } from './pwsh/pwshStartup';
 import { ShellEnvsProvider, ShellStartupScriptProvider } from './startupProvider';
 
-export function createShellStartupScriptProviders(): ShellStartupScriptProvider[] {
+export function createShellStartupProviders(): ShellStartupScriptProvider[] {
     if (isWindows()) {
-        return [new PowerShellClassicStartupScriptProvider(), new PwshStartupProvider()];
+        return [
+            new PowerShellClassicStartupProvider(),
+            new PwshStartupProvider(),
+            new GitBashStartupProvider(),
+            new CmdStartupProvider(),
+        ];
     }
-    return [new PwshStartupProvider()];
+    return [new PwshStartupProvider(), new BashStartupProvider(), new FishStartupProvider(), new ZshStartupProvider()];
 }
 
 export function createShellEnvProviders(): ShellEnvsProvider[] {
     if (isWindows()) {
-        return [new PowerShellEnvsProvider(), new BashEnvsProvider(ShellConstants.GITBASH)];
-    } else {
-        return [new PowerShellEnvsProvider(), new BashEnvsProvider(ShellConstants.BASH)];
+        return [new PowerShellEnvsProvider(), new BashEnvsProvider(ShellConstants.GITBASH), new CmdEnvsProvider()];
     }
+    return [
+        new PowerShellEnvsProvider(),
+        new BashEnvsProvider(ShellConstants.BASH),
+        new FishEnvsProvider(),
+        new ZshEnvsProvider(),
+    ];
 }
