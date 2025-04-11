@@ -60,6 +60,18 @@ suite('Shell Edit Utils', () => {
             const result = hasStartupCode(content, '# START', '# END', ['key1', 'key2']);
             assert.strictEqual(result, false);
         });
+
+        test('should handle Windows line endings (CRLF) correctly', () => {
+            const content = 'content\r\n# START\r\nsome key content\r\n# END\r\nmore content';
+            const result = hasStartupCode(content, '# START', '# END', ['key']);
+            assert.strictEqual(result, true);
+        });
+
+        test('should handle mixed line endings correctly', () => {
+            const content = 'content\n# START\r\nsome key content\n# END\r\nmore content';
+            const result = hasStartupCode(content, '# START', '# END', ['key']);
+            assert.strictEqual(result, true);
+        });
     });
 
     suite('insertStartupCode', () => {
@@ -122,6 +134,30 @@ suite('Shell Edit Utils', () => {
 
             assert.strictEqual(result, expected);
         });
+
+        test('should handle Windows line endings (CRLF) correctly', () => {
+            const content = 'before\r\n# START\r\nold code\r\n# END\r\nafter';
+            const start = '# START';
+            const end = '# END';
+            const code = 'new code';
+
+            const result = insertStartupCode(content, start, end, code);
+            const expected = 'before\r\n# START\r\nnew code\r\n# END\r\nafter';
+
+            assert.strictEqual(result, expected);
+        });
+
+        test('should preserve original line ending style when inserting', () => {
+            // Content with Windows line endings
+            const contentWindows = 'before\r\n# START\r\nold code\r\n# END\r\nafter';
+            const resultWindows = insertStartupCode(contentWindows, '# START', '# END', 'new code');
+            assert.ok(resultWindows.includes('\r\n'), 'Windows line endings should be preserved');
+
+            // Content with Unix line endings
+            const contentUnix = 'before\n# START\nold code\n# END\nafter';
+            const resultUnix = insertStartupCode(contentUnix, '# START', '# END', 'new code');
+            assert.ok(!resultUnix.includes('\r\n'), 'Unix line endings should be preserved');
+        });
     });
 
     suite('removeStartupCode', () => {
@@ -175,6 +211,25 @@ suite('Shell Edit Utils', () => {
             const result = removeStartupCode(content, '# START', '# END');
             const expected = 'before content';
             assert.strictEqual(result, expected);
+        });
+
+        test('should handle Windows line endings (CRLF) correctly', () => {
+            const content = 'before\r\n# START\r\ncode to remove\r\n# END\r\nafter';
+            const result = removeStartupCode(content, '# START', '# END');
+            const expected = 'before\r\nafter';
+            assert.strictEqual(result, expected);
+        });
+
+        test('should preserve original line ending style when removing', () => {
+            // Content with Windows line endings
+            const contentWindows = 'before\r\n# START\r\ncode to remove\r\n# END\r\nafter';
+            const resultWindows = removeStartupCode(contentWindows, '# START', '# END');
+            assert.ok(resultWindows.includes('\r\n'), 'Windows line endings should be preserved');
+
+            // Content with Unix line endings
+            const contentUnix = 'before\n# START\ncode to remove\n# END\nafter';
+            const resultUnix = removeStartupCode(contentUnix, '# START', '# END');
+            assert.ok(!resultUnix.includes('\r\n'), 'Unix line endings should be preserved');
         });
     });
 });
