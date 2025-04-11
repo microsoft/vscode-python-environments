@@ -168,10 +168,10 @@ class PythonEnvironmentApiImpl implements PythonEnvironmentApi {
         return manager.remove(environment);
     }
     async refreshEnvironments(scope: RefreshEnvironmentsScope): Promise<void> {
-        let currentScope = checkUri(scope) as RefreshEnvironmentsScope;
+        const currentScope = checkUri(scope) as RefreshEnvironmentsScope;
 
         if (currentScope === undefined) {
-            await Promise.all(this.envManagers.managers.map((manager) => manager.refresh(scope)));
+            await Promise.all(this.envManagers.managers.map((manager) => manager.refresh(currentScope)));
             return Promise.resolve();
         }
         const manager = this.envManagers.getEnvironmentManager(currentScope);
@@ -181,7 +181,7 @@ class PythonEnvironmentApiImpl implements PythonEnvironmentApi {
         return manager.refresh(currentScope);
     }
     async getEnvironments(scope: GetEnvironmentsScope): Promise<PythonEnvironment[]> {
-        let currentScope = checkUri(scope) as GetEnvironmentsScope;
+        const currentScope = checkUri(scope) as GetEnvironmentsScope;
         if (currentScope === 'all' || currentScope === 'global') {
             const promises = this.envManagers.managers.map((manager) => manager.getEnvironments(currentScope));
             const items = await Promise.all(promises);
