@@ -59,7 +59,7 @@ export class GetEnvironmentInfoTool implements LanguageModelTool<IResourceRefere
         if (parameters.resourcePath === undefined || parameters.resourcePath === '') {
             throw new Error('Invalid input: resourcePath is required');
         }
-        const resourcePath: Uri = Uri.file(parameters.resourcePath);
+        const resourcePath: Uri = Uri.parse(parameters.resourcePath);
 
         // environment info set to default values
         const envInfo: EnvironmentInfo = {
