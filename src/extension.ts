@@ -57,16 +57,16 @@ import { GetEnvironmentInfoTool, InstallPackageTool } from './features/copilotTo
 import { TerminalActivationImpl } from './features/terminal/terminalActivationState';
 import { sendManagerSelectionTelemetry } from './common/telemetry/helpers';
 import { getEnvironmentForTerminal, normalizeShellPath } from './features/terminal/utils';
-import { PwshStartupProvider } from './features/terminal/startup/pwsh/pwshStartup';
-import { ShellStartupActivationManagerImpl } from './features/terminal/startup/activateUsingShellStartup';
+import { PwshStartupProvider } from './features/terminal/shells/pwsh/pwshStartup';
+import { ShellStartupActivationManagerImpl } from './features/terminal/shells/activateUsingShellStartup';
 import {
     BashStartupProvider,
     GitBashStartupProvider,
     ZshStartupProvider,
-} from './features/terminal/startup/bash/bashStartup';
-import { FishStartupProvider } from './features/terminal/startup/fishStartup';
+} from './features/terminal/shells/bash/bashStartup';
+import { FishStartupProvider } from './features/terminal/shells/fishStartup';
 import { isWindows } from './common/utils/platformUtils';
-import { CmdStartupProvider } from './features/terminal/startup/cmdStartup';
+import { CmdStartupProvider } from './features/terminal/shells/cmdStartup';
 
 export async function activate(context: ExtensionContext): Promise<PythonEnvironmentApi> {
     const start = new StopWatch();
