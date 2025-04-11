@@ -8,11 +8,11 @@ import { getCommandAsString } from '../utils';
 import { BASH_ENV_KEY, ZSH_ENV_KEY } from './bashConstants';
 
 export class BashEnvsProvider implements ShellEnvsProvider {
-    constructor(public readonly shell: 'bash' | 'gitbash') {}
+    constructor(public readonly shellType: 'bash' | 'gitbash') {}
 
     async updateEnvVariables(collection: EnvironmentVariableCollection, env: PythonEnvironment): Promise<void> {
         try {
-            const bashActivation = getActivationCommandForShell(env, this.shell);
+            const bashActivation = getActivationCommandForShell(env, this.shellType);
             if (bashActivation) {
                 const command = getCommandAsString(bashActivation, '&&');
                 collection.replace(BASH_ENV_KEY, command);
@@ -20,7 +20,7 @@ export class BashEnvsProvider implements ShellEnvsProvider {
                 collection.delete(BASH_ENV_KEY);
             }
         } catch (err) {
-            traceError(`Failed to update env variables for ${this.shell}`, err);
+            traceError(`Failed to update env variables for ${this.shellType}`, err);
             collection.delete(BASH_ENV_KEY);
         }
     }
@@ -42,13 +42,14 @@ export class BashEnvsProvider implements ShellEnvsProvider {
             }
             return undefined;
         } catch (err) {
-            traceError(`Failed to get env variables for ${this.shell}`, err);
+            traceError(`Failed to get env variables for ${this.shellType}`, err);
             return undefined;
         }
     }
 }
 
 export class ZshEnvsProvider implements ShellEnvsProvider {
+    public readonly shellType: string = ShellConstants.ZSH;
     async updateEnvVariables(envVars: EnvironmentVariableCollection, env: PythonEnvironment): Promise<void> {
         try {
             const zshActivation = getActivationCommandForShell(env, ShellConstants.ZSH);
