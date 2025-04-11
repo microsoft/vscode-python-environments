@@ -91,6 +91,7 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
     const shellStartupActivationManager = new ShellStartupActivationManagerImpl(
         context.environmentVariableCollection,
         shellStartupProviders,
+        shellEnvsProviders,
         envManagers,
     );
     const terminalManager: TerminalManager = new TerminalManagerImpl(terminalActivation, shellEnvsProviders);
