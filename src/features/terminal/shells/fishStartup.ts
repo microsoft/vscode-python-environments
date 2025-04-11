@@ -4,7 +4,7 @@ import * as os from 'os';
 import { ShellScriptEditState, ShellSetupState, ShellStartupScriptProvider } from './startupProvider';
 import { EnvironmentVariableCollection } from 'vscode';
 import { PythonCommandRunConfiguration, PythonEnvironment } from '../../../api';
-import { getActivationCommandForShell } from '../../common/activation';
+import { getShellActivationCommand } from '../../common/activation';
 import { quoteArgs } from '../../execution/execUtils';
 import { traceError, traceInfo, traceVerbose } from '../../../common/logging';
 import which from 'which';
@@ -12,7 +12,7 @@ import { ShellConstants } from '../../common/shellConstants';
 
 async function isFishInstalled(): Promise<boolean> {
     try {
-        await which('fish');
+        await which(ShellConstants.FISH);
         return true;
     } catch {
         return false;
@@ -22,7 +22,7 @@ async function isFishInstalled(): Promise<boolean> {
 async function getFishProfile(): Promise<string> {
     const homeDir = os.homedir();
     // Fish configuration is typically at ~/.config/fish/config.fish
-    const profilePath = path.join(homeDir, '.config', 'fish', 'config.fish');
+    const profilePath = path.join(homeDir, '.config', ShellConstants.FISH, 'config.fish');
     traceInfo(`SHELL: fish profile found at: ${profilePath}`);
     return profilePath;
 }
@@ -164,7 +164,7 @@ export class FishStartupProvider implements ShellStartupScriptProvider {
 
     async updateEnvVariables(collection: EnvironmentVariableCollection, env: PythonEnvironment): Promise<void> {
         try {
-            const fishActivation = getActivationCommandForShell(env, ShellConstants.FISH);
+            const fishActivation = getShellActivationCommand(env, ShellConstants.FISH);
             if (fishActivation) {
                 const command = getCommandAsString(fishActivation);
                 collection.replace(this.fishActivationEnvVarKey, command);
@@ -187,7 +187,7 @@ export class FishStartupProvider implements ShellStartupScriptProvider {
         }
 
         try {
-            const fishActivation = getActivationCommandForShell(env, ShellConstants.FISH);
+            const fishActivation = getShellActivationCommand(env, ShellConstants.FISH);
             return fishActivation
                 ? new Map([[this.fishActivationEnvVarKey, getCommandAsString(fishActivation)]])
                 : undefined;

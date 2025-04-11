@@ -5,7 +5,7 @@ import { isWindows } from '../../../common/utils/platformUtils';
 import { ShellScriptEditState, ShellSetupState, ShellStartupScriptProvider } from './startupProvider';
 import { EnvironmentVariableCollection } from 'vscode';
 import { PythonEnvironment } from '../../../api';
-import { getActivationCommandForShell } from '../../common/activation';
+import { getShellActivationCommand } from '../../common/activation';
 import { traceError, traceInfo, traceVerbose } from '../../../common/logging';
 import { getCommandAsString } from './utils';
 import which from 'which';
@@ -313,7 +313,7 @@ export class CmdStartupProvider implements ShellStartupScriptProvider {
 
     async updateEnvVariables(collection: EnvironmentVariableCollection, env: PythonEnvironment): Promise<void> {
         try {
-            const cmdActivation = getActivationCommandForShell(env, ShellConstants.CMD);
+            const cmdActivation = getShellActivationCommand(env, ShellConstants.CMD);
             if (cmdActivation) {
                 const command = getCommandAsString(cmdActivation, '&');
                 collection.replace(this.cmdActivationEnvVarKey, command);
@@ -336,7 +336,7 @@ export class CmdStartupProvider implements ShellStartupScriptProvider {
         }
 
         try {
-            const cmdActivation = getActivationCommandForShell(env, ShellConstants.CMD);
+            const cmdActivation = getShellActivationCommand(env, ShellConstants.CMD);
             return cmdActivation
                 ? new Map([[this.cmdActivationEnvVarKey, getCommandAsString(cmdActivation, '&')]])
                 : undefined;

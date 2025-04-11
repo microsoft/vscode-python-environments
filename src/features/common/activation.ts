@@ -1,6 +1,7 @@
 import { Terminal } from 'vscode';
 import { PythonCommandRunConfiguration, PythonEnvironment } from '../../api';
 import { identifyTerminalShell } from './shellDetector';
+import { getShellActivationCommand } from '../terminal/shells/common/shellUtils';
 
 export function isActivatableEnvironment(environment: PythonEnvironment): boolean {
     return !!environment.execInfo?.activation || !!environment.execInfo?.shellActivation;
@@ -15,26 +16,7 @@ export function getActivationCommand(
     environment: PythonEnvironment,
 ): PythonCommandRunConfiguration[] | undefined {
     const shell = identifyTerminalShell(terminal);
-    return getActivationCommandForShell(environment, shell);
-}
-
-export function getActivationCommandForShell(
-    environment: PythonEnvironment,
-    shell: string,
-): PythonCommandRunConfiguration[] | undefined {
-    let activation: PythonCommandRunConfiguration[] | undefined;
-    if (environment.execInfo?.shellActivation) {
-        activation = environment.execInfo.shellActivation.get(shell);
-        if (!activation) {
-            activation = environment.execInfo.shellActivation.get('unknown');
-        }
-    }
-
-    if (!activation) {
-        activation = environment.execInfo?.activation;
-    }
-
-    return activation;
+    return getShellActivationCommand(shell, environment);
 }
 
 export function getDeactivationCommand(

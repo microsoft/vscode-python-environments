@@ -45,6 +45,7 @@ import { traceInfo } from '../../common/logging';
 import { untildify } from '../../common/utils/pathUtils';
 import { isWindows } from '../../common/utils/platformUtils';
 import { Installable } from '../common/types';
+import { ShellConstants } from '../../features/common/shellConstants';
 
 export const CONDA_PATH_KEY = `${ENVS_EXTENSION_ID}:conda:CONDA_PATH`;
 export const CONDA_PREFIXES_KEY = `${ENVS_EXTENSION_ID}:conda:CONDA_PREFIXES`;
@@ -267,8 +268,8 @@ function getNamedCondaPythonInfo(
     const sv = shortVersion(version);
     const shellActivation: Map<string, PythonCommandRunConfiguration[]> = new Map();
     const shellDeactivation: Map<string, PythonCommandRunConfiguration[]> = new Map();
-    shellActivation.set('gitbash', [{ executable: pathForGitBash(conda), args: ['activate', name] }]);
-    shellDeactivation.set('gitbash', [{ executable: pathForGitBash(conda), args: ['deactivate'] }]);
+    shellActivation.set(ShellConstants.GITBASH, [{ executable: pathForGitBash(conda), args: ['activate', name] }]);
+    shellDeactivation.set(ShellConstants.GITBASH, [{ executable: pathForGitBash(conda), args: ['deactivate'] }]);
 
     return {
         name: name,
@@ -304,8 +305,8 @@ function getPrefixesCondaPythonInfo(
     const sv = shortVersion(version);
     const shellActivation: Map<string, PythonCommandRunConfiguration[]> = new Map();
     const shellDeactivation: Map<string, PythonCommandRunConfiguration[]> = new Map();
-    shellActivation.set('gitbash', [{ executable: pathForGitBash(conda), args: ['activate', prefix] }]);
-    shellDeactivation.set('gitbash', [{ executable: pathForGitBash(conda), args: ['deactivate'] }]);
+    shellActivation.set(ShellConstants.GITBASH, [{ executable: pathForGitBash(conda), args: ['activate', prefix] }]);
+    shellDeactivation.set(ShellConstants.GITBASH, [{ executable: pathForGitBash(conda), args: ['deactivate'] }]);
 
     const basename = path.basename(prefix);
     return {
@@ -605,7 +606,7 @@ async function createPrefixCondaEnvironment(
             } catch (e) {
                 log.error('Failed to create conda environment', e);
                 setImmediate(async () => {
-                    await showErrorMessage(CondaStrings.condaCreateFailed, log);
+                    await showErrorMessageWithLogs(CondaStrings.condaCreateFailed, log);
                 });
             }
         },
