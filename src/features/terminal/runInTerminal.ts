@@ -4,6 +4,7 @@ import { onDidEndTerminalShellExecution } from '../../common/window.apis';
 import { createDeferred } from '../../common/utils/deferred';
 import { quoteArgs } from '../execution/execUtils';
 import { identifyTerminalShell } from '../common/shellDetector';
+import { ShellConstants } from '../common/shellConstants';
 
 export async function runInTerminal(
     environment: PythonEnvironment,
@@ -33,7 +34,7 @@ export async function runInTerminal(
     } else {
         const shellType = identifyTerminalShell(terminal);
         let text = quoteArgs([executable, ...allArgs]).join(' ');
-        if (shellType === 'pwsh' && !text.startsWith('&')) {
+        if (shellType === ShellConstants.PWSH && !text.startsWith('&')) {
             // PowerShell requires commands to be prefixed with '&' to run them.
             text = `& ${text}`;
         }

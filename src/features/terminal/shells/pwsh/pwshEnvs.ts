@@ -8,6 +8,8 @@ import { ShellConstants } from '../../../common/shellConstants';
 import { POWERSHELL_ENV_KEY } from './pwshConstants';
 
 export class PowerShellEnvsProvider implements ShellEnvsProvider {
+    public readonly shellType: string = ShellConstants.PWSH;
+
     async updateEnvVariables(collection: EnvironmentVariableCollection, env: PythonEnvironment): Promise<void> {
         try {
             const pwshActivation = getActivationCommandForShell(env, ShellConstants.PWSH);
