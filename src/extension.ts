@@ -1,40 +1,14 @@
 import { commands, ExtensionContext, LogOutputChannel, Terminal, Uri } from 'vscode';
 
-import { PythonEnvironmentManagers } from './features/envManagers';
-import { registerLogger, traceError, traceInfo } from './common/logging';
-import { EnvManagerView } from './features/views/envManagersView';
-import {
-    addPythonProject,
-    createEnvironmentCommand,
-    createTerminalCommand,
-    getPackageCommandOptions,
-    refreshManagerCommand,
-    removeEnvironmentCommand,
-    removePythonProject,
-    runAsTaskCommand,
-    runInTerminalCommand,
-    setEnvManagerCommand,
-    setEnvironmentCommand,
-    setPackageManagerCommand,
-    resetEnvironmentCommand,
-    refreshPackagesCommand,
-    createAnyEnvironmentCommand,
-    runInDedicatedTerminalCommand,
-    handlePackageUninstall,
-    copyPathToClipboard,
-} from './features/envCommands';
-import { registerCondaFeatures } from './managers/conda/main';
-import { registerSystemPythonFeatures } from './managers/builtin/main';
-import { PythonProjectManagerImpl } from './features/projectManager';
-import { EnvironmentManagers, ProjectCreators, PythonProjectManager } from './internal.api';
-import { getPythonApi, setPythonApi } from './features/pythonApi';
-import { setPersistentState } from './common/persistentState';
-import { createNativePythonFinder, NativePythonFinder } from './managers/common/nativePythonFinder';
 import { PythonEnvironment, PythonEnvironmentApi } from './api';
-import { ProjectCreatorsImpl } from './features/creators/projectCreators';
-import { ProjectView } from './features/views/projectView';
-import { registerCompletionProvider } from './features/settings/settingCompletions';
-import { TerminalManager, TerminalManagerImpl } from './features/terminal/terminalManager';
+import { ensureCorrectVersion } from './common/extVersion';
+import { registerTools } from './common/lm.apis';
+import { registerLogger, traceError, traceInfo } from './common/logging';
+import { setPersistentState } from './common/persistentState';
+import { StopWatch } from './common/stopWatch';
+import { EventNames } from './common/telemetry/constants';
+import { sendManagerSelectionTelemetry } from './common/telemetry/helpers';
+import { sendTelemetryEvent } from './common/telemetry/sender';
 import {
     activeTerminal,
     createLogOutputChannel,
@@ -42,31 +16,50 @@ import {
     onDidChangeActiveTextEditor,
     onDidChangeTerminalShellIntegration,
 } from './common/window.apis';
+import { GetEnvironmentInfoTool, InstallPackageTool } from './features/copilotTools';
+import { AutoFindProjects } from './features/creators/autoFindProjects';
+import { ExistingProjects } from './features/creators/existingProjects';
+import { ProjectCreatorsImpl } from './features/creators/projectCreators';
+import {
+    addPythonProject,
+    copyPathToClipboard,
+    createAnyEnvironmentCommand,
+    createEnvironmentCommand,
+    createTerminalCommand,
+    getPackageCommandOptions,
+    handlePackageUninstall,
+    refreshManagerCommand,
+    refreshPackagesCommand,
+    removeEnvironmentCommand,
+    removePythonProject,
+    resetEnvironmentCommand,
+    runAsTaskCommand,
+    runInDedicatedTerminalCommand,
+    runInTerminalCommand,
+    setEnvironmentCommand,
+    setEnvManagerCommand,
+    setPackageManagerCommand,
+} from './features/envCommands';
+import { PythonEnvironmentManagers } from './features/envManagers';
+import { EnvVarManager, PythonEnvVariableManager } from './features/execution/envVariableManager';
+import { PythonProjectManagerImpl } from './features/projectManager';
+import { getPythonApi, setPythonApi } from './features/pythonApi';
+import { registerCompletionProvider } from './features/settings/settingCompletions';
 import { setActivateMenuButtonContext } from './features/terminal/activateMenuButton';
+import { ShellStartupActivationManagerImpl } from './features/terminal/shells/activateUsingShellStartup';
+import { normalizeShellPath } from './features/terminal/shells/common/shellUtils';
+import { createShellEnvProviders, createShellStartupProviders } from './features/terminal/shells/providers';
+import { TerminalActivationImpl } from './features/terminal/terminalActivationState';
+import { TerminalManager, TerminalManagerImpl } from './features/terminal/terminalManager';
+import { getEnvironmentForTerminal } from './features/terminal/utils';
+import { EnvManagerView } from './features/views/envManagersView';
+import { ProjectView } from './features/views/projectView';
 import { PythonStatusBarImpl } from './features/views/pythonStatusBar';
 import { updateViewsAndStatus } from './features/views/revealHandler';
-import { EnvVarManager, PythonEnvVariableManager } from './features/execution/envVariableManager';
-import { StopWatch } from './common/stopWatch';
-import { sendTelemetryEvent } from './common/telemetry/sender';
-import { EventNames } from './common/telemetry/constants';
-import { ensureCorrectVersion } from './common/extVersion';
-import { ExistingProjects } from './features/creators/existingProjects';
-import { AutoFindProjects } from './features/creators/autoFindProjects';
-import { registerTools } from './common/lm.apis';
-import { GetEnvironmentInfoTool, InstallPackageTool } from './features/copilotTools';
-import { TerminalActivationImpl } from './features/terminal/terminalActivationState';
-import { sendManagerSelectionTelemetry } from './common/telemetry/helpers';
-import { getEnvironmentForTerminal, normalizeShellPath } from './features/terminal/utils';
-import { PwshStartupProvider } from './features/terminal/shells/pwsh/pwshStartup';
-import { ShellStartupActivationManagerImpl } from './features/terminal/shells/activateUsingShellStartup';
-import {
-    BashStartupProvider,
-    GitBashStartupProvider,
-    ZshStartupProvider,
-} from './features/terminal/shells/bash/bashStartup';
-import { FishStartupProvider } from './features/terminal/shells/fishStartup';
-import { isWindows } from './common/utils/platformUtils';
-import { CmdStartupProvider } from './features/terminal/shells/cmdStartup';
+import { EnvironmentManagers, ProjectCreators, PythonProjectManager } from './internal.api';
+import { registerSystemPythonFeatures } from './managers/builtin/main';
+import { createNativePythonFinder, NativePythonFinder } from './managers/common/nativePythonFinder';
+import { registerCondaFeatures } from './managers/conda/main';
 
 export async function activate(context: ExtensionContext): Promise<PythonEnvironmentApi> {
     const start = new StopWatch();
@@ -93,15 +86,14 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
     context.subscriptions.push(envManagers);
 
     const terminalActivation = new TerminalActivationImpl();
-    const shellStartupProviders = isWindows()
-        ? [new PwshStartupProvider(), new GitBashStartupProvider(), new CmdStartupProvider()]
-        : [new PwshStartupProvider(), new BashStartupProvider(), new ZshStartupProvider(), new FishStartupProvider()];
+    const shellEnvsProviders = createShellEnvProviders();
+    const shellStartupProviders = createShellStartupProviders();
     const shellStartupActivationManager = new ShellStartupActivationManagerImpl(
         context.environmentVariableCollection,
         shellStartupProviders,
         envManagers,
     );
-    const terminalManager: TerminalManager = new TerminalManagerImpl(terminalActivation, shellStartupProviders);
+    const terminalManager: TerminalManager = new TerminalManagerImpl(terminalActivation, shellEnvsProviders);
     context.subscriptions.push(terminalActivation, terminalManager, shellStartupActivationManager);
 
     const projectCreators: ProjectCreators = new ProjectCreatorsImpl();

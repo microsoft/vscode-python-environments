@@ -1,17 +1,18 @@
 import * as fs from 'fs-extra';
+import * as os from 'os';
 import * as path from 'path';
+import which from 'which';
+import { traceError, traceInfo, traceVerbose } from '../../../../common/logging';
 import { isWindows } from '../../../../common/utils/platformUtils';
 import { ShellScriptEditState, ShellSetupState, ShellStartupScriptProvider } from '../startupProvider';
-import { traceError, traceInfo, traceVerbose } from '../../../../common/logging';
 import { runCommand } from '../utils';
-import which from 'which';
-import * as os from 'os';
+
+import { hasStartupCode, insertStartupCode, removeStartupCode } from '../common/editUtils';
 import { POWERSHELL_ENV_KEY } from './pwshConstants';
-import { ShellConstants } from '../../../common/shellConstants';
 
 async function isPowerShellInstalled(shell: string): Promise<boolean> {
     try {
-        await which(shell, { all: true });
+        await which(shell);
         return true;
     } catch {
         traceVerbose(`${shell} is not installed`);
@@ -67,14 +68,9 @@ const regionEnd = '#endregion vscode python';
 function getActivationContent(): string {
     const lineSep = isWindows() ? '\r\n' : '\n';
     const activationContent = [
-        '',
-        '',
-        regionStart,
         `if (($env:TERM_PROGRAM -eq 'vscode') -and ($null -ne $env:${POWERSHELL_ENV_KEY})) {`,
         `    Invoke-Expression $env:${POWERSHELL_ENV_KEY}`,
         '}',
-        regionEnd,
-        '',
     ].join(lineSep);
     return activationContent;
 }
@@ -82,7 +78,7 @@ function getActivationContent(): string {
 async function isPowerShellStartupSetup(shell: string, profile: string): Promise<boolean> {
     if (await fs.pathExists(profile)) {
         const content = await fs.readFile(profile, 'utf8');
-        if (content.includes(POWERSHELL_ENV_KEY)) {
+        if (hasStartupCode(content, regionStart, regionEnd, [POWERSHELL_ENV_KEY])) {
             traceInfo(`SHELL: ${shell} already contains activation code: ${profile}`);
             return true;
         }
@@ -97,23 +93,18 @@ async function setupPowerShellStartup(shell: string, profile: string): Promise<b
     try {
         if (await fs.pathExists(profile)) {
             const content = await fs.readFile(profile, 'utf8');
-            if (content.includes(POWERSHELL_ENV_KEY)) {
+            if (hasStartupCode(content, regionStart, regionEnd, [POWERSHELL_ENV_KEY])) {
                 traceInfo(`SHELL: ${shell} already contains activation code: ${profile}`);
-                return true;
             } else {
-                await fs.writeFile(profile, `${content}${activationContent}`);
+                await fs.writeFile(profile, insertStartupCode(content, regionStart, regionEnd, activationContent));
                 traceInfo(`SHELL: Updated existing ${shell} profile at: ${profile}\r\n${activationContent}`);
-                return true;
             }
         } else {
-            // Create profile directory if it doesn't exist
             await fs.mkdirp(path.dirname(profile));
-
-            // Create new profile with our content
-            await fs.writeFile(profile, activationContent);
+            await fs.writeFile(profile, insertStartupCode('', regionStart, regionEnd, activationContent));
             traceInfo(`SHELL: Created new ${shell} profile at: ${profile}\r\n${activationContent}`);
-            return true;
         }
+        return true;
     } catch (err) {
         traceError(`Failed to setup ${shell} startup`, err);
         return false;
@@ -127,9 +118,8 @@ async function removePowerShellStartup(shell: string, profile: string): Promise<
 
     try {
         const content = await fs.readFile(profile, 'utf8');
-        if (content.includes(POWERSHELL_ENV_KEY)) {
-            const newContent = content.replace(new RegExp(`${regionStart}\\s*.*${regionEnd}\\s*`, 's'), '');
-            await fs.writeFile(profile, newContent);
+        if (hasStartupCode(content, regionStart, regionEnd, [POWERSHELL_ENV_KEY])) {
+            await fs.writeFile(profile, removeStartupCode(content, regionStart, regionEnd));
             traceInfo(`SHELL: Removed activation from ${shell} profile at: ${profile}`);
         } else {
             traceInfo(`SHELL: No activation code found in ${shell} profile at: ${profile}`);
@@ -200,15 +190,15 @@ export class PwshStartupProvider implements ShellStartupScriptProvider {
     public readonly name: string = 'PowerShell';
 
     async isSetup(): Promise<ShellSetupState> {
-        const isInstalled = await isPowerShellInstalled(ShellConstants.PWSH);
+        const isInstalled = await isPowerShellInstalled('pwsh');
         if (!isInstalled) {
             traceVerbose('PowerShell is not installed');
             return ShellSetupState.NotInstalled;
         }
 
         try {
-            const profile = await getProfileForShell(ShellConstants.PWSH);
-            const isSetup = await isPowerShellStartupSetup(ShellConstants.PWSH, profile);
+            const profile = await getProfileForShell('pwsh');
+            const isSetup = await isPowerShellStartupSetup('pwsh', profile);
             return isSetup ? ShellSetupState.Setup : ShellSetupState.NotSetup;
         } catch (err) {
             traceError('Failed to check if PowerShell startup is setup', err);
@@ -217,15 +207,15 @@ export class PwshStartupProvider implements ShellStartupScriptProvider {
     }
 
     async setupScripts(): Promise<ShellScriptEditState> {
-        const isInstalled = await isPowerShellInstalled(ShellConstants.PWSH);
+        const isInstalled = await isPowerShellInstalled('pwsh');
         if (!isInstalled) {
             traceVerbose('PowerShell is not installed');
             return ShellScriptEditState.NotInstalled;
         }
 
         try {
-            const profile = await getProfileForShell(ShellConstants.PWSH);
-            const success = await setupPowerShellStartup(ShellConstants.PWSH, profile);
+            const profile = await getProfileForShell('pwsh');
+            const success = await setupPowerShellStartup('pwsh', profile);
             return success ? ShellScriptEditState.Edited : ShellScriptEditState.NotEdited;
         } catch (err) {
             traceError('Failed to setup PowerShell startup', err);
@@ -234,15 +224,15 @@ export class PwshStartupProvider implements ShellStartupScriptProvider {
     }
 
     async teardownScripts(): Promise<ShellScriptEditState> {
-        const isInstalled = await isPowerShellInstalled(ShellConstants.PWSH);
+        const isInstalled = await isPowerShellInstalled('pwsh');
         if (!isInstalled) {
             traceVerbose('PowerShell is not installed');
             return ShellScriptEditState.NotInstalled;
         }
 
         try {
-            const profile = await getProfileForShell(ShellConstants.PWSH);
-            const success = await removePowerShellStartup(ShellConstants.PWSH, profile);
+            const profile = await getProfileForShell('pwsh');
+            const success = await removePowerShellStartup('pwsh', profile);
             return success ? ShellScriptEditState.Edited : ShellScriptEditState.NotEdited;
         } catch (err) {
             traceError('Failed to remove PowerShell startup', err);

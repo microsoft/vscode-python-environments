@@ -3,11 +3,11 @@ import { isWindows } from '../../../../common/utils/platformUtils';
 import { ShellConstants } from '../../../common/shellConstants';
 import { quoteArgs } from '../../../execution/execUtils';
 
-export function getCommandAsString(command: PythonCommandRunConfiguration[], delimiter: string): string {
+function getCommandAsString(command: PythonCommandRunConfiguration[], shell: string, delimiter: string): string {
     const parts = [];
     for (const cmd of command) {
         const args = cmd.args ?? [];
-        parts.push(quoteArgs([cmd.executable, ...args]).join(' '));
+        parts.push(quoteArgs([normalizeShellPath(cmd.executable, shell), ...args]).join(' '));
     }
     return parts.join(` ${delimiter} `);
 }
@@ -15,16 +15,17 @@ export function getCommandAsString(command: PythonCommandRunConfiguration[], del
 export function getShellCommandAsString(shell: string, command: PythonCommandRunConfiguration[]): string {
     switch (shell) {
         case ShellConstants.NU:
-            return getCommandAsString(command, ';');
+            return getCommandAsString(command, shell, ';');
         case ShellConstants.FISH:
-            return getCommandAsString(command, '; and');
+            return getCommandAsString(command, shell, '; and');
         case ShellConstants.BASH:
         case ShellConstants.SH:
         case ShellConstants.ZSH:
         case ShellConstants.PWSH:
         case ShellConstants.CMD:
+        case ShellConstants.GITBASH:
         default:
-            return getCommandAsString(command, '&&');
+            return getCommandAsString(command, shell, '&&');
     }
 }
 

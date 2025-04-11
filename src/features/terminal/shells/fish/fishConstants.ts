@@ -1,0 +1,1 @@
+export const FISH_ENV_KEY = 'VSCODE_FISH_ACTIVATE';
