@@ -47,6 +47,7 @@ import { runAsTask } from './execution/runAsTask';
 import { runInTerminal } from './terminal/runInTerminal';
 import { runInBackground } from './execution/runInBackground';
 import { EnvVarManager } from './execution/envVariableManager';
+import { convertNotebookCellUriToNotebookUri } from '../common/utils/pathUtils';
 
 class PythonEnvironmentApiImpl implements PythonEnvironmentApi {
     private readonly _onDidChangeEnvironments = new EventEmitter<DidChangeEnvironmentsEventArgs>();
@@ -209,32 +210,16 @@ class PythonEnvironmentApiImpl implements PythonEnvironmentApi {
     }
     onDidChangeEnvironments: Event<DidChangeEnvironmentsEventArgs> = this._onDidChangeEnvironments.event;
     setEnvironment(scope: SetEnvironmentScope, environment?: PythonEnvironment): Promise<void> {
-        let currentScope: SetEnvironmentScope = scope;
+        let currentScope = scope;
+
         if (scope instanceof Uri && scope.scheme === 'vscode-notebook-cell') {
-            currentScope = Uri.from({
-                scheme: 'vscode-notebook',
-                path: scope.path,
-                authority: scope.authority,
-            });
+            currentScope = convertNotebookCellUriToNotebookUri(scope);
         }
 
         if (Array.isArray(scope) && scope.length > 0) {
-            // if scope is an array of Uri, go through each item and check if it is a notebook cell Uri
-            // if it is, convert it to notebook Uri and push all items to the currentScope
-            currentScope = [];
-            for (const s of scope) {
-                if (s instanceof Uri && s.scheme === 'vscode-notebook-cell') {
-                    currentScope.push(
-                        Uri.from({
-                            scheme: 'vscode-notebook',
-                            path: s.path,
-                            authority: s.authority,
-                        }),
-                    );
-                } else {
-                    currentScope.push(s);
-                }
-            }
+            currentScope = scope.map((s) =>
+                s instanceof Uri && s.scheme === 'vscode-notebook-cell' ? convertNotebookCellUriToNotebookUri(s) : s,
+            );
         }
 
         return this.envManagers.setEnvironment(currentScope, environment);
@@ -242,11 +227,7 @@ class PythonEnvironmentApiImpl implements PythonEnvironmentApi {
     async getEnvironment(scope: GetEnvironmentScope): Promise<PythonEnvironment | undefined> {
         let currentScope: GetEnvironmentScope = scope;
         if (scope instanceof Uri && scope.scheme === 'vscode-notebook-cell') {
-            currentScope = Uri.from({
-                scheme: 'vscode-notebook',
-                path: scope.path,
-                authority: scope.authority,
-            });
+            currentScope = convertNotebookCellUriToNotebookUri(scope);
         }
         return this.envManagers.getEnvironment(currentScope);
     }
@@ -321,11 +302,7 @@ class PythonEnvironmentApiImpl implements PythonEnvironmentApi {
     getPythonProject(uri: Uri): PythonProject | undefined {
         let currentUri: GetEnvironmentScope = uri;
         if (uri.scheme === 'vscode-notebook-cell') {
-            currentUri = Uri.from({
-                scheme: 'vscode-notebook',
-                path: uri.path,
-                authority: uri.authority,
-            });
+            currentUri = convertNotebookCellUriToNotebookUri(uri);
         }
         return this.projectManager.get(currentUri);
     }
@@ -372,11 +349,7 @@ class PythonEnvironmentApiImpl implements PythonEnvironmentApi {
     ): Promise<{ [key: string]: string | undefined }> {
         let currentUri: GetEnvironmentScope = uri;
         if (uri.scheme === 'vscode-notebook-cell') {
-            currentUri = Uri.from({
-                scheme: 'vscode-notebook',
-                path: uri.path,
-                authority: uri.authority,
-            });
+            currentUri = convertNotebookCellUriToNotebookUri(uri);
         }
         return this.envVarManager.getEnvironmentVariables(currentUri, overrides, baseEnvVar);
     }
