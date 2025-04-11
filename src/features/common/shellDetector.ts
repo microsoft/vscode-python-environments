@@ -3,6 +3,7 @@ import { Terminal } from 'vscode';
 import { isWindows } from '../../managers/common/utils';
 import { vscodeShell } from '../../common/vscodeEnv.apis';
 import { getConfiguration } from '../../common/workspace.apis';
+import { traceLog } from '../../common/logging';
 
 /*
 When identifying the shell use the following algorithm:
@@ -150,6 +151,7 @@ function fromShellTypeApi(terminal: Terminal): string {
 
 export function identifyTerminalShell(terminal: Terminal): string {
     let shellType = fromShellTypeApi(terminal);
+    traceLog('IdentifyTerminalShell: Shell type from API:', shellType);
 
     if (shellType === 'unknown') {
         shellType = identifyShellFromVSC(terminal);
