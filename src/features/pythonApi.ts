@@ -171,32 +171,84 @@ class PythonEnvironmentApiImpl implements PythonEnvironmentApi {
             await Promise.all(this.envManagers.managers.map((manager) => manager.refresh(scope)));
             return Promise.resolve();
         }
-        const manager = this.envManagers.getEnvironmentManager(scope);
-        if (!manager) {
-            return Promise.reject(new Error(`No environment manager found for: ${scope.fsPath}`));
+        let currentScope: GetEnvironmentScope = scope;
+        if (scope instanceof Uri && scope.scheme === 'vscode-notebook-cell') {
+            currentScope = Uri.from({
+                scheme: 'vscode-notebook',
+                path: scope.path,
+                authority: scope.authority,
+            });
         }
-        return manager.refresh(scope);
+        const manager = this.envManagers.getEnvironmentManager(currentScope);
+        if (!manager) {
+            return Promise.reject(new Error(`No environment manager found for: ${currentScope.fsPath}`));
+        }
+        return manager.refresh(currentScope);
     }
     async getEnvironments(scope: GetEnvironmentsScope): Promise<PythonEnvironment[]> {
-        if (scope === 'all' || scope === 'global') {
-            const promises = this.envManagers.managers.map((manager) => manager.getEnvironments(scope));
+        let currentScope: GetEnvironmentsScope = scope;
+        if (currentScope instanceof Uri && currentScope.scheme === 'vscode-notebook-cell') {
+            currentScope = Uri.from({
+                scheme: 'vscode-notebook',
+                path: currentScope.path,
+                authority: currentScope.authority,
+            });
+        }
+        if (currentScope === 'all' || currentScope === 'global') {
+            const promises = this.envManagers.managers.map((manager) => manager.getEnvironments(currentScope));
             const items = await Promise.all(promises);
             return items.flat();
         }
-        const manager = this.envManagers.getEnvironmentManager(scope);
+        const manager = this.envManagers.getEnvironmentManager(currentScope);
         if (!manager) {
             return [];
         }
 
-        const items = await manager.getEnvironments(scope);
+        const items = await manager.getEnvironments(currentScope);
         return items;
     }
     onDidChangeEnvironments: Event<DidChangeEnvironmentsEventArgs> = this._onDidChangeEnvironments.event;
     setEnvironment(scope: SetEnvironmentScope, environment?: PythonEnvironment): Promise<void> {
-        return this.envManagers.setEnvironment(scope, environment);
+        let currentScope: SetEnvironmentScope = scope;
+        if (scope instanceof Uri && scope.scheme === 'vscode-notebook-cell') {
+            currentScope = Uri.from({
+                scheme: 'vscode-notebook',
+                path: scope.path,
+                authority: scope.authority,
+            });
+        }
+
+        if (Array.isArray(scope) && scope.length > 0) {
+            // if scope is an array of Uri, go through each item and check if it is a notebook cell Uri
+            // if it is, convert it to notebook Uri and push all items to the currentScope
+            currentScope = [];
+            for (const s of scope) {
+                if (s instanceof Uri && s.scheme === 'vscode-notebook-cell') {
+                    currentScope.push(
+                        Uri.from({
+                            scheme: 'vscode-notebook',
+                            path: s.path,
+                            authority: s.authority,
+                        }),
+                    );
+                } else {
+                    currentScope.push(s);
+                }
+            }
+        }
+
+        return this.envManagers.setEnvironment(currentScope, environment);
     }
     async getEnvironment(scope: GetEnvironmentScope): Promise<PythonEnvironment | undefined> {
-        return this.envManagers.getEnvironment(scope);
+        let currentScope: GetEnvironmentScope = scope;
+        if (scope instanceof Uri && scope.scheme === 'vscode-notebook-cell') {
+            currentScope = Uri.from({
+                scheme: 'vscode-notebook',
+                path: scope.path,
+                authority: scope.authority,
+            });
+        }
+        return this.envManagers.getEnvironment(currentScope);
     }
     onDidChangeEnvironment: Event<DidChangeEnvironmentEventArgs> = this._onDidChangeEnvironment.event;
     async resolveEnvironment(context: ResolveEnvironmentContext): Promise<PythonEnvironment | undefined> {
@@ -267,7 +319,15 @@ class PythonEnvironmentApiImpl implements PythonEnvironmentApi {
     }
     onDidChangePythonProjects: Event<DidChangePythonProjectsEventArgs> = this._onDidChangePythonProjects.event;
     getPythonProject(uri: Uri): PythonProject | undefined {
-        return this.projectManager.get(uri);
+        let currentUri: GetEnvironmentScope = uri;
+        if (uri.scheme === 'vscode-notebook-cell') {
+            currentUri = Uri.from({
+                scheme: 'vscode-notebook',
+                path: uri.path,
+                authority: uri.authority,
+            });
+        }
+        return this.projectManager.get(currentUri);
     }
     registerPythonProjectCreator(creator: PythonProjectCreator): Disposable {
         return this.projectCreators.registerPythonProjectCreator(creator);
@@ -310,7 +370,15 @@ class PythonEnvironmentApiImpl implements PythonEnvironmentApi {
         overrides?: ({ [key: string]: string | undefined } | Uri)[],
         baseEnvVar?: { [key: string]: string | undefined },
     ): Promise<{ [key: string]: string | undefined }> {
-        return this.envVarManager.getEnvironmentVariables(uri, overrides, baseEnvVar);
+        let currentUri: GetEnvironmentScope = uri;
+        if (uri.scheme === 'vscode-notebook-cell') {
+            currentUri = Uri.from({
+                scheme: 'vscode-notebook',
+                path: uri.path,
+                authority: uri.authority,
+            });
+        }
+        return this.envVarManager.getEnvironmentVariables(currentUri, overrides, baseEnvVar);
     }
 }
 
