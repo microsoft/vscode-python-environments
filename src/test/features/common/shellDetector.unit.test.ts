@@ -2,6 +2,7 @@ import { Terminal } from 'vscode';
 import { identifyTerminalShell } from '../../../features/common/shellDetector';
 import assert from 'assert';
 import { isWindows } from '../../../common/utils/platformUtils';
+import { ShellConstants } from '../../../features/common/shellConstants';
 
 const testShellTypes: string[] = [
     'sh',
@@ -73,37 +74,37 @@ function getShellPath(shellType: string): string | undefined {
 function expectedShellType(shellType: string): string {
     switch (shellType) {
         case 'sh':
-            return 'sh';
+            return ShellConstants.SH;
         case 'bash':
-            return 'bash';
+            return ShellConstants.BASH;
         case 'pwsh':
         case 'powershell':
         case 'powershellcore':
-            return 'pwsh';
+            return ShellConstants.PWSH;
         case 'cmd':
         case 'commandPrompt':
-            return 'cmd';
+            return ShellConstants.CMD;
         case 'gitbash':
-            return 'gitbash';
+            return ShellConstants.GITBASH;
         case 'zsh':
-            return 'zsh';
+            return ShellConstants.ZSH;
         case 'ksh':
-            return 'ksh';
+            return ShellConstants.KSH;
         case 'fish':
-            return 'fish';
+            return ShellConstants.FISH;
         case 'csh':
         case 'cshell':
-            return 'csh';
+            return ShellConstants.CSH;
         case 'nu':
         case 'nushell':
-            return 'nu';
+            return ShellConstants.NU;
         case 'tcsh':
         case 'tcshell':
-            return 'tcsh';
+            return ShellConstants.FISH;
         case 'xonsh':
-            return 'xonsh';
+            return ShellConstants.XONSH;
         case 'wsl':
-            return 'wsl';
+            return ShellConstants.WSL;
         default:
             return 'unknown';
     }

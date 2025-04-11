@@ -37,9 +37,8 @@ import { NativePythonFinder } from '../common/nativePythonFinder';
 import { PYTHON_EXTENSION_ID } from '../../common/constants';
 import { createDeferred, Deferred } from '../../common/utils/deferred';
 import { getLatest, shortVersion, sortEnvironments } from '../common/utils';
-import { withProgress } from '../../common/window.apis';
+import { showErrorMessage, withProgress } from '../../common/window.apis';
 import { VenvManagerStrings } from '../../common/localize';
-import { showErrorMessage } from '../../common/errors/utils';
 
 export class VenvManager implements EnvironmentManager {
     private collection: PythonEnvironment[] = [];

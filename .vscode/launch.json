@@ -30,7 +30,7 @@
             "program": "${workspaceFolder}/node_modules/mocha/bin/_mocha",
             "skipFiles": ["<node_internals>/**"],
             "outFiles": ["${workspaceFolder}/out/**/*.js", "!${workspaceFolder}/**/node_modules**/*"],
-            "preLaunchTask": "${defaultBuildTask}"
+            "preLaunchTask": "npm: watch-tests"
         },
         {
             "name": "Extension Tests",

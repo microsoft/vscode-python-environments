@@ -7,6 +7,7 @@ import { runCommand } from '../utils';
 import which from 'which';
 import * as os from 'os';
 import { POWERSHELL_ENV_KEY } from './pwshConstants';
+import { ShellConstants } from '../../../common/shellConstants';
 
 async function isPowerShellInstalled(shell: string): Promise<boolean> {
     try {
@@ -199,15 +200,15 @@ export class PwshStartupProvider implements ShellStartupScriptProvider {
     public readonly name: string = 'PowerShell';
 
     async isSetup(): Promise<ShellSetupState> {
-        const isInstalled = await isPowerShellInstalled('pwsh');
+        const isInstalled = await isPowerShellInstalled(ShellConstants.PWSH);
         if (!isInstalled) {
             traceVerbose('PowerShell is not installed');
             return ShellSetupState.NotInstalled;
         }
 
         try {
-            const profile = await getProfileForShell('pwsh');
-            const isSetup = await isPowerShellStartupSetup('pwsh', profile);
+            const profile = await getProfileForShell(ShellConstants.PWSH);
+            const isSetup = await isPowerShellStartupSetup(ShellConstants.PWSH, profile);
             return isSetup ? ShellSetupState.Setup : ShellSetupState.NotSetup;
         } catch (err) {
             traceError('Failed to check if PowerShell startup is setup', err);
@@ -216,15 +217,15 @@ export class PwshStartupProvider implements ShellStartupScriptProvider {
     }
 
     async setupScripts(): Promise<ShellScriptEditState> {
-        const isInstalled = await isPowerShellInstalled('pwsh');
+        const isInstalled = await isPowerShellInstalled(ShellConstants.PWSH);
         if (!isInstalled) {
             traceVerbose('PowerShell is not installed');
             return ShellScriptEditState.NotInstalled;
         }
 
         try {
-            const profile = await getProfileForShell('pwsh');
-            const success = await setupPowerShellStartup('pwsh', profile);
+            const profile = await getProfileForShell(ShellConstants.PWSH);
+            const success = await setupPowerShellStartup(ShellConstants.PWSH, profile);
             return success ? ShellScriptEditState.Edited : ShellScriptEditState.NotEdited;
         } catch (err) {
             traceError('Failed to setup PowerShell startup', err);
@@ -233,15 +234,15 @@ export class PwshStartupProvider implements ShellStartupScriptProvider {
     }
 
     async teardownScripts(): Promise<ShellScriptEditState> {
-        const isInstalled = await isPowerShellInstalled('pwsh');
+        const isInstalled = await isPowerShellInstalled(ShellConstants.PWSH);
         if (!isInstalled) {
             traceVerbose('PowerShell is not installed');
             return ShellScriptEditState.NotInstalled;
         }
 
         try {
-            const profile = await getProfileForShell('pwsh');
-            const success = await removePowerShellStartup('pwsh', profile);
+            const profile = await getProfileForShell(ShellConstants.PWSH);
+            const success = await removePowerShellStartup(ShellConstants.PWSH, profile);
             return success ? ShellScriptEditState.Edited : ShellScriptEditState.NotEdited;
         } catch (err) {
             traceError('Failed to remove PowerShell startup', err);

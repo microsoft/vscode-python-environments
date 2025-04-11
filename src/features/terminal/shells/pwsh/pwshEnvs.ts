@@ -1,20 +1,19 @@
 import { EnvironmentVariableCollection } from 'vscode';
 import { traceError } from '../../../../common/logging';
 import { ShellEnvsProvider } from '../startupProvider';
-import { getCommandAsString } from '../utils';
 import { PythonEnvironment } from '../../../../api';
-import { getActivationCommandForShell } from '../../../common/activation';
 import { ShellConstants } from '../../../common/shellConstants';
 import { POWERSHELL_ENV_KEY } from './pwshConstants';
+import { getShellActivationCommand, getShellCommandAsString } from '../common/shellUtils';
 
 export class PowerShellEnvsProvider implements ShellEnvsProvider {
     public readonly shellType: string = ShellConstants.PWSH;
 
     async updateEnvVariables(collection: EnvironmentVariableCollection, env: PythonEnvironment): Promise<void> {
         try {
-            const pwshActivation = getActivationCommandForShell(env, ShellConstants.PWSH);
+            const pwshActivation = getShellActivationCommand(this.shellType, env);
             if (pwshActivation) {
-                const command = getCommandAsString(pwshActivation, '&&');
+                const command = getShellCommandAsString(this.shellType, pwshActivation);
                 collection.replace(POWERSHELL_ENV_KEY, command);
             } else {
                 collection.delete(POWERSHELL_ENV_KEY);
@@ -35,10 +34,11 @@ export class PowerShellEnvsProvider implements ShellEnvsProvider {
         }
 
         try {
-            const pwshActivation = getActivationCommandForShell(env, ShellConstants.PWSH);
-            return pwshActivation
-                ? new Map([[POWERSHELL_ENV_KEY, getCommandAsString(pwshActivation, '&&')]])
-                : undefined;
+            const pwshActivation = getShellActivationCommand(this.shellType, env);
+            if (pwshActivation) {
+                return new Map([[POWERSHELL_ENV_KEY, getShellCommandAsString(this.shellType, pwshActivation)]]);
+            }
+            return undefined;
         } catch (err) {
             traceError('Failed to get PowerShell environment variables', err);
             return undefined;

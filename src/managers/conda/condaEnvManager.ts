@@ -35,9 +35,8 @@ import {
 } from './condaUtils';
 import { NativePythonFinder } from '../common/nativePythonFinder';
 import { createDeferred, Deferred } from '../../common/utils/deferred';
-import { withProgress } from '../../common/window.apis';
+import { showErrorMessage, withProgress } from '../../common/window.apis';
 import { CondaStrings } from '../../common/localize';
-import { showErrorMessage } from '../../common/errors/utils';
 
 export class CondaEnvManager implements EnvironmentManager, Disposable {
     private collection: PythonEnvironment[] = [];
