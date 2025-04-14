@@ -1,15 +1,15 @@
 import * as path from 'path';
 import * as fsapi from 'fs-extra';
-import { Uri, Event, EventEmitter, FileChangeType } from 'vscode';
+import { Uri, Event, EventEmitter, FileChangeType, EnvironmentVariableCollection } from 'vscode';
 import { DidChangeEnvironmentVariablesEventArgs, PythonEnvironmentVariablesApi } from '../../api';
 import { Disposable } from 'vscode-jsonrpc';
 import { createFileSystemWatcher, getConfiguration } from '../../common/workspace.apis';
 import { PythonProjectManager } from '../../internal.api';
 import { mergeEnvVariables, parseEnvFile } from './envVarUtils';
 import { resolveVariables } from '../../common/utils/internalVariables';
+import { traceVerbose } from '../../common/logging';
 
-export interface EnvVarManager extends PythonEnvironmentVariablesApi, Disposable {}
-
+export interface EnvVarManager extends PythonEnvironmentVariablesApi, Disposable {
 export class PythonEnvVariableManager implements EnvVarManager {
     private disposables: Disposable[] = [];
 
