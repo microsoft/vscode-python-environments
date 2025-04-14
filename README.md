@@ -1,8 +1,8 @@
-# Python Environments and Package Manager (experimental)
+# Python Environments (experimental)
 
 ## Overview
 
-The Python Environments and Package Manager extension for VS Code helps you manage Python environments and packages using your preferred environment manager backed by its extensible APIs. This extension provides unique support to specify environments for specific files or whole Python folders or projects, including multi-root & mono-repos scenarios.
+The Python Environments extension for VS Code helps you manage Python environments and packages using your preferred environment manager backed by its extensible APIs. This extension provides unique support to specify environments for specific files or whole Python folders or projects, including multi-root & mono-repos scenarios.
 
 > Note: This extension is in preview and its APIs and features are subject to change as the project continues to evolve.
 
@@ -17,7 +17,11 @@ The Python Environments and Package Manager extension for VS Code helps you mana
 
 This extension provides an Environments view, which can be accessed via the VS Code Activity Bar, where you can manage your Python environments. Here, you can create, delete, and switch between environments, as well as install and uninstall packages within the selected environment. It also provides APIs for extension developers to contribute their own environment managers.
 
-By default, the extension uses the `venv` environment manager. This default manager determines how environments are created, managed, and where packages are installed. However, users can change the default by setting the `python-envs.defaultEnvManager` to a different environment manager. The following environment managers are supported out of the box:
+ADD A QUICK REFERENCE FOR UI BUTTON 
+
+To further simplify the environment creation process, you can create a virtual environments using "Quick Create", which uses your default environment manager (i.e. `venv`) and the most updated Python version to create a virtual environment. If you would like more control over your environment features, such as the Python version used, the environment name, packages installed, etc. you can create a custom environment.  
+
+The following environment managers are supported out of the box:
 
 | Id                      | name                    | Description                                                                                                                                                                                                   |
 | ----------------------- | ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -31,12 +35,23 @@ The environment manager is responsible for specifying which package manager will
 
 This extension provides a package view for you to manage, install and uninstall you Python packages in any particular environment. This extension provides APIs for extension developers to contribute package managers.
 
+ADD A QUICK REFERENCE FOR BUTTONS 
+
 The extension uses `pip` as the default package manager. You can change this by setting the `python-envs.defaultPackageManager` setting to a different package manager. The following are package managers supported out of the box:
 
-| Id                     | name    | Description                                                                                                                                                                                               |
+| Id                     | Name    | Description                                                                                                                                                                                               |
 | ---------------------- | ------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | ms-python.python:pip   | `pip`   | Pip acts as the default package manager and it's typically built-in to Python.                                                                                                                            |
 | ms-python.python:conda | `conda` | The [conda](https://conda.org) package manager, as provided by conda distributions like [Anaconda Distribution](https://docs.anaconda.com/anaconda/) or [conda-forge](https://conda-forge.org/download/). |
+
+## Command Reference 
+
+| Name    | Description  | 
+| Python: Manage Packages | | 
+| Python: Create Project | | 
+| Python: Activate Environment in Current Terminal | |
+| Python: Deactivate Environment in Current Terminal  | |
+| Python: Run as Task | |          
 
 ## Settings Reference
 
@@ -47,7 +62,11 @@ The extension uses `pip` as the default package manager. You can change this by 
 | pythonProjects              | `[]`                      | A list of Python workspaces, specified by the path, in which you can set particular environment and package managers. You can set information for a workspace as `[{"path":  "/path/to/workspace", "envManager": "ms-python.python:venv", "packageManager": "ms-python.python:pip"]}`. |
 | terminal.showActivateButton | `false`                   | [experimental] Show a button in the terminal to activate/deactivate the current environment for the terminal. This button is only shown if the active terminal is associated with a project that has an activatable environment.                                                       |
 
-## API Reference (proposed)
+## Extensibility
+
+The Python Environments extension was built to provide a cohesive and user friendly experience with `venv` as the default. However, the extension is built with extensibility in mind so that any environment manager could build an extension using the supported APIs to plug-in and provide a seamless and incirporated experience for their users in VS Code. 
+
+### API Reference (proposed)
 
 See [api.ts](https://github.com/microsoft/vscode-python-environments/blob/main/src/api.ts) for the full list of Extension APIs.
 
