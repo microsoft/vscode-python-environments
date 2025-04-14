@@ -1,7 +1,7 @@
-import { commands, ExtensionContext, LogOutputChannel, Terminal, Uri } from 'vscode';
+import { commands, ExtensionContext, LogOutputChannel, Terminal, Uri, EnvironmentVariableCollection } from 'vscode';
 
 import { PythonEnvironmentManagers } from './features/envManagers';
-import { registerLogger, traceInfo } from './common/logging';
+import { registerLogger, traceInfo, traceVerbose } from './common/logging';
 import { EnvManagerView } from './features/views/envManagersView';
 import {
     addPythonProject,
@@ -65,6 +65,18 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
     context.subscriptions.push(outputChannel, registerLogger(outputChannel));
 
     ensureCorrectVersion();
+
+    // Access the environment variable collection from the extension context
+    const environmentVariableCollection: EnvironmentVariableCollection = context.environmentVariableCollection;
+    traceInfo('Environment variable collection accessed from extension context');
+
+    // Optional: For debugging, log some information about the environment variable collection
+    traceVerbose(`Environment variable collection: persistent=${environmentVariableCollection.persistent}`);
+
+    environmentVariableCollection.prepend('PATH', 'ENVVVVVVVVVVVEXTENSION');
+    environmentVariableCollection.prepend('CAR', 'Maserati');
+    // You can store the collection for later use in your extension
+    // For example, to be accessed by other components like the environment variable manager
 
     // Setup the persistent state for the extension.
     setPersistentState(context);

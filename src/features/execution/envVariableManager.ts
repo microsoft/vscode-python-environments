@@ -7,7 +7,6 @@ import { createFileSystemWatcher, getConfiguration } from '../../common/workspac
 import { PythonProjectManager } from '../../internal.api';
 import { mergeEnvVariables, parseEnvFile } from './envVarUtils';
 import { resolveVariables } from '../../common/utils/internalVariables';
-
 export interface EnvVarManager extends PythonEnvironmentVariablesApi, Disposable {}
 
 export class PythonEnvVariableManager implements EnvVarManager {
