@@ -348,7 +348,7 @@ export async function addPythonProject(
         return;
     }
 
-    if (resource instanceof ProjectPackageRootTreeItem) {
+    if (resource instanceof ProjectPackageRootTreeItem || resource instanceof ProjectPackage) {
         await addPythonProject(undefined, wm, em, pc);
     }
 
