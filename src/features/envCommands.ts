@@ -142,17 +142,24 @@ export async function createAnyEnvironmentCommand(
                 }
             });
 
-            let managerId = await pickEnvironmentManager(
-                em.managers.filter((m) => m.supportsCreate),
-                defaultManagers,
-            );
-            let quickCreate = false;
-            if (managerId?.startsWith('QuickCreate#')) {
-                quickCreate = true;
-                managerId = managerId.replace('QuickCreate#', '');
+            let quickCreate = options?.quickCreate ?? false;
+            let manager: InternalEnvironmentManager | undefined;
+
+            if (quickCreate && defaultManagers.length === 1) {
+                manager = defaultManagers[0];
+            } else {
+                let managerId = await pickEnvironmentManager(
+                    em.managers.filter((m) => m.supportsCreate),
+                    defaultManagers,
+                );
+                if (managerId?.startsWith('QuickCreate#')) {
+                    quickCreate = true;
+                    managerId = managerId.replace('QuickCreate#', '');
+                }
+
+                manager = em.managers.find((m) => m.id === managerId);
             }
 
-            const manager = em.managers.find((m) => m.id === managerId);
             if (manager) {
                 const env = await manager.create(
                     selected.map((p) => p.uri),
