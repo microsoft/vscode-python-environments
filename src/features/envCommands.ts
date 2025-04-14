@@ -353,6 +353,7 @@ export async function addPythonProject(
         resource instanceof ProjectPackage ||
         resource instanceof ProjectEnvironment
     ) {
+
         await addPythonProject(undefined, wm, em, pc);
     }
 
