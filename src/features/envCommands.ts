@@ -460,7 +460,15 @@ export async function createTerminalCommand(
     api: PythonEnvironmentApi,
     tm: TerminalManager,
 ): Promise<Terminal | undefined> {
-    if (context instanceof Uri) {
+    if (context === undefined) {
+        const pw = await pickProject(api.getPythonProjects());
+        if (pw) {
+            const env = await api.getEnvironment(pw.uri);
+            if (env) {
+                return await tm.create(env, { cwd: pw.uri });
+            }
+        }
+    } else if (context instanceof Uri) {
         const uri = context as Uri;
         const env = await api.getEnvironment(uri);
         const pw = api.getPythonProject(uri);
