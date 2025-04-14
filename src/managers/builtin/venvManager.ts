@@ -135,6 +135,7 @@ export class VenvManager implements EnvironmentManager {
                         this,
                         this.globalEnv,
                         venvRoot,
+                        options?.additionalPackages,
                     );
                 } else if (!this.globalEnv) {
                     this.log.error('No base python found');
