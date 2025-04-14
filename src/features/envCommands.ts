@@ -348,6 +348,14 @@ export async function addPythonProject(
         return;
     }
 
+    if (
+        resource instanceof ProjectPackageRootTreeItem ||
+        resource instanceof ProjectPackage ||
+        resource instanceof ProjectEnvironment
+    ) {
+        await addPythonProject(undefined, wm, em, pc);
+    }
+
     if (resource instanceof Uri) {
         const uri = resource as Uri;
         const envManagerId = getDefaultEnvManagerSetting(wm, uri);
