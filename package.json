@@ -233,10 +233,6 @@
         "menus": {
             "commandPalette": [
                 {
-                    "command": "python-envs.packages",
-                    "when": "false"
-                },
-                {
                     "command": "python-envs.refreshAllManagers",
                     "when": "false"
                 },
