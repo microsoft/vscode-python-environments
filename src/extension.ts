@@ -56,6 +56,7 @@ import { registerTools } from './common/lm.apis';
 import { GetEnvironmentInfoTool, InstallPackageTool } from './features/copilotTools';
 import { TerminalActivationImpl } from './features/terminal/terminalActivationState';
 import { getEnvironmentForTerminal } from './features/terminal/utils';
+import { createManagerReady } from './features/common/managerReady';
 
 export async function activate(context: ExtensionContext): Promise<PythonEnvironmentApi> {
     const start = new StopWatch();
@@ -79,6 +80,7 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
     context.subscriptions.push(envVarManager);
 
     const envManagers: EnvironmentManagers = new PythonEnvironmentManagers(projectManager);
+    createManagerReady(envManagers, context.subscriptions);
     context.subscriptions.push(envManagers);
 
     const terminalActivation = new TerminalActivationImpl();

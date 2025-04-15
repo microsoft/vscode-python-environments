@@ -48,6 +48,7 @@ import { runInTerminal } from './terminal/runInTerminal';
 import { runInBackground } from './execution/runInBackground';
 import { EnvVarManager } from './execution/envVariableManager';
 import { checkUri } from '../common/utils/pathUtils';
+import { waitForEnvManager } from './common/managerReady';
 
 class PythonEnvironmentApiImpl implements PythonEnvironmentApi {
     private readonly _onDidChangeEnvironments = new EventEmitter<DidChangeEnvironmentsEventArgs>();
@@ -123,6 +124,7 @@ class PythonEnvironmentApiImpl implements PythonEnvironmentApi {
         options: CreateEnvironmentOptions | undefined,
     ): Promise<PythonEnvironment | undefined> {
         if (scope === 'global' || (!Array.isArray(scope) && scope instanceof Uri)) {
+            await waitForEnvManager(scope === 'global' ? undefined : [scope]);
             const manager = this.envManagers.getEnvironmentManager(scope === 'global' ? undefined : scope);
             if (!manager) {
                 throw new Error('No environment manager found');
@@ -134,6 +136,7 @@ class PythonEnvironmentApiImpl implements PythonEnvironmentApi {
         } else if (Array.isArray(scope) && scope.length === 1 && scope[0] instanceof Uri) {
             return this.createEnvironment(scope[0], options);
         } else if (Array.isArray(scope) && scope.length > 0 && scope.every((s) => s instanceof Uri)) {
+            await waitForEnvManager(scope);
             const managers: InternalEnvironmentManager[] = [];
             scope.forEach((s) => {
                 const manager = this.envManagers.getEnvironmentManager(s);
