@@ -5,7 +5,7 @@ import { PythonProjectManager } from '../../internal.api';
 
 export class NewPackageProject implements PythonProjectCreator {
     public readonly name = 'newPackage';
-    public readonly displayName = 'New Python Package';
+    public readonly displayName = 'Python Package';
     public readonly description = 'Create a new Python package project';
     public readonly tooltip = new MarkdownString('Create a new Python package with proper structure');
 
