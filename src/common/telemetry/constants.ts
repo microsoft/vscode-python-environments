@@ -8,7 +8,7 @@ export enum EventNames {
     VENV_USING_UV = 'VENV.USING_UV',
     VENV_CREATION = 'VENV.CREATION',
 
-    PACKAGE_MANAGE = 'PACKAGE.MANAGE',
+    PACKAGE_MANAGEMENT = 'PACKAGE_MANAGEMENT',
 }
 
 // Map all events to their properties
@@ -59,13 +59,11 @@ export interface IEventNamePropertyMapping {
     /* __GDPR__
         "package.install": {
             "managerId": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "owner": "karthiknadig" },
-            "installPackageCount": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "owner": "karthiknadig" },
-            "uninstallPackageCount": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "owner": "karthiknadig" }
+            "result": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "owner": "karthiknadig" }
         }
     */
-    [EventNames.PACKAGE_MANAGE]: {
+    [EventNames.PACKAGE_MANAGEMENT]: {
         managerId: string;
-        installPackageCount: number;
-        uninstallPackageCount: number;
+        result: 'success' | 'error' | 'cancelled';
     };
 }

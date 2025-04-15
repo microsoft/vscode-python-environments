@@ -596,7 +596,7 @@ export interface PackageManager {
     /**
      * Installs/Uninstall packages in the specified Python environment.
      * @param environment - The Python environment in which to install packages.
-     * @param packages - The packages to install.
+     * @param options - Options for managing packages.
      * @returns A promise that resolves when the installation is complete.
      */
     manage(environment: PythonEnvironment, options: PackageManagementOptions): Promise<void>;

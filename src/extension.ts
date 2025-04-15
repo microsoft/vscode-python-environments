@@ -1,7 +1,7 @@
 import { commands, ExtensionContext, LogOutputChannel, Terminal, Uri } from 'vscode';
 
 import { PythonEnvironmentManagers } from './features/envManagers';
-import { registerLogger, traceInfo } from './common/logging';
+import { registerLogger, traceError, traceInfo } from './common/logging';
 import { EnvManagerView } from './features/views/envManagersView';
 import {
     addPythonProject,
@@ -138,7 +138,11 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
                 envManagers,
                 projectManager,
             );
-            packageManager.manage(environment, { install: [] });
+            try {
+                packageManager.manage(environment, { install: [] });
+            } catch (err) {
+                traceError('Error when running command python-envs.packages', err);
+            }
         }),
         commands.registerCommand('python-envs.uninstallPackage', async (context: unknown) => {
             await handlePackageUninstall(context, envManagers);

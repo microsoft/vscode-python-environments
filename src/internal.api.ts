@@ -1,4 +1,4 @@
-import { Disposable, Event, LogOutputChannel, MarkdownString, Uri } from 'vscode';
+import { CancellationError, Disposable, Event, LogOutputChannel, MarkdownString, Uri } from 'vscode';
 import {
     PythonEnvironment,
     EnvironmentManager,
@@ -244,12 +244,20 @@ export class InternalPackageManager implements PackageManager {
     }
 
     async manage(environment: PythonEnvironment, options: PackageManagementOptions): Promise<void> {
-        await this.manager.manage(environment, options);
-        sendTelemetryEvent(EventNames.PACKAGE_MANAGE, undefined, {
-            managerId: this.id,
-            installPackageCount: (options.install ?? []).length,
-            uninstallPackageCount: (options.uninstall ?? []).length,
-        });
+        try {
+            await this.manager.manage(environment, options);
+            sendTelemetryEvent(EventNames.PACKAGE_MANAGEMENT, undefined, { managerId: this.id, result: 'success' });
+        } catch (error) {
+            if (error instanceof CancellationError) {
+                sendTelemetryEvent(EventNames.PACKAGE_MANAGEMENT, undefined, {
+                    managerId: this.id,
+                    result: 'cancelled',
+                });
+                throw error;
+            }
+            sendTelemetryEvent(EventNames.PACKAGE_MANAGEMENT, undefined, { managerId: this.id, result: 'error' });
+            throw error;
+        }
     }
 
     refresh(environment: PythonEnvironment): Promise<void> {
