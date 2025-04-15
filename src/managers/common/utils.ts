@@ -73,6 +73,7 @@ export function shortVersion(version: string): string {
     }
     return version;
 }
+
 export function isGreater(a: string | undefined, b: string | undefined): boolean {
     if (!a && !b) {
         return false;

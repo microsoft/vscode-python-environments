@@ -128,7 +128,7 @@ export class CondaEnvManager implements EnvironmentManager, Disposable {
         }
 
         return {
-            description: l10n.t('Create a conda virtual environment in workspace root'),
+            description: l10n.t('Create a conda environment'),
             detail: l10n.t('Uses Python version {0} and installs workspace dependencies.', this.globalEnv.version),
         };
     }

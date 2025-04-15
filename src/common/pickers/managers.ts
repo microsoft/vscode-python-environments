@@ -37,13 +37,14 @@ export async function pickEnvironmentManager(
             kind: QuickPickItemKind.Separator,
         });
         if (defaultManagers.length === 1 && defaultManagers[0].supportsQuickCreate) {
-            const details = defaultManagers[0].quickCreateConfig();
+            const defaultMgr = defaultManagers[0];
+            const details = defaultMgr.quickCreateConfig();
             if (details) {
                 items.push({
                     label: Common.quickCreate,
-                    description: details.description,
+                    description: `${defaultMgr.displayName} • ${details.description}`,
                     detail: details.detail,
-                    id: `QuickCreate#${defaultManagers[0].id}`,
+                    id: `QuickCreate#${defaultMgr.id}`,
                 });
             }
         }
