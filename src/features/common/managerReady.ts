@@ -1,14 +1,26 @@
-import { Disposable, Uri } from 'vscode';
+import { Disposable, l10n, Uri } from 'vscode';
 import { EnvironmentManagers, PythonProjectManager } from '../../internal.api';
 import { createDeferred, Deferred } from '../../common/utils/deferred';
 import { allExtensions } from '../../common/extension.apis';
-import { traceError } from '../../common/logging';
+import { traceError, traceInfo } from '../../common/logging';
 import { showErrorMessage } from '../../common/window.apis';
 import { getDefaultEnvManagerSetting, getDefaultPkgManagerSetting } from '../settings/settingHelpers';
+import { WorkbenchStrings } from '../../common/localize';
+import { installExtension } from '../../common/workbenchCommands';
 
 interface ManagerReady extends Disposable {
     waitForEnvManager(uris?: Uri[]): Promise<void>;
+    waitForEnvManagerId(managerIds: string[]): Promise<void>;
+    waitForAllEnvManagers(): Promise<void>;
     waitForPkgManager(uris?: Uri[]): Promise<void>;
+    waitForPkgManagerId(managerIds: string[]): Promise<void>;
+}
+
+function getExtensionId(managerId: string): string | undefined {
+    // format <extension-id>:<manager-name>
+    const regex = /^(.*):([a-zA-Z0-9-_]*)$/;
+    const parts = regex.exec(managerId);
+    return parts ? parts[1] : undefined;
 }
 
 class ManagerReadyImpl implements ManagerReady {
@@ -44,10 +56,30 @@ class ManagerReadyImpl implements ManagerReady {
         const installed = allExtensions().some((ext) => managerId.startsWith(`${ext.id}:`));
         if (!installed && !this.checked.has(managerId)) {
             this.checked.add(managerId);
-            traceError(`Extension for manager ${managerId} is not installed.`);
-            showErrorMessage(`Extension for manager ${managerId} is not installed.`);
+            const extId = getExtensionId(managerId);
+            setImmediate(async () => {
+                if (extId) {
+                    traceError(`Extension for manager ${extId} is not installed.`);
+                    const result = await showErrorMessage(
+                        l10n.t(`Extension for {0} is not installed or enabled for this workspace.`, extId),
+                        WorkbenchStrings.installExtension,
+                    );
+                    if (result === WorkbenchStrings.installExtension) {
+                        traceInfo(`Installing extension: ${extId}`);
+                        try {
+                            await installExtension(extId);
+                            traceInfo(`Extension ${extId} installed.`);
+                        } catch (err) {
+                            traceError(`Failed to install extension: ${extId}`, err);
+                        }
+                    }
+                } else {
+                    showErrorMessage(
+                        l10n.t(`Extension for {0} is not installed or enabled for this workspace.`, managerId),
+                    );
+                }
+            });
         }
-        return installed;
     }
 
     public dispose(): void {
@@ -81,8 +113,28 @@ class ManagerReadyImpl implements ManagerReady {
             }
         }
 
-        ids.forEach((managerId) => this.checkExtension(managerId));
-        await Promise.all(Array.from(ids).map((managerId) => this._waitForEnvManager(managerId)));
+        await this.waitForEnvManagerId(Array.from(ids));
+    }
+
+    public async waitForEnvManagerId(managerIds: string[]): Promise<void> {
+        managerIds.forEach((managerId) => this.checkExtension(managerId));
+        await Promise.all(managerIds.map((managerId) => this._waitForEnvManager(managerId)));
+    }
+
+    public async waitForAllEnvManagers(): Promise<void> {
+        const ids: Set<string> = new Set();
+        this.pm.getProjects().forEach((project) => {
+            const m = getDefaultEnvManagerSetting(this.pm, project.uri);
+            if (m && !ids.has(m)) {
+                ids.add(m);
+            }
+        });
+
+        const m = getDefaultEnvManagerSetting(this.pm, undefined);
+        if (m) {
+            ids.add(m);
+        }
+        await this.waitForEnvManagerId(Array.from(ids));
     }
 
     private _waitForPkgManager(managerId: string): Promise<void> {
@@ -111,12 +163,11 @@ class ManagerReadyImpl implements ManagerReady {
             }
         }
 
-        ids.forEach((managerId) => this.checkExtension(managerId));
-        await Promise.all(
-            Array.from(ids).map((managerId) => {
-                return this._waitForPkgManager(managerId);
-            }),
-        );
+        await this.waitForPkgManagerId(Array.from(ids));
+    }
+    public async waitForPkgManagerId(managerIds: string[]): Promise<void> {
+        managerIds.forEach((managerId) => this.checkExtension(managerId));
+        await Promise.all(managerIds.map((managerId) => this._waitForPkgManager(managerId)));
     }
 }
 
@@ -134,7 +185,22 @@ export async function waitForEnvManager(uris?: Uri[]): Promise<void> {
     return mr.waitForEnvManager(uris);
 }
 
+export async function waitForEnvManagerId(managerIds: string[]): Promise<void> {
+    const mr = await _deferred.promise;
+    return mr.waitForEnvManagerId(managerIds);
+}
+
+export async function waitForAllEnvManagers(): Promise<void> {
+    const mr = await _deferred.promise;
+    return mr.waitForAllEnvManagers();
+}
+
 export async function waitForPkgManager(uris?: Uri[]): Promise<void> {
     const mr = await _deferred.promise;
     return mr.waitForPkgManager(uris);
+}
+
+export async function waitForPkgManagerId(managerIds: string[]): Promise<void> {
+    const mr = await _deferred.promise;
+    return mr.waitForPkgManagerId(managerIds);
 }

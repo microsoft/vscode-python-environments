@@ -80,7 +80,7 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
     context.subscriptions.push(envVarManager);
 
     const envManagers: EnvironmentManagers = new PythonEnvironmentManagers(projectManager);
-    createManagerReady(envManagers, context.subscriptions);
+    createManagerReady(envManagers, projectManager, context.subscriptions);
     context.subscriptions.push(envManagers);
 
     const terminalActivation = new TerminalActivationImpl();
