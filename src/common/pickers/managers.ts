@@ -146,8 +146,8 @@ export async function pickCreator(creators: PythonProjectCreator[]): Promise<Pyt
             description: existingProjectsCreator?.description ?? 'Select existing Python projects',
         },
         {
-            label: 'Create New...',
-            description: 'Create a new Python project from a template',
+            label: 'Create New',
+            description: 'Create a Python project from a template',
         },
     ];
 

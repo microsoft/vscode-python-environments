@@ -92,8 +92,8 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
         projectCreators,
         projectCreators.registerPythonProjectCreator(new ExistingProjects()),
         projectCreators.registerPythonProjectCreator(new AutoFindProjects(projectManager)),
-        projectCreators.registerPythonProjectCreator(new NewPackageProject(projectManager)),
-        projectCreators.registerPythonProjectCreator(new NewScriptProject(projectManager)),
+        projectCreators.registerPythonProjectCreator(new NewPackageProject()),
+        projectCreators.registerPythonProjectCreator(new NewScriptProject()),
     );
 
     setPythonApi(envManagers, projectManager, projectCreators, terminalManager, envVarManager);
