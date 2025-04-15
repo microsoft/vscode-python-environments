@@ -3,6 +3,8 @@ import { commands, ExtensionContext, LogOutputChannel, Terminal, Uri } from 'vsc
 import { PythonEnvironmentManagers } from './features/envManagers';
 import { registerLogger, traceInfo } from './common/logging';
 import { EnvManagerView } from './features/views/envManagersView';
+import { NewPackageProject } from './features/creators/newPackageProject';
+import { NewScriptProject } from './features/creators/newScriptProject';
 import {
     addPythonProject,
     createEnvironmentCommand,
@@ -90,6 +92,8 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
         projectCreators,
         projectCreators.registerPythonProjectCreator(new ExistingProjects()),
         projectCreators.registerPythonProjectCreator(new AutoFindProjects(projectManager)),
+        projectCreators.registerPythonProjectCreator(new NewPackageProject(projectManager)),
+        projectCreators.registerPythonProjectCreator(new NewScriptProject(projectManager)),
     );
 
     setPythonApi(envManagers, projectManager, projectCreators, terminalManager, envVarManager);
