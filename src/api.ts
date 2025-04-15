@@ -374,7 +374,7 @@ export interface EnvironmentManager {
 
     /**
      * The quick create details for the environment manager. Having this method also enables the quick create feature
-     * for the environment manager.
+     * for the environment manager. Should Implement {@link EnvironmentManager.create} to support quick create.
      */
     quickCreateConfig?(): QuickCreateConfig | undefined;
 

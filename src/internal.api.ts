@@ -155,11 +155,11 @@ export class InternalEnvironmentManager implements EnvironmentManager {
     }
 
     public get supportsQuickCreate(): boolean {
-        return this.manager.quickCreateConfig !== undefined;
+        return this.manager.quickCreateConfig !== undefined && this.manager.create !== undefined;
     }
 
     quickCreateConfig(): QuickCreateConfig | undefined {
-        if (this.manager.quickCreateConfig) {
+        if (this.manager.quickCreateConfig && this.manager.create) {
             return this.manager.quickCreateConfig();
         }
         throw new CreateEnvironmentNotSupported(`Quick Create Environment not supported by: ${this.id}`);

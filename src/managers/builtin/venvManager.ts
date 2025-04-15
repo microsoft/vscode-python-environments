@@ -36,7 +36,7 @@ import * as path from 'path';
 import { NativePythonFinder } from '../common/nativePythonFinder';
 import { PYTHON_EXTENSION_ID } from '../../common/constants';
 import { createDeferred, Deferred } from '../../common/utils/deferred';
-import { getLatest, sortEnvironments } from '../common/utils';
+import { getLatest, shortVersion, sortEnvironments } from '../common/utils';
 import { withProgress } from '../../common/window.apis';
 import { VenvManagerStrings } from '../../common/localize';
 import { showErrorMessage } from '../../common/errors/utils';
@@ -98,7 +98,10 @@ export class VenvManager implements EnvironmentManager {
 
         return {
             description: l10n.t('Create a virtual environment in workspace root'),
-            detail: l10n.t('Uses Python version {0} and installs workspace dependencies.', this.globalEnv.version),
+            detail: l10n.t(
+                'Uses Python version {0} and installs workspace dependencies.',
+                shortVersion(this.globalEnv.version),
+            ),
         };
     }
 
