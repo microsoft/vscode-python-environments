@@ -1,3 +1,4 @@
+import * as os from 'os';
 import { Uri } from 'vscode';
 import { isWindows } from './platformUtils';
 
