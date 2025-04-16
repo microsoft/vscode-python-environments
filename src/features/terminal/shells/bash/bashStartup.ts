@@ -1,11 +1,12 @@
 import * as fs from 'fs-extra';
-import * as path from 'path';
 import * as os from 'os';
-import { ShellScriptEditState, ShellSetupState, ShellStartupScriptProvider } from '../startupProvider';
-import { traceError, traceInfo, traceVerbose } from '../../../../common/logging';
+import * as path from 'path';
 import which from 'which';
-import { BASH_ENV_KEY, ZSH_ENV_KEY } from './bashConstants';
+import { traceError, traceInfo, traceVerbose } from '../../../../common/logging';
+import { ShellConstants } from '../../../common/shellConstants';
 import { hasStartupCode, insertStartupCode, removeStartupCode } from '../common/editUtils';
+import { ShellScriptEditState, ShellSetupState, ShellStartupScriptProvider } from '../startupProvider';
+import { BASH_ENV_KEY, ZSH_ENV_KEY } from './bashConstants';
 
 async function isBashLikeInstalled(): Promise<boolean> {
     const result = await Promise.all([which('bash', { nothrow: true }), which('sh', { nothrow: true })]);
@@ -106,6 +107,7 @@ async function removeStartup(profile: string, key: string): Promise<boolean> {
 
 export class BashStartupProvider implements ShellStartupScriptProvider {
     public readonly name: string = 'Bash';
+    public readonly shellType: string = ShellConstants.BASH;
 
     private async checkShellInstalled(): Promise<boolean> {
         const found = await isBashLikeInstalled();
@@ -168,6 +170,7 @@ export class BashStartupProvider implements ShellStartupScriptProvider {
 
 export class ZshStartupProvider implements ShellStartupScriptProvider {
     public readonly name: string = 'Zsh';
+    public readonly shellType: string = ShellConstants.ZSH;
 
     private async checkShellInstalled(): Promise<boolean> {
         const found = await isZshInstalled();
@@ -225,6 +228,7 @@ export class ZshStartupProvider implements ShellStartupScriptProvider {
 
 export class GitBashStartupProvider implements ShellStartupScriptProvider {
     public readonly name: string = 'GitBash';
+    public readonly shellType: string = ShellConstants.GITBASH;
 
     private async checkShellInstalled(): Promise<boolean> {
         const found = await isGitBashInstalled();

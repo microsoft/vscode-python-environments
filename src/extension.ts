@@ -46,7 +46,7 @@ import { PythonProjectManagerImpl } from './features/projectManager';
 import { getPythonApi, setPythonApi } from './features/pythonApi';
 import { registerCompletionProvider } from './features/settings/settingCompletions';
 import { setActivateMenuButtonContext } from './features/terminal/activateMenuButton';
-import { ShellStartupActivationManagerImpl } from './features/terminal/shells/activateUsingShellStartup';
+import { ShellStartupActivationManagerImpl } from './features/terminal/activateUsingShellStartup';
 import { normalizeShellPath } from './features/terminal/shells/common/shellUtils';
 import { createShellEnvProviders, createShellStartupProviders } from './features/terminal/shells/providers';
 import { TerminalActivationImpl } from './features/terminal/terminalActivationState';

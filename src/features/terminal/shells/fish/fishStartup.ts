@@ -4,6 +4,7 @@ import * as path from 'path';
 import which from 'which';
 
 import { traceError, traceInfo, traceVerbose } from '../../../../common/logging';
+import { ShellConstants } from '../../../common/shellConstants';
 import { hasStartupCode, insertStartupCode, removeStartupCode } from '../common/editUtils';
 import { ShellScriptEditState, ShellSetupState, ShellStartupScriptProvider } from '../startupProvider';
 import { FISH_ENV_KEY } from './fishConstants';
@@ -90,6 +91,7 @@ async function removeFishStartup(profilePath: string, key: string): Promise<bool
 
 export class FishStartupProvider implements ShellStartupScriptProvider {
     public readonly name: string = 'Fish';
+    public readonly shellType: string = ShellConstants.FISH;
 
     async isSetup(): Promise<ShellSetupState> {
         const isInstalled = await isFishInstalled();

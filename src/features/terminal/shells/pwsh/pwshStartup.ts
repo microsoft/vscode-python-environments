@@ -7,6 +7,7 @@ import { isWindows } from '../../../../common/utils/platformUtils';
 import { ShellScriptEditState, ShellSetupState, ShellStartupScriptProvider } from '../startupProvider';
 import { runCommand } from '../utils';
 
+import { ShellConstants } from '../../../common/shellConstants';
 import { hasStartupCode, insertStartupCode, removeStartupCode } from '../common/editUtils';
 import { POWERSHELL_ENV_KEY } from './pwshConstants';
 
@@ -133,6 +134,7 @@ async function removePowerShellStartup(shell: string, profile: string): Promise<
 
 export class PowerShellClassicStartupProvider implements ShellStartupScriptProvider {
     public readonly name: string = 'PowerShell5';
+    public readonly shellType: string = 'powershell';
 
     async isSetup(): Promise<ShellSetupState> {
         const isInstalled = await isPowerShellInstalled('powershell');
@@ -188,6 +190,7 @@ export class PowerShellClassicStartupProvider implements ShellStartupScriptProvi
 
 export class PwshStartupProvider implements ShellStartupScriptProvider {
     public readonly name: string = 'PowerShell';
+    public readonly shellType: string = ShellConstants.PWSH;
 
     async isSetup(): Promise<ShellSetupState> {
         const isInstalled = await isPowerShellInstalled('pwsh');
