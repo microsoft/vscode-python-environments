@@ -166,7 +166,7 @@ export async function pickCreator(creators: PythonProjectCreator[]): Promise<Pyt
             return autoFindCreator;
         case 'Select Existing':
             return existingProjectsCreator;
-        case 'Create New...':
+        case 'Create New':
             // Show second level menu for other creators
             if (otherCreators.length === 0) {
                 return undefined;
