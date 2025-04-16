@@ -46,7 +46,9 @@ const regionEnd = '# <<< vscode python';
 
 function getActivationContent(key: string): string {
     const lineSep = '\n';
-    return [`if [ -n "$${key}" ] && [ "$TERM_PROGRAM" = "vscode" ]; then`, `    . "$${key}"`, 'fi'].join(lineSep);
+    return [`if [ -n "$${key}" ] && [ "$TERM_PROGRAM" = "vscode" ]; then`, `    eval "$${key}" || true`, 'fi'].join(
+        lineSep,
+    );
 }
 
 async function isStartupSetup(profile: string, key: string): Promise<ShellSetupState> {
