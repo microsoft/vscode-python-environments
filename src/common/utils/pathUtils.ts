@@ -1,14 +1,15 @@
-import { Uri } from 'vscode';
+import { Uri, workspace } from 'vscode';
 import { isWindows } from '../../managers/common/utils';
 
 export function checkUri(scope?: Uri | Uri[] | string): Uri | Uri[] | string | undefined {
     if (scope instanceof Uri) {
         if (scope.scheme === 'vscode-notebook-cell') {
-            return Uri.from({
-                scheme: 'vscode-notebook',
-                path: scope.path,
-                authority: scope.authority,
+            workspace.notebookDocuments.find((doc) => {
+                if (doc.uri.toString() === scope.toString()) {
+                    return doc;
+                }
             });
+            return scope;
         }
     }
     if (Array.isArray(scope)) {
