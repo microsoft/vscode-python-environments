@@ -2,14 +2,14 @@ import { EnvironmentVariableCollection } from 'vscode';
 import { PythonEnvironment } from '../../../../api';
 import { traceError } from '../../../../common/logging';
 import { ShellConstants } from '../../../common/shellConstants';
+import { getShellActivationCommand, getShellCommandAsString } from '../common/shellUtils';
 import { ShellEnvsProvider } from '../startupProvider';
 import { BASH_ENV_KEY, ZSH_ENV_KEY } from './bashConstants';
-import { getShellActivationCommand, getShellCommandAsString } from '../common/shellUtils';
 
 export class BashEnvsProvider implements ShellEnvsProvider {
     constructor(public readonly shellType: 'bash' | 'gitbash') {}
 
-    async updateEnvVariables(collection: EnvironmentVariableCollection, env: PythonEnvironment): Promise<void> {
+    updateEnvVariables(collection: EnvironmentVariableCollection, env: PythonEnvironment): void {
         try {
             const bashActivation = getShellActivationCommand(this.shellType, env);
             if (bashActivation) {
@@ -24,11 +24,11 @@ export class BashEnvsProvider implements ShellEnvsProvider {
         }
     }
 
-    async removeEnvVariables(envCollection: EnvironmentVariableCollection): Promise<void> {
+    removeEnvVariables(envCollection: EnvironmentVariableCollection): void {
         envCollection.delete(BASH_ENV_KEY);
     }
 
-    async getEnvVariables(env?: PythonEnvironment): Promise<Map<string, string | undefined> | undefined> {
+    getEnvVariables(env?: PythonEnvironment): Map<string, string | undefined> | undefined {
         if (!env) {
             return new Map([[BASH_ENV_KEY, undefined]]);
         }
@@ -49,7 +49,7 @@ export class BashEnvsProvider implements ShellEnvsProvider {
 
 export class ZshEnvsProvider implements ShellEnvsProvider {
     public readonly shellType: string = ShellConstants.ZSH;
-    async updateEnvVariables(envVars: EnvironmentVariableCollection, env: PythonEnvironment): Promise<void> {
+    updateEnvVariables(envVars: EnvironmentVariableCollection, env: PythonEnvironment): void {
         try {
             const zshActivation = getShellActivationCommand(this.shellType, env);
             if (zshActivation) {
@@ -64,11 +64,11 @@ export class ZshEnvsProvider implements ShellEnvsProvider {
         }
     }
 
-    async removeEnvVariables(envVars: EnvironmentVariableCollection): Promise<void> {
+    removeEnvVariables(envVars: EnvironmentVariableCollection): void {
         envVars.delete(ZSH_ENV_KEY);
     }
 
-    async getEnvVariables(env?: PythonEnvironment): Promise<Map<string, string | undefined> | undefined> {
+    getEnvVariables(env?: PythonEnvironment): Map<string, string | undefined> | undefined {
         if (!env) {
             return new Map([[ZSH_ENV_KEY, undefined]]);
         }
