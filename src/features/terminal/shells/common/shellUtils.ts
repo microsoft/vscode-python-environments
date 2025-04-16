@@ -9,11 +9,16 @@ function getCommandAsString(command: PythonCommandRunConfiguration[], shell: str
         const args = cmd.args ?? [];
         parts.push(quoteArgs([normalizeShellPath(cmd.executable, shell), ...args]).join(' '));
     }
+    if (shell === ShellConstants.PWSH) {
+        return parts.map((p) => `(${p})`).join(` ${delimiter} `);
+    }
     return parts.join(` ${delimiter} `);
 }
 
 export function getShellCommandAsString(shell: string, command: PythonCommandRunConfiguration[]): string {
     switch (shell) {
+        case ShellConstants.PWSH:
+            return getCommandAsString(command, shell, ';');
         case ShellConstants.NU:
             return getCommandAsString(command, shell, ';');
         case ShellConstants.FISH:
@@ -21,7 +26,7 @@ export function getShellCommandAsString(shell: string, command: PythonCommandRun
         case ShellConstants.BASH:
         case ShellConstants.SH:
         case ShellConstants.ZSH:
-        case ShellConstants.PWSH:
+
         case ShellConstants.CMD:
         case ShellConstants.GITBASH:
         default:
