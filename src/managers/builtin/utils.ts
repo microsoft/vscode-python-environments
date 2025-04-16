@@ -14,7 +14,7 @@ import {
     NativePythonEnvironmentKind,
     NativePythonFinder,
 } from '../common/nativePythonFinder';
-import { showErrorMessage } from '../../common/errors/utils';
+import { showErrorMessageWithLogs } from '../../common/errors/utils';
 import { shortVersion, sortEnvironments } from '../common/utils';
 import { SysManagerStrings } from '../../common/localize';
 import { isUvInstalled, runUV, runPython } from './helpers';
@@ -145,7 +145,7 @@ export async function refreshPackages(
 ): Promise<Package[]> {
     if (!environment.execInfo) {
         manager.log?.error(`No executable found for python: ${environment.environmentPath.fsPath}`);
-        showErrorMessage(
+        showErrorMessageWithLogs(
             l10n.t('No executable found for python: {0}', environment.environmentPath.fsPath),
             manager.log,
         );
@@ -166,7 +166,7 @@ export async function refreshPackages(
         }
     } catch (e) {
         manager.log?.error('Error refreshing packages', e);
-        showErrorMessage(SysManagerStrings.packageRefreshError, manager.log);
+        showErrorMessageWithLogs(SysManagerStrings.packageRefreshError, manager.log);
         return [];
     }
 
