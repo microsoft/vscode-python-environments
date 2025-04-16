@@ -4,6 +4,8 @@ import { ProjectCreatorString } from '../../common/localize';
 import { showOpenDialog, showWarningMessage } from '../../common/window.apis';
 import { PythonProjectManager } from '../../internal.api';
 import { traceInfo } from '../../common/logging';
+import { Uri, window, workspace } from 'vscode';
+import { traceLog } from '../../common/logging';
 
 export class ExistingProjects implements PythonProjectCreator {
     public readonly name = 'existingProjects';
@@ -23,6 +25,7 @@ export class ExistingProjects implements PythonProjectCreator {
         });
 
         if (!results || results.length === 0) {
+            // User cancelled the dialog & doesn't want to add any projects
             return;
         }
 
@@ -49,9 +52,46 @@ export class ExistingProjects implements PythonProjectCreator {
             return;
         }
 
-        return filtered.map((r) => ({
-            name: path.basename(r.fsPath),
-            uri: r,
-        }));
+        // for all the selected files / folders, check to make sure they are in the workspace
+        const resultsOutsideWorkspace: Uri[] = [];
+        const workspaceRoots: Uri[] = workspace.workspaceFolders?.map((w) => w.uri) || [];
+        const resultsInWorkspace = filtered.filter((r) => {
+            const exists = workspaceRoots.some((w) => r.fsPath.startsWith(w.fsPath));
+            if (!exists) {
+                traceLog(`File ${r.fsPath} is not in the workspace, ignoring it from 'add projects' list.`);
+                resultsOutsideWorkspace.push(r);
+            }
+            return exists;
+        });
+        if (resultsInWorkspace.length === 0) {
+            // Show a single error message with option to add to workspace
+            const response = await window.showErrorMessage(
+                'Selected items are not in the current workspace.',
+                'Add to Workspace',
+                'Cancel',
+            );
+
+            if (response === 'Add to Workspace') {
+                // Use the command palette to let user adjust which folders to add
+                // Add folders programmatically using workspace API
+                for (const r of resultsOutsideWorkspace) {
+                    // if the user selects a file, add that file to the workspace
+                    await // if the user selects a folder, add that folder to the workspace
+                    await workspace.updateWorkspaceFolders(
+                        workspace.workspaceFolders?.length || 0, // Start index
+                        0, // Delete count
+                        {
+                            uri: r,
+                        },
+                    );
+                }
+            }
+            return;
+        } else {
+            return resultsInWorkspace.map((uri) => ({
+                name: path.basename(uri.fsPath),
+                uri,
+            })) as PythonProject[];
+        }
     }
 }
