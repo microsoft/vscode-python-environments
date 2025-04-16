@@ -1,12 +1,12 @@
 import { ConfigurationChangeEvent, Disposable, GlobalEnvironmentVariableCollection } from 'vscode';
-import { DidChangeEnvironmentEventArgs } from '../../../api';
-import { ShellStartupActivationStrings } from '../../../common/localize';
-import { traceError, traceInfo } from '../../../common/logging';
-import { showErrorMessage, showInformationMessage } from '../../../common/window.apis';
-import { getWorkspaceFolder, getWorkspaceFolders, onDidChangeConfiguration } from '../../../common/workspace.apis';
-import { EnvironmentManagers } from '../../../internal.api';
-import { getAutoActivationType, setAutoActivationType } from '../utils';
-import { ShellEnvsProvider, ShellScriptEditState, ShellStartupScriptProvider } from './startupProvider';
+import { DidChangeEnvironmentEventArgs } from '../../api';
+import { ShellStartupActivationStrings } from '../../common/localize';
+import { traceError, traceInfo } from '../../common/logging';
+import { showErrorMessage, showInformationMessage } from '../../common/window.apis';
+import { getWorkspaceFolder, getWorkspaceFolders, onDidChangeConfiguration } from '../../common/workspace.apis';
+import { EnvironmentManagers } from '../../internal.api';
+import { ShellEnvsProvider, ShellScriptEditState, ShellStartupScriptProvider } from './shells/startupProvider';
+import { getAutoActivationType, setAutoActivationType } from './utils';
 
 export interface ShellStartupActivationManager extends Disposable {
     initialize(): Promise<void>;
@@ -42,20 +42,12 @@ export class ShellStartupActivationManagerImpl implements ShellStartupActivation
                 // remove any contributed environment variables
                 const workspaces = getWorkspaceFolders() ?? [];
                 if (workspaces.length > 0) {
-                    // User has one or more workspaces open
-                    const promises: Promise<void>[] = [];
                     workspaces.forEach((workspace) => {
                         const collection = this.envCollection.getScoped({ workspaceFolder: workspace });
-                        promises.push(
-                            ...this.shellEnvsProviders.map((provider) => provider.removeEnvVariables(collection)),
-                        );
+                        this.shellEnvsProviders.forEach((provider) => provider.removeEnvVariables(collection));
                     });
-                    await Promise.all(promises);
                 } else {
-                    // User has no workspaces open
-                    await Promise.all(
-                        this.shellEnvsProviders.map((provider) => provider.removeEnvVariables(this.envCollection)),
-                    );
+                    this.shellEnvsProviders.forEach((provider) => provider.removeEnvVariables(this.envCollection));
                 }
             }
         }
@@ -72,15 +64,13 @@ export class ShellStartupActivationManagerImpl implements ShellStartupActivation
             if (wf) {
                 const envVars = this.envCollection.getScoped({ workspaceFolder: wf });
                 if (envVars) {
-                    await Promise.all(
-                        this.shellEnvsProviders.map(async (provider) => {
-                            if (e.new) {
-                                await provider.updateEnvVariables(envVars, e.new);
-                            } else {
-                                await provider.removeEnvVariables(envVars);
-                            }
-                        }),
-                    );
+                    this.shellEnvsProviders.forEach((provider) => {
+                        if (e.new) {
+                            provider.updateEnvVariables(envVars, e.new);
+                        } else {
+                            provider.removeEnvVariables(envVars);
+                        }
+                    });
                 }
             }
         }
@@ -132,9 +122,9 @@ export class ShellStartupActivationManagerImpl implements ShellStartupActivation
                         ...this.shellEnvsProviders.map(async (provider) => {
                             const env = await this.em.getEnvironment(workspace.uri);
                             if (env) {
-                                await provider.updateEnvVariables(collection, env);
+                                provider.updateEnvVariables(collection, env);
                             } else {
-                                await provider.removeEnvVariables(collection);
+                                provider.removeEnvVariables(collection);
                             }
                         }),
                     );
@@ -145,9 +135,9 @@ export class ShellStartupActivationManagerImpl implements ShellStartupActivation
                     this.shellEnvsProviders.map(async (provider) => {
                         const env = await this.em.getEnvironment(undefined);
                         if (env) {
-                            await provider.updateEnvVariables(this.envCollection, env);
+                            provider.updateEnvVariables(this.envCollection, env);
                         } else {
-                            await provider.removeEnvVariables(this.envCollection);
+                            provider.removeEnvVariables(this.envCollection);
                         }
                     }),
                 );

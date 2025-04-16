@@ -8,7 +8,7 @@ import { CMD_ENV_KEY } from './cmdConstants';
 
 export class CmdEnvsProvider implements ShellEnvsProvider {
     readonly shellType: string = ShellConstants.CMD;
-    async updateEnvVariables(collection: EnvironmentVariableCollection, env: PythonEnvironment): Promise<void> {
+    updateEnvVariables(collection: EnvironmentVariableCollection, env: PythonEnvironment): void {
         try {
             const cmdActivation = getShellActivationCommand(this.shellType, env);
             if (cmdActivation) {
@@ -23,11 +23,11 @@ export class CmdEnvsProvider implements ShellEnvsProvider {
         }
     }
 
-    async removeEnvVariables(envCollection: EnvironmentVariableCollection): Promise<void> {
+    removeEnvVariables(envCollection: EnvironmentVariableCollection): void {
         envCollection.delete(CMD_ENV_KEY);
     }
 
-    async getEnvVariables(env?: PythonEnvironment): Promise<Map<string, string | undefined> | undefined> {
+    getEnvVariables(env?: PythonEnvironment): Map<string, string | undefined> | undefined {
         if (!env) {
             return new Map([[CMD_ENV_KEY, undefined]]);
         }

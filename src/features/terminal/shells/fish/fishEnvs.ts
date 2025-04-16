@@ -8,7 +8,7 @@ import { FISH_ENV_KEY } from './fishConstants';
 
 export class FishEnvsProvider implements ShellEnvsProvider {
     readonly shellType: string = ShellConstants.FISH;
-    async updateEnvVariables(collection: EnvironmentVariableCollection, env: PythonEnvironment): Promise<void> {
+    updateEnvVariables(collection: EnvironmentVariableCollection, env: PythonEnvironment): void {
         try {
             const fishActivation = getShellActivationCommand(this.shellType, env);
             if (fishActivation) {
@@ -23,11 +23,11 @@ export class FishEnvsProvider implements ShellEnvsProvider {
         }
     }
 
-    async removeEnvVariables(envCollection: EnvironmentVariableCollection): Promise<void> {
+    removeEnvVariables(envCollection: EnvironmentVariableCollection): void {
         envCollection.delete(FISH_ENV_KEY);
     }
 
-    async getEnvVariables(env?: PythonEnvironment): Promise<Map<string, string | undefined> | undefined> {
+    getEnvVariables(env?: PythonEnvironment): Map<string, string | undefined> | undefined {
         if (!env) {
             return new Map([[FISH_ENV_KEY, undefined]]);
         }

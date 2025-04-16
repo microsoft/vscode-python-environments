@@ -1,15 +1,15 @@
 import { EnvironmentVariableCollection } from 'vscode';
-import { traceError } from '../../../../common/logging';
-import { ShellEnvsProvider } from '../startupProvider';
 import { PythonEnvironment } from '../../../../api';
+import { traceError } from '../../../../common/logging';
 import { ShellConstants } from '../../../common/shellConstants';
-import { POWERSHELL_ENV_KEY } from './pwshConstants';
 import { getShellActivationCommand, getShellCommandAsString } from '../common/shellUtils';
+import { ShellEnvsProvider } from '../startupProvider';
+import { POWERSHELL_ENV_KEY } from './pwshConstants';
 
 export class PowerShellEnvsProvider implements ShellEnvsProvider {
     public readonly shellType: string = ShellConstants.PWSH;
 
-    async updateEnvVariables(collection: EnvironmentVariableCollection, env: PythonEnvironment): Promise<void> {
+    updateEnvVariables(collection: EnvironmentVariableCollection, env: PythonEnvironment): void {
         try {
             const pwshActivation = getShellActivationCommand(this.shellType, env);
             if (pwshActivation) {
@@ -24,11 +24,11 @@ export class PowerShellEnvsProvider implements ShellEnvsProvider {
         }
     }
 
-    async removeEnvVariables(envCollection: EnvironmentVariableCollection): Promise<void> {
+    removeEnvVariables(envCollection: EnvironmentVariableCollection): void {
         envCollection.delete(POWERSHELL_ENV_KEY);
     }
 
-    async getEnvVariables(env?: PythonEnvironment): Promise<Map<string, string | undefined> | undefined> {
+    getEnvVariables(env?: PythonEnvironment): Map<string, string | undefined> | undefined {
         if (!env) {
             return new Map([[POWERSHELL_ENV_KEY, undefined]]);
         }

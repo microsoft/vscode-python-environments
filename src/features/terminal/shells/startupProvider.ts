@@ -22,7 +22,7 @@ export interface ShellStartupScriptProvider {
 
 export interface ShellEnvsProvider {
     readonly shellType: string;
-    updateEnvVariables(envVars: EnvironmentVariableCollection, env: PythonEnvironment): Promise<void>;
-    removeEnvVariables(envVars: EnvironmentVariableCollection): Promise<void>;
-    getEnvVariables(env?: PythonEnvironment): Promise<Map<string, string | undefined> | undefined>;
+    updateEnvVariables(envVars: EnvironmentVariableCollection, env: PythonEnvironment): void;
+    removeEnvVariables(envVars: EnvironmentVariableCollection): void;
+    getEnvVariables(env?: PythonEnvironment): Map<string, string | undefined> | undefined;
 }
