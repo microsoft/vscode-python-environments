@@ -348,10 +348,6 @@ export async function addPythonProject(
         return;
     }
 
-    if (resource instanceof ProjectPackageRootTreeItem || resource instanceof ProjectPackage) {
-        await addPythonProject(undefined, wm, em, pc);
-    }
-
     if (resource instanceof Uri) {
         const uri = resource as Uri;
         const envManagerId = getDefaultEnvManagerSetting(wm, uri);
@@ -416,6 +412,9 @@ export async function addPythonProject(
         }
         await addPythonProjectSetting(edits);
         return projects;
+    } else {
+        // If the context is not a Uri or ProjectItem, rerun function with undefined context
+        await addPythonProject(undefined, wm, em, pc);
     }
 }
 

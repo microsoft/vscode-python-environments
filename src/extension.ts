@@ -88,7 +88,7 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
     const projectCreators: ProjectCreators = new ProjectCreatorsImpl();
     context.subscriptions.push(
         projectCreators,
-        projectCreators.registerPythonProjectCreator(new ExistingProjects()),
+        projectCreators.registerPythonProjectCreator(new ExistingProjects(projectManager)),
         projectCreators.registerPythonProjectCreator(new AutoFindProjects(projectManager)),
     );
 
