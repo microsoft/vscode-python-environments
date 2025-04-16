@@ -24,11 +24,11 @@ export class ShellStartupActivationManagerImpl implements ShellStartupActivation
     ) {
         this.envCollection.description = ShellStartupActivationStrings.envCollectionDescription;
         this.disposables.push(
-            onDidChangeConfiguration((e: ConfigurationChangeEvent) => {
-                this.handleConfigurationChange(e);
+            onDidChangeConfiguration(async (e: ConfigurationChangeEvent) => {
+                await this.handleConfigurationChange(e);
             }),
-            this.em.onDidChangeEnvironmentFiltered((e: DidChangeEnvironmentEventArgs) => {
-                this.handleEnvironmentChange(e);
+            this.em.onDidChangeEnvironmentFiltered(async (e: DidChangeEnvironmentEventArgs) => {
+                await this.handleEnvironmentChange(e);
             }),
         );
     }

@@ -15,6 +15,7 @@ export enum ShellScriptEditState {
 
 export interface ShellStartupScriptProvider {
     name: string;
+    readonly shellType: string;
     isSetup(): Promise<ShellSetupState>;
     setupScripts(): Promise<ShellScriptEditState>;
     teardownScripts(): Promise<ShellScriptEditState>;

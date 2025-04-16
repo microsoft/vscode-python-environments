@@ -6,6 +6,7 @@ import { promisify } from 'util';
 import which from 'which';
 import { traceError, traceInfo, traceVerbose } from '../../../../common/logging';
 import { isWindows } from '../../../../common/utils/platformUtils';
+import { ShellConstants } from '../../../common/shellConstants';
 import { hasStartupCode, insertStartupCode, removeStartupCode } from '../common/editUtils';
 import { ShellScriptEditState, ShellSetupState, ShellStartupScriptProvider } from '../startupProvider';
 import { CMD_ENV_KEY } from './cmdConstants';
@@ -256,6 +257,7 @@ async function removeCmdStartup(startupFile: string, key: string): Promise<boole
 
 export class CmdStartupProvider implements ShellStartupScriptProvider {
     public readonly name: string = 'Command Prompt';
+    public readonly shellType: string = ShellConstants.CMD;
 
     async isSetup(): Promise<ShellSetupState> {
         const isInstalled = await isCmdInstalled();
