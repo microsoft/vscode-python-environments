@@ -20,6 +20,8 @@ import { createManagerReady } from './features/common/managerReady';
 import { GetEnvironmentInfoTool, InstallPackageTool } from './features/copilotTools';
 import { AutoFindProjects } from './features/creators/autoFindProjects';
 import { ExistingProjects } from './features/creators/existingProjects';
+import { NewPackageProject } from './features/creators/newPackageProject';
+import { NewScriptProject } from './features/creators/newScriptProject';
 import { ProjectCreatorsImpl } from './features/creators/projectCreators';
 import {
     addPythonProjectCommand,
@@ -108,6 +110,8 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
         projectCreators,
         projectCreators.registerPythonProjectCreator(new ExistingProjects(projectManager)),
         projectCreators.registerPythonProjectCreator(new AutoFindProjects(projectManager)),
+        projectCreators.registerPythonProjectCreator(new NewPackageProject()),
+        projectCreators.registerPythonProjectCreator(new NewScriptProject()),
     );
 
     setPythonApi(envManagers, projectManager, projectCreators, terminalManager, envVarManager);

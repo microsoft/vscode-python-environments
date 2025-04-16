@@ -134,14 +134,57 @@ export async function pickCreator(creators: PythonProjectCreator[]): Promise<Pyt
         return creators[0];
     }
 
-    const items: (QuickPickItem & { c: PythonProjectCreator })[] = creators.map((c) => ({
-        label: c.displayName ?? c.name,
-        description: c.description,
-        c: c,
-    }));
+    // First level menu
+    const autoFindCreator = creators.find((c) => c.name === 'autoProjects');
+    const existingProjectsCreator = creators.find((c) => c.name === 'existingProjects');
+    const otherCreators = creators.filter((c) => c.name !== 'autoProjects' && c.name !== 'existingProjects');
+
+    const items: QuickPickItem[] = [
+        {
+            label: 'Auto Find',
+            description: autoFindCreator?.description ?? 'Automatically find Python projects',
+        },
+        {
+            label: 'Select Existing',
+            description: existingProjectsCreator?.description ?? 'Select existing Python projects',
+        },
+        {
+            label: 'Create New',
+            description: 'Create a Python project from a template',
+        },
+    ];
+
     const selected = await showQuickPick(items, {
         placeHolder: Pickers.Managers.selectProjectCreator,
         ignoreFocusOut: true,
     });
-    return (selected as { c: PythonProjectCreator })?.c;
+
+    if (!selected) {
+        return undefined;
+    }
+
+    // Return appropriate creator based on selection
+    switch (selected.label) {
+        case 'Auto Find':
+            return autoFindCreator;
+        case 'Select Existing':
+            return existingProjectsCreator;
+        case 'Create New':
+            // Show second level menu for other creators
+            if (otherCreators.length === 0) {
+                return undefined;
+            }
+            const newItems: (QuickPickItem & { c: PythonProjectCreator })[] = otherCreators.map((c) => ({
+                label: c.displayName ?? c.name,
+                description: c.description,
+                c: c,
+            }));
+            const newSelected = await showQuickPick(newItems, {
+                placeHolder: 'Select project type for new project',
+                ignoreFocusOut: true,
+            });
+            return newSelected?.c;
+    }
+
+    return undefined;
 }
