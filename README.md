@@ -15,6 +15,10 @@ The Python Environments extension for VS Code helps you manage Python environmen
 
 ## Features
 
+The "Python Projects" fold shows you all of the projects that are currently in your workspace and their selected environments. From this view you can add more files or folders as projects, select a new environment for your project, and manage your selected environments. 
+
+The "Environment Managers" fold shows you all of the environment managers that are available on your machine with all related environments nested below. From this view, you can create new environments, delete old environments, and manage packages.
+
 <img src=<https://raw.githubusercontent.com/microsoft/vscode-python-environments/main/images/python-envs-overview.gif> width=734 height=413>
 
 ### Environment Management
