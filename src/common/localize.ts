@@ -14,6 +14,10 @@ export namespace Common {
     export const quickCreate = l10n.t('Quick Create');
 }
 
+export namespace WorkbenchStrings {
+    export const installExtension = l10n.t('Install Extension');
+}
+
 export namespace Interpreter {
     export const statusBarSelect = l10n.t('Select Interpreter');
     export const browsePath = l10n.t('Browse...');
