@@ -1,7 +1,7 @@
 import { Disposable, l10n, Uri } from 'vscode';
 import { EnvironmentManagers, PythonProjectManager } from '../../internal.api';
 import { createDeferred, Deferred } from '../../common/utils/deferred';
-import { allExtensions } from '../../common/extension.apis';
+import { allExtensions, getExtension } from '../../common/extension.apis';
 import { traceError, traceInfo } from '../../common/logging';
 import { showErrorMessage } from '../../common/window.apis';
 import { getDefaultEnvManagerSetting, getDefaultPkgManagerSetting } from '../settings/settingHelpers';
@@ -54,11 +54,25 @@ class ManagerReadyImpl implements ManagerReady {
 
     private checkExtension(managerId: string) {
         const installed = allExtensions().some((ext) => managerId.startsWith(`${ext.id}:`));
-        if (!installed && !this.checked.has(managerId)) {
-            this.checked.add(managerId);
-            const extId = getExtensionId(managerId);
+        if (this.checked.has(managerId)) {
+            return;
+        }
+        this.checked.add(managerId);
+        const extId = getExtensionId(managerId);
+        if (extId) {
             setImmediate(async () => {
-                if (extId) {
+                if (installed) {
+                    const ext = getExtension(extId);
+                    if (ext && !ext.isActive) {
+                        traceInfo(`Extension for manager ${extId} is not active: Activating...`);
+                        try {
+                            await ext.activate();
+                            traceInfo(`Extension for manager ${extId} is now active.`);
+                        } catch (err) {
+                            traceError(`Failed to activate extension ${extId}, required for: ${managerId}`, err);
+                        }
+                    }
+                } else {
                     traceError(`Extension for manager ${extId} is not installed.`);
                     const result = await showErrorMessage(
                         l10n.t(`Extension for {0} is not installed or enabled for this workspace.`, extId),
@@ -73,12 +87,10 @@ class ManagerReadyImpl implements ManagerReady {
                             traceError(`Failed to install extension: ${extId}`, err);
                         }
                     }
-                } else {
-                    showErrorMessage(
-                        l10n.t(`Extension for {0} is not installed or enabled for this workspace.`, managerId),
-                    );
                 }
             });
+        } else {
+            showErrorMessage(l10n.t(`Extension for {0} is not installed or enabled for this workspace.`, managerId));
         }
     }
 
