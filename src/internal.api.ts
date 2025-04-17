@@ -1,4 +1,4 @@
-import { Disposable, Event, LogOutputChannel, MarkdownString, Uri } from 'vscode';
+import { CancellationError, Disposable, Event, LogOutputChannel, MarkdownString, Uri } from 'vscode';
 import {
     PythonEnvironment,
     EnvironmentManager,
@@ -28,6 +28,8 @@ import {
     CreateEnvironmentOptions,
 } from './api';
 import { CreateEnvironmentNotSupported, RemoveEnvironmentNotSupported } from './common/errors/NotSupportedError';
+import { sendTelemetryEvent } from './common/telemetry/sender';
+import { EventNames } from './common/telemetry/constants';
 
 export type EnvironmentManagerScope = undefined | string | Uri | PythonEnvironment;
 export type PackageManagerScope = undefined | string | Uri | PythonEnvironment | Package;
@@ -241,8 +243,21 @@ export class InternalPackageManager implements PackageManager {
         return this.manager.log;
     }
 
-    manage(environment: PythonEnvironment, options: PackageManagementOptions): Promise<void> {
-        return this.manager.manage(environment, options);
+    async manage(environment: PythonEnvironment, options: PackageManagementOptions): Promise<void> {
+        try {
+            await this.manager.manage(environment, options);
+            sendTelemetryEvent(EventNames.PACKAGE_MANAGEMENT, undefined, { managerId: this.id, result: 'success' });
+        } catch (error) {
+            if (error instanceof CancellationError) {
+                sendTelemetryEvent(EventNames.PACKAGE_MANAGEMENT, undefined, {
+                    managerId: this.id,
+                    result: 'cancelled',
+                });
+                throw error;
+            }
+            sendTelemetryEvent(EventNames.PACKAGE_MANAGEMENT, undefined, { managerId: this.id, result: 'error' });
+            throw error;
+        }
     }
 
     refresh(environment: PythonEnvironment): Promise<void> {
