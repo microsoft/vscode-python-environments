@@ -56,6 +56,7 @@ import { registerTools } from './common/lm.apis';
 import { GetEnvironmentInfoTool, InstallPackageTool } from './features/copilotTools';
 import { TerminalActivationImpl } from './features/terminal/terminalActivationState';
 import { getEnvironmentForTerminal } from './features/terminal/utils';
+import { sendManagerSelectionTelemetry } from './common/telemetry/helpers';
 
 export async function activate(context: ExtensionContext): Promise<PythonEnvironmentApi> {
     const start = new StopWatch();
@@ -267,8 +268,10 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
             registerSystemPythonFeatures(nativeFinder, context.subscriptions, outputChannel),
             registerCondaFeatures(nativeFinder, context.subscriptions, outputChannel),
         ]);
+
         sendTelemetryEvent(EventNames.EXTENSION_MANAGER_REGISTRATION_DURATION, start.elapsedTime);
         await terminalManager.initialize(api);
+        sendManagerSelectionTelemetry(projectManager);
     });
 
     sendTelemetryEvent(EventNames.EXTENSION_ACTIVATION_DURATION, start.elapsedTime);

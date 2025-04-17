@@ -4,6 +4,8 @@ export enum EventNames {
 
     ENVIRONMENT_MANAGER_REGISTERED = 'ENVIRONMENT_MANAGER.REGISTERED',
     PACKAGE_MANAGER_REGISTERED = 'PACKAGE_MANAGER.REGISTERED',
+    ENVIRONMENT_MANAGER_SELECTED = 'ENVIRONMENT_MANAGER.SELECTED',
+    PACKAGE_MANAGER_SELECTED = 'PACKAGE_MANAGER.SELECTED',
 
     VENV_USING_UV = 'VENV.USING_UV',
     VENV_CREATION = 'VENV.CREATION',
@@ -41,6 +43,24 @@ export interface IEventNamePropertyMapping {
         }
     */
     [EventNames.PACKAGE_MANAGER_REGISTERED]: {
+        managerId: string;
+    };
+
+    /* __GDPR__
+        "environment_manager.selected": {
+            "managerId" : { "classification": "SystemMetaData", "purpose": "FeatureInsight", "owner": "karthiknadig" }
+        }
+    */
+    [EventNames.ENVIRONMENT_MANAGER_SELECTED]: {
+        managerId: string;
+    };
+
+    /* __GDPR__
+        "package_manager.selected": {
+            "managerId" : { "classification": "SystemMetaData", "purpose": "FeatureInsight", "owner": "karthiknadig" }
+        }
+    */
+    [EventNames.PACKAGE_MANAGER_SELECTED]: {
         managerId: string;
     };
 
