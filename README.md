@@ -56,7 +56,13 @@ The extension uses `pip` as the default package manager, but you can use the pac
 | ms-python.python:pip   | `pip`   | Pip acts as the default package manager and it's typically built-in to Python.                                                                                                                            |
 | ms-python.python:conda | `conda` | The [conda](https://conda.org) package manager, as provided by conda distributions like [Anaconda Distribution](https://docs.anaconda.com/anaconda/) or [conda-forge](https://conda-forge.org/download/). |
 
-### Project Creation
+### Project Creation and Management
+
+The Python Environments extension allows you to assign additional files or folders to various environments. Using `Add Python Project` in the Python Projects view you can:
+
+- Add existing projects : Allows you to select a file or folder that is currently in your VS Code workspace
+- Auto find projects: Searches for folders in your VS Code workspace with `pyproject.toml` and other setup files
+- Create new project: Create a new project from scratch
 
 The **Python: Create Project** command simplifies the process of starting a new Python project by scaffolding it for you. Whether in a new workspace or an existing one, this command sets up the necessary environment and files, so you don’t have to worry about the initial setup, and only the code you want to write.
 
