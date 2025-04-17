@@ -14,7 +14,7 @@ The Python Environments extension for VS Code helps you manage Python environmen
 
 ### Environment Management
 
-This extension provides an Environment Managers view, accessible via the VS Code Activity Bar, where you can:
+This extension provides an Python Environments view, accessible via the VS Code Activity Bar, where you can:
 
 - Create, delete, and switch between environments.
 - Install and uninstall packages within the selected environment.
