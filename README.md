@@ -2,18 +2,16 @@
 
 ## Overview
 
-The Python Environments extension for VS Code helps you manage Python environments and packages using your preferred environment manager, backed by its extensible APIs. This extension provides unique support for specifying environments for specific files, entire Python folders, or projects, including multi-root and mono-repo scenarios.
+The Python Environments extension for VS Code helps you manage Python environments and packages using your preferred environment manager, backed by its extensible APIs. This extension provides unique support for specifying environments for specific files, entire Python folders, or projects, including multi-root and mono-repo scenarios. The core feature set includes: 
+
+- 🌐 Create, delete, and manage environments
+- 📦 Install and uninstall packages within the selected environment
+- ✅ Create activated terminals Activate terminals
+- 🖌️ Add and create new Python projects
 
 > **Note:** This extension is in preview, and its APIs and features are subject to change as the project evolves.
 
 > **Important:** This extension requires the pre-release version of the Python extension (`ms-python.python`) to operate (version 2024.23.2025010901 or later).
-
-This extension provides a Python Environments view, accessible via the VS Code Activity Bar, where you can:
-
-- Create, delete, and manage environments
-- Install and uninstall packages within the selected environment
-- Create activated terminals Activate terminals
-- Add and create new Python projects
 
 ## Features
 
@@ -51,7 +49,7 @@ The extension also provides an interface to install and uninstall Python package
 
 ![ADD A QUICK REFERENCE PICTURE FOR BUTTONS]()
 
-The extension uses `pip` as the default package manager. You can change this by setting the `python-envs.defaultPackageManager` setting to a different package manager. The following are package managers supported out of the box:
+The extension uses `pip` as the default package manager, but you can use the package manager of your choice using the `python-envs.defaultPackageManager` setting. The following are package managers supported out of the box:
 
 | Id                     | Name  |  Description|
 | ---------------------- | ------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
