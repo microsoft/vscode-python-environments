@@ -64,18 +64,18 @@ class ManagerReadyImpl implements ManagerReady {
                 if (installed) {
                     const ext = getExtension(extId);
                     if (ext && !ext.isActive) {
-                        traceInfo(`Extension for manager ${extId} is not active: Activating...`);
+                        traceInfo(`Extension for manager ${managerId} is not active: Activating...`);
                         try {
                             await ext.activate();
-                            traceInfo(`Extension for manager ${extId} is now active.`);
+                            traceInfo(`Extension for manager ${managerId} is now active.`);
                         } catch (err) {
                             traceError(`Failed to activate extension ${extId}, required for: ${managerId}`, err);
                         }
                     }
                 } else {
-                    traceError(`Extension for manager ${extId} is not installed.`);
+                    traceError(`Extension for manager ${managerId} is not installed.`);
                     const result = await showErrorMessage(
-                        l10n.t(`Do you want to install extension ${extId} to enable {1} support.`, extId, managerId),
+                        l10n.t(`Do you want to install extension {0} to enable {1} support.`, extId, managerId),
                         WorkbenchStrings.installExtension,
                     );
                     if (result === WorkbenchStrings.installExtension) {
@@ -84,7 +84,17 @@ class ManagerReadyImpl implements ManagerReady {
                             await installExtension(extId);
                             traceInfo(`Extension ${extId} installed.`);
                         } catch (err) {
-                            traceError(`Failed to install extension: ${extId}`, err);
+                            traceError(`Failed to install  extension: ${extId}`, err);
+                        }
+
+                        try {
+                            const ext = getExtension(extId);
+                            if (ext && !ext.isActive) {
+                                traceInfo(`Extension for manager ${managerId} is not active: Activating...`);
+                                await ext.activate();
+                            }
+                        } catch (err) {
+                            traceError(`Failed to activate extension ${extId}, required for: ${managerId}`, err);
                         }
                     }
                 }
