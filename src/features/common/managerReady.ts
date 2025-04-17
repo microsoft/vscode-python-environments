@@ -75,7 +75,7 @@ class ManagerReadyImpl implements ManagerReady {
                 } else {
                     traceError(`Extension for manager ${extId} is not installed.`);
                     const result = await showErrorMessage(
-                        l10n.t(`Extension for {0} is not installed or enabled for this workspace.`, extId),
+                        l10n.t(`Do you want to install extension ${extId} to enable {1} support.`, extId, managerId),
                         WorkbenchStrings.installExtension,
                     );
                     if (result === WorkbenchStrings.installExtension) {
