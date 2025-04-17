@@ -13,6 +13,7 @@ export namespace Common {
     export const yes = l10n.t('Yes');
     export const no = l10n.t('No');
     export const quickCreate = l10n.t('Quick Create');
+    export const installPython = l10n.t('Install Python');
 }
 
 export namespace Interpreter {
@@ -139,6 +140,11 @@ export namespace CondaStrings {
 
     export const quickCreateCondaNoEnvRoot = l10n.t('No conda environment root found');
     export const quickCreateCondaNoName = l10n.t('Could not generate a name for env');
+
+    export const condaMissingPython = l10n.t('No Python found in the selected conda environment');
+    export const condaMissingPythonNoFix = l10n.t(
+        'No Python found in the selected conda environment. Please select another environment or install Python manually.',
+    );
 }
 
 export namespace ProjectCreatorString {
