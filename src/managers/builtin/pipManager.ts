@@ -63,7 +63,7 @@ export class PipPackageManager implements PackageManager, Disposable {
 
         if (toInstall.length === 0 && toUninstall.length === 0) {
             const projects = this.venv.getProjectsByEnvironment(environment);
-            const result = await getWorkspacePackagesToInstall(this.api, options, projects, environment);
+            const result = await getWorkspacePackagesToInstall(this.api, options, projects, environment, this.log);
             if (result) {
                 toInstall = result.install;
                 toUninstall = result.uninstall;

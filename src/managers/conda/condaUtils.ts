@@ -20,6 +20,7 @@ import {
     LogOutputChannel,
     ProgressLocation,
     QuickInputButtons,
+    QuickPickItem,
     Uri,
 } from 'vscode';
 import { ENVS_EXTENSION_ID, EXTENSION_ROOT_DIR } from '../../common/constants';
@@ -786,7 +787,7 @@ async function selectCommonPackagesOrSkip(
         return undefined;
     }
 
-    const items = [];
+    const items: QuickPickItem[] = [];
     if (common.length > 0) {
         items.push({
             label: PackageManagement.searchCommonPackages,
@@ -798,21 +799,25 @@ async function selectCommonPackagesOrSkip(
         items.push({ label: PackageManagement.skipPackageInstallation });
     }
 
-    const selected =
-        items.length === 1
-            ? items[0]
-            : await showQuickPickWithButtons(items, {
-                  placeHolder: Pickers.Packages.selectOption,
-                  ignoreFocusOut: true,
-                  showBackButton: true,
-                  matchOnDescription: false,
-                  matchOnDetail: false,
-              });
+    let showBackButton = true;
+    let selected: QuickPickItem[] | QuickPickItem | undefined = undefined;
+    if (items.length === 1) {
+        selected = items[0];
+        showBackButton = false;
+    } else {
+        selected = await showQuickPickWithButtons(items, {
+            placeHolder: Pickers.Packages.selectOption,
+            ignoreFocusOut: true,
+            showBackButton: true,
+            matchOnDescription: false,
+            matchOnDetail: false,
+        });
+    }
 
     if (selected && !Array.isArray(selected)) {
         try {
             if (selected.label === PackageManagement.searchCommonPackages) {
-                return await selectFromCommonPackagesToInstall(common, installed);
+                return await selectFromCommonPackagesToInstall(common, installed, undefined, { showBackButton });
             } else {
                 traceInfo('Package Installer: user selected skip package installation');
                 return undefined;
