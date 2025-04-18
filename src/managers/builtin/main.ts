@@ -9,6 +9,8 @@ import { UvProjectCreator } from './uvProjectCreator';
 import { isUvInstalled } from './helpers';
 import { createFileSystemWatcher, onDidDeleteFiles } from '../../common/workspace.apis';
 import { createSimpleDebounce } from '../../common/utils/debounce';
+import { onDidEndTerminalShellExecution } from '../../common/window.apis';
+import { isPipInstallCommand } from './pipUtils';
 
 export async function registerSystemPythonFeatures(
     nativeFinder: NativePythonFinder,
@@ -40,6 +42,18 @@ export async function registerSystemPythonFeatures(
         }),
         onDidDeleteFiles(() => {
             venvDebouncedRefresh.trigger();
+        }),
+    );
+
+    disposables.push(
+        onDidEndTerminalShellExecution(async (e) => {
+            const cwd = e.terminal.shellIntegration?.cwd;
+            if (isPipInstallCommand(e.execution.commandLine.value) && cwd) {
+                const env = await venvManager.get(cwd);
+                if (env) {
+                    await pkgManager.refresh(env);
+                }
+            }
         }),
     );
 
