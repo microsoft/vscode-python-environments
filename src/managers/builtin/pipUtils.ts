@@ -116,12 +116,13 @@ async function selectWorkspaceOrCommon(
     if (selected && !Array.isArray(selected)) {
         try {
             if (selected.label === PackageManagement.workspaceDependencies) {
-                const installArgs = await selectFromInstallableToInstall(installable);
-                return { install: installArgs ?? [], uninstall: [] };
+                return await selectFromInstallableToInstall(installable);
             } else if (selected.label === PackageManagement.searchCommonPackages) {
                 return await selectFromCommonPackagesToInstall(common, installed);
-            } else {
+            } else if (selected.label === PackageManagement.skipPackageInstallation) {
                 traceInfo('Package Installer: user selected skip package installation');
+                return undefined;
+            } else {
                 return undefined;
             }
             // eslint-disable-next-line @typescript-eslint/no-explicit-any

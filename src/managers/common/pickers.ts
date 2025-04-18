@@ -105,12 +105,12 @@ function groupByInstalled(items: PackageQuickPickItem[], installed?: string[]): 
     };
 }
 
-export interface CommonPackagesResult {
+interface PackagesPickerResult {
     install: string[];
     uninstall: string[];
 }
 
-function selectionsToResult(selections: string[], installed: string[]): CommonPackagesResult {
+function selectionsToResult(selections: string[], installed: string[]): PackagesPickerResult {
     const install: string[] = selections;
     const uninstall: string[] = [];
     installed.forEach((i) => {
@@ -128,7 +128,7 @@ export async function selectFromCommonPackagesToInstall(
     common: Installable[],
     installed: string[],
     preSelected?: PackageQuickPickItem[] | undefined,
-): Promise<CommonPackagesResult | undefined> {
+): Promise<PackagesPickerResult | undefined> {
     const { installedItems, items } = groupByInstalled(common.map(installableToQuickPickItem), installed);
     const preSelectedItems = items.filter((i) => (preSelected ?? installedItems).some((s) => s.id === i.id));
     let selected: PackageQuickPickItem | PackageQuickPickItem[] | undefined;
@@ -232,7 +232,7 @@ function getGroupedItems(items: Installable[]): PackageQuickPickItem[] {
 export async function selectFromInstallableToInstall(
     installable: Installable[],
     preSelected?: PackageQuickPickItem[],
-): Promise<string[] | undefined> {
+): Promise<PackagesPickerResult | undefined> {
     const items: PackageQuickPickItem[] = [];
 
     if (installable && installable.length > 0) {
@@ -263,9 +263,9 @@ export async function selectFromInstallableToInstall(
 
     if (selected) {
         if (Array.isArray(selected)) {
-            return selected.flatMap((s) => s.args ?? []);
+            return { install: selected.flatMap((s) => s.args ?? []), uninstall: [] };
         } else {
-            return selected.args ?? [];
+            return { install: selected.args ?? [], uninstall: [] };
         }
     }
     return undefined;
