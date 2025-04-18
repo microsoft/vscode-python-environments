@@ -1,7 +1,7 @@
 import * as fse from 'fs-extra';
 import * as path from 'path';
 import * as tomljs from '@iarna/toml';
-import { LogOutputChannel, ProgressLocation, QuickInputButtons, Uri } from 'vscode';
+import { LogOutputChannel, ProgressLocation, QuickInputButtons, QuickPickItem, Uri } from 'vscode';
 import { showQuickPickWithButtons, withProgress } from '../../common/window.apis';
 import { PackageManagement, Pickers, VenvManagerStrings } from '../../common/localize';
 import { PackageManagementOptions, PythonEnvironment, PythonEnvironmentApi, PythonProject } from '../../api';
@@ -10,6 +10,7 @@ import { EXTENSION_ROOT_DIR } from '../../common/constants';
 import { selectFromCommonPackagesToInstall, selectFromInstallableToInstall } from '../common/pickers';
 import { traceInfo } from '../../common/logging';
 import { Installable, mergePackages } from '../common/utils';
+import { refreshPipPackages } from './utils';
 
 async function tomlParse(fsPath: string, log?: LogOutputChannel): Promise<tomljs.JsonMap> {
     try {
@@ -83,7 +84,7 @@ async function selectWorkspaceOrCommon(
         return undefined;
     }
 
-    const items = [];
+    const items: QuickPickItem[] = [];
     if (installable.length > 0) {
         items.push({
             label: PackageManagement.workspaceDependencies,
@@ -102,23 +103,27 @@ async function selectWorkspaceOrCommon(
         items.push({ label: PackageManagement.skipPackageInstallation });
     }
 
-    const selected =
-        items.length === 1
-            ? items[0]
-            : await showQuickPickWithButtons(items, {
-                  placeHolder: Pickers.Packages.selectOption,
-                  ignoreFocusOut: true,
-                  showBackButton: true,
-                  matchOnDescription: false,
-                  matchOnDetail: false,
-              });
+    let showBackButton = true;
+    let selected: QuickPickItem[] | QuickPickItem | undefined = undefined;
+    if (items.length === 1) {
+        selected = items[0];
+        showBackButton = false;
+    } else {
+        selected = await showQuickPickWithButtons(items, {
+            placeHolder: Pickers.Packages.selectOption,
+            ignoreFocusOut: true,
+            showBackButton: true,
+            matchOnDescription: false,
+            matchOnDetail: false,
+        });
+    }
 
     if (selected && !Array.isArray(selected)) {
         try {
             if (selected.label === PackageManagement.workspaceDependencies) {
-                return await selectFromInstallableToInstall(installable);
+                return await selectFromInstallableToInstall(installable, undefined, { showBackButton });
             } else if (selected.label === PackageManagement.searchCommonPackages) {
-                return await selectFromCommonPackagesToInstall(common, installed);
+                return await selectFromCommonPackagesToInstall(common, installed, undefined, { showBackButton });
             } else if (selected.label === PackageManagement.skipPackageInstallation) {
                 traceInfo('Package Installer: user selected skip package installation');
                 return undefined;
@@ -145,12 +150,13 @@ export async function getWorkspacePackagesToInstall(
     options: PackageManagementOptions,
     project?: PythonProject[],
     environment?: PythonEnvironment,
+    log?: LogOutputChannel,
 ): Promise<PipPackages | undefined> {
     const installable = (await getProjectInstallable(api, project)) ?? [];
     let common = await getCommonPackages();
     let installed: string[] | undefined;
     if (environment) {
-        installed = (await api.getPackages(environment))?.map((pkg) => pkg.name);
+        installed = (await refreshPipPackages(environment, log, { showProgress: true }))?.map((pkg) => pkg.name);
         common = mergePackages(common, installed ?? []);
     }
     return selectWorkspaceOrCommon(installable, common, !!options.showSkipOption, installed ?? []);
@@ -167,7 +173,7 @@ export async function getProjectInstallable(
     const installable: Installable[] = [];
     await withProgress(
         {
-            location: ProgressLocation.Window,
+            location: ProgressLocation.Notification,
             title: VenvManagerStrings.searchingDependencies,
         },
         async (_progress, token) => {

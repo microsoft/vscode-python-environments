@@ -128,6 +128,7 @@ export async function selectFromCommonPackagesToInstall(
     common: Installable[],
     installed: string[],
     preSelected?: PackageQuickPickItem[] | undefined,
+    options?: { showBackButton?: boolean } | undefined,
 ): Promise<PackagesPickerResult | undefined> {
     const { installedItems, items } = groupByInstalled(common.map(installableToQuickPickItem), installed);
     const preSelectedItems = items.filter((i) => (preSelected ?? installedItems).some((s) => s.id === i.id));
@@ -139,7 +140,7 @@ export async function selectFromCommonPackagesToInstall(
                 placeHolder: PackageManagement.selectPackagesToInstall,
                 ignoreFocusOut: true,
                 canPickMany: true,
-                showBackButton: true,
+                showBackButton: options?.showBackButton,
                 buttons: [EDIT_ARGUMENTS_BUTTON],
                 selected: preSelectedItems,
             },
@@ -232,6 +233,7 @@ function getGroupedItems(items: Installable[]): PackageQuickPickItem[] {
 export async function selectFromInstallableToInstall(
     installable: Installable[],
     preSelected?: PackageQuickPickItem[],
+    options?: { showBackButton?: boolean } | undefined,
 ): Promise<PackagesPickerResult | undefined> {
     const items: PackageQuickPickItem[] = [];
 
@@ -252,7 +254,7 @@ export async function selectFromInstallableToInstall(
             placeHolder: PackageManagement.selectPackagesToInstall,
             ignoreFocusOut: true,
             canPickMany: true,
-            showBackButton: true,
+            showBackButton: options?.showBackButton,
             selected: preSelectedItems,
         },
         undefined,
