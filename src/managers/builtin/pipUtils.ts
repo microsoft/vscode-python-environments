@@ -207,3 +207,17 @@ export async function getProjectInstallable(
     );
     return installable;
 }
+
+export function isPipInstallCommand(command: string): boolean {
+    // Regex to match pip install commands, capturing variations like:
+    // pip install package
+    // python -m pip install package
+    // pip3 install package
+    // py -m pip install package
+    // pip install -r requirements.txt
+    // uv pip install package
+    // poetry run pip install package
+    // pipx run pip install package
+    // Any other tool that might wrap pip install
+    return /(?:^|\s)(?:\S+\s+)*(?:pip\d*)\s+(install|uninstall)\b/.test(command);
+}
