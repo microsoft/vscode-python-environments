@@ -9,6 +9,7 @@ import { runCommand } from '../utils';
 
 import { ShellConstants } from '../../../common/shellConstants';
 import { hasStartupCode, insertStartupCode, removeStartupCode } from '../common/editUtils';
+import { extractProfilePath, PROFILE_TAG_END, PROFILE_TAG_START } from '../common/shellUtils';
 import { POWERSHELL_ENV_KEY } from './pwshConstants';
 
 async function isPowerShellInstalled(shell: string): Promise<boolean> {
@@ -23,13 +24,18 @@ async function isPowerShellInstalled(shell: string): Promise<boolean> {
 
 async function getProfileForShell(shell: 'powershell' | 'pwsh'): Promise<string> {
     try {
-        const profilePath = await runCommand(
-            isWindows() ? `${shell} -Command $profile` : `${shell} -Command \\$profile`,
+        const content = await runCommand(
+            isWindows()
+                ? `${shell} -Command "Write-Output '${PROFILE_TAG_START}'; Write-Output $profile; Write-Output '${PROFILE_TAG_END}'"`
+                : `${shell} -Command "Write-Output '${PROFILE_TAG_START}'; Write-Output \\$profile; Write-Output '${PROFILE_TAG_END}'"`,
         );
-        traceInfo(`SHELL: ${shell} profile found at: ${profilePath}`);
 
-        if (profilePath) {
-            return profilePath.trim();
+        if (content) {
+            const profilePath = extractProfilePath(content);
+            if (profilePath) {
+                traceInfo(`SHELL: ${shell} profile found at: ${profilePath}`);
+                return profilePath;
+            }
         }
     } catch (err) {
         traceError(`${shell} failed to get profile path`, err);
