@@ -61,8 +61,7 @@ export class GetEnvironmentInfoTool implements LanguageModelTool<IResourceRefere
         if (parameters.resourcePath === undefined || parameters.resourcePath === '') {
             throw new Error('Invalid input: resourcePath is required');
         }
-
-        const projects = this.api.getPythonProjects();
+        const projects = this.api.getPythonProjects() || [];
         let root = projects.length > 0 ? projects[0].uri.fsPath : undefined;
         const resourcePath: Uri | undefined = getResourceUri(parameters.resourcePath, root);
         if (!resourcePath) {
