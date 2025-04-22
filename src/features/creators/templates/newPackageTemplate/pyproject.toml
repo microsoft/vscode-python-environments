@@ -1,10 +1,12 @@
 [project]
 name = "package_name"
 version = "1.0.0"
-description = TODO: Add a short description of your package
+description = "" #TODO: Add a short description of your package
+authors = [{name = "Your Name", email = "your@email.com"}] #TODO: Add your name and email
 readme = "README.md"
+dependencies = [] #TODO: Add your package dependencies here
 
-requires-python = ">=3.8"
+requires-python = ">=3.9"
 
 [project.optional-dependencies]
 dev-requirements = {file = "dev-requirements.txt"}
@@ -14,6 +16,8 @@ requires = ["setuptools", "wheel"]
 build-backend = "setuptools.build_meta"
 
 
+[project.scripts]
+# Add your CLI entry points here
 
 
 
