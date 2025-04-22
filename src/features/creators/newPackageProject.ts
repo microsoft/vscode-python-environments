@@ -9,8 +9,10 @@ import {
     quickCreateNewVenv,
     removeCopilotInstructions,
     replaceInFilesAndNames,
+    replaceInFile,
 } from './creationHelpers';
 import { EXTENSION_ROOT_DIR } from '../../common/constants';
+import { EnvironmentManagers } from '../../internal.api';
 
 export class NewPackageProject implements PythonProjectCreator {
     public readonly name = 'newPackage';
@@ -18,7 +20,7 @@ export class NewPackageProject implements PythonProjectCreator {
     public readonly description = 'Create a new Python package';
     public readonly tooltip = new MarkdownString('Create a new Python package');
 
-    constructor() {}
+    constructor(private readonly envManagers: EnvironmentManagers) {}
 
     async create(_options?: PythonProjectCreatorOptions): Promise<PythonProject | undefined> {
         // Prompt for package name
@@ -30,7 +32,7 @@ export class NewPackageProject implements PythonProjectCreator {
             return undefined;
         }
 
-        // Use helper for venv
+        // Use helper to prompt for virtual environment creation
         const createVenv = await promptForVenv();
         if (createVenv === undefined) {
             return undefined;
@@ -83,8 +85,25 @@ export class NewPackageProject implements PythonProjectCreator {
 
         // 4. Create virtual environment if requested
         if (createVenv) {
-            await quickCreateNewVenv(destFolder);
+            await quickCreateNewVenv(this.envManagers, destFolder);
         }
+
+        // 5. Replace <run_exec> and <activation_command> in README.md
+        const readmeFilePath = path.join(destFolder, 'README.md');
+        const pythonEnvironment = await this.envManagers.getEnvironment(Uri.parse(destFolder));
+        if (!pythonEnvironment) {
+            window.showErrorMessage('Python environment not found.');
+            return undefined;
+        }
+        const execInfo = pythonEnvironment.execInfo;
+        if (execInfo.run) {
+            let execRunStr = execInfo.run.executable;
+            if (execInfo.run.args) {
+                execRunStr += ` ${execInfo.run.args.join(' ')}`;
+            }
+            await replaceInFile(readmeFilePath, '<run_exec>', execRunStr);
+        }
+        // TODO: replace <activation_command> in README.md ?
 
         // Return a PythonProject object if needed by your API
         return {
