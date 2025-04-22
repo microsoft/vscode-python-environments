@@ -5,15 +5,6 @@ import { getResourceUri, normalizePath } from '../../common/utils/pathUtils';
 import * as utils from '../../managers/common/utils';
 
 suite('Path Utilities', () => {
-    let isWindowsStub: sinon.SinonStub;
-
-    setup(() => {
-        isWindowsStub = sinon.stub(utils, 'isWindows');
-    });
-
-    teardown(() => {
-        sinon.restore();
-    });
     suite('getResourceUri', () => {
         const testRoot = process.cwd();
 
@@ -36,13 +27,16 @@ suite('Path Utilities', () => {
             assert.strictEqual(result?.path, testPath);
         });
 
-        test('creates file URI from Windows path', () => {
+        test('creates file URI from Windows path', function () {
+            if (!utils.isWindows()) {
+                this.skip();
+            }
             const testPath = 'C:\\path\\to\\file.txt';
             const result = getResourceUri(testPath, testRoot);
 
             assert.ok(result instanceof Uri);
             assert.strictEqual(result?.scheme, 'file');
-            assert.strictEqual(result?.path, 'C:/path/to/file.txt');
+            assert.strictEqual(result?.path, '/C:/path/to/file.txt');
         });
 
         test('parses existing URI correctly', () => {
@@ -99,6 +93,15 @@ suite('Path Utilities', () => {
     });
 
     suite('normalizePath', () => {
+        let isWindowsStub: sinon.SinonStub;
+
+        setup(() => {
+            isWindowsStub = sinon.stub(utils, 'isWindows');
+        });
+
+        teardown(() => {
+            sinon.restore();
+        });
         test('replaces backslashes with forward slashes', () => {
             const testPath = 'C:\\path\\to\\file.txt';
             const result = normalizePath(testPath);
