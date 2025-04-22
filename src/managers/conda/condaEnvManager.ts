@@ -38,8 +38,6 @@ import { createDeferred, Deferred } from '../../common/utils/deferred';
 import { withProgress } from '../../common/window.apis';
 import { CondaStrings } from '../../common/localize';
 import { showErrorMessage } from '../../common/errors/utils';
-import { isWindows } from '../common/utils';
-import { normalizePath } from '../../common/utils/pathUtils';
 
 export class CondaEnvManager implements EnvironmentManager, Disposable {
     private collection: PythonEnvironment[] = [];
@@ -74,16 +72,6 @@ export class CondaEnvManager implements EnvironmentManager, Disposable {
 
     public dispose() {
         this.disposablesMap.forEach((d) => d.dispose());
-    }
-
-    private setFsPathToEnv(fsPath: string, environment: PythonEnvironment): void {
-        this.fsPathToEnv.set(isWindows() ? normalizePath(fsPath) : fsPath, environment);
-    }
-    private getFsPathToEnv(fsPath: string): PythonEnvironment | undefined {
-        return this.fsPathToEnv.get(isWindows() ? normalizePath(fsPath) : fsPath);
-    }
-    private deleteFsPathToEnv(fsPath: string): void {
-        this.fsPathToEnv.delete(isWindows() ? normalizePath(fsPath) : fsPath);
     }
 
     private _initialized: Deferred<void> | undefined;
@@ -186,7 +174,7 @@ export class CondaEnvManager implements EnvironmentManager, Disposable {
                             this.collection = this.collection.filter((env) => env.envId.id !== result?.envId.id);
                             Array.from(this.fsPathToEnv.entries())
                                 .filter(([, env]) => env.envId.id === result?.envId.id)
-                                .forEach(([uri]) => this.deleteFsPathToEnv(uri));
+                                .forEach(([uri]) => this.fsPathToEnv.delete(uri));
                             this.disposablesMap.delete(result.envId.id);
                         }
                     }),
@@ -248,13 +236,13 @@ export class CondaEnvManager implements EnvironmentManager, Disposable {
     async get(scope: GetEnvironmentScope): Promise<PythonEnvironment | undefined> {
         await this.initialize();
         if (scope instanceof Uri) {
-            let env = this.getFsPathToEnv(scope.fsPath);
+            let env = this.fsPathToEnv.get(scope.fsPath);
             if (env) {
                 return env;
             }
             const project = this.api.getPythonProject(scope);
             if (project) {
-                env = this.getFsPathToEnv(project.uri.fsPath);
+                env = this.fsPathToEnv.get(project.uri.fsPath);
                 if (env) {
                     return env;
                 }
@@ -272,9 +260,9 @@ export class CondaEnvManager implements EnvironmentManager, Disposable {
             const fsPath = folder?.uri?.fsPath ?? scope.fsPath;
             if (fsPath) {
                 if (environment) {
-                    this.setFsPathToEnv(fsPath, environment);
+                    this.fsPathToEnv.set(fsPath, environment);
                 } else {
-                    this.deleteFsPathToEnv(fsPath);
+                    this.fsPathToEnv.delete(fsPath);
                 }
                 await setCondaForWorkspace(fsPath, environment?.environmentPath.fsPath);
             }
@@ -290,11 +278,11 @@ export class CondaEnvManager implements EnvironmentManager, Disposable {
 
             const before: Map<string, PythonEnvironment | undefined> = new Map();
             projects.forEach((p) => {
-                before.set(p.uri.fsPath, this.getFsPathToEnv(p.uri.fsPath));
+                before.set(p.uri.fsPath, this.fsPathToEnv.get(p.uri.fsPath));
                 if (environment) {
-                    this.setFsPathToEnv(p.uri.fsPath, environment);
+                    this.fsPathToEnv.set(p.uri.fsPath, environment);
                 } else {
-                    this.deleteFsPathToEnv(p.uri.fsPath);
+                    this.fsPathToEnv.delete(p.uri.fsPath);
                 }
             });
 
@@ -383,14 +371,14 @@ export class CondaEnvManager implements EnvironmentManager, Disposable {
                 const found = this.findEnvironmentByPath(env);
 
                 if (found) {
-                    this.setFsPathToEnv(p, found);
+                    this.fsPathToEnv.set(p, found);
                 } else {
                     // If not found, resolve the conda path. Could be portable conda.
                     const resolved = await resolveCondaPath(env, this.nativeFinder, this.api, this.log, this);
 
                     if (resolved) {
                         // If resolved add it to the collection
-                        this.setFsPathToEnv(p, resolved);
+                        this.fsPathToEnv.set(p, resolved);
                         this.collection.push(resolved);
                     } else {
                         this.log.error(`Failed to resolve conda environment: ${env}`);
@@ -400,7 +388,7 @@ export class CondaEnvManager implements EnvironmentManager, Disposable {
                 // If there is not an environment already assigned by user to this project
                 // then see if there is one in the collection
                 if (pathSorted.length === 1) {
-                    this.setFsPathToEnv(p, pathSorted[0]);
+                    this.fsPathToEnv.set(p, pathSorted[0]);
                 } else {
                     // If there is more than one environment then we need to check if the project
                     // is a subfolder of one of the environments
@@ -409,7 +397,7 @@ export class CondaEnvManager implements EnvironmentManager, Disposable {
                         return t && path.normalize(t) === p;
                     });
                     if (found) {
-                        this.setFsPathToEnv(p, found);
+                        this.fsPathToEnv.set(p, found);
                     }
                 }
             }
@@ -418,7 +406,7 @@ export class CondaEnvManager implements EnvironmentManager, Disposable {
 
     private fromEnvMap(uri: Uri): PythonEnvironment | undefined {
         // Find environment directly using the URI mapping
-        const env = this.getFsPathToEnv(uri.fsPath);
+        const env = this.fsPathToEnv.get(uri.fsPath);
         if (env) {
             return env;
         }
@@ -426,7 +414,7 @@ export class CondaEnvManager implements EnvironmentManager, Disposable {
         // Find environment using the Python project for the Uri
         const project = this.api.getPythonProject(uri);
         if (project) {
-            return this.getFsPathToEnv(project.uri.fsPath);
+            return this.fsPathToEnv.get(project.uri.fsPath);
         }
 
         return undefined;

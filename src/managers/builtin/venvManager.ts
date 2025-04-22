@@ -36,11 +36,10 @@ import * as path from 'path';
 import { NativePythonFinder } from '../common/nativePythonFinder';
 import { PYTHON_EXTENSION_ID } from '../../common/constants';
 import { createDeferred, Deferred } from '../../common/utils/deferred';
-import { getLatest, isWindows, shortVersion, sortEnvironments } from '../common/utils';
+import { getLatest, shortVersion, sortEnvironments } from '../common/utils';
 import { withProgress } from '../../common/window.apis';
 import { VenvManagerStrings } from '../../common/localize';
 import { showErrorMessage } from '../../common/errors/utils';
-import { normalizePath } from '../../common/utils/pathUtils';
 
 export class VenvManager implements EnvironmentManager {
     private collection: PythonEnvironment[] = [];
@@ -202,20 +201,11 @@ export class VenvManager implements EnvironmentManager {
         const changed: Uri[] = [];
         this.fsPathToEnv.forEach((env, uri) => {
             if (env.environmentPath.fsPath === environment.environmentPath.fsPath) {
-                this.deleteFsPathToEnv(uri);
+                this.fsPathToEnv.delete(uri);
                 changed.push(Uri.file(uri));
             }
         });
         return changed;
-    }
-    private setFsPathToEnv(fsPath: string, environment: PythonEnvironment): void {
-        this.fsPathToEnv.set(isWindows() ? normalizePath(fsPath) : fsPath, environment);
-    }
-    private getFsPathToEnv(fsPath: string): PythonEnvironment | undefined {
-        return this.fsPathToEnv.get(isWindows() ? normalizePath(fsPath) : fsPath);
-    }
-    private deleteFsPathToEnv(fsPath: string): void {
-        this.fsPathToEnv.delete(isWindows() ? normalizePath(fsPath) : fsPath);
     }
 
     async refresh(scope: RefreshEnvironmentsScope): Promise<void> {
@@ -272,7 +262,7 @@ export class VenvManager implements EnvironmentManager {
             return [];
         }
 
-        const env = this.getFsPathToEnv(scope.fsPath);
+        const env = this.fsPathToEnv.get(scope.fsPath);
         return env ? [env] : [];
     }
 
@@ -289,7 +279,7 @@ export class VenvManager implements EnvironmentManager {
             return this.globalEnv;
         }
 
-        let env = this.getFsPathToEnv(project.uri.fsPath);
+        let env = this.fsPathToEnv.get(project.uri.fsPath);
         if (!env) {
             env = this.findEnvironmentByPath(project.uri.fsPath);
         }
@@ -315,11 +305,11 @@ export class VenvManager implements EnvironmentManager {
                 return;
             }
 
-            const before = this.getFsPathToEnv(pw.uri.fsPath);
+            const before = this.fsPathToEnv.get(pw.uri.fsPath);
             if (environment) {
-                this.setFsPathToEnv(pw.uri.fsPath, environment);
+                this.fsPathToEnv.set(pw.uri.fsPath, environment);
             } else {
-                this.deleteFsPathToEnv(pw.uri.fsPath);
+                this.fsPathToEnv.delete(pw.uri.fsPath);
             }
             await setVenvForWorkspace(pw.uri.fsPath, environment?.environmentPath.fsPath);
 
@@ -340,11 +330,11 @@ export class VenvManager implements EnvironmentManager {
 
             const before: Map<string, PythonEnvironment | undefined> = new Map();
             projects.forEach((p) => {
-                before.set(p.uri.fsPath, this.getFsPathToEnv(p.uri.fsPath));
+                before.set(p.uri.fsPath, this.fsPathToEnv.get(p.uri.fsPath));
                 if (environment) {
-                    this.setFsPathToEnv(p.uri.fsPath, environment);
+                    this.fsPathToEnv.set(p.uri.fsPath, environment);
                 } else {
-                    this.deleteFsPathToEnv(p.uri.fsPath);
+                    this.fsPathToEnv.delete(p.uri.fsPath);
                 }
             });
 
@@ -474,10 +464,10 @@ export class VenvManager implements EnvironmentManager {
 
             if (env) {
                 const found = this.findEnvironmentByPath(env, sorted) ?? this.findEnvironmentByPath(env, globals);
-                const previous = this.getFsPathToEnv(p);
+                const previous = this.fsPathToEnv.get(p);
                 const pw = this.api.getPythonProject(Uri.file(p));
                 if (found) {
-                    this.setFsPathToEnv(p, found);
+                    this.fsPathToEnv.set(p, found);
                     if (pw && previous?.envId.id !== found.envId.id) {
                         events.push(() =>
                             this._onDidChangeEnvironment.fire({ uri: pw.uri, old: undefined, new: found }),
@@ -493,7 +483,7 @@ export class VenvManager implements EnvironmentManager {
                     );
                     if (resolved) {
                         // If resolved add it to the collection
-                        this.setFsPathToEnv(p, resolved);
+                        this.fsPathToEnv.set(p, resolved);
                         this.addEnvironment(resolved, false);
                         if (pw && previous?.envId.id !== resolved.envId.id) {
                             events.push(() =>
@@ -507,7 +497,7 @@ export class VenvManager implements EnvironmentManager {
             } else {
                 // There is NO selected venv, then try and choose the venv that is in the workspace.
                 if (sorted.length === 1) {
-                    this.setFsPathToEnv(p, sorted[0]);
+                    this.fsPathToEnv.set(p, sorted[0]);
                 } else {
                     // These are sorted by version and by path length. The assumption is that the user would want to pick
                     // latest version and the one that is closest to the workspace.
@@ -516,7 +506,7 @@ export class VenvManager implements EnvironmentManager {
                         return t && path.normalize(t) === p;
                     });
                     if (found) {
-                        this.setFsPathToEnv(p, found);
+                        this.fsPathToEnv.set(p, found);
                     }
                 }
             }

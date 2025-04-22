@@ -1,3 +1,4 @@
+import * as path from 'path';
 import { Uri } from 'vscode';
 import { isWindows } from '../../managers/common/utils';
 
@@ -19,8 +20,8 @@ export function checkUri(scope?: Uri | Uri[] | string): Uri | Uri[] | string | u
     return scope;
 }
 
-export function normalizePath(path: string): string {
-    const path1 = path.replace(/\\/g, '/');
+export function normalizePath(fsPath: string): string {
+    const path1 = fsPath.replace(/\\/g, '/');
     if (isWindows()) {
         return path1.toLowerCase();
     }
@@ -38,14 +39,11 @@ export function getResourceUri(resourcePath: string, root?: string): Uri | undef
             return Uri.parse(normalizedPath);
         }
 
-        const path = require('path');
         if (!path.isAbsolute(resourcePath) && root) {
             const absolutePath = path.resolve(root, resourcePath);
             return Uri.file(absolutePath);
         }
-
-        const pathWithForwardSlashes = resourcePath.replace(/\\/g, '/');
-        return Uri.file(pathWithForwardSlashes);
+        return Uri.file(resourcePath);
     } catch (_err) {
         return undefined;
     }
