@@ -1,10 +1,10 @@
-# <project_name>
+# package_name
 
 > TODO: Write a short description of your project and what it does.
 
 ## Table of Contents
 
-- [\<project\_name\>](#project_name)
+- [package\_name](#package_name)
   - [Table of Contents](#table-of-contents)
   - [How to Run](#how-to-run)
   - [How to Package](#how-to-package)
