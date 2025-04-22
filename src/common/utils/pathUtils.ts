@@ -44,7 +44,8 @@ export function getResourceUri(resourcePath: string, root?: string): Uri | undef
             return Uri.file(absolutePath);
         }
 
-        return Uri.file(resourcePath);
+        const pathWithForwardSlashes = resourcePath.replace(/\\/g, '/');
+        return Uri.file(pathWithForwardSlashes);
     } catch (_err) {
         return undefined;
     }
