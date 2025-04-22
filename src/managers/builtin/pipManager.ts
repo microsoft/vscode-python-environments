@@ -1,4 +1,13 @@
-import { Event, EventEmitter, LogOutputChannel, MarkdownString, ProgressLocation, ThemeIcon, window } from 'vscode';
+import {
+    CancellationError,
+    Event,
+    EventEmitter,
+    LogOutputChannel,
+    MarkdownString,
+    ProgressLocation,
+    ThemeIcon,
+    window,
+} from 'vscode';
 import {
     DidChangePackagesEventArgs,
     IconPath,
@@ -54,7 +63,7 @@ export class PipPackageManager implements PackageManager, Disposable {
 
         if (toInstall.length === 0 && toUninstall.length === 0) {
             const projects = this.venv.getProjectsByEnvironment(environment);
-            const result = await getWorkspacePackagesToInstall(this.api, options, projects, environment);
+            const result = await getWorkspacePackagesToInstall(this.api, options, projects, environment, this.log);
             if (result) {
                 toInstall = result.install;
                 toUninstall = result.uninstall;
@@ -82,6 +91,9 @@ export class PipPackageManager implements PackageManager, Disposable {
                     this.packages.set(environment.envId.id, after);
                     this._onDidChangePackages.fire({ environment, manager: this, changes });
                 } catch (e) {
+                    if (e instanceof CancellationError) {
+                        throw e;
+                    }
                     this.log.error('Error managing packages', e);
                     setImmediate(async () => {
                         const result = await window.showErrorMessage('Error managing packages', 'View Output');
@@ -89,6 +101,7 @@ export class PipPackageManager implements PackageManager, Disposable {
                             this.log.show();
                         }
                     });
+                    throw e;
                 }
             },
         );

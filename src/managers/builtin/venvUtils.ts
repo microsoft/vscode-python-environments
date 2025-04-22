@@ -527,6 +527,8 @@ export async function createPythonVenv(
         api,
         { showSkipOption: true, install: [] },
         project ? [project] : undefined,
+        undefined,
+        log,
     );
     const allPackages = [];
     allPackages.push(...(packages?.install ?? []), ...(options.additionalPackages ?? []));

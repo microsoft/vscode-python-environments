@@ -85,7 +85,7 @@ export class CondaPackageManager implements PackageManager, Disposable {
                     this._onDidChangePackages.fire({ environment: environment, manager: this, changes });
                 } catch (e) {
                     if (e instanceof CancellationError) {
-                        return;
+                        throw e;
                     }
 
                     this.log.error('Error installing packages', e);

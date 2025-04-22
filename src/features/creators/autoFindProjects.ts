@@ -1,11 +1,12 @@
 import * as path from 'path';
 import { Uri } from 'vscode';
-import { showQuickPickWithButtons } from '../../common/window.apis';
+import { showQuickPickWithButtons, showWarningMessage } from '../../common/window.apis';
 import { ProjectCreatorString } from '../../common/localize';
 import { PythonProject, PythonProjectCreator, PythonProjectCreatorOptions } from '../../api';
 import { PythonProjectManager } from '../../internal.api';
 import { showErrorMessage } from '../../common/errors/utils';
 import { findFiles } from '../../common/workspace.apis';
+import { traceInfo } from '../../common/logging';
 
 function getUniqueUri(uris: Uri[]): {
     label: string;
@@ -68,8 +69,9 @@ export class AutoFindProjects implements PythonProjectCreator {
         const filtered = files.filter((uri) => {
             const p = this.pm.get(uri);
             if (p) {
-                // If there ia already a project with the same path, skip it.
-                // If there is a project with the same parent path, skip it.
+                // Skip this project if:
+                // 1. There's already a project registered with exactly the same path
+                // 2. There's already a project registered with this project's parent directory path
                 const np = path.normalize(p.uri.fsPath);
                 const nf = path.normalize(uri.fsPath);
                 const nfp = path.dirname(nf);
@@ -79,11 +81,20 @@ export class AutoFindProjects implements PythonProjectCreator {
         });
 
         if (filtered.length === 0) {
+            // No new projects found that are not already in the project manager
+            traceInfo('All discovered projects are already registered in the project manager');
+            setImmediate(() => {
+                showWarningMessage('No new projects found');
+            });
             return;
         }
 
+        traceInfo(`Found ${filtered.length} new potential projects that aren't already registered`);
+
         const projects = await pickProjects(filtered);
         if (!projects || projects.length === 0) {
+            // User cancelled the selection.
+            traceInfo('User cancelled project selection.');
             return;
         }
 

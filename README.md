@@ -12,7 +12,6 @@ The Python Environments and Package Manager extension for VS Code helps you mana
 
 <img src=https://raw.githubusercontent.com/microsoft/vscode-python-environments/main/images/python-envs-overview.gif width=734 height=413>
 
-
 ### Environment Management
 
 This extension provides an Environments view, which can be accessed via the VS Code Activity Bar, where you can manage your Python environments. Here, you can create, delete, and switch between environments, as well as install and uninstall packages within the selected environment. It also provides APIs for extension developers to contribute their own environment managers.
@@ -54,19 +53,44 @@ See [api.ts](https://github.com/microsoft/vscode-python-environments/blob/main/s
 To consume these APIs you can look at the example here:
 https://github.com/microsoft/vscode-python-environments/blob/main/examples/README.md
 
+### Callable Commands
+
+The extension provides a set of callable commands that can be used to interact with the environment and package managers. These commands can be invoked from other extensions or from the command palette.
+
+#### `python-envs.createAny`
+
+Create a new environment using any of the available environment managers. This command will prompt the user to select the environment manager to use. Following options are available on this command:
+
+```typescript
+{
+    /**
+     * Default `false`. If `true` the creation provider should show back button when showing QuickPick or QuickInput.
+     */
+    showBackButton?: boolean;
+
+    /**
+     * Default `true`. If `true`, the environment after creation will be selected.
+     */
+    selectEnvironment?: boolean;
+}
+```
+
+usage: `await vscode.commands.executeCommand('python-envs.createAny', options);`
 
 ## Extension Dependency
 
-This section provides an overview of how the Python extension interacts with the Python Environments extension and other tool-specific extensions. The Python Environments extension allows users to create, manage, and remove Python environments and packages. It also provides an API that other extensions can use to support environment management or consume it for running Python tools or projects.  
+This section provides an overview of how the Python extension interacts with the Python Environments extension and other tool-specific extensions. The Python Environments extension allows users to create, manage, and remove Python environments and packages. It also provides an API that other extensions can use to support environment management or consume it for running Python tools or projects.
 
 Tools that may rely on these APIs in their own extensions include:
-- **Debuggers** (e.g., `debugpy`)
-- **Linters** (e.g., Pylint, Flake8, Mypy)
-- **Formatters** (e.g., Black, autopep8)
-- **Language Server extensions** (e.g., Pylance, Jedi)
-- **Environment and Package Manager extensions** (e.g., Pixi, Conda, Hatch)
+
+-   **Debuggers** (e.g., `debugpy`)
+-   **Linters** (e.g., Pylint, Flake8, Mypy)
+-   **Formatters** (e.g., Black, autopep8)
+-   **Language Server extensions** (e.g., Pylance, Jedi)
+-   **Environment and Package Manager extensions** (e.g., Pixi, Conda, Hatch)
 
 ### API Dependency
+
 The relationship between these extensions can be represented as follows:
 
 <img src=https://raw.githubusercontent.com/microsoft/vscode-python-environments/refs/heads/main/images/extension_relationships.png width=734 height=413>
@@ -75,7 +99,7 @@ Users who do not need to execute code or work in **Virtual Workspaces** can use 
 
 ### Trust Relationship Between Python and Python Environments Extensions
 
-VS Code supports trust management, allowing extensions to function in either **trusted** or **untrusted** scenarios. Code execution and tools that can modify the user’s environment are typically unavailable in untrusted scenarios.  
+VS Code supports trust management, allowing extensions to function in either **trusted** or **untrusted** scenarios. Code execution and tools that can modify the user’s environment are typically unavailable in untrusted scenarios.
 
 The relationship is illustrated below:
 

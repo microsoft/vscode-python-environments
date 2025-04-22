@@ -1,7 +1,7 @@
 import { commands, ExtensionContext, LogOutputChannel, Terminal, Uri } from 'vscode';
 
 import { PythonEnvironmentManagers } from './features/envManagers';
-import { registerLogger, traceInfo } from './common/logging';
+import { registerLogger, traceError, traceInfo } from './common/logging';
 import { EnvManagerView } from './features/views/envManagersView';
 import {
     addPythonProject,
@@ -56,6 +56,7 @@ import { registerTools } from './common/lm.apis';
 import { GetEnvironmentInfoTool, InstallPackageTool } from './features/copilotTools';
 import { TerminalActivationImpl } from './features/terminal/terminalActivationState';
 import { getEnvironmentForTerminal } from './features/terminal/utils';
+import { sendManagerSelectionTelemetry } from './common/telemetry/helpers';
 
 export async function activate(context: ExtensionContext): Promise<PythonEnvironmentApi> {
     const start = new StopWatch();
@@ -88,7 +89,7 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
     const projectCreators: ProjectCreators = new ProjectCreatorsImpl();
     context.subscriptions.push(
         projectCreators,
-        projectCreators.registerPythonProjectCreator(new ExistingProjects()),
+        projectCreators.registerPythonProjectCreator(new ExistingProjects(projectManager)),
         projectCreators.registerPythonProjectCreator(new AutoFindProjects(projectManager)),
     );
 
@@ -138,7 +139,11 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
                 envManagers,
                 projectManager,
             );
-            packageManager.manage(environment, { install: [] });
+            try {
+                packageManager.manage(environment, { install: [] });
+            } catch (err) {
+                traceError('Error when running command python-envs.packages', err);
+            }
         }),
         commands.registerCommand('python-envs.uninstallPackage', async (context: unknown) => {
             await handlePackageUninstall(context, envManagers);
@@ -263,8 +268,10 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
             registerSystemPythonFeatures(nativeFinder, context.subscriptions, outputChannel),
             registerCondaFeatures(nativeFinder, context.subscriptions, outputChannel),
         ]);
+
         sendTelemetryEvent(EventNames.EXTENSION_MANAGER_REGISTRATION_DURATION, start.elapsedTime);
         await terminalManager.initialize(api);
+        sendManagerSelectionTelemetry(projectManager);
     });
 
     sendTelemetryEvent(EventNames.EXTENSION_ACTIVATION_DURATION, start.elapsedTime);

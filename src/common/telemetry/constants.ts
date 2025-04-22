@@ -4,9 +4,13 @@ export enum EventNames {
 
     ENVIRONMENT_MANAGER_REGISTERED = 'ENVIRONMENT_MANAGER.REGISTERED',
     PACKAGE_MANAGER_REGISTERED = 'PACKAGE_MANAGER.REGISTERED',
+    ENVIRONMENT_MANAGER_SELECTED = 'ENVIRONMENT_MANAGER.SELECTED',
+    PACKAGE_MANAGER_SELECTED = 'PACKAGE_MANAGER.SELECTED',
 
     VENV_USING_UV = 'VENV.USING_UV',
     VENV_CREATION = 'VENV.CREATION',
+
+    PACKAGE_MANAGEMENT = 'PACKAGE_MANAGEMENT',
 }
 
 // Map all events to their properties
@@ -43,16 +47,43 @@ export interface IEventNamePropertyMapping {
     };
 
     /* __GDPR__
-        "venv.using_uv": {"owner": "karthiknadig" }
+        "environment_manager.selected": {
+            "managerId" : { "classification": "SystemMetaData", "purpose": "FeatureInsight", "owner": "karthiknadig" }
+        }
     */
-    [EventNames.VENV_USING_UV]: never | undefined;
+    [EventNames.ENVIRONMENT_MANAGER_SELECTED]: {
+        managerId: string;
+    };
 
     /* __GDPR__
+        "package_manager.selected": {
+            "managerId" : { "classification": "SystemMetaData", "purpose": "FeatureInsight", "owner": "karthiknadig" }
+        }
+    */
+    [EventNames.PACKAGE_MANAGER_SELECTED]: {
+        managerId: string;
+    };
+
+    /* __GDPR__
+        "venv.using_uv": {"owner": "karthiknadig" }
+    */
+    [EventNames.VENV_USING_UV]: never | undefined /* __GDPR__
         "venv.creation": {
             "creationType": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "owner": "karthiknadig" }
         }
-    */
+    */;
     [EventNames.VENV_CREATION]: {
         creationType: 'quick' | 'custom';
+    };
+
+    /* __GDPR__
+        "package.install": {
+            "managerId": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "owner": "karthiknadig" },
+            "result": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "owner": "karthiknadig" }
+        }
+    */
+    [EventNames.PACKAGE_MANAGEMENT]: {
+        managerId: string;
+        result: 'success' | 'error' | 'cancelled';
     };
 }
