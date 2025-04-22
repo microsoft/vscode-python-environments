@@ -1,3 +1,4 @@
 pytest
 setuptools
 wheel
+# TODO: update the necessary requirements to develop this package

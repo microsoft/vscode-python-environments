@@ -1,7 +1,7 @@
 [project]
-name = "Package Template"
+name = "package_name"
 version = "1.0.0"
-description = "A Python package template."
+description = TODO: Add a short description of your package
 readme = "README.md"
 
 requires-python = ">=3.8"
