@@ -115,7 +115,7 @@ export async function createEnvironmentCommand(
 export async function createAnyEnvironmentCommand(
     em: EnvironmentManagers,
     pm: PythonProjectManager,
-    options?: CreateEnvironmentOptions & { selectEnvironment: boolean; showBackButton: boolean },
+    options?: CreateEnvironmentOptions & { selectEnvironment?: boolean; showBackButton?: boolean },
 ): Promise<PythonEnvironment | undefined> {
     const select = options?.selectEnvironment;
     const projects = pm.getProjects();
