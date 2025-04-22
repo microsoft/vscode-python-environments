@@ -71,7 +71,7 @@ export class NewPackageProject implements PythonProjectCreator {
             window.showErrorMessage('No workspace folder is open.');
             return undefined;
         }
-        const destRoot = workspaceFolders[0].uri.fsPath;
+        const destRoot = workspaceFolders[0].uri.fsPath; // this doesn't seem right...
         const destFolder = path.join(destRoot, `${packageName}_project`);
         await fs.copy(templateFolder, destFolder);
 
@@ -88,19 +88,20 @@ export class NewPackageProject implements PythonProjectCreator {
             await quickCreateNewVenv(this.envManagers, destFolder);
         }
 
-        // 5. Replace <run_exec> and <activation_command> in README.md
-        const readmeFilePath = path.join(destFolder, 'README.md');
+        // 5. Get the Python environment for the destination folder
+        // could be either the one created in step 4 or an existing one
         const pythonEnvironment = await this.envManagers.getEnvironment(Uri.parse(destFolder));
+
+        // 6. Replace <run_exec> and <activation_command> in README.md
+        const readmeFilePath = path.join(destFolder, 'README.md');
         if (!pythonEnvironment) {
             window.showErrorMessage('Python environment not found.');
             return undefined;
         }
         const execInfo = pythonEnvironment.execInfo;
         if (execInfo.run) {
-            let execRunStr = execInfo.run.executable;
-            if (execInfo.run.args) {
-                execRunStr += ` ${execInfo.run.args.join(' ')}`;
-            }
+            const { executable, args = [] } = execInfo.run;
+            const execRunStr = [executable, ...args].join(' ');
             await replaceInFile(readmeFilePath, '<run_exec>', execRunStr);
         }
         // TODO: replace <activation_command> in README.md ?

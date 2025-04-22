@@ -6,8 +6,8 @@ import { CreateEnvironmentOptions, EnvironmentManager } from '../../api';
 import { traceVerbose } from '../../common/logging';
 
 /**
- * Prompts the user to choose whether to create a new venv for a package.
- * Returns true if the user selects 'Yes', false if 'No', and undefined if cancelled.
+ * Prompts the user to choose whether to create a new virtual environment (venv) for a package.
+ * @returns {Promise<boolean | undefined>} Resolves to true if 'Yes' is selected, false if 'No', or undefined if cancelled.
  */
 export async function promptForVenv(): Promise<boolean | undefined> {
     const venvChoice = await window.showQuickPick(['Yes', 'No'], {
@@ -21,7 +21,8 @@ export async function promptForVenv(): Promise<boolean | undefined> {
 }
 
 /**
- * Returns true if GitHub Copilot extension is installed, false otherwise.
+ * Checks if the GitHub Copilot extension is installed in the current VS Code environment.
+ * @returns {boolean} True if Copilot is installed, false otherwise.
  */
 export function isCopilotInstalled(): boolean {
     return !!extensions.getExtension('GitHub.copilot');
@@ -29,7 +30,7 @@ export function isCopilotInstalled(): boolean {
 
 /**
  * Prompts the user to choose whether to create a Copilot instructions file, only if Copilot is installed.
- * Returns true if the user selects 'Yes', false if 'No', and undefined if cancelled or Copilot not installed.
+ * @returns {Promise<boolean | undefined>} Resolves to true if 'Yes' is selected, false if 'No', or undefined if cancelled or Copilot is not installed.
  */
 export async function promptForCopilotInstructions(): Promise<boolean | undefined> {
     if (!isCopilotInstalled()) {
@@ -45,6 +46,11 @@ export async function promptForCopilotInstructions(): Promise<boolean | undefine
     return copilotChoice === 'Yes';
 }
 
+/**
+ * Removes the .github Copilot instructions folder from the specified destination folder, if it exists.
+ * @param destFolder - The absolute path to the destination folder where the .github folder may exist.
+ * @returns {Promise<void>} Resolves when the folder is removed or if it does not exist.
+ */
 export async function removeCopilotInstructions(destFolder: string) {
     const copilotFolder = path.join(destFolder, '.github');
     if (await fs.pathExists(copilotFolder)) {
@@ -52,6 +58,13 @@ export async function removeCopilotInstructions(destFolder: string) {
     }
 }
 
+/**
+ * Quickly creates a new Python virtual environment (venv) in the specified destination folder using the available environment managers.
+ * Attempts to use the venv manager if available, otherwise falls back to any manager that supports environment creation.
+ * @param envManagers - The collection of available environment managers.
+ * @param destFolder - The absolute path to the destination folder where the environment should be created.
+ * @returns {Promise<void>} Resolves when the environment is created or an error is shown.
+ */
 export async function quickCreateNewVenv(envManagers: EnvironmentManagers, destFolder: string) {
     try {
         // get the environment manager for venv
@@ -86,10 +99,11 @@ export async function quickCreateNewVenv(envManagers: EnvironmentManagers, destF
 }
 
 /**
- * Replaces all occurrences of a string in a single file's contents, handling special regex characters in the search value.
- * @param filePath The path to the file to update.
- * @param searchValue The string to search for (will be escaped for regex).
- * @param replaceValue The string to replace with.
+ * Replaces all occurrences of a string in a single file's contents, safely handling special regex characters in the search value.
+ * @param filePath - The absolute path to the file to update.
+ * @param searchValue - The string to search for (will be escaped for regex).
+ * @param replaceValue - The string to replace with.
+ * @returns {Promise<void>} Resolves when the file has been updated.
  */
 export async function replaceInFile(filePath: string, searchValue: string, replaceValue: string) {
     // Escape special regex characters in searchValue
@@ -102,7 +116,13 @@ export async function replaceInFile(filePath: string, searchValue: string, repla
     }
 }
 
-// Helper to recursively replace all occurrences of a string in file/folder names and file contents
+/**
+ * Recursively replaces all occurrences of a string in file and folder names, as well as file contents, within a directory tree.
+ * @param dir - The root directory to start the replacement from.
+ * @param searchValue - The string to search for in names and contents.
+ * @param replaceValue - The string to replace with.
+ * @returns {Promise<void>} Resolves when all replacements are complete.
+ */
 export async function replaceInFilesAndNames(dir: string, searchValue: string, replaceValue: string) {
     const entries = await fs.readdir(dir, { withFileTypes: true });
     for (const entry of entries) {
