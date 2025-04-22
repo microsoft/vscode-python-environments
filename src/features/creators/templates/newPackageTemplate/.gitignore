@@ -31,3 +31,5 @@ MANIFEST
 
 
 .pytest_cache/
+
+# TODO: add other files and folders to ignore if needed
