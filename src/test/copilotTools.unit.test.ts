@@ -10,6 +10,7 @@ import {
     PythonPackageGetterApi,
     PythonPackageManagementApi,
     PythonProjectEnvironmentApi,
+    PythonProjectGetterApi,
 } from '../api';
 import { createDeferred } from '../common/utils/deferred';
 import {
@@ -239,16 +240,14 @@ suite('InstallPackageTool Tests', () => {
 
 suite('GetEnvironmentInfoTool Tests', () => {
     let getEnvironmentInfoTool: GetEnvironmentInfoTool;
-    let mockApi: typeMoq.IMock<PythonProjectEnvironmentApi & PythonPackageGetterApi & PythonPackageManagementApi>;
+    let mockApi: typeMoq.IMock<PythonProjectEnvironmentApi & PythonPackageGetterApi & PythonProjectGetterApi>;
     let mockEnvironment: typeMoq.IMock<PythonEnvironment>;
     let em: typeMoq.IMock<EnvironmentManagers>;
     let managerSys: typeMoq.IMock<InternalEnvironmentManager>;
 
     setup(() => {
         // Create mock functions
-        mockApi = typeMoq.Mock.ofType<
-            PythonProjectEnvironmentApi & PythonPackageGetterApi & PythonPackageManagementApi
-        >();
+        mockApi = typeMoq.Mock.ofType<PythonProjectEnvironmentApi & PythonPackageGetterApi & PythonProjectGetterApi>();
         mockEnvironment = typeMoq.Mock.ofType<PythonEnvironment>();
 
         // eslint-disable-next-line @typescript-eslint/no-explicit-any

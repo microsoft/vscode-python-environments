@@ -26,3 +26,26 @@ export function normalizePath(path: string): string {
     }
     return path1;
 }
+
+export function getResourceUri(resourcePath: string, root?: string): Uri | undefined {
+    try {
+        if (!resourcePath) {
+            return undefined;
+        }
+
+        const normalizedPath = normalizePath(resourcePath);
+        if (normalizedPath.includes('://')) {
+            return Uri.parse(normalizedPath);
+        }
+
+        const path = require('path');
+        if (!path.isAbsolute(resourcePath) && root) {
+            const absolutePath = path.resolve(root, resourcePath);
+            return Uri.file(absolutePath);
+        }
+
+        return Uri.file(resourcePath);
+    } catch (_err) {
+        return undefined;
+    }
+}
