@@ -21,6 +21,7 @@ function getDescription(mgr: InternalEnvironmentManager | InternalPackageManager
 export async function pickEnvironmentManager(
     managers: InternalEnvironmentManager[],
     defaultManagers?: InternalEnvironmentManager[],
+    showBackButton?: boolean,
 ): Promise<string | undefined> {
     if (managers.length === 0) {
         return;
@@ -72,6 +73,7 @@ export async function pickEnvironmentManager(
     const item = await showQuickPickWithButtons(items, {
         placeHolder: Pickers.Managers.selectEnvironmentManager,
         ignoreFocusOut: true,
+        showBackButton,
     });
     return (item as QuickPickItem & { id: string })?.id;
 }

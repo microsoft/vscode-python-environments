@@ -115,7 +115,7 @@ export async function createEnvironmentCommand(
 export async function createAnyEnvironmentCommand(
     em: EnvironmentManagers,
     pm: PythonProjectManager,
-    options?: CreateEnvironmentOptions & { selectEnvironment: boolean },
+    options?: CreateEnvironmentOptions & { selectEnvironment?: boolean; showBackButton?: boolean },
 ): Promise<PythonEnvironment | undefined> {
     const select = options?.selectEnvironment;
     const projects = pm.getProjects();
@@ -130,7 +130,7 @@ export async function createAnyEnvironmentCommand(
             return env;
         }
     } else if (projects.length > 0) {
-        const selected = await pickProjectMany(projects);
+        const selected = await pickProjectMany(projects, options?.showBackButton);
 
         if (selected && selected.length > 0) {
             const defaultManagers: InternalEnvironmentManager[] = [];
@@ -151,6 +151,7 @@ export async function createAnyEnvironmentCommand(
                 let managerId = await pickEnvironmentManager(
                     em.managers.filter((m) => m.supportsCreate),
                     defaultManagers,
+                    options?.showBackButton,
                 );
                 if (managerId?.startsWith('QuickCreate#')) {
                     quickCreate = true;
