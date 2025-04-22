@@ -42,8 +42,7 @@ suite('Path Utilities', () => {
 
             assert.ok(result instanceof Uri);
             assert.strictEqual(result?.scheme, 'file');
-            // path in the URI should use forward slashes
-            assert.strictEqual(result?.path.includes('\\'), false);
+            assert.strictEqual(result?.path, 'C:/path/to/file.txt');
         });
 
         test('parses existing URI correctly', () => {
