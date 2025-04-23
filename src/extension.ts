@@ -108,8 +108,8 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
 
     context.subscriptions.push(
         registerCompletionProvider(envManagers),
-        registerTools('python_environment_tool', new GetEnvironmentInfoTool(api, envManagers)),
-        registerTools('python_install_package_tool', new InstallPackageTool(api)),
+        registerTools('python_environment', new GetEnvironmentInfoTool(api, envManagers)),
+        registerTools('python_install_package', new InstallPackageTool(api)),
         commands.registerCommand('python-envs.viewLogs', () => outputChannel.show()),
         commands.registerCommand('python-envs.refreshManager', async (item) => {
             await refreshManagerCommand(item);
