@@ -10,7 +10,7 @@ import { runCommand } from '../utils';
 import { ShellConstants } from '../../../common/shellConstants';
 import { hasStartupCode, insertStartupCode, removeStartupCode } from '../common/editUtils';
 import { extractProfilePath, PROFILE_TAG_END, PROFILE_TAG_START } from '../common/shellUtils';
-import { POWERSHELL_ENV_KEY } from './pwshConstants';
+import { POWERSHELL_ENV_KEY, PWSH_SCRIPT_VERSION } from './pwshConstants';
 
 async function isPowerShellInstalled(shell: string): Promise<boolean> {
     try {
@@ -75,6 +75,7 @@ const regionEnd = '#endregion vscode python';
 function getActivationContent(): string {
     const lineSep = isWindows() ? '\r\n' : '\n';
     const activationContent = [
+        `# version: ${PWSH_SCRIPT_VERSION}`,
         `if (($env:TERM_PROGRAM -eq 'vscode') -and ($null -ne $env:${POWERSHELL_ENV_KEY})) {`,
         '    try {',
         `        Invoke-Expression $env:${POWERSHELL_ENV_KEY}`,

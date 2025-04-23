@@ -79,8 +79,8 @@ export function getShellDeactivationCommand(
     return deactivation;
 }
 
-export const PROFILE_TAG_START = '###VSCODE_PROFILE_PATH_START###';
-export const PROFILE_TAG_END = '###VSCODE_PROFILE_PATH_END###';
+export const PROFILE_TAG_START = '###PATH_START###';
+export const PROFILE_TAG_END = '###PATH_END###';
 export function extractProfilePath(content: string): string | undefined {
     // Extract only the part between the tags
     const profilePathRegex = new RegExp(`${PROFILE_TAG_START}\\r?\\n(.*?)\\r?\\n${PROFILE_TAG_END}`, 's');

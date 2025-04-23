@@ -1,1 +1,2 @@
 export const POWERSHELL_ENV_KEY = 'VSCODE_PWSH_ACTIVATE';
+export const PWSH_SCRIPT_VERSION = '0.1.0';

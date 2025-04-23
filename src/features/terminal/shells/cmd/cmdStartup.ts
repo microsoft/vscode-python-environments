@@ -9,7 +9,7 @@ import { isWindows } from '../../../../common/utils/platformUtils';
 import { ShellConstants } from '../../../common/shellConstants';
 import { hasStartupCode, insertStartupCode, removeStartupCode } from '../common/editUtils';
 import { ShellScriptEditState, ShellSetupState, ShellStartupScriptProvider } from '../startupProvider';
-import { CMD_ENV_KEY } from './cmdConstants';
+import { CMD_ENV_KEY, CMD_SCRIPT_VERSION } from './cmdConstants';
 
 const exec = promisify(cp.exec);
 
@@ -61,7 +61,7 @@ const regionEnd = ':: <<< vscode python';
 
 function getActivationContent(key: string): string {
     const lineSep = '\r\n';
-    return [`if defined ${key} (`, `    call %${key}%`, ')'].join(lineSep);
+    return [`:: version: ${CMD_SCRIPT_VERSION}`, `if defined ${key} (`, `    call %${key}%`, ')'].join(lineSep);
 }
 
 function getHeader(): string {

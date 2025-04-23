@@ -7,7 +7,7 @@ import { traceError, traceInfo, traceVerbose } from '../../../../common/logging'
 import { ShellConstants } from '../../../common/shellConstants';
 import { hasStartupCode, insertStartupCode, removeStartupCode } from '../common/editUtils';
 import { ShellScriptEditState, ShellSetupState, ShellStartupScriptProvider } from '../startupProvider';
-import { FISH_ENV_KEY } from './fishConstants';
+import { FISH_ENV_KEY, FISH_SCRIPT_VERSION } from './fishConstants';
 
 async function isFishInstalled(): Promise<boolean> {
     try {
@@ -32,7 +32,12 @@ const regionEnd = '# <<< vscode python';
 
 function getActivationContent(key: string): string {
     const lineSep = '\n';
-    return [`if test "$TERM_PROGRAM" = "vscode"; and set -q ${key}`, `    eval $${key}`, 'end'].join(lineSep);
+    return [
+        `# version: ${FISH_SCRIPT_VERSION}`,
+        `if test "$TERM_PROGRAM" = "vscode"; and set -q ${key}`,
+        `    eval $${key}`,
+        'end',
+    ].join(lineSep);
 }
 
 async function isStartupSetup(profilePath: string, key: string): Promise<boolean> {

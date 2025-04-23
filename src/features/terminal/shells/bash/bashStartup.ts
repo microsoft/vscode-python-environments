@@ -6,7 +6,7 @@ import { traceError, traceInfo, traceVerbose } from '../../../../common/logging'
 import { ShellConstants } from '../../../common/shellConstants';
 import { hasStartupCode, insertStartupCode, removeStartupCode } from '../common/editUtils';
 import { ShellScriptEditState, ShellSetupState, ShellStartupScriptProvider } from '../startupProvider';
-import { BASH_ENV_KEY, ZSH_ENV_KEY } from './bashConstants';
+import { BASH_ENV_KEY, BASH_SCRIPT_VERSION, ZSH_ENV_KEY } from './bashConstants';
 
 async function isBashLikeInstalled(): Promise<boolean> {
     const result = await Promise.all([which('bash', { nothrow: true }), which('sh', { nothrow: true })]);
@@ -46,9 +46,12 @@ const regionEnd = '# <<< vscode python';
 
 function getActivationContent(key: string): string {
     const lineSep = '\n';
-    return [`if [ -n "$${key}" ] && [ "$TERM_PROGRAM" = "vscode" ]; then`, `    eval "$${key}" || true`, 'fi'].join(
-        lineSep,
-    );
+    return [
+        `# version: ${BASH_SCRIPT_VERSION}`,
+        `if [ -n "$${key}" ] && [ "$TERM_PROGRAM" = "vscode" ]; then`,
+        `    eval "$${key}" || true`,
+        'fi',
+    ].join(lineSep);
 }
 
 async function isStartupSetup(profile: string, key: string): Promise<ShellSetupState> {
