@@ -667,10 +667,18 @@ export interface PythonProjectCreatorOptions {
     name: string;
 
     /**
-     * Optional path that may be provided as a root for the project.
+     * Path provided as the root for the project.
      */
-    uri?: Uri;
+    rootUri: Uri;
+
+    projectTemplateSpecifications?: PythonProjectTemplateSpecifications;
 }
+
+/**
+ * Specifications for the template set by the Python project creator. Project creators can create an object
+ * extending this type to provide additional information about what their template need.
+ */
+export interface PythonProjectTemplateSpecifications {}
 
 /**
  * Interface representing a creator for Python projects.
