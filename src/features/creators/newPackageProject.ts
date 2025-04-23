@@ -72,7 +72,12 @@ export class NewPackageProject implements PythonProjectCreator {
             return undefined;
         }
         const destRoot = workspaceFolders[0].uri.fsPath; // this doesn't seem right...
+        // Check if the destination folder already exists
         const destFolder = path.join(destRoot, `${packageName}_project`);
+        if (await fs.pathExists(destFolder)) {
+            window.showErrorMessage('A project folder by that name already exists, aborting.');
+            return undefined;
+        }
         await fs.copy(templateFolder, destFolder);
 
         // 2. Replace <package_name> in all files and file/folder names using helper
@@ -103,6 +108,7 @@ export class NewPackageProject implements PythonProjectCreator {
             const { executable, args = [] } = execInfo.run;
             const execRunStr = [executable, ...args].join(' ');
             await replaceInFile(readmeFilePath, '<run_exec>', execRunStr);
+            await replaceInFile(readmeFilePath, 'packagenamereplacementtext', packageName);
         }
         // TODO: replace <activation_command> in README.md ?
 

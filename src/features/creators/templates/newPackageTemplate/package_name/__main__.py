@@ -5,4 +5,5 @@ def main() -> None:
     print("Start coding in Python today!")
 
 
-main()
+if __name__ == "__main__":
+    main()

@@ -1,6 +1,6 @@
-# Copilot Instructions for <package_name>
+# Copilot Instructions for package_name
 
--   This is a Python package named `<package_name>`.
+-   This is a Python package named `package_name`.
 -   Follow PEP8 style guidelines.
 -   Use relative imports within the package.
 -   Write clear docstrings for all public functions and classes.
