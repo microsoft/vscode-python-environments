@@ -3,16 +3,16 @@ import * as fs from 'fs-extra';
 import * as path from 'path';
 import { EnvironmentManagers, InternalEnvironmentManager } from '../../internal.api';
 import { CreateEnvironmentOptions } from '../../api';
-import { traceVerbose } from '../../common/logging';
+import { traceError, traceVerbose } from '../../common/logging';
 import { showQuickPickWithButtons } from '../../common/window.apis';
 
 /**
- * Prompts the user to choose whether to create a new virtual environment (venv) for a package, with a clearer return and early exit.
+ * Prompts the user to choose whether to create a new virtual environment (venv) for a project, with a clearer return and early exit.
  * @returns {Promise<boolean | undefined>} Resolves to true if 'Yes' is selected, false if 'No', or undefined if cancelled.
  */
 export async function promptForVenv(): Promise<boolean | undefined> {
     const venvChoice = await showQuickPickWithButtons([{ label: 'Yes' }, { label: 'No' }], {
-        placeHolder: 'Would you like to create a new virtual environment for this package?',
+        placeHolder: 'Would you like to create a new virtual environment for this project?',
         ignoreFocusOut: true,
         showBackButton: true,
     });
@@ -57,20 +57,6 @@ export async function promptForCopilotInstructions(): Promise<boolean | undefine
     return copilotChoice.label === 'Yes';
 }
 
-/**
- * Removes the .github Copilot instructions folder from the specified destination folder, if it exists.
- * @param destFolder - The absolute path to the destination folder where the .github folder may exist.
- * @returns {Promise<void>} Resolves when the folder is removed or if it does not exist.
- */
-export async function removeCopilotInstructions(destFolder: string) {
-    const copilotFolder = path.join(destFolder, '.github');
-    if (await fs.pathExists(copilotFolder)) {
-        await fs.remove(copilotFolder);
-    }
-}
-
-export async function insertCopilotInstructions() {}
-export async function insertLaunchJson() {}
 
 /**
  * Quickly creates a new Python virtual environment (venv) in the specified destination folder using the available environment managers.
@@ -104,23 +90,7 @@ export async function quickCreateNewVenv(envManagers: EnvironmentManagers, destF
     }
 }
 
-/**
- * Replaces all occurrences of a string in a single file's contents, safely handling special regex characters in the search value.
- * @param filePath - The absolute path to the file to update.
- * @param searchValue - The string to search for (will be escaped for regex).
- * @param replaceValue - The string to replace with.
- * @returns {Promise<void>} Resolves when the file has been updated.
- */
-export async function replaceInFile(filePath: string, searchValue: string, replaceValue: string) {
-    // Escape special regex characters in searchValue
-    const escapedSearchValue = searchValue.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    const regex = new RegExp(escapedSearchValue, 'g');
-    let content = await fs.readFile(filePath, 'utf8');
-    if (content.includes(searchValue)) {
-        content = content.replace(regex, replaceValue);
-        await fs.writeFile(filePath, content, 'utf8');
-    }
-}
+
 
 /**
  * Recursively replaces all occurrences of a string in file and folder names, as well as file contents, within a directory tree.
@@ -151,5 +121,76 @@ export async function replaceInFilesAndNames(dir: string, searchValue: string, r
                 await fs.writeFile(newFullPath, content, 'utf8');
             }
         }
+    }
+}
+
+/**
+ * Ensures the .github/copilot-instructions.md file exists at the given root, creating or appending as needed.
+ * @param destinationRootPath - The root directory where the .github folder should exist.
+ * @param instructionsText - The text to write or append to the copilot-instructions.md file.
+ */
+export async function manageCopilotInstructionsFile(
+    destinationRootPath: string,
+    packageName: string,
+    instructionsFilePath: string,
+) {
+    const instructionsText = `\n \n` + (await fs.readFile(instructionsFilePath, 'utf-8'));
+    const githubFolderPath = path.join(destinationRootPath, '.github');
+    const customInstructionsPath = path.join(githubFolderPath, 'copilot-instructions.md');
+    if (!(await fs.pathExists(githubFolderPath))) {
+        // make the .github folder if it doesn't exist
+        await fs.mkdir(githubFolderPath);
+    }
+    const customInstructions = await fs.pathExists(customInstructionsPath);
+    if (customInstructions) {
+        // Append to the existing file
+        await fs.appendFile(customInstructionsPath, instructionsText.replace('<package_name>', packageName));
+    } else {
+        // Create the file if it doesn't exist
+        await fs.writeFile(customInstructionsPath, instructionsText.replace('<package_name>', packageName));
+    }
+}
+
+/**
+ * Appends a configuration object to the configurations array in a launch.json file.
+ * @param launchJsonPath - The absolute path to the launch.json file.
+ * @param projectLaunchConfig - The stringified JSON config to append.
+ */
+async function appendToJsonConfigs(launchJsonPath: string, projectLaunchConfig: string) {
+    let content = await fs.readFile(launchJsonPath, 'utf8');
+    const json = JSON.parse(content);
+    // If it's a VS Code launch config, append to configurations array
+    if (json && Array.isArray(json.configurations)) {
+        const configObj = JSON.parse(projectLaunchConfig);
+        json.configurations.push(configObj);
+        await fs.writeFile(launchJsonPath, JSON.stringify(json, null, 4), 'utf8');
+    } else {
+        traceError('Failed to add Project Launch Config to launch.json.');
+        return;
+    }
+}
+
+/**
+ * Updates the launch.json file in the .vscode folder to include the provided project launch configuration.
+ * @param destinationRootPath - The root directory where the .vscode folder should exist.
+ * @param projectLaunchConfig - The stringified JSON config to append.
+ */
+export async function manageLaunchJsonFile(destinationRootPath: string, projectLaunchConfig: string) {
+    const vscodeFolderPath = path.join(destinationRootPath, '.vscode');
+    const launchJsonPath = path.join(vscodeFolderPath, 'launch.json');
+    if (!(await fs.pathExists(vscodeFolderPath))) {
+        await fs.mkdir(vscodeFolderPath);
+    }
+    const launchJsonExists = await fs.pathExists(launchJsonPath);
+    if (launchJsonExists) {
+        // Try to parse and append to existing launch.json
+        await appendToJsonConfigs(launchJsonPath, projectLaunchConfig);
+    } else {
+        // Create a new launch.json with the provided config
+        const launchJson = {
+            version: '0.2.0',
+            configurations: [JSON.parse(projectLaunchConfig)],
+        };
+        await fs.writeFile(launchJsonPath, JSON.stringify(launchJson, null, 4), 'utf8');
     }
 }
