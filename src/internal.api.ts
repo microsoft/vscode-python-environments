@@ -27,6 +27,7 @@ import {
     QuickCreateConfig,
     CreateEnvironmentOptions,
     PythonProjectTemplateSpecifications,
+    PythonProjectCustomization,
 } from './api';
 import { CreateEnvironmentNotSupported, RemoveEnvironmentNotSupported } from './common/errors/NotSupportedError';
 import { sendTelemetryEvent } from './common/telemetry/sender';
@@ -373,6 +374,6 @@ export interface ProjectCreators extends Disposable {
     getProjectCreators(): PythonProjectCreator[];
 }
 
-export interface PackageTemplateSpecifications extends PythonProjectTemplateSpecifications {
+export interface PackageTemplateSpecifications extends PythonProjectCustomization {
     createVenv?: boolean;
 }

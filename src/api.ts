@@ -660,7 +660,7 @@ export interface PythonProject {
 /**
  * Options for creating a Python project.
  */
-export interface PythonProjectCreatorOptions {
+export interface PythonProjectCreatorOptions<T extends PythonProjectCustomization = PythonProjectCustomization> {
     /**
      * The name of the Python project.
      */
@@ -671,14 +671,16 @@ export interface PythonProjectCreatorOptions {
      */
     rootUri: Uri;
 
-    projectTemplateSpecifications?: PythonProjectTemplateSpecifications;
+    /**
+     * The customization options for the Python project.
+     */
+    customization?: T;
 }
 
 /**
- * Specifications for the template set by the Python project creator. Project creators can create an object
- * extending this type to provide additional information about what their template need.
+ * This is an interface allowing project creators to specify customization options required for the project creation.
  */
-export interface PythonProjectTemplateSpecifications {}
+export interface PythonProjectCustomization {}
 
 /**
  * Interface representing a creator for Python projects.
