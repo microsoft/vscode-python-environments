@@ -164,7 +164,9 @@ export class ShellStartupActivationManagerImpl implements ShellStartupActivation
     public async cleanupStartupScripts(): Promise<void> {
         await Promise.all(this.shellStartupProviders.map((provider) => provider.teardownScripts()));
         setAutoActivationType('command');
-        showInformationMessage(ShellStartupActivationStrings.revertToCommandActivation);
+        traceInfo(
+            'Setting `python-envs.terminal.autoActivationType` to `command`, after removing shell startup scripts.',
+        );
     }
 
     dispose() {
