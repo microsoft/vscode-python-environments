@@ -368,7 +368,7 @@ export async function addPythonProject(
             return;
         }
 
-        let results: PythonProject | PythonProject[] | undefined;
+        let results: PythonProject | PythonProject[] | Uri | Uri[] | undefined;
         try {
             results = await creator.create();
             if (results === undefined) {
@@ -380,6 +380,15 @@ export async function addPythonProject(
             }
             throw ex;
         }
+
+        if (
+            results instanceof Uri ||
+            (Array.isArray(results) && results.length > 0 && results.every((r) => r instanceof Uri))
+        ) {
+            // the results are Uris, which means they aren't projects and shouldn't be added
+            return;
+        }
+        results = results as PythonProject | PythonProject[];
 
         if (!Array.isArray(results)) {
             results = [results];
