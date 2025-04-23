@@ -33,3 +33,7 @@ export function createShellEnvProviders(): ShellEnvsProvider[] {
         new ZshEnvsProvider(),
     ];
 }
+
+export async function clearShellProfileCache(providers: ShellStartupScriptProvider[]): Promise<void> {
+    await Promise.all(providers.map((provider) => provider.clearCache()));
+}

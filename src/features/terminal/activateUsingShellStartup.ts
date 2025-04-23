@@ -1,7 +1,7 @@
 import { ConfigurationChangeEvent, Disposable, GlobalEnvironmentVariableCollection } from 'vscode';
 import { DidChangeEnvironmentEventArgs } from '../../api';
 import { ShellStartupActivationStrings } from '../../common/localize';
-import { traceError, traceInfo } from '../../common/logging';
+import { traceInfo } from '../../common/logging';
 import { showErrorMessage, showInformationMessage } from '../../common/window.apis';
 import { getWorkspaceFolder, getWorkspaceFolders, onDidChangeConfiguration } from '../../common/workspace.apis';
 import { EnvironmentManagers } from '../../internal.api';
@@ -90,28 +90,30 @@ export class ShellStartupActivationManagerImpl implements ShellStartupActivation
         return providers;
     }
 
+    private async check() {
+        const providers = await this.getSetupRequired();
+        if (providers.length > 0) {
+            const shells = providers.map((provider) => provider.name).join(', ');
+            const result = await showInformationMessage(
+                ShellStartupActivationStrings.shellStartupScriptEditPrompt,
+                { modal: true, detail: `${ShellStartupActivationStrings.updatingTheseProfiles}: ${shells}` },
+                ShellStartupActivationStrings.updateScript,
+            );
+
+            if (ShellStartupActivationStrings.updateScript === result) {
+                await this.updateStartupScripts();
+            } else {
+                traceError('User declined to edit shell startup scripts. See <doc-link> for more information.');
+                traceInfo('Setting `python-envs.terminal.autoActivationType` to `command`.');
+                setAutoActivationType('command');
+                return;
+            }
+        }
+    }
+
     public async initialize(): Promise<void> {
         const autoActType = getAutoActivationType();
         if (autoActType === 'shellStartup') {
-            const providers = await this.getSetupRequired();
-            if (providers.length > 0) {
-                const shells = providers.map((provider) => provider.name).join(', ');
-                const result = await showInformationMessage(
-                    ShellStartupActivationStrings.shellStartupScriptEditPrompt,
-                    { modal: true, detail: `${ShellStartupActivationStrings.updatingTheseProfiles}: ${shells}` },
-                    ShellStartupActivationStrings.updateScript,
-                );
-
-                if (ShellStartupActivationStrings.updateScript === result) {
-                    await this.updateStartupScripts();
-                } else {
-                    traceError('User declined to edit shell startup scripts. See <doc-link> for more information.');
-                    traceInfo('Setting `python-envs.terminal.autoActivationType` to `command`.');
-                    setAutoActivationType('command');
-                    return;
-                }
-            }
-
             const workspaces = getWorkspaceFolders() ?? [];
 
             if (workspaces.length > 0) {

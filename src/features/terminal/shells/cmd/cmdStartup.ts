@@ -309,4 +309,8 @@ export class CmdStartupProvider implements ShellStartupScriptProvider {
             return ShellScriptEditState.NotEdited;
         }
     }
+
+    clearCache(): Promise<void> {
+        return Promise.resolve();
+    }
 }

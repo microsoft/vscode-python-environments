@@ -19,6 +19,7 @@ export interface ShellStartupScriptProvider {
     isSetup(): Promise<ShellSetupState>;
     setupScripts(): Promise<ShellScriptEditState>;
     teardownScripts(): Promise<ShellScriptEditState>;
+    clearCache(): Promise<void>;
 }
 
 export interface ShellEnvsProvider {

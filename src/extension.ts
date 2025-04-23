@@ -48,7 +48,11 @@ import { registerCompletionProvider } from './features/settings/settingCompletio
 import { setActivateMenuButtonContext } from './features/terminal/activateMenuButton';
 import { ShellStartupActivationManagerImpl } from './features/terminal/activateUsingShellStartup';
 import { normalizeShellPath } from './features/terminal/shells/common/shellUtils';
-import { createShellEnvProviders, createShellStartupProviders } from './features/terminal/shells/providers';
+import {
+    clearShellProfileCache,
+    createShellEnvProviders,
+    createShellStartupProviders,
+} from './features/terminal/shells/providers';
 import { TerminalActivationImpl } from './features/terminal/terminalActivationState';
 import { TerminalManager, TerminalManagerImpl } from './features/terminal/terminalManager';
 import { getEnvironmentForTerminal } from './features/terminal/utils';
@@ -94,7 +98,11 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
         shellEnvsProviders,
         envManagers,
     );
-    const terminalManager: TerminalManager = new TerminalManagerImpl(terminalActivation, shellEnvsProviders);
+    const terminalManager: TerminalManager = new TerminalManagerImpl(
+        terminalActivation,
+        shellEnvsProviders,
+        shellStartupProviders,
+    );
     context.subscriptions.push(terminalActivation, terminalManager, shellStartupActivationManager);
 
     const projectCreators: ProjectCreators = new ProjectCreatorsImpl();
@@ -185,6 +193,7 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
         }),
         commands.registerCommand('python-envs.clearCache', async () => {
             await envManagers.clearCache(undefined);
+            await clearShellProfileCache(shellStartupProviders);
         }),
         commands.registerCommand('python-envs.runInTerminal', (item) => {
             return runInTerminalCommand(item, api, terminalManager);

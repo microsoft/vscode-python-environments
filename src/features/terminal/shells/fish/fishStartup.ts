@@ -148,4 +148,8 @@ export class FishStartupProvider implements ShellStartupScriptProvider {
             return ShellScriptEditState.NotEdited;
         }
     }
+
+    clearCache(): Promise<void> {
+        return Promise.resolve();
+    }
 }

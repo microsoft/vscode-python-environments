@@ -14,7 +14,7 @@ import { getConfiguration } from '../../common/workspace.apis';
 import { isActivatableEnvironment } from '../common/activation';
 import { identifyTerminalShell } from '../common/shellDetector';
 import { getPythonApi } from '../pythonApi';
-import { ShellEnvsProvider } from './shells/startupProvider';
+import { ShellEnvsProvider, ShellStartupScriptProvider } from './shells/startupProvider';
 import {
     DidChangeTerminalActivationStateEvent,
     TerminalActivation,
@@ -68,7 +68,8 @@ export class TerminalManagerImpl implements TerminalManager {
 
     constructor(
         private readonly ta: TerminalActivationInternal,
-        private readonly startupProviders: ShellEnvsProvider[],
+        private readonly startupEnvProviders: ShellEnvsProvider[],
+        private readonly startupScriptProviders: ShellStartupScriptProvider[],
     ) {
         this.disposables.push(
             this.onTerminalOpenedEmitter,
@@ -105,9 +106,20 @@ export class TerminalManagerImpl implements TerminalManager {
     private async autoActivateOnTerminalOpen(terminal: Terminal, environment: PythonEnvironment): Promise<void> {
         let actType = getAutoActivationType();
         const shellType = identifyTerminalShell(terminal);
-        if (shellType === 'shellStartup' && !this.startupProviders.some((p) => p.shellType === shellType)) {
+        if (shellType === 'shellStartup' && !this.startupEnvProviders.some((p) => p.shellType === shellType)) {
             actType = 'command';
             traceInfo(`Shell startup not supported for ${shellType}, using command activation`);
+
+            const provider = this.startupScriptProviders.find((p) => p.shellType === shellType);
+            if (provider) {
+                traceVerbose(`Checking is shell profile is setup for ${shellType}`);
+                if (await provider.isSetup()) {
+                } else {
+                }
+            } else {
+                actType = 'command';
+                traceInfo(`No startup script provider found for ${shellType}, using command activation`);
+            }
         }
         if (actType === 'command') {
             if (isActivatableEnvironment(environment)) {
@@ -137,7 +149,7 @@ export class TerminalManagerImpl implements TerminalManager {
         const autoActType = getAutoActivationType();
         let envVars = options.env;
         if (autoActType === 'shellStartup') {
-            const vars = await Promise.all(this.startupProviders.map((p) => p.getEnvVariables(environment)));
+            const vars = await Promise.all(this.startupEnvProviders.map((p) => p.getEnvVariables(environment)));
 
             vars.forEach((varMap) => {
                 if (varMap) {

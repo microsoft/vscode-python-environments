@@ -7,10 +7,45 @@ import { isWindows } from '../../../../common/utils/platformUtils';
 import { ShellScriptEditState, ShellSetupState, ShellStartupScriptProvider } from '../startupProvider';
 import { runCommand } from '../utils';
 
+import { getGlobalPersistentState } from '../../../../common/persistentState';
 import { ShellConstants } from '../../../common/shellConstants';
 import { hasStartupCode, insertStartupCode, removeStartupCode } from '../common/editUtils';
 import { extractProfilePath, PROFILE_TAG_END, PROFILE_TAG_START } from '../common/shellUtils';
 import { POWERSHELL_ENV_KEY, PWSH_SCRIPT_VERSION } from './pwshConstants';
+
+const PWSH_PROFILE_PATH_CACHE_KEY = 'PWSH_PROFILE_PATH_CACHE';
+const PS5_PROFILE_PATH_CACHE_KEY = 'PS5_PROFILE_PATH_CACHE';
+let pwshProfilePath: string | undefined;
+let ps5ProfilePath: string | undefined;
+async function clearPwshCache(shell: 'powershell' | 'pwsh'): Promise<void> {
+    const global = await getGlobalPersistentState();
+    if (shell === 'powershell') {
+        ps5ProfilePath = undefined;
+        await global.clear([PS5_PROFILE_PATH_CACHE_KEY]);
+    } else {
+        pwshProfilePath = undefined;
+        await global.clear([PWSH_PROFILE_PATH_CACHE_KEY]);
+    }
+}
+
+async function setProfilePathCache(shell: 'powershell' | 'pwsh', profilePath: string): Promise<void> {
+    const global = await getGlobalPersistentState();
+    if (shell === 'powershell') {
+        ps5ProfilePath = profilePath;
+        await global.set(PS5_PROFILE_PATH_CACHE_KEY, profilePath);
+    } else {
+        pwshProfilePath = profilePath;
+        await global.set(PWSH_PROFILE_PATH_CACHE_KEY, profilePath);
+    }
+}
+
+function getProfilePathCache(shell: 'powershell' | 'pwsh'): string | undefined {
+    if (shell === 'powershell') {
+        return ps5ProfilePath;
+    } else {
+        return pwshProfilePath;
+    }
+}
 
 async function isPowerShellInstalled(shell: string): Promise<boolean> {
     try {
@@ -23,6 +58,12 @@ async function isPowerShellInstalled(shell: string): Promise<boolean> {
 }
 
 async function getProfileForShell(shell: 'powershell' | 'pwsh'): Promise<string> {
+    const cachedPath = getProfilePathCache(shell);
+    if (cachedPath) {
+        traceInfo(`SHELL: ${shell} profile path from cache: ${cachedPath}`);
+        return cachedPath;
+    }
+
     try {
         const content = await runCommand(
             isWindows()
@@ -33,6 +74,7 @@ async function getProfileForShell(shell: 'powershell' | 'pwsh'): Promise<string>
         if (content) {
             const profilePath = extractProfilePath(content);
             if (profilePath) {
+                setProfilePathCache(shell, profilePath);
                 traceInfo(`SHELL: ${shell} profile found at: ${profilePath}`);
                 return profilePath;
             }
@@ -146,9 +188,16 @@ async function removePowerShellStartup(shell: string, profile: string): Promise<
 export class PowerShellClassicStartupProvider implements ShellStartupScriptProvider {
     public readonly name: string = 'PowerShell5';
     public readonly shellType: string = 'powershell';
+    private _isInstalled: boolean | undefined;
 
+    private async checkInstallation(): Promise<boolean> {
+        if (this._isInstalled === undefined) {
+            this._isInstalled = await isPowerShellInstalled('powershell');
+        }
+        return this._isInstalled;
+    }
     async isSetup(): Promise<ShellSetupState> {
-        const isInstalled = await isPowerShellInstalled('powershell');
+        const isInstalled = await this.checkInstallation();
         if (!isInstalled) {
             traceVerbose('PowerShell is not installed');
             return ShellSetupState.NotInstalled;
@@ -165,7 +214,7 @@ export class PowerShellClassicStartupProvider implements ShellStartupScriptProvi
     }
 
     async setupScripts(): Promise<ShellScriptEditState> {
-        const isInstalled = await isPowerShellInstalled('powershell');
+        const isInstalled = await this.checkInstallation();
         if (!isInstalled) {
             traceVerbose('PowerShell is not installed');
             return ShellScriptEditState.NotInstalled;
@@ -182,7 +231,7 @@ export class PowerShellClassicStartupProvider implements ShellStartupScriptProvi
     }
 
     async teardownScripts(): Promise<ShellScriptEditState> {
-        const isInstalled = await isPowerShellInstalled('powershell');
+        const isInstalled = await this.checkInstallation();
         if (!isInstalled) {
             traceVerbose('PowerShell is not installed');
             return ShellScriptEditState.NotInstalled;
@@ -197,14 +246,26 @@ export class PowerShellClassicStartupProvider implements ShellStartupScriptProvi
         }
         return ShellScriptEditState.NotEdited;
     }
+    async clearCache(): Promise<void> {
+        await clearPwshCache('powershell');
+    }
 }
 
 export class PwshStartupProvider implements ShellStartupScriptProvider {
     public readonly name: string = 'PowerShell';
     public readonly shellType: string = ShellConstants.PWSH;
 
+    private _isInstalled: boolean | undefined;
+
+    private async checkInstallation(): Promise<boolean> {
+        if (this._isInstalled === undefined) {
+            this._isInstalled = await isPowerShellInstalled('pwsh');
+        }
+        return this._isInstalled;
+    }
+
     async isSetup(): Promise<ShellSetupState> {
-        const isInstalled = await isPowerShellInstalled('pwsh');
+        const isInstalled = await this.checkInstallation();
         if (!isInstalled) {
             traceVerbose('PowerShell is not installed');
             return ShellSetupState.NotInstalled;
@@ -221,7 +282,7 @@ export class PwshStartupProvider implements ShellStartupScriptProvider {
     }
 
     async setupScripts(): Promise<ShellScriptEditState> {
-        const isInstalled = await isPowerShellInstalled('pwsh');
+        const isInstalled = await this.checkInstallation();
         if (!isInstalled) {
             traceVerbose('PowerShell is not installed');
             return ShellScriptEditState.NotInstalled;
@@ -238,7 +299,7 @@ export class PwshStartupProvider implements ShellStartupScriptProvider {
     }
 
     async teardownScripts(): Promise<ShellScriptEditState> {
-        const isInstalled = await isPowerShellInstalled('pwsh');
+        const isInstalled = await this.checkInstallation();
         if (!isInstalled) {
             traceVerbose('PowerShell is not installed');
             return ShellScriptEditState.NotInstalled;
@@ -252,5 +313,8 @@ export class PwshStartupProvider implements ShellStartupScriptProvider {
             traceError('Failed to remove PowerShell startup', err);
         }
         return ShellScriptEditState.NotEdited;
+    }
+    async clearCache(): Promise<void> {
+        await clearPwshCache('pwsh');
     }
 }

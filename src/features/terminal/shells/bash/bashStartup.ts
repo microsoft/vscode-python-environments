@@ -171,6 +171,10 @@ export class BashStartupProvider implements ShellStartupScriptProvider {
             return ShellScriptEditState.NotEdited;
         }
     }
+
+    clearCache(): Promise<void> {
+        return Promise.resolve();
+    }
 }
 
 export class ZshStartupProvider implements ShellStartupScriptProvider {
@@ -229,6 +233,9 @@ export class ZshStartupProvider implements ShellStartupScriptProvider {
             return ShellScriptEditState.NotEdited;
         }
     }
+    clearCache(): Promise<void> {
+        return Promise.resolve();
+    }
 }
 
 export class GitBashStartupProvider implements ShellStartupScriptProvider {
@@ -285,5 +292,8 @@ export class GitBashStartupProvider implements ShellStartupScriptProvider {
             traceError('Failed to teardown git bash startup scripts', err);
             return ShellScriptEditState.NotEdited;
         }
+    }
+    clearCache(): Promise<void> {
+        return Promise.resolve();
     }
 }
