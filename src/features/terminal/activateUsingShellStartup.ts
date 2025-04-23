@@ -167,6 +167,7 @@ export class ShellStartupActivationManagerImpl implements ShellStartupActivation
         traceInfo(
             'Setting `python-envs.terminal.autoActivationType` to `command`, after removing shell startup scripts.',
         );
+        showInformationMessage(ShellStartupActivationStrings.revertedShellStartupScripts);
     }
 
     dispose() {

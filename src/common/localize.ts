@@ -172,11 +172,15 @@ export namespace ShellStartupActivationStrings {
     export const updateScript = l10n.t('Update Shell Profile');
     export const envCollectionDescription = l10n.t('Environment variables for shell activation');
     export const shellStartupScriptEditComplete = l10n.t(
-        'Shell startup profile updated. See [logs](command:{0})',
+        'Shell startup profile updated with code for Python environment activation. See [logs](command:{0})',
         Commands.viewLogs,
     );
     export const shellStartupScriptEditFailed = l10n.t(
         'Failed to update shell startup profile. See [logs](command:{0})',
+        Commands.viewLogs,
+    );
+    export const revertedShellStartupScripts = l10n.t(
+        'Removed shell startup profile code for Python environment activation. See [logs](command:{0})',
         Commands.viewLogs,
     );
 }
