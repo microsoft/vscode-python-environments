@@ -2,7 +2,7 @@ import { QuickPickItem, QuickPickItemKind } from 'vscode';
 import { PythonProjectCreator } from '../../api';
 import { InternalEnvironmentManager, InternalPackageManager } from '../../internal.api';
 import { Common, Pickers } from '../localize';
-import { showQuickPick, showQuickPickWithButtons } from '../window.apis';
+import { showQuickPickWithButtons } from '../window.apis';
 
 function getDescription(mgr: InternalEnvironmentManager | InternalPackageManager): string | undefined {
     if (mgr.description) {
@@ -154,7 +154,7 @@ export async function pickCreator(creators: PythonProjectCreator[]): Promise<Pyt
         },
     ];
 
-    const selected = await showQuickPick(items, {
+    const selected = await showQuickPickWithButtons(items, {
         placeHolder: Pickers.Managers.selectProjectCreator,
         ignoreFocusOut: true,
     });
@@ -164,7 +164,12 @@ export async function pickCreator(creators: PythonProjectCreator[]): Promise<Pyt
     }
 
     // Return appropriate creator based on selection
-    switch (selected.label) {
+    // Handle case where selected could be an array (should not happen, but for type safety)
+    const selectedItem = Array.isArray(selected) ? selected[0] : selected;
+    if (!selectedItem) {
+        return undefined;
+    }
+    switch (selectedItem.label) {
         case 'Auto Find':
             return autoFindCreator;
         case 'Select Existing':
@@ -179,11 +184,24 @@ export async function pickCreator(creators: PythonProjectCreator[]): Promise<Pyt
                 description: c.description,
                 c: c,
             }));
-            const newSelected = await showQuickPick(newItems, {
+            const newSelected = await showQuickPickWithButtons(newItems, {
                 placeHolder: 'Select project type for new project',
                 ignoreFocusOut: true,
+                showBackButton: true,
             });
-            return newSelected?.c;
+            if (!newSelected) {
+                // User cancelled the picker
+                return undefined;
+            }
+            // Handle back button
+            if ((newSelected as any)?.kind === -1 || (newSelected as any)?.back === true) {
+                // User pressed the back button, re-show the first menu
+                return pickCreator(creators);
+            }
+
+            // Handle case where newSelected could be an array (should not happen, but for type safety)
+            const selectedCreator = Array.isArray(newSelected) ? newSelected[0] : newSelected;
+            return selectedCreator?.c;
     }
 
     return undefined;

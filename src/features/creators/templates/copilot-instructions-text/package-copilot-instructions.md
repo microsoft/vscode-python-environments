@@ -1,4 +1,4 @@
-# Copilot Instructions for package_name
+# Copilot Instructions for <package_name>
 
 -   The package `<package_name>` is a Python Project located in the folder `<package_name>-folder`.
 -   You need to call the `Get Python Environment Information` tool on the <package_name> path to get the Python executable details.
