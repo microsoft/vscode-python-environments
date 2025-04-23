@@ -709,7 +709,7 @@ export interface PythonProjectCreator {
     /**
      * A flag indicating whether the project creator supports quick create where no user input is required.
      */
-    supportsQuickCreate?: boolean;
+    readonly supportsQuickCreate?: boolean;
 
     /**
      * Creates a new Python project or projects.
