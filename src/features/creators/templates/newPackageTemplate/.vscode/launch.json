@@ -1,5 +1,0 @@
-{
-    "configurations": [
-        { "name": "Python Debugger: Module", "type": "debugpy", "request": "launch", "module": "package_name" }
-    ]
-}

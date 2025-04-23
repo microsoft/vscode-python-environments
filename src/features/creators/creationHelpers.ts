@@ -4,20 +4,26 @@ import * as path from 'path';
 import { EnvironmentManagers, InternalEnvironmentManager } from '../../internal.api';
 import { CreateEnvironmentOptions } from '../../api';
 import { traceVerbose } from '../../common/logging';
+import { showQuickPickWithButtons } from '../../common/window.apis';
 
 /**
- * Prompts the user to choose whether to create a new virtual environment (venv) for a package.
+ * Prompts the user to choose whether to create a new virtual environment (venv) for a package, with a clearer return and early exit.
  * @returns {Promise<boolean | undefined>} Resolves to true if 'Yes' is selected, false if 'No', or undefined if cancelled.
  */
 export async function promptForVenv(): Promise<boolean | undefined> {
-    const venvChoice = await window.showQuickPick(['Yes', 'No'], {
+    const venvChoice = await showQuickPickWithButtons([{ label: 'Yes' }, { label: 'No' }], {
         placeHolder: 'Would you like to create a new virtual environment for this package?',
         ignoreFocusOut: true,
+        showBackButton: true,
     });
     if (!venvChoice) {
         return undefined;
     }
-    return venvChoice === 'Yes';
+    if (Array.isArray(venvChoice)) {
+        // Should not happen for single selection, but handle just in case
+        return venvChoice.some((item) => item.label === 'Yes');
+    }
+    return venvChoice.label === 'Yes';
 }
 
 /**
@@ -36,14 +42,19 @@ export async function promptForCopilotInstructions(): Promise<boolean | undefine
     if (!isCopilotInstalled()) {
         return undefined;
     }
-    const copilotChoice = await window.showQuickPick(['Yes', 'No'], {
+    const copilotChoice = await showQuickPickWithButtons([{ label: 'Yes' }, { label: 'No' }], {
         placeHolder: 'Would you like to create a Copilot instructions file?',
         ignoreFocusOut: true,
+        showBackButton: true,
     });
     if (!copilotChoice) {
         return undefined;
     }
-    return copilotChoice === 'Yes';
+    if (Array.isArray(copilotChoice)) {
+        // Should not happen for single selection, but handle just in case
+        return copilotChoice.some((item) => item.label === 'Yes');
+    }
+    return copilotChoice.label === 'Yes';
 }
 
 /**
@@ -58,6 +69,9 @@ export async function removeCopilotInstructions(destFolder: string) {
     }
 }
 
+export async function insertCopilotInstructions() {}
+export async function insertLaunchJson() {}
+
 /**
  * Quickly creates a new Python virtual environment (venv) in the specified destination folder using the available environment managers.
  * Attempts to use the venv manager if available, otherwise falls back to any manager that supports environment creation.
@@ -66,37 +80,27 @@ export async function removeCopilotInstructions(destFolder: string) {
  * @returns {Promise<void>} Resolves when the environment is created or an error is shown.
  */
 export async function quickCreateNewVenv(envManagers: EnvironmentManagers, destFolder: string) {
-    try {
-        // get the environment manager for venv
-        const envManager: InternalEnvironmentManager | undefined = envManagers.managers.find(
-            (m) => m.id === 'ms-python.python:venv',
-        );
-        const destUri = Uri.parse(destFolder);
-        if (envManager?.supportsQuickCreate) {
-            // with quickCreate enabled, user will not be prompted when creating the environment
-            const options: CreateEnvironmentOptions = { quickCreate: false };
-            if (envManager.supportsQuickCreate) {
-                options.quickCreate = true;
-            }
-            const pyEnv = await envManager.create(destUri, options);
-            // comes back as undefined if this doesn't work
-            traceVerbose(`Created venv at: ${pyEnv?.environmentPath} using ${envManager.name}`);
-        } else {
-            // // find an environment manager that supports create
-            // const envManager = envManagers.managers.find((m) => m.supportsCreate);
-            // if (envManager) {
-            //     const options: CreateEnvironmentOptions = { quickCreate: true, additionalPackages: [] };
-            //     const pyEnv = await envManager.create(destUri, options);
-            //     traceVerbose(`Created venv at: ${pyEnv?.environmentPath} using ${envManager.name}`);
-            // }
-            // // If no environment manager supports create, show an error message
-            // window.showErrorMessage(
-            //     `No environment manager found that supports creating a new environment, skipping...`,
-            // );
-            //TODO: just throw error
+    // get the environment manager for venv, should always exist
+    const envManager: InternalEnvironmentManager | undefined = envManagers.managers.find(
+        (m) => m.id === 'ms-python.python:venv',
+    );
+    const destinationUri = Uri.parse(destFolder);
+    if (envManager?.supportsQuickCreate) {
+        // with quickCreate enabled, user will not be prompted when creating the environment
+        const options: CreateEnvironmentOptions = { quickCreate: false };
+        if (envManager.supportsQuickCreate) {
+            options.quickCreate = true;
         }
-    } catch (err) {
-        window.showErrorMessage(`Failed to create virtual environment: ${err}`);
+        const pyEnv = await envManager.create(destinationUri, options);
+        // TODO: do I need to update to say this is the env for the file? Like set it?
+        if (!pyEnv) {
+            // comes back as undefined if this doesn't work
+            window.showErrorMessage(`Failed to create virtual environment, please create it manually.`);
+        } else {
+            traceVerbose(`Created venv at: ${pyEnv?.environmentPath}`);
+        }
+    } else {
+        window.showErrorMessage(`Failed to quick create virtual environment, please create it manually.`);
     }
 }
 
