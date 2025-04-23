@@ -2,7 +2,7 @@ import assert from 'node:assert';
 import * as sinon from 'sinon';
 import { Uri } from 'vscode';
 import { getResourceUri, normalizePath } from '../../common/utils/pathUtils';
-import * as utils from '../../managers/common/utils';
+import * as utils from '../../common/utils/platformUtils';
 
 suite('Path Utilities', () => {
     suite('getResourceUri', () => {

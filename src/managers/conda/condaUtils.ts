@@ -9,6 +9,7 @@ import {
     LogOutputChannel,
     ProgressLocation,
     QuickInputButtons,
+    QuickPickItem,
     ThemeIcon,
     Uri,
 } from 'vscode';
