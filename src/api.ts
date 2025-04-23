@@ -660,7 +660,7 @@ export interface PythonProject {
 /**
  * Options for creating a Python project.
  */
-export interface PythonProjectCreatorOptions<T extends PythonProjectCustomization = PythonProjectCustomization> {
+export interface PythonProjectCreatorOptions {
     /**
      * The name of the Python project.
      */
@@ -672,15 +672,10 @@ export interface PythonProjectCreatorOptions<T extends PythonProjectCustomizatio
     rootUri: Uri;
 
     /**
-     * The customization options for the Python project.
+     * Boolean indicating whether the project should be created without any user input.
      */
-    customization?: T;
+    quickCreate?: boolean;
 }
-
-/**
- * This is an interface allowing project creators to specify customization options required for the project creation.
- */
-export interface PythonProjectCustomization {}
 
 /**
  * Interface representing a creator for Python projects.
@@ -710,6 +705,11 @@ export interface PythonProjectCreator {
      * The icon path for the Python project creator, which can be a string, Uri, or an object with light and dark theme paths.
      */
     readonly iconPath?: IconPath;
+
+    /**
+     * A flag indicating whether the project creator supports quick create where no user input is required.
+     */
+    supportsQuickCreate?: boolean;
 
     /**
      * Creates a new Python project or projects.
