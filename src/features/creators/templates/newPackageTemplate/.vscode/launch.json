@@ -1,6 +1,5 @@
 {
     "configurations": [
-        { "name": "Python Debugger: Module", "type": "debugpy", "request": "launch", "module": "<package_name>" }
+        { "name": "Python Debugger: Module", "type": "debugpy", "request": "launch", "module": "package_name" }
     ]
 }
-// TODO: Add more configurations as needed
