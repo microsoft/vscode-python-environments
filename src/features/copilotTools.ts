@@ -164,7 +164,7 @@ function BuildEnvironmentInfoContent(envInfo: EnvironmentInfo): LanguageModelTex
  */
 export interface IInstallPackageInput {
     packageList: string[];
-    workspacePath?: string;
+    resourcePath?: string;
 }
 
 /**
@@ -192,7 +192,7 @@ export class InstallPackageTool implements LanguageModelTool<IInstallPackageInpu
         });
 
         const parameters: IInstallPackageInput = options.input;
-        const workspacePath = parameters.workspacePath ? Uri.file(parameters.workspacePath) : undefined;
+        const workspacePath = parameters.resourcePath ? Uri.file(parameters.resourcePath) : undefined;
         if (!workspacePath) {
             throw new Error('Invalid input: workspacePath is required');
         }
