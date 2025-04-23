@@ -1,8 +1,8 @@
 import { window, extensions, Uri } from 'vscode';
 import * as fs from 'fs-extra';
 import * as path from 'path';
-import { EnvironmentManagers } from '../../internal.api';
-import { CreateEnvironmentOptions, EnvironmentManager } from '../../api';
+import { EnvironmentManagers, InternalEnvironmentManager } from '../../internal.api';
+import { CreateEnvironmentOptions } from '../../api';
 import { traceVerbose } from '../../common/logging';
 
 /**
@@ -68,31 +68,32 @@ export async function removeCopilotInstructions(destFolder: string) {
 export async function quickCreateNewVenv(envManagers: EnvironmentManagers, destFolder: string) {
     try {
         // get the environment manager for venv
-        const envManager: EnvironmentManager | undefined = envManagers.managers.find(
+        const envManager: InternalEnvironmentManager | undefined = envManagers.managers.find(
             (m) => m.id === 'ms-python.python:venv',
         );
         const destUri = Uri.parse(destFolder);
-        if (envManager && envManager.create) {
+        if (envManager?.supportsQuickCreate) {
             // with quickCreate enabled, user will not be prompted when creating the environment
             const options: CreateEnvironmentOptions = { quickCreate: false };
-            if (envManager.quickCreateConfig) {
+            if (envManager.supportsQuickCreate) {
                 options.quickCreate = true;
             }
             const pyEnv = await envManager.create(destUri, options);
             // comes back as undefined if this doesn't work
             traceVerbose(`Created venv at: ${pyEnv?.environmentPath} using ${envManager.name}`);
         } else {
-            // find an environment manager that supports create
-            const envManager = envManagers.managers.find((m) => m.create);
-            if (envManager) {
-                const options: CreateEnvironmentOptions = { quickCreate: true, additionalPackages: [] };
-                const pyEnv = await envManager.create(destUri, options);
-                traceVerbose(`Created venv at: ${pyEnv?.environmentPath} using ${envManager.name}`);
-            }
-            // If no environment manager supports create, show an error message
-            window.showErrorMessage(
-                `No environment manager found that supports creating a new environment, skipping...`,
-            );
+            // // find an environment manager that supports create
+            // const envManager = envManagers.managers.find((m) => m.supportsCreate);
+            // if (envManager) {
+            //     const options: CreateEnvironmentOptions = { quickCreate: true, additionalPackages: [] };
+            //     const pyEnv = await envManager.create(destUri, options);
+            //     traceVerbose(`Created venv at: ${pyEnv?.environmentPath} using ${envManager.name}`);
+            // }
+            // // If no environment manager supports create, show an error message
+            // window.showErrorMessage(
+            //     `No environment manager found that supports creating a new environment, skipping...`,
+            // );
+            //TODO: just throw error
         }
     } catch (err) {
         window.showErrorMessage(`Failed to create virtual environment: ${err}`);

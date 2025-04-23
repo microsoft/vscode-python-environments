@@ -23,7 +23,7 @@ export class NewPackageProject implements PythonProjectCreator {
     constructor(private readonly envManagers: EnvironmentManagers) {}
 
     async create(_options?: PythonProjectCreatorOptions): Promise<PythonProject | undefined> {
-        // Prompt for package name
+        // Prompt for package name (TODO: this doesn't make sense if the _options is already being passed in )
         const packageName = await window.showInputBox({
             prompt: 'What is the name of the package? (e.g. my_package)',
             ignoreFocusOut: true,
