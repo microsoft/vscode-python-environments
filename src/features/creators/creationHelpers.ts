@@ -11,7 +11,7 @@ import { traceVerbose } from '../../common/logging';
  */
 export async function promptForVenv(): Promise<boolean | undefined> {
     const venvChoice = await window.showQuickPick(['Yes', 'No'], {
-        placeHolder: 'Would you like to create a new venv for this package?',
+        placeHolder: 'Would you like to create a new virtual environment for this package?',
         ignoreFocusOut: true,
     });
     if (!venvChoice) {
@@ -85,7 +85,8 @@ export async function quickCreateNewVenv(envManagers: EnvironmentManagers, destF
             // find an environment manager that supports create
             const envManager = envManagers.managers.find((m) => m.create);
             if (envManager) {
-                const pyEnv = await envManager.create(destUri, {});
+                const options: CreateEnvironmentOptions = { quickCreate: true, additionalPackages: [] };
+                const pyEnv = await envManager.create(destUri, options);
                 traceVerbose(`Created venv at: ${pyEnv?.environmentPath} using ${envManager.name}`);
             }
             // If no environment manager supports create, show an error message
