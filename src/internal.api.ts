@@ -26,7 +26,6 @@ import {
     EnvironmentGroupInfo,
     QuickCreateConfig,
     CreateEnvironmentOptions,
-    PythonProjectTemplateSpecifications,
     PythonProjectCustomization,
 } from './api';
 import { CreateEnvironmentNotSupported, RemoveEnvironmentNotSupported } from './common/errors/NotSupportedError';
