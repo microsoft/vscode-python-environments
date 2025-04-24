@@ -5,8 +5,6 @@ import { PipPackageManager } from './pipManager';
 import { VenvManager } from './venvManager';
 import { getPythonApi } from '../../features/pythonApi';
 import { NativePythonFinder } from '../common/nativePythonFinder';
-import { UvProjectCreator } from './uvProjectCreator';
-import { isUvInstalled } from './helpers';
 import { createFileSystemWatcher, onDidDeleteFiles } from '../../common/workspace.apis';
 import { createSimpleDebounce } from '../../common/utils/debounce';
 import { onDidEndTerminalShellExecution } from '../../common/window.apis';
@@ -56,10 +54,4 @@ export async function registerSystemPythonFeatures(
             }
         }),
     );
-
-    setImmediate(async () => {
-        if (await isUvInstalled(log)) {
-            disposables.push(api.registerPythonProjectCreator(new UvProjectCreator(api, log)));
-        }
-    });
 }
