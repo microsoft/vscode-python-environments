@@ -703,6 +703,7 @@ export interface PythonProjectCreator {
 
     /**
      * Creates a new Python project(s) or, if files are not a project, returns Uri(s) to the created files.
+     * Anything that needs its own python environment constitutes a project.
      * @param options Optional parameters for creating the Python project.
      * @returns A promise that resolves to one of the following:
      *   - PythonProject or PythonProject[]: when a single or multiple projects are created.
