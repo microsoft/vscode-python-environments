@@ -667,9 +667,14 @@ export interface PythonProjectCreatorOptions {
     name: string;
 
     /**
-     * Optional path that may be provided as a root for the project.
+     * Path provided as the root for the project.
      */
-    uri?: Uri;
+    rootUri: Uri;
+
+    /**
+     * Boolean indicating whether the project should be created without any user input.
+     */
+    quickCreate?: boolean;
 }
 
 /**
@@ -711,6 +716,11 @@ export interface PythonProjectCreator {
      *   - undefined: if project creation fails.
      */
     create(options?: PythonProjectCreatorOptions): Promise<PythonProject | PythonProject[] | Uri | Uri[] | undefined>;
+     
+  /**
+      * A flag indicating whether the project creator supports quick create where no user input is required.
+     */
+    readonly supportsQuickCreate?: boolean;
 }
 
 /**
