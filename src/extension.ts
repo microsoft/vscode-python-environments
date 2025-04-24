@@ -22,7 +22,6 @@ import { ExistingProjects } from './features/creators/existingProjects';
 import { ProjectCreatorsImpl } from './features/creators/projectCreators';
 import {
     addPythonProjectCommand,
-    addPythonProject,
     copyPathToClipboard,
     createAnyEnvironmentCommand,
     createEnvironmentCommand,
