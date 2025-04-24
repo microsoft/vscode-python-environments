@@ -18,7 +18,6 @@ export async function handleSettingUpShellProfile(
         ),
         { modal: true, detail: l10n.t('Shells: {0}', shells) },
         Common.yes,
-        Common.no,
     );
 
     if (response === Common.yes) {
@@ -40,7 +39,6 @@ export async function handleSettingUpShellProfile(
                     l10n.t(
                         'Shell profiles have been set up successfully. Extension will use shell startup activation next time a new terminal is created.',
                     ),
-                    Common.ok,
                 );
             });
             providers.forEach((provider) => callback(provider, true));
