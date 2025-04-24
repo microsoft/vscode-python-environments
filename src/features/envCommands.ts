@@ -352,7 +352,8 @@ export async function addPythonProjectCommand(
         return;
     }
     if (resource instanceof ProjectItem) {
-        // If the context is a ProjectItem, project is already created.
+        // If the context is a ProjectItem, project is already created. Just add it to the package manager project list.
+        wm.add(resource.project);
         return;
     }
     let options: PythonProjectCreatorOptions | undefined;
