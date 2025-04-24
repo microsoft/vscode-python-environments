@@ -112,9 +112,11 @@ export class TerminalManagerImpl implements TerminalManager {
                                 .map((t) => identifyTerminalShell(t))
                                 .filter((t) => t !== 'unknown'),
                         );
-                        await handleSettingUpShellProfile(shells, this.startupScriptProviders, (p, v) =>
-                            this.shellSetup.set(p.shellType, v),
-                        );
+                        if (shells.size > 0) {
+                            await handleSettingUpShellProfile(shells, this.startupScriptProviders, (p, v) =>
+                                this.shellSetup.set(p.shellType, v),
+                            );
+                        }
                     }
                 }
             }),
@@ -319,9 +321,11 @@ export class TerminalManagerImpl implements TerminalManager {
                     .map((t) => identifyTerminalShell(t))
                     .filter((t) => t !== 'unknown'),
             );
-            await handleSettingUpShellProfile(shells, this.startupScriptProviders, (p, v) =>
-                this.shellSetup.set(p.shellType, v),
-            );
+            if (shells.size > 0) {
+                await handleSettingUpShellProfile(shells, this.startupScriptProviders, (p, v) =>
+                    this.shellSetup.set(p.shellType, v),
+                );
+            }
         }
     }
 

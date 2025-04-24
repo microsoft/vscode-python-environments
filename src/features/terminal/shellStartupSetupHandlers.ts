@@ -23,6 +23,9 @@ export async function handleSettingUpShellProfile(
     callback: (provider: ShellStartupScriptProvider, result: boolean) => void,
 ): Promise<void> {
     const providers = getProviders(shellTypes, allProviders);
+    if (providers.length === 0) {
+        traceVerbose('No shell providers found for the specified shell types: ' + Array.from(shellTypes).join(', '));
+    }
     const shells = providers.map((p) => p.shellType).join(', ');
     const response = await showInformationMessage(
         l10n.t(
