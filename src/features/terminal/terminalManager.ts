@@ -10,7 +10,7 @@ import {
     terminals,
     withProgress,
 } from '../../common/window.apis';
-import { getConfiguration } from '../../common/workspace.apis';
+import { getConfiguration, onDidChangeConfiguration } from '../../common/workspace.apis';
 import { isActivatableEnvironment } from '../common/activation';
 import { identifyTerminalShell } from '../common/shellDetector';
 import { getPythonApi } from '../pythonApi';
@@ -101,6 +101,23 @@ export class TerminalManagerImpl implements TerminalManager {
             }),
             this.ta.onDidChangeTerminalActivationState((e) => {
                 this.onDidChangeTerminalActivationStateEmitter.fire(e);
+            }),
+            onDidChangeConfiguration(async (e) => {
+                if (e.affectsConfiguration('python-envs.terminal.autoActivationType')) {
+                    const actType = getAutoActivationType();
+                    if (actType === 'shellStartup') {
+                        traceInfo(`Auto activation type changed to ${actType}`);
+                        const shells = new Set(
+                            terminals()
+                                .map((t) => identifyTerminalShell(t))
+                                .filter((t) => t !== 'unknown'),
+                        );
+                        await handleSettingUpShellProfileMultiple(
+                            this.startupScriptProviders.filter((p) => shells.has(p.shellType)),
+                            (p, v) => this.shellSetup.set(p.shellType, v),
+                        );
+                    }
+                }
             }),
         );
     }
