@@ -702,7 +702,8 @@ export interface PythonProjectCreator {
     readonly iconPath?: IconPath;
 
     /**
-     * Creates a new Python project or projects.
+     * Creates a new Python project or projects. The create method is required to add the created project if successful to the
+     * list of projects.
      * @param options - Optional parameters for creating the Python project.
      * @returns A promise that resolves to a Python project, an array of Python projects, or undefined.
      */

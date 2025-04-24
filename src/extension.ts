@@ -4,7 +4,7 @@ import { PythonEnvironmentManagers } from './features/envManagers';
 import { registerLogger, traceError, traceInfo } from './common/logging';
 import { EnvManagerView } from './features/views/envManagersView';
 import {
-    addPythonProject,
+    addPythonProjectCommand,
     createEnvironmentCommand,
     createTerminalCommand,
     getPackageCommandOptions,
@@ -164,7 +164,7 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
             await setPackageManagerCommand(envManagers, projectManager);
         }),
         commands.registerCommand('python-envs.addPythonProject', async (resource) => {
-            await addPythonProject(resource, projectManager, envManagers, projectCreators);
+            await addPythonProjectCommand(resource, projectManager, envManagers, projectCreators);
         }),
         commands.registerCommand('python-envs.removePythonProject', async (item) => {
             await resetEnvironmentCommand(item, envManagers, projectManager);

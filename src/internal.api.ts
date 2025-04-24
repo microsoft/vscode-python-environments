@@ -284,7 +284,7 @@ export interface PythonProjectManager extends Disposable {
         uri: Uri,
         options?: { description?: string; tooltip?: string | MarkdownString; iconPath?: IconPath },
     ): PythonProject;
-    add(pyWorkspace: PythonProject | PythonProject[]): void;
+    add(pyWorkspace: PythonProject | PythonProject[]): Promise<void>;
     remove(pyWorkspace: PythonProject | PythonProject[]): void;
     getProjects(uris?: Uri[]): ReadonlyArray<PythonProject>;
     get(uri: Uri): PythonProject | undefined;

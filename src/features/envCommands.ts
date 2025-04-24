@@ -13,19 +13,10 @@ import {
     PythonEnvironmentApi,
     PythonProject,
     PythonProjectCreator,
+    PythonProjectCreatorOptions,
 } from '../api';
-import * as path from 'path';
-import {
-    setEnvironmentManager,
-    setPackageManager,
-    addPythonProjectSetting,
-    removePythonProjectSetting,
-    getDefaultEnvManagerSetting,
-    getDefaultPkgManagerSetting,
-    EditProjectSettings,
-} from './settings/settingHelpers';
+import { setEnvironmentManager, setPackageManager, removePythonProjectSetting } from './settings/settingHelpers';
 
-import { getAbsolutePath } from '../common/utils/fileNameUtils';
 import { runAsTask } from './execution/runAsTask';
 import {
     EnvManagerTreeItem,
@@ -338,84 +329,58 @@ export async function setPackageManagerCommand(em: EnvironmentManagers, wm: Pyth
     }
 }
 
-export async function addPythonProject(
+/**
+ * Creates a new Python project using a selected PythonProjectCreator.
+ *
+ * This function calls create on the selected creator and handles the creation process. Will return
+ * without doing anything if the resource is a ProjectItem, as the project is already created.
+ *
+ * @param resource - The resource to use for project creation (can be a Uri, ProjectItem, or undefined).
+ * @param wm - The PythonProjectManager instance for managing projects.
+ * @param em - The EnvironmentManagers instance for managing environments.
+ * @param pc - The ProjectCreators instance for accessing available project creators.
+ * @returns A promise that resolves when the project has been created, or void if cancelled or invalid.
+ */
+export async function addPythonProjectCommand(
     resource: unknown,
     wm: PythonProjectManager,
     em: EnvironmentManagers,
     pc: ProjectCreators,
-): Promise<PythonProject | PythonProject[] | undefined> {
+): Promise<void> {
     if (wm.getProjects().length === 0) {
         showErrorMessage('Please open a folder/project before adding a workspace');
         return;
     }
+    if (resource instanceof ProjectItem) {
+        // If the context is a ProjectItem, project is already created.
+        return;
+    }
+    let options: PythonProjectCreatorOptions | undefined;
 
     if (resource instanceof Uri) {
-        const uri = resource as Uri;
-        const envManagerId = getDefaultEnvManagerSetting(wm, uri);
-        const pkgManagerId = getDefaultPkgManagerSetting(
-            wm,
-            uri,
-            em.getEnvironmentManager(envManagerId)?.preferredPackageManagerId,
-        );
-        const pw = wm.create(path.basename(uri.fsPath), uri);
-        await addPythonProjectSetting([{ project: pw, envManager: envManagerId, packageManager: pkgManagerId }]);
-        return pw;
+        // Use resource as the URI for the project if it is a URI.
+        options = {
+            name: resource.fsPath,
+            uri: resource,
+        };
     }
 
-    if (resource === undefined || resource instanceof ProjectItem) {
-        const creator: PythonProjectCreator | undefined = await pickCreator(pc.getProjectCreators());
-        if (!creator) {
+    const creator: PythonProjectCreator | undefined = await pickCreator(pc.getProjectCreators());
+    if (!creator) {
+        return;
+    }
+
+    let results: PythonProject | PythonProject[] | undefined;
+    try {
+        results = await creator.create(options);
+        if (results === undefined) {
             return;
         }
-
-        let results: PythonProject | PythonProject[] | undefined;
-        try {
-            results = await creator.create();
-            if (results === undefined) {
-                return;
-            }
-        } catch (ex) {
-            if (ex === QuickInputButtons.Back) {
-                return addPythonProject(resource, wm, em, pc);
-            }
-            throw ex;
+    } catch (ex) {
+        if (ex === QuickInputButtons.Back) {
+            return addPythonProjectCommand(resource, wm, em, pc);
         }
-
-        if (!Array.isArray(results)) {
-            results = [results];
-        }
-
-        if (Array.isArray(results)) {
-            if (results.length === 0) {
-                return;
-            }
-        }
-
-        const projects: PythonProject[] = [];
-        const edits: EditProjectSettings[] = [];
-
-        for (const result of results) {
-            const uri = await getAbsolutePath(result.uri.fsPath);
-            if (!uri) {
-                traceError(`Path does not belong to any opened workspace: ${result.uri.fsPath}`);
-                continue;
-            }
-
-            const envManagerId = getDefaultEnvManagerSetting(wm, uri);
-            const pkgManagerId = getDefaultPkgManagerSetting(
-                wm,
-                uri,
-                em.getEnvironmentManager(envManagerId)?.preferredPackageManagerId,
-            );
-            const pw = wm.create(path.basename(uri.fsPath), uri);
-            projects.push(pw);
-            edits.push({ project: pw, envManager: envManagerId, packageManager: pkgManagerId });
-        }
-        await addPythonProjectSetting(edits);
-        return projects;
-    } else {
-        // If the context is not a Uri or ProjectItem, rerun function with undefined context
-        await addPythonProject(undefined, wm, em, pc);
+        throw ex;
     }
 }
 
