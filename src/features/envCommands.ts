@@ -377,6 +377,7 @@ export async function addPythonProjectCommand(
         return;
     }
 
+
     let results: PythonProject | PythonProject[] | undefined;
     try {
         results = await creator.create(options);
