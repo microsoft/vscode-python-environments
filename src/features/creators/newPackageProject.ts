@@ -1,19 +1,19 @@
 import * as fs from 'fs-extra';
 import * as path from 'path';
-import { Uri, workspace, MarkdownString, window } from 'vscode';
+import { MarkdownString, Uri, window, workspace } from 'vscode';
 import { PythonProject, PythonProjectCreator, PythonProjectCreatorOptions } from '../../api';
+import { NEW_PROJECT_TEMPLATES_FOLDER } from '../../common/constants';
+import { showInputBoxWithButtons } from '../../common/window.apis';
+import { EnvironmentManagers } from '../../internal.api';
 import {
-    promptForVenv,
-    promptForCopilotInstructions,
     isCopilotInstalled,
-    quickCreateNewVenv,
-    replaceInFilesAndNames,
     manageCopilotInstructionsFile,
     manageLaunchJsonFile,
+    promptForCopilotInstructions,
+    promptForVenv,
+    quickCreateNewVenv,
+    replaceInFilesAndNames,
 } from './creationHelpers';
-import { NEW_PROJECT_TEMPLATES_FOLDER } from '../../common/constants';
-import { EnvironmentManagers } from '../../internal.api';
-import { showInputBoxWithButtons } from '../../common/window.apis';
 
 export class NewPackageProject implements PythonProjectCreator {
     public readonly name = 'newPackage';
@@ -24,33 +24,40 @@ export class NewPackageProject implements PythonProjectCreator {
     constructor(private readonly envManagers: EnvironmentManagers) {}
 
     async create(options?: PythonProjectCreatorOptions): Promise<PythonProject | undefined> {
-        // Prompt for package name if not provided
         let packageName = options?.name;
-        if (!packageName) {
-            packageName = await showInputBoxWithButtons({
-                prompt: 'What is the name of the package? (e.g. my_package)',
-                ignoreFocusOut: true,
-                showBackButton: true,
-            });
-        }
-        if (!packageName) {
-            return undefined;
-        }
-
-        // Use helper to prompt for virtual environment creation
-        const createVenv = await promptForVenv();
-        if (createVenv === undefined) {
-            return undefined;
-        }
-
-        // Only prompt for Copilot instructions if Copilot is installed
-        let createCopilotInstructions = false;
-        if (isCopilotInstalled()) {
-            const copilotResult = await promptForCopilotInstructions();
-            if (copilotResult === undefined) {
+        let createVenv: boolean | undefined;
+        let createCopilotInstructions: boolean | undefined;
+        if (options?.quickCreate === true) {
+            // If quickCreate is true, we should not prompt for any input
+            if (!packageName) {
+                throw new Error('Package name is required in quickCreate mode.');
+            }
+            createVenv = true;
+            createCopilotInstructions = true;
+        } else {
+            //Prompt as quickCreate is false
+            if (!packageName) {
+                packageName = await showInputBoxWithButtons({
+                    prompt: 'What is the name of the package? (e.g. my_package)',
+                    ignoreFocusOut: true,
+                    showBackButton: true,
+                });
+            }
+            if (!packageName) {
                 return undefined;
             }
-            createCopilotInstructions = copilotResult === true;
+            // Use helper to prompt for virtual environment creation
+            createVenv = await promptForVenv();
+            if (createVenv === undefined) {
+                return undefined;
+            }
+            if (isCopilotInstalled()) {
+                const copilotResult = await promptForCopilotInstructions();
+                if (copilotResult === undefined) {
+                    return undefined;
+                }
+                createCopilotInstructions = copilotResult === true;
+            }
         }
 
         window.showInformationMessage(
@@ -65,7 +72,7 @@ export class NewPackageProject implements PythonProjectCreator {
         }
 
         // Check if the destination folder is provided, otherwise use the first workspace folder
-        let destRoot = options?.uri?.fsPath;
+        let destRoot = options?.rootUri.fsPath;
         if (!destRoot) {
             const workspaceFolders = workspace.workspaceFolders;
             if (!workspaceFolders || workspaceFolders.length === 0) {
