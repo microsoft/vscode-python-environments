@@ -707,16 +707,20 @@ export interface PythonProjectCreator {
     readonly iconPath?: IconPath;
 
     /**
+     * Creates a new Python project(s) or, if files are not a project, returns Uri(s) to the created files.
+     * Anything that needs its own python environment constitutes a project.
+     * @param options Optional parameters for creating the Python project.
+     * @returns A promise that resolves to one of the following:
+     *   - PythonProject or PythonProject[]: when a single or multiple projects are created.
+     *   - Uri or Uri[]: when files are created that do not constitute a project.
+     *   - undefined: if project creation fails.
+     */
+    create(options?: PythonProjectCreatorOptions): Promise<PythonProject | PythonProject[] | Uri | Uri[] | undefined>;
+
+    /**
      * A flag indicating whether the project creator supports quick create where no user input is required.
      */
     readonly supportsQuickCreate?: boolean;
-
-    /**
-     * Creates a new Python project or projects.
-     * @param options - Optional parameters for creating the Python project.
-     * @returns A promise that resolves to a Python project, an array of Python projects, or undefined.
-     */
-    create(options?: PythonProjectCreatorOptions): Promise<PythonProject | PythonProject[] | undefined>;
 }
 
 /**
