@@ -377,10 +377,7 @@ export async function addPythonProjectCommand(
     }
 
     try {
-        const results = await creator.create(options);
-        if (results === undefined) {
-            return;
-        }
+        await creator.create(options);
     } catch (ex) {
         if (ex === QuickInputButtons.Back) {
             return addPythonProjectCommand(resource, wm, em, pc);
