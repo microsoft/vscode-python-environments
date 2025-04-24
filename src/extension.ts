@@ -46,13 +46,14 @@ import { PythonProjectManagerImpl } from './features/projectManager';
 import { getPythonApi, setPythonApi } from './features/pythonApi';
 import { registerCompletionProvider } from './features/settings/settingCompletions';
 import { setActivateMenuButtonContext } from './features/terminal/activateMenuButton';
-import { ShellStartupActivationManagerImpl } from './features/terminal/activateUsingShellStartup';
 import { normalizeShellPath } from './features/terminal/shells/common/shellUtils';
 import {
     clearShellProfileCache,
     createShellEnvProviders,
     createShellStartupProviders,
 } from './features/terminal/shells/providers';
+import { ShellStartupActivationVariablesManagerImpl } from './features/terminal/shellStartupActivationVariablesManager';
+import { cleanupStartupScripts } from './features/terminal/shellStartupSetupHandlers';
 import { TerminalActivationImpl } from './features/terminal/terminalActivationState';
 import { TerminalManager, TerminalManagerImpl } from './features/terminal/terminalManager';
 import { getEnvironmentForTerminal } from './features/terminal/utils';
@@ -92,9 +93,8 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
     const terminalActivation = new TerminalActivationImpl();
     const shellEnvsProviders = createShellEnvProviders();
     const shellStartupProviders = createShellStartupProviders();
-    const shellStartupActivationManager = new ShellStartupActivationManagerImpl(
+    const shellStartupVarsMgr = new ShellStartupActivationVariablesManagerImpl(
         context.environmentVariableCollection,
-        shellStartupProviders,
         shellEnvsProviders,
         envManagers,
     );
@@ -103,7 +103,7 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
         shellEnvsProviders,
         shellStartupProviders,
     );
-    context.subscriptions.push(terminalActivation, terminalManager, shellStartupActivationManager);
+    context.subscriptions.push(terminalActivation, terminalManager, shellStartupVarsMgr);
 
     const projectCreators: ProjectCreators = new ProjectCreatorsImpl();
     context.subscriptions.push(
@@ -129,7 +129,7 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
         registerTools('python_environment', new GetEnvironmentInfoTool(api, envManagers)),
         registerTools('python_install_package', new InstallPackageTool(api)),
         commands.registerCommand('python-envs.terminal.revertStartupScriptChanges', async () => {
-            await shellStartupActivationManager.cleanupStartupScripts();
+            await cleanupStartupScripts(shellStartupProviders);
         }),
         commands.registerCommand('python-envs.viewLogs', () => outputChannel.show()),
         commands.registerCommand('python-envs.refreshManager', async (item) => {
@@ -290,7 +290,7 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
         await Promise.all([
             registerSystemPythonFeatures(nativeFinder, context.subscriptions, outputChannel),
             registerCondaFeatures(nativeFinder, context.subscriptions, outputChannel),
-            shellStartupActivationManager.initialize(),
+            shellStartupVarsMgr.initialize(),
         ]);
 
         sendTelemetryEvent(EventNames.EXTENSION_MANAGER_REGISTRATION_DURATION, start.elapsedTime);

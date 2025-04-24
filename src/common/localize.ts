@@ -12,6 +12,7 @@ export namespace Common {
     export const viewLogs = l10n.t('View Logs');
     export const yes = l10n.t('Yes');
     export const no = l10n.t('No');
+    export const ok = l10n.t('Ok');
     export const quickCreate = l10n.t('Quick Create');
     export const installPython = l10n.t('Install Python');
 }
@@ -165,20 +166,7 @@ export namespace EnvViewStrings {
 }
 
 export namespace ShellStartupActivationStrings {
-    export const shellStartupScriptEditPrompt = l10n.t(
-        'To support Python Terminal activation using `shellStartup` we need to modify your shell profile. Do you want to proceed?',
-    );
-    export const updatingTheseProfiles = l10n.t('Updating these profiles');
-    export const updateScript = l10n.t('Update Shell Profile');
     export const envCollectionDescription = l10n.t('Environment variables for shell activation');
-    export const shellStartupScriptEditComplete = l10n.t(
-        'Shell startup profile updated with code for Python environment activation. See [logs](command:{0})',
-        Commands.viewLogs,
-    );
-    export const shellStartupScriptEditFailed = l10n.t(
-        'Failed to update shell startup profile. See [logs](command:{0})',
-        Commands.viewLogs,
-    );
     export const revertedShellStartupScripts = l10n.t(
         'Removed shell startup profile code for Python environment activation. See [logs](command:{0})',
         Commands.viewLogs,

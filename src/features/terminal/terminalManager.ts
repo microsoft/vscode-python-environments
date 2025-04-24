@@ -15,13 +15,14 @@ import { isActivatableEnvironment } from '../common/activation';
 import { identifyTerminalShell } from '../common/shellDetector';
 import { getPythonApi } from '../pythonApi';
 import { ShellEnvsProvider, ShellStartupScriptProvider } from './shells/startupProvider';
+import { handleSettingUpShellProfile, handleSettingUpShellProfileMultiple } from './shellStartupSetupHandlers';
 import {
     DidChangeTerminalActivationStateEvent,
     TerminalActivation,
     TerminalActivationInternal,
     TerminalEnvironment,
 } from './terminalActivationState';
-import { getAutoActivationType, getEnvironmentForTerminal, waitForShellIntegration } from './utils';
+import { AutoActivationType, getAutoActivationType, getEnvironmentForTerminal, waitForShellIntegration } from './utils';
 
 export interface TerminalCreation {
     create(environment: PythonEnvironment, options: PythonTerminalCreateOptions): Promise<Terminal>;
@@ -56,6 +57,7 @@ export interface TerminalManager
 export class TerminalManagerImpl implements TerminalManager {
     private disposables: Disposable[] = [];
     private skipActivationOnOpen = new Set<Terminal>();
+    private shellSetup: Map<string, boolean> = new Map<string, boolean>();
 
     private onTerminalOpenedEmitter = new EventEmitter<Terminal>();
     private onTerminalOpened = this.onTerminalOpenedEmitter.event;
@@ -103,24 +105,45 @@ export class TerminalManagerImpl implements TerminalManager {
         );
     }
 
+    private async getEffectiveActivationType(shellType: string): Promise<AutoActivationType> {
+        const provider = this.startupScriptProviders.find((p) => p.shellType === shellType);
+        if (provider) {
+            traceVerbose(`Shell startup is supported for ${shellType}, using shell startup activation`);
+            const isSetup = this.shellSetup.get(shellType);
+            if (isSetup === true) {
+                traceVerbose(`Shell profile for ${shellType} is already setup.`);
+                return 'shellStartup';
+            } else if (isSetup === false) {
+                traceVerbose(`Shell profile for ${shellType} is not set up, using command fallback.`);
+                return 'command';
+            }
+
+            if (await provider.isSetup()) {
+                this.shellSetup.set(shellType, true);
+                traceVerbose(`Shell profile for ${shellType} is setup successfully.`);
+                return 'shellStartup';
+            }
+
+            this.shellSetup.set(shellType, false);
+            traceVerbose(`Shell profile for ${shellType} is not setup, falling back to command activation`);
+
+            setImmediate(async () => {
+                const result = await handleSettingUpShellProfile(provider);
+                this.shellSetup.set(shellType, result);
+            });
+            return 'command';
+        }
+        traceInfo(`Shell startup not supported for ${shellType}, using command activation as fallback`);
+        return 'command';
+    }
+
     private async autoActivateOnTerminalOpen(terminal: Terminal, environment: PythonEnvironment): Promise<void> {
         let actType = getAutoActivationType();
         const shellType = identifyTerminalShell(terminal);
-        if (shellType === 'shellStartup' && !this.startupEnvProviders.some((p) => p.shellType === shellType)) {
-            actType = 'command';
-            traceInfo(`Shell startup not supported for ${shellType}, using command activation`);
-
-            const provider = this.startupScriptProviders.find((p) => p.shellType === shellType);
-            if (provider) {
-                traceVerbose(`Checking is shell profile is setup for ${shellType}`);
-                if (await provider.isSetup()) {
-                } else {
-                }
-            } else {
-                actType = 'command';
-                traceInfo(`No startup script provider found for ${shellType}, using command activation`);
-            }
+        if (actType === 'shellStartup') {
+            actType = await this.getEffectiveActivationType(shellType);
         }
+
         if (actType === 'command') {
             if (isActivatableEnvironment(environment)) {
                 await withProgress(
@@ -260,7 +283,8 @@ export class TerminalManagerImpl implements TerminalManager {
     }
 
     public async initialize(api: PythonEnvironmentApi): Promise<void> {
-        if (getAutoActivationType() === 'command') {
+        const actType = getAutoActivationType();
+        if (actType === 'command') {
             await Promise.all(
                 terminals().map(async (t) => {
                     this.skipActivationOnOpen.add(t);
@@ -271,6 +295,16 @@ export class TerminalManagerImpl implements TerminalManager {
                         await this.activate(t, env);
                     }
                 }),
+            );
+        } else if (actType === 'shellStartup') {
+            const shells = new Set(
+                terminals()
+                    .map((t) => identifyTerminalShell(t))
+                    .filter((t) => t !== 'unknown'),
+            );
+            await handleSettingUpShellProfileMultiple(
+                this.startupScriptProviders.filter((p) => shells.has(p.shellType)),
+                (p, v) => this.shellSetup.set(p.shellType, v),
             );
         }
     }

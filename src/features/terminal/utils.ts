@@ -1,7 +1,7 @@
 import * as path from 'path';
 import { Terminal, TerminalOptions, Uri } from 'vscode';
-import { sleep } from '../../common/utils/asyncUtils';
 import { PythonEnvironment, PythonProject, PythonProjectEnvironmentApi, PythonProjectGetterApi } from '../../api';
+import { sleep } from '../../common/utils/asyncUtils';
 import { getConfiguration, getWorkspaceFolders } from '../../common/workspace.apis';
 
 const SHELL_INTEGRATION_TIMEOUT = 500; // 0.5 seconds
@@ -90,15 +90,16 @@ export async function getEnvironmentForTerminal(
     return env;
 }
 
-export function getAutoActivationType(): 'off' | 'command' | 'shellStartup' {
+export type AutoActivationType = 'off' | 'command' | 'shellStartup';
+export function getAutoActivationType(): AutoActivationType {
     // 'startup' auto-activation means terminal is activated via shell startup scripts.
     // 'command' auto-activation means terminal is activated via a command.
     // 'off' means no auto-activation.
     const config = getConfiguration('python-envs');
-    return config.get<'off' | 'command' | 'shellStartup'>('terminal.autoActivationType', 'command');
+    return config.get<AutoActivationType>('terminal.autoActivationType', 'command');
 }
 
-export async function setAutoActivationType(value: 'off' | 'command' | 'shellStartup'): Promise<void> {
+export async function setAutoActivationType(value: AutoActivationType): Promise<void> {
     const config = getConfiguration('python-envs');
     return await config.update('terminal.autoActivationType', value, true);
 }
