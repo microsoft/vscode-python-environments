@@ -1,8 +1,8 @@
-import { l10n } from 'vscode';
+import { l10n, ProgressLocation } from 'vscode';
 import { executeCommand } from '../../common/command.api';
 import { Common, ShellStartupActivationStrings } from '../../common/localize';
 import { traceInfo, traceVerbose } from '../../common/logging';
-import { showErrorMessage, showInformationMessage } from '../../common/window.apis';
+import { showErrorMessage, showInformationMessage, withProgress } from '../../common/window.apis';
 import { ShellScriptEditState, ShellStartupScriptProvider } from './shells/startupProvider';
 import { getAutoActivationType, setAutoActivationType } from './utils';
 
@@ -23,8 +23,16 @@ export async function handleSettingUpShellProfile(
 
     if (response === Common.yes) {
         traceVerbose(`User chose to set up shell profiles for ${shells} shells`);
-        const states = (await Promise.all(providers.map((provider) => provider.setupScripts()))).filter(
-            (state) => state !== ShellScriptEditState.NotInstalled,
+        const states = await withProgress(
+            {
+                location: ProgressLocation.Notification,
+                title: l10n.t('Setting up shell profiles for {0}', shells),
+            },
+            async () => {
+                return (await Promise.all(providers.map((provider) => provider.setupScripts()))).filter(
+                    (state) => state !== ShellScriptEditState.NotInstalled,
+                );
+            },
         );
         if (states.every((state) => state === ShellScriptEditState.Edited)) {
             setImmediate(async () => {

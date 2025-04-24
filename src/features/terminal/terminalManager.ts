@@ -5,6 +5,7 @@ import { PythonEnvironment, PythonEnvironmentApi, PythonProject, PythonTerminalC
 import { traceInfo, traceVerbose } from '../../common/logging';
 import {
     createTerminal,
+    onDidChangeWindowState,
     onDidCloseTerminal,
     onDidOpenTerminal,
     terminals,
@@ -15,7 +16,7 @@ import { isActivatableEnvironment } from '../common/activation';
 import { identifyTerminalShell } from '../common/shellDetector';
 import { getPythonApi } from '../pythonApi';
 import { ShellEnvsProvider, ShellSetupState, ShellStartupScriptProvider } from './shells/startupProvider';
-import { filterProviders, handleSettingUpShellProfile } from './shellStartupSetupHandlers';
+import { handleSettingUpShellProfile } from './shellStartupSetupHandlers';
 import {
     DidChangeTerminalActivationStateEvent,
     TerminalActivation,
@@ -68,6 +69,8 @@ export class TerminalManagerImpl implements TerminalManager {
     private onDidChangeTerminalActivationStateEmitter = new EventEmitter<DidChangeTerminalActivationStateEvent>();
     public onDidChangeTerminalActivationState = this.onDidChangeTerminalActivationStateEmitter.event;
 
+    private hasFocus = true;
+
     constructor(
         private readonly ta: TerminalActivationInternal,
         private readonly startupEnvProviders: ShellEnvsProvider[],
@@ -115,15 +118,21 @@ export class TerminalManagerImpl implements TerminalManager {
                         if (shells.size > 0) {
                             await this.handleSetupCheck(shells);
                         }
+                    } else {
+                        traceVerbose(`Auto activation type changed to ${actType}`);
+                        this.shellSetup.clear();
                     }
                 }
+            }),
+            onDidChangeWindowState((e) => {
+                this.hasFocus = e.focused;
             }),
         );
     }
 
     private async handleSetupCheck(shellType: string | Set<string>): Promise<void> {
         const shellTypes = typeof shellType === 'string' ? new Set([shellType]) : shellType;
-        const providers = filterProviders(shellTypes, this.startupScriptProviders);
+        const providers = this.startupScriptProviders.filter((p) => shellTypes.has(p.shellType));
         if (providers.length > 0) {
             const shellsToSetup: ShellStartupScriptProvider[] = [];
             await Promise.all(
@@ -153,7 +162,13 @@ export class TerminalManagerImpl implements TerminalManager {
                 return;
             }
 
+            if (!this.hasFocus) {
+                traceVerbose('Window does not have focus, skipping shell profile setup');
+                return;
+            }
+
             setImmediate(async () => {
+                // Avoid blocking this setup on user interaction.
                 await handleSettingUpShellProfile(shellsToSetup, (p, v) => this.shellSetup.set(p.shellType, v));
             });
         }
@@ -171,7 +186,7 @@ export class TerminalManagerImpl implements TerminalManager {
     }
 
     private async getEffectiveActivationType(shellType: string): Promise<AutoActivationType> {
-        const providers = filterProviders(new Set([shellType]), this.startupScriptProviders);
+        const providers = this.startupScriptProviders.filter((p) => p.shellType === shellType);
         if (providers.length > 0) {
             traceVerbose(`Shell startup is supported for ${shellType}, using shell startup activation`);
             let isSetup = this.getShellActivationType(shellType);
@@ -333,20 +348,20 @@ export class TerminalManagerImpl implements TerminalManager {
         return newTerminal;
     }
 
+    private async activateUsingCommand(api: PythonEnvironmentApi, t: Terminal): Promise<void> {
+        this.skipActivationOnOpen.add(t);
+
+        const env = this.ta.getEnvironment(t) ?? (await getEnvironmentForTerminal(api, t));
+
+        if (env && isActivatableEnvironment(env)) {
+            await this.activate(t, env);
+        }
+    }
+
     public async initialize(api: PythonEnvironmentApi): Promise<void> {
         const actType = getAutoActivationType();
         if (actType === 'command') {
-            await Promise.all(
-                terminals().map(async (t) => {
-                    this.skipActivationOnOpen.add(t);
-
-                    const env = this.ta.getEnvironment(t) ?? (await getEnvironmentForTerminal(api, t));
-
-                    if (env && isActivatableEnvironment(env)) {
-                        await this.activate(t, env);
-                    }
-                }),
-            );
+            await Promise.all(terminals().map(async (t) => this.activateUsingCommand(api, t)));
         } else if (actType === 'shellStartup') {
             const shells = new Set(
                 terminals()
@@ -355,6 +370,14 @@ export class TerminalManagerImpl implements TerminalManager {
             );
             if (shells.size > 0) {
                 await this.handleSetupCheck(shells);
+                await Promise.all(
+                    terminals().map(async (t) => {
+                        // If the shell is not set up, we activate using command fallback.
+                        if (this.shellSetup.get(identifyTerminalShell(t)) === false) {
+                            await this.activateUsingCommand(api, t);
+                        }
+                    }),
+                );
             }
         }
     }

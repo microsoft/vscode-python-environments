@@ -13,6 +13,10 @@ export class CmdEnvsProvider implements ShellEnvsProvider {
             const cmdActivation = getShellActivationCommand(this.shellType, env);
             if (cmdActivation) {
                 const command = getShellCommandAsString(this.shellType, cmdActivation);
+                const v = collection.get(CMD_ENV_KEY);
+                if (v?.value === command) {
+                    return;
+                }
                 collection.replace(CMD_ENV_KEY, command);
             } else {
                 collection.delete(CMD_ENV_KEY);

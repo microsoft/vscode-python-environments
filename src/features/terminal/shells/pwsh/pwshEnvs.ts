@@ -14,6 +14,10 @@ export class PowerShellEnvsProvider implements ShellEnvsProvider {
             const pwshActivation = getShellActivationCommand(this.shellType, env);
             if (pwshActivation) {
                 const command = getShellCommandAsString(this.shellType, pwshActivation);
+                const v = collection.get(POWERSHELL_ENV_KEY);
+                if (v?.value === command) {
+                    return;
+                }
                 collection.replace(POWERSHELL_ENV_KEY, command);
             } else {
                 collection.delete(POWERSHELL_ENV_KEY);

@@ -7,6 +7,7 @@ import { isWindows } from '../../../../common/utils/platformUtils';
 import { ShellScriptEditState, ShellSetupState, ShellStartupScriptProvider } from '../startupProvider';
 import { runCommand } from '../utils';
 
+import assert from 'assert';
 import { getGlobalPersistentState } from '../../../../common/persistentState';
 import { ShellConstants } from '../../../common/shellConstants';
 import { hasStartupCode, insertStartupCode, removeStartupCode } from '../common/editUtils';
@@ -185,130 +186,134 @@ async function removePowerShellStartup(shell: string, profile: string): Promise<
     }
 }
 
-export class PowerShellClassicStartupProvider implements ShellStartupScriptProvider {
-    public readonly name: string = 'PowerShell5';
-    public readonly shellType: string = 'powershell';
-    private _isInstalled: boolean | undefined;
-
-    private async checkInstallation(): Promise<boolean> {
-        if (this._isInstalled === undefined) {
-            this._isInstalled = await isPowerShellInstalled('powershell');
-        }
-        return this._isInstalled;
-    }
-    async isSetup(): Promise<ShellSetupState> {
-        const isInstalled = await this.checkInstallation();
-        if (!isInstalled) {
-            return ShellSetupState.NotInstalled;
-        }
-
-        try {
-            const profile = await getProfileForShell('powershell');
-            const isSetup = await isPowerShellStartupSetup('powershell', profile);
-            return isSetup ? ShellSetupState.Setup : ShellSetupState.NotSetup;
-        } catch (err) {
-            traceError('Failed to check if PowerShell startup is setup', err);
-        }
-        return ShellSetupState.NotSetup;
-    }
-
-    async setupScripts(): Promise<ShellScriptEditState> {
-        const isInstalled = await this.checkInstallation();
-        if (!isInstalled) {
-            return ShellScriptEditState.NotInstalled;
-        }
-
-        try {
-            const profile = await getProfileForShell('powershell');
-            const success = await setupPowerShellStartup('powershell', profile);
-            return success ? ShellScriptEditState.Edited : ShellScriptEditState.NotEdited;
-        } catch (err) {
-            traceError('Failed to setup PowerShell startup', err);
-        }
-        return ShellScriptEditState.NotEdited;
-    }
-
-    async teardownScripts(): Promise<ShellScriptEditState> {
-        const isInstalled = await this.checkInstallation();
-        if (!isInstalled) {
-            return ShellScriptEditState.NotInstalled;
-        }
-
-        try {
-            const profile = await getProfileForShell('powershell');
-            const success = await removePowerShellStartup('powershell', profile);
-            return success ? ShellScriptEditState.Edited : ShellScriptEditState.NotEdited;
-        } catch (err) {
-            traceError('Failed to remove PowerShell startup', err);
-        }
-        return ShellScriptEditState.NotEdited;
-    }
-    async clearCache(): Promise<void> {
-        await clearPwshCache('powershell');
-    }
-}
+type PowerShellType = 'powershell' | 'pwsh';
 
 export class PwshStartupProvider implements ShellStartupScriptProvider {
     public readonly name: string = 'PowerShell';
     public readonly shellType: string = ShellConstants.PWSH;
 
-    private _isInstalled: boolean | undefined;
+    private _isPwshInstalled: boolean | undefined;
+    private _isPs5Installed: boolean | undefined;
+    private _supportedShells: PowerShellType[];
 
-    private async checkInstallation(): Promise<boolean> {
-        if (this._isInstalled === undefined) {
-            this._isInstalled = await isPowerShellInstalled('pwsh');
-        }
-        return this._isInstalled;
+    constructor(supportedShells: PowerShellType[]) {
+        assert(supportedShells.length > 0, 'At least one PowerShell shell must be supported');
+        this._supportedShells = supportedShells;
+    }
+
+    private async checkInstallations(): Promise<Map<PowerShellType, boolean>> {
+        const results = new Map<PowerShellType, boolean>();
+
+        await Promise.all(
+            this._supportedShells.map(async (shell) => {
+                if (shell === 'pwsh' && this._isPwshInstalled !== undefined) {
+                    results.set(shell, this._isPwshInstalled);
+                } else if (shell === 'powershell' && this._isPs5Installed !== undefined) {
+                    results.set(shell, this._isPs5Installed);
+                } else {
+                    const isInstalled = await isPowerShellInstalled(shell);
+                    if (shell === 'pwsh') {
+                        this._isPwshInstalled = isInstalled;
+                    } else {
+                        this._isPs5Installed = isInstalled;
+                    }
+                    results.set(shell, isInstalled);
+                }
+            }),
+        );
+
+        return results;
     }
 
     async isSetup(): Promise<ShellSetupState> {
-        const isInstalled = await this.checkInstallation();
-        if (!isInstalled) {
+        const installations = await this.checkInstallations();
+
+        if (Array.from(installations.values()).every((installed) => !installed)) {
             return ShellSetupState.NotInstalled;
         }
 
-        try {
-            const profile = await getProfileForShell('pwsh');
-            const isSetup = await isPowerShellStartupSetup('pwsh', profile);
-            return isSetup ? ShellSetupState.Setup : ShellSetupState.NotSetup;
-        } catch (err) {
-            traceError('Failed to check if PowerShell startup is setup', err);
+        const results: ShellSetupState[] = [];
+        for (const [shell, installed] of installations.entries()) {
+            if (!installed) {
+                continue;
+            }
+
+            try {
+                const profile = await getProfileForShell(shell);
+                const isSetup = await isPowerShellStartupSetup(shell, profile);
+                results.push(isSetup ? ShellSetupState.Setup : ShellSetupState.NotSetup);
+            } catch (err) {
+                traceError(`Failed to check if ${shell} startup is setup`, err);
+                results.push(ShellSetupState.NotSetup);
+            }
         }
-        return ShellSetupState.NotSetup;
+
+        if (results.includes(ShellSetupState.NotSetup)) {
+            return ShellSetupState.NotSetup;
+        }
+
+        return ShellSetupState.Setup;
     }
 
     async setupScripts(): Promise<ShellScriptEditState> {
-        const isInstalled = await this.checkInstallation();
-        if (!isInstalled) {
+        const installations = await this.checkInstallations();
+
+        if (Array.from(installations.values()).every((installed) => !installed)) {
             return ShellScriptEditState.NotInstalled;
         }
 
-        try {
-            const profile = await getProfileForShell('pwsh');
-            const success = await setupPowerShellStartup('pwsh', profile);
-            return success ? ShellScriptEditState.Edited : ShellScriptEditState.NotEdited;
-        } catch (err) {
-            traceError('Failed to setup PowerShell startup', err);
+        const anyEdited = [];
+        for (const [shell, installed] of installations.entries()) {
+            if (!installed) {
+                continue;
+            }
+
+            try {
+                const profile = await getProfileForShell(shell);
+                const success = await setupPowerShellStartup(shell, profile);
+                anyEdited.push(success ? ShellScriptEditState.Edited : ShellScriptEditState.NotEdited);
+            } catch (err) {
+                traceError(`Failed to setup ${shell} startup`, err);
+            }
         }
-        return ShellScriptEditState.NotEdited;
+        return anyEdited.every((state) => state === ShellScriptEditState.Edited)
+            ? ShellScriptEditState.Edited
+            : ShellScriptEditState.NotEdited;
     }
 
     async teardownScripts(): Promise<ShellScriptEditState> {
-        const isInstalled = await this.checkInstallation();
-        if (!isInstalled) {
+        const installations = await this.checkInstallations();
+
+        if (Array.from(installations.values()).every((installed) => !installed)) {
             return ShellScriptEditState.NotInstalled;
         }
 
-        try {
-            const profile = await getProfileForShell('pwsh');
-            const success = await removePowerShellStartup('pwsh', profile);
-            return success ? ShellScriptEditState.Edited : ShellScriptEditState.NotEdited;
-        } catch (err) {
-            traceError('Failed to remove PowerShell startup', err);
+        const anyEdited = [];
+        for (const [shell, installed] of installations.entries()) {
+            if (!installed) {
+                continue;
+            }
+
+            try {
+                const profile = await getProfileForShell(shell);
+                const success = await removePowerShellStartup(shell, profile);
+                anyEdited.push(success ? ShellScriptEditState.Edited : ShellScriptEditState.NotEdited);
+            } catch (err) {
+                traceError(`Failed to remove ${shell} startup`, err);
+            }
         }
-        return ShellScriptEditState.NotEdited;
+        return anyEdited.every((state) => state === ShellScriptEditState.Edited)
+            ? ShellScriptEditState.Edited
+            : ShellScriptEditState.NotEdited;
     }
+
     async clearCache(): Promise<void> {
-        await clearPwshCache('pwsh');
+        for (const shell of this._supportedShells) {
+            await clearPwshCache(shell);
+        }
+
+        // Reset installation check cache as well
+        this._isPwshInstalled = undefined;
+        this._isPs5Installed = undefined;
     }
 }

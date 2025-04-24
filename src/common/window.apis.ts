@@ -29,6 +29,7 @@ import {
     TextEditor,
     Uri,
     window,
+    WindowState,
 } from 'vscode';
 import { createDeferred } from './utils/deferred';
 
@@ -346,4 +347,12 @@ export function createLogOutputChannel(name: string): LogOutputChannel {
 
 export function registerFileDecorationProvider(provider: FileDecorationProvider): Disposable {
     return window.registerFileDecorationProvider(provider);
+}
+
+export function onDidChangeWindowState(
+    listener: (e: WindowState) => any,
+    thisArgs?: any,
+    disposables?: Disposable[],
+): Disposable {
+    return window.onDidChangeWindowState(listener, thisArgs, disposables);
 }

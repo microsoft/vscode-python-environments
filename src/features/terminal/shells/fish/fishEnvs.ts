@@ -13,6 +13,10 @@ export class FishEnvsProvider implements ShellEnvsProvider {
             const fishActivation = getShellActivationCommand(this.shellType, env);
             if (fishActivation) {
                 const command = getShellCommandAsString(this.shellType, fishActivation);
+                const v = collection.get(FISH_ENV_KEY);
+                if (v?.value === command) {
+                    return;
+                }
                 collection.replace(FISH_ENV_KEY, command);
             } else {
                 collection.delete(FISH_ENV_KEY);
