@@ -15,7 +15,7 @@ import { isActivatableEnvironment } from '../common/activation';
 import { identifyTerminalShell } from '../common/shellDetector';
 import { getPythonApi } from '../pythonApi';
 import { ShellEnvsProvider, ShellStartupScriptProvider } from './shells/startupProvider';
-import { handleSettingUpShellProfile, handleSettingUpShellProfileMultiple } from './shellStartupSetupHandlers';
+import { handleSettingUpShellProfile } from './shellStartupSetupHandlers';
 import {
     DidChangeTerminalActivationStateEvent,
     TerminalActivation,
@@ -112,9 +112,8 @@ export class TerminalManagerImpl implements TerminalManager {
                                 .map((t) => identifyTerminalShell(t))
                                 .filter((t) => t !== 'unknown'),
                         );
-                        await handleSettingUpShellProfileMultiple(
-                            this.startupScriptProviders.filter((p) => shells.has(p.shellType)),
-                            (p, v) => this.shellSetup.set(p.shellType, v),
+                        await handleSettingUpShellProfile(shells, this.startupScriptProviders, (p, v) =>
+                            this.shellSetup.set(p.shellType, v),
                         );
                     }
                 }
@@ -145,8 +144,9 @@ export class TerminalManagerImpl implements TerminalManager {
             traceVerbose(`Shell profile for ${shellType} is not setup, falling back to command activation`);
 
             setImmediate(async () => {
-                const result = await handleSettingUpShellProfile(provider);
-                this.shellSetup.set(shellType, result);
+                await handleSettingUpShellProfile(new Set([shellType]), this.startupScriptProviders, (p, v) =>
+                    this.shellSetup.set(p.shellType, v),
+                );
             });
             return 'command';
         }
@@ -319,9 +319,8 @@ export class TerminalManagerImpl implements TerminalManager {
                     .map((t) => identifyTerminalShell(t))
                     .filter((t) => t !== 'unknown'),
             );
-            await handleSettingUpShellProfileMultiple(
-                this.startupScriptProviders.filter((p) => shells.has(p.shellType)),
-                (p, v) => this.shellSetup.set(p.shellType, v),
+            await handleSettingUpShellProfile(shells, this.startupScriptProviders, (p, v) =>
+                this.shellSetup.set(p.shellType, v),
             );
         }
     }

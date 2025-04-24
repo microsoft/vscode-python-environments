@@ -216,7 +216,6 @@ export class PowerShellClassicStartupProvider implements ShellStartupScriptProvi
     async setupScripts(): Promise<ShellScriptEditState> {
         const isInstalled = await this.checkInstallation();
         if (!isInstalled) {
-            traceVerbose('PowerShell is not installed');
             return ShellScriptEditState.NotInstalled;
         }
 
@@ -267,7 +266,6 @@ export class PwshStartupProvider implements ShellStartupScriptProvider {
     async isSetup(): Promise<ShellSetupState> {
         const isInstalled = await this.checkInstallation();
         if (!isInstalled) {
-            traceVerbose('PowerShell is not installed');
             return ShellSetupState.NotInstalled;
         }
 
