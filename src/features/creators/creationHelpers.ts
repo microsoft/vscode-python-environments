@@ -1,16 +1,22 @@
-import { window, extensions, Uri } from 'vscode';
 import * as fs from 'fs-extra';
 import * as path from 'path';
-import { EnvironmentManagers, InternalEnvironmentManager } from '../../internal.api';
+import { extensions, QuickInputButtons, Uri, window } from 'vscode';
 import { CreateEnvironmentOptions } from '../../api';
 import { traceError, traceVerbose } from '../../common/logging';
 import { showQuickPickWithButtons } from '../../common/window.apis';
+import { EnvironmentManagers, InternalEnvironmentManager } from '../../internal.api';
 
 /**
  * Prompts the user to choose whether to create a new virtual environment (venv) for a project, with a clearer return and early exit.
  * @returns {Promise<boolean | undefined>} Resolves to true if 'Yes' is selected, false if 'No', or undefined if cancelled.
  */
-export async function promptForVenv(): Promise<boolean | undefined> {
+export async function promptForVenv(callback: () => void): Promise<boolean | undefined> {
+    try {
+    } catch (ex) {
+        if (ex === QuickInputButtons.Back) {
+            callback();
+        }
+    }
     const venvChoice = await showQuickPickWithButtons([{ label: 'Yes' }, { label: 'No' }], {
         placeHolder: 'Would you like to create a new virtual environment for this project?',
         ignoreFocusOut: true,
@@ -57,7 +63,6 @@ export async function promptForCopilotInstructions(): Promise<boolean | undefine
     return copilotChoice.label === 'Yes';
 }
 
-
 /**
  * Quickly creates a new Python virtual environment (venv) in the specified destination folder using the available environment managers.
  * Attempts to use the venv manager if available, otherwise falls back to any manager that supports environment creation.
@@ -89,8 +94,6 @@ export async function quickCreateNewVenv(envManagers: EnvironmentManagers, destF
         window.showErrorMessage(`Failed to quick create virtual environment, please create it manually.`);
     }
 }
-
-
 
 /**
  * Recursively replaces all occurrences of a string in file and folder names, as well as file contents, within a directory tree.

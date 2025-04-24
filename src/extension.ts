@@ -5,6 +5,7 @@ import { ensureCorrectVersion } from './common/extVersion';
 import { registerTools } from './common/lm.apis';
 import { registerLogger, traceError, traceInfo } from './common/logging';
 import { setPersistentState } from './common/persistentState';
+import { newProjectSelection } from './common/pickers/managers';
 import { StopWatch } from './common/stopWatch';
 import { EventNames } from './common/telemetry/constants';
 import { sendManagerSelectionTelemetry } from './common/telemetry/helpers';
@@ -234,6 +235,12 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
             const terminal = activeTerminal();
             if (terminal) {
                 await terminalManager.deactivate(terminal);
+            }
+        }),
+        commands.registerCommand('python-envs.createNewProjectFromTemplate', async () => {
+            const selected = await newProjectSelection(projectCreators.getProjectCreators());
+            if (selected) {
+                await selected.create();
             }
         }),
         terminalActivation.onDidChangeTerminalActivationState(async (e) => {

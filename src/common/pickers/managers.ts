@@ -1,4 +1,4 @@
-import { QuickPickItem, QuickPickItemKind } from 'vscode';
+import { commands, QuickInputButtons, QuickPickItem, QuickPickItemKind } from 'vscode';
 import { PythonProjectCreator } from '../../api';
 import { InternalEnvironmentManager, InternalPackageManager } from '../../internal.api';
 import { Common, Pickers } from '../localize';
@@ -137,7 +137,6 @@ export async function pickCreator(creators: PythonProjectCreator[]): Promise<Pyt
     // First level menu
     const autoFindCreator = creators.find((c) => c.name === 'autoProjects');
     const existingProjectsCreator = creators.find((c) => c.name === 'existingProjects');
-    const otherCreators = creators.filter((c) => c.name !== 'autoProjects' && c.name !== 'existingProjects');
 
     const items: QuickPickItem[] = [
         {
@@ -175,34 +174,47 @@ export async function pickCreator(creators: PythonProjectCreator[]): Promise<Pyt
         case 'Select Existing':
             return existingProjectsCreator;
         case 'Create New':
-            // Show second level menu for other creators
-            if (otherCreators.length === 0) {
-                return undefined;
-            }
-            const newItems: (QuickPickItem & { c: PythonProjectCreator })[] = otherCreators.map((c) => ({
-                label: c.displayName ?? c.name,
-                description: c.description,
-                c: c,
-            }));
-            const newSelected = await showQuickPickWithButtons(newItems, {
-                placeHolder: 'Select project type for new project',
-                ignoreFocusOut: true,
-                showBackButton: true,
-            });
-            if (!newSelected) {
-                // User cancelled the picker
-                return undefined;
-            }
-            // Handle back button
-            if ((newSelected as any)?.kind === -1 || (newSelected as any)?.back === true) {
-                // User pressed the back button, re-show the first menu
-                return pickCreator(creators);
-            }
-
-            // Handle case where newSelected could be an array (should not happen, but for type safety)
-            const selectedCreator = Array.isArray(newSelected) ? newSelected[0] : newSelected;
-            return selectedCreator?.c;
+            return newProjectSelection(creators);
     }
 
     return undefined;
+}
+
+export async function newProjectSelection(creators: PythonProjectCreator[]): Promise<PythonProjectCreator | undefined> {
+    const otherCreators = creators.filter((c) => c.name !== 'autoProjects' && c.name !== 'existingProjects');
+
+    // Show second level menu for other creators
+    if (otherCreators.length === 0) {
+        return undefined;
+    }
+    const newItems: (QuickPickItem & { c: PythonProjectCreator })[] = otherCreators.map((c) => ({
+        label: c.displayName ?? c.name,
+        description: c.description,
+        c: c,
+    }));
+    try {
+        const newSelected = await showQuickPickWithButtons(newItems, {
+            placeHolder: 'Select project type for new project',
+            ignoreFocusOut: true,
+            showBackButton: true,
+        });
+
+        if (!newSelected) {
+            // User cancelled the picker
+            return undefined;
+        }
+        // Handle back button
+        if ((newSelected as any)?.kind === -1 || (newSelected as any)?.back === true) {
+            // User pressed the back button, re-show the first menu
+            return pickCreator(creators);
+        }
+
+        // Handle case where newSelected could be an array (should not happen, but for type safety)
+        const selectedCreator = Array.isArray(newSelected) ? newSelected[0] : newSelected;
+        return selectedCreator?.c;
+    } catch (ex) {
+        if (ex === QuickInputButtons.Back) {
+            await commands.executeCommand('python-envs.addPythonProject');
+        }
+    }
 }
