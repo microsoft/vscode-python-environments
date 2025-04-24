@@ -1,0 +1,3 @@
+export const BASH_ENV_KEY = 'VSCODE_BASH_ACTIVATE';
+export const ZSH_ENV_KEY = 'VSCODE_ZSH_ACTIVATE';
+export const BASH_SCRIPT_VERSION = '0.1.0';

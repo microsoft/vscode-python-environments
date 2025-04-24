@@ -17,10 +17,10 @@ import {
     PythonEnvironment,
     PythonEnvironmentApi,
 } from '../../api';
-import { getCommonCondaPackagesToInstall, managePackages, refreshPackages } from './condaUtils';
-import { withProgress } from '../../common/window.apis';
-import { showErrorMessage } from '../../common/errors/utils';
+import { showErrorMessageWithLogs } from '../../common/errors/utils';
 import { CondaStrings } from '../../common/localize';
+import { withProgress } from '../../common/window.apis';
+import { getCommonCondaPackagesToInstall, managePackages, refreshPackages } from './condaUtils';
 
 function getChanges(before: Package[], after: Package[]): { kind: PackageChangeKind; pkg: Package }[] {
     const changes: { kind: PackageChangeKind; pkg: Package }[] = [];
@@ -79,7 +79,7 @@ export class CondaPackageManager implements PackageManager, Disposable {
             async (_progress, token) => {
                 try {
                     const before = this.packages.get(environment.envId.id) ?? [];
-                    const after = await managePackages(environment, manageOptions, this.api, this, token);
+                    const after = await managePackages(environment, manageOptions, this.api, this, token, this.log);
                     const changes = getChanges(before, after);
                     this.packages.set(environment.envId.id, after);
                     this._onDidChangePackages.fire({ environment: environment, manager: this, changes });
@@ -90,7 +90,7 @@ export class CondaPackageManager implements PackageManager, Disposable {
 
                     this.log.error('Error installing packages', e);
                     setImmediate(async () => {
-                        await showErrorMessage(CondaStrings.condaInstallError, this.log);
+                        await showErrorMessageWithLogs(CondaStrings.condaInstallError, this.log);
                     });
                 }
             },

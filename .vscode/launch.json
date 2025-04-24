@@ -11,7 +11,7 @@
             "request": "launch",
             "args": ["--extensionDevelopmentPath=${workspaceFolder}"],
             "outFiles": ["${workspaceFolder}/dist/**/*.js"],
-            "preLaunchTask": "${defaultBuildTask}"
+            "preLaunchTask": "npm: watch"
         },
         {
             "name": "Unit Tests",
@@ -30,7 +30,7 @@
             "program": "${workspaceFolder}/node_modules/mocha/bin/_mocha",
             "skipFiles": ["<node_internals>/**"],
             "outFiles": ["${workspaceFolder}/out/**/*.js", "!${workspaceFolder}/**/node_modules**/*"],
-            "preLaunchTask": "tasks: watch-tests"
+            "preLaunchTask": "npm: watch-tests"
         },
         {
             "name": "Extension Tests",
@@ -41,7 +41,7 @@
                 "--extensionTestsPath=${workspaceFolder}/out/test/"
             ],
             "outFiles": ["${workspaceFolder}/out/**/*.js", "${workspaceFolder}/dist/**/*.js"],
-            "preLaunchTask": "tasks: watch-tests"
+            "preLaunchTask": "${defaultBuildTask}"
         }
     ]
 }

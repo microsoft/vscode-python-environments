@@ -1,10 +1,9 @@
 import * as path from 'path';
 import { Uri } from 'vscode';
-import { showQuickPickWithButtons, showWarningMessage } from '../../common/window.apis';
+import { showErrorMessage, showQuickPickWithButtons, showWarningMessage } from '../../common/window.apis';
 import { ProjectCreatorString } from '../../common/localize';
 import { PythonProject, PythonProjectCreator, PythonProjectCreatorOptions } from '../../api';
 import { PythonProjectManager } from '../../internal.api';
-import { showErrorMessage } from '../../common/errors/utils';
 import { findFiles } from '../../common/workspace.apis';
 import { traceInfo } from '../../common/logging';
 

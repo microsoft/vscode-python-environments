@@ -1,6 +1,7 @@
+import * as os from 'os';
 import * as path from 'path';
 import { Uri } from 'vscode';
-import { isWindows } from '../../managers/common/utils';
+import { isWindows } from './platformUtils';
 
 export function checkUri(scope?: Uri | Uri[] | string): Uri | Uri[] | string | undefined {
     if (scope instanceof Uri) {
@@ -47,4 +48,12 @@ export function getResourceUri(resourcePath: string, root?: string): Uri | undef
     } catch (_err) {
         return undefined;
     }
+}
+
+export function untildify(path: string): string {
+    return path.replace(/^~($|\/|\\)/, `${os.homedir()}$1`);
+}
+
+export function getUserHomeDir(): string {
+    return os.homedir();
 }

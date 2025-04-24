@@ -2,7 +2,7 @@ import { QuickInputButtons, QuickPickItem, QuickPickItemButtonEvent, QuickPickIt
 import { Common, PackageManagement } from '../../common/localize';
 import { launchBrowser } from '../../common/env.apis';
 import { showInputBoxWithButtons, showQuickPickWithButtons, showTextDocument } from '../../common/window.apis';
-import { Installable } from './utils';
+import { Installable } from './types';
 
 const OPEN_BROWSER_BUTTON = {
     iconPath: new ThemeIcon('globe'),

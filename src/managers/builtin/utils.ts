@@ -14,12 +14,12 @@ import {
     NativePythonEnvironmentKind,
     NativePythonFinder,
 } from '../common/nativePythonFinder';
-import { showErrorMessage } from '../../common/errors/utils';
 import { shortVersion, sortEnvironments } from '../common/utils';
 import { SysManagerStrings } from '../../common/localize';
 import { isUvInstalled, runUV, runPython } from './helpers';
 import { parsePipList, PipPackage } from './pipListUtils';
 import { withProgress } from '../../common/window.apis';
+import { showErrorMessageWithLogs } from '../../common/errors/utils';
 
 function asPackageQuickPickItem(name: string, version?: string): QuickPickItem {
     return {
@@ -170,7 +170,7 @@ export async function refreshPipPackages(
         return parsePipList(data);
     } catch (e) {
         log?.error('Error refreshing packages', e);
-        showErrorMessage(SysManagerStrings.packageRefreshError, log);
+        showErrorMessageWithLogs(SysManagerStrings.packageRefreshError, log);
         return undefined;
     }
 }
