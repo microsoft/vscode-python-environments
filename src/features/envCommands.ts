@@ -335,7 +335,7 @@ export async function setPackageManagerCommand(em: EnvironmentManagers, wm: Pyth
  * This function calls create on the selected creator and handles the creation process. Will return
  * without doing anything if the resource is a ProjectItem, as the project is already created.
  *
- * @param resource - The resource to use for project creation (can be a Uri, ProjectItem, or undefined).
+ * @param resource - The resource to use for project creation (can be a Uri(s), ProjectItem(s), or undefined).
  * @param wm - The PythonProjectManager instance for managing projects.
  * @param em - The EnvironmentManagers instance for managing environments.
  * @param pc - The ProjectCreators instance for accessing available project creators.
@@ -350,6 +350,12 @@ export async function addPythonProjectCommand(
     if (wm.getProjects().length === 0) {
         showErrorMessage('Please open a folder/project before adding a workspace');
         return;
+    }
+    if (resource instanceof Array) {
+        for (const r of resource) {
+            await addPythonProjectCommand(r, wm, em, pc);
+            return;
+        }
     }
     if (resource instanceof ProjectItem) {
         // If the context is a ProjectItem, project is already created. Just add it to the package manager project list.
