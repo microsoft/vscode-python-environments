@@ -667,9 +667,14 @@ export interface PythonProjectCreatorOptions {
     name: string;
 
     /**
-     * Optional path that may be provided as a root for the project.
+     * Path provided as the root for the project.
      */
-    uri?: Uri;
+    rootUri: Uri;
+
+    /**
+     * Boolean indicating whether the project should be created without any user input.
+     */
+    quickCreate?: boolean;
 }
 
 /**
@@ -700,6 +705,11 @@ export interface PythonProjectCreator {
      * The icon path for the Python project creator, which can be a string, Uri, or an object with light and dark theme paths.
      */
     readonly iconPath?: IconPath;
+
+    /**
+     * A flag indicating whether the project creator supports quick create where no user input is required.
+     */
+    readonly supportsQuickCreate?: boolean;
 
     /**
      * Creates a new Python project or projects.
