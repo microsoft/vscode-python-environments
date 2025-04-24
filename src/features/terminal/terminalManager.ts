@@ -14,8 +14,8 @@ import { getConfiguration, onDidChangeConfiguration } from '../../common/workspa
 import { isActivatableEnvironment } from '../common/activation';
 import { identifyTerminalShell } from '../common/shellDetector';
 import { getPythonApi } from '../pythonApi';
-import { ShellEnvsProvider, ShellStartupScriptProvider } from './shells/startupProvider';
-import { handleSettingUpShellProfile } from './shellStartupSetupHandlers';
+import { ShellEnvsProvider, ShellSetupState, ShellStartupScriptProvider } from './shells/startupProvider';
+import { filterProviders, handleSettingUpShellProfile } from './shellStartupSetupHandlers';
 import {
     DidChangeTerminalActivationStateEvent,
     TerminalActivation,
@@ -113,9 +113,7 @@ export class TerminalManagerImpl implements TerminalManager {
                                 .filter((t) => t !== 'unknown'),
                         );
                         if (shells.size > 0) {
-                            await handleSettingUpShellProfile(shells, this.startupScriptProviders, (p, v) =>
-                                this.shellSetup.set(p.shellType, v),
-                            );
+                            await this.handleSetupCheck(shells);
                         }
                     }
                 }
@@ -123,34 +121,68 @@ export class TerminalManagerImpl implements TerminalManager {
         );
     }
 
-    private async getEffectiveActivationType(shellType: string): Promise<AutoActivationType> {
-        const provider = this.startupScriptProviders.find((p) => p.shellType === shellType);
-        if (provider) {
-            traceVerbose(`Shell startup is supported for ${shellType}, using shell startup activation`);
-            const isSetup = this.shellSetup.get(shellType);
-            if (isSetup === true) {
-                traceVerbose(`Shell profile for ${shellType} is already setup.`);
-                return 'shellStartup';
-            } else if (isSetup === false) {
-                traceVerbose(`Shell profile for ${shellType} is not set up, using command fallback.`);
-                return 'command';
-            }
+    private async handleSetupCheck(shellType: string | Set<string>): Promise<void> {
+        const shellTypes = typeof shellType === 'string' ? new Set([shellType]) : shellType;
+        const providers = filterProviders(shellTypes, this.startupScriptProviders);
+        if (providers.length > 0) {
+            const shellsToSetup: ShellStartupScriptProvider[] = [];
+            await Promise.all(
+                providers.map(async (p) => {
+                    if (this.shellSetup.has(p.shellType)) {
+                        traceVerbose(`Shell profile for ${p.shellType} already checked.`);
+                        return;
+                    }
+                    traceVerbose(`Checking shell profile for ${p.shellType}.`);
+                    const state = await p.isSetup();
+                    if (state === ShellSetupState.NotSetup) {
+                        this.shellSetup.set(p.shellType, false);
+                        shellsToSetup.push(p);
+                        traceVerbose(`Shell profile for ${p.shellType} is not setup.`);
+                    } else if (state === ShellSetupState.Setup) {
+                        this.shellSetup.set(p.shellType, true);
+                        traceVerbose(`Shell profile for ${p.shellType} is setup.`);
+                    } else if (state === ShellSetupState.NotInstalled) {
+                        this.shellSetup.set(p.shellType, false);
+                        traceVerbose(`Shell profile for ${p.shellType} is not installed.`);
+                    }
+                }),
+            );
 
-            if (await provider.isSetup()) {
-                this.shellSetup.set(shellType, true);
-                traceVerbose(`Shell profile for ${shellType} is setup successfully.`);
-                return 'shellStartup';
+            if (shellsToSetup.length === 0) {
+                traceVerbose(`No shell profiles to setup for ${Array.from(shellTypes).join(', ')}`);
+                return;
             }
-
-            this.shellSetup.set(shellType, false);
-            traceVerbose(`Shell profile for ${shellType} is not setup, falling back to command activation`);
 
             setImmediate(async () => {
-                await handleSettingUpShellProfile(new Set([shellType]), this.startupScriptProviders, (p, v) =>
-                    this.shellSetup.set(p.shellType, v),
-                );
+                await handleSettingUpShellProfile(shellsToSetup, (p, v) => this.shellSetup.set(p.shellType, v));
             });
+        }
+    }
+
+    private getShellActivationType(shellType: string): AutoActivationType | undefined {
+        let isSetup = this.shellSetup.get(shellType);
+        if (isSetup === true) {
+            traceVerbose(`Shell profile for ${shellType} is already setup.`);
+            return 'shellStartup';
+        } else if (isSetup === false) {
+            traceVerbose(`Shell profile for ${shellType} is not set up, using command fallback.`);
             return 'command';
+        }
+    }
+
+    private async getEffectiveActivationType(shellType: string): Promise<AutoActivationType> {
+        const providers = filterProviders(new Set([shellType]), this.startupScriptProviders);
+        if (providers.length > 0) {
+            traceVerbose(`Shell startup is supported for ${shellType}, using shell startup activation`);
+            let isSetup = this.getShellActivationType(shellType);
+            if (isSetup !== undefined) {
+                return isSetup;
+            }
+
+            await this.handleSetupCheck(shellType);
+
+            // Check again after the setup check.
+            return this.getShellActivationType(shellType) ?? 'command';
         }
         traceInfo(`Shell startup not supported for ${shellType}, using command activation as fallback`);
         return 'command';
@@ -322,9 +354,7 @@ export class TerminalManagerImpl implements TerminalManager {
                     .filter((t) => t !== 'unknown'),
             );
             if (shells.size > 0) {
-                await handleSettingUpShellProfile(shells, this.startupScriptProviders, (p, v) =>
-                    this.shellSetup.set(p.shellType, v),
-                );
+                await this.handleSetupCheck(shells);
             }
         }
     }

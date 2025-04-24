@@ -117,7 +117,7 @@ const regionEnd = '#endregion vscode python';
 function getActivationContent(): string {
     const lineSep = isWindows() ? '\r\n' : '\n';
     const activationContent = [
-        `# version: ${PWSH_SCRIPT_VERSION}`,
+        `#version: ${PWSH_SCRIPT_VERSION}`,
         `if (($env:TERM_PROGRAM -eq 'vscode') -and ($null -ne $env:${POWERSHELL_ENV_KEY})) {`,
         '    try {',
         `        Invoke-Expression $env:${POWERSHELL_ENV_KEY}`,
@@ -199,7 +199,6 @@ export class PowerShellClassicStartupProvider implements ShellStartupScriptProvi
     async isSetup(): Promise<ShellSetupState> {
         const isInstalled = await this.checkInstallation();
         if (!isInstalled) {
-            traceVerbose('PowerShell is not installed');
             return ShellSetupState.NotInstalled;
         }
 
@@ -232,7 +231,6 @@ export class PowerShellClassicStartupProvider implements ShellStartupScriptProvi
     async teardownScripts(): Promise<ShellScriptEditState> {
         const isInstalled = await this.checkInstallation();
         if (!isInstalled) {
-            traceVerbose('PowerShell is not installed');
             return ShellScriptEditState.NotInstalled;
         }
 
@@ -282,7 +280,6 @@ export class PwshStartupProvider implements ShellStartupScriptProvider {
     async setupScripts(): Promise<ShellScriptEditState> {
         const isInstalled = await this.checkInstallation();
         if (!isInstalled) {
-            traceVerbose('PowerShell is not installed');
             return ShellScriptEditState.NotInstalled;
         }
 
@@ -299,7 +296,6 @@ export class PwshStartupProvider implements ShellStartupScriptProvider {
     async teardownScripts(): Promise<ShellScriptEditState> {
         const isInstalled = await this.checkInstallation();
         if (!isInstalled) {
-            traceVerbose('PowerShell is not installed');
             return ShellScriptEditState.NotInstalled;
         }
 

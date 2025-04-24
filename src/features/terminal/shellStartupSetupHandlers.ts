@@ -2,30 +2,14 @@ import { l10n } from 'vscode';
 import { executeCommand } from '../../common/command.api';
 import { Common, ShellStartupActivationStrings } from '../../common/localize';
 import { traceInfo, traceVerbose } from '../../common/logging';
-import { isWindows } from '../../common/utils/platformUtils';
 import { showErrorMessage, showInformationMessage } from '../../common/window.apis';
-import { ShellConstants } from '../common/shellConstants';
 import { ShellScriptEditState, ShellStartupScriptProvider } from './shells/startupProvider';
 import { getAutoActivationType, setAutoActivationType } from './utils';
 
-function getProviders(shellTypes: Set<string>, providers: ShellStartupScriptProvider[]): ShellStartupScriptProvider[] {
-    return providers.filter((provider) => {
-        if (isWindows() && shellTypes.has(ShellConstants.PWSH) && provider.shellType === 'powershell') {
-            return true;
-        }
-        return shellTypes.has(provider.shellType);
-    });
-}
-
 export async function handleSettingUpShellProfile(
-    shellTypes: Set<string>,
-    allProviders: ShellStartupScriptProvider[],
+    providers: ShellStartupScriptProvider[],
     callback: (provider: ShellStartupScriptProvider, result: boolean) => void,
 ): Promise<void> {
-    const providers = getProviders(shellTypes, allProviders);
-    if (providers.length === 0) {
-        traceVerbose('No shell providers found for the specified shell types: ' + Array.from(shellTypes).join(', '));
-    }
     const shells = providers.map((p) => p.shellType).join(', ');
     const response = await showInformationMessage(
         l10n.t(
@@ -39,7 +23,9 @@ export async function handleSettingUpShellProfile(
 
     if (response === Common.yes) {
         traceVerbose(`User chose to set up shell profiles for ${shells} shells`);
-        const states = await Promise.all(providers.map((provider) => provider.setupScripts()));
+        const states = (await Promise.all(providers.map((provider) => provider.setupScripts()))).filter(
+            (state) => state !== ShellScriptEditState.NotInstalled,
+        );
         if (states.every((state) => state === ShellScriptEditState.Edited)) {
             setImmediate(async () => {
                 await showInformationMessage(
