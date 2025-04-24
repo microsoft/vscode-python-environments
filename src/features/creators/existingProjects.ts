@@ -88,10 +88,13 @@ export class ExistingProjects implements PythonProjectCreator {
             }
             return;
         } else {
-            return resultsInWorkspace.map((uri) => ({
+            const projects = resultsInWorkspace.map((uri) => ({
                 name: path.basename(uri.fsPath),
                 uri,
             })) as PythonProject[];
+            // Add the projects to the project manager
+            this.pm.add(projects);
+            return projects;
         }
     }
 }
