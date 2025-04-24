@@ -2,7 +2,6 @@ import * as path from 'path';
 import * as sinon from 'sinon';
 import * as typmoq from 'typemoq';
 import * as wapi from '../../../common/workspace.apis';
-import * as eapi from '../../../common/errors/utils';
 import * as winapi from '../../../common/window.apis';
 import { PythonProjectManager } from '../../../internal.api';
 import { createDeferred } from '../../../common/utils/deferred';
@@ -20,8 +19,7 @@ suite('Auto Find Project tests', () => {
 
     setup(() => {
         findFilesStub = sinon.stub(wapi, 'findFiles');
-        showErrorMessageStub = sinon.stub(eapi, 'showErrorMessage');
-
+        showErrorMessageStub = sinon.stub(winapi, 'showErrorMessage');
         showQuickPickWithButtonsStub = sinon.stub(winapi, 'showQuickPickWithButtons');
         showQuickPickWithButtonsStub.callsFake((items) => items);
 

@@ -12,11 +12,17 @@
     "typescript.tsc.autoDetect": "off",
     "editor.formatOnSave": true,
     "[typescript]": {
-        "editor.defaultFormatter": "esbenp.prettier-vscode"
+        "editor.defaultFormatter": "esbenp.prettier-vscode",
+        "editor.codeActionsOnSave": {
+            "source.organizeImports": "explicit"
+        }
     },
     "[python]": {
         "editor.defaultFormatter": "charliermarsh.ruff",
-        "diffEditor.ignoreTrimWhitespace": false
+        "diffEditor.ignoreTrimWhitespace": false,
+        "editor.codeActionsOnSave": {
+            "source.organizeImports": "explicit"
+        }
     },
     "prettier.tabWidth": 4,
     "python-envs.defaultEnvManager": "ms-python.python:venv",
