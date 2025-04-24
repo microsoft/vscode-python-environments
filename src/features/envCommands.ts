@@ -3,7 +3,6 @@ import {
     CreateEnvironmentOptions,
     PythonEnvironment,
     PythonEnvironmentApi,
-    PythonProject,
     PythonProjectCreator,
     PythonProjectCreatorOptions,
 } from '../api';
@@ -377,10 +376,8 @@ export async function addPythonProjectCommand(
         return;
     }
 
-
-    let results: PythonProject | PythonProject[] | undefined;
     try {
-        results = await creator.create(options);
+        const results = await creator.create(options);
         if (results === undefined) {
             return;
         }
