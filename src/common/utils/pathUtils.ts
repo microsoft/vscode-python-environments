@@ -51,7 +51,7 @@ function isEqual(uri1: Uri | undefined, uri2: Uri | undefined): boolean {
 function getComparisonKey(uri: Uri): string {
     return uri
         .with({
-            path: uri.path.toLowerCase(),
+            path: isWindows() ? uri.path.toLowerCase() : uri.path,
             fragment: undefined,
         })
         .toString();
