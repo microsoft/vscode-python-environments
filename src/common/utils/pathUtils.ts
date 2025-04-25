@@ -1,10 +1,7 @@
-import { NotebookCell, NotebookDocument, Uri, workspace } from 'vscode';
-import { isWindows } from '../../managers/common/utils';
 import * as os from 'os';
 import * as path from 'path';
-import { Uri } from 'vscode';
+import { NotebookCell, NotebookDocument, Uri, workspace } from 'vscode';
 import { isWindows } from './platformUtils';
-
 
 export function checkUri(scope?: Uri | Uri[] | string): Uri | Uri[] | string | undefined {
     if (!scope) {
@@ -59,7 +56,6 @@ function getComparisonKey(uri: Uri): string {
         })
         .toString();
 }
-
 
 export function normalizePath(fsPath: string): string {
     const path1 = fsPath.replace(/\\/g, '/');
