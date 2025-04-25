@@ -17,6 +17,10 @@ export namespace Common {
     export const installPython = l10n.t('Install Python');
 }
 
+export namespace WorkbenchStrings {
+    export const installExtension = l10n.t('Install Extension');
+}
+
 export namespace Interpreter {
     export const statusBarSelect = l10n.t('Select Interpreter');
     export const browsePath = l10n.t('Browse...');

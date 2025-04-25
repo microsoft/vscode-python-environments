@@ -15,6 +15,7 @@ import {
     onDidChangeActiveTextEditor,
     onDidChangeTerminalShellIntegration,
 } from './common/window.apis';
+import { createManagerReady } from './features/common/managerReady';
 import { GetEnvironmentInfoTool, InstallPackageTool } from './features/copilotTools';
 import { AutoFindProjects } from './features/creators/autoFindProjects';
 import { ExistingProjects } from './features/creators/existingProjects';
@@ -89,6 +90,7 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
     context.subscriptions.push(envVarManager);
 
     const envManagers: EnvironmentManagers = new PythonEnvironmentManagers(projectManager);
+    createManagerReady(envManagers, projectManager, context.subscriptions);
     context.subscriptions.push(envManagers);
 
     const terminalActivation = new TerminalActivationImpl();

@@ -333,7 +333,7 @@ export interface QuickCreateConfig {
  */
 export interface EnvironmentManager {
     /**
-     * The name of the environment manager.
+     * The name of the environment manager. Allowed characters (a-z, A-Z, 0-9, -, _).
      */
     readonly name: string;
 
@@ -564,7 +564,7 @@ export interface DidChangePackagesEventArgs {
  */
 export interface PackageManager {
     /**
-     * The name of the package manager.
+     * The name of the package manager. Allowed characters (a-z, A-Z, 0-9, -, _).
      */
     name: string;
 
