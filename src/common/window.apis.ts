@@ -333,22 +333,6 @@ export function showWarningMessage(message: string, ...items: any[]): Thenable<s
     return window.showWarningMessage(message, ...items);
 }
 
-export function showErrorMessage<T extends string>(message: string, ...items: T[]): Thenable<T | undefined>;
-export function showErrorMessage<T extends string>(
-    message: string,
-    options: MessageOptions,
-    ...items: T[]
-): Thenable<T | undefined>;
-export function showErrorMessage<T extends MessageItem>(message: string, ...items: T[]): Thenable<T | undefined>;
-export function showErrorMessage<T extends MessageItem>(
-    message: string,
-    options: MessageOptions,
-    ...items: T[]
-): Thenable<T | undefined>;
-export function showErrorMessage(message: string, ...items: any[]): Thenable<string | undefined> {
-    return window.showErrorMessage(message, ...items);
-}
-
 export function showInputBox(options?: InputBoxOptions, token?: CancellationToken): Thenable<string | undefined> {
     return window.showInputBox(options, token);
 }
