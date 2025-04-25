@@ -147,10 +147,10 @@ export async function manageCopilotInstructionsFile(
     const customInstructions = await fs.pathExists(customInstructionsPath);
     if (customInstructions) {
         // Append to the existing file
-        await fs.appendFile(customInstructionsPath, instructionsText.replace('<package_name>', packageName));
+        await fs.appendFile(customInstructionsPath, instructionsText.replace(/<package_name>/g, packageName));
     } else {
         // Create the file if it doesn't exist
-        await fs.writeFile(customInstructionsPath, instructionsText.replace('<package_name>', packageName));
+        await fs.writeFile(customInstructionsPath, instructionsText.replace(/<package_name>/g, packageName));
     }
 }
 
