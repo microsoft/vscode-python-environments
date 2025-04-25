@@ -12,24 +12,24 @@ import { EnvironmentManagers, InternalEnvironmentManager } from '../../internal.
  */
 export async function promptForVenv(callback: () => void): Promise<boolean | undefined> {
     try {
+        const venvChoice = await showQuickPickWithButtons([{ label: 'Yes' }, { label: 'No' }], {
+            placeHolder: 'Would you like to create a new virtual environment for this project?',
+            ignoreFocusOut: true,
+            showBackButton: true,
+        });
+        if (!venvChoice) {
+            return undefined;
+        }
+        if (Array.isArray(venvChoice)) {
+            // Should not happen for single selection, but handle just in case
+            return venvChoice.some((item) => item.label === 'Yes');
+        }
+        return venvChoice.label === 'Yes';
     } catch (ex) {
         if (ex === QuickInputButtons.Back) {
             callback();
         }
     }
-    const venvChoice = await showQuickPickWithButtons([{ label: 'Yes' }, { label: 'No' }], {
-        placeHolder: 'Would you like to create a new virtual environment for this project?',
-        ignoreFocusOut: true,
-        showBackButton: true,
-    });
-    if (!venvChoice) {
-        return undefined;
-    }
-    if (Array.isArray(venvChoice)) {
-        // Should not happen for single selection, but handle just in case
-        return venvChoice.some((item) => item.label === 'Yes');
-    }
-    return venvChoice.label === 'Yes';
 }
 
 /**
