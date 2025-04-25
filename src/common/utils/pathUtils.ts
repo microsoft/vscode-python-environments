@@ -49,14 +49,10 @@ function isEqual(uri1: Uri | undefined, uri2: Uri | undefined): boolean {
 function getComparisonKey(uri: Uri): string {
     return uri
         .with({
-            path: ignorePathCasing(uri) ? uri.path.toLowerCase() : undefined,
+            path: uri.path.toLowerCase(),
             fragment: undefined,
         })
         .toString();
-}
-
-function ignorePathCasing(_uri: Uri): boolean {
-    return true;
 }
 
 export function normalizePath(path: string): string {
