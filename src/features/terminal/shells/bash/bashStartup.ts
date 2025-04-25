@@ -111,7 +111,7 @@ async function removeStartup(profile: string, key: string): Promise<boolean> {
 }
 
 export class BashStartupProvider implements ShellStartupScriptProvider {
-    public readonly name: string = 'Bash';
+    public readonly name: string = 'bash';
     public readonly shellType: string = ShellConstants.BASH;
 
     private async checkShellInstalled(): Promise<boolean> {
@@ -178,7 +178,7 @@ export class BashStartupProvider implements ShellStartupScriptProvider {
 }
 
 export class ZshStartupProvider implements ShellStartupScriptProvider {
-    public readonly name: string = 'Zsh';
+    public readonly name: string = 'zsh';
     public readonly shellType: string = ShellConstants.ZSH;
 
     private async checkShellInstalled(): Promise<boolean> {
@@ -239,7 +239,7 @@ export class ZshStartupProvider implements ShellStartupScriptProvider {
 }
 
 export class GitBashStartupProvider implements ShellStartupScriptProvider {
-    public readonly name: string = 'GitBash';
+    public readonly name: string = 'Git bash';
     public readonly shellType: string = ShellConstants.GITBASH;
 
     private async checkShellInstalled(): Promise<boolean> {

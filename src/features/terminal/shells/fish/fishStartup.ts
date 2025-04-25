@@ -95,7 +95,7 @@ async function removeFishStartup(profilePath: string, key: string): Promise<bool
 }
 
 export class FishStartupProvider implements ShellStartupScriptProvider {
-    public readonly name: string = 'Fish';
+    public readonly name: string = 'fish';
     public readonly shellType: string = ShellConstants.FISH;
 
     async isSetup(): Promise<ShellSetupState> {
