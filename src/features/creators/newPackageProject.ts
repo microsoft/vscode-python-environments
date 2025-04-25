@@ -1,6 +1,6 @@
 import * as fs from 'fs-extra';
 import * as path from 'path';
-import { commands, MarkdownString, QuickInputButtons, Uri, window, workspace } from 'vscode';
+import { commands, l10n, MarkdownString, QuickInputButtons, Uri, window, workspace } from 'vscode';
 import { PythonProject, PythonProjectCreator, PythonProjectCreatorOptions } from '../../api';
 import { NEW_PROJECT_TEMPLATES_FOLDER } from '../../common/constants';
 import { showInputBoxWithButtons } from '../../common/window.apis';
@@ -15,10 +15,10 @@ import {
 } from './creationHelpers';
 
 export class NewPackageProject implements PythonProjectCreator {
-    public readonly name = 'newPackage';
-    public readonly displayName = 'Package';
-    public readonly description = 'Creates a package folder in your current workspace';
-    public readonly tooltip = new MarkdownString('Create a new Python package');
+    public readonly name = l10n.t('newPackage');
+    public readonly displayName = l10n.t('Package');
+    public readonly description = l10n.t('Creates a package folder in your current workspace');
+    public readonly tooltip = new MarkdownString(l10n.t('Create a new Python package'));
 
     constructor(private readonly envManagers: EnvironmentManagers) {}
 
@@ -38,16 +38,18 @@ export class NewPackageProject implements PythonProjectCreator {
             if (!packageName) {
                 try {
                     packageName = await showInputBoxWithButtons({
-                        prompt: 'What is the name of the package? (e.g. my_package)',
+                        prompt: l10n.t('What is the name of the package? (e.g. my_package)'),
                         ignoreFocusOut: true,
                         showBackButton: true,
                         validateInput: (value) => {
                             // following PyPI (PEP 508) rules for package names
                             if (!/^([a-z_]|[a-z0-9_][a-z0-9._-]*[a-z0-9_])$/i.test(value)) {
-                                return 'Invalid package name. Use only letters, numbers, underscores, hyphens, or periods. Must start and end with a letter or number.';
+                                return l10n.t(
+                                    'Invalid package name. Use only letters, numbers, underscores, hyphens, or periods. Must start and end with a letter or number.',
+                                );
                             }
                             if (/^[-._0-9]$/i.test(value)) {
-                                return 'Single-character package names cannot be a number, hyphen, or period.';
+                                return l10n.t('Single-character package names cannot be a number, hyphen, or period.');
                             }
                             return null;
                         },
@@ -73,14 +75,10 @@ export class NewPackageProject implements PythonProjectCreator {
                 }
             }
 
-            window.showInformationMessage(
-                `Creating a new Python project: ${packageName}\nvenv: ${createVenv}\nCopilot instructions: ${createCopilotInstructions}`,
-            );
-
             // 1. Copy template folder
             const newPackageTemplateFolder = path.join(NEW_PROJECT_TEMPLATES_FOLDER, 'newPackageTemplate');
             if (!(await fs.pathExists(newPackageTemplateFolder))) {
-                window.showErrorMessage('Template folder does not exist, aborting creation.');
+                window.showErrorMessage(l10n.t('Template folder does not exist, aborting creation.'));
                 return undefined;
             }
 
@@ -89,7 +87,7 @@ export class NewPackageProject implements PythonProjectCreator {
             if (!destRoot) {
                 const workspaceFolders = workspace.workspaceFolders;
                 if (!workspaceFolders || workspaceFolders.length === 0) {
-                    window.showErrorMessage('No workspace folder is open or provided, aborting creation.');
+                    window.showErrorMessage(l10n.t('No workspace folder is open or provided, aborting creation.'));
                     return undefined;
                 }
                 destRoot = workspaceFolders[0].uri.fsPath;
@@ -99,7 +97,9 @@ export class NewPackageProject implements PythonProjectCreator {
             const projectDestinationFolder = path.join(destRoot, `${packageName}_project`);
             if (await fs.pathExists(projectDestinationFolder)) {
                 window.showErrorMessage(
-                    'A project folder by that name already exists, aborting creation. Please retry with a unique package name given your workspace.',
+                    l10n.t(
+                        'A project folder by that name already exists, aborting creation. Please retry with a unique package name given your workspace.',
+                    ),
                 );
                 return undefined;
             }
@@ -118,7 +118,7 @@ export class NewPackageProject implements PythonProjectCreator {
             const pythonEnvironment = await this.envManagers.getEnvironment(Uri.parse(projectDestinationFolder));
 
             if (!pythonEnvironment) {
-                window.showErrorMessage('Python environment not found.');
+                window.showErrorMessage(l10n.t('Python environment not found.'));
                 return undefined;
             }
 

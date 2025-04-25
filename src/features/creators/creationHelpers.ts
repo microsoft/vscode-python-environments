@@ -1,6 +1,6 @@
 import * as fs from 'fs-extra';
 import * as path from 'path';
-import { extensions, QuickInputButtons, Uri, window } from 'vscode';
+import { extensions, l10n, QuickInputButtons, Uri, window } from 'vscode';
 import { CreateEnvironmentOptions } from '../../api';
 import { traceError, traceVerbose } from '../../common/logging';
 import { showQuickPickWithButtons } from '../../common/window.apis';
@@ -12,8 +12,8 @@ import { EnvironmentManagers, InternalEnvironmentManager } from '../../internal.
  */
 export async function promptForVenv(callback: () => void): Promise<boolean | undefined> {
     try {
-        const venvChoice = await showQuickPickWithButtons([{ label: 'Yes' }, { label: 'No' }], {
-            placeHolder: 'Would you like to create a new virtual environment for this project?',
+        const venvChoice = await showQuickPickWithButtons([{ label: l10n.t('Yes') }, { label: l10n.t('No') }], {
+            placeHolder: l10n.t('Would you like to create a new virtual environment for this project?'),
             ignoreFocusOut: true,
             showBackButton: true,
         });
