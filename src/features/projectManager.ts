@@ -9,6 +9,12 @@ import {
     onDidChangeWorkspaceFolders,
 } from '../common/workspace.apis';
 import { createSimpleDebounce } from '../common/utils/debounce';
+import {
+    addPythonProjectSetting,
+    EditProjectSettings,
+    getDefaultEnvManagerSetting,
+    getDefaultPkgManagerSetting,
+} from './settings/settingHelpers';
 
 type ProjectArray = PythonProject[];
 
@@ -92,14 +98,24 @@ export class PythonProjectManagerImpl implements PythonProjectManager {
         return new PythonProjectsImpl(name, uri, options);
     }
 
-    add(projects: PythonProject | ProjectArray): void {
+    async add(projects: PythonProject | ProjectArray): Promise<void> {
         const _projects = Array.isArray(projects) ? projects : [projects];
         if (_projects.length === 0) {
             return;
         }
+        const edits: EditProjectSettings[] = [];
 
-        _projects.forEach((w) => this._projects.set(w.uri.toString(), w));
+        const envManagerId = getDefaultEnvManagerSetting(this);
+        const pkgManagerId = getDefaultPkgManagerSetting(this);
+
+        _projects.forEach((w) => {
+            edits.push({ project: w, envManager: envManagerId, packageManager: pkgManagerId });
+            return this._projects.set(w.uri.toString(), w);
+        });
         this._onDidChangeProjects.fire(Array.from(this._projects.values()));
+
+        // handle bulk edits to avoid multiple calls to the setting
+        await addPythonProjectSetting(edits);
     }
 
     remove(projects: PythonProject | ProjectArray): void {

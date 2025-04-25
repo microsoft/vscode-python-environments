@@ -22,7 +22,7 @@ import { AutoFindProjects } from './features/creators/autoFindProjects';
 import { ExistingProjects } from './features/creators/existingProjects';
 import { ProjectCreatorsImpl } from './features/creators/projectCreators';
 import {
-    addPythonProject,
+    addPythonProjectCommand,
     copyPathToClipboard,
     createAnyEnvironmentCommand,
     createEnvironmentCommand,
@@ -187,7 +187,7 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
             await setPackageManagerCommand(envManagers, projectManager);
         }),
         commands.registerCommand('python-envs.addPythonProject', async (resource) => {
-            await addPythonProject(resource, projectManager, envManagers, projectCreators);
+            await addPythonProjectCommand(resource, projectManager, envManagers, projectCreators);
         }),
         commands.registerCommand('python-envs.removePythonProject', async (item) => {
             await resetEnvironmentCommand(item, envManagers, projectManager);
