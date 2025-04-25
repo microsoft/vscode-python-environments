@@ -15,9 +15,11 @@ import {
     PythonPackageGetterApi,
     PythonPackageManagementApi,
     PythonProjectEnvironmentApi,
+    PythonProjectGetterApi,
 } from '../api';
 import { createDeferred } from '../common/utils/deferred';
 import { EnvironmentManagers } from '../internal.api';
+import { getResourceUri } from '../common/utils/pathUtils';
 
 export interface IResourceReference {
     resourcePath?: string;
@@ -35,7 +37,7 @@ interface EnvironmentInfo {
  */
 export class GetEnvironmentInfoTool implements LanguageModelTool<IResourceReference> {
     constructor(
-        private readonly api: PythonProjectEnvironmentApi & PythonPackageGetterApi,
+        private readonly api: PythonProjectEnvironmentApi & PythonPackageGetterApi & PythonProjectGetterApi,
         private readonly envManagers: EnvironmentManagers,
     ) {}
     /**
@@ -59,7 +61,12 @@ export class GetEnvironmentInfoTool implements LanguageModelTool<IResourceRefere
         if (parameters.resourcePath === undefined || parameters.resourcePath === '') {
             throw new Error('Invalid input: resourcePath is required');
         }
-        const resourcePath: Uri = Uri.parse(parameters.resourcePath);
+        const projects = this.api.getPythonProjects() || [];
+        let root = projects.length > 0 ? projects[0].uri.fsPath : undefined;
+        const resourcePath: Uri | undefined = getResourceUri(parameters.resourcePath, root);
+        if (!resourcePath) {
+            throw new Error('Invalid input: Unable to resolve resource path');
+        }
 
         // environment info set to default values
         const envInfo: EnvironmentInfo = {
@@ -157,7 +164,7 @@ function BuildEnvironmentInfoContent(envInfo: EnvironmentInfo): LanguageModelTex
  */
 export interface IInstallPackageInput {
     packageList: string[];
-    workspacePath?: string;
+    resourcePath?: string;
 }
 
 /**
@@ -185,7 +192,7 @@ export class InstallPackageTool implements LanguageModelTool<IInstallPackageInpu
         });
 
         const parameters: IInstallPackageInput = options.input;
-        const workspacePath = parameters.workspacePath ? Uri.file(parameters.workspacePath) : undefined;
+        const workspacePath = parameters.resourcePath ? Uri.file(parameters.resourcePath) : undefined;
         if (!workspacePath) {
             throw new Error('Invalid input: workspacePath is required');
         }

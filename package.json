@@ -86,6 +86,22 @@
                         "onExP",
                         "preview"
                     ]
+                },
+                "python-envs.terminal.autoActivationType": {
+                    "type": "string",
+                    "markdownDescription": "%python-envs.terminal.autoActivationType.description%",
+                    "default": "command",
+                    "enum": [
+                        "command",
+                        "shellStartup",
+                        "off"
+                    ],
+                    "markdownEnumDescriptions": [
+                        "%python-envs.terminal.autoActivationType.command%",
+                        "%python-envs.terminal.autoActivationType.shellStartup%",
+                        "%python-envs.terminal.autoActivationType.off%"
+                    ],
+                    "scope": "machine"
                 }
             }
         },
@@ -228,6 +244,12 @@
                 "title": "%python-envs.copyProjectPath.title%",
                 "category": "Python Envs",
                 "icon": "$(copy)"
+            },
+            {
+                "command": "python-envs.terminal.revertStartupScriptChanges",
+                "title": "%python-envs.terminal.revertStartupScriptChanges.title%",
+                "category": "Python Envs",
+                "icon": "$(discard)"
             }
         ],
         "menus": {
@@ -487,7 +509,7 @@
         ],
         "languageModelTools": [
             {
-                "name": "python_environment_tool",
+                "name": "python_environment",
                 "displayName": "Get Python Environment Information",
                 "modelDescription": "Provides details about the Python environment for a specified file or workspace, including environment type, Python version, run command, and installed packages with their versions.",
                 "toolReferenceName": "pythonGetEnvironmentInfo",
@@ -508,7 +530,7 @@
                 }
             },
             {
-                "name": "python_install_package_tool",
+                "name": "python_install_package",
                 "displayName": "Install Python Package",
                 "modelDescription": "Installs Python packages in the given workspace. Use this tool to install packages in the user's chosen environment.",
                 "toolReferenceName": "pythonInstallPackage",
@@ -525,14 +547,14 @@
                             },
                             "description": "The list of packages to install."
                         },
-                        "workspacePath": {
+                        "resourcePath": {
                             "type": "string",
-                            "description": "Path to Python workspace that determines the environment for package installation."
+                            "description": "The path to the Python file or workspace to get the environment information for."
                         }
                     },
                     "required": [
                         "packageList",
-                        "workspacePath"
+                        "resourcePath"
                     ]
                 }
             }

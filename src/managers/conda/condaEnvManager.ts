@@ -18,7 +18,12 @@ import {
     ResolveEnvironmentContext,
     SetEnvironmentScope,
 } from '../../api';
+import { CondaStrings } from '../../common/localize';
+import { createDeferred, Deferred } from '../../common/utils/deferred';
+import { showErrorMessage, withProgress } from '../../common/window.apis';
+import { NativePythonFinder } from '../common/nativePythonFinder';
 import {
+    checkForNoPythonCondaEnvironment,
     clearCondaCache,
     createCondaEnvironment,
     deleteCondaEnvironment,
@@ -33,16 +38,10 @@ import {
     setCondaForWorkspace,
     setCondaForWorkspaces,
 } from './condaUtils';
-import { NativePythonFinder } from '../common/nativePythonFinder';
-import { createDeferred, Deferred } from '../../common/utils/deferred';
-import { withProgress } from '../../common/window.apis';
-import { CondaStrings } from '../../common/localize';
-import { showErrorMessage } from '../../common/errors/utils';
 
 export class CondaEnvManager implements EnvironmentManager, Disposable {
     private collection: PythonEnvironment[] = [];
     private fsPathToEnv: Map<string, PythonEnvironment> = new Map();
-    private disposablesMap: Map<string, Disposable> = new Map();
     private globalEnv: PythonEnvironment | undefined;
 
     private readonly _onDidChangeEnvironment = new EventEmitter<DidChangeEnvironmentEventArgs>();
@@ -71,7 +70,8 @@ export class CondaEnvManager implements EnvironmentManager, Disposable {
     iconPath?: IconPath;
 
     public dispose() {
-        this.disposablesMap.forEach((d) => d.dispose());
+        this.collection = [];
+        this.fsPathToEnv.clear();
     }
 
     private _initialized: Deferred<void> | undefined;
@@ -167,20 +167,7 @@ export class CondaEnvManager implements EnvironmentManager, Disposable {
                 );
             }
             if (result) {
-                this.disposablesMap.set(
-                    result.envId.id,
-                    new Disposable(() => {
-                        if (result) {
-                            this.collection = this.collection.filter((env) => env.envId.id !== result?.envId.id);
-                            Array.from(this.fsPathToEnv.entries())
-                                .filter(([, env]) => env.envId.id === result?.envId.id)
-                                .forEach(([uri]) => this.fsPathToEnv.delete(uri));
-                            this.disposablesMap.delete(result.envId.id);
-                        }
-                    }),
-                );
-                this.collection.push(result);
-                this._onDidChangeEnvironments.fire([{ kind: EnvironmentChangeKind.add, environment: result }]);
+                this.addEnvironment(result);
             }
 
             return result;
@@ -190,12 +177,28 @@ export class CondaEnvManager implements EnvironmentManager, Disposable {
         }
     }
 
+    private addEnvironment(environment: PythonEnvironment, raiseEvent: boolean = true): void {
+        this.collection.push(environment);
+        if (raiseEvent) {
+            this._onDidChangeEnvironments.fire([{ kind: EnvironmentChangeKind.add, environment: environment }]);
+        }
+    }
+
+    private removeEnvironment(environment: PythonEnvironment, raiseEvent: boolean = true): void {
+        this.collection = this.collection.filter((env) => env.envId.id !== environment.envId.id);
+        Array.from(this.fsPathToEnv.entries())
+            .filter(([, env]) => env.envId.id === environment.envId.id)
+            .forEach(([uri]) => this.fsPathToEnv.delete(uri));
+        if (raiseEvent) {
+            this._onDidChangeEnvironments.fire([{ kind: EnvironmentChangeKind.remove, environment }]);
+        }
+    }
+
     async remove(context: PythonEnvironment): Promise<void> {
         try {
             const projects = this.getProjectsForEnvironment(context);
+            this.removeEnvironment(context, false);
             await deleteCondaEnvironment(context, this.log);
-            this.disposablesMap.get(context.envId.id)?.dispose();
-
             setImmediate(() => {
                 this._onDidChangeEnvironments.fire([{ kind: EnvironmentChangeKind.remove, environment: context }]);
                 projects.forEach((project) =>
@@ -208,9 +211,6 @@ export class CondaEnvManager implements EnvironmentManager, Disposable {
     }
     async refresh(context: RefreshEnvironmentsScope): Promise<void> {
         if (context === undefined) {
-            this.disposablesMap.forEach((d) => d.dispose());
-            this.disposablesMap.clear();
-
             await withProgress(
                 {
                     location: ProgressLocation.Window,
@@ -253,18 +253,22 @@ export class CondaEnvManager implements EnvironmentManager, Disposable {
     }
 
     async set(scope: SetEnvironmentScope, environment?: PythonEnvironment | undefined): Promise<void> {
+        const checkedEnv = environment
+            ? await checkForNoPythonCondaEnvironment(this.nativeFinder, this, environment, this.api, this.log)
+            : undefined;
+
         if (scope === undefined) {
-            await setCondaForGlobal(environment?.environmentPath?.fsPath);
+            await setCondaForGlobal(checkedEnv?.environmentPath?.fsPath);
         } else if (scope instanceof Uri) {
             const folder = this.api.getPythonProject(scope);
             const fsPath = folder?.uri?.fsPath ?? scope.fsPath;
             if (fsPath) {
-                if (environment) {
-                    this.fsPathToEnv.set(fsPath, environment);
+                if (checkedEnv) {
+                    this.fsPathToEnv.set(fsPath, checkedEnv);
                 } else {
                     this.fsPathToEnv.delete(fsPath);
                 }
-                await setCondaForWorkspace(fsPath, environment?.environmentPath.fsPath);
+                await setCondaForWorkspace(fsPath, checkedEnv?.environmentPath.fsPath);
             }
         } else if (Array.isArray(scope) && scope.every((u) => u instanceof Uri)) {
             const projects: PythonProject[] = [];
@@ -279,8 +283,8 @@ export class CondaEnvManager implements EnvironmentManager, Disposable {
             const before: Map<string, PythonEnvironment | undefined> = new Map();
             projects.forEach((p) => {
                 before.set(p.uri.fsPath, this.fsPathToEnv.get(p.uri.fsPath));
-                if (environment) {
-                    this.fsPathToEnv.set(p.uri.fsPath, environment);
+                if (checkedEnv) {
+                    this.fsPathToEnv.set(p.uri.fsPath, checkedEnv);
                 } else {
                     this.fsPathToEnv.delete(p.uri.fsPath);
                 }
@@ -288,14 +292,27 @@ export class CondaEnvManager implements EnvironmentManager, Disposable {
 
             await setCondaForWorkspaces(
                 projects.map((p) => p.uri.fsPath),
-                environment?.environmentPath.fsPath,
+                checkedEnv?.environmentPath.fsPath,
             );
 
             projects.forEach((p) => {
                 const b = before.get(p.uri.fsPath);
-                if (b?.envId.id !== environment?.envId.id) {
-                    this._onDidChangeEnvironment.fire({ uri: p.uri, old: b, new: environment });
+                if (b?.envId.id !== checkedEnv?.envId.id) {
+                    this._onDidChangeEnvironment.fire({ uri: p.uri, old: b, new: checkedEnv });
                 }
+            });
+        }
+
+        if (environment && checkedEnv && checkedEnv.envId.id !== environment.envId.id) {
+            this.removeEnvironment(environment, false);
+            this.addEnvironment(checkedEnv, false);
+            setImmediate(() => {
+                this._onDidChangeEnvironments.fire([
+                    { kind: EnvironmentChangeKind.remove, environment },
+                    { kind: EnvironmentChangeKind.add, environment: checkedEnv },
+                ]);
+                const uri = scope ? (scope instanceof Uri ? scope : scope[0]) : undefined;
+                this._onDidChangeEnvironment.fire({ uri, old: environment, new: checkedEnv });
             });
         }
     }

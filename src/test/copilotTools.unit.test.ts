@@ -10,6 +10,7 @@ import {
     PythonPackageGetterApi,
     PythonPackageManagementApi,
     PythonProjectEnvironmentApi,
+    PythonProjectGetterApi,
 } from '../api';
 import { createDeferred } from '../common/utils/deferred';
 import {
@@ -45,7 +46,7 @@ suite('InstallPackageTool Tests', () => {
 
     test('should throw error if workspacePath is an empty string', async () => {
         const testFile: IInstallPackageInput = {
-            workspacePath: '',
+            resourcePath: '',
             packageList: ['package1', 'package2'],
         };
         const options = { input: testFile, toolInvocationToken: undefined };
@@ -60,7 +61,7 @@ suite('InstallPackageTool Tests', () => {
         mockEnvironment.setup((x: any) => x.then).returns(() => undefined);
 
         const testFile: IInstallPackageInput = {
-            workspacePath: 'this/is/a/test/path.ipynb',
+            resourcePath: 'this/is/a/test/path.ipynb',
             packageList: ['package1', 'package2'],
         };
         const options = { input: testFile, toolInvocationToken: undefined };
@@ -74,7 +75,7 @@ suite('InstallPackageTool Tests', () => {
 
     test('should throw error for notebook cells', async () => {
         const testFile: IInstallPackageInput = {
-            workspacePath: 'this/is/a/test/path.ipynb#cell',
+            resourcePath: 'this/is/a/test/path.ipynb#cell',
             packageList: ['package1', 'package2'],
         };
         const options = { input: testFile, toolInvocationToken: undefined };
@@ -88,7 +89,7 @@ suite('InstallPackageTool Tests', () => {
 
     test('should throw error if packageList passed in is empty', async () => {
         const testFile: IInstallPackageInput = {
-            workspacePath: 'path/to/workspace',
+            resourcePath: 'path/to/workspace',
             packageList: [],
         };
 
@@ -101,7 +102,7 @@ suite('InstallPackageTool Tests', () => {
 
     test('should handle cancellation', async () => {
         const testFile: IInstallPackageInput = {
-            workspacePath: 'path/to/workspace',
+            resourcePath: 'path/to/workspace',
             packageList: ['package1', 'package2'],
         };
 
@@ -130,7 +131,7 @@ suite('InstallPackageTool Tests', () => {
 
     test('should handle packages installation', async () => {
         const testFile: IInstallPackageInput = {
-            workspacePath: 'path/to/workspace',
+            resourcePath: 'path/to/workspace',
             packageList: ['package1', 'package2'],
         };
 
@@ -161,7 +162,7 @@ suite('InstallPackageTool Tests', () => {
     });
     test('should handle package installation failure', async () => {
         const testFile: IInstallPackageInput = {
-            workspacePath: 'path/to/workspace',
+            resourcePath: 'path/to/workspace',
             packageList: ['package1', 'package2'],
         };
 
@@ -194,7 +195,7 @@ suite('InstallPackageTool Tests', () => {
     });
     test('should handle error occurs when getting environment', async () => {
         const testFile: IInstallPackageInput = {
-            workspacePath: 'path/to/workspace',
+            resourcePath: 'path/to/workspace',
             packageList: ['package1', 'package2'],
         };
         mockApi
@@ -212,7 +213,7 @@ suite('InstallPackageTool Tests', () => {
     });
     test('correct plurality in package installation message', async () => {
         const testFile: IInstallPackageInput = {
-            workspacePath: 'path/to/workspace',
+            resourcePath: 'path/to/workspace',
             packageList: ['package1'],
         };
         mockApi
@@ -239,16 +240,14 @@ suite('InstallPackageTool Tests', () => {
 
 suite('GetEnvironmentInfoTool Tests', () => {
     let getEnvironmentInfoTool: GetEnvironmentInfoTool;
-    let mockApi: typeMoq.IMock<PythonProjectEnvironmentApi & PythonPackageGetterApi & PythonPackageManagementApi>;
+    let mockApi: typeMoq.IMock<PythonProjectEnvironmentApi & PythonPackageGetterApi & PythonProjectGetterApi>;
     let mockEnvironment: typeMoq.IMock<PythonEnvironment>;
     let em: typeMoq.IMock<EnvironmentManagers>;
     let managerSys: typeMoq.IMock<InternalEnvironmentManager>;
 
     setup(() => {
         // Create mock functions
-        mockApi = typeMoq.Mock.ofType<
-            PythonProjectEnvironmentApi & PythonPackageGetterApi & PythonPackageManagementApi
-        >();
+        mockApi = typeMoq.Mock.ofType<PythonProjectEnvironmentApi & PythonPackageGetterApi & PythonProjectGetterApi>();
         mockEnvironment = typeMoq.Mock.ofType<PythonEnvironment>();
 
         // eslint-disable-next-line @typescript-eslint/no-explicit-any

@@ -1,4 +1,19 @@
 import * as ch from 'child_process';
+import * as fse from 'fs-extra';
+import * as os from 'os';
+import * as path from 'path';
+import {
+    CancellationError,
+    CancellationToken,
+    l10n,
+    LogOutputChannel,
+    ProgressLocation,
+    QuickInputButtons,
+    QuickPickItem,
+    ThemeIcon,
+    Uri,
+} from 'vscode';
+import which from 'which';
 import {
     EnvironmentManager,
     Package,
@@ -10,21 +25,25 @@ import {
     PythonEnvironmentInfo,
     PythonProject,
 } from '../../api';
-import * as path from 'path';
-import * as os from 'os';
-import * as fse from 'fs-extra';
-import {
-    CancellationError,
-    CancellationToken,
-    l10n,
-    LogOutputChannel,
-    ProgressLocation,
-    QuickInputButtons,
-    QuickPickItem,
-    Uri,
-} from 'vscode';
 import { ENVS_EXTENSION_ID, EXTENSION_ROOT_DIR } from '../../common/constants';
+import { showErrorMessageWithLogs } from '../../common/errors/utils';
+import { Common, CondaStrings, PackageManagement, Pickers } from '../../common/localize';
+import { traceInfo } from '../../common/logging';
+import { getGlobalPersistentState, getWorkspacePersistentState } from '../../common/persistentState';
+import { pickProject } from '../../common/pickers/projects';
 import { createDeferred } from '../../common/utils/deferred';
+import { untildify } from '../../common/utils/pathUtils';
+import { isWindows } from '../../common/utils/platformUtils';
+import {
+    showErrorMessage,
+    showInputBox,
+    showQuickPick,
+    showQuickPickWithButtons,
+    withProgress,
+} from '../../common/window.apis';
+import { getConfiguration } from '../../common/workspace.apis';
+import { ShellConstants } from '../../features/common/shellConstants';
+import { quoteArgs } from '../../features/execution/execUtils';
 import {
     isNativeEnvInfo,
     NativeEnvInfo,
@@ -32,17 +51,9 @@ import {
     NativePythonEnvironmentKind,
     NativePythonFinder,
 } from '../common/nativePythonFinder';
-import { getConfiguration } from '../../common/workspace.apis';
-import { getGlobalPersistentState, getWorkspacePersistentState } from '../../common/persistentState';
-import which from 'which';
-import { Installable, isWindows, shortVersion, sortEnvironments, untildify } from '../common/utils';
-import { pickProject } from '../../common/pickers/projects';
-import { CondaStrings, PackageManagement, Pickers } from '../../common/localize';
-import { showErrorMessage } from '../../common/errors/utils';
-import { showInputBox, showQuickPick, showQuickPickWithButtons, withProgress } from '../../common/window.apis';
 import { selectFromCommonPackagesToInstall } from '../common/pickers';
-import { quoteArgs } from '../../features/execution/execUtils';
-import { traceInfo } from '../../common/logging';
+import { Installable } from '../common/types';
+import { shortVersion, sortEnvironments } from '../common/utils';
 
 export const CONDA_PATH_KEY = `${ENVS_EXTENSION_ID}:conda:CONDA_PATH`;
 export const CONDA_PREFIXES_KEY = `${ENVS_EXTENSION_ID}:conda:CONDA_PREFIXES`;
@@ -124,13 +135,7 @@ async function findConda(): Promise<readonly string[] | undefined> {
     }
 }
 
-export async function getConda(native?: NativePythonFinder): Promise<string> {
-    const conda = getCondaPathSetting();
-    if (conda) {
-        traceInfo(`Using conda from settings: ${conda}`);
-        return conda;
-    }
-
+async function getCondaExecutable(native?: NativePythonFinder): Promise<string> {
     if (condaPath) {
         traceInfo(`Using conda from cache: ${condaPath}`);
         return untildify(condaPath);
@@ -168,9 +173,22 @@ export async function getConda(native?: NativePythonFinder): Promise<string> {
     throw new Error('Conda not found');
 }
 
-async function runConda(args: string[], token?: CancellationToken): Promise<string> {
-    const conda = await getConda();
+export async function getConda(native?: NativePythonFinder): Promise<string> {
+    const conda = getCondaPathSetting();
+    if (conda) {
+        traceInfo(`Using conda from settings: ${conda}`);
+        return conda;
+    }
 
+    return await getCondaExecutable(native);
+}
+
+async function _runConda(
+    conda: string,
+    args: string[],
+    log?: LogOutputChannel,
+    token?: CancellationToken,
+): Promise<string> {
     const deferred = createDeferred<string>();
     args = quoteArgs(args);
     const proc = ch.spawn(conda, args, { shell: true });
@@ -183,10 +201,14 @@ async function runConda(args: string[], token?: CancellationToken): Promise<stri
     let stdout = '';
     let stderr = '';
     proc.stdout?.on('data', (data) => {
-        stdout += data.toString('utf-8');
+        const d = data.toString('utf-8');
+        stdout += d;
+        log?.info(d.trim());
     });
     proc.stderr?.on('data', (data) => {
-        stderr += data.toString('utf-8');
+        const d = data.toString('utf-8');
+        stderr += d;
+        log?.error(d.trim());
     });
     proc.on('close', () => {
         deferred.resolve(stdout);
@@ -198,6 +220,16 @@ async function runConda(args: string[], token?: CancellationToken): Promise<stri
     });
 
     return deferred.promise;
+}
+
+async function runConda(args: string[], log?: LogOutputChannel, token?: CancellationToken): Promise<string> {
+    const conda = await getConda();
+    return await _runConda(conda, args, log, token);
+}
+
+async function runCondaExecutable(args: string[], log?: LogOutputChannel, token?: CancellationToken): Promise<string> {
+    const conda = await getCondaExecutable(undefined);
+    return await _runConda(conda, args, log, token);
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -252,7 +284,7 @@ function isPrefixOf(roots: string[], e: string): boolean {
 }
 
 function pathForGitBash(binPath: string): string {
-    return isWindows() ? binPath.replace(/\\/g, '/') : binPath;
+    return isWindows() ? binPath.replace(/\\/g, '/').replace(/^([a-zA-Z]):/, '/$1') : binPath;
 }
 
 function getNamedCondaPythonInfo(
@@ -265,8 +297,64 @@ function getNamedCondaPythonInfo(
     const sv = shortVersion(version);
     const shellActivation: Map<string, PythonCommandRunConfiguration[]> = new Map();
     const shellDeactivation: Map<string, PythonCommandRunConfiguration[]> = new Map();
-    shellActivation.set('gitbash', [{ executable: pathForGitBash(conda), args: ['activate', name] }]);
-    shellDeactivation.set('gitbash', [{ executable: pathForGitBash(conda), args: ['deactivate'] }]);
+
+    if (conda.includes('/') || conda.includes('\\')) {
+        const shActivate = path.join(path.dirname(path.dirname(conda)), 'etc', 'profile.d', 'conda.sh');
+
+        if (isWindows()) {
+            shellActivation.set(ShellConstants.GITBASH, [
+                { executable: '.', args: [pathForGitBash(shActivate)] },
+                { executable: 'conda', args: ['activate', name] },
+            ]);
+            shellDeactivation.set(ShellConstants.GITBASH, [{ executable: 'conda', args: ['deactivate'] }]);
+
+            const cmdActivate = path.join(path.dirname(conda), 'activate.bat');
+            shellActivation.set(ShellConstants.CMD, [{ executable: cmdActivate, args: [name] }]);
+            shellDeactivation.set(ShellConstants.CMD, [{ executable: 'conda', args: ['deactivate'] }]);
+        } else {
+            shellActivation.set(ShellConstants.BASH, [
+                { executable: '.', args: [shActivate] },
+                { executable: 'conda', args: ['activate', name] },
+            ]);
+            shellDeactivation.set(ShellConstants.BASH, [{ executable: 'conda', args: ['deactivate'] }]);
+
+            shellActivation.set(ShellConstants.SH, [
+                { executable: '.', args: [shActivate] },
+                { executable: 'conda', args: ['activate', name] },
+            ]);
+            shellDeactivation.set(ShellConstants.SH, [{ executable: 'conda', args: ['deactivate'] }]);
+
+            shellActivation.set(ShellConstants.ZSH, [
+                { executable: '.', args: [shActivate] },
+                { executable: 'conda', args: ['activate', name] },
+            ]);
+            shellDeactivation.set(ShellConstants.ZSH, [{ executable: 'conda', args: ['deactivate'] }]);
+        }
+        const psActivate = path.join(path.dirname(path.dirname(conda)), 'shell', 'condabin', 'conda-hook.ps1');
+        shellActivation.set(ShellConstants.PWSH, [
+            { executable: '&', args: [psActivate] },
+            { executable: 'conda', args: ['activate', name] },
+        ]);
+        shellDeactivation.set(ShellConstants.PWSH, [{ executable: 'conda', args: ['deactivate'] }]);
+    } else {
+        shellActivation.set(ShellConstants.GITBASH, [{ executable: 'conda', args: ['activate', name] }]);
+        shellDeactivation.set(ShellConstants.GITBASH, [{ executable: 'conda', args: ['deactivate'] }]);
+
+        shellActivation.set(ShellConstants.CMD, [{ executable: 'conda', args: ['activate', name] }]);
+        shellDeactivation.set(ShellConstants.CMD, [{ executable: 'conda', args: ['deactivate'] }]);
+
+        shellActivation.set(ShellConstants.BASH, [{ executable: 'conda', args: ['activate', name] }]);
+        shellDeactivation.set(ShellConstants.BASH, [{ executable: 'conda', args: ['deactivate'] }]);
+
+        shellActivation.set(ShellConstants.SH, [{ executable: 'conda', args: ['activate', name] }]);
+        shellDeactivation.set(ShellConstants.SH, [{ executable: 'conda', args: ['deactivate'] }]);
+
+        shellActivation.set(ShellConstants.ZSH, [{ executable: 'conda', args: ['activate', name] }]);
+        shellDeactivation.set(ShellConstants.ZSH, [{ executable: 'conda', args: ['deactivate'] }]);
+
+        shellActivation.set(ShellConstants.PWSH, [{ executable: 'conda', args: ['activate', name] }]);
+        shellDeactivation.set(ShellConstants.PWSH, [{ executable: 'conda', args: ['deactivate'] }]);
+    }
 
     return {
         name: name,
@@ -281,11 +369,11 @@ function getNamedCondaPythonInfo(
         execInfo: {
             run: { executable: path.join(executable) },
             activatedRun: {
-                executable: conda,
+                executable: 'conda',
                 args: ['run', '--live-stream', '--name', name, 'python'],
             },
-            activation: [{ executable: conda, args: ['activate', name] }],
-            deactivation: [{ executable: conda, args: ['deactivate'] }],
+            activation: [{ executable: 'conda', args: ['activate', name] }],
+            deactivation: [{ executable: 'conda', args: ['deactivate'] }],
             shellActivation,
             shellDeactivation,
         },
@@ -302,8 +390,64 @@ function getPrefixesCondaPythonInfo(
     const sv = shortVersion(version);
     const shellActivation: Map<string, PythonCommandRunConfiguration[]> = new Map();
     const shellDeactivation: Map<string, PythonCommandRunConfiguration[]> = new Map();
-    shellActivation.set('gitbash', [{ executable: pathForGitBash(conda), args: ['activate', prefix] }]);
-    shellDeactivation.set('gitbash', [{ executable: pathForGitBash(conda), args: ['deactivate'] }]);
+
+    if (conda.includes('/') || conda.includes('\\')) {
+        const shActivate = path.join(path.dirname(path.dirname(conda)), 'etc', 'profile.d', 'conda.sh');
+
+        if (isWindows()) {
+            shellActivation.set(ShellConstants.GITBASH, [
+                { executable: '.', args: [pathForGitBash(shActivate)] },
+                { executable: 'conda', args: ['activate', prefix] },
+            ]);
+            shellDeactivation.set(ShellConstants.GITBASH, [{ executable: 'conda', args: ['deactivate'] }]);
+
+            const cmdActivate = path.join(path.dirname(conda), 'activate.bat');
+            shellActivation.set(ShellConstants.CMD, [{ executable: cmdActivate, args: [prefix] }]);
+            shellDeactivation.set(ShellConstants.CMD, [{ executable: 'conda', args: ['deactivate'] }]);
+        } else {
+            shellActivation.set(ShellConstants.BASH, [
+                { executable: '.', args: [shActivate] },
+                { executable: 'conda', args: ['activate', prefix] },
+            ]);
+            shellDeactivation.set(ShellConstants.BASH, [{ executable: 'conda', args: ['deactivate'] }]);
+
+            shellActivation.set(ShellConstants.SH, [
+                { executable: '.', args: [shActivate] },
+                { executable: 'conda', args: ['activate', prefix] },
+            ]);
+            shellDeactivation.set(ShellConstants.SH, [{ executable: 'conda', args: ['deactivate'] }]);
+
+            shellActivation.set(ShellConstants.ZSH, [
+                { executable: '.', args: [shActivate] },
+                { executable: 'conda', args: ['activate', prefix] },
+            ]);
+            shellDeactivation.set(ShellConstants.ZSH, [{ executable: 'conda', args: ['deactivate'] }]);
+        }
+        const psActivate = path.join(path.dirname(path.dirname(conda)), 'shell', 'condabin', 'conda-hook.ps1');
+        shellActivation.set(ShellConstants.PWSH, [
+            { executable: '&', args: [psActivate] },
+            { executable: 'conda', args: ['activate', prefix] },
+        ]);
+        shellDeactivation.set(ShellConstants.PWSH, [{ executable: 'conda', args: ['deactivate'] }]);
+    } else {
+        shellActivation.set(ShellConstants.GITBASH, [{ executable: 'conda', args: ['activate', prefix] }]);
+        shellDeactivation.set(ShellConstants.GITBASH, [{ executable: 'conda', args: ['deactivate'] }]);
+
+        shellActivation.set(ShellConstants.CMD, [{ executable: 'conda', args: ['activate', prefix] }]);
+        shellDeactivation.set(ShellConstants.CMD, [{ executable: 'conda', args: ['deactivate'] }]);
+
+        shellActivation.set(ShellConstants.BASH, [{ executable: 'conda', args: ['activate', prefix] }]);
+        shellDeactivation.set(ShellConstants.BASH, [{ executable: 'conda', args: ['deactivate'] }]);
+
+        shellActivation.set(ShellConstants.SH, [{ executable: 'conda', args: ['activate', prefix] }]);
+        shellDeactivation.set(ShellConstants.SH, [{ executable: 'conda', args: ['deactivate'] }]);
+
+        shellActivation.set(ShellConstants.ZSH, [{ executable: 'conda', args: ['activate', prefix] }]);
+        shellDeactivation.set(ShellConstants.ZSH, [{ executable: 'conda', args: ['deactivate'] }]);
+
+        shellActivation.set(ShellConstants.PWSH, [{ executable: 'conda', args: ['activate', prefix] }]);
+        shellDeactivation.set(ShellConstants.PWSH, [{ executable: 'conda', args: ['deactivate'] }]);
+    }
 
     const basename = path.basename(prefix);
     return {
@@ -331,6 +475,25 @@ function getPrefixesCondaPythonInfo(
     };
 }
 
+function getCondaWithoutPython(name: string, prefix: string, conda: string): PythonEnvironmentInfo {
+    return {
+        name: name,
+        environmentPath: Uri.file(prefix),
+        displayName: `${name} (no-python)`,
+        shortDisplayName: `${name} (no-python)`,
+        displayPath: prefix,
+        description: prefix,
+        tooltip: l10n.t('Conda environment without Python'),
+        version: 'no-python',
+        sysPrefix: prefix,
+        iconPath: new ThemeIcon('stop'),
+        execInfo: {
+            run: { executable: conda },
+        },
+        group: name.length > 0 ? 'Named' : 'Prefix',
+    };
+}
+
 function nativeToPythonEnv(
     e: NativeEnvInfo,
     api: PythonEnvironmentApi,
@@ -340,8 +503,13 @@ function nativeToPythonEnv(
     condaPrefixes: string[],
 ): PythonEnvironment | undefined {
     if (!(e.prefix && e.executable && e.version)) {
-        log.warn(`Invalid conda environment: ${JSON.stringify(e)}`);
-        return;
+        let name = e.name;
+        const environment = api.createPythonEnvironmentItem(
+            getCondaWithoutPython(name ?? '', e.prefix ?? '', conda),
+            manager,
+        );
+        log.info(`Found a No-Python conda environment: ${e.executable ?? e.prefix ?? 'conda-no-python'}`);
+        return environment;
     }
 
     if (e.name === 'base') {
@@ -524,7 +692,7 @@ async function createNamedCondaEnvironment(
         async () => {
             try {
                 const bin = os.platform() === 'win32' ? 'python.exe' : 'python';
-                const output = await runConda(['create', '--yes', '--name', envName, 'python']);
+                const output = await runCondaExecutable(['create', '--yes', '--name', envName, 'python']);
                 log.info(output);
 
                 const prefixes = await getPrefixes();
@@ -545,7 +713,7 @@ async function createNamedCondaEnvironment(
             } catch (e) {
                 log.error('Failed to create conda environment', e);
                 setImmediate(async () => {
-                    await showErrorMessage(CondaStrings.condaCreateFailed, log);
+                    await showErrorMessageWithLogs(CondaStrings.condaCreateFailed, log);
                 });
             }
         },
@@ -591,7 +759,7 @@ async function createPrefixCondaEnvironment(
         async () => {
             try {
                 const bin = os.platform() === 'win32' ? 'python.exe' : 'python';
-                const output = await runConda(['create', '--yes', '--prefix', prefix, 'python']);
+                const output = await runCondaExecutable(['create', '--yes', '--prefix', prefix, 'python']);
                 log.info(output);
                 const version = await getVersion(prefix);
 
@@ -603,7 +771,7 @@ async function createPrefixCondaEnvironment(
             } catch (e) {
                 log.error('Failed to create conda environment', e);
                 setImmediate(async () => {
-                    await showErrorMessage(CondaStrings.condaCreateFailed, log);
+                    await showErrorMessageWithLogs(CondaStrings.condaCreateFailed, log);
                 });
             }
         },
@@ -641,9 +809,9 @@ export async function quickCreateConda(
         async () => {
             try {
                 const bin = os.platform() === 'win32' ? 'python.exe' : 'python';
-                log.info(await runConda(['create', '--yes', '--prefix', prefix, 'python']));
+                await runCondaExecutable(['create', '--yes', '--prefix', prefix, 'python'], log);
                 if (additionalPackages && additionalPackages.length > 0) {
-                    log.info(await runConda(['install', '--yes', '--prefix', prefix, ...additionalPackages]));
+                    await runConda(['install', '--yes', '--prefix', prefix, ...additionalPackages], log);
                 }
                 const version = await getVersion(prefix);
 
@@ -673,7 +841,7 @@ export async function quickCreateConda(
             } catch (e) {
                 log.error('Failed to create conda environment', e);
                 setImmediate(async () => {
-                    await showErrorMessage(CondaStrings.condaCreateFailed, log);
+                    await showErrorMessageWithLogs(CondaStrings.condaCreateFailed, log);
                 });
             }
         },
@@ -689,11 +857,11 @@ export async function deleteCondaEnvironment(environment: PythonEnvironment, log
         },
         async () => {
             try {
-                await runConda(args);
+                await runCondaExecutable(args, log);
             } catch (e) {
                 log.error(`Failed to delete conda environment: ${e}`);
                 setImmediate(async () => {
-                    await showErrorMessage(CondaStrings.condaRemoveFailed, log);
+                    await showErrorMessageWithLogs(CondaStrings.condaRemoveFailed, log);
                 });
                 return false;
             }
@@ -708,7 +876,7 @@ export async function refreshPackages(
     manager: PackageManager,
 ): Promise<Package[]> {
     let args = ['list', '-p', environment.environmentPath.fsPath];
-    const data = await runConda(args);
+    const data = await runCondaExecutable(args);
     const content = data.split(/\r?\n/).filter((l) => !l.startsWith('#'));
     const packages: Package[] = [];
     content.forEach((l) => {
@@ -736,10 +904,12 @@ export async function managePackages(
     api: PythonEnvironmentApi,
     manager: PackageManager,
     token: CancellationToken,
+    log: LogOutputChannel,
 ): Promise<Package[]> {
     if (options.uninstall && options.uninstall.length > 0) {
-        await runConda(
+        await runCondaExecutable(
             ['remove', '--prefix', environment.environmentPath.fsPath, '--yes', ...options.uninstall],
+            log,
             token,
         );
     }
@@ -749,7 +919,7 @@ export async function managePackages(
             args.push('--update-all');
         }
         args.push(...options.install);
-        await runConda(args, token);
+        await runCondaExecutable(args, log, token);
     }
     return refreshPackages(environment, api, manager);
 }
@@ -841,4 +1011,51 @@ export async function getCommonCondaPackagesToInstall(
     const installed = (await api.getPackages(environment))?.map((p) => p.name);
     const selected = await selectCommonPackagesOrSkip(common, installed ?? [], !!options.showSkipOption);
     return selected;
+}
+
+async function installPython(
+    nativeFinder: NativePythonFinder,
+    manager: EnvironmentManager,
+    environment: PythonEnvironment,
+    api: PythonEnvironmentApi,
+    log: LogOutputChannel,
+): Promise<PythonEnvironment | undefined> {
+    if (environment.sysPrefix === '') {
+        return undefined;
+    }
+    await runCondaExecutable(['install', '--yes', '--prefix', environment.sysPrefix, 'python'], log);
+    await nativeFinder.refresh(true, NativePythonEnvironmentKind.conda);
+    const native = await nativeFinder.resolve(environment.sysPrefix);
+    if (native.kind === NativePythonEnvironmentKind.conda) {
+        return nativeToPythonEnv(native, api, manager, log, await getConda(), await getPrefixes());
+    }
+    return undefined;
+}
+
+export async function checkForNoPythonCondaEnvironment(
+    nativeFinder: NativePythonFinder,
+    manager: EnvironmentManager,
+    environment: PythonEnvironment,
+    api: PythonEnvironmentApi,
+    log: LogOutputChannel,
+): Promise<PythonEnvironment | undefined> {
+    if (environment.version === 'no-python') {
+        if (environment.sysPrefix === '') {
+            await showErrorMessage(CondaStrings.condaMissingPythonNoFix, { modal: true });
+            return undefined;
+        } else {
+            const result = await showErrorMessage(
+                `${CondaStrings.condaMissingPython}: ${environment.displayName}`,
+                {
+                    modal: true,
+                },
+                Common.installPython,
+            );
+            if (result === Common.installPython) {
+                return await installPython(nativeFinder, manager, environment, api, log);
+            }
+            return undefined;
+        }
+    }
+    return environment;
 }

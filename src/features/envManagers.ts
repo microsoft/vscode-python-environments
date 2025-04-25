@@ -10,7 +10,7 @@ import {
     PythonProject,
     SetEnvironmentScope,
 } from '../api';
-import { traceError } from '../common/logging';
+import { traceError, traceVerbose } from '../common/logging';
 import {
     EditAllManagerSettings,
     getDefaultEnvManagerSetting,
@@ -39,7 +39,11 @@ import { sendTelemetryEvent } from '../common/telemetry/sender';
 import { EventNames } from '../common/telemetry/constants';
 
 function generateId(name: string): string {
-    return `${getCallingExtension()}:${name}`;
+    const newName = name.toLowerCase().replace(/[^a-zA-Z0-9-_]/g, '_');
+    if (name !== newName) {
+        traceVerbose(`Environment manager name "${name}"  was normalized to "${newName}"`);
+    }
+    return `${getCallingExtension()}:${newName}`;
 }
 
 export class PythonEnvironmentManagers implements EnvironmentManagers {

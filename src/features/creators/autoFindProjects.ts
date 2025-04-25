@@ -1,10 +1,9 @@
 import * as path from 'path';
 import { Uri } from 'vscode';
-import { showQuickPickWithButtons, showWarningMessage } from '../../common/window.apis';
+import { showErrorMessage, showQuickPickWithButtons, showWarningMessage } from '../../common/window.apis';
 import { ProjectCreatorString } from '../../common/localize';
 import { PythonProject, PythonProjectCreator, PythonProjectCreatorOptions } from '../../api';
 import { PythonProjectManager } from '../../internal.api';
-import { showErrorMessage } from '../../common/errors/utils';
 import { findFiles } from '../../common/workspace.apis';
 import { traceInfo } from '../../common/logging';
 
@@ -91,16 +90,19 @@ export class AutoFindProjects implements PythonProjectCreator {
 
         traceInfo(`Found ${filtered.length} new potential projects that aren't already registered`);
 
-        const projects = await pickProjects(filtered);
-        if (!projects || projects.length === 0) {
+        const projectUris = await pickProjects(filtered);
+        if (!projectUris || projectUris.length === 0) {
             // User cancelled the selection.
             traceInfo('User cancelled project selection.');
             return;
         }
 
-        return projects.map((uri) => ({
+        const projects = projectUris.map((uri) => ({
             name: path.basename(uri.fsPath),
             uri,
-        }));
+        })) as PythonProject[];
+        // Add the projects to the project manager
+        this.pm.add(projects);
+        return projects;
     }
 }
