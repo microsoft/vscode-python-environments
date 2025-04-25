@@ -1,5 +1,4 @@
 import { commands, ExtensionContext, LogOutputChannel, Terminal, Uri } from 'vscode';
-
 import { PythonEnvironment, PythonEnvironmentApi } from './api';
 import { ensureCorrectVersion } from './common/extVersion';
 import { registerTools } from './common/lm.apis';
