@@ -7,16 +7,19 @@ export function checkUri(scope?: Uri | Uri[] | string): Uri | Uri[] | string | u
     }
 
     if (Array.isArray(scope)) {
-        return scope.map((item) => checkUri(item) as Uri);
+        // if the scope is an array, all items must be Uri, check each item
+        return scope.map((item) => {
+            const s = checkUri(item);
+            if (s instanceof Uri) {
+                return s;
+            }
+            throw new Error('Invalid entry, expected Uri.');
+        });
     }
 
     if (scope instanceof Uri) {
         if (scope.scheme === 'vscode-notebook-cell') {
-            // If the scope is a cell Uri, we need to find the notebook document it belongs to.
-            const matchingDoc = workspace.notebookDocuments.find((doc) => {
-                const cell = findCell(scope, doc);
-                return cell !== undefined;
-            });
+            const matchingDoc = workspace.notebookDocuments.find((doc) => findCell(scope, doc));
             // If we find a matching notebook document, return the Uri of the cell.
             return matchingDoc ? matchingDoc.uri : scope;
         }
@@ -29,20 +32,31 @@ export function checkUri(scope?: Uri | Uri[] | string): Uri | Uri[] | string | u
  */
 export function findCell(cellUri: Uri, notebook: NotebookDocument): NotebookCell | undefined {
     // Fragment is not unique to a notebook, hence ensure we compare the path as well.
-    const index = notebook
-        .getCells()
-        .findIndex(
-            (cell) =>
-                isEqual(cell.document.uri, cellUri) ||
-                (cell.document.uri.fragment === cellUri.fragment && cell.document.uri.path === cellUri.path),
-        );
-    if (index !== -1) {
-        return notebook.getCells()[index];
+    return notebook.getCells().find((cell) => {
+        return isEqual(cell.document.uri, cellUri);
+    });
+}
+function isEqual(uri1: Uri | undefined, uri2: Uri | undefined): boolean {
+    if (uri1 === uri2) {
+        return true;
     }
+    if (!uri1 || !uri2) {
+        return false;
+    }
+    return getComparisonKey(uri1) === getComparisonKey(uri2);
 }
 
-function isEqual(a: Uri, b: Uri): boolean {
-    return a.toString() === b.toString();
+function getComparisonKey(uri: Uri): string {
+    return uri
+        .with({
+            path: ignorePathCasing(uri) ? uri.path.toLowerCase() : undefined,
+            fragment: undefined,
+        })
+        .toString();
+}
+
+function ignorePathCasing(_uri: Uri): boolean {
+    return true;
 }
 
 export function normalizePath(path: string): string {
