@@ -1,10 +1,9 @@
 import { ConfigurationChangeEvent, Disposable, GlobalEnvironmentVariableCollection } from 'vscode';
-import { DidChangeEnvironmentEventArgs } from '../../api';
-import { ShellStartupActivationStrings } from '../../common/localize';
+import { DidChangeEnvironmentEventArgs, PythonProjectEnvironmentApi } from '../../api';
+import { ActivationStrings } from '../../common/localize';
 import { getWorkspaceFolder, getWorkspaceFolders, onDidChangeConfiguration } from '../../common/workspace.apis';
-import { EnvironmentManagers } from '../../internal.api';
 import { ShellEnvsProvider } from './shells/startupProvider';
-import { getAutoActivationType } from './utils';
+import { ACT_TYPE_SHELL, getAutoActivationType } from './utils';
 
 export interface ShellStartupActivationVariablesManager extends Disposable {
     initialize(): Promise<void>;
@@ -15,14 +14,14 @@ export class ShellStartupActivationVariablesManagerImpl implements ShellStartupA
     constructor(
         private readonly envCollection: GlobalEnvironmentVariableCollection,
         private readonly shellEnvsProviders: ShellEnvsProvider[],
-        private readonly em: EnvironmentManagers,
+        private readonly api: PythonProjectEnvironmentApi,
     ) {
-        this.envCollection.description = ShellStartupActivationStrings.envCollectionDescription;
+        this.envCollection.description = ActivationStrings.envCollectionDescription;
         this.disposables.push(
             onDidChangeConfiguration(async (e: ConfigurationChangeEvent) => {
                 await this.handleConfigurationChange(e);
             }),
-            this.em.onDidChangeEnvironmentFiltered(async (e: DidChangeEnvironmentEventArgs) => {
+            this.api.onDidChangeEnvironment(async (e: DidChangeEnvironmentEventArgs) => {
                 await this.handleEnvironmentChange(e);
             }),
         );
@@ -31,7 +30,7 @@ export class ShellStartupActivationVariablesManagerImpl implements ShellStartupA
     private async handleConfigurationChange(e: ConfigurationChangeEvent) {
         if (e.affectsConfiguration('python-envs.terminal.autoActivationType')) {
             const autoActType = getAutoActivationType();
-            if (autoActType === 'shellStartup') {
+            if (autoActType === ACT_TYPE_SHELL) {
                 await this.initializeInternal();
             } else {
                 const workspaces = getWorkspaceFolders() ?? [];
@@ -49,7 +48,7 @@ export class ShellStartupActivationVariablesManagerImpl implements ShellStartupA
 
     private async handleEnvironmentChange(e: DidChangeEnvironmentEventArgs) {
         const autoActType = getAutoActivationType();
-        if (autoActType === 'shellStartup' && e.uri) {
+        if (autoActType === ACT_TYPE_SHELL && e.uri) {
             const wf = getWorkspaceFolder(e.uri);
             if (wf) {
                 const envVars = this.envCollection.getScoped({ workspaceFolder: wf });
@@ -75,7 +74,7 @@ export class ShellStartupActivationVariablesManagerImpl implements ShellStartupA
                 const collection = this.envCollection.getScoped({ workspaceFolder: workspace });
                 promises.push(
                     ...this.shellEnvsProviders.map(async (provider) => {
-                        const env = await this.em.getEnvironment(workspace.uri);
+                        const env = await this.api.getEnvironment(workspace.uri);
                         if (env) {
                             provider.updateEnvVariables(collection, env);
                         } else {
@@ -86,7 +85,7 @@ export class ShellStartupActivationVariablesManagerImpl implements ShellStartupA
             });
             await Promise.all(promises);
         } else {
-            const env = await this.em.getEnvironment(undefined);
+            const env = await this.api.getEnvironment(undefined);
             await Promise.all(
                 this.shellEnvsProviders.map(async (provider) => {
                     if (env) {
@@ -101,7 +100,7 @@ export class ShellStartupActivationVariablesManagerImpl implements ShellStartupA
 
     public async initialize(): Promise<void> {
         const autoActType = getAutoActivationType();
-        if (autoActType === 'shellStartup') {
+        if (autoActType === ACT_TYPE_SHELL) {
             await this.initializeInternal();
         }
     }

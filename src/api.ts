@@ -2,16 +2,16 @@
 // Licensed under the MIT License.
 
 import {
-    Uri,
     Disposable,
-    MarkdownString,
     Event,
-    LogOutputChannel,
-    ThemeIcon,
-    Terminal,
-    TaskExecution,
-    TerminalOptions,
     FileChangeType,
+    LogOutputChannel,
+    MarkdownString,
+    TaskExecution,
+    Terminal,
+    TerminalOptions,
+    ThemeIcon,
+    Uri,
 } from 'vscode';
 
 /**

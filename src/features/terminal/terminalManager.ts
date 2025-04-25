@@ -2,6 +2,7 @@ import * as fsapi from 'fs-extra';
 import * as path from 'path';
 import { Disposable, EventEmitter, ProgressLocation, Terminal, TerminalOptions, Uri } from 'vscode';
 import { PythonEnvironment, PythonEnvironmentApi, PythonProject, PythonTerminalCreateOptions } from '../../api';
+import { ActivationStrings } from '../../common/localize';
 import { traceInfo, traceVerbose } from '../../common/logging';
 import {
     createTerminal,
@@ -23,7 +24,15 @@ import {
     TerminalActivationInternal,
     TerminalEnvironment,
 } from './terminalActivationState';
-import { AutoActivationType, getAutoActivationType, getEnvironmentForTerminal, waitForShellIntegration } from './utils';
+import {
+    ACT_TYPE_COMMAND,
+    ACT_TYPE_OFF,
+    ACT_TYPE_SHELL,
+    AutoActivationType,
+    getAutoActivationType,
+    getEnvironmentForTerminal,
+    waitForShellIntegration,
+} from './utils';
 
 export interface TerminalCreation {
     create(environment: PythonEnvironment, options: PythonTerminalCreateOptions): Promise<Terminal>;
@@ -108,7 +117,7 @@ export class TerminalManagerImpl implements TerminalManager {
             onDidChangeConfiguration(async (e) => {
                 if (e.affectsConfiguration('python-envs.terminal.autoActivationType')) {
                     const actType = getAutoActivationType();
-                    if (actType === 'shellStartup') {
+                    if (actType === ACT_TYPE_SHELL) {
                         traceInfo(`Auto activation type changed to ${actType}`);
                         const shells = new Set(
                             terminals()
@@ -178,10 +187,10 @@ export class TerminalManagerImpl implements TerminalManager {
         let isSetup = this.shellSetup.get(shellType);
         if (isSetup === true) {
             traceVerbose(`Shell profile for ${shellType} is already setup.`);
-            return 'shellStartup';
+            return ACT_TYPE_SHELL;
         } else if (isSetup === false) {
             traceVerbose(`Shell profile for ${shellType} is not set up, using command fallback.`);
-            return 'command';
+            return ACT_TYPE_COMMAND;
         }
     }
 
@@ -197,25 +206,25 @@ export class TerminalManagerImpl implements TerminalManager {
             await this.handleSetupCheck(shellType);
 
             // Check again after the setup check.
-            return this.getShellActivationType(shellType) ?? 'command';
+            return this.getShellActivationType(shellType) ?? ACT_TYPE_COMMAND;
         }
         traceInfo(`Shell startup not supported for ${shellType}, using command activation as fallback`);
-        return 'command';
+        return ACT_TYPE_COMMAND;
     }
 
     private async autoActivateOnTerminalOpen(terminal: Terminal, environment: PythonEnvironment): Promise<void> {
         let actType = getAutoActivationType();
         const shellType = identifyTerminalShell(terminal);
-        if (actType === 'shellStartup') {
+        if (actType === ACT_TYPE_SHELL) {
             actType = await this.getEffectiveActivationType(shellType);
         }
 
-        if (actType === 'command') {
+        if (actType === ACT_TYPE_COMMAND) {
             if (isActivatableEnvironment(environment)) {
                 await withProgress(
                     {
                         location: ProgressLocation.Window,
-                        title: `Activating environment: ${environment.environmentPath.fsPath}`,
+                        title: `${ActivationStrings.activatingEnvironment}: ${environment.environmentPath.fsPath}`,
                     },
                     async () => {
                         await waitForShellIntegration(terminal);
@@ -225,9 +234,9 @@ export class TerminalManagerImpl implements TerminalManager {
             } else {
                 traceVerbose(`Environment ${environment.environmentPath.fsPath} is not activatable`);
             }
-        } else if (actType === 'off') {
+        } else if (actType === ACT_TYPE_OFF) {
             traceInfo(`"python-envs.terminal.autoActivationType" is set to "${actType}", skipping auto activation`);
-        } else if (actType === 'shellStartup') {
+        } else if (actType === ACT_TYPE_SHELL) {
             traceInfo(
                 `"python-envs.terminal.autoActivationType" is set to "${actType}", terminal should be activated by shell startup script`,
             );
@@ -237,7 +246,7 @@ export class TerminalManagerImpl implements TerminalManager {
     public async create(environment: PythonEnvironment, options: PythonTerminalCreateOptions): Promise<Terminal> {
         const autoActType = getAutoActivationType();
         let envVars = options.env;
-        if (autoActType === 'shellStartup') {
+        if (autoActType === ACT_TYPE_SHELL) {
             const vars = await Promise.all(this.startupEnvProviders.map((p) => p.getEnvVariables(environment)));
 
             vars.forEach((varMap) => {
@@ -249,6 +258,7 @@ export class TerminalManagerImpl implements TerminalManager {
             });
         }
 
+        // Uncomment the code line below after the issue is resolved:
         // https://github.com/microsoft/vscode-python-environments/issues/172
         // const name = options.name ?? `Python: ${environment.displayName}`;
         const newTerminal = createTerminal({
@@ -266,7 +276,7 @@ export class TerminalManagerImpl implements TerminalManager {
             isTransient: options.isTransient,
         });
 
-        if (autoActType === 'command') {
+        if (autoActType === ACT_TYPE_COMMAND) {
             if (options.disableActivation) {
                 this.skipActivationOnOpen.add(newTerminal);
                 return newTerminal;
@@ -360,9 +370,9 @@ export class TerminalManagerImpl implements TerminalManager {
 
     public async initialize(api: PythonEnvironmentApi): Promise<void> {
         const actType = getAutoActivationType();
-        if (actType === 'command') {
+        if (actType === ACT_TYPE_COMMAND) {
             await Promise.all(terminals().map(async (t) => this.activateUsingCommand(api, t)));
-        } else if (actType === 'shellStartup') {
+        } else if (actType === ACT_TYPE_SHELL) {
             const shells = new Set(
                 terminals()
                     .map((t) => identifyTerminalShell(t))
