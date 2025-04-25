@@ -1,10 +1,10 @@
 import { l10n, ProgressLocation } from 'vscode';
 import { executeCommand } from '../../common/command.api';
-import { Common, ShellStartupActivationStrings } from '../../common/localize';
+import { ActivationStrings, Common } from '../../common/localize';
 import { traceInfo, traceVerbose } from '../../common/logging';
 import { showErrorMessage, showInformationMessage, withProgress } from '../../common/window.apis';
 import { ShellScriptEditState, ShellStartupScriptProvider } from './shells/startupProvider';
-import { getAutoActivationType, setAutoActivationType } from './utils';
+import { ACT_TYPE_COMMAND, ACT_TYPE_SHELL, getAutoActivationType, setAutoActivationType } from './utils';
 
 export async function handleSettingUpShellProfile(
     providers: ShellStartupScriptProvider[],
@@ -14,7 +14,7 @@ export async function handleSettingUpShellProfile(
     const response = await showInformationMessage(
         l10n.t(
             'To use "{0}" activation, the shell profiles need to be set up. Do you want to set it up now?',
-            'shellStartup',
+            ACT_TYPE_SHELL,
         ),
         { modal: true, detail: l10n.t('Shells: {0}', shells) },
         Common.yes,
@@ -59,11 +59,11 @@ export async function handleSettingUpShellProfile(
 
 export async function cleanupStartupScripts(allProviders: ShellStartupScriptProvider[]): Promise<void> {
     await Promise.all(allProviders.map((provider) => provider.teardownScripts()));
-    if (getAutoActivationType() === 'shellStartup') {
-        setAutoActivationType('command');
+    if (getAutoActivationType() === ACT_TYPE_SHELL) {
+        setAutoActivationType(ACT_TYPE_COMMAND);
         traceInfo(
             'Setting `python-envs.terminal.autoActivationType` to `command`, after removing shell startup scripts.',
         );
     }
-    setImmediate(async () => await showInformationMessage(ShellStartupActivationStrings.revertedShellStartupScripts));
+    setImmediate(async () => await showInformationMessage(ActivationStrings.revertedShellStartupScripts));
 }
