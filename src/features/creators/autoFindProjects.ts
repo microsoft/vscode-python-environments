@@ -90,16 +90,19 @@ export class AutoFindProjects implements PythonProjectCreator {
 
         traceInfo(`Found ${filtered.length} new potential projects that aren't already registered`);
 
-        const projects = await pickProjects(filtered);
-        if (!projects || projects.length === 0) {
+        const projectUris = await pickProjects(filtered);
+        if (!projectUris || projectUris.length === 0) {
             // User cancelled the selection.
             traceInfo('User cancelled project selection.');
             return;
         }
 
-        return projects.map((uri) => ({
+        const projects = projectUris.map((uri) => ({
             name: path.basename(uri.fsPath),
             uri,
-        }));
+        })) as PythonProject[];
+        // Add the projects to the project manager
+        this.pm.add(projects);
+        return projects;
     }
 }
