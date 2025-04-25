@@ -17,7 +17,7 @@ import {
 export class NewPackageProject implements PythonProjectCreator {
     public readonly name = 'newPackage';
     public readonly displayName = 'Package';
-    public readonly description = 'Create a package folder nested in the current workspace.';
+    public readonly description = 'Creates a package folder in your current workspace';
     public readonly tooltip = new MarkdownString('Create a new Python package');
 
     constructor(private readonly envManagers: EnvironmentManagers) {}
@@ -41,6 +41,16 @@ export class NewPackageProject implements PythonProjectCreator {
                         prompt: 'What is the name of the package? (e.g. my_package)',
                         ignoreFocusOut: true,
                         showBackButton: true,
+                        validateInput: (value) => {
+                            // following PyPI (PEP 508) rules for package names
+                            if (!/^([a-z_]|[a-z0-9_][a-z0-9._-]*[a-z0-9_])$/i.test(value)) {
+                                return 'Invalid package name. Use only letters, numbers, underscores, hyphens, or periods. Must start and end with a letter or number.';
+                            }
+                            if (/^[-._0-9]$/i.test(value)) {
+                                return 'Single-character package names cannot be a number, hyphen, or period.';
+                            }
+                            return null;
+                        },
                     });
                 } catch (ex) {
                     if (ex === QuickInputButtons.Back) {
