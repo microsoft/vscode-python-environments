@@ -165,10 +165,11 @@ export namespace EnvViewStrings {
     export const selectedWorkspaceTooltip = l10n.t('This environment is selected for workspace files');
 }
 
-export namespace ShellStartupActivationStrings {
+export namespace ActivationStrings {
     export const envCollectionDescription = l10n.t('Environment variables for shell activation');
     export const revertedShellStartupScripts = l10n.t(
         'Removed shell startup profile code for Python environment activation. See [logs](command:{0})',
         Commands.viewLogs,
     );
+    export const activatingEnvironment = l10n.t('Activating environment');
 }

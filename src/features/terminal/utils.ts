@@ -90,6 +90,9 @@ export async function getEnvironmentForTerminal(
     return env;
 }
 
+export const ACT_TYPE_SHELL = 'shellStartup';
+export const ACT_TYPE_COMMAND = 'command';
+export const ACT_TYPE_OFF = 'off';
 export type AutoActivationType = 'off' | 'command' | 'shellStartup';
 export function getAutoActivationType(): AutoActivationType {
     // 'startup' auto-activation means terminal is activated via shell startup scripts.
