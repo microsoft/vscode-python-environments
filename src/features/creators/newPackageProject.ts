@@ -9,7 +9,6 @@ import {
     isCopilotInstalled,
     manageCopilotInstructionsFile,
     manageLaunchJsonFile,
-    promptForCopilotInstructions,
     promptForVenv,
     quickCreateNewVenv,
     replaceInFilesAndNames,
@@ -53,22 +52,14 @@ export class NewPackageProject implements PythonProjectCreator {
                 }
                 // Use helper to prompt for virtual environment creation
                 const callback = () => {
-                    if (options) {
-                        return this.create(options);
-                    } else {
-                        return this.create({ name: packageName } as PythonProjectCreatorOptions);
-                    }
+                    return this.create(options);
                 };
                 createVenv = await promptForVenv(callback);
                 if (createVenv === undefined) {
                     return undefined;
                 }
                 if (isCopilotInstalled()) {
-                    const copilotResult = await promptForCopilotInstructions();
-                    if (copilotResult === undefined) {
-                        return undefined;
-                    }
-                    createCopilotInstructions = copilotResult === true;
+                    createCopilotInstructions = true;
                 }
             }
 
