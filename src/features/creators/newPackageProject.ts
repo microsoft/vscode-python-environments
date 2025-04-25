@@ -4,7 +4,7 @@ import { commands, l10n, MarkdownString, QuickInputButtons, Uri, window, workspa
 import { PythonProject, PythonProjectCreator, PythonProjectCreatorOptions } from '../../api';
 import { NEW_PROJECT_TEMPLATES_FOLDER } from '../../common/constants';
 import { showInputBoxWithButtons } from '../../common/window.apis';
-import { EnvironmentManagers } from '../../internal.api';
+import { EnvironmentManagers, PythonProjectManager } from '../../internal.api';
 import {
     isCopilotInstalled,
     manageCopilotInstructionsFile,
@@ -20,9 +20,12 @@ export class NewPackageProject implements PythonProjectCreator {
     public readonly description = l10n.t('Creates a package folder in your current workspace');
     public readonly tooltip = new MarkdownString(l10n.t('Create a new Python package'));
 
-    constructor(private readonly envManagers: EnvironmentManagers) {}
+    constructor(
+        private readonly envManagers: EnvironmentManagers,
+        private readonly projectManager: PythonProjectManager,
+    ) {}
 
-    async create(options?: PythonProjectCreatorOptions): Promise<PythonProject | undefined> {
+    async create(options?: PythonProjectCreatorOptions): Promise<PythonProject | Uri | undefined> {
         let packageName = options?.name;
         let createVenv: boolean | undefined;
         let createCopilotInstructions: boolean | undefined;
@@ -109,7 +112,15 @@ export class NewPackageProject implements PythonProjectCreator {
             await replaceInFilesAndNames(projectDestinationFolder, 'package_name', packageName);
 
             // 4. Create virtual environment if requested
+            let createdPackage: PythonProject | undefined;
             if (createVenv) {
+                createdPackage = {
+                    name: packageName,
+                    uri: Uri.file(projectDestinationFolder),
+                };
+
+                // add package to list of packages before creating the venv
+                this.projectManager.add(createdPackage);
                 await quickCreateNewVenv(this.envManagers, projectDestinationFolder);
             }
 
@@ -141,11 +152,13 @@ export class NewPackageProject implements PythonProjectCreator {
             };
             await manageLaunchJsonFile(destRoot, JSON.stringify(launchJsonConfig));
 
-            // Return a PythonProject OR Uri (if no venv was created)
-            return {
-                name: packageName,
-                uri: Uri.file(projectDestinationFolder),
-            };
+            if (createdPackage) {
+                // return package if created (ie when venv is created)
+                return createdPackage;
+            } else {
+                // otherwise its not a package and just a folder
+                return Uri.file(projectDestinationFolder);
+            }
         }
     }
 }
