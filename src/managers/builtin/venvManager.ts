@@ -1,4 +1,5 @@
-import { ProgressLocation, Uri, LogOutputChannel, EventEmitter, MarkdownString, ThemeIcon, l10n } from 'vscode';
+import * as path from 'path';
+import { EventEmitter, l10n, LogOutputChannel, MarkdownString, ProgressLocation, ThemeIcon, Uri } from 'vscode';
 import {
     CreateEnvironmentOptions,
     CreateEnvironmentScope,
@@ -17,6 +18,12 @@ import {
     ResolveEnvironmentContext,
     SetEnvironmentScope,
 } from '../../api';
+import { PYTHON_EXTENSION_ID } from '../../common/constants';
+import { VenvManagerStrings } from '../../common/localize';
+import { createDeferred, Deferred } from '../../common/utils/deferred';
+import { showErrorMessage, withProgress } from '../../common/window.apis';
+import { NativePythonFinder } from '../common/nativePythonFinder';
+import { getLatest, shortVersion, sortEnvironments } from '../common/utils';
 import {
     clearVenvCache,
     createPythonVenv,
@@ -32,13 +39,6 @@ import {
     setVenvForWorkspace,
     setVenvForWorkspaces,
 } from './venvUtils';
-import * as path from 'path';
-import { NativePythonFinder } from '../common/nativePythonFinder';
-import { PYTHON_EXTENSION_ID } from '../../common/constants';
-import { createDeferred, Deferred } from '../../common/utils/deferred';
-import { getLatest, shortVersion, sortEnvironments } from '../common/utils';
-import { showErrorMessage, withProgress } from '../../common/window.apis';
-import { VenvManagerStrings } from '../../common/localize';
 
 export class VenvManager implements EnvironmentManager {
     private collection: PythonEnvironment[] = [];
@@ -215,7 +215,7 @@ export class VenvManager implements EnvironmentManager {
         if (this.skipWatcherRefresh) {
             return;
         }
-        return this.internalRefresh(undefined, false, VenvManagerStrings.venvRefreshing);
+        return this.internalRefresh(undefined, true, VenvManagerStrings.venvRefreshing);
     }
 
     private async internalRefresh(
