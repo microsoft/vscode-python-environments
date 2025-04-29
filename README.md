@@ -6,7 +6,7 @@ The Python Environments extension for VS Code helps you manage Python environmen
 
 - 🌐 Create, delete, and manage environments
 - 📦 Install and uninstall packages within the selected environment
-- ✅ Create activated terminals Activate terminals
+- ✅ Create activated terminals
 - 🖌️ Add and create new Python projects
 
 > **Note:** This extension is in preview, and its APIs and features are subject to change as the project evolves.
