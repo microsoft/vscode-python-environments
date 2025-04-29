@@ -95,17 +95,13 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
     const terminalActivation = new TerminalActivationImpl();
     const shellEnvsProviders = createShellEnvProviders();
     const shellStartupProviders = createShellStartupProviders();
-    const shellStartupVarsMgr = new ShellStartupActivationVariablesManagerImpl(
-        context.environmentVariableCollection,
-        shellEnvsProviders,
-        envManagers,
-    );
+
     const terminalManager: TerminalManager = new TerminalManagerImpl(
         terminalActivation,
         shellEnvsProviders,
         shellStartupProviders,
     );
-    context.subscriptions.push(terminalActivation, terminalManager, shellStartupVarsMgr);
+    context.subscriptions.push(terminalActivation, terminalManager);
 
     const projectCreators: ProjectCreators = new ProjectCreatorsImpl();
     context.subscriptions.push(
@@ -125,8 +121,14 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
     workspaceView.initialize();
 
     const monitoredTerminals = new Map<Terminal, PythonEnvironment>();
+    const shellStartupVarsMgr = new ShellStartupActivationVariablesManagerImpl(
+        context.environmentVariableCollection,
+        shellEnvsProviders,
+        api,
+    );
 
     context.subscriptions.push(
+        shellStartupVarsMgr,
         registerCompletionProvider(envManagers),
         registerTools('python_environment', new GetEnvironmentInfoTool(api, envManagers)),
         registerTools('python_install_package', new InstallPackageTool(api)),

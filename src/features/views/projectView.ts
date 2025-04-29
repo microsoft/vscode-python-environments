@@ -10,22 +10,22 @@ import {
     window,
 } from 'vscode';
 import { PythonEnvironment } from '../../api';
+import { ProjectViews } from '../../common/localize';
+import { createSimpleDebounce } from '../../common/utils/debounce';
+import { onDidChangeConfiguration } from '../../common/workspace.apis';
 import { EnvironmentManagers, PythonProjectManager } from '../../internal.api';
 import {
-    ProjectTreeItem,
-    ProjectItem,
-    ProjectEnvironment,
-    ProjectPackageRootTreeItem,
-    ProjectTreeItemKind,
+    GlobalProjectItem,
     NoProjectEnvironment,
+    ProjectEnvironment,
     ProjectEnvironmentInfo,
+    ProjectItem,
     ProjectPackage,
     ProjectPackageRootInfoTreeItem,
-    GlobalProjectItem,
+    ProjectPackageRootTreeItem,
+    ProjectTreeItem,
+    ProjectTreeItemKind,
 } from './treeViewItems';
-import { onDidChangeConfiguration } from '../../common/workspace.apis';
-import { createSimpleDebounce } from '../../common/utils/debounce';
-import { ProjectViews } from '../../common/localize';
 
 export class ProjectView implements TreeDataProvider<ProjectTreeItem> {
     private treeView: TreeView<ProjectTreeItem>;
@@ -171,7 +171,7 @@ export class ProjectView implements TreeDataProvider<ProjectTreeItem> {
                 ];
             }
 
-            const environment = await manager?.get(uri);
+            const environment = await this.envManagers.getEnvironment(uri);
             if (!environment) {
                 return [
                     new NoProjectEnvironment(
