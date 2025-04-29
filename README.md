@@ -56,7 +56,7 @@ The extension uses `pip` as the default package manager, but you can use the pac
 | ms-python.python:pip   | `pip`   | Pip acts as the default package manager and it's typically built-in to Python.                                                                                                                            |
 | ms-python.python:conda | `conda` | The [conda](https://conda.org) package manager, as provided by conda distributions like [Anaconda Distribution](https://docs.anaconda.com/anaconda/) or [conda-forge](https://conda-forge.org/download/). |
 
-## Project Management
+### Project Management
 
 A "Python Project" can be a file or folder that contains runnable Python code. With the Python Environments extension, you can add files and folders as projects and assign individual environments to them.
 
@@ -87,6 +87,7 @@ There are a couple of ways that you can add a Python Project from the Python Env
 | defaultPackageManager       | `"ms-python.python:pip"`  | The default package manager to use for installing and managing packages. This is often dictated by the default environment manager but can be customized. |
 | pythonProjects              | `[]`                      | A list of Python workspaces, specified by the path, in which you can set particular environment and package managers. You can set information for a workspace as `[{"path":  "/path/to/workspace", "envManager": "ms-python.python:venv", "packageManager": "ms-python.python:pip"]}`. |
 | terminal.showActivateButton | `false`                   | (experimental) Show a button in the terminal to activate/deactivate the current environment for the terminal. This button is only shown if the active terminal is associated with a project that has an activatable environment.                                                       |
+| python-envs.terminal.autoActivationType | `command` | Specifies how the extension can activate an environment in a terminal. Utilizing Shell Startup requires changes to the shell script file and is only enabled for the following shells: zsh, fsh, pwsh, bash, cmd. When set to `command`, any shell can be activated. This setting applies only when terminals are created, so you will need to restart your terminals for it to take effect. To revert changes made during shellStartup, run `Python Envs: Revert Shell Startup Script Changes`.|
 
 ## Extensibility
 
