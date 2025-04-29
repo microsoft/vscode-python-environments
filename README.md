@@ -58,7 +58,7 @@ The extension uses `pip` as the default package manager, but you can use the pac
 
 ### Project Management
 
-A "Python Project" can be a file or folder that contains runnable Python code. With the Python Environments extension, you can add files and folders as projects and assign individual environments to them.
+A "Python Project" is any file or folder that contains runnable Python code and needs its own environment. With the Python Environments extension, you can add files and folders as projects in your workspace and assign individual environments to them allowing you to run various projects more seamlessly.
 
 Projects can be added via the Python Environments pane or in the File Explorer by right-clicking on the folder/file and selecting the "Add as Python Project" menu item.
 
