@@ -15,7 +15,7 @@ The Python Environments extension for VS Code helps you manage Python environmen
 
 ## Features
 
-The "Python Projects" fold shows you all of the projects that are currently in your workspace and their selected environments. From this view you can add more files or folders as projects, select a new environment for your project, and manage your selected environments. 
+The "Python Projects" fold shows you all of the projects that are currently in your workspace and their selected environments. From this view you can add more files or folders as projects, select a new environment for your project, and manage your selected environments.
 
 The "Environment Managers" fold shows you all of the environment managers that are available on your machine with all related environments nested below. From this view, you can create new environments, delete old environments, and manage packages.
 
@@ -25,7 +25,7 @@ The "Environment Managers" fold shows you all of the environment managers that a
 
 The Python Environments panel provides an interface to create, delete and manage environments.
 
-![ADD A QUICK REFERENCE FOR UI BUTTON]()
+<img src=<https://raw.githubusercontent.com/microsoft/vscode-python-environments/main/images/environment-managers-quick-start.png> width=734 height=413>
 
 To simplify the environment creation process, you can use "Quick Create" to automatically create a new virtual environment using:
 
@@ -34,8 +34,6 @@ To simplify the environment creation process, you can use "Quick Create" to auto
 - Workspace dependencies
 
 For more control, you can create a custom environment where you can specify Python version, environment name, packages to be installed, and more!
-
-![Gif showing environment creation using Quick Create.]()
 
 The following environment managers are supported out of the box:
 
@@ -51,8 +49,6 @@ Environment managers are responsible for specifying which package manager will b
 
 The extension also provides an interface to install and uninstall Python packages, and provides APIs for extension developers to contribute package managers of their choice.
 
-![ADD A QUICK REFERENCE PICTURE FOR BUTTONS]()
-
 The extension uses `pip` as the default package manager, but you can use the package manager of your choice using the `python-envs.defaultPackageManager` setting. The following are package managers supported out of the box:
 
 | Id                     | Name  |  Description|
@@ -60,24 +56,18 @@ The extension uses `pip` as the default package manager, but you can use the pac
 | ms-python.python:pip   | `pip`   | Pip acts as the default package manager and it's typically built-in to Python.                                                                                                                            |
 | ms-python.python:conda | `conda` | The [conda](https://conda.org) package manager, as provided by conda distributions like [Anaconda Distribution](https://docs.anaconda.com/anaconda/) or [conda-forge](https://conda-forge.org/download/). |
 
-### Project Creation and Management
+## Project Management
 
-The Python Environments extension allows you to assign additional files or folders to various environments. Using `Add Python Project` in the Python Projects view you can:
+A "Python Project" can be a file or folder that contains runnable Python code. With the Python Environments extension, you can add files and folders as projects and assign individual environments to them.
 
-- Add existing projects : Allows you to select a file or folder that is currently in your VS Code workspace
-- Auto find projects: Searches for folders in your VS Code workspace with `pyproject.toml` and other setup files
-- Create new project: Create a new project from scratch
+Projects can be added via the Python Environments pane or in the File Explorer by right-clicking on the folder/file and selecting the "Add as Python Project" menu item.
 
-The **Python: Create Project** command simplifies the process of starting a new Python project by scaffolding it for you. Whether in a new workspace or an existing one, this command sets up the necessary environment and files, so you don’t have to worry about the initial setup, and only the code you want to write.
+There are a couple of ways that you can add a Python Project from the Python Environments panel:
 
-![Gif showing project creation using the `Python: Create Project` command for a Python package.]()
-
-#### Types of Projects
-
-The `Python: Create Project` command supports the following project types:
-
-- Package: A structured Python package with files like `__init__.py` and setup configurations.
-- Generic script: A simple project for standalone Python scripts, ideal for quick tasks or just to get you started.
+| Name | Description |
+| ----- | ---------- |
+| Add Existing | Allows you to add an existing folder from the file explorer. |
+| Auto find | Searches for folders that contain `pyproject.toml` or `setup.py` files |
 
 ## Command Reference
 
@@ -85,7 +75,6 @@ The `Python: Create Project` command supports the following project types:
 | -------- | ------------- |
 | Python: Create Environment | Create a virtual environment using your preferred environment manager preconfigured with "Quick Create" or configured to your choices.  |
 | Python: Manage Packages | Install and uninstall packages in a given Python environment. |
-| Python: Create Project | Creates a scaffolded Python project with a virtual environment. |
 | Python: Activate Environment in Current Terminal | Activates the currently opened terminal with a particular environment. |
 | Python: Deactivate Environment in Current Terminal  | Deactivates environment in currently opened terminal. |
 | Python: Run as Task | Runs Python module as a task. |
