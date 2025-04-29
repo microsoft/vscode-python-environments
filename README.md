@@ -11,7 +11,7 @@ The Python Environments extension for VS Code helps you manage Python environmen
 
 > **Note:** This extension is in preview, and its APIs and features are subject to change as the project evolves.
 
-> **Important:** This extension requires the pre-release version of the Python extension (`ms-python.python`) to operate (version 2024.23.2025010901 or later).
+> **Important:** This extension requires version `2024.23`, or later, of the Python extension (`ms-python.python`).
 
 ## Features
 
