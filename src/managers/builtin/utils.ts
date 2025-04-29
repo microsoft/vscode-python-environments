@@ -1,4 +1,4 @@
-import { CancellationToken, l10n, LogOutputChannel, QuickPickItem, ThemeIcon, Uri, window } from 'vscode';
+import { CancellationToken, LogOutputChannel, ProgressLocation, QuickPickItem, ThemeIcon, Uri, window } from 'vscode';
 import {
     EnvironmentManager,
     Package,
@@ -14,11 +14,12 @@ import {
     NativePythonEnvironmentKind,
     NativePythonFinder,
 } from '../common/nativePythonFinder';
-import { showErrorMessage } from '../../common/errors/utils';
 import { shortVersion, sortEnvironments } from '../common/utils';
 import { SysManagerStrings } from '../../common/localize';
 import { isUvInstalled, runUV, runPython } from './helpers';
-import { parsePipList } from './pipListUtils';
+import { parsePipList, PipPackage } from './pipListUtils';
+import { withProgress } from '../../common/window.apis';
+import { showErrorMessageWithLogs } from '../../common/errors/utils';
 
 function asPackageQuickPickItem(name: string, version?: string): QuickPickItem {
     return {
@@ -138,39 +139,49 @@ export async function refreshPythons(
     return sortEnvironments(collection);
 }
 
+async function refreshPipPackagesRaw(environment: PythonEnvironment, log?: LogOutputChannel): Promise<string> {
+    const useUv = await isUvInstalled();
+    if (useUv) {
+        return await runUV(['pip', 'list', '--python', environment.execInfo.run.executable], undefined, log);
+    }
+    return await runPython(environment.execInfo.run.executable, ['-m', 'pip', 'list'], undefined, log);
+}
+
+export async function refreshPipPackages(
+    environment: PythonEnvironment,
+    log?: LogOutputChannel,
+    options?: { showProgress: boolean },
+): Promise<PipPackage[] | undefined> {
+    let data: string;
+    try {
+        if (options?.showProgress) {
+            data = await withProgress(
+                {
+                    location: ProgressLocation.Notification,
+                },
+                async () => {
+                    return await refreshPipPackagesRaw(environment, log);
+                },
+            );
+        } else {
+            data = await refreshPipPackagesRaw(environment, log);
+        }
+
+        return parsePipList(data);
+    } catch (e) {
+        log?.error('Error refreshing packages', e);
+        showErrorMessageWithLogs(SysManagerStrings.packageRefreshError, log);
+        return undefined;
+    }
+}
+
 export async function refreshPackages(
     environment: PythonEnvironment,
     api: PythonEnvironmentApi,
     manager: PackageManager,
 ): Promise<Package[]> {
-    if (!environment.execInfo) {
-        manager.log?.error(`No executable found for python: ${environment.environmentPath.fsPath}`);
-        showErrorMessage(
-            l10n.t('No executable found for python: {0}', environment.environmentPath.fsPath),
-            manager.log,
-        );
-        return [];
-    }
-
-    let data: string;
-    try {
-        const useUv = await isUvInstalled();
-        if (useUv) {
-            data = await runUV(
-                ['pip', 'list', '--python', environment.execInfo.run.executable],
-                undefined,
-                manager.log,
-            );
-        } else {
-            data = await runPython(environment.execInfo.run.executable, ['-m', 'pip', 'list'], undefined, manager.log);
-        }
-    } catch (e) {
-        manager.log?.error('Error refreshing packages', e);
-        showErrorMessage(SysManagerStrings.packageRefreshError, manager.log);
-        return [];
-    }
-
-    return parsePipList(data).map((pkg) => api.createPackageItem(pkg, environment, manager));
+    const data = await refreshPipPackages(environment, manager.log);
+    return (data ?? []).map((pkg) => api.createPackageItem(pkg, environment, manager));
 }
 
 export async function managePackages(

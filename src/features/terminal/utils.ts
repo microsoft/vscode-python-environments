@@ -1,8 +1,8 @@
 import * as path from 'path';
 import { Terminal, TerminalOptions, Uri } from 'vscode';
-import { sleep } from '../../common/utils/asyncUtils';
 import { PythonEnvironment, PythonProject, PythonProjectEnvironmentApi, PythonProjectGetterApi } from '../../api';
-import { getWorkspaceFolders } from '../../common/workspace.apis';
+import { sleep } from '../../common/utils/asyncUtils';
+import { getConfiguration, getWorkspaceFolders } from '../../common/workspace.apis';
 
 const SHELL_INTEGRATION_TIMEOUT = 500; // 0.5 seconds
 const SHELL_INTEGRATION_POLL_INTERVAL = 20; // 0.02 seconds
@@ -88,4 +88,44 @@ export async function getEnvironmentForTerminal(
     }
 
     return env;
+}
+
+export const ACT_TYPE_SHELL = 'shellStartup';
+export const ACT_TYPE_COMMAND = 'command';
+export const ACT_TYPE_OFF = 'off';
+export type AutoActivationType = 'off' | 'command' | 'shellStartup';
+export function getAutoActivationType(): AutoActivationType {
+    // 'startup' auto-activation means terminal is activated via shell startup scripts.
+    // 'command' auto-activation means terminal is activated via a command.
+    // 'off' means no auto-activation.
+    const config = getConfiguration('python-envs');
+    return config.get<AutoActivationType>('terminal.autoActivationType', 'command');
+}
+
+export async function setAutoActivationType(value: AutoActivationType): Promise<void> {
+    const config = getConfiguration('python-envs');
+    return await config.update('terminal.autoActivationType', value, true);
+}
+
+export async function getAllDistinctProjectEnvironments(
+    api: PythonProjectGetterApi & PythonProjectEnvironmentApi,
+): Promise<PythonEnvironment[] | undefined> {
+    const envs: PythonEnvironment[] | undefined = [];
+
+    const projects = api.getPythonProjects();
+    if (projects.length === 0) {
+        const env = await api.getEnvironment(undefined);
+        if (env) {
+            envs.push(env);
+        }
+    } else if (projects.length === 1) {
+        const env = await api.getEnvironment(projects[0].uri);
+        if (env) {
+            envs.push(env);
+        }
+    } else {
+        envs.push(...(await getDistinctProjectEnvs(api, projects)));
+    }
+
+    return envs.length > 0 ? envs : undefined;
 }

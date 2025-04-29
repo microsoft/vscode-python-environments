@@ -1,53 +1,43 @@
 import { QuickInputButtons, TaskExecution, TaskRevealKind, Terminal, Uri } from 'vscode';
 import {
+    CreateEnvironmentOptions,
+    PythonEnvironment,
+    PythonEnvironmentApi,
+    PythonProjectCreator,
+    PythonProjectCreatorOptions,
+} from '../api';
+import { traceError, traceInfo, traceVerbose } from '../common/logging';
+import {
     EnvironmentManagers,
     InternalEnvironmentManager,
     InternalPackageManager,
     ProjectCreators,
     PythonProjectManager,
 } from '../internal.api';
-import { traceError, traceInfo, traceVerbose } from '../common/logging';
-import {
-    CreateEnvironmentOptions,
-    PythonEnvironment,
-    PythonEnvironmentApi,
-    PythonProject,
-    PythonProjectCreator,
-} from '../api';
-import * as path from 'path';
-import {
-    setEnvironmentManager,
-    setPackageManager,
-    addPythonProjectSetting,
-    removePythonProjectSetting,
-    getDefaultEnvManagerSetting,
-    getDefaultPkgManagerSetting,
-    EditProjectSettings,
-} from './settings/settingHelpers';
+import { removePythonProjectSetting, setEnvironmentManager, setPackageManager } from './settings/settingHelpers';
 
-import { getAbsolutePath } from '../common/utils/fileNameUtils';
+import { clipboardWriteText } from '../common/env.apis';
+import {} from '../common/errors/utils';
+import { pickEnvironment } from '../common/pickers/environments';
+import { pickCreator, pickEnvironmentManager, pickPackageManager } from '../common/pickers/managers';
+import { pickProject, pickProjectMany } from '../common/pickers/projects';
+import { activeTextEditor, showErrorMessage } from '../common/window.apis';
+import { quoteArgs } from './execution/execUtils';
 import { runAsTask } from './execution/runAsTask';
+import { runInTerminal } from './terminal/runInTerminal';
+import { TerminalManager } from './terminal/terminalManager';
 import {
     EnvManagerTreeItem,
-    PackageRootTreeItem,
-    PythonEnvTreeItem,
-    ProjectItem,
-    ProjectEnvironment,
-    ProjectPackageRootTreeItem,
-    GlobalProjectItem,
     EnvTreeItemKind,
+    GlobalProjectItem,
+    PackageRootTreeItem,
     PackageTreeItem,
+    ProjectEnvironment,
+    ProjectItem,
     ProjectPackage,
+    ProjectPackageRootTreeItem,
+    PythonEnvTreeItem,
 } from './views/treeViewItems';
-import { pickEnvironment } from '../common/pickers/environments';
-import { pickEnvironmentManager, pickPackageManager, pickCreator } from '../common/pickers/managers';
-import { pickProject, pickProjectMany } from '../common/pickers/projects';
-import { TerminalManager } from './terminal/terminalManager';
-import { runInTerminal } from './terminal/runInTerminal';
-import { quoteArgs } from './execution/execUtils';
-import { showErrorMessage } from '../common/errors/utils';
-import { activeTextEditor } from '../common/window.apis';
-import { clipboardWriteText } from '../common/env.apis';
 
 export async function refreshManagerCommand(context: unknown): Promise<void> {
     if (context instanceof EnvManagerTreeItem) {
@@ -115,7 +105,7 @@ export async function createEnvironmentCommand(
 export async function createAnyEnvironmentCommand(
     em: EnvironmentManagers,
     pm: PythonProjectManager,
-    options?: CreateEnvironmentOptions & { selectEnvironment: boolean },
+    options?: CreateEnvironmentOptions & { selectEnvironment?: boolean; showBackButton?: boolean },
 ): Promise<PythonEnvironment | undefined> {
     const select = options?.selectEnvironment;
     const projects = pm.getProjects();
@@ -130,7 +120,7 @@ export async function createAnyEnvironmentCommand(
             return env;
         }
     } else if (projects.length > 0) {
-        const selected = await pickProjectMany(projects);
+        const selected = await pickProjectMany(projects, options?.showBackButton);
 
         if (selected && selected.length > 0) {
             const defaultManagers: InternalEnvironmentManager[] = [];
@@ -142,17 +132,25 @@ export async function createAnyEnvironmentCommand(
                 }
             });
 
-            let managerId = await pickEnvironmentManager(
-                em.managers.filter((m) => m.supportsCreate),
-                defaultManagers,
-            );
-            let quickCreate = false;
-            if (managerId?.startsWith('QuickCreate#')) {
-                quickCreate = true;
-                managerId = managerId.replace('QuickCreate#', '');
+            let quickCreate = options?.quickCreate ?? false;
+            let manager: InternalEnvironmentManager | undefined;
+
+            if (quickCreate && defaultManagers.length === 1) {
+                manager = defaultManagers[0];
+            } else {
+                let managerId = await pickEnvironmentManager(
+                    em.managers.filter((m) => m.supportsCreate),
+                    defaultManagers,
+                    options?.showBackButton,
+                );
+                if (managerId?.startsWith('QuickCreate#')) {
+                    quickCreate = true;
+                    managerId = managerId.replace('QuickCreate#', '');
+                }
+
+                manager = em.managers.find((m) => m.id === managerId);
             }
 
-            const manager = em.managers.find((m) => m.id === managerId);
             if (manager) {
                 const env = await manager.create(
                     selected.map((p) => p.uri),
@@ -330,81 +328,61 @@ export async function setPackageManagerCommand(em: EnvironmentManagers, wm: Pyth
     }
 }
 
-export async function addPythonProject(
+/**
+ * Creates a new Python project using a selected PythonProjectCreator.
+ *
+ * This function calls create on the selected creator and handles the creation process. Will return
+ * without doing anything if the resource is a ProjectItem, as the project is already created.
+ *
+ * @param resource - The resource to use for project creation (can be a Uri(s), ProjectItem(s), or undefined).
+ * @param wm - The PythonProjectManager instance for managing projects.
+ * @param em - The EnvironmentManagers instance for managing environments.
+ * @param pc - The ProjectCreators instance for accessing available project creators.
+ * @returns A promise that resolves when the project has been created, or void if cancelled or invalid.
+ */
+export async function addPythonProjectCommand(
     resource: unknown,
     wm: PythonProjectManager,
     em: EnvironmentManagers,
     pc: ProjectCreators,
-): Promise<PythonProject | PythonProject[] | undefined> {
+): Promise<void> {
     if (wm.getProjects().length === 0) {
         showErrorMessage('Please open a folder/project before adding a workspace');
         return;
     }
-
-    if (resource instanceof Uri) {
-        const uri = resource as Uri;
-        const envManagerId = getDefaultEnvManagerSetting(wm, uri);
-        const pkgManagerId = getDefaultPkgManagerSetting(
-            wm,
-            uri,
-            em.getEnvironmentManager(envManagerId)?.preferredPackageManagerId,
-        );
-        const pw = wm.create(path.basename(uri.fsPath), uri);
-        await addPythonProjectSetting([{ project: pw, envManager: envManagerId, packageManager: pkgManagerId }]);
-        return pw;
-    }
-
-    if (resource === undefined || resource instanceof ProjectItem) {
-        const creator: PythonProjectCreator | undefined = await pickCreator(pc.getProjectCreators());
-        if (!creator) {
+    if (resource instanceof Array) {
+        for (const r of resource) {
+            await addPythonProjectCommand(r, wm, em, pc);
             return;
         }
+    }
+    if (resource instanceof ProjectItem) {
+        // If the context is a ProjectItem, project is already created. Just add it to the package manager project list.
+        wm.add(resource.project);
+        return;
+    }
+    let options: PythonProjectCreatorOptions | undefined;
 
-        let results: PythonProject | PythonProject[] | undefined;
-        try {
-            results = await creator.create();
-            if (results === undefined) {
-                return;
-            }
-        } catch (ex) {
-            if (ex === QuickInputButtons.Back) {
-                return addPythonProject(resource, wm, em, pc);
-            }
-            throw ex;
+    if (resource instanceof Uri) {
+        // Use resource as the URI for the project if it is a URI.
+        options = {
+            name: resource.fsPath,
+            rootUri: resource,
+        };
+    }
+
+    const creator: PythonProjectCreator | undefined = await pickCreator(pc.getProjectCreators());
+    if (!creator) {
+        return;
+    }
+
+    try {
+        await creator.create(options);
+    } catch (ex) {
+        if (ex === QuickInputButtons.Back) {
+            return addPythonProjectCommand(resource, wm, em, pc);
         }
-
-        if (!Array.isArray(results)) {
-            results = [results];
-        }
-
-        if (Array.isArray(results)) {
-            if (results.length === 0) {
-                return;
-            }
-        }
-
-        const projects: PythonProject[] = [];
-        const edits: EditProjectSettings[] = [];
-
-        for (const result of results) {
-            const uri = await getAbsolutePath(result.uri.fsPath);
-            if (!uri) {
-                traceError(`Path does not belong to any opened workspace: ${result.uri.fsPath}`);
-                continue;
-            }
-
-            const envManagerId = getDefaultEnvManagerSetting(wm, uri);
-            const pkgManagerId = getDefaultPkgManagerSetting(
-                wm,
-                uri,
-                em.getEnvironmentManager(envManagerId)?.preferredPackageManagerId,
-            );
-            const pw = wm.create(path.basename(uri.fsPath), uri);
-            projects.push(pw);
-            edits.push({ project: pw, envManager: envManagerId, packageManager: pkgManagerId });
-        }
-        await addPythonProjectSetting(edits);
-        return projects;
+        throw ex;
     }
 }
 
@@ -460,7 +438,15 @@ export async function createTerminalCommand(
     api: PythonEnvironmentApi,
     tm: TerminalManager,
 ): Promise<Terminal | undefined> {
-    if (context instanceof Uri) {
+    if (context === undefined) {
+        const pw = await pickProject(api.getPythonProjects());
+        if (pw) {
+            const env = await api.getEnvironment(pw.uri);
+            if (env) {
+                return await tm.create(env, { cwd: pw.uri });
+            }
+        }
+    } else if (context instanceof Uri) {
         const uri = context as Uri;
         const env = await api.getEnvironment(uri);
         const pw = api.getPythonProject(uri);

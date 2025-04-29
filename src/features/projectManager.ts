@@ -1,14 +1,21 @@
-import { Uri, EventEmitter, MarkdownString, Disposable } from 'vscode';
-import { IconPath, PythonProject } from '../api';
 import * as path from 'path';
-import { PythonProjectManager, PythonProjectSettings, PythonProjectsImpl } from '../internal.api';
+import { Disposable, EventEmitter, MarkdownString, Uri, workspace } from 'vscode';
+import { IconPath, PythonProject } from '../api';
+import { DEFAULT_ENV_MANAGER_ID, DEFAULT_PACKAGE_MANAGER_ID } from '../common/constants';
+import { createSimpleDebounce } from '../common/utils/debounce';
 import {
     getConfiguration,
     getWorkspaceFolders,
     onDidChangeConfiguration,
     onDidChangeWorkspaceFolders,
 } from '../common/workspace.apis';
-import { createSimpleDebounce } from '../common/utils/debounce';
+import { PythonProjectManager, PythonProjectSettings, PythonProjectsImpl } from '../internal.api';
+import {
+    addPythonProjectSetting,
+    EditProjectSettings,
+    getDefaultEnvManagerSetting,
+    getDefaultPkgManagerSetting,
+} from './settings/settingHelpers';
 
 type ProjectArray = PythonProject[];
 
@@ -92,14 +99,32 @@ export class PythonProjectManagerImpl implements PythonProjectManager {
         return new PythonProjectsImpl(name, uri, options);
     }
 
-    add(projects: PythonProject | ProjectArray): void {
+    async add(projects: PythonProject | ProjectArray): Promise<void> {
         const _projects = Array.isArray(projects) ? projects : [projects];
         if (_projects.length === 0) {
             return;
         }
+        const edits: EditProjectSettings[] = [];
 
-        _projects.forEach((w) => this._projects.set(w.uri.toString(), w));
+        const envManagerId = getDefaultEnvManagerSetting(this);
+        const pkgManagerId = getDefaultPkgManagerSetting(this);
+
+        const globalConfig = workspace.getConfiguration('python-envs', undefined);
+        const defaultEnvManager = globalConfig.get<string>('defaultEnvManager', DEFAULT_ENV_MANAGER_ID);
+        const defaultPkgManager = globalConfig.get<string>('defaultPackageManager', DEFAULT_PACKAGE_MANAGER_ID);
+
+        _projects.forEach((w) => {
+            // if the package manager and env manager are not the default ones, then add them to the edits
+            if (envManagerId !== defaultEnvManager || pkgManagerId !== defaultPkgManager) {
+                edits.push({ project: w, envManager: envManagerId, packageManager: pkgManagerId });
+            }
+            return this._projects.set(w.uri.toString(), w);
+        });
         this._onDidChangeProjects.fire(Array.from(this._projects.values()));
+
+        if (edits.length > 0) {
+            await addPythonProjectSetting(edits);
+        }
     }
 
     remove(projects: PythonProject | ProjectArray): void {

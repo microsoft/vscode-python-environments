@@ -1,4 +1,5 @@
 import { l10n } from 'vscode';
+import { Commands } from './commands';
 
 export namespace Common {
     export const recommended = l10n.t('Recommended');
@@ -11,7 +12,13 @@ export namespace Common {
     export const viewLogs = l10n.t('View Logs');
     export const yes = l10n.t('Yes');
     export const no = l10n.t('No');
+    export const ok = l10n.t('Ok');
     export const quickCreate = l10n.t('Quick Create');
+    export const installPython = l10n.t('Install Python');
+}
+
+export namespace WorkbenchStrings {
+    export const installExtension = l10n.t('Install Extension');
 }
 
 export namespace Interpreter {
@@ -138,6 +145,11 @@ export namespace CondaStrings {
 
     export const quickCreateCondaNoEnvRoot = l10n.t('No conda environment root found');
     export const quickCreateCondaNoName = l10n.t('Could not generate a name for env');
+
+    export const condaMissingPython = l10n.t('No Python found in the selected conda environment');
+    export const condaMissingPythonNoFix = l10n.t(
+        'No Python found in the selected conda environment. Please select another environment or install Python manually.',
+    );
 }
 
 export namespace ProjectCreatorString {
@@ -155,4 +167,13 @@ export namespace ProjectCreatorString {
 export namespace EnvViewStrings {
     export const selectedGlobalTooltip = l10n.t('This environment is selected for non-workspace files');
     export const selectedWorkspaceTooltip = l10n.t('This environment is selected for workspace files');
+}
+
+export namespace ActivationStrings {
+    export const envCollectionDescription = l10n.t('Environment variables for shell activation');
+    export const revertedShellStartupScripts = l10n.t(
+        'Removed shell startup profile code for Python environment activation. See [logs](command:{0})',
+        Commands.viewLogs,
+    );
+    export const activatingEnvironment = l10n.t('Activating environment');
 }

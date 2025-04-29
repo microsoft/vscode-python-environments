@@ -1,4 +1,5 @@
-import { ProgressLocation, Uri, LogOutputChannel, EventEmitter, MarkdownString, ThemeIcon, l10n } from 'vscode';
+import * as path from 'path';
+import { EventEmitter, l10n, LogOutputChannel, MarkdownString, ProgressLocation, ThemeIcon, Uri } from 'vscode';
 import {
     CreateEnvironmentOptions,
     CreateEnvironmentScope,
@@ -17,6 +18,12 @@ import {
     ResolveEnvironmentContext,
     SetEnvironmentScope,
 } from '../../api';
+import { PYTHON_EXTENSION_ID } from '../../common/constants';
+import { VenvManagerStrings } from '../../common/localize';
+import { createDeferred, Deferred } from '../../common/utils/deferred';
+import { showErrorMessage, withProgress } from '../../common/window.apis';
+import { NativePythonFinder } from '../common/nativePythonFinder';
+import { getLatest, shortVersion, sortEnvironments } from '../common/utils';
 import {
     clearVenvCache,
     createPythonVenv,
@@ -32,14 +39,6 @@ import {
     setVenvForWorkspace,
     setVenvForWorkspaces,
 } from './venvUtils';
-import * as path from 'path';
-import { NativePythonFinder } from '../common/nativePythonFinder';
-import { PYTHON_EXTENSION_ID } from '../../common/constants';
-import { createDeferred, Deferred } from '../../common/utils/deferred';
-import { getLatest, sortEnvironments } from '../common/utils';
-import { withProgress } from '../../common/window.apis';
-import { VenvManagerStrings } from '../../common/localize';
-import { showErrorMessage } from '../../common/errors/utils';
 
 export class VenvManager implements EnvironmentManager {
     private collection: PythonEnvironment[] = [];
@@ -98,7 +97,10 @@ export class VenvManager implements EnvironmentManager {
 
         return {
             description: l10n.t('Create a virtual environment in workspace root'),
-            detail: l10n.t('Uses Python version {0} and installs workspace dependencies.', this.globalEnv.version),
+            detail: l10n.t(
+                'Uses Python version {0} and installs workspace dependencies.',
+                shortVersion(this.globalEnv.version),
+            ),
         };
     }
 
@@ -135,6 +137,7 @@ export class VenvManager implements EnvironmentManager {
                         this,
                         this.globalEnv,
                         venvRoot,
+                        options?.additionalPackages,
                     );
                 } else if (!this.globalEnv) {
                     this.log.error('No base python found');
@@ -212,7 +215,7 @@ export class VenvManager implements EnvironmentManager {
         if (this.skipWatcherRefresh) {
             return;
         }
-        return this.internalRefresh(undefined, false, VenvManagerStrings.venvRefreshing);
+        return this.internalRefresh(undefined, true, VenvManagerStrings.venvRefreshing);
     }
 
     private async internalRefresh(

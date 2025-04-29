@@ -86,6 +86,22 @@
                         "onExP",
                         "preview"
                     ]
+                },
+                "python-envs.terminal.autoActivationType": {
+                    "type": "string",
+                    "markdownDescription": "%python-envs.terminal.autoActivationType.description%",
+                    "default": "command",
+                    "enum": [
+                        "command",
+                        "shellStartup",
+                        "off"
+                    ],
+                    "markdownEnumDescriptions": [
+                        "%python-envs.terminal.autoActivationType.command%",
+                        "%python-envs.terminal.autoActivationType.shellStartup%",
+                        "%python-envs.terminal.autoActivationType.off%"
+                    ],
+                    "scope": "machine"
                 }
             }
         },
@@ -228,14 +244,16 @@
                 "title": "%python-envs.copyProjectPath.title%",
                 "category": "Python Envs",
                 "icon": "$(copy)"
+            },
+            {
+                "command": "python-envs.terminal.revertStartupScriptChanges",
+                "title": "%python-envs.terminal.revertStartupScriptChanges.title%",
+                "category": "Python Envs",
+                "icon": "$(discard)"
             }
         ],
         "menus": {
             "commandPalette": [
-                {
-                    "command": "python-envs.packages",
-                    "when": "false"
-                },
                 {
                     "command": "python-envs.refreshAllManagers",
                     "when": "false"
@@ -491,22 +509,53 @@
         ],
         "languageModelTools": [
             {
-                "name": "python_get_packages",
-                "displayName": "Get Python Packages",
-                "modelDescription": "Returns the packages installed in the given Python file's environment. You should call this when you want to generate Python code to determine the users preferred packages. Also call this to determine if you need to provide installation instructions in a response.",
-                "toolReferenceName": "pythonGetPackages",
+                "name": "python_environment",
+                "userDescription": "Get Python environment info for a file or path, including version, packages, and the command to run it.",
+                "displayName": "Get Python Environment Information",
+                "modelDescription": "Provides details about the Python environment for a specified file or workspace, including environment type, Python version, run command, and installed packages with their versions. Use this tool to determine the correct command for executing Python code in this workspace.",
+                "toolReferenceName": "pythonGetEnvironmentInfo",
                 "tags": [],
                 "icon": "$(files)",
+                "canBeReferencedInPrompt": true,
                 "inputSchema": {
                     "type": "object",
                     "properties": {
-                        "filePath": {
+                        "resourcePath": {
                             "type": "string"
                         }
                     },
-                    "description": "The path to the Python file or workspace to get the installed packages for.",
+                    "description": "The path to the Python file or workspace to get the environment information for.",
                     "required": [
-                        "filePath"
+                        "resourcePath"
+                    ]
+                }
+            },
+            {
+                "name": "python_install_package",
+                "displayName": "Install Python Package",
+                "modelDescription": "Installs Python packages in the given workspace. Use this tool to install packages in the user's chosen environment.",
+                "toolReferenceName": "pythonInstallPackage",
+                "tags": [],
+                "icon": "$(package)",
+                "canBeReferencedInPrompt": true,
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "packageList": {
+                            "type": "array",
+                            "items": {
+                                "type": "string"
+                            },
+                            "description": "The list of packages to install."
+                        },
+                        "resourcePath": {
+                            "type": "string",
+                            "description": "The path to the Python file or workspace to get the environment information for."
+                        }
+                    },
+                    "required": [
+                        "packageList",
+                        "resourcePath"
                     ]
                 }
             }

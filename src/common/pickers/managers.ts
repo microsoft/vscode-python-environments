@@ -21,6 +21,7 @@ function getDescription(mgr: InternalEnvironmentManager | InternalPackageManager
 export async function pickEnvironmentManager(
     managers: InternalEnvironmentManager[],
     defaultManagers?: InternalEnvironmentManager[],
+    showBackButton?: boolean,
 ): Promise<string | undefined> {
     if (managers.length === 0) {
         return;
@@ -37,13 +38,14 @@ export async function pickEnvironmentManager(
             kind: QuickPickItemKind.Separator,
         });
         if (defaultManagers.length === 1 && defaultManagers[0].supportsQuickCreate) {
-            const details = defaultManagers[0].quickCreateConfig();
+            const defaultMgr = defaultManagers[0];
+            const details = defaultMgr.quickCreateConfig();
             if (details) {
                 items.push({
                     label: Common.quickCreate,
-                    description: details.description,
+                    description: `${defaultMgr.displayName} • ${details.description}`,
                     detail: details.detail,
-                    id: `QuickCreate#${defaultManagers[0].id}`,
+                    id: `QuickCreate#${defaultMgr.id}`,
                 });
             }
         }
@@ -71,6 +73,7 @@ export async function pickEnvironmentManager(
     const item = await showQuickPickWithButtons(items, {
         placeHolder: Pickers.Managers.selectEnvironmentManager,
         ignoreFocusOut: true,
+        showBackButton,
     });
     return (item as QuickPickItem & { id: string })?.id;
 }

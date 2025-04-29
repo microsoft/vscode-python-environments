@@ -25,13 +25,16 @@
             "presentation": {
                 "reveal": "never",
                 "group": "watchers"
-            },
-            "group": "build"
+            }
         },
         {
-            "label": "tasks: watch-tests",
+            "label": "tasks: build",
             "dependsOn": ["npm: watch", "npm: watch-tests"],
-            "problemMatcher": []
+            "problemMatcher": [],
+            "presentation": {
+                "reveal": "never",
+                "group": "watchers"
+            }
         },
         {
             "type": "npm",
