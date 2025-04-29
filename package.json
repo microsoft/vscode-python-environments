@@ -510,8 +510,9 @@
         "languageModelTools": [
             {
                 "name": "python_environment",
+                "userDescription": "Get Python environment info for a file or path, including version, packages, and the command to run it.",
                 "displayName": "Get Python Environment Information",
-                "modelDescription": "Provides details about the Python environment for a specified file or workspace, including environment type, Python version, run command, and installed packages with their versions.",
+                "modelDescription": "Provides details about the Python environment for a specified file or workspace, including environment type, Python version, run command, and installed packages with their versions. Use this tool to determine the correct command for executing Python code in this workspace.",
                 "toolReferenceName": "pythonGetEnvironmentInfo",
                 "tags": [],
                 "icon": "$(files)",
