@@ -1,11 +1,10 @@
 import * as path from 'path';
+import { Uri, window, workspace } from 'vscode';
 import { PythonProject, PythonProjectCreator, PythonProjectCreatorOptions } from '../../api';
 import { ProjectCreatorString } from '../../common/localize';
+import { traceInfo, traceLog } from '../../common/logging';
 import { showOpenDialog, showWarningMessage } from '../../common/window.apis';
-import { PythonProjectManager } from '../../internal.api';
-import { traceInfo } from '../../common/logging';
-import { Uri, window, workspace } from 'vscode';
-import { traceLog } from '../../common/logging';
+import { PythonProjectManager, PythonProjectsImpl } from '../../internal.api';
 
 export class ExistingProjects implements PythonProjectCreator {
     public readonly name = 'existingProjects';
@@ -90,10 +89,9 @@ export class ExistingProjects implements PythonProjectCreator {
             }
             return;
         } else {
-            const projects = resultsInWorkspace.map((uri) => ({
-                name: path.basename(uri.fsPath),
-                uri,
-            })) as PythonProject[];
+            const projects = resultsInWorkspace.map(
+                (uri) => new PythonProjectsImpl(path.basename(uri.fsPath), uri),
+            ) as PythonProject[];
             // Add the projects to the project manager
             this.pm.add(projects);
             return projects;

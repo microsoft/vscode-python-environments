@@ -113,12 +113,19 @@ export class PythonProjectManagerImpl implements PythonProjectManager {
         const defaultEnvManager = globalConfig.get<string>('defaultEnvManager', DEFAULT_ENV_MANAGER_ID);
         const defaultPkgManager = globalConfig.get<string>('defaultPackageManager', DEFAULT_PACKAGE_MANAGER_ID);
 
-        _projects.forEach((w) => {
-            // if the package manager and env manager are not the default ones, then add them to the edits
-            if (envManagerId !== defaultEnvManager || pkgManagerId !== defaultPkgManager) {
-                edits.push({ project: w, envManager: envManagerId, packageManager: pkgManagerId });
+        _projects.forEach((currProject) => {
+            const workspaces = getWorkspaceFolders() ?? [];
+            const isRoot = workspaces.some((w) => w.uri.toString() === currProject.uri.toString());
+            if (isRoot) {
+                // for root projects, add setting if not default
+                if (envManagerId !== defaultEnvManager || pkgManagerId !== defaultPkgManager) {
+                    edits.push({ project: currProject, envManager: envManagerId, packageManager: pkgManagerId });
+                }
+            } else {
+                // for non-root projects, always add setting
+                edits.push({ project: currProject, envManager: envManagerId, packageManager: pkgManagerId });
             }
-            return this._projects.set(w.uri.toString(), w);
+            return this._projects.set(currProject.uri.toString(), currProject);
         });
         this._onDidChangeProjects.fire(Array.from(this._projects.values()));
 
