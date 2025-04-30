@@ -1,11 +1,11 @@
 import * as path from 'path';
 import { Uri } from 'vscode';
-import { showErrorMessage, showQuickPickWithButtons, showWarningMessage } from '../../common/window.apis';
-import { ProjectCreatorString } from '../../common/localize';
 import { PythonProject, PythonProjectCreator, PythonProjectCreatorOptions } from '../../api';
-import { PythonProjectManager } from '../../internal.api';
-import { findFiles } from '../../common/workspace.apis';
+import { ProjectCreatorString } from '../../common/localize';
 import { traceInfo } from '../../common/logging';
+import { showErrorMessage, showQuickPickWithButtons, showWarningMessage } from '../../common/window.apis';
+import { findFiles } from '../../common/workspace.apis';
+import { PythonProjectManager, PythonProjectsImpl } from '../../internal.api';
 
 function getUniqueUri(uris: Uri[]): {
     label: string;
@@ -96,11 +96,9 @@ export class AutoFindProjects implements PythonProjectCreator {
             traceInfo('User cancelled project selection.');
             return;
         }
-
-        const projects = projectUris.map((uri) => ({
-            name: path.basename(uri.fsPath),
-            uri,
-        })) as PythonProject[];
+        const projects = projectUris.map(
+            (uri) => new PythonProjectsImpl(path.basename(uri.fsPath), uri),
+        ) as PythonProject[];
         // Add the projects to the project manager
         this.pm.add(projects);
         return projects;
