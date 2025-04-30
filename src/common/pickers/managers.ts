@@ -2,7 +2,7 @@ import { QuickPickItem, QuickPickItemKind } from 'vscode';
 import { PythonProjectCreator } from '../../api';
 import { InternalEnvironmentManager, InternalPackageManager } from '../../internal.api';
 import { Common, Pickers } from '../localize';
-import { showQuickPickWithButtons, showQuickPick } from '../window.apis';
+import { showQuickPick, showQuickPickWithButtons } from '../window.apis';
 
 function getDescription(mgr: InternalEnvironmentManager | InternalPackageManager): string | undefined {
     if (mgr.description) {
@@ -27,7 +27,8 @@ export async function pickEnvironmentManager(
         return;
     }
 
-    if (managers.length === 1) {
+    if (managers.length === 1 && !managers[0].supportsQuickCreate) {
+        // If there's only one manager and it doesn't support quick create, return its ID directly.
         return managers[0].id;
     }
 
