@@ -19,13 +19,13 @@ The "Python Projects" fold shows you all of the projects that are currently in y
 
 The "Environment Managers" fold shows you all of the environment managers that are available on your machine with all related environments nested below. From this view, you can create new environments, delete old environments, and manage packages.
 
-<img src=<https://raw.githubusercontent.com/microsoft/vscode-python-environments/main/images/python-envs-overview.gif> width=734 height=413>
+![Gif showing the Python Environments UI and features.](/images/python-envs-overview.gif)
 
 ### Environment Management
 
 The Python Environments panel provides an interface to create, delete and manage environments.
 
-<img src=<https://raw.githubusercontent.com/microsoft/vscode-python-environments/main/images/environment-managers-quick-start.png> width=734 height=413>
+![Image showing environment manager UI buttons.](/images/environment-managers-quick-start.png)
 
 To simplify the environment creation process, you can use "Quick Create" to automatically create a new virtual environment using:
 
@@ -140,7 +140,7 @@ Tools that may rely on these APIs in their own extensions include:
 
 The relationship between these extensions can be represented as follows:
 
-<img src=<https://raw.githubusercontent.com/microsoft/vscode-python-environments/refs/heads/main/images/extension_relationships.png> width=734 height=413>
+![Diagram demonstrating the relationship between tools extensions and Python Environments.](/images/extension_relationships.png)
 
 Users who do not need to execute code or work in **Virtual Workspaces** can use the Python extension to access language features like hover, completion, and go-to definition. However, executing code (e.g., running a debugger, linter, or formatter), creating/modifying environments, or managing packages requires the Python Environments extension to enable these functionalities.
 
@@ -150,7 +150,7 @@ VS Code supports trust management, allowing extensions to function in either **t
 
 The relationship is illustrated below:
 
-<img src=<https://raw.githubusercontent.com/microsoft/vscode-python-environments/refs/heads/main/images/trust_relationships.png> width=734 height=413>
+![Diagram demonstrating the trust relationship between tools extensions and the Python Environments extension.](/images/trust_relationships.png)
 
 In **trusted mode**, the Python Environments extension supports tasks like managing environments, installing/removing packages, and running tools. In **untrusted mode**, functionality is limited to language features, ensuring a secure and restricted environment.
 
