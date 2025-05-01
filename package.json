@@ -56,7 +56,7 @@
                     "type": "array",
                     "default": [],
                     "description": "%python-envs.pythonProjects.description%",
-                    "scope": "window",
+                    "scope": "resource",
                     "items": {
                         "type": "object",
                         "properties": {

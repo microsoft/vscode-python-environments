@@ -7,10 +7,11 @@ import {
     WorkspaceConfiguration,
     WorkspaceFolder,
 } from 'vscode';
-import { PythonProjectManager, PythonProjectSettings } from '../../internal.api';
-import { traceError, traceInfo } from '../../common/logging';
 import { PythonProject } from '../../api';
 import { DEFAULT_ENV_MANAGER_ID, DEFAULT_PACKAGE_MANAGER_ID } from '../../common/constants';
+import { traceError, traceInfo } from '../../common/logging';
+import { getWorkspaceFile } from '../../common/workspace.apis';
+import { PythonProjectManager, PythonProjectSettings } from '../../internal.api';
 
 function getSettings(
     wm: PythonProjectManager,
@@ -105,6 +106,7 @@ export async function setAllManagerSettings(edits: EditAllManagerSettings[]): Pr
         }
     });
 
+    const workspaceFile = getWorkspaceFile();
     const promises: Thenable<void>[] = [];
 
     workspaces.forEach((es, w) => {
@@ -116,6 +118,12 @@ export async function setAllManagerSettings(edits: EditAllManagerSettings[]): Pr
             if (index >= 0) {
                 overrides[index].envManager = e.envManager;
                 overrides[index].packageManager = e.packageManager;
+            } else if (workspaceFile) {
+                overrides.push({
+                    path: path.relative(w.uri.fsPath, pwPath).replace(/\\/g, '/'),
+                    envManager: e.envManager,
+                    packageManager: e.packageManager,
+                });
             } else {
                 if (config.get('defaultEnvManager') !== e.envManager) {
                     promises.push(config.update('defaultEnvManager', e.envManager, ConfigurationTarget.Workspace));
@@ -127,7 +135,13 @@ export async function setAllManagerSettings(edits: EditAllManagerSettings[]): Pr
                 }
             }
         });
-        promises.push(config.update('pythonProjects', overrides, ConfigurationTarget.Workspace));
+        promises.push(
+            config.update(
+                'pythonProjects',
+                overrides,
+                workspaceFile ? ConfigurationTarget.WorkspaceFolder : ConfigurationTarget.Workspace,
+            ),
+        );
     });
 
     const config = workspace.getConfiguration('python-envs', undefined);
