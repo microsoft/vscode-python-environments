@@ -1,3 +1,6 @@
+import * as fsapi from 'fs-extra';
+import * as os from 'os';
+import * as path from 'path';
 import { l10n, LogOutputChannel, ProgressLocation, QuickPickItem, QuickPickItemKind, ThemeIcon, Uri } from 'vscode';
 import {
     EnvironmentManager,
@@ -6,36 +9,33 @@ import {
     PythonEnvironmentApi,
     PythonEnvironmentInfo,
 } from '../../api';
-import * as path from 'path';
-import * as os from 'os';
-import * as fsapi from 'fs-extra';
-import { resolveSystemPythonEnvironmentPath } from './utils';
 import { ENVS_EXTENSION_ID } from '../../common/constants';
+import { Common, VenvManagerStrings } from '../../common/localize';
+import { getWorkspacePersistentState } from '../../common/persistentState';
+import { pickEnvironmentFrom } from '../../common/pickers/environments';
+import { EventNames } from '../../common/telemetry/constants';
+import { sendTelemetryEvent } from '../../common/telemetry/sender';
+import { isWindows } from '../../common/utils/platformUtils';
+import {
+    showErrorMessage,
+    showInputBox,
+    showOpenDialog,
+    showQuickPick,
+    showWarningMessage,
+    withProgress,
+} from '../../common/window.apis';
+import { getConfiguration } from '../../common/workspace.apis';
+import { ShellConstants } from '../../features/common/shellConstants';
 import {
     isNativeEnvInfo,
     NativeEnvInfo,
     NativePythonEnvironmentKind,
     NativePythonFinder,
 } from '../common/nativePythonFinder';
-import { getWorkspacePersistentState } from '../../common/persistentState';
 import { shortVersion, sortEnvironments } from '../common/utils';
-import { getConfiguration } from '../../common/workspace.apis';
-import { pickEnvironmentFrom } from '../../common/pickers/environments';
-import {
-    showQuickPick,
-    withProgress,
-    showWarningMessage,
-    showInputBox,
-    showOpenDialog,
-    showErrorMessage,
-} from '../../common/window.apis';
-import { Common, VenvManagerStrings } from '../../common/localize';
-import { isUvInstalled, runUV, runPython } from './helpers';
+import { isUvInstalled, runPython, runUV } from './helpers';
 import { getProjectInstallable, getWorkspacePackagesToInstall, PipPackages } from './pipUtils';
-import { isWindows } from '../../common/utils/platformUtils';
-import { sendTelemetryEvent } from '../../common/telemetry/sender';
-import { EventNames } from '../../common/telemetry/constants';
-import { ShellConstants } from '../../features/common/shellConstants';
+import { resolveSystemPythonEnvironmentPath } from './utils';
 
 export const VENV_WORKSPACE_KEY = `${ENVS_EXTENSION_ID}:venv:WORKSPACE_SELECTED`;
 export const VENV_GLOBAL_KEY = `${ENVS_EXTENSION_ID}:venv:GLOBAL_SELECTED`;
@@ -136,24 +136,22 @@ async function getPythonInfo(env: NativeEnvInfo): Promise<PythonEnvironmentInfo>
             shellDeactivation.set('unknown', [{ executable: 'deactivate' }]);
         }
 
-        if (await fsapi.pathExists(path.join(binDir, 'activate'))) {
-            shellActivation.set(ShellConstants.SH, [{ executable: 'source', args: [path.join(binDir, `activate`)] }]);
-            shellDeactivation.set(ShellConstants.SH, [{ executable: 'deactivate' }]);
+        shellActivation.set(ShellConstants.SH, [{ executable: 'source', args: [path.join(binDir, `activate`)] }]);
+        shellDeactivation.set(ShellConstants.SH, [{ executable: 'deactivate' }]);
 
-            shellActivation.set(ShellConstants.BASH, [{ executable: 'source', args: [path.join(binDir, `activate`)] }]);
-            shellDeactivation.set(ShellConstants.BASH, [{ executable: 'deactivate' }]);
+        shellActivation.set(ShellConstants.BASH, [{ executable: 'source', args: [path.join(binDir, `activate`)] }]);
+        shellDeactivation.set(ShellConstants.BASH, [{ executable: 'deactivate' }]);
 
-            shellActivation.set(ShellConstants.GITBASH, [
-                { executable: 'source', args: [pathForGitBash(path.join(binDir, `activate`))] },
-            ]);
-            shellDeactivation.set(ShellConstants.GITBASH, [{ executable: 'deactivate' }]);
+        shellActivation.set(ShellConstants.GITBASH, [
+            { executable: 'source', args: [pathForGitBash(path.join(binDir, `activate`))] },
+        ]);
+        shellDeactivation.set(ShellConstants.GITBASH, [{ executable: 'deactivate' }]);
 
-            shellActivation.set(ShellConstants.ZSH, [{ executable: 'source', args: [path.join(binDir, `activate`)] }]);
-            shellDeactivation.set(ShellConstants.ZSH, [{ executable: 'deactivate' }]);
+        shellActivation.set(ShellConstants.ZSH, [{ executable: 'source', args: [path.join(binDir, `activate`)] }]);
+        shellDeactivation.set(ShellConstants.ZSH, [{ executable: 'deactivate' }]);
 
-            shellActivation.set(ShellConstants.KSH, [{ executable: '.', args: [path.join(binDir, `activate`)] }]);
-            shellDeactivation.set(ShellConstants.KSH, [{ executable: 'deactivate' }]);
-        }
+        shellActivation.set(ShellConstants.KSH, [{ executable: '.', args: [path.join(binDir, `activate`)] }]);
+        shellDeactivation.set(ShellConstants.KSH, [{ executable: 'deactivate' }]);
 
         if (await fsapi.pathExists(path.join(binDir, 'Activate.ps1'))) {
             shellActivation.set(ShellConstants.PWSH, [{ executable: '&', args: [path.join(binDir, `Activate.ps1`)] }]);
