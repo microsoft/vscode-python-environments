@@ -52,10 +52,16 @@ export class PythonProjectManagerImpl implements PythonProjectManager {
         for (const w of workspaces) {
             const config = getConfiguration('python-envs', w.uri);
             const overrides = config.get<PythonProjectSettings[]>('pythonProjects', []);
-            newProjects.push(new PythonProjectsImpl(w.name, w.uri));
+
+            if (!newProjects.some((p) => p.uri.toString() === w.uri.toString())) {
+                newProjects.push(new PythonProjectsImpl(w.name, w.uri));
+            }
+
             for (const o of overrides) {
                 const uri = Uri.file(path.resolve(w.uri.fsPath, o.path));
-                newProjects.push(new PythonProjectsImpl(o.path, uri));
+                if (!newProjects.some((p) => p.uri.toString() === uri.toString())) {
+                    newProjects.push(new PythonProjectsImpl(o.path, uri));
+                }
             }
         }
         return newProjects;
@@ -69,10 +75,15 @@ export class PythonProjectManagerImpl implements PythonProjectManager {
         for (const w of workspaces) {
             const config = getConfiguration('python-envs', w.uri);
             const overrides = config.get<PythonProjectSettings[]>('pythonProjects', []);
-            newProjects.push(new PythonProjectsImpl(w.name, w.uri));
+
+            if (!newProjects.some((p) => p.uri.toString() === w.uri.toString())) {
+                newProjects.push(new PythonProjectsImpl(w.name, w.uri));
+            }
             for (const o of overrides) {
                 const uri = Uri.file(path.resolve(w.uri.fsPath, o.path));
-                newProjects.push(new PythonProjectsImpl(o.path, uri));
+                if (!newProjects.some((p) => p.uri.toString() === uri.toString())) {
+                    newProjects.push(new PythonProjectsImpl(o.path, uri));
+                }
             }
         }
 
