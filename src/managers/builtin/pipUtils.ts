@@ -1,17 +1,17 @@
+import * as tomljs from '@iarna/toml';
 import * as fse from 'fs-extra';
 import * as path from 'path';
-import * as tomljs from '@iarna/toml';
 import { LogOutputChannel, ProgressLocation, QuickInputButtons, QuickPickItem, Uri } from 'vscode';
-import { showQuickPickWithButtons, withProgress } from '../../common/window.apis';
-import { PackageManagement, Pickers, VenvManagerStrings } from '../../common/localize';
 import { PackageManagementOptions, PythonEnvironment, PythonEnvironmentApi, PythonProject } from '../../api';
-import { findFiles } from '../../common/workspace.apis';
 import { EXTENSION_ROOT_DIR } from '../../common/constants';
-import { selectFromCommonPackagesToInstall, selectFromInstallableToInstall } from '../common/pickers';
+import { PackageManagement, Pickers, VenvManagerStrings } from '../../common/localize';
 import { traceInfo } from '../../common/logging';
-import { refreshPipPackages } from './utils';
-import { mergePackages } from '../common/utils';
+import { showQuickPickWithButtons, withProgress } from '../../common/window.apis';
+import { findFiles } from '../../common/workspace.apis';
+import { selectFromCommonPackagesToInstall, selectFromInstallableToInstall } from '../common/pickers';
 import { Installable } from '../common/types';
+import { mergePackages } from '../common/utils';
+import { refreshPipPackages } from './utils';
 
 async function tomlParse(fsPath: string, log?: LogOutputChannel): Promise<tomljs.JsonMap> {
     try {
@@ -29,6 +29,7 @@ function isPipInstallableToml(toml: tomljs.JsonMap): boolean {
 
 function getTomlInstallable(toml: tomljs.JsonMap, tomlPath: Uri): Installable[] {
     const extras: Installable[] = [];
+    const projectDir = path.dirname(tomlPath.fsPath);
 
     if (isPipInstallableToml(toml)) {
         const name = path.basename(tomlPath.fsPath);
@@ -37,7 +38,7 @@ function getTomlInstallable(toml: tomljs.JsonMap, tomlPath: Uri): Installable[] 
             displayName: name,
             description: VenvManagerStrings.installEditable,
             group: 'TOML',
-            args: ['-e', path.dirname(tomlPath.fsPath)],
+            args: ['-e', projectDir],
             uri: tomlPath,
         });
     }
@@ -49,7 +50,8 @@ function getTomlInstallable(toml: tomljs.JsonMap, tomlPath: Uri): Installable[] 
                 name: key,
                 displayName: key,
                 group: 'TOML',
-                args: ['-e', `.[${key}]`],
+                // Use a single -e argument with the extras specified as part of the path
+                args: ['-e', `${projectDir}[${key}]`],
                 uri: tomlPath,
             });
         }
