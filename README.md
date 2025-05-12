@@ -2,12 +2,12 @@
 
 ## Overview
 
-The Python Environments extension for VS Code helps you manage Python environments and packages using your preferred environment manager, backed by its extensible APIs. This extension provides unique support for specifying environments for specific files, entire Python folders, or projects, including multi-root and mono-repo scenarios. The core feature set includes: 
+The Python Environments extension for VS Code helps you manage Python environments and packages using your preferred environment manager, backed by its extensible APIs. This extension provides unique support for specifying environments for specific files, entire Python folders, or projects, including multi-root and mono-repo scenarios. The core feature set includes:
 
-- 🌐 Create, delete, and manage environments
-- 📦 Install and uninstall packages within the selected environment
-- ✅ Create activated terminals
-- 🖌️ Add and create new Python projects
+-   🌐 Create, delete, and manage environments
+-   📦 Install and uninstall packages within the selected environment
+-   ✅ Create activated terminals
+-   🖌️ Add and create new Python projects
 
 > **Note:** This extension is in preview, and its APIs and features are subject to change as the project evolves.
 
@@ -29,9 +29,9 @@ The Python Environments panel provides an interface to create, delete and manage
 
 To simplify the environment creation process, you can use "Quick Create" to automatically create a new virtual environment using:
 
-- Your default environment manager (e.g., `venv`)
-- The latest Python version
-- Workspace dependencies
+-   Your default environment manager (e.g., `venv`)
+-   The latest Python version
+-   Workspace dependencies
 
 For more control, you can create a custom environment where you can specify Python version, environment name, packages to be installed, and more!
 
@@ -51,7 +51,7 @@ The extension also provides an interface to install and uninstall Python package
 
 The extension uses `pip` as the default package manager, but you can use the package manager of your choice using the `python-envs.defaultPackageManager` setting. The following are package managers supported out of the box:
 
-| Id                     | Name  |  Description|
+| Id                     | Name    | Description                                                                                                                                                                                               |
 | ---------------------- | ------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | ms-python.python:pip   | `pip`   | Pip acts as the default package manager and it's typically built-in to Python.                                                                                                                            |
 | ms-python.python:conda | `conda` | The [conda](https://conda.org) package manager, as provided by conda distributions like [Anaconda Distribution](https://docs.anaconda.com/anaconda/) or [conda-forge](https://conda-forge.org/download/). |
@@ -64,30 +64,30 @@ Projects can be added via the Python Environments pane or in the File Explorer b
 
 There are a couple of ways that you can add a Python Project from the Python Environments panel:
 
-| Name | Description |
-| ----- | ---------- |
-| Add Existing | Allows you to add an existing folder from the file explorer. |
-| Auto find | Searches for folders that contain `pyproject.toml` or `setup.py` files |
+| Name         | Description                                                            |
+| ------------ | ---------------------------------------------------------------------- |
+| Add Existing | Allows you to add an existing folder from the file explorer.           |
+| Auto find    | Searches for folders that contain `pyproject.toml` or `setup.py` files |
 
 ## Command Reference
 
-| Name    | Description  |
-| -------- | ------------- |
-| Python: Create Environment | Create a virtual environment using your preferred environment manager preconfigured with "Quick Create" or configured to your choices.  |
-| Python: Manage Packages | Install and uninstall packages in a given Python environment. |
-| Python: Activate Environment in Current Terminal | Activates the currently opened terminal with a particular environment. |
-| Python: Deactivate Environment in Current Terminal  | Deactivates environment in currently opened terminal. |
-| Python: Run as Task | Runs Python module as a task. |
+| Name                                               | Description                                                                                                                            |
+| -------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
+| Python: Create Environment                         | Create a virtual environment using your preferred environment manager preconfigured with "Quick Create" or configured to your choices. |
+| Python: Manage Packages                            | Install and uninstall packages in a given Python environment.                                                                          |
+| Python: Activate Environment in Current Terminal   | Activates the currently opened terminal with a particular environment.                                                                 |
+| Python: Deactivate Environment in Current Terminal | Deactivates environment in currently opened terminal.                                                                                  |
+| Python: Run as Task                                | Runs Python module as a task.                                                                                                          |
 
 ## Settings Reference
 
-| Setting (python-envs.)      | Default                   | Description                                                                                                                                                                                                                                                                            |
-| --------------------------- | ------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| defaultEnvManager           | `"ms-python.python:venv"` | The default environment manager used for creating and managing environments. |
-| defaultPackageManager       | `"ms-python.python:pip"`  | The default package manager to use for installing and managing packages. This is often dictated by the default environment manager but can be customized. |
-| pythonProjects              | `[]`                      | A list of Python workspaces, specified by the path, in which you can set particular environment and package managers. You can set information for a workspace as `[{"path":  "/path/to/workspace", "envManager": "ms-python.python:venv", "packageManager": "ms-python.python:pip"]}`. |
-| terminal.showActivateButton | `false`                   | (experimental) Show a button in the terminal to activate/deactivate the current environment for the terminal. This button is only shown if the active terminal is associated with a project that has an activatable environment.                                                       |
-| python-envs.terminal.autoActivationType | `command` | Specifies how the extension can activate an environment in a terminal. Utilizing Shell Startup requires changes to the shell script file and is only enabled for the following shells: zsh, fsh, pwsh, bash, cmd. When set to `command`, any shell can be activated. This setting applies only when terminals are created, so you will need to restart your terminals for it to take effect. To revert changes made during shellStartup, run `Python Envs: Revert Shell Startup Script Changes`.|
+| Setting (python-envs.)                  | Default                   | Description                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| --------------------------------------- | ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| defaultEnvManager                       | `"ms-python.python:venv"` | The default environment manager used for creating and managing environments.                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| defaultPackageManager                   | `"ms-python.python:pip"`  | The default package manager to use for installing and managing packages. This is often dictated by the default environment manager but can be customized.                                                                                                                                                                                                                                                                                                                                        |
+| pythonProjects                          | `[]`                      | A list of Python workspaces, specified by the path, in which you can set particular environment and package managers. You can set information for a workspace as `[{"path":  "/path/to/workspace", "envManager": "ms-python.python:venv", "packageManager": "ms-python.python:pip"]}`.                                                                                                                                                                                                           |
+| terminal.showActivateButton             | `false`                   | (experimental) Show a button in the terminal to activate/deactivate the current environment for the terminal. This button is only shown if the active terminal is associated with a project that has an activatable environment.                                                                                                                                                                                                                                                                 |
+| python-envs.terminal.autoActivationType | `command`                 | Specifies how the extension can activate an environment in a terminal. Utilizing Shell Startup requires changes to the shell script file and is only enabled for the following shells: zsh, fsh, pwsh, bash, cmd. When set to `command`, any shell can be activated. This setting applies only when terminals are created, so you will need to restart your terminals for it to take effect. To revert changes made during shellStartup, run `Python Envs: Revert Shell Startup Script Changes`. |
 
 ## Extensibility
 
@@ -118,11 +118,125 @@ Create a new environment using any of the available environment managers. This c
      * Default `true`. If `true`, the environment after creation will be selected.
      */
     selectEnvironment?: boolean;
+
+    /**
+     * Provides some context about quick create based on user input.
+     *   - if true, the environment should be created without any user input or prompts.
+     *   - if false, the environment creation can show user input or prompts.
+     *     This also means user explicitly skipped the quick create option.
+     *   - if undefined, the environment creation can show user input or prompts.
+     *     You can show quick create option to the user if you support it.
+     */
+    quickCreate?: boolean;
+    /**
+     * Packages to install in addition to the automatically picked packages as a part of creating environment.
+     */
+    additionalPackages?: string[];
 }
 ```
 
 usage: `await vscode.commands.executeCommand('python-envs.createAny', options);`
 
+# Experimental Features
+
+## Shell Startup Activation
+
+The Python Environments extension supports shell startup activation for environments. This feature allows you to automatically activate a Python environment when you open a terminal in VS Code. The activation is done by modifying the shell's startup script, which is supported for the following shells:
+
+-   **Bash**: `~/.bashrc`
+-   **Zsh**: `~/.zshrc`
+-   **Fish**: `~/.config/fish/config.fish`
+-   **PowerShell**:
+    -   (Mac/Linux):`~/.config/powershell/profile.ps1`
+    -   (Windows): `~\Documents\PowerShell\Microsoft.PowerShell_profile.ps1`
+-   **CMD**: `~/.cmdrc/cmd_startup.bat`
+
+### CMD
+
+1. Add or update `HKCU\\Software\\Microsoft\\Command Processor` `AutoRun` string value to use a command script.
+2. A command script is added to `%USERPROFILE%\.cmdrc\cmd_startup.bat`
+3. A script named `vscode-python.bat` is added to `%USERPROFILE%\.cmdrc` and called from `cmd_startup.bat`
+
+contents of `cmd_startup.bat`
+
+```bat
+:: >>> vscode python
+if "%TERM_PROGRAM%"=="vscode" (
+    if not defined VSCODE_PYTHON_AUTOACTIVATE_GUARD (
+        set "VSCODE_PYTHON_AUTOACTIVATE_GUARD=1"
+        if exist "%USERPROFILE%\.cmdrc\vscode-python.bat" call "%USERPROFILE%\.cmdrc\vscode-python.bat"
+    )
+)
+:: <<< vscode python
+```
+
+contents of `vscode-python.bat`
+
+```bat
+:: >>> vscode python
+:: version: 0.1.0
+if defined VSCODE_CMD_ACTIVATE (
+    call %VSCODE_CMD_ACTIVATE%
+)
+:: <<< vscode python
+```
+
+### Powershell/pwsh
+
+1. Runs `powershell  -Command $profile` to get the profile location
+2. If it does not exist creates it.
+3. Adds following code to the shell profile script:
+
+```powershell
+#region vscode python
+if ($null -ne $env:VSCODE_PWSH_ACTIVATE) {
+    Invoke-Expression $env:VSCODE_PWSH_ACTIVATE
+}
+#endregion vscode python
+
+```
+
+### sh/bash/gitbash
+
+1. Adds or creates `~/.bashrc`
+2. Updates it with following code:
+
+```bash
+# >>> vscode python
+# version: 0.1.0
+if [ -n "$VSCODE_BASH_ACTIVATE" ] && [ "$TERM_PROGRAM" = "vscode" ]; then
+    eval "$VSCODE_BASH_ACTIVATE" || true
+fi
+# <<< vscode python
+```
+
+### zsh
+
+1. Adds or creates `~/.zshrc`
+2. Updates it with following code:
+
+```zsh
+# >>> vscode python
+# version: 0.1.0
+if [ -n "$VSCODE_BASH_ACTIVATE" ] && [ "$TERM_PROGRAM" = "vscode" ]; then
+    eval "$VSCODE_BASH_ACTIVATE" || true
+fi
+# <<< vscode python
+```
+
+### fish
+
+1. Adds or creates `~/.config/fish/config.fish`
+2. Updates it with following code:
+
+```fish
+# >>> vscode python
+# version: 0.1.0
+if test "$TERM_PROGRAM" = "vscode"; and set -q  VSCODE_FISH_ACTIVATE
+    eval $VSCODE_FISH_ACTIVATE
+end
+# <<< vscode python
+```
 
 ## Extension Dependency
 
@@ -130,11 +244,11 @@ This section provides an overview of how the Python extension interacts with the
 
 Tools that may rely on these APIs in their own extensions include:
 
-- **Debuggers** (e.g., `debugpy`)
-- **Linters** (e.g., Pylint, Flake8, Mypy)
-- **Formatters** (e.g., Black, autopep8)
-- **Language Server extensions** (e.g., Pylance, Jedi)
-- **Environment and Package Manager extensions** (e.g., Pixi, Conda, Hatch)
+-   **Debuggers** (e.g., `debugpy`)
+-   **Linters** (e.g., Pylint, Flake8, Mypy)
+-   **Formatters** (e.g., Black, autopep8)
+-   **Language Server extensions** (e.g., Pylance, Jedi)
+-   **Environment and Package Manager extensions** (e.g., Pixi, Conda, Hatch)
 
 ### API Dependency
 
@@ -170,13 +284,13 @@ contact [opencode@microsoft.com](mailto:opencode@microsoft.com) with any additio
 
 ## Questions, issues, feature requests, and contributions
 
-- If you have a question about how to accomplish something with the extension, please [ask on our Discussions page](https://github.com/microsoft/vscode-python/discussions/categories/q-a).
-- If you come across a problem with the extension, please [file an issue](https://github.com/microsoft/vscode-python).
-- Contributions are always welcome! Please see our [contributing guide](https://github.com/Microsoft/vscode-python/blob/main/CONTRIBUTING.md) for more details.
-- Any and all feedback is appreciated and welcome!
-  - If someone has already [filed an issue](https://github.com/Microsoft/vscode-python) that encompasses your feedback, please leave a 👍/👎 reaction on the issue.
-  - Otherwise please start a [new discussion](https://github.com/microsoft/vscode-python/discussions/categories/ideas).
-- If you're interested in the development of the extension, you can read about our [development process](https://github.com/Microsoft/vscode-python/blob/main/CONTRIBUTING.md#development-process).
+-   If you have a question about how to accomplish something with the extension, please [ask on our Discussions page](https://github.com/microsoft/vscode-python/discussions/categories/q-a).
+-   If you come across a problem with the extension, please [file an issue](https://github.com/microsoft/vscode-python).
+-   Contributions are always welcome! Please see our [contributing guide](https://github.com/Microsoft/vscode-python/blob/main/CONTRIBUTING.md) for more details.
+-   Any and all feedback is appreciated and welcome!
+    -   If someone has already [filed an issue](https://github.com/Microsoft/vscode-python) that encompasses your feedback, please leave a 👍/👎 reaction on the issue.
+    -   Otherwise please start a [new discussion](https://github.com/microsoft/vscode-python/discussions/categories/ideas).
+-   If you're interested in the development of the extension, you can read about our [development process](https://github.com/Microsoft/vscode-python/blob/main/CONTRIBUTING.md#development-process).
 
 ## Data and telemetry
 

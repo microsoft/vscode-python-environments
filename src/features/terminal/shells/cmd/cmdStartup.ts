@@ -77,9 +77,11 @@ function getMainBatchFileContent(startupFile: string): string {
     const lineSep = '\r\n';
     const content = [];
 
-    content.push('if not defined VSCODE_PYTHON_AUTOACTIVATE_GUARD (');
-    content.push('    set "VSCODE_PYTHON_AUTOACTIVATE_GUARD=1"');
-    content.push(`    if exist "${startupFile}" call "${startupFile}"`);
+    content.push('if "%TERM_PROGRAM%"=="vscode" (');
+    content.push('    if not defined VSCODE_PYTHON_AUTOACTIVATE_GUARD (');
+    content.push('        set "VSCODE_PYTHON_AUTOACTIVATE_GUARD=1"');
+    content.push(`        if exist "${startupFile}" call "${startupFile}"`);
+    content.push('    )');
     content.push(')');
 
     return content.join(lineSep);
