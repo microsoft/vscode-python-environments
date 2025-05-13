@@ -54,6 +54,8 @@ export class AutoFindProjects implements PythonProjectCreator {
     public readonly displayName = ProjectCreatorString.autoFindProjects;
     public readonly description = ProjectCreatorString.autoFindProjectsDescription;
 
+    supportsQuickCreate = true;
+
     constructor(private readonly pm: PythonProjectManager) {}
 
     async create(_options?: PythonProjectCreatorOptions): Promise<PythonProject | PythonProject[] | undefined> {
