@@ -10,7 +10,7 @@ import {
 import { PythonProject } from '../../api';
 import { DEFAULT_ENV_MANAGER_ID, DEFAULT_PACKAGE_MANAGER_ID } from '../../common/constants';
 import { traceError, traceInfo } from '../../common/logging';
-import { getWorkspaceFile } from '../../common/workspace.apis';
+import { getWorkspaceFile, getWorkspaceFolders } from '../../common/workspace.apis';
 import { PythonProjectManager, PythonProjectSettings } from '../../internal.api';
 
 function getSettings(
@@ -284,6 +284,7 @@ export interface EditProjectSettings {
     project: PythonProject;
     envManager?: string;
     packageManager?: string;
+    workspace?: string;
 }
 
 export async function addPythonProjectSetting(edits: EditProjectSettings[]): Promise<void> {
@@ -306,13 +307,23 @@ export async function addPythonProjectSetting(edits: EditProjectSettings[]): Pro
         traceError(`Unable to find workspace for ${e.project.uri.fsPath}`);
     });
 
+    const isMultiroot = (getWorkspaceFolders() ?? []).length > 1;
+
     const promises: Thenable<void>[] = [];
     workspaces.forEach((es, w) => {
         const config = workspace.getConfiguration('python-envs', w.uri);
         const overrides = config.get<PythonProjectSettings[]>('pythonProjects', []);
         es.forEach((e) => {
+            if (isMultiroot) {
+            }
             const pwPath = path.normalize(e.project.uri.fsPath);
-            const index = overrides.findIndex((s) => path.resolve(w.uri.fsPath, s.path) === pwPath);
+            const index = overrides.findIndex((s) => {
+                if (s.workspace) {
+                    // If the workspace is set, check workspace and path in existing overrides
+                    return s.workspace === w.name && path.resolve(w.uri.fsPath, s.path) === pwPath;
+                }
+                return path.resolve(w.uri.fsPath, s.path) === pwPath;
+            });
             if (index >= 0) {
                 overrides[index].envManager = e.envManager ?? envManager;
                 overrides[index].packageManager = e.packageManager ?? pkgManager;
@@ -321,6 +332,7 @@ export async function addPythonProjectSetting(edits: EditProjectSettings[]): Pro
                     path: path.relative(w.uri.fsPath, pwPath).replace(/\\/g, '/'),
                     envManager,
                     packageManager: pkgManager,
+                    workspace: isMultiroot ? w.name : undefined,
                 });
             }
         });
