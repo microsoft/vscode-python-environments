@@ -137,7 +137,6 @@ export async function pickCreator(creators: PythonProjectCreator[]): Promise<Pyt
     // First level menu
     const autoFindCreator = creators.find((c) => c.name === 'autoProjects');
     const existingProjectsCreator = creators.find((c) => c.name === 'existingProjects');
-    const otherCreators = creators.filter((c) => c.name !== 'autoProjects' && c.name !== 'existingProjects');
 
     const items: QuickPickItem[] = [
         {

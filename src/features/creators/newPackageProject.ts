@@ -160,4 +160,6 @@ export class NewPackageProject implements PythonProjectCreator {
                 return Uri.file(projectDestinationFolder);
             }
         }
+        return undefined;
+    }
 }
