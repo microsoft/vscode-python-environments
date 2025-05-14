@@ -54,10 +54,12 @@ export class AutoFindProjects implements PythonProjectCreator {
     public readonly displayName = ProjectCreatorString.autoFindProjects;
     public readonly description = ProjectCreatorString.autoFindProjectsDescription;
 
+    supportsQuickCreate = true;
+
     constructor(private readonly pm: PythonProjectManager) {}
 
     async create(_options?: PythonProjectCreatorOptions): Promise<PythonProject | PythonProject[] | undefined> {
-        const files = await findFiles('**/{pyproject.toml,setup.py}');
+        const files = await findFiles('**/{pyproject.toml,setup.py}', '**/.venv/**');
         if (!files || files.length === 0) {
             setImmediate(() => {
                 showErrorMessage('No projects found');
