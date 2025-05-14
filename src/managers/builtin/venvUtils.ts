@@ -32,7 +32,7 @@ import {
     NativePythonEnvironmentKind,
     NativePythonFinder,
 } from '../common/nativePythonFinder';
-import { shortVersion, sortEnvironments } from '../common/utils';
+import { pathForGitBash, shortVersion, sortEnvironments } from '../common/utils';
 import { isUvInstalled, runPython, runUV } from './helpers';
 import { getProjectInstallable, getWorkspacePackagesToInstall, PipPackages } from './pipUtils';
 import { resolveSystemPythonEnvironmentPath } from './utils';
@@ -111,10 +111,6 @@ function getName(binPath: string): string {
         return path.basename(path.dirname(dir1));
     }
     return path.basename(dir1);
-}
-
-function pathForGitBash(binPath: string): string {
-    return isWindows() ? binPath.replace(/\\/g, '/').replace(/^([a-zA-Z]):/, '/$1') : binPath;
 }
 
 async function getPythonInfo(env: NativeEnvInfo): Promise<PythonEnvironmentInfo> {
