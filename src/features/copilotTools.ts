@@ -141,7 +141,6 @@ function BuildEnvironmentInfoContent(envInfo: EnvironmentInfo): LanguageModelTex
     // Create a formatted string that looks like JSON but preserves comments
     let envTypeDescriptor: string = `This environment is managed by ${envInfo.type} environment manager. Use the install tool to install packages into this environment.`;
 
-    // TODO: If this is setup as python.defaultInterpreterPath, then do not include this message.
     if (envInfo.type === 'system') {
         envTypeDescriptor =
             'System pythons are pythons that ship with the OS or are installed globally. These python installs may be used by the OS for running services and core functionality. Confirm with the user before installing packages into this environment, as it can lead to issues with any services on the OS.';
