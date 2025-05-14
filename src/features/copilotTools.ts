@@ -1,5 +1,6 @@
 import {
     CancellationToken,
+    l10n,
     LanguageModelTextPart,
     LanguageModelTool,
     LanguageModelToolInvocationOptions,
@@ -130,9 +131,8 @@ export class GetEnvironmentInfoTool implements LanguageModelTool<IResourceRefere
         _options: LanguageModelToolInvocationPrepareOptions<IResourceReference>,
         _token: CancellationToken,
     ): Promise<PreparedToolInvocation> {
-        const message = 'Preparing to fetch Python environment information...';
         return {
-            invocationMessage: message,
+            invocationMessage: l10n.t('Fetching Python environment information'),
         };
     }
 }
@@ -242,13 +242,46 @@ export class InstallPackageTool implements LanguageModelTool<IInstallPackageInpu
         options: LanguageModelToolInvocationPrepareOptions<IInstallPackageInput>,
         _token: CancellationToken,
     ): Promise<PreparedToolInvocation> {
-        const packageList = options.input.packageList || [];
-        const packageCount = packageList.length;
-        const packageText = packageCount === 1 ? 'package' : 'packages';
-        const message = `Preparing to install Python ${packageText}: ${packageList.join(', ')}...`;
+        const workspacePath = options.input.resourcePath ? Uri.file(options.input.resourcePath) : undefined;
+
+        const packageCount = options.input.packageList.length;
+        let envName = '';
+        try {
+            const environment = await this.api.getEnvironment(workspacePath);
+            envName = environment?.displayName || '';
+        } catch {
+            //
+        }
+
+        let title = '';
+        let invocationMessage = '';
+        const message =
+            packageCount === 1
+                ? ''
+                : l10n.t(`The following packages will be installed: {0}`, options.input.packageList.sort().join(', '));
+        if (envName) {
+            title =
+                packageCount === 1
+                    ? l10n.t(`Install {0} in {1}?`, options.input.packageList[0], envName)
+                    : l10n.t(`Install packages in {0}?`, envName);
+            invocationMessage =
+                packageCount === 1
+                    ? l10n.t(`Installing {0} in {1}`, options.input.packageList[0], envName)
+                    : l10n.t(`Installing packages {0} in {1}`, options.input.packageList.sort().join(', '), envName);
+        } else {
+            title =
+                options.input.packageList.length === 1
+                    ? l10n.t(`Install Python package '{0}'?`, options.input.packageList[0])
+                    : l10n.t(`Install Python packages?`);
+            invocationMessage =
+                packageCount === 1
+                    ? l10n.t(`Installing Python package '{0}'`, options.input.packageList[0])
+                    : l10n.t(`Installing Python packages: {0}`, options.input.packageList.sort().join(', '));
+        }
 
         return {
-            invocationMessage: message,
+            confirmationMessages: { title, message },
+            invocationMessage,
         };
     }
 }
