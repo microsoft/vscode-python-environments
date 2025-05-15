@@ -881,7 +881,7 @@ export async function refreshPackages(
     const packages: Package[] = [];
     content.forEach((l) => {
         const parts = l.split(' ').filter((p) => p.length > 0);
-        if (parts.length === 3) {
+        if (parts.length >= 3) {
             const pkg = api.createPackageItem(
                 {
                     name: parts[0],
