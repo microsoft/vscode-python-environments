@@ -152,6 +152,12 @@ export namespace CondaStrings {
     );
 }
 
+export namespace PyenvStrings {
+    export const pyenvManager = l10n.t('Manages Pyenv Python versions');
+    export const pyenvDiscovering = l10n.t('Discovering Pyenv Python versions');
+    export const pyenvRefreshing = l10n.t('Refreshing Pyenv Python versions');
+}
+
 export namespace ProjectCreatorString {
     export const addExistingProjects = l10n.t('Add Existing Projects');
     export const autoFindProjects = l10n.t('Auto Find Projects');

@@ -1,4 +1,5 @@
 import { PythonEnvironment } from '../../api';
+import { isWindows } from '../../common/utils/platformUtils';
 import { Installable } from './types';
 
 export function noop() {
@@ -81,4 +82,8 @@ export function mergePackages(common: Installable[], installed: string[]): Insta
     return common
         .concat(notInCommon.map((pkg) => ({ name: pkg, displayName: pkg })))
         .sort((a, b) => a.name.localeCompare(b.name));
+}
+
+export function pathForGitBash(binPath: string): string {
+    return isWindows() ? binPath.replace(/\\/g, '/').replace(/^([a-zA-Z]):/, '/$1') : binPath;
 }
