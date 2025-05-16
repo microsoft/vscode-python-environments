@@ -295,6 +295,7 @@ export interface PythonProjectSettings {
     path: string;
     envManager: string;
     packageManager: string;
+    workspace?: string;
 }
 
 export class PythonEnvironmentImpl implements PythonEnvironment {
