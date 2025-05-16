@@ -14,7 +14,6 @@ import { traceError, traceInfo } from '../../common/logging';
 import { getGlobalPersistentState, getWorkspacePersistentState } from '../../common/persistentState';
 import { getUserHomeDir, normalizePath, untildify } from '../../common/utils/pathUtils';
 import { isWindows } from '../../common/utils/platformUtils';
-import { ShellConstants } from '../../features/common/shellConstants';
 import {
     isNativeEnvInfo,
     NativeEnvInfo,
@@ -22,7 +21,7 @@ import {
     NativePythonEnvironmentKind,
     NativePythonFinder,
 } from '../common/nativePythonFinder';
-import { pathForGitBash, shortVersion, sortEnvironments } from '../common/utils';
+import { shortVersion, sortEnvironments } from '../common/utils';
 
 async function findPyenv(): Promise<string | undefined> {
     try {
@@ -186,15 +185,8 @@ function nativeToPythonEnv(
     const shellActivation: Map<string, PythonCommandRunConfiguration[]> = new Map();
     const shellDeactivation: Map<string, PythonCommandRunConfiguration[]> = new Map();
 
-    shellActivation.set('unknown', [{ executable: pyenv, args: ['shell', name] }]);
-    shellDeactivation.set('unknown', [{ executable: pyenv, args: ['shell', '--unset'] }]);
-
-    if (isWindows()) {
-        shellActivation.set(ShellConstants.GITBASH, [{ executable: pathForGitBash(pyenv), args: ['shell', name] }]);
-        shellDeactivation.set(ShellConstants.GITBASH, [
-            { executable: pathForGitBash(pyenv), args: ['shell', '--unset'] },
-        ]);
-    }
+    shellActivation.set('unknown', [{ executable: 'pyenv', args: ['shell', name] }]);
+    shellDeactivation.set('unknown', [{ executable: 'pyenv', args: ['shell', '--unset'] }]);
 
     const environment: PythonEnvironmentInfo = {
         name: name,
@@ -237,25 +229,23 @@ export async function refreshPyenv(
         await setPyenv(pyenv);
     }
 
-    if (pyenv) {
-        const envs = data
-            .filter((e) => isNativeEnvInfo(e))
-            .map((e) => e as NativeEnvInfo)
-            .filter((e) => e.kind === NativePythonEnvironmentKind.pyenv);
-        const collection: PythonEnvironment[] = [];
+    const envs = data
+        .filter((e) => isNativeEnvInfo(e))
+        .map((e) => e as NativeEnvInfo)
+        .filter((e) => e.kind === NativePythonEnvironmentKind.pyenv);
 
-        envs.forEach((e) => {
+    const collection: PythonEnvironment[] = [];
+
+    envs.forEach((e) => {
+        if (pyenv) {
             const environment = nativeToPythonEnv(e, api, manager, pyenv);
             if (environment) {
                 collection.push(environment);
             }
-        });
+        }
+    });
 
-        return sortEnvironments(collection);
-    }
-
-    traceError('Pyenv not found');
-    return [];
+    return sortEnvironments(collection);
 }
 
 export async function resolvePyenvPath(

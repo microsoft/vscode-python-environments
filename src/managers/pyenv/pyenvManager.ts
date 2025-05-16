@@ -321,24 +321,11 @@ export class PyEnvManager implements EnvironmentManager, Disposable {
         return undefined;
     }
 
-    private getProjectsForEnvironment(environment: PythonEnvironment): PythonProject[] {
-        return Array.from(this.fsPathToEnv.entries())
-            .filter(([, env]) => env === environment)
-            .map(([uri]) => this.api.getPythonProject(Uri.file(uri)))
-            .filter((project) => project !== undefined) as PythonProject[];
-    }
-
     private findEnvironmentByPath(fsPath: string): PythonEnvironment | undefined {
         const normalized = path.normalize(fsPath);
         return this.collection.find((e) => {
             const n = path.normalize(e.environmentPath.fsPath);
             return n === normalized || path.dirname(n) === normalized || path.dirname(path.dirname(n)) === normalized;
-        });
-    }
-
-    private findEnvironmentByName(name: string): PythonEnvironment | undefined {
-        return this.collection.find((e) => {
-            return e.name === name;
         });
     }
 }
