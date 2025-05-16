@@ -10,6 +10,9 @@ function getCommandAsString(command: PythonCommandRunConfiguration[], shell: str
         parts.push(quoteArgs([normalizeShellPath(cmd.executable, shell), ...args]).join(' '));
     }
     if (shell === ShellConstants.PWSH) {
+        if (parts.length === 1) {
+            return parts[0];
+        }
         return parts.map((p) => `(${p})`).join(` ${delimiter} `);
     }
     return parts.join(` ${delimiter} `);
