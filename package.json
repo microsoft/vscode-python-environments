@@ -210,6 +210,12 @@
                 "icon": "$(terminal)"
             },
             {
+                "command": "python-envs.createNewProjectFromTemplate",
+                "title": "%python-envs.createNewProjectFromTemplate.title%",
+                "category": "Python Envs",
+                "icon": "$(play)"
+            },
+            {
                 "command": "python-envs.runAsTask",
                 "title": "%python-envs.runAsTask.title%",
                 "category": "Python Envs",
