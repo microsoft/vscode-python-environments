@@ -34,5 +34,7 @@
     "python-envs.createNewProjectFromTemplate.title": "Create New Project from Template",
     "python-envs.terminal.activate.title": "Activate Environment in Current Terminal",
     "python-envs.terminal.deactivate.title": "Deactivate Environment in Current Terminal",
-    "python-envs.uninstallPackage.title": "Uninstall Package"
+    "python-envs.uninstallPackage.title": "Uninstall Package",
+    "python.languageModelTools.python_environment.userDescription": "Get Python environment info for a file or path, including version, packages, and the command to run it.",
+    "python.languageModelTools.python_install_package.userDescription": "Installs Python packages in the given workspace."
 }

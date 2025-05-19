@@ -53,21 +53,22 @@ import {
 } from '../common/nativePythonFinder';
 import { selectFromCommonPackagesToInstall } from '../common/pickers';
 import { Installable } from '../common/types';
-import { shortVersion, sortEnvironments } from '../common/utils';
+import { pathForGitBash, shortVersion, sortEnvironments } from '../common/utils';
 
 export const CONDA_PATH_KEY = `${ENVS_EXTENSION_ID}:conda:CONDA_PATH`;
 export const CONDA_PREFIXES_KEY = `${ENVS_EXTENSION_ID}:conda:CONDA_PREFIXES`;
 export const CONDA_WORKSPACE_KEY = `${ENVS_EXTENSION_ID}:conda:WORKSPACE_SELECTED`;
 export const CONDA_GLOBAL_KEY = `${ENVS_EXTENSION_ID}:conda:GLOBAL_SELECTED`;
 
+let condaPath: string | undefined;
 export async function clearCondaCache(): Promise<void> {
     const state = await getWorkspacePersistentState();
     await state.clear([CONDA_PATH_KEY, CONDA_WORKSPACE_KEY, CONDA_GLOBAL_KEY]);
     const global = await getGlobalPersistentState();
     await global.clear([CONDA_PREFIXES_KEY]);
+    condaPath = undefined;
 }
 
-let condaPath: string | undefined;
 async function setConda(conda: string): Promise<void> {
     condaPath = conda;
     const state = await getWorkspacePersistentState();
@@ -281,10 +282,6 @@ function isPrefixOf(roots: string[], e: string): boolean {
         }
     }
     return false;
-}
-
-function pathForGitBash(binPath: string): string {
-    return isWindows() ? binPath.replace(/\\/g, '/').replace(/^([a-zA-Z]):/, '/$1') : binPath;
 }
 
 function getNamedCondaPythonInfo(
@@ -881,7 +878,7 @@ export async function refreshPackages(
     const packages: Package[] = [];
     content.forEach((l) => {
         const parts = l.split(' ').filter((p) => p.length > 0);
-        if (parts.length === 3) {
+        if (parts.length >= 3) {
             const pkg = api.createPackageItem(
                 {
                     name: parts[0],

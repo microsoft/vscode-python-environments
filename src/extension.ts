@@ -68,6 +68,7 @@ import { EnvironmentManagers, ProjectCreators, PythonProjectManager } from './in
 import { registerSystemPythonFeatures } from './managers/builtin/main';
 import { createNativePythonFinder, NativePythonFinder } from './managers/common/nativePythonFinder';
 import { registerCondaFeatures } from './managers/conda/main';
+import { registerPyenvFeatures } from './managers/pyenv/main';
 
 export async function activate(context: ExtensionContext): Promise<PythonEnvironmentApi> {
     const start = new StopWatch();
@@ -304,6 +305,7 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
         await Promise.all([
             registerSystemPythonFeatures(nativeFinder, context.subscriptions, outputChannel),
             registerCondaFeatures(nativeFinder, context.subscriptions, outputChannel),
+            registerPyenvFeatures(nativeFinder, context.subscriptions),
             shellStartupVarsMgr.initialize(),
         ]);
 

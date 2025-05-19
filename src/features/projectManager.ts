@@ -67,7 +67,21 @@ export class PythonProjectManagerImpl implements PythonProjectManager {
 
             // For each override, resolve its path and add as a project if not already present
             for (const o of overrides) {
-                const uri = Uri.file(path.resolve(w.uri.fsPath, o.path));
+                let uriFromWorkspace: Uri | undefined = undefined;
+                // if override has a workspace property, resolve the path relative to that workspace
+                if (o.workspace) {
+                    //
+                    const workspaceFolder = workspaces.find((ws) => ws.name === o.workspace);
+                    if (workspaceFolder) {
+                        if (workspaceFolder.uri.toString() !== w.uri.toString()) {
+                            continue; // skip if the workspace is not the same as the current workspace
+                        }
+                        uriFromWorkspace = Uri.file(path.resolve(workspaceFolder.uri.fsPath, o.path));
+                    }
+                }
+                const uri = uriFromWorkspace ? uriFromWorkspace : Uri.file(path.resolve(w.uri.fsPath, o.path));
+
+                // Check if the project already exists in the newProjects array
                 if (!newProjects.some((p) => p.uri.toString() === uri.toString())) {
                     newProjects.push(new PythonProjectsImpl(o.path, uri));
                 }

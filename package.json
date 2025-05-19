@@ -516,11 +516,13 @@
         "languageModelTools": [
             {
                 "name": "python_environment",
-                "userDescription": "Get Python environment info for a file or path, including version, packages, and the command to run it.",
+                "userDescription": "%python.languageModelTools.python_environment.userDescription%",
                 "displayName": "Get Python Environment Information",
                 "modelDescription": "Provides details about the Python environment for a specified file or workspace, including environment type, Python version, run command, and installed packages with their versions. Use this tool to determine the correct command for executing Python code in this workspace.",
                 "toolReferenceName": "pythonGetEnvironmentInfo",
-                "tags": [],
+                "tags": [
+                    "ms-python.python"
+                ],
                 "icon": "$(files)",
                 "canBeReferencedInPrompt": true,
                 "inputSchema": {
@@ -539,9 +541,12 @@
             {
                 "name": "python_install_package",
                 "displayName": "Install Python Package",
+                "userDescription": "%python.languageModelTools.python_install_package.userDescription%",
                 "modelDescription": "Installs Python packages in the given workspace. Use this tool to install packages in the user's chosen environment.",
                 "toolReferenceName": "pythonInstallPackage",
-                "tags": [],
+                "tags": [
+                    "ms-python.python"
+                ],
                 "icon": "$(package)",
                 "canBeReferencedInPrompt": true,
                 "inputSchema": {
