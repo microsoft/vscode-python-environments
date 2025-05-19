@@ -140,7 +140,9 @@ export class NewPackageProject implements PythonProjectCreator {
                     'copilot-instructions-text',
                     'package-copilot-instructions.md',
                 );
-                await manageCopilotInstructionsFile(destRoot, packageName, packageInstructionsPath);
+                await manageCopilotInstructionsFile(destRoot, packageName, [
+                    { searchValue: '<package_name>', replaceValue: packageInstructionsPath },
+                ]);
             }
 
             // update launch.json file with config for the package
