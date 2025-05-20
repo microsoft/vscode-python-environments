@@ -395,7 +395,7 @@
                 {
                     "command": "python-envs.refreshPackages",
                     "group": "inline",
-                    "when": "view == python-projects && viewItem == python-package-root"
+                    "when": "view == python-projects && viewItem == python-env"
                 },
                 {
                     "command": "python-envs.removePythonProject",
