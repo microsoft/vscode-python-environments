@@ -172,7 +172,7 @@ export namespace ProjectCreatorString {
 
 export namespace EnvViewStrings {
     export const selectedGlobalTooltip = l10n.t('This environment is selected for non-workspace files');
-    export const selectedWorkspaceTooltip = l10n.t('This environment is selected for workspace files');
+    export const selectedWorkspaceTooltip = l10n.t('This environment is selected for project files');
 }
 
 export namespace ActivationStrings {
