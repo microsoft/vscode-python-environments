@@ -4,7 +4,6 @@ import { commands, l10n, MarkdownString, QuickInputButtons, Uri, window, workspa
 import { PythonProject, PythonProjectCreator, PythonProjectCreatorOptions } from '../../api';
 import { NEW_PROJECT_TEMPLATES_FOLDER } from '../../common/constants';
 import { showInputBoxWithButtons } from '../../common/window.apis';
-import { EnvironmentManagers, PythonProjectManager } from '../../internal.api';
 import { isCopilotInstalled, manageCopilotInstructionsFile, replaceInFilesAndNames } from './creationHelpers';
 
 export class NewScriptProject implements PythonProjectCreator {
@@ -13,10 +12,7 @@ export class NewScriptProject implements PythonProjectCreator {
     public readonly description = l10n.t('Creates a new script folder in your current workspace with PEP 723 support');
     public readonly tooltip = new MarkdownString(l10n.t('Create a new Python script'));
 
-    constructor(
-        private readonly envManagers: EnvironmentManagers,
-        private readonly projectManager: PythonProjectManager,
-    ) {}
+    constructor() {}
 
     async create(options?: PythonProjectCreatorOptions): Promise<PythonProject | Uri | undefined> {
         // quick create (needs name, will always create venv and copilot instructions)
