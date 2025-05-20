@@ -146,7 +146,7 @@ export async function pickEnvironment(
             },
             {
                 label: options.recommended.displayName,
-                description: options.recommended.description,
+                description: options.recommended.description || options.recommended.displayPath,
                 result: options.recommended,
                 iconPath: getIconPath(options.recommended.iconPath),
             },
@@ -163,7 +163,7 @@ export async function pickEnvironment(
             ...envs.map((e) => {
                 return {
                     label: e.displayName ?? e.name,
-                    description: e.description,
+                    description: e.description || e.displayPath,
                     result: e,
                     manager: manager,
                     iconPath: getIconPath(e.iconPath),
@@ -178,7 +178,7 @@ export async function pickEnvironment(
 export async function pickEnvironmentFrom(environments: PythonEnvironment[]): Promise<PythonEnvironment | undefined> {
     const items = environments.map((e) => ({
         label: e.displayName ?? e.name,
-        description: e.description,
+        description: e.description || e.displayPath,
         e: e,
         iconPath: getIconPath(e.iconPath),
     }));
