@@ -140,8 +140,8 @@ export class NewPackageProject implements PythonProjectCreator {
                     'copilot-instructions-text',
                     'package-copilot-instructions.md',
                 );
-                await manageCopilotInstructionsFile(destRoot, packageName, [
-                    { searchValue: '<package_name>', replaceValue: packageInstructionsPath },
+                await manageCopilotInstructionsFile(destRoot, packageInstructionsPath, [
+                    { searchValue: '<package_name>', replaceValue: packageName },
                 ]);
             }
 
