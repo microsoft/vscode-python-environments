@@ -31,6 +31,7 @@
     "python-envs.runInTerminal.title": "Run in Terminal",
     "python-envs.createTerminal.title": "Create Python Terminal",
     "python-envs.runAsTask.title": "Run as Task",
+    "python-envs.createNewProjectFromTemplate.title": "Create New Project from Template",
     "python-envs.terminal.activate.title": "Activate Environment in Current Terminal",
     "python-envs.terminal.deactivate.title": "Deactivate Environment in Current Terminal",
     "python-envs.uninstallPackage.title": "Uninstall Package",

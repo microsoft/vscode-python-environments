@@ -1,10 +1,10 @@
 import { commands, ExtensionContext, LogOutputChannel, Terminal, Uri } from 'vscode';
-
 import { PythonEnvironment, PythonEnvironmentApi } from './api';
 import { ensureCorrectVersion } from './common/extVersion';
 import { registerTools } from './common/lm.apis';
 import { registerLogger, traceError, traceInfo } from './common/logging';
 import { setPersistentState } from './common/persistentState';
+import { newProjectSelection } from './common/pickers/managers';
 import { StopWatch } from './common/stopWatch';
 import { EventNames } from './common/telemetry/constants';
 import { sendManagerSelectionTelemetry } from './common/telemetry/helpers';
@@ -20,6 +20,8 @@ import { createManagerReady } from './features/common/managerReady';
 import { GetEnvironmentInfoTool, InstallPackageTool } from './features/copilotTools';
 import { AutoFindProjects } from './features/creators/autoFindProjects';
 import { ExistingProjects } from './features/creators/existingProjects';
+import { NewPackageProject } from './features/creators/newPackageProject';
+import { NewScriptProject } from './features/creators/newScriptProject';
 import { ProjectCreatorsImpl } from './features/creators/projectCreators';
 import {
     addPythonProjectCommand,
@@ -109,6 +111,8 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
         projectCreators,
         projectCreators.registerPythonProjectCreator(new ExistingProjects(projectManager)),
         projectCreators.registerPythonProjectCreator(new AutoFindProjects(projectManager)),
+        projectCreators.registerPythonProjectCreator(new NewPackageProject(envManagers, projectManager)),
+        projectCreators.registerPythonProjectCreator(new NewScriptProject()),
     );
 
     setPythonApi(envManagers, projectManager, projectCreators, terminalManager, envVarManager);
@@ -231,6 +235,12 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
             const terminal = activeTerminal();
             if (terminal) {
                 await terminalManager.deactivate(terminal);
+            }
+        }),
+        commands.registerCommand('python-envs.createNewProjectFromTemplate', async () => {
+            const selected = await newProjectSelection(projectCreators.getProjectCreators());
+            if (selected) {
+                await selected.create();
             }
         }),
         terminalActivation.onDidChangeTerminalActivationState(async (e) => {
