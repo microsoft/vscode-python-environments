@@ -232,7 +232,7 @@ export class ProjectItem implements ProjectTreeItem {
         item.description = this.project.description;
         item.tooltip = this.project.tooltip;
         item.resourceUri = project.uri.fsPath.endsWith('.py') ? this.project.uri : undefined;
-        item.iconPath = this.project.iconPath ?? (project.uri.fsPath.endsWith('.py') ? ThemeIcon.File : undefined);
+        item.iconPath = this.project.iconPath;
         this.treeItem = item;
     }
 
