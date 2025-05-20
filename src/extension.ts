@@ -1,4 +1,4 @@
-import { commands, ExtensionContext, LogOutputChannel, Terminal, Uri, workspace, window } from 'vscode';
+import { commands, ExtensionContext, LogOutputChannel, Terminal, Uri, window } from 'vscode';
 import { PythonEnvironment, PythonEnvironmentApi } from './api';
 import { ensureCorrectVersion } from './common/extVersion';
 import { registerTools } from './common/lm.apis';
@@ -94,26 +94,6 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
         }
         return projectManager.get(uri) !== undefined;
     };
-
-    // Update the context key when explorer selection changes
-    context.subscriptions.push(
-        window.onDidChangeActiveTextEditor((editor) => {
-            if (editor) {
-                commands.executeCommand('setContext', 'python-envs:isExistingProject', isExistingProject(editor.document.uri));
-            }
-        }),
-        window.onDidChangeWindowState(() => {
-            const activeEditor = window.activeTextEditor;
-            if (activeEditor) {
-                commands.executeCommand('setContext', 'python-envs:isExistingProject', isExistingProject(activeEditor.document.uri));
-            }
-        }),
-        workspace.onDidOpenTextDocument((document) => {
-            if (window.activeTextEditor && window.activeTextEditor.document === document) {
-                commands.executeCommand('setContext', 'python-envs:isExistingProject', isExistingProject(document.uri));
-            }
-        })
-    );
 
     const envVarManager: EnvVarManager = new PythonEnvVariableManager(projectManager);
     context.subscriptions.push(envVarManager);
