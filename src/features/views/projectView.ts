@@ -21,8 +21,6 @@ import {
     ProjectEnvironmentInfo,
     ProjectItem,
     ProjectPackage,
-    ProjectPackageRootInfoTreeItem,
-    ProjectPackageRootTreeItem,
     ProjectTreeItem,
     ProjectTreeItemKind,
 } from './treeViewItems';
@@ -34,7 +32,7 @@ export class ProjectView implements TreeDataProvider<ProjectTreeItem> {
     >();
     private projectViews: Map<string, ProjectItem> = new Map();
     private revealMap: Map<string, ProjectEnvironment> = new Map();
-    private packageRoots: Map<string, ProjectPackageRootTreeItem> = new Map();
+    private packageRoots: Map<string, ProjectEnvironment> = new Map();
     private disposables: Disposable[] = [];
     private debouncedUpdateProject = createSimpleDebounce(500, () => this.updateProject());
     public constructor(private envManagers: EnvironmentManagers, private projectManager: PythonProjectManager) {
@@ -83,7 +81,8 @@ export class ProjectView implements TreeDataProvider<ProjectTreeItem> {
 
     private updatePackagesForEnvironment(e: PythonEnvironment): void {
         const views: ProjectTreeItem[] = [];
-        this.packageRoots.forEach((v) => {
+        // Look for environments matching this environment ID and refresh them
+        this.revealMap.forEach((v) => {
             if (v.environment.envId.id === e.envId.id) {
                 views.push(v);
             }
@@ -193,31 +192,23 @@ export class ProjectView implements TreeDataProvider<ProjectTreeItem> {
             const pkgManager = this.envManagers.getPackageManager(uri);
             const environment = environmentItem.environment;
 
-            const views: ProjectTreeItem[] = [];
-
-            if (pkgManager) {
-                const item = new ProjectPackageRootTreeItem(environmentItem, pkgManager, environment);
-                this.packageRoots.set(uri ? uri.fsPath : 'global', item);
-                views.push(item);
-            } else {
-                views.push(new ProjectEnvironmentInfo(environmentItem, ProjectViews.noPackageManager));
+            if (!pkgManager) {
+                return [new ProjectEnvironmentInfo(environmentItem, ProjectViews.noPackageManager)];
             }
-            return views;
+
+            let packages = await pkgManager.getPackages(environment);
+            if (!packages) {
+                return [new ProjectEnvironmentInfo(environmentItem, ProjectViews.noPackages)];
+            }
+
+            // Store the reference for refreshing packages
+            this.packageRoots.set(uri ? uri.fsPath : 'global', environmentItem);
+
+            // Return packages directly under the environment
+            return packages.map((p) => new ProjectPackage(environmentItem, p, pkgManager));
         }
 
-        if (element.kind === ProjectTreeItemKind.packageRoot) {
-            const root = element as ProjectPackageRootTreeItem;
-            const manager = root.manager;
-            const environment = root.environment;
-            let packages = await manager.getPackages(environment);
-            const views: ProjectTreeItem[] = [];
-
-            if (packages) {
-                return packages.map((p) => new ProjectPackage(root, p, manager));
-            } else {
-                views.push(new ProjectPackageRootInfoTreeItem(root, ProjectViews.noPackages));
-            }
-        }
+        // We no longer need to handle packageRoot items as they are not created anymore
 
         return undefined;
     }

@@ -382,7 +382,7 @@ export class ProjectPackage implements ProjectTreeItem {
     public readonly id: string;
     public readonly treeItem: TreeItem;
     constructor(
-        public readonly parent: ProjectPackageRootTreeItem,
+        public readonly parent: ProjectEnvironment,
         public readonly pkg: Package,
         public readonly manager: InternalPackageManager,
     ) {
@@ -395,7 +395,7 @@ export class ProjectPackage implements ProjectTreeItem {
         this.treeItem = item;
     }
 
-    static getId(projectEnv: ProjectPackageRootTreeItem, pkg: Package): string {
+    static getId(projectEnv: ProjectEnvironment, pkg: Package): string {
         return `${projectEnv.id}>>>${pkg.pkgId}`;
     }
 }
