@@ -369,11 +369,17 @@ export async function addPythonProjectCommand(
             name: resource.fsPath,
             rootUri: resource,
         };
-        
+
         // When a URI is provided (right-click in explorer), directly use the existingProjects creator
         const existingProjectsCreator = pc.getProjectCreators().find((c) => c.name === 'existingProjects');
         if (existingProjectsCreator) {
             try {
+                if (existingProjectsCreator.supportsQuickCreate) {
+                    options = {
+                        ...options,
+                        quickCreate: true,
+                    };
+                }
                 await existingProjectsCreator.create(options);
                 return;
             } catch (ex) {
