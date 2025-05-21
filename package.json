@@ -354,11 +354,6 @@
                     "when": "view == env-managers && viewItem =~ /.*pythonEnvManager.*/"
                 },
                 {
-                    "command": "python-envs.createTerminal",
-                    "group": "inline",
-                    "when": "view == env-managers && viewItem =~ /.*pythonEnvironment.*;activatable;.*/"
-                },
-                {
                     "command": "python-envs.refreshPackages",
                     "group": "inline",
                     "when": "view == env-managers && viewItem == python-package-root"
@@ -380,11 +375,6 @@
                 },
                 {
                     "command": "python-envs.packages",
-                    "group": "inline",
-                    "when": "view == python-projects && viewItem == python-env"
-                },
-                {
-                    "command": "python-envs.copyEnvPath",
                     "group": "inline",
                     "when": "view == python-projects && viewItem == python-env"
                 },
