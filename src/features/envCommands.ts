@@ -21,7 +21,7 @@ import {} from '../common/errors/utils';
 import { pickEnvironment } from '../common/pickers/environments';
 import { pickCreator, pickEnvironmentManager, pickPackageManager } from '../common/pickers/managers';
 import { pickProject, pickProjectMany } from '../common/pickers/projects';
-import { activeTextEditor, showErrorMessage } from '../common/window.apis';
+import { activeTextEditor, showErrorMessage, showInformationMessage } from '../common/window.apis';
 import { quoteArgs } from './execution/execUtils';
 import { runAsTask } from './execution/runAsTask';
 import { runInTerminal } from './terminal/runInTerminal';
@@ -271,6 +271,16 @@ export async function setEnvironmentCommand(
         });
 
         if (selected) {
+            // Check if the selected environment is already the current one
+            // Only show notification when we have exactly one project and it already has this environment
+            if (uris.length === 1) {
+                const currentEnv = await em.getEnvironment(uris[0]);
+                if (currentEnv?.envId.id === selected.envId.id) {
+                    // The environment is already selected for this project
+                    showInformationMessage('This environment is already selected for the workspace.');
+                    return;
+                }
+            }
             await em.setEnvironments(uris, selected);
         }
     } else {
