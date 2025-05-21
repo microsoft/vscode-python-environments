@@ -282,8 +282,8 @@ export async function setEnvironmentCommand(
 }
 /**
  * Sets the environment for the given projects, showing a warning for those already set.
- * @param selectedProjects Array of project items (with .uri and .name)
- * @param environment The environment to set
+ * @param selectedProjects Array of  PythonProject selected by user
+ * @param environment The environment to set for the projects
  * @param em The EnvironmentManagers instance
  */
 async function setEnvironmentForProjects(
