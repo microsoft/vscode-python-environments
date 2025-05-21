@@ -124,8 +124,16 @@ export class ProjectView implements TreeDataProvider<ProjectTreeItem> {
         return element.treeItem;
     }
 
+    /**
+     * Returns the children of a given element in the project tree view:
+     * If param is undefined, return root project items
+     * If param is a project, returns its environments.
+     * If param is an environment, returns its packages.
+     * @param element The tree item for which to get children.
+     */
     async getChildren(element?: ProjectTreeItem | undefined): Promise<ProjectTreeItem[] | undefined> {
         if (element === undefined) {
+            // Return the root items
             this.projectViews.clear();
             const views: ProjectTreeItem[] = [];
             const projects = this.projectManager.getProjects();
@@ -186,6 +194,8 @@ export class ProjectView implements TreeDataProvider<ProjectTreeItem> {
         }
 
         if (element.kind === ProjectTreeItemKind.environment) {
+            // Return packages directly under the environment
+
             const environmentItem = element as ProjectEnvironment;
             const parent = environmentItem.parent;
             const uri = parent.id === 'global' ? undefined : parent.project.uri;
@@ -204,12 +214,10 @@ export class ProjectView implements TreeDataProvider<ProjectTreeItem> {
             // Store the reference for refreshing packages
             this.packageRoots.set(uri ? uri.fsPath : 'global', environmentItem);
 
-            // Return packages directly under the environment
             return packages.map((p) => new ProjectPackage(environmentItem, p, pkgManager));
         }
 
-        // We no longer need to handle packageRoot items as they are not created anymore
-
+        //return nothing if the element is not a project, environment, or undefined
         return undefined;
     }
     getParent(element: ProjectTreeItem): ProviderResult<ProjectTreeItem> {
