@@ -96,61 +96,65 @@ export async function quickCreateNewVenv(envManagers: EnvironmentManagers, destF
 }
 
 /**
- * Recursively replaces all occurrences of a string in file and folder names, as well as file contents, within a directory tree.
- * @param dir - The root directory to start the replacement from.
+ * Replaces all occurrences of a string in file and folder names, as well as file contents, within a directory tree or a single file.
+ * @param targetPath - The root directory or file path to start the replacement from.
  * @param searchValue - The string to search for in names and contents.
  * @param replaceValue - The string to replace with.
  * @returns {Promise<void>} Resolves when all replacements are complete.
  */
-export async function replaceInFilesAndNames(dir: string, searchValue: string, replaceValue: string) {
-    const entries = await fs.readdir(dir, { withFileTypes: true });
-    for (const entry of entries) {
-        let entryName = entry.name;
-        let fullPath = path.join(dir, entryName);
-        let newFullPath = fullPath;
-        // If the file or folder name contains searchValue, rename it
-        if (entryName.includes(searchValue)) {
-            const newName = entryName.replace(new RegExp(searchValue, 'g'), replaceValue);
-            newFullPath = path.join(dir, newName);
-            await fs.rename(fullPath, newFullPath);
-            entryName = newName;
-        }
-        if (entry.isDirectory()) {
-            await replaceInFilesAndNames(newFullPath, searchValue, replaceValue);
-        } else {
-            let content = await fs.readFile(newFullPath, 'utf8');
-            if (content.includes(searchValue)) {
-                content = content.replace(new RegExp(searchValue, 'g'), replaceValue);
-                await fs.writeFile(newFullPath, content, 'utf8');
+export async function replaceInFilesAndNames(targetPath: string, searchValue: string, replaceValue: string) {
+    const stat = await fs.stat(targetPath);
+
+    if (stat.isDirectory()) {
+        const entries = await fs.readdir(targetPath, { withFileTypes: true });
+        for (const entry of entries) {
+            let entryName = entry.name;
+            let fullPath = path.join(targetPath, entryName);
+            let newFullPath = fullPath;
+            // If the file or folder name contains searchValue, rename it
+            if (entryName.includes(searchValue)) {
+                const newName = entryName.replace(new RegExp(searchValue, 'g'), replaceValue);
+                newFullPath = path.join(targetPath, newName);
+                await fs.rename(fullPath, newFullPath);
+                entryName = newName;
             }
+            await replaceInFilesAndNames(newFullPath, searchValue, replaceValue);
+        }
+    } else if (stat.isFile()) {
+        let content = await fs.readFile(targetPath, 'utf8');
+        if (content.includes(searchValue)) {
+            content = content.replace(new RegExp(searchValue, 'g'), replaceValue);
+            await fs.writeFile(targetPath, content, 'utf8');
         }
     }
 }
 
 /**
  * Ensures the .github/copilot-instructions.md file exists at the given root, creating or appending as needed.
+ * Performs multiple find-and-replace operations as specified by the replacements array.
  * @param destinationRootPath - The root directory where the .github folder should exist.
- * @param instructionsText - The text to write or append to the copilot-instructions.md file.
+ * @param instructionsFilePath - The path to the instructions template file.
+ * @param replacements - An array of tuples [{ text_to_find_and_replace, text_to_replace_it_with }]
  */
 export async function manageCopilotInstructionsFile(
     destinationRootPath: string,
-    packageName: string,
     instructionsFilePath: string,
+    replacements: Array<{ searchValue: string; replaceValue: string }>,
 ) {
-    const instructionsText = `\n \n` + (await fs.readFile(instructionsFilePath, 'utf-8'));
+    let instructionsText = `\n\n` + (await fs.readFile(instructionsFilePath, 'utf-8'));
+    for (const { searchValue: text_to_find_and_replace, replaceValue: text_to_replace_it_with } of replacements) {
+        instructionsText = instructionsText.replace(new RegExp(text_to_find_and_replace, 'g'), text_to_replace_it_with);
+    }
     const githubFolderPath = path.join(destinationRootPath, '.github');
     const customInstructionsPath = path.join(githubFolderPath, 'copilot-instructions.md');
     if (!(await fs.pathExists(githubFolderPath))) {
-        // make the .github folder if it doesn't exist
         await fs.mkdir(githubFolderPath);
     }
     const customInstructions = await fs.pathExists(customInstructionsPath);
     if (customInstructions) {
-        // Append to the existing file
-        await fs.appendFile(customInstructionsPath, instructionsText.replace(/<package_name>/g, packageName));
+        await fs.appendFile(customInstructionsPath, instructionsText);
     } else {
-        // Create the file if it doesn't exist
-        await fs.writeFile(customInstructionsPath, instructionsText.replace(/<package_name>/g, packageName));
+        await fs.writeFile(customInstructionsPath, instructionsText);
     }
 }
 
