@@ -30,7 +30,6 @@ import {
     EnvManagerTreeItem,
     EnvTreeItemKind,
     GlobalProjectItem,
-    PackageRootTreeItem,
     PackageTreeItem,
     ProjectEnvironment,
     ProjectItem,
@@ -47,7 +46,7 @@ export async function refreshManagerCommand(context: unknown): Promise<void> {
     }
 }
 
-export async function refreshPackagesCommand(context: unknown, managers?: EnvironmentManagers) {
+export async function refreshPackagesCommand(context: unknown, managers?: EnvironmentManagers): Promise<void> {
     if (context instanceof ProjectEnvironment) {
         const view = context as ProjectEnvironment;
         if (managers) {
@@ -56,10 +55,16 @@ export async function refreshPackagesCommand(context: unknown, managers?: Enviro
                 await pkgManager.refresh(view.environment);
             }
         }
-    } else if (context instanceof PackageRootTreeItem) {
-        const view = context as PackageRootTreeItem;
-        const manager = view.manager;
-        await manager.refresh(view.environment);
+    } else if (context instanceof PythonEnvTreeItem) {
+        const view = context as PythonEnvTreeItem;
+        const envManager =
+            view.parent.kind === EnvTreeItemKind.environmentGroup
+                ? view.parent.parent.manager
+                : view.parent.manager;
+        const pkgManager = managers?.getPackageManager(envManager.preferredPackageManagerId);
+        if (pkgManager) {
+            await pkgManager.refresh(view.environment);
+        }
     } else {
         traceVerbose(`Invalid context for refresh command: ${context}`);
     }

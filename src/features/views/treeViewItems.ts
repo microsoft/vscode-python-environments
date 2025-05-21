@@ -11,8 +11,6 @@ export enum EnvTreeItemKind {
     environmentGroup = 'python-env-group',
     noEnvironment = 'python-no-env',
     package = 'python-package',
-    packageRoot = 'python-package-root',
-    packageRootInfo = 'python-package-root-info',
     managerInfo = 'python-env-manager-info',
     environmentInfo = 'python-env-info',
     packageInfo = 'python-package-info',
@@ -128,28 +126,12 @@ export class NoPythonEnvTreeItem implements EnvTreeItem {
     }
 }
 
-export class PackageRootTreeItem implements EnvTreeItem {
-    public readonly kind = EnvTreeItemKind.packageRoot;
-    public readonly treeItem: TreeItem;
-    constructor(
-        public readonly parent: PythonEnvTreeItem,
-        public readonly manager: InternalPackageManager,
-        public readonly environment: PythonEnvironment,
-    ) {
-        const item = new TreeItem('Packages', TreeItemCollapsibleState.Collapsed);
-        item.contextValue = 'python-package-root';
-        item.description = manager.displayName;
-        item.tooltip = 'Packages installed in this environment';
-        this.treeItem = item;
-    }
-}
-
 export class PackageTreeItem implements EnvTreeItem {
     public readonly kind = EnvTreeItemKind.package;
     public readonly treeItem: TreeItem;
     constructor(
         public readonly pkg: Package,
-        public readonly parent: PackageRootTreeItem,
+        public readonly parent: PythonEnvTreeItem,
         public readonly manager: InternalPackageManager,
     ) {
         const item = new TreeItem(pkg.displayName);
@@ -183,10 +165,10 @@ export class EnvInfoTreeItem implements EnvTreeItem {
 }
 
 export class PackageRootInfoTreeItem implements EnvTreeItem {
-    public readonly kind = EnvTreeItemKind.packageRootInfo;
+    public readonly kind = EnvTreeItemKind.packageInfo;
     public readonly treeItem: TreeItem;
     constructor(
-        public readonly parent: PackageRootTreeItem,
+        public readonly parent: PythonEnvTreeItem,
         name: string,
         description?: string,
         tooltip?: string | MarkdownString,
@@ -209,7 +191,6 @@ export enum ProjectTreeItemKind {
     none = 'project-no-environment',
     environmentInfo = 'environment-info',
     package = 'project-package',
-    packageRoot = 'project-package-root',
     packageRootInfo = 'project-package-root-info',
 }
 
@@ -307,24 +288,6 @@ export class NoProjectEnvironment implements ProjectTreeItem {
     }
 }
 
-export class ProjectPackageRootTreeItem implements ProjectTreeItem {
-    public readonly kind = ProjectTreeItemKind.packageRoot;
-    public readonly id: string;
-    public readonly treeItem: TreeItem;
-    constructor(
-        public readonly parent: ProjectEnvironment,
-        public readonly manager: InternalPackageManager,
-        public readonly environment: PythonEnvironment,
-    ) {
-        const item = new TreeItem('Packages', TreeItemCollapsibleState.Collapsed);
-        this.id = `${this.parent.id}>>>packages`;
-        item.contextValue = 'python-package-root';
-        item.description = manager.displayName;
-        item.tooltip = 'Packages installed in this environment';
-        this.treeItem = item;
-    }
-}
-
 export class NoPackagesEnvironment implements ProjectTreeItem {
     public readonly kind = ProjectTreeItemKind.none;
     public readonly id: string;
@@ -405,7 +368,7 @@ export class ProjectPackageRootInfoTreeItem implements ProjectTreeItem {
     public readonly id: string;
     public readonly treeItem: TreeItem;
     constructor(
-        public readonly parent: ProjectPackageRootTreeItem,
+        public readonly parent: ProjectEnvironment,
         name: string,
         description?: string,
         tooltip?: string | MarkdownString,
@@ -421,7 +384,7 @@ export class ProjectPackageRootInfoTreeItem implements ProjectTreeItem {
         this.treeItem.iconPath = iconPath;
         this.treeItem.command = command;
     }
-    static getId(projectEnv: ProjectPackageRootTreeItem, name: string): string {
+    static getId(projectEnv: ProjectEnvironment, name: string): string {
         return `${projectEnv.id}>>>${name}`;
     }
 }

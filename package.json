@@ -361,7 +361,7 @@
                 {
                     "command": "python-envs.refreshPackages",
                     "group": "inline",
-                    "when": "view == env-managers && viewItem == python-package-root"
+                    "when": "view == env-managers && viewItem =~ /.*pythonEnvironment.*/"
                 },
                 {
                     "command": "python-envs.packages",
