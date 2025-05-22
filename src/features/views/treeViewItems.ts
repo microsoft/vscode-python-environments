@@ -79,7 +79,7 @@ export class PythonEnvTreeItem implements EnvTreeItem {
         item.contextValue = this.getContextValue();
         item.description = environment.description;
         item.tooltip = tooltip;
-        item.iconPath = environment.iconPath;
+        // Removed icon to improve UI clarity as section titles already indicate environment type
         this.treeItem = item;
     }
 
@@ -251,7 +251,7 @@ export class ProjectEnvironment implements ProjectTreeItem {
         item.contextValue = 'python-env';
         item.description = this.environment.description;
         item.tooltip = this.environment.tooltip;
-        item.iconPath = this.environment.iconPath;
+        // Removed icon to improve UI clarity as section titles already indicate environment type
         this.treeItem = item;
     }
 
