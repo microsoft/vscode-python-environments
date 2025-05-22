@@ -25,7 +25,7 @@ import {
     clearPoetryCache,
     getPoetryForGlobal,
     getPoetryForWorkspace,
-    POETRY_ENVIRONMENTS,
+    POETRY_GLOBAL,
     refreshPoetry,
     resolvePoetryPath,
     setPoetryForGlobal,
@@ -98,7 +98,7 @@ export class PoetryManager implements EnvironmentManager, Disposable {
 
         if (scope === 'global') {
             return this.collection.filter((env) => {
-                return env.group === POETRY_ENVIRONMENTS;
+                return env.group === POETRY_GLOBAL;
             });
         }
 
@@ -155,7 +155,7 @@ export class PoetryManager implements EnvironmentManager, Disposable {
 
         return this.globalEnv;
     }
-    
+
     async set(scope: SetEnvironmentScope, environment?: PythonEnvironment | undefined): Promise<void> {
         if (scope === undefined) {
             await setPoetryForGlobal(environment?.environmentPath?.fsPath);
@@ -251,7 +251,7 @@ export class PoetryManager implements EnvironmentManager, Disposable {
         }
 
         if (!this.globalEnv) {
-            this.globalEnv = getLatest(this.collection.filter((e) => e.group === POETRY_ENVIRONMENTS));
+            this.globalEnv = getLatest(this.collection.filter((e) => e.group === POETRY_GLOBAL));
         }
 
         // Find any poetry environments that might be associated with the current projects

@@ -8,7 +8,6 @@ import {
     MarkdownString,
     ProgressLocation,
     ThemeIcon,
-    window
 } from 'vscode';
 import { Disposable } from 'vscode-jsonrpc';
 import {
@@ -21,6 +20,7 @@ import {
     PythonEnvironment,
     PythonEnvironmentApi,
 } from '../../api';
+import { showErrorMessage, showInputBox, withProgress } from '../../common/window.apis';
 import { PoetryManager } from './poetryManager';
 import { getPoetry } from './poetryUtils';
 
@@ -64,21 +64,24 @@ export class PoetryPackageManager implements PackageManager, Disposable {
 
         if (toInstall.length === 0 && toUninstall.length === 0) {
             // Show package input UI if no packages are specified
-            const installInput = await window.showInputBox({
+            const installInput = await showInputBox({
                 prompt: 'Enter packages to install (comma separated)',
-                placeHolder: 'e.g., requests, pytest, black'
+                placeHolder: 'e.g., requests, pytest, black',
             });
-            
+
             if (installInput) {
-                toInstall = installInput.split(',').map(p => p.trim()).filter(p => p.length > 0);
+                toInstall = installInput
+                    .split(',')
+                    .map((p) => p.trim())
+                    .filter((p) => p.length > 0);
             }
-            
+
             if (toInstall.length === 0) {
                 return;
             }
         }
 
-        await window.withProgress(
+        await withProgress(
             {
                 location: ProgressLocation.Notification,
                 title: 'Managing packages with Poetry',
@@ -87,7 +90,11 @@ export class PoetryPackageManager implements PackageManager, Disposable {
             async (_progress, token) => {
                 try {
                     const before = this.packages.get(environment.envId.id) ?? [];
-                    const after = await this.managePackages(environment, {install: toInstall, uninstall: toUninstall}, token);
+                    const after = await this.managePackages(
+                        environment,
+                        { install: toInstall, uninstall: toUninstall },
+                        token,
+                    );
                     const changes = getChanges(before, after);
                     this.packages.set(environment.envId.id, after);
                     this._onDidChangePackages.fire({ environment, manager: this, changes });
@@ -97,7 +104,7 @@ export class PoetryPackageManager implements PackageManager, Disposable {
                     }
                     this.log.error('Error managing packages with Poetry', e);
                     setImmediate(async () => {
-                        const result = await window.showErrorMessage('Error managing packages with Poetry', 'View Output');
+                        const result = await showErrorMessage('Error managing packages with Poetry', 'View Output');
                         if (result === 'View Output') {
                             this.log.show();
                         }
@@ -109,23 +116,34 @@ export class PoetryPackageManager implements PackageManager, Disposable {
     }
 
     async refresh(environment: PythonEnvironment): Promise<void> {
-        await window.withProgress(
+        await withProgress(
             {
                 location: ProgressLocation.Window,
                 title: 'Refreshing Poetry packages',
             },
             async () => {
-                const before = this.packages.get(environment.envId.id) ?? [];
-                const after = await this.refreshPackages(environment);
-                const changes = getChanges(before, after);
-                this.packages.set(environment.envId.id, after);
-                if (changes.length > 0) {
-                    this._onDidChangePackages.fire({ environment, manager: this, changes });
+                try {
+                    const before = this.packages.get(environment.envId.id) ?? [];
+                    const after = await this.refreshPackages(environment);
+                    const changes = getChanges(before, after);
+                    this.packages.set(environment.envId.id, after);
+                    if (changes.length > 0) {
+                        this._onDidChangePackages.fire({ environment, manager: this, changes });
+                    }
+                } catch (error) {
+                    this.log.error(`Failed to refresh packages: ${error}`);
+                    // Show error to user but don't break the UI
+                    setImmediate(async () => {
+                        const result = await showErrorMessage('Error refreshing Poetry packages', 'View Output');
+                        if (result === 'View Output') {
+                            this.log.show();
+                        }
+                    });
                 }
             },
         );
     }
-    
+
     async getPackages(environment: PythonEnvironment): Promise<Package[] | undefined> {
         if (!this.packages.has(environment.envId.id)) {
             await this.refresh(environment);
@@ -141,16 +159,14 @@ export class PoetryPackageManager implements PackageManager, Disposable {
     private async managePackages(
         environment: PythonEnvironment,
         options: { install?: string[]; uninstall?: string[] },
-        token?: CancellationToken
+        token?: CancellationToken,
     ): Promise<Package[]> {
-        const cwd = environment.environmentPath.fsPath;
-
         // Handle uninstalls first
         if (options.uninstall && options.uninstall.length > 0) {
             try {
                 const args = ['remove', ...options.uninstall];
                 this.log.info(`Running: poetry ${args.join(' ')}`);
-                const result = await runPoetry(args, cwd, this.log, token);
+                const result = await runPoetry(args, undefined, this.log, token);
                 this.log.info(result);
             } catch (err) {
                 this.log.error(`Error removing packages with Poetry: ${err}`);
@@ -163,7 +179,7 @@ export class PoetryPackageManager implements PackageManager, Disposable {
             try {
                 const args = ['add', ...options.install];
                 this.log.info(`Running: poetry ${args.join(' ')}`);
-                const result = await runPoetry(args, cwd, this.log, token);
+                const result = await runPoetry(args, undefined, this.log, token);
                 this.log.info(result);
             } catch (err) {
                 this.log.error(`Error adding packages with Poetry: ${err}`);
@@ -176,12 +192,12 @@ export class PoetryPackageManager implements PackageManager, Disposable {
     }
 
     private async refreshPackages(environment: PythonEnvironment): Promise<Package[]> {
-        const cwd = environment.environmentPath.fsPath;
         const poetryPackages: { name: string; version: string; displayName: string; description: string }[] = [];
 
         try {
-            const result = await runPoetry(['show', '--no-ansi'], cwd, this.log);
-            
+            this.log.info(`Running: ${await getPoetry()} show --no-ansi`);
+            const result = await runPoetry(['show', '--no-ansi'], undefined, this.log);
+
             // Parse poetry show output
             // Format: name         version    description
             const lines = result.split('\n');
@@ -199,11 +215,12 @@ export class PoetryPackageManager implements PackageManager, Disposable {
             }
         } catch (err) {
             this.log.error(`Error refreshing packages with Poetry: ${err}`);
-            throw err;
+            // Return empty array instead of throwing to avoid breaking the UI
+            return [];
         }
 
         // Convert to Package objects using the API
-        return poetryPackages.map(pkg => this.api.createPackageItem(pkg, environment, this));
+        return poetryPackages.map((pkg) => this.api.createPackageItem(pkg, environment, this));
     }
 }
 
@@ -211,16 +228,17 @@ export async function runPoetry(
     args: string[],
     cwd?: string,
     log?: LogOutputChannel,
-    token?: CancellationToken
+    token?: CancellationToken,
 ): Promise<string> {
     const poetry = await getPoetry();
     if (!poetry) {
         throw new Error('Poetry executable not found');
     }
-    
+
     log?.info(`Running: ${poetry} ${args.join(' ')}`);
+
     return new Promise<string>((resolve, reject) => {
-        const proc = ch.spawn(poetry, args, { cwd: cwd });
+        const proc = ch.spawn(poetry, args, { cwd });
         token?.onCancellationRequested(() => {
             proc.kill();
             reject(new CancellationError());
@@ -238,6 +256,10 @@ export async function runPoetry(
         });
         proc.on('close', () => {
             resolve(builder);
+        });
+        proc.on('error', (error) => {
+            log?.error(`Error executing poetry command: ${error}`);
+            reject(error);
         });
         proc.on('exit', (code) => {
             if (code !== 0) {
