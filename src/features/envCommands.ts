@@ -369,8 +369,29 @@ export async function addPythonProjectCommand(
             name: resource.fsPath,
             rootUri: resource,
         };
+
+        // When a URI is provided (right-click in explorer), directly use the existingProjects creator
+        const existingProjectsCreator = pc.getProjectCreators().find((c) => c.name === 'existingProjects');
+        if (existingProjectsCreator) {
+            try {
+                if (existingProjectsCreator.supportsQuickCreate) {
+                    options = {
+                        ...options,
+                        quickCreate: true,
+                    };
+                }
+                await existingProjectsCreator.create(options);
+                return;
+            } catch (ex) {
+                if (ex === QuickInputButtons.Back) {
+                    return addPythonProjectCommand(resource, wm, em, pc);
+                }
+                throw ex;
+            }
+        }
     }
 
+    // If not a URI or existingProjectsCreator not found, fall back to picker
     const creator: PythonProjectCreator | undefined = await pickCreator(pc.getProjectCreators());
     if (!creator) {
         return;
