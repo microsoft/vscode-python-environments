@@ -15,17 +15,27 @@ export class ExistingProjects implements PythonProjectCreator {
     async create(
         _options?: PythonProjectCreatorOptions,
     ): Promise<PythonProject | PythonProject[] | Uri | Uri[] | undefined> {
-        const results = await showOpenDialog({
-            canSelectFiles: true,
-            canSelectFolders: true,
-            canSelectMany: true,
-            filters: {
-                python: ['py'],
-            },
-            title: ProjectCreatorString.selectFilesOrFolders,
-        });
+        let existingAddUri: Uri[] | undefined;
+        if (_options?.rootUri) {
+            // If rootUri is provided, do not prompt
+            existingAddUri = [_options.rootUri];
+        } else if (_options?.quickCreate) {
+            // If quickCreate is true & no rootUri is provided, we should not prompt for any input
+            throw new Error('Root URI is required in quickCreate mode.');
+        } else {
+            // Prompt the user to select files or folders
+            existingAddUri = await showOpenDialog({
+                canSelectFiles: true,
+                canSelectFolders: true,
+                canSelectMany: true,
+                filters: {
+                    python: ['py'],
+                },
+                title: ProjectCreatorString.selectFilesOrFolders,
+            });
+        }
 
-        if (!results || results.length === 0) {
+        if (!existingAddUri || existingAddUri.length === 0) {
             // User cancelled the dialog & doesn't want to add any projects
             return;
         }
@@ -33,7 +43,7 @@ export class ExistingProjects implements PythonProjectCreator {
         // do we have any limitations that need to be applied here?
         // like selected folder not child of workspace folder?
 
-        const filtered = results.filter((uri) => {
+        const filtered = existingAddUri.filter((uri) => {
             const p = this.pm.get(uri);
             if (p) {
                 // Skip this project if there's already a project registered with exactly the same path

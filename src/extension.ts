@@ -1,4 +1,4 @@
-import { commands, ExtensionContext, LogOutputChannel, Terminal, Uri } from 'vscode';
+import { commands, ExtensionContext, LogOutputChannel, Terminal, Uri, window } from 'vscode';
 import { PythonEnvironment, PythonEnvironmentApi } from './api';
 import { ensureCorrectVersion } from './common/extVersion';
 import { registerTools } from './common/lm.apis';
@@ -13,7 +13,6 @@ import {
     activeTerminal,
     createLogOutputChannel,
     onDidChangeActiveTerminal,
-    onDidChangeActiveTextEditor,
     onDidChangeTerminalShellIntegration,
 } from './common/window.apis';
 import { createManagerReady } from './features/common/managerReady';
@@ -87,6 +86,14 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
 
     const projectManager: PythonProjectManager = new PythonProjectManagerImpl();
     context.subscriptions.push(projectManager);
+
+    // Helper function to check if a resource is an existing Python project
+    const isExistingProject = (uri: Uri | undefined): boolean => {
+        if (!uri) {
+            return false;
+        }
+        return projectManager.get(uri) !== undefined;
+    };
 
     const envVarManager: EnvVarManager = new PythonEnvVariableManager(projectManager);
     context.subscriptions.push(envVarManager);
@@ -194,6 +201,10 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
             await setPackageManagerCommand(envManagers, projectManager);
         }),
         commands.registerCommand('python-envs.addPythonProject', async (resource) => {
+            // Set context to show/hide menu item depending on whether the resource is already a Python project
+            if (resource instanceof Uri) {
+                commands.executeCommand('setContext', 'python-envs:isExistingProject', isExistingProject(resource));
+            }
             await addPythonProjectCommand(resource, projectManager, envManagers, projectCreators);
         }),
         commands.registerCommand('python-envs.removePythonProject', async (item) => {
@@ -254,7 +265,7 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
                 }
             }
         }),
-        onDidChangeActiveTextEditor(async () => {
+        window.onDidChangeActiveTextEditor(async () => {
             updateViewsAndStatus(statusBar, workspaceView, managerView, api);
         }),
         envManagers.onDidChangeEnvironment(async () => {

@@ -13,10 +13,14 @@ export async function registerPyenvFeatures(
     const api: PythonEnvironmentApi = await getPythonApi();
 
     try {
-        await getPyenv(nativeFinder);
-
-        const mgr = new PyEnvManager(nativeFinder, api);
-        disposables.push(mgr, api.registerEnvironmentManager(mgr));
+        const pyenv = await getPyenv(nativeFinder);
+        
+        if (pyenv) {
+            const mgr = new PyEnvManager(nativeFinder, api);
+            disposables.push(mgr, api.registerEnvironmentManager(mgr));
+        } else {
+            traceInfo('Pyenv not found, turning off pyenv features.');
+        }
     } catch (ex) {
         traceInfo('Pyenv not found, turning off pyenv features.', ex);
     }

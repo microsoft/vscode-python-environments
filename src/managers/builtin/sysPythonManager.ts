@@ -199,7 +199,6 @@ export class SysPythonManager implements EnvironmentManager {
         // This environment is unknown. Resolve it.
         const resolved = await resolveSystemPythonEnvironmentPath(context.fsPath, this.nativeFinder, this.api, this);
         if (resolved) {
-            // HERE IT GOT TOO MANY
             // This is just like finding a new environment or creating a new one.
             // Add it to collection, and trigger the added event.
 

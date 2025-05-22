@@ -13,7 +13,7 @@
     "python-envs.terminal.revertStartupScriptChanges.title": "Revert Shell Startup Script Changes",
     "python-envs.setEnvManager.title": "Set Environment Manager",
     "python-envs.setPkgManager.title": "Set Package Manager",
-    "python-envs.addPythonProject.title": "Add Python Project",
+    "python-envs.addPythonProject.title": "Add as Python Project",
     "python-envs.removePythonProject.title": "Remove Python Project",
     "python-envs.copyEnvPath.title": "Copy Environment Path",
     "python-envs.copyProjectPath.title": "Copy Project Path",
