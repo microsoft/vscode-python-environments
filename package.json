@@ -457,12 +457,12 @@
                 {
                     "command": "python-envs.addPythonProject",
                     "group": "inline",
-                    "when": "explorerViewletVisible && explorerResourceIsFolder"
+                    "when": "explorerViewletVisible && explorerResourceIsFolder && !python-envs:isExistingProject"
                 },
                 {
                     "command": "python-envs.addPythonProject",
                     "group": "inline",
-                    "when": "explorerViewletVisible && resourceExtname == .py"
+                    "when": "explorerViewletVisible && resourceExtname == .py && !python-envs:isExistingProject"
                 }
             ],
             "editor/title/run": [
