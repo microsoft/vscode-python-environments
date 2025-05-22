@@ -155,7 +155,7 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
             await Promise.all(envManagers.managers.map((m) => m.refresh(undefined)));
         }),
         commands.registerCommand('python-envs.refreshPackages', async (item) => {
-            await refreshPackagesCommand(item);
+            await refreshPackagesCommand(item, envManagers);
         }),
         commands.registerCommand('python-envs.create', async (item) => {
             return await createEnvironmentCommand(item, envManagers, projectManager);

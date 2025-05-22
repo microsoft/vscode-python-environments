@@ -31,12 +31,10 @@ import {
     EnvManagerTreeItem,
     EnvTreeItemKind,
     GlobalProjectItem,
-    PackageRootTreeItem,
     PackageTreeItem,
     ProjectEnvironment,
     ProjectItem,
     ProjectPackage,
-    ProjectPackageRootTreeItem,
     PythonEnvTreeItem,
 } from './views/treeViewItems';
 
@@ -49,15 +47,25 @@ export async function refreshManagerCommand(context: unknown): Promise<void> {
     }
 }
 
-export async function refreshPackagesCommand(context: unknown) {
-    if (context instanceof ProjectPackageRootTreeItem) {
-        const view = context as ProjectPackageRootTreeItem;
-        const manager = view.manager;
-        await manager.refresh(view.environment);
-    } else if (context instanceof PackageRootTreeItem) {
-        const view = context as PackageRootTreeItem;
-        const manager = view.manager;
-        await manager.refresh(view.environment);
+export async function refreshPackagesCommand(context: unknown, managers?: EnvironmentManagers): Promise<void> {
+    if (context instanceof ProjectEnvironment) {
+        const view = context as ProjectEnvironment;
+        if (managers) {
+            const pkgManager = managers.getPackageManager(view.parent.project.uri);
+            if (pkgManager) {
+                await pkgManager.refresh(view.environment);
+            }
+        }
+    } else if (context instanceof PythonEnvTreeItem) {
+        const view = context as PythonEnvTreeItem;
+        const envManager =
+            view.parent.kind === EnvTreeItemKind.environmentGroup
+                ? view.parent.parent.manager
+                : view.parent.manager;
+        const pkgManager = managers?.getPackageManager(envManager.preferredPackageManagerId);
+        if (pkgManager) {
+            await pkgManager.refresh(view.environment);
+        }
     } else {
         traceVerbose(`Invalid context for refresh command: ${context}`);
     }
@@ -193,7 +201,8 @@ export async function removeEnvironmentCommand(context: unknown, managers: Envir
 export async function handlePackageUninstall(context: unknown, em: EnvironmentManagers) {
     if (context instanceof PackageTreeItem || context instanceof ProjectPackage) {
         const moduleName = context.pkg.name;
-        const environment = context.parent.environment;
+        const environment = 
+            context instanceof ProjectPackage ? context.parent.environment : context.parent.environment;
         const packageManager = em.getPackageManager(environment);
         await packageManager?.manage(environment, { uninstall: [moduleName], install: [] });
         return;
