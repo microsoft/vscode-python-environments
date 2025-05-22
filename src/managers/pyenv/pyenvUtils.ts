@@ -225,8 +225,11 @@ export async function refreshPyenv(
             .filter((e) => !isNativeEnvInfo(e))
             .map((e) => e as NativeEnvManagerInfo)
             .filter((e) => e.tool.toLowerCase() === 'pyenv');
-        pyenv = managers[0].executable;
-        await setPyenv(pyenv);
+        
+        if (managers.length > 0) {
+            pyenv = managers[0].executable;
+            await setPyenv(pyenv);
+        }
     }
 
     const envs = data
