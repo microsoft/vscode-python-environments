@@ -1,4 +1,6 @@
 import * as ch from 'child_process';
+import * as fsapi from 'fs-extra';
+import * as path from 'path';
 import {
     CancellationError,
     CancellationToken,
@@ -192,24 +194,55 @@ export class PoetryPackageManager implements PackageManager, Disposable {
     }
 
     private async refreshPackages(environment: PythonEnvironment): Promise<Package[]> {
+        let cwd = process.cwd();
+        const projects = this.api.getPythonProjects();
+        if (projects.length === 1) {
+            const stat = await fsapi.stat(projects[0].uri.fsPath);
+            if (stat.isDirectory()) {
+                cwd = projects[0].uri.fsPath;
+            } else {
+                cwd = path.dirname(projects[0].uri.fsPath);
+            }
+        } else if (projects.length > 1) {
+            const dirs = new Set<string>();
+            await Promise.all(
+                projects.map(async (project) => {
+                    const e = await this.api.getEnvironment(project.uri);
+                    if (e?.envId.id === environment.envId.id) {
+                        const stat = await fsapi.stat(projects[0].uri.fsPath);
+                        const dir = stat.isDirectory() ? projects[0].uri.fsPath : path.dirname(projects[0].uri.fsPath);
+                        if (dirs.has(dir)) {
+                            dirs.add(dir);
+                        }
+                    }
+                }),
+            );
+            if (dirs.size > 0) {
+                // ensure we have the deepest directory node picked
+                cwd = Array.from(dirs.values()).sort((a, b) => (a.length - b.length) * -1)[0];
+            }
+        }
+
         const poetryPackages: { name: string; version: string; displayName: string; description: string }[] = [];
 
         try {
             this.log.info(`Running: ${await getPoetry()} show --no-ansi`);
-            const result = await runPoetry(['show', '--no-ansi'], undefined, this.log);
+            const result = await runPoetry(['show', '--no-ansi'], cwd, this.log);
 
             // Parse poetry show output
             // Format: name         version    description
             const lines = result.split('\n');
             for (const line of lines) {
-                const match = line.match(/^([^\s]+)\s+([^\s]+)\s+(.*)/);
+                // Updated regex to properly handle lines with the format:
+                // "package (!) version description"
+                const match = line.match(/^(\S+)(?:\s+\([!]\))?\s+(\S+)\s+(.*)/);
                 if (match) {
                     const [, name, version, description] = match;
                     poetryPackages.push({
                         name,
                         version,
                         displayName: name,
-                        description: description?.trim() || version,
+                        description: `${version} - ${description?.trim() || ''}`,
                     });
                 }
             }
