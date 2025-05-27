@@ -25,7 +25,11 @@
         }
     },
     "activationEvents": [
-        "onLanguage:python"
+        "onLanguage:python",
+        "onLanguageModelTool:get_python_environment_info",
+        "onLanguageModelTool:get_python_executable_info",
+        "onLanguageModelTool:install_python_package",
+        "onLanguageModelTool:create_quick_virtual_environment"
     ],
     "homepage": "https://github.com/microsoft/vscode-python-environments",
     "repository": {
@@ -515,13 +519,35 @@
         ],
         "languageModelTools": [
             {
-                "name": "python_environment",
-                "userDescription": "%python.languageModelTools.python_environment.userDescription%",
-                "displayName": "Get Python Environment Information",
-                "modelDescription": "Provides details about the Python environment for a specified file or workspace, including environment type, Python version, run command, and installed packages with their versions. Use this tool to determine the correct command for executing Python code in this workspace.",
-                "toolReferenceName": "pythonGetEnvironmentInfo",
+                "name": "get_python_environment_info",
+                "displayName": "%python.languageModelTools.get_python_environment_info.displayName%",
+                "userDescription": "%python.languageModelTools.get_python_environment_info.userDescription%",
+                "modelDescription": "This tool will retrieve the details of the Python Environment for the specified file or workspace. The details returned include the 1. Type of Environment (conda, venv, etec), 2. Version of Python, 3. List of all installed packages with their versions. ",
+                "toolReferenceName": "pythonEnvironmentDetails",
                 "tags": [
-                    "ms-python.python"
+                    "extension_installed_by_tool"
+                ],
+                "icon": "$(snake)",
+                "canBeReferencedInPrompt": true,
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "resourcePath": {
+                            "type": "string"
+                        }
+                    },
+                    "description": "The path to the Python file or workspace to get the environment information for.",
+                    "required": []
+                }
+            },
+            {
+                "name": "get_python_executable_info",
+                "displayName": "%python.languageModelTools.get_python_executable.displayName%",
+                "userDescription": "%python.languageModelTools.get_python_executable.userDescription%",
+                "modelDescription": "This tool will retrieve the details of the Python Environment for the specified file or workspace. ALWAYS use this tool before executing any Python command in the terminal. This tool returns the details of how to construct the fully qualified path and or command including details such as arguments required to run Python in a terminal. Note: Instead of executing `python --version` or `python -c 'import sys; print(sys.executable)'`, use this tool to get the Python executable path to replace the `python` command. E.g. instead of using `python -c 'import sys; print(sys.executable)'`, use this tool to build the command `conda run -n <env_name> -c 'import sys; print(sys.executable)'`.",
+                "toolReferenceName": "pythonExecutableDetails",
+                "tags": [
+                    "extension_installed_by_tool"
                 ],
                 "icon": "$(files)",
                 "canBeReferencedInPrompt": true,
@@ -532,20 +558,19 @@
                             "type": "string"
                         }
                     },
-                    "description": "The path to the Python file or workspace to get the environment information for.",
-                    "required": [
-                        "resourcePath"
-                    ]
+                    "description": "The path to the Python file or workspace to get the executable information for. If not provided, the current workspace will be used. Where possible pass the path to the file or workspace.",
+                    "required": []
                 }
             },
             {
-                "name": "python_install_package",
-                "displayName": "Install Python Package",
-                "userDescription": "%python.languageModelTools.python_install_package.userDescription%",
+                "name": "install_python_package",
+                "displayName": "%python.languageModelTools.install_python_package.displayName%",
+                "userDescription": "%python.languageModelTools.install_python_package.userDescription%",
                 "modelDescription": "Installs Python packages in the given workspace. Use this tool to install packages in the user's chosen environment.",
-                "toolReferenceName": "pythonInstallPackage",
+                "toolReferenceName": "installPythonPackage",
                 "tags": [
-                    "ms-python.python"
+                    "install python package",
+                    "extension_installed_by_tool"
                 ],
                 "icon": "$(package)",
                 "canBeReferencedInPrompt": true,
@@ -561,14 +586,31 @@
                         },
                         "resourcePath": {
                             "type": "string",
-                            "description": "The path to the Python file or workspace to get the environment information for."
+                            "description": "The path to the Python file or workspace into which the packages are installed. If not provided, the current workspace will be used. Where possible pass the path to the file or workspace."
                         }
                     },
                     "required": [
-                        "packageList",
-                        "resourcePath"
+                        "packageList"
                     ]
                 }
+            },
+            {
+                "name": "create_quick_virtual_environment",
+                "displayName": "Create a Virtual Environment",
+                "modelDescription": "This tool will create a Virual Environment",
+                "tags": [],
+                "canBeReferencedInPrompt": false,
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "resourcePath": {
+                            "type": "string",
+                            "description": "The path to the Python file or workspace for which a Python Environment needs to be configured."
+                        }
+                    },
+                    "required": []
+                },
+                "when": "false"
             }
         ]
     },

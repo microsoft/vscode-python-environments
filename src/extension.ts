@@ -16,7 +16,6 @@ import {
     onDidChangeTerminalShellIntegration,
 } from './common/window.apis';
 import { createManagerReady } from './features/common/managerReady';
-import { GetEnvironmentInfoTool, InstallPackageTool } from './features/copilotTools';
 import { AutoFindProjects } from './features/creators/autoFindProjects';
 import { ExistingProjects } from './features/creators/existingProjects';
 import { NewPackageProject } from './features/creators/newPackageProject';
@@ -68,6 +67,12 @@ import { registerSystemPythonFeatures } from './managers/builtin/main';
 import { createNativePythonFinder, NativePythonFinder } from './managers/common/nativePythonFinder';
 import { registerCondaFeatures } from './managers/conda/main';
 import { registerPyenvFeatures } from './managers/pyenv/main';
+import { GetEnvironmentInfoTool } from './features/chat/getEnvInfoTool';
+import { GetExecutableTool } from './features/chat/getExecutableTool';
+import { InstallPackageTool } from './features/chat/installPackagesTool';
+import { CreateQuickVirtualEnvironmentTool } from './features/chat/createQuickVenvTool';
+import { createDeferred } from './common/utils/deferred';
+import { SysPythonManager } from './managers/builtin/sysPythonManager';
 
 export async function activate(context: ExtensionContext): Promise<PythonEnvironmentApi> {
     const start = new StopWatch();
@@ -124,7 +129,7 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
 
     setPythonApi(envManagers, projectManager, projectCreators, terminalManager, envVarManager);
     const api = await getPythonApi();
-
+    const sysPythonManager = createDeferred<SysPythonManager>();
     const managerView = new EnvManagerView(envManagers);
     context.subscriptions.push(managerView);
 
@@ -142,8 +147,19 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
     context.subscriptions.push(
         shellStartupVarsMgr,
         registerCompletionProvider(envManagers),
-        registerTools('python_environment', new GetEnvironmentInfoTool(api, envManagers)),
-        registerTools('python_install_package', new InstallPackageTool(api)),
+        registerTools(
+            CreateQuickVirtualEnvironmentTool.toolName,
+            new CreateQuickVirtualEnvironmentTool(
+                api,
+                envManagers,
+                projectManager,
+                sysPythonManager.promise,
+                outputChannel,
+            ),
+        ),
+        registerTools(GetEnvironmentInfoTool.toolName, new GetEnvironmentInfoTool(api, envManagers)),
+        registerTools(GetExecutableTool.toolName, new GetExecutableTool(api, envManagers)),
+        registerTools(InstallPackageTool.toolName, new InstallPackageTool(api)),
         commands.registerCommand('python-envs.terminal.revertStartupScriptChanges', async () => {
             await cleanupStartupScripts(shellStartupProviders);
         }),
@@ -313,8 +329,10 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
         // This is the finder that is used by all the built in environment managers
         const nativeFinder: NativePythonFinder = await createNativePythonFinder(outputChannel, api, context);
         context.subscriptions.push(nativeFinder);
+        const sysMgr = new SysPythonManager(nativeFinder, api, outputChannel);
+        sysPythonManager.resolve(sysMgr);
         await Promise.all([
-            registerSystemPythonFeatures(nativeFinder, context.subscriptions, outputChannel),
+            registerSystemPythonFeatures(nativeFinder, context.subscriptions, outputChannel, sysMgr),
             registerCondaFeatures(nativeFinder, context.subscriptions, outputChannel),
             registerPyenvFeatures(nativeFinder, context.subscriptions),
             shellStartupVarsMgr.initialize(),

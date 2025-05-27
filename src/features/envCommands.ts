@@ -114,10 +114,14 @@ export async function createEnvironmentCommand(
 export async function createAnyEnvironmentCommand(
     em: EnvironmentManagers,
     pm: PythonProjectManager,
-    options?: CreateEnvironmentOptions & { selectEnvironment?: boolean; showBackButton?: boolean },
+    options?: CreateEnvironmentOptions & {
+        selectEnvironment?: boolean;
+        showBackButton?: boolean;
+        uri?: Uri;
+    },
 ): Promise<PythonEnvironment | undefined> {
     const select = options?.selectEnvironment;
-    const projects = pm.getProjects();
+    const projects = pm.getProjects(options?.uri ? [options?.uri] : undefined);
     if (projects.length === 0) {
         const managerId = await pickEnvironmentManager(em.managers.filter((m) => m.supportsCreate));
         const manager = em.managers.find((m) => m.id === managerId);
