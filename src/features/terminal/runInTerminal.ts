@@ -1,10 +1,12 @@
 import { Terminal, TerminalShellExecution } from 'vscode';
 import { PythonEnvironment, PythonTerminalExecutionOptions } from '../../api';
-import { onDidEndTerminalShellExecution } from '../../common/window.apis';
+import { onDidEndTerminalShellExecution, showErrorMessage } from '../../common/window.apis';
 import { createDeferred } from '../../common/utils/deferred';
 import { quoteArgs } from '../execution/execUtils';
 import { identifyTerminalShell } from '../common/shellDetector';
 import { ShellConstants } from '../common/shellConstants';
+import { executableExists } from '../../common/utils/executableExists';
+import { Common } from '../../common/localize';
 
 export async function runInTerminal(
     environment: PythonEnvironment,
@@ -19,6 +21,12 @@ export async function runInTerminal(
         environment.execInfo?.activatedRun?.executable ?? environment.execInfo?.run.executable ?? 'python';
     const args = environment.execInfo?.activatedRun?.args ?? environment.execInfo?.run.args ?? [];
     const allArgs = [...args, ...(options.args ?? [])];
+
+    // Check if the Python executable exists
+    if (!(await executableExists(executable))) {
+        await showErrorMessage(Common.pythonNotFound, { modal: true }, Common.installPython);
+        return;
+    }
 
     if (terminal.shellIntegration) {
         let execution: TerminalShellExecution | undefined;
