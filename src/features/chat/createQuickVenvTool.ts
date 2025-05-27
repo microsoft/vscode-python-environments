@@ -20,6 +20,7 @@ import { SysPythonManager } from '../../managers/builtin/sysPythonManager';
 import { ensureGlobalEnv } from '../../managers/builtin/venvUtils';
 
 export interface IResourceReference {
+    packageList?: string[];
     resourcePath?: string;
 }
 
@@ -41,6 +42,10 @@ export class CreateQuickVirtualEnvironmentTool implements LanguageModelTool<IRes
             selectEnvironment: true,
             quickCreate: true,
             uri: resourcePath,
+            additionalPackages:
+                Array.isArray(options.input.packageList) && options.input.packageList.length
+                    ? options.input.packageList
+                    : [],
         });
         if (env) {
             const message = await getEnvironmentDetails(
