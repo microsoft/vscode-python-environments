@@ -525,6 +525,7 @@
                 "modelDescription": "This tool will retrieve the details of the Python Environment for the specified file or workspace. The details returned include the 1. Type of Environment (conda, venv, etec), 2. Version of Python, 3. List of all installed packages with their versions. ",
                 "toolReferenceName": "pythonEnvironmentDetails",
                 "tags": [
+                    "python",
                     "extension_installed_by_tool"
                 ],
                 "icon": "$(snake)",
@@ -547,6 +548,7 @@
                 "modelDescription": "This tool will retrieve the details of the Python Environment for the specified file or workspace. ALWAYS use this tool before executing any Python command in the terminal. This tool returns the details of how to construct the fully qualified path and or command including details such as arguments required to run Python in a terminal. Note: Instead of executing `python --version` or `python -c 'import sys; print(sys.executable)'`, use this tool to get the Python executable path to replace the `python` command. E.g. instead of using `python -c 'import sys; print(sys.executable)'`, use this tool to build the command `conda run -n <env_name> -c 'import sys; print(sys.executable)'`.",
                 "toolReferenceName": "pythonExecutableDetails",
                 "tags": [
+                    "python",
                     "extension_installed_by_tool"
                 ],
                 "icon": "$(files)",
@@ -569,6 +571,7 @@
                 "modelDescription": "Installs Python packages in the given workspace. Use this tool to install packages in the user's chosen environment.",
                 "toolReferenceName": "installPythonPackage",
                 "tags": [
+                    "python",
                     "install python package",
                     "extension_installed_by_tool"
                 ],
