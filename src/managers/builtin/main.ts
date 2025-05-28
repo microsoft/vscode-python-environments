@@ -14,9 +14,9 @@ export async function registerSystemPythonFeatures(
     nativeFinder: NativePythonFinder,
     disposables: Disposable[],
     log: LogOutputChannel,
+    envManager: SysPythonManager,
 ): Promise<void> {
     const api: PythonEnvironmentApi = await getPythonApi();
-    const envManager = new SysPythonManager(nativeFinder, api, log);
     const venvManager = new VenvManager(nativeFinder, api, envManager, log);
     const pkgManager = new PipPackageManager(api, log, venvManager);
 
