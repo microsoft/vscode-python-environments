@@ -1,5 +1,5 @@
 import { commands, ExtensionContext, LogOutputChannel, Terminal, Uri, window } from 'vscode';
-import { PythonEnvironment, PythonEnvironmentApi } from './api';
+import { PythonEnvironment, PythonEnvironmentApi, PythonProjectCreator, PythonProjectCreatorOptions } from './api';
 import { ensureCorrectVersion } from './common/extVersion';
 import { registerTools } from './common/lm.apis';
 import { registerLogger, traceError, traceInfo } from './common/logging';
@@ -114,13 +114,21 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
     context.subscriptions.push(terminalActivation, terminalManager);
 
     const projectCreators: ProjectCreators = new ProjectCreatorsImpl();
+    const abc = new NewScriptProject();
     context.subscriptions.push(
         projectCreators,
         projectCreators.registerPythonProjectCreator(new ExistingProjects(projectManager)),
         projectCreators.registerPythonProjectCreator(new AutoFindProjects(projectManager)),
         projectCreators.registerPythonProjectCreator(new NewPackageProject(envManagers, projectManager)),
-        projectCreators.registerPythonProjectCreator(new NewScriptProject()),
+
+        projectCreators.registerPythonProjectCreator(abc),
     );
+    const cd: PythonProjectCreatorOptions = {
+        name: abc.name,
+        rootUri: context.extensionUri,
+        quickCreate: true,
+    };
+    abc.create(cd);
 
     setPythonApi(envManagers, projectManager, projectCreators, terminalManager, envVarManager);
     const api = await getPythonApi();
@@ -248,12 +256,37 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
                 await terminalManager.deactivate(terminal);
             }
         }),
-        commands.registerCommand('python-envs.createNewProjectFromTemplate', async () => {
-            const selected = await newProjectSelection(projectCreators.getProjectCreators());
-            if (selected) {
-                await selected.create();
-            }
-        }),
+        commands.registerCommand(
+            'python-envs.createNewProjectFromTemplate',
+            async (projectType: string, quickCreate: boolean, newProjectName: string, newProjectPath: string) => {
+                if (quickCreate) {
+                    if (!projectType || !newProjectName || !newProjectPath) {
+                        throw new Error('Project type, name, and path are required for quick create.');
+                    }
+                    const creators = projectCreators.getProjectCreators();
+                    let selected: PythonProjectCreator | undefined;
+                    if (projectType === 'python-package') {
+                        selected = creators.find((c) => c.name === 'newPackage');
+                    }
+                    if (projectType === 'python-script') {
+                        selected = creators.find((c) => c.name === 'newScript');
+                    }
+                    if (!selected) {
+                        throw new Error(`Project creator for type "${projectType}" not found.`);
+                    }
+                    await selected.create({
+                        quickCreate: true,
+                        name: newProjectName,
+                        rootUri: Uri.file(newProjectPath),
+                    });
+                } else {
+                    const selected = await newProjectSelection(projectCreators.getProjectCreators());
+                    if (selected) {
+                        await selected.create();
+                    }
+                }
+            },
+        ),
         terminalActivation.onDidChangeTerminalActivationState(async (e) => {
             await setActivateMenuButtonContext(e.terminal, e.environment, e.activated);
         }),
