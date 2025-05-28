@@ -1,5 +1,5 @@
 import { commands, ExtensionContext, LogOutputChannel, Terminal, Uri, window } from 'vscode';
-import { PythonEnvironment, PythonEnvironmentApi, PythonProjectCreator, PythonProjectCreatorOptions } from './api';
+import { PythonEnvironment, PythonEnvironmentApi, PythonProjectCreator } from './api';
 import { ensureCorrectVersion } from './common/extVersion';
 import { registerTools } from './common/lm.apis';
 import { registerLogger, traceError, traceInfo } from './common/logging';
@@ -114,21 +114,13 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
     context.subscriptions.push(terminalActivation, terminalManager);
 
     const projectCreators: ProjectCreators = new ProjectCreatorsImpl();
-    const abc = new NewScriptProject();
     context.subscriptions.push(
         projectCreators,
         projectCreators.registerPythonProjectCreator(new ExistingProjects(projectManager)),
         projectCreators.registerPythonProjectCreator(new AutoFindProjects(projectManager)),
         projectCreators.registerPythonProjectCreator(new NewPackageProject(envManagers, projectManager)),
-
-        projectCreators.registerPythonProjectCreator(abc),
+        projectCreators.registerPythonProjectCreator(new NewScriptProject()),
     );
-    const cd: PythonProjectCreatorOptions = {
-        name: abc.name,
-        rootUri: context.extensionUri,
-        quickCreate: true,
-    };
-    abc.create(cd);
 
     setPythonApi(envManagers, projectManager, projectCreators, terminalManager, envVarManager);
     const api = await getPythonApi();
