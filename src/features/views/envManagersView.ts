@@ -13,12 +13,10 @@ import {
     EnvTreeItem,
     EnvManagerTreeItem,
     PythonEnvTreeItem,
-    PackageRootTreeItem,
     PackageTreeItem,
     EnvTreeItemKind,
     NoPythonEnvTreeItem,
     EnvInfoTreeItem,
-    PackageRootInfoTreeItem,
     PythonGroupEnvTreeItem,
 } from './treeViewItems';
 import { createSimpleDebounce } from '../../common/utils/debounce';
@@ -31,7 +29,6 @@ export class EnvManagerView implements TreeDataProvider<EnvTreeItem>, Disposable
     >();
     private revealMap = new Map<string, PythonEnvTreeItem>();
     private managerViews = new Map<string, EnvManagerTreeItem>();
-    private packageRoots = new Map<string, PackageRootTreeItem>();
     private selected: Map<string, string> = new Map();
     private disposables: Disposable[] = [];
 
@@ -42,7 +39,6 @@ export class EnvManagerView implements TreeDataProvider<EnvTreeItem>, Disposable
 
         this.disposables.push(
             new Disposable(() => {
-                this.packageRoots.clear();
                 this.revealMap.clear();
                 this.managerViews.clear();
                 this.selected.clear();
@@ -165,28 +161,14 @@ export class EnvManagerView implements TreeDataProvider<EnvTreeItem>, Disposable
             const views: EnvTreeItem[] = [];
 
             if (pkgManager) {
-                const item = new PackageRootTreeItem(parent, pkgManager, environment);
-                this.packageRoots.set(environment.envId.id, item);
-                views.push(item);
+                const packages = await pkgManager.getPackages(environment);
+                if (packages && packages.length > 0) {
+                    views.push(...packages.map((p) => new PackageTreeItem(p, parent, pkgManager)));
+                } else {
+                    views.push(new EnvInfoTreeItem(parent, ProjectViews.noPackages));
+                }
             } else {
                 views.push(new EnvInfoTreeItem(parent, ProjectViews.noPackageManager));
-            }
-
-            return views;
-        }
-
-        if (element.kind === EnvTreeItemKind.packageRoot) {
-            const root = element as PackageRootTreeItem;
-            const manager = root.manager;
-            const environment = root.environment;
-
-            let packages = await manager.getPackages(environment);
-            const views: EnvTreeItem[] = [];
-
-            if (packages) {
-                views.push(...packages.map((p) => new PackageTreeItem(p, root, manager)));
-            } else {
-                views.push(new PackageRootInfoTreeItem(root, ProjectViews.noPackages));
             }
 
             return views;
@@ -219,35 +201,32 @@ export class EnvManagerView implements TreeDataProvider<EnvTreeItem>, Disposable
     }
 
     private onDidChangePackages(args: InternalDidChangePackagesEventArgs) {
-        const pkgRoot = this.packageRoots.get(args.environment.envId.id);
-        if (pkgRoot) {
-            this.fireDataChanged(pkgRoot);
+        const view = Array.from(this.revealMap.values()).find(
+            (v) => v.environment.envId.id === args.environment.envId.id
+        );
+        if (view) {
+            this.fireDataChanged(view);
         }
     }
 
-    private onDidChangePackageManager(args: DidChangePackageManagerEventArgs) {
-        const roots = Array.from(this.packageRoots.values()).filter((r) => r.manager.id === args.manager.id);
-        this.fireDataChanged(roots);
+    private onDidChangePackageManager(_args: DidChangePackageManagerEventArgs) {
+        // Since we removed the packageRoots level, just refresh all environments
+        // This is a simplified approach that isn't as targeted but ensures packages get refreshed
+        this.fireDataChanged(undefined);
     }
 
     public environmentChanged(e: DidChangeEnvironmentEventArgs) {
         const views = [];
         if (e.old) {
             this.selected.delete(e.old.envId.id);
-            let view: EnvTreeItem | undefined = this.packageRoots.get(e.old.envId.id);
-            if (!view) {
-                view = this.managerViews.get(e.old.envId.managerId);
-            }
+            const view: EnvTreeItem | undefined = this.revealMap.get(e.old.envId.id);
             if (view) {
                 views.push(view);
             }
         }
         if (e.new) {
             this.selected.set(e.new.envId.id, e.uri === undefined ? 'global' : e.uri.fsPath);
-            let view: EnvTreeItem | undefined = this.packageRoots.get(e.new.envId.id);
-            if (!view) {
-                view = this.managerViews.get(e.new.envId.managerId);
-            }
+            const view: EnvTreeItem | undefined = this.revealMap.get(e.new.envId.id);
             if (view && !views.includes(view)) {
                 views.push(view);
             }

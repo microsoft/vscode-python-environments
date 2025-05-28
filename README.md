@@ -151,6 +151,8 @@ The Python Environments extension supports shell startup activation for environm
     -   (Windows): `~\Documents\PowerShell\Microsoft.PowerShell_profile.ps1`
 -   **CMD**: `~/.cmdrc/cmd_startup.bat`
 
+If at any time you would like to revert the changes made to the shell's script, you can do so by running `Python Envs: Revert Shell Startup Script Changes` via the Command Palette.
+
 ### CMD
 
 1. Add or update `HKCU\\Software\\Microsoft\\Command Processor` `AutoRun` string value to use a command script.

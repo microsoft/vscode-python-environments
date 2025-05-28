@@ -67,6 +67,7 @@ import { EnvironmentManagers, ProjectCreators, PythonProjectManager } from './in
 import { registerSystemPythonFeatures } from './managers/builtin/main';
 import { createNativePythonFinder, NativePythonFinder } from './managers/common/nativePythonFinder';
 import { registerCondaFeatures } from './managers/conda/main';
+import { registerPoetryFeatures } from './managers/poetry/main';
 import { registerPyenvFeatures } from './managers/pyenv/main';
 
 export async function activate(context: ExtensionContext): Promise<PythonEnvironmentApi> {
@@ -155,7 +156,7 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
             await Promise.all(envManagers.managers.map((m) => m.refresh(undefined)));
         }),
         commands.registerCommand('python-envs.refreshPackages', async (item) => {
-            await refreshPackagesCommand(item);
+            await refreshPackagesCommand(item, envManagers);
         }),
         commands.registerCommand('python-envs.create', async (item) => {
             return await createEnvironmentCommand(item, envManagers, projectManager);
@@ -342,6 +343,7 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
             registerSystemPythonFeatures(nativeFinder, context.subscriptions, outputChannel),
             registerCondaFeatures(nativeFinder, context.subscriptions, outputChannel),
             registerPyenvFeatures(nativeFinder, context.subscriptions),
+            registerPoetryFeatures(nativeFinder, context.subscriptions, outputChannel),
             shellStartupVarsMgr.initialize(),
         ]);
 

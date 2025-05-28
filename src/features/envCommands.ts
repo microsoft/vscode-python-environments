@@ -3,6 +3,7 @@ import {
     CreateEnvironmentOptions,
     PythonEnvironment,
     PythonEnvironmentApi,
+    PythonProject,
     PythonProjectCreator,
     PythonProjectCreatorOptions,
 } from '../api';
@@ -21,7 +22,7 @@ import {} from '../common/errors/utils';
 import { pickEnvironment } from '../common/pickers/environments';
 import { pickCreator, pickEnvironmentManager, pickPackageManager } from '../common/pickers/managers';
 import { pickProject, pickProjectMany } from '../common/pickers/projects';
-import { activeTextEditor, showErrorMessage } from '../common/window.apis';
+import { activeTextEditor, showErrorMessage, showInformationMessage } from '../common/window.apis';
 import { quoteArgs } from './execution/execUtils';
 import { runAsTask } from './execution/runAsTask';
 import { runInTerminal } from './terminal/runInTerminal';
@@ -30,12 +31,10 @@ import {
     EnvManagerTreeItem,
     EnvTreeItemKind,
     GlobalProjectItem,
-    PackageRootTreeItem,
     PackageTreeItem,
     ProjectEnvironment,
     ProjectItem,
     ProjectPackage,
-    ProjectPackageRootTreeItem,
     PythonEnvTreeItem,
 } from './views/treeViewItems';
 
@@ -48,15 +47,25 @@ export async function refreshManagerCommand(context: unknown): Promise<void> {
     }
 }
 
-export async function refreshPackagesCommand(context: unknown) {
-    if (context instanceof ProjectPackageRootTreeItem) {
-        const view = context as ProjectPackageRootTreeItem;
-        const manager = view.manager;
-        await manager.refresh(view.environment);
-    } else if (context instanceof PackageRootTreeItem) {
-        const view = context as PackageRootTreeItem;
-        const manager = view.manager;
-        await manager.refresh(view.environment);
+export async function refreshPackagesCommand(context: unknown, managers?: EnvironmentManagers): Promise<void> {
+    if (context instanceof ProjectEnvironment) {
+        const view = context as ProjectEnvironment;
+        if (managers) {
+            const pkgManager = managers.getPackageManager(view.parent.project.uri);
+            if (pkgManager) {
+                await pkgManager.refresh(view.environment);
+            }
+        }
+    } else if (context instanceof PythonEnvTreeItem) {
+        const view = context as PythonEnvTreeItem;
+        const envManager =
+            view.parent.kind === EnvTreeItemKind.environmentGroup
+                ? view.parent.parent.manager
+                : view.parent.manager;
+        const pkgManager = managers?.getPackageManager(envManager.preferredPackageManagerId);
+        if (pkgManager) {
+            await pkgManager.refresh(view.environment);
+        }
     } else {
         traceVerbose(`Invalid context for refresh command: ${context}`);
     }
@@ -192,7 +201,8 @@ export async function removeEnvironmentCommand(context: unknown, managers: Envir
 export async function handlePackageUninstall(context: unknown, em: EnvironmentManagers) {
     if (context instanceof PackageTreeItem || context instanceof ProjectPackage) {
         const moduleName = context.pkg.name;
-        const environment = context.parent.environment;
+        const environment = 
+            context instanceof ProjectPackage ? context.parent.environment : context.parent.environment;
         const packageManager = em.getPackageManager(environment);
         await packageManager?.manage(environment, { uninstall: [moduleName], install: [] });
         return;
@@ -212,8 +222,8 @@ export async function setEnvironmentCommand(
             if (projects.length > 0) {
                 const selected = await pickProjectMany(projects);
                 if (selected && selected.length > 0) {
-                    const uris = selected.map((p) => p.uri);
-                    await em.setEnvironments(uris, view.environment);
+                    // Check if the selected environment is already the current one for each project
+                    await setEnvironmentForProjects(selected, context.environment, em);
                 }
             } else {
                 await em.setEnvironments('global', view.environment);
@@ -271,12 +281,46 @@ export async function setEnvironmentCommand(
         });
 
         if (selected) {
-            await em.setEnvironments(uris, selected);
+            // Use the same logic for checking already set environments
+            await setEnvironmentForProjects(projects, selected, em);
         }
     } else {
         traceError(`Invalid context for setting environment command: ${context}`);
         showErrorMessage('Invalid context for setting environment');
     }
+}
+/**
+ * Sets the environment for the given projects, showing a warning for those already set.
+ * @param selectedProjects Array of  PythonProject selected by user
+ * @param environment The environment to set for the projects
+ * @param em The EnvironmentManagers instance
+ */
+async function setEnvironmentForProjects(
+    selectedProjects: PythonProject[],
+    environment: PythonEnvironment,
+    em: EnvironmentManagers,
+) {
+    let alreadySet: PythonProject[] = [];
+    for (const p of selectedProjects) {
+        const currentEnv = await em.getEnvironment(p.uri);
+        if (currentEnv?.envId.id === environment.envId.id) {
+            alreadySet.push(p);
+        }
+    }
+    if (alreadySet.length > 0) {
+        const env = alreadySet.length > 1 ? 'environments' : 'environment';
+        showInformationMessage(
+            `"${environment.name}" is already selected as the ${env} for: ${alreadySet
+                .map((p) => `"${p.name}"`)
+                .join(', ')}`,
+        );
+    }
+    const toSet: PythonProject[] = selectedProjects.filter((p) => !alreadySet.includes(p));
+    const uris = toSet.map((p) => p.uri);
+    if (uris.length === 0) {
+        return;
+    }
+    await em.setEnvironments(uris, environment);
 }
 
 export async function resetEnvironmentCommand(

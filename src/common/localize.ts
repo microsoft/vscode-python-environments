@@ -158,6 +158,12 @@ export namespace PyenvStrings {
     export const pyenvRefreshing = l10n.t('Refreshing Pyenv Python versions');
 }
 
+export namespace PoetryStrings {
+    export const poetryManager = l10n.t('Manages Poetry environments');
+    export const poetryDiscovering = l10n.t('Discovering Poetry environments');
+    export const poetryRefreshing = l10n.t('Refreshing Poetry environments');
+}
+
 export namespace ProjectCreatorString {
     export const addExistingProjects = l10n.t('Add Existing Projects');
     export const autoFindProjects = l10n.t('Auto Find Projects');
@@ -172,7 +178,7 @@ export namespace ProjectCreatorString {
 
 export namespace EnvViewStrings {
     export const selectedGlobalTooltip = l10n.t('This environment is selected for non-workspace files');
-    export const selectedWorkspaceTooltip = l10n.t('This environment is selected for workspace files');
+    export const selectedWorkspaceTooltip = l10n.t('This environment is selected for project files');
 }
 
 export namespace ActivationStrings {
