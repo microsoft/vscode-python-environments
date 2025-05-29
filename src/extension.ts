@@ -1,7 +1,6 @@
 import { commands, ExtensionContext, LogOutputChannel, Terminal, Uri, window } from 'vscode';
 import { PythonEnvironment, PythonEnvironmentApi } from './api';
 import { ensureCorrectVersion } from './common/extVersion';
-import { registerTools } from './common/lm.apis';
 import { registerLogger, traceError, traceInfo } from './common/logging';
 import { setPersistentState } from './common/persistentState';
 import { newProjectSelection } from './common/pickers/managers';
@@ -9,6 +8,7 @@ import { StopWatch } from './common/stopWatch';
 import { EventNames } from './common/telemetry/constants';
 import { sendManagerSelectionTelemetry } from './common/telemetry/helpers';
 import { sendTelemetryEvent } from './common/telemetry/sender';
+import { createDeferred } from './common/utils/deferred';
 import {
     activeTerminal,
     createLogOutputChannel,
@@ -64,16 +64,12 @@ import { PythonStatusBarImpl } from './features/views/pythonStatusBar';
 import { updateViewsAndStatus } from './features/views/revealHandler';
 import { EnvironmentManagers, ProjectCreators, PythonProjectManager } from './internal.api';
 import { registerSystemPythonFeatures } from './managers/builtin/main';
+import { SysPythonManager } from './managers/builtin/sysPythonManager';
 import { createNativePythonFinder, NativePythonFinder } from './managers/common/nativePythonFinder';
 import { registerCondaFeatures } from './managers/conda/main';
 import { registerPoetryFeatures } from './managers/poetry/main';
 import { registerPyenvFeatures } from './managers/pyenv/main';
-import { GetEnvironmentInfoTool } from './features/chat/getEnvInfoTool';
-import { GetExecutableTool } from './features/chat/getExecutableTool';
-import { InstallPackageTool } from './features/chat/installPackagesTool';
-import { CreateQuickVirtualEnvironmentTool } from './features/chat/createQuickVenvTool';
-import { createDeferred } from './common/utils/deferred';
-import { SysPythonManager } from './managers/builtin/sysPythonManager';
+import { registerPrivateApi } from './features/privateApi';
 
 export async function activate(context: ExtensionContext): Promise<PythonEnvironmentApi> {
     const start = new StopWatch();
@@ -148,19 +144,7 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
     context.subscriptions.push(
         shellStartupVarsMgr,
         registerCompletionProvider(envManagers),
-        registerTools(
-            CreateQuickVirtualEnvironmentTool.toolName,
-            new CreateQuickVirtualEnvironmentTool(
-                api,
-                envManagers,
-                projectManager,
-                sysPythonManager.promise,
-                outputChannel,
-            ),
-        ),
-        registerTools(GetEnvironmentInfoTool.toolName, new GetEnvironmentInfoTool(api, envManagers)),
-        registerTools(GetExecutableTool.toolName, new GetExecutableTool(api, envManagers)),
-        registerTools(InstallPackageTool.toolName, new InstallPackageTool(api)),
+        registerPrivateApi(api),
         commands.registerCommand('python-envs.terminal.revertStartupScriptChanges', async () => {
             await cleanupStartupScripts(shellStartupProviders);
         }),
