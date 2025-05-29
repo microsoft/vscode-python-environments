@@ -412,7 +412,7 @@ async function createWithProgress(
     );
 }
 
-function ensureGlobalEnv(basePythons: PythonEnvironment[], log: LogOutputChannel): PythonEnvironment[] {
+export function ensureGlobalEnv(basePythons: PythonEnvironment[], log: LogOutputChannel): PythonEnvironment[] {
     if (basePythons.length === 0) {
         log.error('No base python found');
         showErrorMessage(VenvManagerStrings.venvErrorNoBasePython);
