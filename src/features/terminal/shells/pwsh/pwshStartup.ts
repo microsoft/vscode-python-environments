@@ -8,7 +8,7 @@ import { ShellScriptEditState, ShellSetupState, ShellStartupScriptProvider } fro
 import { runCommand } from '../utils';
 
 import assert from 'assert';
-import { getGlobalPersistentState } from '../../../../common/persistentState';
+import { getWorkspacePersistentState } from '../../../../common/persistentState';
 import { ShellConstants } from '../../../common/shellConstants';
 import { hasStartupCode, insertStartupCode, removeStartupCode } from '../common/editUtils';
 import { extractProfilePath, PROFILE_TAG_END, PROFILE_TAG_START } from '../common/shellUtils';
@@ -18,25 +18,19 @@ const PWSH_PROFILE_PATH_CACHE_KEY = 'PWSH_PROFILE_PATH_CACHE';
 const PS5_PROFILE_PATH_CACHE_KEY = 'PS5_PROFILE_PATH_CACHE';
 let pwshProfilePath: string | undefined;
 let ps5ProfilePath: string | undefined;
-async function clearPwshCache(shell: 'powershell' | 'pwsh'): Promise<void> {
-    const global = await getGlobalPersistentState();
-    if (shell === 'powershell') {
-        ps5ProfilePath = undefined;
-        await global.clear([PS5_PROFILE_PATH_CACHE_KEY]);
-    } else {
-        pwshProfilePath = undefined;
-        await global.clear([PWSH_PROFILE_PATH_CACHE_KEY]);
-    }
+function clearPwshCache() {
+    ps5ProfilePath = undefined;
+    pwshProfilePath = undefined;
 }
 
 async function setProfilePathCache(shell: 'powershell' | 'pwsh', profilePath: string): Promise<void> {
-    const global = await getGlobalPersistentState();
+    const state = await getWorkspacePersistentState();
     if (shell === 'powershell') {
         ps5ProfilePath = profilePath;
-        await global.set(PS5_PROFILE_PATH_CACHE_KEY, profilePath);
+        await state.set(PS5_PROFILE_PATH_CACHE_KEY, profilePath);
     } else {
         pwshProfilePath = profilePath;
-        await global.set(PWSH_PROFILE_PATH_CACHE_KEY, profilePath);
+        await state.set(PWSH_PROFILE_PATH_CACHE_KEY, profilePath);
     }
 }
 
@@ -308,10 +302,7 @@ export class PwshStartupProvider implements ShellStartupScriptProvider {
     }
 
     async clearCache(): Promise<void> {
-        for (const shell of this._supportedShells) {
-            await clearPwshCache(shell);
-        }
-
+        clearPwshCache();
         // Reset installation check cache as well
         this._isPwshInstalled = undefined;
         this._isPs5Installed = undefined;

@@ -11,7 +11,7 @@ import {
 } from '../../api';
 import { ENVS_EXTENSION_ID } from '../../common/constants';
 import { traceError, traceInfo } from '../../common/logging';
-import { getGlobalPersistentState, getWorkspacePersistentState } from '../../common/persistentState';
+import { getWorkspacePersistentState } from '../../common/persistentState';
 import { getUserHomeDir, untildify } from '../../common/utils/pathUtils';
 import { isWindows } from '../../common/utils/platformUtils';
 import { ShellConstants } from '../../features/common/shellConstants';
@@ -43,14 +43,6 @@ let poetryPath: string | undefined;
 let poetryVirtualenvsPath: string | undefined;
 
 export async function clearPoetryCache(): Promise<void> {
-    // Clear workspace-specific settings 
-    const state = await getWorkspacePersistentState();
-    await state.clear([POETRY_WORKSPACE_KEY]);
-    
-    // Clear global settings
-    const global = await getGlobalPersistentState();
-    await global.clear([POETRY_PATH_KEY, POETRY_GLOBAL_KEY, POETRY_VIRTUALENVS_PATH_KEY]);
-    
     // Reset in-memory cache
     poetryPath = undefined;
     poetryVirtualenvsPath = undefined;
@@ -58,21 +50,21 @@ export async function clearPoetryCache(): Promise<void> {
 
 async function setPoetry(poetry: string): Promise<void> {
     poetryPath = poetry;
-    const global = await getGlobalPersistentState();
-    await global.set(POETRY_PATH_KEY, poetry);
+    const state = await getWorkspacePersistentState();
+    await state.set(POETRY_PATH_KEY, poetry);
 
     // Also get and cache the virtualenvs path
     await getPoetryVirtualenvsPath(poetry);
 }
 
 export async function getPoetryForGlobal(): Promise<string | undefined> {
-    const global = await getGlobalPersistentState();
-    return await global.get(POETRY_GLOBAL_KEY);
+    const state = await getWorkspacePersistentState();
+    return await state.get(POETRY_GLOBAL_KEY);
 }
 
 export async function setPoetryForGlobal(poetryPath: string | undefined): Promise<void> {
-    const global = await getGlobalPersistentState();
-    await global.set(POETRY_GLOBAL_KEY, poetryPath);
+    const state = await getWorkspacePersistentState();
+    await state.set(POETRY_GLOBAL_KEY, poetryPath);
 }
 
 export async function getPoetryForWorkspace(fsPath: string): Promise<string | undefined> {
@@ -117,8 +109,8 @@ export async function getPoetry(native?: NativePythonFinder): Promise<string | u
         return poetryPath;
     }
 
-    const global = await getGlobalPersistentState();
-    poetryPath = await global.get<string>(POETRY_PATH_KEY);
+    const state = await getWorkspacePersistentState();
+    poetryPath = await state.get<string>(POETRY_PATH_KEY);
     if (poetryPath) {
         traceInfo(`Using poetry from persistent state: ${poetryPath}`);
         // Also retrieve the virtualenvs path if we haven't already
@@ -174,8 +166,8 @@ export async function getPoetryVirtualenvsPath(poetryExe?: string): Promise<stri
     }
 
     // Check if we have it in persistent state
-    const global = await getGlobalPersistentState();
-    poetryVirtualenvsPath = await global.get<string>(POETRY_VIRTUALENVS_PATH_KEY);
+    const state = await getWorkspacePersistentState();
+    poetryVirtualenvsPath = await state.get<string>(POETRY_VIRTUALENVS_PATH_KEY);
     if (poetryVirtualenvsPath) {
         return untildify(poetryVirtualenvsPath);
     }
@@ -199,7 +191,7 @@ export async function getPoetryVirtualenvsPath(poetryExe?: string): Promise<stri
                 }
 
                 if (poetryVirtualenvsPath) {
-                    await global.set(POETRY_VIRTUALENVS_PATH_KEY, poetryVirtualenvsPath);
+                    await state.set(POETRY_VIRTUALENVS_PATH_KEY, poetryVirtualenvsPath);
                     return poetryVirtualenvsPath;
                 }
             }
@@ -212,7 +204,7 @@ export async function getPoetryVirtualenvsPath(poetryExe?: string): Promise<stri
     const home = getUserHomeDir();
     if (home) {
         poetryVirtualenvsPath = path.join(home, '.cache', 'pypoetry', 'virtualenvs');
-        await global.set(POETRY_VIRTUALENVS_PATH_KEY, poetryVirtualenvsPath);
+        await state.set(POETRY_VIRTUALENVS_PATH_KEY, poetryVirtualenvsPath);
         return poetryVirtualenvsPath;
     }
 

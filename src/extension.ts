@@ -2,7 +2,7 @@ import { commands, ExtensionContext, LogOutputChannel, Terminal, Uri, window } f
 import { PythonEnvironment, PythonEnvironmentApi, PythonProjectCreator } from './api';
 import { ensureCorrectVersion } from './common/extVersion';
 import { registerLogger, traceError, traceInfo } from './common/logging';
-import { setPersistentState } from './common/persistentState';
+import { clearPersistentState, setPersistentState } from './common/persistentState';
 import { newProjectSelection } from './common/pickers/managers';
 import { StopWatch } from './common/stopWatch';
 import { EventNames } from './common/telemetry/constants';
@@ -15,6 +15,10 @@ import {
     onDidChangeActiveTerminal,
     onDidChangeTerminalShellIntegration,
 } from './common/window.apis';
+import { CreateQuickVirtualEnvironmentTool } from './features/chat/createQuickVenvTool';
+import { GetEnvironmentInfoTool } from './features/chat/getEnvInfoTool';
+import { GetExecutableTool } from './features/chat/getExecutableTool';
+import { InstallPackageTool } from './features/chat/installPackagesTool';
 import { createManagerReady } from './features/common/managerReady';
 import { AutoFindProjects } from './features/creators/autoFindProjects';
 import { ExistingProjects } from './features/creators/existingProjects';
@@ -211,6 +215,7 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
             await removePythonProject(item, projectManager);
         }),
         commands.registerCommand('python-envs.clearCache', async () => {
+            await clearPersistentState();
             await envManagers.clearCache(undefined);
             await clearShellProfileCache(shellStartupProviders);
         }),

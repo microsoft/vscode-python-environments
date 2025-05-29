@@ -29,7 +29,7 @@ import { ENVS_EXTENSION_ID, EXTENSION_ROOT_DIR } from '../../common/constants';
 import { showErrorMessageWithLogs } from '../../common/errors/utils';
 import { Common, CondaStrings, PackageManagement, Pickers } from '../../common/localize';
 import { traceInfo } from '../../common/logging';
-import { getGlobalPersistentState, getWorkspacePersistentState } from '../../common/persistentState';
+import { getWorkspacePersistentState } from '../../common/persistentState';
 import { pickProject } from '../../common/pickers/projects';
 import { createDeferred } from '../../common/utils/deferred';
 import { untildify } from '../../common/utils/pathUtils';
@@ -62,10 +62,6 @@ export const CONDA_GLOBAL_KEY = `${ENVS_EXTENSION_ID}:conda:GLOBAL_SELECTED`;
 
 let condaPath: string | undefined;
 export async function clearCondaCache(): Promise<void> {
-    const state = await getWorkspacePersistentState();
-    await state.clear([CONDA_PATH_KEY, CONDA_WORKSPACE_KEY, CONDA_GLOBAL_KEY]);
-    const global = await getGlobalPersistentState();
-    await global.clear([CONDA_PREFIXES_KEY]);
     condaPath = undefined;
 }
 
@@ -245,7 +241,7 @@ async function getPrefixes(): Promise<string[]> {
         return prefixes;
     }
 
-    const state = await getGlobalPersistentState();
+    const state = await getWorkspacePersistentState();
     prefixes = await state.get<string[]>(CONDA_PREFIXES_KEY);
     if (prefixes) {
         return prefixes;
