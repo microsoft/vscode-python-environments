@@ -11,7 +11,7 @@ import {
 } from '../../api';
 import { ENVS_EXTENSION_ID } from '../../common/constants';
 import { traceError, traceInfo } from '../../common/logging';
-import { getGlobalPersistentState, getWorkspacePersistentState } from '../../common/persistentState';
+import { getWorkspacePersistentState } from '../../common/persistentState';
 import { getUserHomeDir, normalizePath, untildify } from '../../common/utils/pathUtils';
 import { isWindows } from '../../common/utils/platformUtils';
 import {
@@ -40,10 +40,7 @@ export const PYENV_GLOBAL_KEY = `${ENVS_EXTENSION_ID}:pyenv:GLOBAL_SELECTED`;
 
 let pyenvPath: string | undefined;
 export async function clearPyenvCache(): Promise<void> {
-    const state = await getWorkspacePersistentState();
-    await state.clear([PYENV_WORKSPACE_KEY, PYENV_GLOBAL_KEY]);
-    const global = await getGlobalPersistentState();
-    await global.clear([PYENV_PATH_KEY]);
+    pyenvPath = undefined;
 }
 
 async function setPyenv(pyenv: string): Promise<void> {
@@ -225,7 +222,7 @@ export async function refreshPyenv(
             .filter((e) => !isNativeEnvInfo(e))
             .map((e) => e as NativeEnvManagerInfo)
             .filter((e) => e.tool.toLowerCase() === 'pyenv');
-        
+
         if (managers.length > 0) {
             pyenv = managers[0].executable;
             await setPyenv(pyenv);

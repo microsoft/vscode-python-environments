@@ -1,6 +1,6 @@
 import { ExtensionContext, Memento } from 'vscode';
-import { createDeferred, Deferred } from './utils/deferred';
 import { traceError } from './logging';
+import { createDeferred, Deferred } from './utils/deferred';
 
 export interface PersistentState {
     get<T>(key: string, defaultValue?: T): Promise<T | undefined>;
@@ -9,7 +9,6 @@ export interface PersistentState {
 }
 
 class PersistentStateImpl implements PersistentState {
-    private keys: string[] = [];
     private clearing: Deferred<void>;
     constructor(private readonly momento: Memento) {
         this.clearing = createDeferred<void>();
@@ -24,10 +23,6 @@ class PersistentStateImpl implements PersistentState {
     }
     async set<T>(key: string, value: T): Promise<void> {
         await this.clearing.promise;
-
-        if (!this.keys.includes(key)) {
-            this.keys.push(key);
-        }
         await this.momento.update(key, value);
 
         const before = JSON.stringify(value);
@@ -40,9 +35,8 @@ class PersistentStateImpl implements PersistentState {
     async clear(keys?: string[]): Promise<void> {
         if (this.clearing.completed) {
             this.clearing = createDeferred<void>();
-            const _keys = keys ?? this.keys;
+            const _keys = keys ?? this.momento.keys();
             await Promise.all(_keys.map((key) => this.momento.update(key, undefined)));
-            this.keys = this.keys.filter((k) => _keys.includes(k));
             this.clearing.resolve();
         }
         return this.clearing.promise;
@@ -63,4 +57,10 @@ export function getWorkspacePersistentState(): Promise<PersistentState> {
 
 export function getGlobalPersistentState(): Promise<PersistentState> {
     return _global.promise;
+}
+
+export async function clearPersistentState(): Promise<void> {
+    const [workspace, global] = await Promise.all([_workspace.promise, _global.promise]);
+    await Promise.all([workspace.clear(), global.clear()]);
+    return undefined;
 }

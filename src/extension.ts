@@ -3,18 +3,23 @@ import { PythonEnvironment, PythonEnvironmentApi } from './api';
 import { ensureCorrectVersion } from './common/extVersion';
 import { registerTools } from './common/lm.apis';
 import { registerLogger, traceError, traceInfo } from './common/logging';
-import { setPersistentState } from './common/persistentState';
+import { clearPersistentState, setPersistentState } from './common/persistentState';
 import { newProjectSelection } from './common/pickers/managers';
 import { StopWatch } from './common/stopWatch';
 import { EventNames } from './common/telemetry/constants';
 import { sendManagerSelectionTelemetry } from './common/telemetry/helpers';
 import { sendTelemetryEvent } from './common/telemetry/sender';
+import { createDeferred } from './common/utils/deferred';
 import {
     activeTerminal,
     createLogOutputChannel,
     onDidChangeActiveTerminal,
     onDidChangeTerminalShellIntegration,
 } from './common/window.apis';
+import { CreateQuickVirtualEnvironmentTool } from './features/chat/createQuickVenvTool';
+import { GetEnvironmentInfoTool } from './features/chat/getEnvInfoTool';
+import { GetExecutableTool } from './features/chat/getExecutableTool';
+import { InstallPackageTool } from './features/chat/installPackagesTool';
 import { createManagerReady } from './features/common/managerReady';
 import { AutoFindProjects } from './features/creators/autoFindProjects';
 import { ExistingProjects } from './features/creators/existingProjects';
@@ -64,16 +69,11 @@ import { PythonStatusBarImpl } from './features/views/pythonStatusBar';
 import { updateViewsAndStatus } from './features/views/revealHandler';
 import { EnvironmentManagers, ProjectCreators, PythonProjectManager } from './internal.api';
 import { registerSystemPythonFeatures } from './managers/builtin/main';
+import { SysPythonManager } from './managers/builtin/sysPythonManager';
 import { createNativePythonFinder, NativePythonFinder } from './managers/common/nativePythonFinder';
 import { registerCondaFeatures } from './managers/conda/main';
 import { registerPoetryFeatures } from './managers/poetry/main';
 import { registerPyenvFeatures } from './managers/pyenv/main';
-import { GetEnvironmentInfoTool } from './features/chat/getEnvInfoTool';
-import { GetExecutableTool } from './features/chat/getExecutableTool';
-import { InstallPackageTool } from './features/chat/installPackagesTool';
-import { CreateQuickVirtualEnvironmentTool } from './features/chat/createQuickVenvTool';
-import { createDeferred } from './common/utils/deferred';
-import { SysPythonManager } from './managers/builtin/sysPythonManager';
 
 export async function activate(context: ExtensionContext): Promise<PythonEnvironmentApi> {
     const start = new StopWatch();
@@ -229,6 +229,7 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
             await removePythonProject(item, projectManager);
         }),
         commands.registerCommand('python-envs.clearCache', async () => {
+            await clearPersistentState();
             await envManagers.clearCache(undefined);
             await clearShellProfileCache(shellStartupProviders);
         }),

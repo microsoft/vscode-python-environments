@@ -36,17 +36,17 @@ export async function registerPoetryFeatures(
                     return;
                 }
             }
+
+            const envManager = new PoetryManager(nativeFinder, api);
+            const pkgManager = new PoetryPackageManager(api, outputChannel, envManager);
+
+            disposables.push(
+                envManager,
+                pkgManager,
+                api.registerEnvironmentManager(envManager),
+                api.registerPackageManager(pkgManager),
+            );
         }
-
-        const envManager = new PoetryManager(nativeFinder, api);
-        const pkgManager = new PoetryPackageManager(api, outputChannel, envManager);
-
-        disposables.push(
-            envManager,
-            pkgManager,
-            api.registerEnvironmentManager(envManager),
-            api.registerPackageManager(pkgManager),
-        );
     } catch (ex) {
         traceInfo('Poetry not found, turning off poetry features.', ex);
     }
