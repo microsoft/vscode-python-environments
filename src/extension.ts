@@ -69,7 +69,6 @@ import { createNativePythonFinder, NativePythonFinder } from './managers/common/
 import { registerCondaFeatures } from './managers/conda/main';
 import { registerPoetryFeatures } from './managers/poetry/main';
 import { registerPyenvFeatures } from './managers/pyenv/main';
-import { registerPrivateApi } from './features/privateApi';
 
 export async function activate(context: ExtensionContext): Promise<PythonEnvironmentApi> {
     const start = new StopWatch();
@@ -144,7 +143,6 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
     context.subscriptions.push(
         shellStartupVarsMgr,
         registerCompletionProvider(envManagers),
-        registerPrivateApi(api),
         commands.registerCommand('python-envs.terminal.revertStartupScriptChanges', async () => {
             await cleanupStartupScripts(shellStartupProviders);
         }),

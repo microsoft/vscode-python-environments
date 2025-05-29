@@ -34,11 +34,5 @@
     "python-envs.createNewProjectFromTemplate.title": "Create New Project from Template",
     "python-envs.terminal.activate.title": "Activate Environment in Current Terminal",
     "python-envs.terminal.deactivate.title": "Deactivate Environment in Current Terminal",
-    "python-envs.uninstallPackage.title": "Uninstall Package",
-    "python.languageModelTools.get_python_environment_info.displayName": "Get Python Environment Info",
-    "python.languageModelTools.get_python_environment_info.userDescription": "Get information for a Python Environment, such as Type, Version, Packages, and more.",
-    "python.languageModelTools.install_python_package.displayName": "Install Python Package",
-    "python.languageModelTools.install_python_package.userDescription": "Installs Python packages in a Python Environment.",
-    "python.languageModelTools.get_python_executable.displayName": "Get Python Executable Info",
-    "python.languageModelTools.get_python_executable.userDescription": "Get executable info for a Python Environment"
+    "python-envs.uninstallPackage.title": "Uninstall Package"
 }
