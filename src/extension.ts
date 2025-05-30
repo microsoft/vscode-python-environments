@@ -15,10 +15,6 @@ import {
     onDidChangeActiveTerminal,
     onDidChangeTerminalShellIntegration,
 } from './common/window.apis';
-import { CreateQuickVirtualEnvironmentTool } from './features/chat/createQuickVenvTool';
-import { GetEnvironmentInfoTool } from './features/chat/getEnvInfoTool';
-import { GetExecutableTool } from './features/chat/getExecutableTool';
-import { InstallPackageTool } from './features/chat/installPackagesTool';
 import { createManagerReady } from './features/common/managerReady';
 import { AutoFindProjects } from './features/creators/autoFindProjects';
 import { ExistingProjects } from './features/creators/existingProjects';
