@@ -3,6 +3,7 @@ import * as path from 'path';
 import { commands, l10n, MarkdownString, QuickInputButtons, Uri, window, workspace } from 'vscode';
 import { PythonProject, PythonProjectCreator, PythonProjectCreatorOptions } from '../../api';
 import { NEW_PROJECT_TEMPLATES_FOLDER } from '../../common/constants';
+import { traceError } from '../../common/logging';
 import { showInputBoxWithButtons } from '../../common/window.apis';
 import { EnvironmentManagers, PythonProjectManager } from '../../internal.api';
 import {
@@ -91,6 +92,7 @@ export class NewPackageProject implements PythonProjectCreator {
                 const workspaceFolders = workspace.workspaceFolders;
                 if (!workspaceFolders || workspaceFolders.length === 0) {
                     window.showErrorMessage(l10n.t('No workspace folder is open or provided, aborting creation.'));
+                    traceError(`Template file not found at: ${newPackageTemplateFolder}`);
                     return undefined;
                 }
                 destRoot = workspaceFolders[0].uri.fsPath;
