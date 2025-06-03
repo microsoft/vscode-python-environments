@@ -3,6 +3,7 @@ import * as path from 'path';
 import { commands, l10n, MarkdownString, QuickInputButtons, Uri, window, workspace } from 'vscode';
 import { PythonProject, PythonProjectCreator, PythonProjectCreatorOptions } from '../../api';
 import { NEW_PROJECT_TEMPLATES_FOLDER } from '../../common/constants';
+import { traceError } from '../../common/logging';
 import { showInputBoxWithButtons } from '../../common/window.apis';
 import { isCopilotInstalled, manageCopilotInstructionsFile, replaceInFilesAndNames } from './creationHelpers';
 
@@ -70,6 +71,7 @@ export class NewScriptProject implements PythonProjectCreator {
             const newScriptTemplateFile = path.join(NEW_PROJECT_TEMPLATES_FOLDER, 'new723ScriptTemplate', 'script.py');
             if (!(await fs.pathExists(newScriptTemplateFile))) {
                 window.showErrorMessage(l10n.t('Template file does not exist, aborting creation.'));
+                traceError(`Template file not found at: ${newScriptTemplateFile}`);
                 return undefined;
             }
 
