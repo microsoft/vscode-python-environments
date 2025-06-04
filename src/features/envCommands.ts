@@ -1,4 +1,4 @@
-import { QuickInputButtons, TaskExecution, TaskRevealKind, Terminal, Uri } from 'vscode';
+import { commands, QuickInputButtons, TaskExecution, TaskRevealKind, Terminal, Uri } from 'vscode';
 import {
     CreateEnvironmentOptions,
     PythonEnvironment,
@@ -59,9 +59,7 @@ export async function refreshPackagesCommand(context: unknown, managers?: Enviro
     } else if (context instanceof PythonEnvTreeItem) {
         const view = context as PythonEnvTreeItem;
         const envManager =
-            view.parent.kind === EnvTreeItemKind.environmentGroup
-                ? view.parent.parent.manager
-                : view.parent.manager;
+            view.parent.kind === EnvTreeItemKind.environmentGroup ? view.parent.parent.manager : view.parent.manager;
         const pkgManager = managers?.getPackageManager(envManager.preferredPackageManagerId);
         if (pkgManager) {
             await pkgManager.refresh(view.environment);
@@ -205,8 +203,7 @@ export async function removeEnvironmentCommand(context: unknown, managers: Envir
 export async function handlePackageUninstall(context: unknown, em: EnvironmentManagers) {
     if (context instanceof PackageTreeItem || context instanceof ProjectPackage) {
         const moduleName = context.pkg.name;
-        const environment = 
-            context instanceof ProjectPackage ? context.parent.environment : context.parent.environment;
+        const environment = context instanceof ProjectPackage ? context.parent.environment : context.parent.environment;
         const packageManager = em.getPackageManager(environment);
         await packageManager?.manage(environment, { uninstall: [moduleName], install: [] });
         return;
@@ -395,8 +392,17 @@ export async function addPythonProjectCommand(
     pc: ProjectCreators,
 ): Promise<void> {
     if (wm.getProjects().length === 0) {
-        showErrorMessage('Please open a folder/project before adding a workspace');
-        return;
+        const r = await showErrorMessage(
+            'Please open a folder/project to create a Python project.',
+            {
+                modal: true,
+            },
+            'Open Folder',
+        );
+        if (r === 'Open Folder') {
+            await commands.executeCommand('vscode.openFolder');
+            return;
+        }
     }
     if (resource instanceof Array) {
         for (const r of resource) {
