@@ -27,5 +27,5 @@ export const KNOWN_FILES = [
 
 export const KNOWN_TEMPLATE_ENDINGS = ['.j2', '.jinja2'];
 
-export const NEW_PROJECT_TEMPLATES_FOLDER = path.join(EXTENSION_ROOT_DIR, 'src', 'features', 'creators', 'templates');
+export const NEW_PROJECT_TEMPLATES_FOLDER = path.join(EXTENSION_ROOT_DIR, 'files', 'templates');
 export const NotebookCellScheme = 'vscode-notebook-cell';
