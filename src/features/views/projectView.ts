@@ -14,6 +14,7 @@ import { ProjectViews } from '../../common/localize';
 import { createSimpleDebounce } from '../../common/utils/debounce';
 import { onDidChangeConfiguration } from '../../common/workspace.apis';
 import { EnvironmentManagers, PythonProjectManager } from '../../internal.api';
+import { getCopyFeedbackManager } from '../copyFeedback';
 import {
     GlobalProjectItem,
     NoProjectEnvironment,
@@ -39,6 +40,9 @@ export class ProjectView implements TreeDataProvider<ProjectTreeItem> {
         this.treeView = window.createTreeView<ProjectTreeItem>('python-projects', {
             treeDataProvider: this,
         });
+        
+        const copyFeedbackManager = getCopyFeedbackManager();
+        
         this.disposables.push(
             new Disposable(() => {
                 this.packageRoots.clear();
@@ -68,6 +72,10 @@ export class ProjectView implements TreeDataProvider<ProjectTreeItem> {
                     this.debouncedUpdateProject.trigger();
                 }
             }),
+            // Listen for copy state changes and refresh affected items
+            copyFeedbackManager.onDidChangeCopiedState((itemId) => {
+                this.refreshItemById(itemId);
+            }),
         );
     }
 
@@ -76,6 +84,25 @@ export class ProjectView implements TreeDataProvider<ProjectTreeItem> {
     }
 
     updateProject(): void {
+        this._treeDataChanged.fire(undefined);
+    }
+
+    private refreshItemById(itemId: string): void {
+        // Find and refresh the specific item by ID
+        const projectItem = this.projectViews.get(itemId);
+        if (projectItem) {
+            this._treeDataChanged.fire(projectItem);
+            return;
+        }
+
+        // Check if it's an environment item
+        const environmentItem = this.revealMap.get(itemId.replace(/>>>.+$/, ''));
+        if (environmentItem && environmentItem.id === itemId) {
+            this._treeDataChanged.fire(environmentItem);
+            return;
+        }
+
+        // If we can't find the specific item, refresh all
         this._treeDataChanged.fire(undefined);
     }
 

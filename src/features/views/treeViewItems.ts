@@ -4,6 +4,7 @@ import { PythonEnvironment, IconPath, Package, PythonProject, EnvironmentGroupIn
 import { removable } from './utils';
 import { isActivatableEnvironment } from '../common/activation';
 import { EnvViewStrings } from '../../common/localize';
+import { getCopyFeedbackManager } from '../copyFeedback';
 
 export enum EnvTreeItemKind {
     manager = 'python-env-manager',
@@ -79,7 +80,16 @@ export class PythonEnvTreeItem implements EnvTreeItem {
         item.contextValue = this.getContextValue();
         item.description = environment.description;
         item.tooltip = tooltip;
-        item.iconPath = environment.iconPath;
+        
+        // Check if recently copied and use checkmark icon if so
+        const copyFeedbackManager = getCopyFeedbackManager();
+        const itemId = `env-${this.environment.envId.id}`;
+        if (copyFeedbackManager.isRecentlyCopied(itemId)) {
+            item.iconPath = new ThemeIcon('check');
+        } else {
+            item.iconPath = environment.iconPath;
+        }
+        
         this.treeItem = item;
     }
 
@@ -213,7 +223,15 @@ export class ProjectItem implements ProjectTreeItem {
         item.description = this.project.description;
         item.tooltip = this.project.tooltip;
         item.resourceUri = project.uri.fsPath.endsWith('.py') ? this.project.uri : undefined;
-        item.iconPath = this.project.iconPath ?? (project.uri.fsPath.endsWith('.py') ? ThemeIcon.File : undefined);
+        
+        // Check if recently copied and use checkmark icon if so
+        const copyFeedbackManager = getCopyFeedbackManager();
+        if (copyFeedbackManager.isRecentlyCopied(this.id)) {
+            item.iconPath = new ThemeIcon('check');
+        } else {
+            item.iconPath = this.project.iconPath ?? (project.uri.fsPath.endsWith('.py') ? ThemeIcon.File : undefined);
+        }
+        
         this.treeItem = item;
     }
 
@@ -251,7 +269,15 @@ export class ProjectEnvironment implements ProjectTreeItem {
         item.contextValue = 'python-env';
         item.description = this.environment.description;
         item.tooltip = this.environment.tooltip;
-        item.iconPath = this.environment.iconPath;
+        
+        // Check if recently copied and use checkmark icon if so
+        const copyFeedbackManager = getCopyFeedbackManager();
+        if (copyFeedbackManager.isRecentlyCopied(this.id)) {
+            item.iconPath = new ThemeIcon('check');
+        } else {
+            item.iconPath = this.environment.iconPath;
+        }
+        
         this.treeItem = item;
     }
 

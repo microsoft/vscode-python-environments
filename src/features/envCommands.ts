@@ -23,6 +23,7 @@ import { pickEnvironment } from '../common/pickers/environments';
 import { pickCreator, pickEnvironmentManager, pickPackageManager } from '../common/pickers/managers';
 import { pickProject, pickProjectMany } from '../common/pickers/projects';
 import { activeTextEditor, showErrorMessage, showInformationMessage } from '../common/window.apis';
+import { getCopyFeedbackManager } from './copyFeedback';
 import { quoteArgs } from './execution/execUtils';
 import { runAsTask } from './execution/runAsTask';
 import { runInTerminal } from './terminal/runInTerminal';
@@ -622,15 +623,24 @@ export async function runAsTaskCommand(item: unknown, api: PythonEnvironmentApi)
 }
 
 export async function copyPathToClipboard(item: unknown): Promise<void> {
+    const copyFeedbackManager = getCopyFeedbackManager();
+    
     if (item instanceof ProjectItem) {
         const projectPath = item.project.uri.fsPath;
         await clipboardWriteText(projectPath);
         traceInfo(`Copied project path to clipboard: ${projectPath}`);
+        
+        // Mark as copied for visual feedback
+        copyFeedbackManager.markAsCopied(item.id);
     } else if (item instanceof ProjectEnvironment || item instanceof PythonEnvTreeItem) {
         const run = item.environment.execInfo.activatedRun ?? item.environment.execInfo.run;
         const envPath = quoteArgs([run.executable, ...(run.args ?? [])]).join(' ');
         await clipboardWriteText(envPath);
         traceInfo(`Copied environment path to clipboard: ${envPath}`);
+        
+        // Mark as copied for visual feedback
+        const itemId = item instanceof ProjectEnvironment ? item.id : `env-${item.environment.envId.id}`;
+        copyFeedbackManager.markAsCopied(itemId);
     } else {
         traceVerbose(`Invalid context for copy path to clipboard: ${item}`);
     }

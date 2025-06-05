@@ -21,6 +21,7 @@ import {
 } from './treeViewItems';
 import { createSimpleDebounce } from '../../common/utils/debounce';
 import { ProjectViews } from '../../common/localize';
+import { getCopyFeedbackManager } from '../copyFeedback';
 
 export class EnvManagerView implements TreeDataProvider<EnvTreeItem>, Disposable {
     private treeView: TreeView<EnvTreeItem>;
@@ -36,6 +37,8 @@ export class EnvManagerView implements TreeDataProvider<EnvTreeItem>, Disposable
         this.treeView = window.createTreeView<EnvTreeItem>('env-managers', {
             treeDataProvider: this,
         });
+
+        const copyFeedbackManager = getCopyFeedbackManager();
 
         this.disposables.push(
             new Disposable(() => {
@@ -57,6 +60,10 @@ export class EnvManagerView implements TreeDataProvider<EnvTreeItem>, Disposable
             }),
             this.providers.onDidChangePackageManager((p: DidChangePackageManagerEventArgs) => {
                 this.onDidChangePackageManager(p);
+            }),
+            // Listen for copy state changes and refresh affected items
+            copyFeedbackManager.onDidChangeCopiedState((itemId) => {
+                this.refreshItemById(itemId);
             }),
         );
     }
@@ -212,6 +219,21 @@ export class EnvManagerView implements TreeDataProvider<EnvTreeItem>, Disposable
     private onDidChangePackageManager(_args: DidChangePackageManagerEventArgs) {
         // Since we removed the packageRoots level, just refresh all environments
         // This is a simplified approach that isn't as targeted but ensures packages get refreshed
+        this.fireDataChanged(undefined);
+    }
+
+    private refreshItemById(itemId: string): void {
+        // Check if it's an environment item (starts with 'env-')
+        if (itemId.startsWith('env-')) {
+            const envId = itemId.substring(4); // Remove 'env-' prefix
+            const envItem = this.revealMap.get(envId);
+            if (envItem) {
+                this.fireDataChanged(envItem);
+                return;
+            }
+        }
+
+        // If we can't find the specific item, refresh all
         this.fireDataChanged(undefined);
     }
 

@@ -1,4 +1,4 @@
-import { commands, ExtensionContext, LogOutputChannel, Terminal, Uri, window } from 'vscode';
+import { commands, ExtensionContext, LogOutputChannel, Terminal, Uri, window, Disposable } from 'vscode';
 import { PythonEnvironment, PythonEnvironmentApi, PythonProjectCreator } from './api';
 import { ensureCorrectVersion } from './common/extVersion';
 import { registerLogger, traceError, traceInfo } from './common/logging';
@@ -62,6 +62,7 @@ import { EnvManagerView } from './features/views/envManagersView';
 import { ProjectView } from './features/views/projectView';
 import { PythonStatusBarImpl } from './features/views/pythonStatusBar';
 import { updateViewsAndStatus } from './features/views/revealHandler';
+import { initializeCopyFeedbackManager, disposeCopyFeedbackManager } from './features/copyFeedback';
 import { EnvironmentManagers, ProjectCreators, PythonProjectManager } from './internal.api';
 import { registerSystemPythonFeatures } from './managers/builtin/main';
 import { SysPythonManager } from './managers/builtin/sysPythonManager';
@@ -81,6 +82,10 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
 
     // Setup the persistent state for the extension.
     setPersistentState(context);
+
+    // Initialize copy feedback manager
+    initializeCopyFeedbackManager();
+    context.subscriptions.push(new Disposable(() => disposeCopyFeedbackManager()));
 
     const statusBar = new PythonStatusBarImpl();
     context.subscriptions.push(statusBar);
