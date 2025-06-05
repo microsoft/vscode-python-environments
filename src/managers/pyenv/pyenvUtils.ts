@@ -177,7 +177,7 @@ function nativeToPythonEnv(
 
     const sv = shortVersion(info.version);
     const name = info.name || info.displayName || path.basename(info.prefix);
-    const displayName = info.displayName || `pyenv (${sv}}`;
+    const displayName = info.displayName || `pyenv (${sv})`;
 
     const shellActivation: Map<string, PythonCommandRunConfiguration[]> = new Map();
     const shellDeactivation: Map<string, PythonCommandRunConfiguration[]> = new Map();
