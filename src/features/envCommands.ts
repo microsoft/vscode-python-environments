@@ -22,7 +22,7 @@ import {} from '../common/errors/utils';
 import { pickEnvironment } from '../common/pickers/environments';
 import { pickCreator, pickEnvironmentManager, pickPackageManager } from '../common/pickers/managers';
 import { pickProject, pickProjectMany } from '../common/pickers/projects';
-import { activeTextEditor, showErrorMessage, showInformationMessage } from '../common/window.apis';
+import { activeTextEditor, showErrorMessage, showInformationMessage, showTextDocument } from '../common/window.apis';
 import { quoteArgs } from './execution/execUtils';
 import { runAsTask } from './execution/runAsTask';
 import { runInTerminal } from './terminal/runInTerminal';
@@ -434,7 +434,12 @@ export async function addPythonProjectCommand(
                         quickCreate: true,
                     };
                 }
-                await existingProjectsCreator.create(options);
+                const result = await existingProjectsCreator.create(options);
+                
+                // If the creator returns a Uri (like a script file), open it in the editor
+                if (result instanceof Uri) {
+                    await showTextDocument(result);
+                }
                 return;
             } catch (ex) {
                 if (ex === QuickInputButtons.Back) {
@@ -452,7 +457,12 @@ export async function addPythonProjectCommand(
     }
 
     try {
-        await creator.create(options);
+        const result = await creator.create(options);
+        
+        // If the creator returns a Uri (like a script file), open it in the editor
+        if (result instanceof Uri) {
+            await showTextDocument(result);
+        }
     } catch (ex) {
         if (ex === QuickInputButtons.Back) {
             return addPythonProjectCommand(resource, wm, em, pc);
