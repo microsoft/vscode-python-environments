@@ -453,8 +453,6 @@ export async function addPythonProjectCommand(
 
     try {
         const result = await creator.create(options);
-
-        // If the creator returns a Uri (like a script file), open it in the editor
         if (result instanceof Uri) {
             await showTextDocument(result);
         }
