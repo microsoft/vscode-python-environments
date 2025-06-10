@@ -171,7 +171,10 @@ export class VenvManager implements EnvironmentManager {
         try {
             this.skipWatcherRefresh = true;
 
-            await removeVenv(environment, this.log);
+            const isRemoved = await removeVenv(environment, this.log);
+            if (!isRemoved) {
+                return;
+            }
             this.updateCollection(environment);
             this._onDidChangeEnvironments.fire([{ environment, kind: EnvironmentChangeKind.remove }]);
 

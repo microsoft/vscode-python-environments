@@ -1,4 +1,4 @@
-import { commands, QuickInputButtons, QuickPickItem, QuickPickItemKind } from 'vscode';
+import { commands, QuickInputButtons, QuickPickItem, QuickPickItemKind, workspace, WorkspaceFolder } from 'vscode';
 import { PythonProjectCreator } from '../../api';
 import { InternalEnvironmentManager, InternalPackageManager } from '../../internal.api';
 import { Common, Pickers } from '../localize';
@@ -125,6 +125,31 @@ export async function pickPackageManager(
     return (item as QuickPickItem & { id: string })?.id;
 }
 
+export async function pickWorkspaceFolder(showBackButton = true): Promise<WorkspaceFolder | undefined> {
+    const folders = workspace.workspaceFolders;
+    if (!folders || folders.length === 0) {
+        return undefined;
+    }
+    if (folders.length === 1) {
+        return folders[0];
+    }
+    const items = folders.map((f) => ({
+        label: f.name,
+        description: f.uri.fsPath,
+        folder: f,
+    }));
+
+    const selected = await showQuickPickWithButtons(items, {
+        placeHolder: 'Select a workspace folder',
+        ignoreFocusOut: true,
+        showBackButton,
+    });
+    if (!selected) {
+        return undefined;
+    }
+    const selectedItem = Array.isArray(selected) ? selected[0] : selected;
+    return selectedItem?.folder;
+}
 export async function pickCreator(creators: PythonProjectCreator[]): Promise<PythonProjectCreator | undefined> {
     if (creators.length === 0) {
         return;

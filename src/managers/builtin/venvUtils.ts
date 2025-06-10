@@ -11,6 +11,7 @@ import {
 } from '../../api';
 import { ENVS_EXTENSION_ID } from '../../common/constants';
 import { Common, VenvManagerStrings } from '../../common/localize';
+import { traceInfo } from '../../common/logging';
 import { getWorkspacePersistentState } from '../../common/persistentState';
 import { pickEnvironmentFrom } from '../../common/pickers/environments';
 import { EventNames } from '../../common/telemetry/constants';
@@ -561,7 +562,7 @@ export async function removeVenv(environment: PythonEnvironment, log: LogOutputC
         { title: Common.no, isCloseAffordance: true },
     );
     if (confirm?.title === Common.yes) {
-        await withProgress(
+        const result = await withProgress(
             {
                 location: ProgressLocation.Notification,
                 title: VenvManagerStrings.venvRemoving,
@@ -577,8 +578,10 @@ export async function removeVenv(environment: PythonEnvironment, log: LogOutputC
                 }
             },
         );
+        return result;
     }
 
+    traceInfo(`User cancelled removal of virtual environment: ${envPath}`);
     return false;
 }
 

@@ -1,4 +1,4 @@
-import { commands, QuickInputButtons, TaskExecution, TaskRevealKind, Terminal, Uri } from 'vscode';
+import { commands, QuickInputButtons, TaskExecution, TaskRevealKind, Terminal, Uri, workspace } from 'vscode';
 import {
     CreateEnvironmentOptions,
     PythonEnvironment,
@@ -20,7 +20,12 @@ import { removePythonProjectSetting, setEnvironmentManager, setPackageManager } 
 import { clipboardWriteText } from '../common/env.apis';
 import {} from '../common/errors/utils';
 import { pickEnvironment } from '../common/pickers/environments';
-import { pickCreator, pickEnvironmentManager, pickPackageManager } from '../common/pickers/managers';
+import {
+    pickCreator,
+    pickEnvironmentManager,
+    pickPackageManager,
+    pickWorkspaceFolder,
+} from '../common/pickers/managers';
 import { pickProject, pickProjectMany } from '../common/pickers/projects';
 import { activeTextEditor, showErrorMessage, showInformationMessage, showTextDocument } from '../common/window.apis';
 import { quoteArgs } from './execution/execUtils';
@@ -449,6 +454,20 @@ export async function addPythonProjectCommand(
     const creator: PythonProjectCreator | undefined = await pickCreator(pc.getProjectCreators());
     if (!creator) {
         return;
+    }
+
+    // if multiroot, prompt the user to select which workspace to create the project in
+    const workspaceFolders = workspace.workspaceFolders;
+    if (!resource && workspaceFolders && workspaceFolders.length > 1) {
+        try {
+            const workspace = await pickWorkspaceFolder(true);
+            resource = workspace?.uri;
+        } catch (ex) {
+            if (ex === QuickInputButtons.Back) {
+                return addPythonProjectCommand(resource, wm, em, pc);
+            }
+            throw ex;
+        }
     }
 
     try {
