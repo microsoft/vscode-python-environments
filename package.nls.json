@@ -24,7 +24,6 @@
     "python-envs.reset.title": "Reset to Default",
     "python-envs.remove.title": "Delete Environment",
     "python-envs.refreshAllManagers.title": "Refresh All Environment Managers",
-    "python-envs.refreshManager.title": "Refresh Environments List",
     "python-envs.refreshPackages.title": "Refresh Packages List",
     "python-envs.packages.title": "Manage Packages",
     "python-envs.clearCache.title": "Clear Cache",

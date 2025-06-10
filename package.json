@@ -174,12 +174,6 @@
                 "icon": "$(refresh)"
             },
             {
-                "command": "python-envs.refreshManager",
-                "title": "%python-envs.refreshManager.title%",
-                "category": "Python",
-                "icon": "$(refresh)"
-            },
-            {
                 "command": "python-envs.refreshPackages",
                 "title": "%python-envs.refreshPackages.title%",
                 "category": "Python",
@@ -265,10 +259,6 @@
                     "when": "false"
                 },
                 {
-                    "command": "python-envs.refreshManager",
-                    "when": "false"
-                },
-                {
                     "command": "python-envs.refreshPackages",
                     "when": "false"
                 },
@@ -347,11 +337,6 @@
                     "command": "python-envs.setEnv",
                     "group": "inline",
                     "when": "view == env-managers && viewItem =~ /.*pythonEnvironment.*/"
-                },
-                {
-                    "command": "python-envs.refreshManager",
-                    "group": "inline",
-                    "when": "view == env-managers && viewItem =~ /.*pythonEnvManager.*/"
                 },
                 {
                     "command": "python-envs.createTerminal",
