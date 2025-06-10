@@ -1,4 +1,4 @@
-import { CancellationToken, LogOutputChannel, ProgressLocation, QuickPickItem, ThemeIcon, Uri, window } from 'vscode';
+import { CancellationToken, LogOutputChannel, ProgressLocation, QuickPickItem, Uri, window } from 'vscode';
 import {
     EnvironmentManager,
     Package,
@@ -85,7 +85,6 @@ function getPythonInfo(env: NativeEnvInfo): PythonEnvironmentInfo {
             description: undefined,
             tooltip: env.executable,
             environmentPath: Uri.file(env.executable),
-            iconPath: new ThemeIcon('globe'),
             sysPrefix: env.prefix,
             execInfo: {
                 run: {
