@@ -195,7 +195,10 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
         commands.registerCommand('python-envs.setPkgManager', async () => {
             await setPackageManagerCommand(envManagers, projectManager);
         }),
-        commands.registerCommand('python-envs.addPythonProject', async (resource) => {
+        commands.registerCommand('python-envs.addPythonProject', async () => {
+            await addPythonProjectCommand(undefined, projectManager, envManagers, projectCreators);
+        }),
+        commands.registerCommand('python-envs.addPythonProjectGivenResource', async (resource) => {
             // Set context to show/hide menu item depending on whether the resource is already a Python project
             if (resource instanceof Uri) {
                 commands.executeCommand('setContext', 'python-envs:isExistingProject', isExistingProject(resource));
