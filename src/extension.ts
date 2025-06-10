@@ -29,7 +29,6 @@ import {
     createTerminalCommand,
     getPackageCommandOptions,
     handlePackageUninstall,
-    refreshManagerCommand,
     refreshPackagesCommand,
     removeEnvironmentCommand,
     removePythonProject,
@@ -147,9 +146,6 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
             await cleanupStartupScripts(shellStartupProviders);
         }),
         commands.registerCommand('python-envs.viewLogs', () => outputChannel.show()),
-        commands.registerCommand('python-envs.refreshManager', async (item) => {
-            await refreshManagerCommand(item);
-        }),
         commands.registerCommand('python-envs.refreshAllManagers', async () => {
             await Promise.all(envManagers.managers.map((m) => m.refresh(undefined)));
         }),
