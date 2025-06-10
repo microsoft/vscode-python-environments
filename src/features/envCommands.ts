@@ -434,12 +434,7 @@ export async function addPythonProjectCommand(
                         quickCreate: true,
                     };
                 }
-                const result = await existingProjectsCreator.create(options);
-                
-                // If the creator returns a Uri (like a script file), open it in the editor
-                if (result instanceof Uri) {
-                    await showTextDocument(result);
-                }
+                await existingProjectsCreator.create(options);
                 return;
             } catch (ex) {
                 if (ex === QuickInputButtons.Back) {
@@ -458,7 +453,7 @@ export async function addPythonProjectCommand(
 
     try {
         const result = await creator.create(options);
-        
+
         // If the creator returns a Uri (like a script file), open it in the editor
         if (result instanceof Uri) {
             await showTextDocument(result);
