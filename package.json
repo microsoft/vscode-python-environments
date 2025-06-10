@@ -125,6 +125,12 @@
                 "icon": "$(new-folder)"
             },
             {
+                "command": "python-envs.addPythonProjectGivenResource",
+                "title": "%python-envs.addPythonProjectGivenResource.title%",
+                "category": "Python",
+                "icon": "$(new-folder)"
+            },
+            {
                 "command": "python-envs.removePythonProject",
                 "title": "%python-envs.removePythonProject.title%",
                 "category": "Python",
@@ -293,6 +299,10 @@
                     "when": "false"
                 },
                 {
+                    "command": "python-envs.addPythonProjectGivenResource",
+                    "when": "false"
+                },
+                {
                     "command": "python-envs.removePythonProject",
                     "when": "false"
                 },
@@ -455,12 +465,12 @@
             ],
             "explorer/context": [
                 {
-                    "command": "python-envs.addPythonProject",
+                    "command": "python-envs.addPythonProjectGivenResource",
                     "group": "inline",
                     "when": "explorerViewletVisible && explorerResourceIsFolder && !python-envs:isExistingProject"
                 },
                 {
-                    "command": "python-envs.addPythonProject",
+                    "command": "python-envs.addPythonProjectGivenResource",
                     "group": "inline",
                     "when": "explorerViewletVisible && resourceExtname == .py && !python-envs:isExistingProject"
                 }
