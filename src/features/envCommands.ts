@@ -27,7 +27,7 @@ import {
     pickWorkspaceFolder,
 } from '../common/pickers/managers';
 import { pickProject, pickProjectMany } from '../common/pickers/projects';
-import { activeTextEditor, showErrorMessage, showInformationMessage } from '../common/window.apis';
+import { activeTextEditor, showErrorMessage, showInformationMessage, showTextDocument } from '../common/window.apis';
 import { quoteArgs } from './execution/execUtils';
 import { runAsTask } from './execution/runAsTask';
 import { runInTerminal } from './terminal/runInTerminal';
@@ -471,7 +471,10 @@ export async function addPythonProjectCommand(
     }
 
     try {
-        await creator.create(options);
+        const result = await creator.create(options);
+        if (result instanceof Uri) {
+            await showTextDocument(result);
+        }
     } catch (ex) {
         if (ex === QuickInputButtons.Back) {
             return addPythonProjectCommand(resource, wm, em, pc);
