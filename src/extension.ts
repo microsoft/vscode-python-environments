@@ -210,6 +210,8 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
                 const manager = envManagers.getEnvironmentManager(uri);
                 if (manager) {
                     manager.set(uri, undefined);
+                } else {
+                    traceError(`No environment manager found for ${uri.fsPath}`);
                 }
             }
             await removePythonProject(item, projectManager);
