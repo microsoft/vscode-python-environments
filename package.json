@@ -256,6 +256,11 @@
                 "title": "%python-envs.terminal.revertStartupScriptChanges.title%",
                 "category": "Python Envs",
                 "icon": "$(discard)"
+            },
+            {
+                "command": "python-envs.reportIssue",
+                "title": "%python-envs.reportIssue.title%",
+                "category": "Python Environments"
             }
         ],
         "menus": {
