@@ -22,7 +22,7 @@
     "python-envs.createAny.title": "Create Environment",
     "python-envs.set.title": "Set Project Environment",
     "python-envs.setEnv.title": "Set As Project Environment",
-    "python-envs.reset.title": "Reset to Default",
+
     "python-envs.remove.title": "Delete Environment",
     "python-envs.refreshAllManagers.title": "Refresh All Environment Managers",
     "python-envs.refreshPackages.title": "Refresh Packages List",

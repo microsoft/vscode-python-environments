@@ -32,7 +32,6 @@ import {
     refreshPackagesCommand,
     removeEnvironmentCommand,
     removePythonProject,
-    resetEnvironmentCommand,
     runAsTaskCommand,
     runInDedicatedTerminalCommand,
     runInTerminalCommand,
@@ -61,6 +60,7 @@ import { EnvManagerView } from './features/views/envManagersView';
 import { ProjectView } from './features/views/projectView';
 import { PythonStatusBarImpl } from './features/views/pythonStatusBar';
 import { updateViewsAndStatus } from './features/views/revealHandler';
+import { ProjectItem } from './features/views/treeViewItems';
 import { EnvironmentManagers, ProjectCreators, PythonProjectManager } from './internal.api';
 import { registerSystemPythonFeatures } from './managers/builtin/main';
 import { SysPythonManager } from './managers/builtin/sysPythonManager';
@@ -186,9 +186,7 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
         commands.registerCommand('python-envs.setEnv', async (item) => {
             await setEnvironmentCommand(item, envManagers, projectManager);
         }),
-        commands.registerCommand('python-envs.reset', async (item) => {
-            await resetEnvironmentCommand(item, envManagers, projectManager);
-        }),
+
         commands.registerCommand('python-envs.setEnvManager', async () => {
             await setEnvManagerCommand(envManagers, projectManager);
         }),
@@ -206,7 +204,14 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
             await addPythonProjectCommand(resource, projectManager, envManagers, projectCreators);
         }),
         commands.registerCommand('python-envs.removePythonProject', async (item) => {
-            await resetEnvironmentCommand(item, envManagers, projectManager);
+            // Clear environment association before removing project
+            if (item instanceof ProjectItem) {
+                const uri = item.project.uri;
+                const manager = envManagers.getEnvironmentManager(uri);
+                if (manager) {
+                    manager.set(uri, undefined);
+                }
+            }
             await removePythonProject(item, projectManager);
         }),
         commands.registerCommand('python-envs.clearCache', async () => {

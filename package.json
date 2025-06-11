@@ -160,12 +160,7 @@
                 "category": "Python",
                 "icon": "$(check)"
             },
-            {
-                "command": "python-envs.reset",
-                "title": "%python-envs.reset.title%",
-                "category": "Python",
-                "icon": "$(sync)"
-            },
+
             {
                 "command": "python-envs.remove",
                 "title": "%python-envs.remove.title%",
@@ -276,10 +271,7 @@
                     "command": "python-envs.setEnv",
                     "when": "false"
                 },
-                {
-                    "command": "python-envs.reset",
-                    "when": "false"
-                },
+
                 {
                     "command": "python-envs.remove",
                     "when": "false"
@@ -401,10 +393,7 @@
                     "group": "inline",
                     "when": "view == python-projects && viewItem =~ /.*python-workspace.*/"
                 },
-                {
-                    "command": "python-envs.reset",
-                    "when": "view == python-projects && viewItem =~ /.*python-workspace.*/"
-                },
+
                 {
                     "command": "python-envs.createTerminal",
                     "group": "inline",
