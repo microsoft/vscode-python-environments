@@ -379,11 +379,6 @@
                     "when": "view == python-projects && viewItem == python-env"
                 },
                 {
-                    "command": "python-envs.copyEnvPath",
-                    "group": "inline",
-                    "when": "view == python-projects && viewItem == python-env"
-                },
-                {
                     "command": "python-envs.remove",
                     "when": "view == python-projects && viewItem == python-env"
                 },
@@ -403,11 +398,6 @@
                 },
                 {
                     "command": "python-envs.reset",
-                    "when": "view == python-projects && viewItem =~ /.*python-workspace.*/"
-                },
-                {
-                    "command": "python-envs.createTerminal",
-                    "group": "inline",
                     "when": "view == python-projects && viewItem =~ /.*python-workspace.*/"
                 },
                 {
