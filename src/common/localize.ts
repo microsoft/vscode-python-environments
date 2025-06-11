@@ -15,6 +15,7 @@ export namespace Common {
     export const ok = l10n.t('Ok');
     export const quickCreate = l10n.t('Quick Create');
     export const installPython = l10n.t('Install Python');
+    export const pythonNotFound = l10n.t('Python is not installed or not found in PATH. Please install Python to run Python files.');
 }
 
 export namespace WorkbenchStrings {
