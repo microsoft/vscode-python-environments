@@ -7,7 +7,7 @@ import { NativePythonFinder } from '../common/nativePythonFinder';
 import { compareVersions } from '../common/utils';
 import { PoetryManager } from './poetryManager';
 import { PoetryPackageManager } from './poetryPackageManager';
-import { getPoetry, getPoetryVersion, isPoetryShellPluginInstalled } from './poetryUtils';
+import { getPoetry, getPoetryVersion } from './poetryUtils';
 
 export async function registerPoetryFeatures(
     nativeFinder: NativePythonFinder,
@@ -18,23 +18,19 @@ export async function registerPoetryFeatures(
 
     try {
         const poetryPath = await getPoetry(nativeFinder);
-        let shellSupported = true;
         if (poetryPath) {
             const version = await getPoetryVersion(poetryPath);
             if (!version) {
                 showErrorMessage(l10n.t('Poetry version could not be determined.'));
                 return;
             }
+            traceInfo(
+                'The `shell` command is not available by default in Poetry versions 2.0.0 and above. Therefore all shell activation will be handled by calling `source <path-to-poetry-executable>`. If you face any problems with shell activation, please file an issue at https://github.com/microsoft/vscode-python-environments/issues to help us improve this implementation.',
+            );
             if (version && compareVersions(version, '2.0.0') >= 0) {
-                shellSupported = await isPoetryShellPluginInstalled(poetryPath);
-                if (!shellSupported) {
-                    showErrorMessage(
-                        l10n.t(
-                            'Poetry 2.0.0+ detected. The `shell` command is not available by default. Please install the shell plugin to enable shell activation. See  [here](https://python-poetry.org/docs/managing-environments/#activating-the-environment), shell [plugin](https://github.com/python-poetry/poetry-plugin-shell)',
-                        ),
-                    );
-                    return;
-                }
+                traceInfo('Note: The current version of Poetry is 2.0.0 or higher.');
+            } else {
+                traceInfo('Note: The current version of Poetry is lower than 2.0.0.');
             }
 
             const envManager = new PoetryManager(nativeFinder, api);

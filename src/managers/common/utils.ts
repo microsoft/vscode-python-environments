@@ -1,5 +1,10 @@
-import { PythonEnvironment } from '../../api';
+import * as fs from 'fs-extra';
+import path from 'path';
+import { ThemeIcon, Uri } from 'vscode';
+import { PythonCommandRunConfiguration, PythonEnvironment, PythonEnvironmentInfo } from '../../api';
 import { isWindows } from '../../common/utils/platformUtils';
+import { ShellConstants } from '../../features/common/shellConstants';
+import { NativeEnvInfo } from './nativePythonFinder';
 import { Installable } from './types';
 
 export function noop() {
@@ -111,4 +116,113 @@ export function compareVersions(version1: string, version2: string): number {
     }
 
     return 0;
+}
+
+export async function getPythonInfo(env: NativeEnvInfo): Promise<PythonEnvironmentInfo> {
+    if (env.executable && env.version && env.prefix) {
+        const venvName = env.name;
+        const sv = shortVersion(env.version);
+        const name = `${venvName} (${sv})`;
+
+        const binDir = path.dirname(env.executable);
+
+        const shellActivation: Map<string, PythonCommandRunConfiguration[]> = new Map();
+        const shellDeactivation: Map<string, PythonCommandRunConfiguration[]> = new Map();
+
+        if (isWindows()) {
+            shellActivation.set('unknown', [{ executable: path.join(binDir, `activate`) }]);
+            shellDeactivation.set('unknown', [{ executable: path.join(binDir, `deactivate`) }]);
+        } else {
+            shellActivation.set('unknown', [{ executable: 'source', args: [path.join(binDir, `activate`)] }]);
+            shellDeactivation.set('unknown', [{ executable: 'deactivate' }]);
+        }
+
+        shellActivation.set(ShellConstants.SH, [{ executable: 'source', args: [path.join(binDir, `activate`)] }]);
+        shellDeactivation.set(ShellConstants.SH, [{ executable: 'deactivate' }]);
+
+        shellActivation.set(ShellConstants.BASH, [{ executable: 'source', args: [path.join(binDir, `activate`)] }]);
+        shellDeactivation.set(ShellConstants.BASH, [{ executable: 'deactivate' }]);
+
+        shellActivation.set(ShellConstants.GITBASH, [
+            { executable: 'source', args: [pathForGitBash(path.join(binDir, `activate`))] },
+        ]);
+        shellDeactivation.set(ShellConstants.GITBASH, [{ executable: 'deactivate' }]);
+
+        shellActivation.set(ShellConstants.ZSH, [{ executable: 'source', args: [path.join(binDir, `activate`)] }]);
+        shellDeactivation.set(ShellConstants.ZSH, [{ executable: 'deactivate' }]);
+
+        shellActivation.set(ShellConstants.KSH, [{ executable: '.', args: [path.join(binDir, `activate`)] }]);
+        shellDeactivation.set(ShellConstants.KSH, [{ executable: 'deactivate' }]);
+
+        if (await fs.pathExists(path.join(binDir, 'Activate.ps1'))) {
+            shellActivation.set(ShellConstants.PWSH, [{ executable: '&', args: [path.join(binDir, `Activate.ps1`)] }]);
+            shellDeactivation.set(ShellConstants.PWSH, [{ executable: 'deactivate' }]);
+        } else if (await fs.pathExists(path.join(binDir, 'activate.ps1'))) {
+            shellActivation.set(ShellConstants.PWSH, [{ executable: '&', args: [path.join(binDir, `activate.ps1`)] }]);
+            shellDeactivation.set(ShellConstants.PWSH, [{ executable: 'deactivate' }]);
+        }
+
+        if (await fs.pathExists(path.join(binDir, 'activate.bat'))) {
+            shellActivation.set(ShellConstants.CMD, [{ executable: path.join(binDir, `activate.bat`) }]);
+            shellDeactivation.set(ShellConstants.CMD, [{ executable: path.join(binDir, `deactivate.bat`) }]);
+        }
+
+        if (await fs.pathExists(path.join(binDir, 'activate.csh'))) {
+            shellActivation.set(ShellConstants.CSH, [
+                { executable: 'source', args: [path.join(binDir, `activate.csh`)] },
+            ]);
+            shellDeactivation.set(ShellConstants.CSH, [{ executable: 'deactivate' }]);
+
+            shellActivation.set(ShellConstants.FISH, [
+                { executable: 'source', args: [path.join(binDir, `activate.csh`)] },
+            ]);
+            shellDeactivation.set(ShellConstants.FISH, [{ executable: 'deactivate' }]);
+        }
+
+        if (await fs.pathExists(path.join(binDir, 'activate.fish'))) {
+            shellActivation.set(ShellConstants.FISH, [
+                { executable: 'source', args: [path.join(binDir, `activate.fish`)] },
+            ]);
+            shellDeactivation.set(ShellConstants.FISH, [{ executable: 'deactivate' }]);
+        }
+
+        if (await fs.pathExists(path.join(binDir, 'activate.xsh'))) {
+            shellActivation.set(ShellConstants.XONSH, [
+                { executable: 'source', args: [path.join(binDir, `activate.xsh`)] },
+            ]);
+            shellDeactivation.set(ShellConstants.XONSH, [{ executable: 'deactivate' }]);
+        }
+
+        if (await fs.pathExists(path.join(binDir, 'activate.nu'))) {
+            shellActivation.set(ShellConstants.NU, [
+                { executable: 'overlay', args: ['use', path.join(binDir, 'activate.nu')] },
+            ]);
+            shellDeactivation.set(ShellConstants.NU, [{ executable: 'overlay', args: ['hide', 'activate'] }]);
+        }
+
+        return {
+            name: name,
+            displayName: name,
+            shortDisplayName: `${sv} (${venvName})`,
+            displayPath: env.executable,
+            version: env.version,
+            description: undefined,
+            tooltip: env.executable,
+            environmentPath: Uri.file(env.executable),
+            iconPath: new ThemeIcon('python'),
+            sysPrefix: env.prefix,
+            execInfo: {
+                run: {
+                    executable: env.executable,
+                },
+                activatedRun: {
+                    executable: env.executable,
+                },
+                shellActivation,
+                shellDeactivation,
+            },
+        };
+    } else {
+        throw new Error(`Invalid python info: ${JSON.stringify(env)}`);
+    }
 }

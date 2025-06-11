@@ -22,7 +22,7 @@ import {
     NativePythonEnvironmentKind,
     NativePythonFinder,
 } from '../common/nativePythonFinder';
-import { shortVersion, sortEnvironments } from '../common/utils';
+import { getPythonInfo, shortVersion, sortEnvironments } from '../common/utils';
 
 async function findPoetry(): Promise<string | undefined> {
     try {
@@ -229,17 +229,6 @@ export async function getPoetryVersion(poetry: string): Promise<string | undefin
         return undefined;
     }
 }
-
-export async function isPoetryShellPluginInstalled(poetry: string): Promise<boolean> {
-    try {
-        const { stdout } = await exec(`"${poetry}" self show plugins`);
-        // Look for a line like: "  - poetry-plugin-shell (1.0.1) Poetry plugin to run subshell..."
-        return /\s+-\s+poetry-plugin-shell\s+\(\d+\.\d+\.\d+\)/.test(stdout);
-    } catch {
-        return false;
-    }
-}
-
 function createShellActivation(
     poetry: string,
     _prefix: string,
@@ -279,12 +268,12 @@ function createShellDeactivation(): Map<string, PythonCommandRunConfiguration[]>
     return shellDeactivation;
 }
 
-function nativeToPythonEnv(
+async function nativeToPythonEnv(
     info: NativeEnvInfo,
     api: PythonEnvironmentApi,
     manager: EnvironmentManager,
     _poetry: string,
-): PythonEnvironment | undefined {
+): Promise<Promise<PythonEnvironment | undefined>> {
     if (!(info.prefix && info.executable && info.version)) {
         traceError(`Incomplete poetry environment info: ${JSON.stringify(info)}`);
         return undefined;
@@ -296,6 +285,8 @@ function nativeToPythonEnv(
 
     const shellActivation = createShellActivation(_poetry, info.prefix);
     const shellDeactivation = createShellDeactivation();
+    console.log('shellActivation', shellActivation);
+    console.log('shellDeactivation', shellDeactivation);
 
     // Check if this is a global Poetry virtualenv by checking if it's in Poetry's virtualenvs directory
     // We need to use path.normalize() to ensure consistent path format comparison
@@ -319,6 +310,14 @@ function nativeToPythonEnv(
         }
     }
 
+    // Get generic python environment info to access shell activation/deactivation commands following Poetry 2.0+ dropping the `shell` command
+    const nativeEnvironmentInfo: NativeEnvInfo = {
+        executable: info.executable,
+        version: info.version,
+        prefix: info.prefix,
+    };
+    const pythonInfo: PythonEnvironmentInfo = await getPythonInfo(nativeEnvironmentInfo);
+
     const environment: PythonEnvironmentInfo = {
         name: name,
         displayName: displayName,
@@ -330,8 +329,8 @@ function nativeToPythonEnv(
         tooltip: info.prefix,
         execInfo: {
             run: { executable: info.executable },
-            shellActivation,
-            shellDeactivation,
+            shellActivation: pythonInfo.execInfo.shellActivation,
+            shellDeactivation: pythonInfo.execInfo.shellDeactivation,
         },
         sysPrefix: info.prefix,
         group: isGlobalPoetryEnv ? POETRY_GLOBAL : undefined,
@@ -374,14 +373,16 @@ export async function refreshPoetry(
 
     const collection: PythonEnvironment[] = [];
 
-    envs.forEach((e) => {
-        if (poetry) {
-            const environment = nativeToPythonEnv(e, api, manager, poetry);
-            if (environment) {
-                collection.push(environment);
+    await Promise.all(
+        envs.map(async (e) => {
+            if (poetry) {
+                const environment = await nativeToPythonEnv(e, api, manager, poetry);
+                if (environment) {
+                    collection.push(environment);
+                }
             }
-        }
-    });
+        }),
+    );
 
     return sortEnvironments(collection);
 }
