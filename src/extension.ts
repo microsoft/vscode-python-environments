@@ -1,4 +1,4 @@
-import { commands, ExtensionContext, LogOutputChannel, Terminal, Uri, window, workspace } from 'vscode';
+import { commands, extensions, ExtensionContext, LogOutputChannel, Terminal, Uri, window, workspace } from 'vscode';
 import { PythonEnvironment, PythonEnvironmentApi, PythonProjectCreator } from './api';
 import { ensureCorrectVersion } from './common/extVersion';
 import { registerLogger, traceError, traceInfo } from './common/logging';
@@ -83,6 +83,11 @@ async function collectEnvironmentInfo(
         // Extension version
         const extensionVersion = context.extension?.packageJSON?.version || 'unknown';
         info.push(`Extension Version: ${extensionVersion}`);
+        
+        // Python extension version
+        const pythonExtension = extensions.getExtension('ms-python.python');
+        const pythonVersion = pythonExtension?.packageJSON?.version || 'not installed';
+        info.push(`Python Extension Version: ${pythonVersion}`);
         
         // Environment managers
         const managers = envManagers.managers;
