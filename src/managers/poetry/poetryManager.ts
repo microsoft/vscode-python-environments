@@ -1,5 +1,5 @@
 import * as path from 'path';
-import { Disposable, EventEmitter, MarkdownString, ProgressLocation, ThemeIcon, Uri } from 'vscode';
+import { Disposable, EventEmitter, MarkdownString, ProgressLocation, Uri } from 'vscode';
 import {
     DidChangeEnvironmentEventArgs,
     DidChangeEnvironmentsEventArgs,
@@ -49,7 +49,6 @@ export class PoetryManager implements EnvironmentManager, Disposable {
         this.displayName = 'Poetry';
         this.preferredPackageManagerId = 'ms-python.python:poetry';
         this.tooltip = new MarkdownString(PoetryStrings.poetryManager, true);
-        this.iconPath = new ThemeIcon('python');
     }
 
     name: string;
