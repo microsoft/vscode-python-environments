@@ -36,8 +36,8 @@ export namespace PackageManagement {
     export const enterPackageNames = l10n.t('Enter package names');
     export const searchCommonPackages = l10n.t('Search common `PyPI` packages');
     export const searchCommonPackagesDescription = l10n.t('Search and Install common `PyPI` packages');
-    export const workspaceDependencies = l10n.t('Install workspace dependencies');
-    export const workspaceDependenciesDescription = l10n.t('Install dependencies found in the current workspace.');
+    export const workspaceDependencies = l10n.t('Install project dependencies');
+    export const workspaceDependenciesDescription = l10n.t('Install packages found in dependency files.');
     export const selectPackagesToUninstall = l10n.t('Select packages to uninstall');
     export const enterPackagesPlaceHolder = l10n.t('Enter package names separated by space');
     export const editArguments = l10n.t('Edit arguments');
