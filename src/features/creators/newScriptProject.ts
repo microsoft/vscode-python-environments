@@ -5,6 +5,7 @@ import { PythonProject, PythonProjectCreator, PythonProjectCreatorOptions } from
 import { NEW_PROJECT_TEMPLATES_FOLDER } from '../../common/constants';
 import { traceError } from '../../common/logging';
 import { showInputBoxWithButtons } from '../../common/window.apis';
+import { PythonProjectManager } from '../../internal.api';
 import { isCopilotInstalled, manageCopilotInstructionsFile, replaceInFilesAndNames } from './creationHelpers';
 
 export class NewScriptProject implements PythonProjectCreator {
@@ -13,7 +14,7 @@ export class NewScriptProject implements PythonProjectCreator {
     public readonly description = l10n.t('Creates a new script folder in your current workspace with PEP 723 support');
     public readonly tooltip = new MarkdownString(l10n.t('Create a new Python script'));
 
-    constructor() {}
+    constructor(private readonly projectManager: PythonProjectManager) {}
 
     async create(options?: PythonProjectCreatorOptions): Promise<PythonProject | Uri | undefined> {
         // quick create (needs name, will always create venv and copilot instructions)
@@ -113,7 +114,13 @@ export class NewScriptProject implements PythonProjectCreator {
                 ]);
             }
 
-            return Uri.file(scriptDestination);
+            // Add the created script to the project manager
+            const createdScript: PythonProject | undefined = {
+                name: scriptFileName,
+                uri: Uri.file(scriptDestination),
+            };
+            this.projectManager.add(createdScript);
+            return createdScript;
         }
         return undefined;
     }
