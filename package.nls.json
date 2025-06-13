@@ -11,6 +11,7 @@
     "python-envs.terminal.autoActivationType.shellStartup": "Activation by modifying the terminal shell startup script. To use this feature we will need to modify your shell startup scripts.",
     "python-envs.terminal.autoActivationType.off": "No automatic activation of environments.",
     "python-envs.terminal.revertStartupScriptChanges.title": "Revert Shell Startup Script Changes",
+    "python-envs.reportIssue.title": "Report Issue",
     "python-envs.setEnvManager.title": "Set Environment Manager",
     "python-envs.setPkgManager.title": "Set Package Manager",
     "python-envs.addPythonProject.title": "Add Python Project",

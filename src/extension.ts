@@ -1,4 +1,4 @@
-import { commands, ExtensionContext, LogOutputChannel, Terminal, Uri, window } from 'vscode';
+import { commands, extensions, ExtensionContext, LogOutputChannel, Terminal, Uri, window, workspace } from 'vscode';
 import { PythonEnvironment, PythonEnvironmentApi, PythonProjectCreator } from './api';
 import { ensureCorrectVersion } from './common/extVersion';
 import { registerLogger, traceError, traceInfo } from './common/logging';
@@ -68,6 +68,85 @@ import { createNativePythonFinder, NativePythonFinder } from './managers/common/
 import { registerCondaFeatures } from './managers/conda/main';
 import { registerPoetryFeatures } from './managers/poetry/main';
 import { registerPyenvFeatures } from './managers/pyenv/main';
+
+/**
+ * Collects relevant Python environment information for issue reporting
+ */
+async function collectEnvironmentInfo(
+    context: ExtensionContext,
+    envManagers: EnvironmentManagers,
+    projectManager: PythonProjectManager
+): Promise<string> {
+    const info: string[] = [];
+    
+    try {
+        // Extension version
+        const extensionVersion = context.extension?.packageJSON?.version || 'unknown';
+        info.push(`Extension Version: ${extensionVersion}`);
+        
+        // Python extension version
+        const pythonExtension = extensions.getExtension('ms-python.python');
+        const pythonVersion = pythonExtension?.packageJSON?.version || 'not installed';
+        info.push(`Python Extension Version: ${pythonVersion}`);
+        
+        // Environment managers
+        const managers = envManagers.managers;
+        info.push(`\nRegistered Environment Managers (${managers.length}):`);
+        managers.forEach(manager => {
+            info.push(`  - ${manager.id} (${manager.displayName})`);
+        });
+        
+        // Available environments
+        const allEnvironments: PythonEnvironment[] = [];
+        for (const manager of managers) {
+            try {
+                const envs = await manager.getEnvironments('all');
+                allEnvironments.push(...envs);
+            } catch (err) {
+                info.push(`  Error getting environments from ${manager.id}: ${err}`);
+            }
+        }
+        
+        info.push(`\nTotal Available Environments: ${allEnvironments.length}`);
+        if (allEnvironments.length > 0) {
+            info.push('Environment Details:');
+            allEnvironments.slice(0, 10).forEach((env, index) => {
+                info.push(`  ${index + 1}. ${env.displayName} (${env.version}) - ${env.displayPath}`);
+            });
+            if (allEnvironments.length > 10) {
+                info.push(`  ... and ${allEnvironments.length - 10} more environments`);
+            }
+        }
+        
+        // Python projects
+        const projects = projectManager.getProjects();
+        info.push(`\nPython Projects (${projects.length}):`);
+        for (let index = 0; index < projects.length; index++) {
+            const project = projects[index];
+            info.push(`  ${index + 1}. ${project.uri.fsPath}`);
+            try {
+                const env = await envManagers.getEnvironment(project.uri);
+                if (env) {
+                    info.push(`     Environment: ${env.displayName}`);
+                }
+            } catch (err) {
+                info.push(`     Error getting environment: ${err}`);
+            }
+        }
+        
+        // Current settings (non-sensitive)
+        const config = workspace.getConfiguration('python-envs');
+        info.push('\nExtension Settings:');
+        info.push(`  Default Environment Manager: ${config.get('defaultEnvManager')}`);
+        info.push(`  Default Package Manager: ${config.get('defaultPackageManager')}`);
+        info.push(`  Terminal Auto Activation: ${config.get('terminal.autoActivationType')}`);
+        
+    } catch (err) {
+        info.push(`\nError collecting environment information: ${err}`);
+    }
+    
+    return info.join('\n');
+}
 
 export async function activate(context: ExtensionContext): Promise<PythonEnvironmentApi> {
     const start = new StopWatch();
@@ -278,6 +357,19 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
                 }
             },
         ),
+        commands.registerCommand('python-envs.reportIssue', async () => {
+            try {
+                const issueData = await collectEnvironmentInfo(context, envManagers, projectManager);
+                
+                await commands.executeCommand('workbench.action.openIssueReporter', {
+                    extensionId: 'ms-python.vscode-python-envs',
+                    issueTitle: '[Python Environments] ',
+                    issueBody: `<!-- Please describe the issue you're experiencing -->\n\n<!-- The following information was automatically generated -->\n\n<details>\n<summary>Environment Information</summary>\n\n\`\`\`\n${issueData}\n\`\`\`\n\n</details>`
+                });
+            } catch (error) {
+                window.showErrorMessage(`Failed to open issue reporter: ${error}`);
+            }
+        }),
         terminalActivation.onDidChangeTerminalActivationState(async (e) => {
             await setActivateMenuButtonContext(e.terminal, e.environment, e.activated);
         }),
