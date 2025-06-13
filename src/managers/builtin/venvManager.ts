@@ -22,6 +22,7 @@ import { PYTHON_EXTENSION_ID } from '../../common/constants';
 import { VenvManagerStrings } from '../../common/localize';
 import { createDeferred, Deferred } from '../../common/utils/deferred';
 import { showErrorMessage, withProgress } from '../../common/window.apis';
+import { findParentIfFile } from '../../features/envCommands';
 import { NativePythonFinder } from '../common/nativePythonFinder';
 import { getLatest, shortVersion, sortEnvironments } from '../common/utils';
 import {
@@ -125,7 +126,8 @@ export class VenvManager implements EnvironmentManager {
                 return;
             }
 
-            const venvRoot: Uri = uri;
+            const venvRoot: Uri = Uri.file(await findParentIfFile(uri.fsPath));
+
             const globals = await this.baseManager.getEnvironments('global');
             let environment: PythonEnvironment | undefined = undefined;
             if (options?.quickCreate) {
