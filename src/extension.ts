@@ -186,7 +186,6 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
         commands.registerCommand('python-envs.setEnv', async (item) => {
             await setEnvironmentCommand(item, envManagers, projectManager);
         }),
-
         commands.registerCommand('python-envs.setEnvManager', async () => {
             await setEnvManagerCommand(envManagers, projectManager);
         }),

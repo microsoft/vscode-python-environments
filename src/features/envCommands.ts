@@ -329,8 +329,6 @@ async function setEnvironmentForProjects(
     await em.setEnvironments(uris, environment);
 }
 
-
-
 export async function setEnvManagerCommand(em: EnvironmentManagers, wm: PythonProjectManager): Promise<void> {
     const projects = await pickProjectMany(wm.getProjects());
     if (projects && projects.length > 0) {
