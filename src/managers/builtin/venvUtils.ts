@@ -371,16 +371,22 @@ export async function quickCreateVenv(
     if (additionalPackages) {
         allPackages.push(...additionalPackages);
     }
-    return await createWithProgress(
-        nativeFinder,
-        api,
-        log,
-        manager,
-        baseEnv,
-        venvRoot,
-        path.join(venvRoot.fsPath, '.venv'),
-        { install: allPackages, uninstall: [] },
-    );
+
+    // Check if .venv already exists
+    let venvPath = path.join(venvRoot.fsPath, '.venv');
+    if (await fsapi.pathExists(venvPath)) {
+        // increment to create a unique name, e.g. .venv-1
+        let i = 1;
+        while (await fsapi.pathExists(`${venvPath}-${i}`)) {
+            i++;
+        }
+        venvPath = `${venvPath}-${i}`;
+    }
+
+    return await createWithProgress(nativeFinder, api, log, manager, baseEnv, venvRoot, venvPath, {
+        install: allPackages,
+        uninstall: [],
+    });
 }
 
 export async function createPythonVenv(
@@ -393,7 +399,6 @@ export async function createPythonVenv(
     options: { showQuickAndCustomOptions: boolean; additionalPackages?: string[] },
 ): Promise<PythonEnvironment | undefined> {
     const sortedEnvs = ensureGlobalEnv(basePythons, log);
-    const project = api.getPythonProject(venvRoot);
 
     let customize: boolean | undefined = true;
     if (options.showQuickAndCustomOptions) {
@@ -403,26 +408,11 @@ export async function createPythonVenv(
     if (customize === undefined) {
         return;
     } else if (customize === false) {
-        sendTelemetryEvent(EventNames.VENV_CREATION, undefined, { creationType: 'quick' });
-        const installables = await getProjectInstallable(api, project ? [project] : undefined);
-        const allPackages = [];
-        allPackages.push(...(installables?.flatMap((i) => i.args ?? []) ?? []));
-        if (options.additionalPackages) {
-            allPackages.push(...options.additionalPackages);
-        }
-        return await createWithProgress(
-            nativeFinder,
-            api,
-            log,
-            manager,
-            sortedEnvs[0],
-            venvRoot,
-            path.join(venvRoot.fsPath, '.venv'),
-            { install: allPackages, uninstall: [] },
-        );
+        return quickCreateVenv(nativeFinder, api, log, manager, sortedEnvs[0], venvRoot, options.additionalPackages);
     } else {
         sendTelemetryEvent(EventNames.VENV_CREATION, undefined, { creationType: 'custom' });
     }
+    const project = api.getPythonProject(venvRoot);
 
     const basePython = await pickEnvironmentFrom(sortedEnvs);
     if (!basePython || !basePython.execInfo) {
