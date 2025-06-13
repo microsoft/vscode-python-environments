@@ -329,35 +329,6 @@ async function setEnvironmentForProjects(
     await em.setEnvironments(uris, environment);
 }
 
-export async function resetEnvironmentCommand(
-    context: unknown,
-    em: EnvironmentManagers,
-    wm: PythonProjectManager,
-): Promise<void> {
-    if (context instanceof ProjectItem) {
-        const view = context as ProjectItem;
-        return resetEnvironmentCommand(view.project.uri, em, wm);
-    } else if (context instanceof Uri) {
-        const uri = context as Uri;
-        const manager = em.getEnvironmentManager(uri);
-        if (manager) {
-            manager.set(uri, undefined);
-        } else {
-            showErrorMessage(`No environment manager found for: ${uri.fsPath}`);
-            traceError(`No environment manager found for ${uri.fsPath}`);
-        }
-        return;
-    } else if (context === undefined) {
-        const pw = await pickProject(wm.getProjects());
-        if (pw) {
-            return resetEnvironmentCommand(pw.uri, em, wm);
-        }
-        return;
-    }
-    traceError(`Invalid context for unset environment command: ${context}`);
-    showErrorMessage('Invalid context for unset environment');
-}
-
 export async function setEnvManagerCommand(em: EnvironmentManagers, wm: PythonProjectManager): Promise<void> {
     const projects = await pickProjectMany(wm.getProjects());
     if (projects && projects.length > 0) {
