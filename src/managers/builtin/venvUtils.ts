@@ -98,9 +98,17 @@ export async function setVenvForGlobal(envPath: string | undefined): Promise<voi
     await state.set(VENV_GLOBAL_KEY, envPath);
 }
 
-export async function getPythonInfo(env: NativeEnvInfo): Promise<PythonEnvironmentInfo> {
+function getName(binPath: string): string {
+    const dir1 = path.dirname(binPath);
+    if (dir1.endsWith('bin') || dir1.endsWith('Scripts') || dir1.endsWith('scripts')) {
+        return path.basename(path.dirname(dir1));
+    }
+    return path.basename(dir1);
+}
+
+async function getPythonInfo(env: NativeEnvInfo): Promise<PythonEnvironmentInfo> {
     if (env.executable && env.version && env.prefix) {
-        const venvName = env.name;
+        const venvName = env.name ?? getName(env.executable);
         const sv = shortVersion(env.version);
         const name = `${venvName} (${sv})`;
 
