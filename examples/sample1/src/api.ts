@@ -2,16 +2,16 @@
 // Licensed under the MIT License.
 
 import {
-    Uri,
     Disposable,
-    MarkdownString,
     Event,
-    LogOutputChannel,
-    ThemeIcon,
-    Terminal,
-    TaskExecution,
-    TerminalOptions,
     FileChangeType,
+    LogOutputChannel,
+    MarkdownString,
+    TaskExecution,
+    Terminal,
+    TerminalOptions,
+    ThemeIcon,
+    Uri,
 } from 'vscode';
 
 /**
@@ -651,10 +651,6 @@ export interface PythonProject {
      */
     readonly tooltip?: string | MarkdownString;
 
-    /**
-     * The icon path for the Python project, which can be a string, Uri, or an object with light and dark theme paths.
-     */
-    readonly iconPath?: IconPath;
 }
 
 /**
@@ -696,10 +692,6 @@ export interface PythonProjectCreator {
      */
     readonly tooltip?: string | MarkdownString;
 
-    /**
-     * The icon path for the Python project creator, which can be a string, Uri, or an object with light and dark theme paths.
-     */
-    readonly iconPath?: IconPath;
 
     /**
      * Creates a new Python project or projects.
