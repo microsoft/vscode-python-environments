@@ -1,9 +1,9 @@
-import { TreeItem, TreeItemCollapsibleState, MarkdownString, Command, ThemeIcon } from 'vscode';
-import { InternalEnvironmentManager, InternalPackageManager } from '../../internal.api';
-import { PythonEnvironment, IconPath, Package, PythonProject, EnvironmentGroupInfo } from '../../api';
-import { removable } from './utils';
-import { isActivatableEnvironment } from '../common/activation';
+import { Command, MarkdownString, ThemeIcon, TreeItem, TreeItemCollapsibleState } from 'vscode';
+import { EnvironmentGroupInfo, IconPath, Package, PythonEnvironment, PythonProject } from '../../api';
 import { EnvViewStrings } from '../../common/localize';
+import { InternalEnvironmentManager, InternalPackageManager } from '../../internal.api';
+import { isActivatableEnvironment } from '../common/activation';
+import { removable } from './utils';
 
 export enum EnvTreeItemKind {
     manager = 'python-env-manager',
