@@ -1,8 +1,8 @@
 import * as fsapi from 'fs-extra';
 import * as os from 'os';
 import * as path from 'path';
-import { l10n, LogOutputChannel, ProgressLocation, QuickPickItem, QuickPickItemKind, Uri } from 'vscode';
-import { EnvironmentManager, PythonEnvironment, PythonEnvironmentApi } from '../../api';
+import { l10n, LogOutputChannel, ProgressLocation, QuickPickItem, QuickPickItemKind, ThemeIcon, Uri } from 'vscode';
+import { EnvironmentManager, PythonEnvironment, PythonEnvironmentApi, PythonEnvironmentInfo } from '../../api';
 import { ENVS_EXTENSION_ID } from '../../common/constants';
 import { Common, VenvManagerStrings } from '../../common/localize';
 import { traceInfo } from '../../common/logging';
@@ -25,7 +25,7 @@ import {
     NativePythonEnvironmentKind,
     NativePythonFinder,
 } from '../common/nativePythonFinder';
-import { getPythonInfo, sortEnvironments } from '../common/utils';
+import { getShellActivationCommands, shortVersion, sortEnvironments } from '../common/utils';
 import { isUvInstalled, runPython, runUV } from './helpers';
 import { getProjectInstallable, getWorkspacePackagesToInstall, PipPackages } from './pipUtils';
 import { resolveSystemPythonEnvironmentPath } from './utils';
@@ -98,7 +98,42 @@ export async function setVenvForGlobal(envPath: string | undefined): Promise<voi
     await state.set(VENV_GLOBAL_KEY, envPath);
 }
 
+export async function getPythonInfo(env: NativeEnvInfo): Promise<PythonEnvironmentInfo> {
+    if (env.executable && env.version && env.prefix) {
+        const venvName = env.name;
+        const sv = shortVersion(env.version);
+        const name = `${venvName} (${sv})`;
 
+        const binDir = path.dirname(env.executable);
+
+        const { shellActivation, shellDeactivation } = await getShellActivationCommands(binDir);
+
+        return {
+            name: name,
+            displayName: name,
+            shortDisplayName: `${sv} (${venvName})`,
+            displayPath: env.executable,
+            version: env.version,
+            description: undefined,
+            tooltip: env.executable,
+            environmentPath: Uri.file(env.executable),
+            iconPath: new ThemeIcon('python'),
+            sysPrefix: env.prefix,
+            execInfo: {
+                run: {
+                    executable: env.executable,
+                },
+                activatedRun: {
+                    executable: env.executable,
+                },
+                shellActivation,
+                shellDeactivation,
+            },
+        };
+    } else {
+        throw new Error(`Invalid python info: ${JSON.stringify(env)}`);
+    }
+}
 
 export async function findVirtualEnvironments(
     hardRefresh: boolean,
