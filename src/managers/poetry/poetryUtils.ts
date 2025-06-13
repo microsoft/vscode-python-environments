@@ -227,7 +227,7 @@ async function nativeToPythonEnv(
     api: PythonEnvironmentApi,
     manager: EnvironmentManager,
     _poetry: string,
-): Promise<Promise<PythonEnvironment | undefined>> {
+): Promise<PythonEnvironment | undefined> {
     if (!(info.prefix && info.executable && info.version)) {
         traceError(`Incomplete poetry environment info: ${JSON.stringify(info)}`);
         return undefined;
