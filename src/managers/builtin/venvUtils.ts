@@ -2,13 +2,7 @@ import * as fsapi from 'fs-extra';
 import * as os from 'os';
 import * as path from 'path';
 import { l10n, LogOutputChannel, ProgressLocation, QuickPickItem, QuickPickItemKind, ThemeIcon, Uri } from 'vscode';
-import {
-    EnvironmentManager,
-    PythonCommandRunConfiguration,
-    PythonEnvironment,
-    PythonEnvironmentApi,
-    PythonEnvironmentInfo,
-} from '../../api';
+import { EnvironmentManager, PythonEnvironment, PythonEnvironmentApi, PythonEnvironmentInfo } from '../../api';
 import { ENVS_EXTENSION_ID } from '../../common/constants';
 import { Common, VenvManagerStrings } from '../../common/localize';
 import { traceInfo } from '../../common/logging';
@@ -16,7 +10,6 @@ import { getWorkspacePersistentState } from '../../common/persistentState';
 import { pickEnvironmentFrom } from '../../common/pickers/environments';
 import { EventNames } from '../../common/telemetry/constants';
 import { sendTelemetryEvent } from '../../common/telemetry/sender';
-import { isWindows } from '../../common/utils/platformUtils';
 import {
     showErrorMessage,
     showInputBox,
@@ -26,14 +19,13 @@ import {
     withProgress,
 } from '../../common/window.apis';
 import { getConfiguration } from '../../common/workspace.apis';
-import { ShellConstants } from '../../features/common/shellConstants';
 import {
     isNativeEnvInfo,
     NativeEnvInfo,
     NativePythonEnvironmentKind,
     NativePythonFinder,
 } from '../common/nativePythonFinder';
-import { pathForGitBash, shortVersion, sortEnvironments } from '../common/utils';
+import { getShellActivationCommands, shortVersion, sortEnvironments } from '../common/utils';
 import { isUvInstalled, runPython, runUV } from './helpers';
 import { getProjectInstallable, getWorkspacePackagesToInstall, PipPackages } from './pipUtils';
 import { resolveSystemPythonEnvironmentPath } from './utils';
@@ -122,79 +114,7 @@ async function getPythonInfo(env: NativeEnvInfo): Promise<PythonEnvironmentInfo>
 
         const binDir = path.dirname(env.executable);
 
-        const shellActivation: Map<string, PythonCommandRunConfiguration[]> = new Map();
-        const shellDeactivation: Map<string, PythonCommandRunConfiguration[]> = new Map();
-
-        if (isWindows()) {
-            shellActivation.set('unknown', [{ executable: path.join(binDir, `activate`) }]);
-            shellDeactivation.set('unknown', [{ executable: path.join(binDir, `deactivate`) }]);
-        } else {
-            shellActivation.set('unknown', [{ executable: 'source', args: [path.join(binDir, `activate`)] }]);
-            shellDeactivation.set('unknown', [{ executable: 'deactivate' }]);
-        }
-
-        shellActivation.set(ShellConstants.SH, [{ executable: 'source', args: [path.join(binDir, `activate`)] }]);
-        shellDeactivation.set(ShellConstants.SH, [{ executable: 'deactivate' }]);
-
-        shellActivation.set(ShellConstants.BASH, [{ executable: 'source', args: [path.join(binDir, `activate`)] }]);
-        shellDeactivation.set(ShellConstants.BASH, [{ executable: 'deactivate' }]);
-
-        shellActivation.set(ShellConstants.GITBASH, [
-            { executable: 'source', args: [pathForGitBash(path.join(binDir, `activate`))] },
-        ]);
-        shellDeactivation.set(ShellConstants.GITBASH, [{ executable: 'deactivate' }]);
-
-        shellActivation.set(ShellConstants.ZSH, [{ executable: 'source', args: [path.join(binDir, `activate`)] }]);
-        shellDeactivation.set(ShellConstants.ZSH, [{ executable: 'deactivate' }]);
-
-        shellActivation.set(ShellConstants.KSH, [{ executable: '.', args: [path.join(binDir, `activate`)] }]);
-        shellDeactivation.set(ShellConstants.KSH, [{ executable: 'deactivate' }]);
-
-        if (await fsapi.pathExists(path.join(binDir, 'Activate.ps1'))) {
-            shellActivation.set(ShellConstants.PWSH, [{ executable: '&', args: [path.join(binDir, `Activate.ps1`)] }]);
-            shellDeactivation.set(ShellConstants.PWSH, [{ executable: 'deactivate' }]);
-        } else if (await fsapi.pathExists(path.join(binDir, 'activate.ps1'))) {
-            shellActivation.set(ShellConstants.PWSH, [{ executable: '&', args: [path.join(binDir, `activate.ps1`)] }]);
-            shellDeactivation.set(ShellConstants.PWSH, [{ executable: 'deactivate' }]);
-        }
-
-        if (await fsapi.pathExists(path.join(binDir, 'activate.bat'))) {
-            shellActivation.set(ShellConstants.CMD, [{ executable: path.join(binDir, `activate.bat`) }]);
-            shellDeactivation.set(ShellConstants.CMD, [{ executable: path.join(binDir, `deactivate.bat`) }]);
-        }
-
-        if (await fsapi.pathExists(path.join(binDir, 'activate.csh'))) {
-            shellActivation.set(ShellConstants.CSH, [
-                { executable: 'source', args: [path.join(binDir, `activate.csh`)] },
-            ]);
-            shellDeactivation.set(ShellConstants.CSH, [{ executable: 'deactivate' }]);
-
-            shellActivation.set(ShellConstants.FISH, [
-                { executable: 'source', args: [path.join(binDir, `activate.csh`)] },
-            ]);
-            shellDeactivation.set(ShellConstants.FISH, [{ executable: 'deactivate' }]);
-        }
-
-        if (await fsapi.pathExists(path.join(binDir, 'activate.fish'))) {
-            shellActivation.set(ShellConstants.FISH, [
-                { executable: 'source', args: [path.join(binDir, `activate.fish`)] },
-            ]);
-            shellDeactivation.set(ShellConstants.FISH, [{ executable: 'deactivate' }]);
-        }
-
-        if (await fsapi.pathExists(path.join(binDir, 'activate.xsh'))) {
-            shellActivation.set(ShellConstants.XONSH, [
-                { executable: 'source', args: [path.join(binDir, `activate.xsh`)] },
-            ]);
-            shellDeactivation.set(ShellConstants.XONSH, [{ executable: 'deactivate' }]);
-        }
-
-        if (await fsapi.pathExists(path.join(binDir, 'activate.nu'))) {
-            shellActivation.set(ShellConstants.NU, [
-                { executable: 'overlay', args: ['use', path.join(binDir, 'activate.nu')] },
-            ]);
-            shellDeactivation.set(ShellConstants.NU, [{ executable: 'overlay', args: ['hide', 'activate'] }]);
-        }
+        const { shellActivation, shellDeactivation } = await getShellActivationCommands(binDir);
 
         return {
             name: name,

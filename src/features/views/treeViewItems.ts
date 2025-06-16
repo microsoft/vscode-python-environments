@@ -1,9 +1,9 @@
-import { TreeItem, TreeItemCollapsibleState, MarkdownString, Command, ThemeIcon } from 'vscode';
-import { InternalEnvironmentManager, InternalPackageManager } from '../../internal.api';
-import { PythonEnvironment, IconPath, Package, PythonProject, EnvironmentGroupInfo } from '../../api';
-import { removable } from './utils';
-import { isActivatableEnvironment } from '../common/activation';
+import { Command, MarkdownString, ThemeIcon, TreeItem, TreeItemCollapsibleState } from 'vscode';
+import { EnvironmentGroupInfo, IconPath, Package, PythonEnvironment, PythonProject } from '../../api';
 import { EnvViewStrings } from '../../common/localize';
+import { InternalEnvironmentManager, InternalPackageManager } from '../../internal.api';
+import { isActivatableEnvironment } from '../common/activation';
+import { removable } from './utils';
 
 export enum EnvTreeItemKind {
     manager = 'python-env-manager',
@@ -213,7 +213,6 @@ export class ProjectItem implements ProjectTreeItem {
         item.description = this.project.description;
         item.tooltip = this.project.tooltip;
         item.resourceUri = project.uri.fsPath.endsWith('.py') ? this.project.uri : undefined;
-        item.iconPath = this.project.iconPath ?? (project.uri.fsPath.endsWith('.py') ? ThemeIcon.File : undefined);
         this.treeItem = item;
     }
 
@@ -233,7 +232,6 @@ export class GlobalProjectItem implements ProjectTreeItem {
         item.contextValue = 'python-workspace';
         item.description = 'Global Python environment';
         item.tooltip = 'Global Python environment';
-        item.iconPath = new ThemeIcon('globe');
         this.treeItem = item;
     }
 }

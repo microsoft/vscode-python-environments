@@ -650,11 +650,6 @@ export interface PythonProject {
      * The tooltip for the Python project, which can be a string or a Markdown string.
      */
     readonly tooltip?: string | MarkdownString;
-
-    /**
-     * The icon path for the Python project, which can be a string, Uri, or an object with light and dark theme paths.
-     */
-    readonly iconPath?: IconPath;
 }
 
 /**
@@ -700,11 +695,6 @@ export interface PythonProjectCreator {
      * The tooltip for the Python project creator, which can be a string or a Markdown string.
      */
     readonly tooltip?: string | MarkdownString;
-
-    /**
-     * The icon path for the Python project creator, which can be a string, Uri, or an object with light and dark theme paths.
-     */
-    readonly iconPath?: IconPath;
 
     /**
      * Creates a new Python project(s) or, if files are not a project, returns Uri(s) to the created files.

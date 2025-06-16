@@ -2,19 +2,12 @@ import * as fs from 'fs-extra';
 import * as path from 'path';
 import { Uri } from 'vscode';
 import which from 'which';
-import {
-    EnvironmentManager,
-    PythonCommandRunConfiguration,
-    PythonEnvironment,
-    PythonEnvironmentApi,
-    PythonEnvironmentInfo,
-} from '../../api';
+import { EnvironmentManager, PythonEnvironment, PythonEnvironmentApi, PythonEnvironmentInfo } from '../../api';
 import { ENVS_EXTENSION_ID } from '../../common/constants';
 import { traceError, traceInfo } from '../../common/logging';
 import { getWorkspacePersistentState } from '../../common/persistentState';
 import { getUserHomeDir, untildify } from '../../common/utils/pathUtils';
 import { isWindows } from '../../common/utils/platformUtils';
-import { ShellConstants } from '../../features/common/shellConstants';
 import {
     isNativeEnvInfo,
     NativeEnvInfo,
@@ -22,7 +15,7 @@ import {
     NativePythonEnvironmentKind,
     NativePythonFinder,
 } from '../common/nativePythonFinder';
-import { shortVersion, sortEnvironments } from '../common/utils';
+import { getShellActivationCommands, shortVersion, sortEnvironments } from '../common/utils';
 
 async function findPoetry(): Promise<string | undefined> {
     try {
@@ -229,62 +222,12 @@ export async function getPoetryVersion(poetry: string): Promise<string | undefin
         return undefined;
     }
 }
-
-export async function isPoetryShellPluginInstalled(poetry: string): Promise<boolean> {
-    try {
-        const { stdout } = await exec(`"${poetry}" self show plugins`);
-        // Look for a line like: "  - poetry-plugin-shell (1.0.1) Poetry plugin to run subshell..."
-        return /\s+-\s+poetry-plugin-shell\s+\(\d+\.\d+\.\d+\)/.test(stdout);
-    } catch {
-        return false;
-    }
-}
-
-function createShellActivation(
-    poetry: string,
-    _prefix: string,
-): Map<string, PythonCommandRunConfiguration[]> | undefined {
-    const shellActivation: Map<string, PythonCommandRunConfiguration[]> = new Map();
-
-    shellActivation.set(ShellConstants.BASH, [{ executable: poetry, args: ['shell'] }]);
-    shellActivation.set(ShellConstants.ZSH, [{ executable: poetry, args: ['shell'] }]);
-    shellActivation.set(ShellConstants.SH, [{ executable: poetry, args: ['shell'] }]);
-    shellActivation.set(ShellConstants.GITBASH, [{ executable: poetry, args: ['shell'] }]);
-    shellActivation.set(ShellConstants.FISH, [{ executable: poetry, args: ['shell'] }]);
-    shellActivation.set(ShellConstants.PWSH, [{ executable: poetry, args: ['shell'] }]);
-    if (isWindows()) {
-        shellActivation.set(ShellConstants.CMD, [{ executable: poetry, args: ['shell'] }]);
-    }
-    shellActivation.set(ShellConstants.NU, [{ executable: poetry, args: ['shell'] }]);
-    shellActivation.set('unknown', [{ executable: poetry, args: ['shell'] }]);
-    return shellActivation;
-}
-
-function createShellDeactivation(): Map<string, PythonCommandRunConfiguration[]> {
-    const shellDeactivation: Map<string, PythonCommandRunConfiguration[]> = new Map();
-
-    // Poetry doesn't have a standard deactivation command like venv does
-    // The best approach is to exit the shell or start a new one
-    shellDeactivation.set('unknown', [{ executable: 'exit' }]);
-
-    shellDeactivation.set(ShellConstants.BASH, [{ executable: 'exit' }]);
-    shellDeactivation.set(ShellConstants.ZSH, [{ executable: 'exit' }]);
-    shellDeactivation.set(ShellConstants.SH, [{ executable: 'exit' }]);
-    shellDeactivation.set(ShellConstants.GITBASH, [{ executable: 'exit' }]);
-    shellDeactivation.set(ShellConstants.FISH, [{ executable: 'exit' }]);
-    shellDeactivation.set(ShellConstants.PWSH, [{ executable: 'exit' }]);
-    shellDeactivation.set(ShellConstants.CMD, [{ executable: 'exit' }]);
-    shellDeactivation.set(ShellConstants.NU, [{ executable: 'exit' }]);
-
-    return shellDeactivation;
-}
-
-function nativeToPythonEnv(
+async function nativeToPythonEnv(
     info: NativeEnvInfo,
     api: PythonEnvironmentApi,
     manager: EnvironmentManager,
     _poetry: string,
-): PythonEnvironment | undefined {
+): Promise<PythonEnvironment | undefined> {
     if (!(info.prefix && info.executable && info.version)) {
         traceError(`Incomplete poetry environment info: ${JSON.stringify(info)}`);
         return undefined;
@@ -293,9 +236,6 @@ function nativeToPythonEnv(
     const sv = shortVersion(info.version);
     const name = info.name || info.displayName || path.basename(info.prefix);
     const displayName = info.displayName || `poetry (${sv})`;
-
-    const shellActivation = createShellActivation(_poetry, info.prefix);
-    const shellDeactivation = createShellDeactivation();
 
     // Check if this is a global Poetry virtualenv by checking if it's in Poetry's virtualenvs directory
     // We need to use path.normalize() to ensure consistent path format comparison
@@ -318,6 +258,10 @@ function nativeToPythonEnv(
             getPoetryVirtualenvsPath(_poetry).catch((e) => traceError(`Error getting Poetry virtualenvs path: ${e}`));
         }
     }
+
+    // Get generic python environment info to access shell activation/deactivation commands following Poetry 2.0+ dropping the `shell` command
+    const binDir = path.dirname(info.executable);
+    const { shellActivation, shellDeactivation } = await getShellActivationCommands(binDir);
 
     const environment: PythonEnvironmentInfo = {
         name: name,
@@ -374,14 +318,16 @@ export async function refreshPoetry(
 
     const collection: PythonEnvironment[] = [];
 
-    envs.forEach((e) => {
-        if (poetry) {
-            const environment = nativeToPythonEnv(e, api, manager, poetry);
-            if (environment) {
-                collection.push(environment);
+    await Promise.all(
+        envs.map(async (e) => {
+            if (poetry) {
+                const environment = await nativeToPythonEnv(e, api, manager, poetry);
+                if (environment) {
+                    collection.push(environment);
+                }
             }
-        }
-    });
+        }),
+    );
 
     return sortEnvironments(collection);
 }

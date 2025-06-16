@@ -116,11 +116,6 @@ export class NewPackageProject implements PythonProjectCreator {
             let createdPackage: PythonProject | undefined;
             let createdEnv: PythonEnvironment | undefined;
             if (createVenv) {
-                createdPackage = {
-                    name: packageName,
-                    uri: Uri.file(projectDestinationFolder),
-                };
-
                 // add package to list of packages before creating the venv
                 this.projectManager.add(createdPackage);
                 // gets default environment manager
@@ -178,13 +173,12 @@ export class NewPackageProject implements PythonProjectCreator {
             };
             await manageLaunchJsonFile(destRoot, JSON.stringify(launchJsonConfig));
 
-            if (createdPackage) {
-                // return package if created (ie when venv is created)
-                return createdPackage;
-            } else {
-                // otherwise its not a package and just a folder
-                return Uri.file(projectDestinationFolder);
-            }
+            const createdPackage: PythonProject | undefined = {
+                name: packageName,
+                uri: Uri.file(projectDestinationFolder),
+            };
+            this.projectManager.add(createdPackage);
+            return createdPackage;
         }
         return undefined;
     }
