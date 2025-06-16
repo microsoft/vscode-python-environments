@@ -74,6 +74,9 @@ export async function refreshPackagesCommand(context: unknown, managers?: Enviro
     }
 }
 
+/**
+ * Creates a Python environment using the manager implied by the context (no user prompt).
+ */
 export async function createEnvironmentCommand(
     context: unknown,
     em: EnvironmentManagers,
@@ -94,7 +97,7 @@ export async function createEnvironmentCommand(
                 const scope = selected.length === 0 ? 'global' : selected.map((p) => p.uri);
                 const env = await manager.create(scope, undefined);
                 if (env) {
-                    await em.setEnvironments(scope, env);
+                    await em.setEnvironmentsIfUnset(scope, env);
                 }
                 return env;
             } else {
@@ -114,6 +117,9 @@ export async function createEnvironmentCommand(
     }
 }
 
+/**
+ * Prompts the user to pick the environment manager and project(s) for environment creation.
+ */
 export async function createAnyEnvironmentCommand(
     em: EnvironmentManagers,
     pm: PythonProjectManager,
