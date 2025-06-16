@@ -112,12 +112,16 @@ export class NewPackageProject implements PythonProjectCreator {
             // 2. Replace 'package_name' in all files and file/folder names using a helper
             await replaceInFilesAndNames(projectDestinationFolder, 'package_name', packageName);
 
+            const createdPackage: PythonProject | undefined = {
+                name: packageName,
+                uri: Uri.file(projectDestinationFolder),
+            };
+            // add package to list of packages
+            this.projectManager.add(createdPackage);
+
             // 4. Create virtual environment if requested
-            let createdPackage: PythonProject | undefined;
             let createdEnv: PythonEnvironment | undefined;
             if (createVenv) {
-                // add package to list of packages before creating the venv
-                this.projectManager.add(createdPackage);
                 // gets default environment manager
                 const en = this.envManagers.getEnvironmentManager(undefined);
                 if (en?.supportsQuickCreate) {
@@ -173,11 +177,6 @@ export class NewPackageProject implements PythonProjectCreator {
             };
             await manageLaunchJsonFile(destRoot, JSON.stringify(launchJsonConfig));
 
-            const createdPackage: PythonProject | undefined = {
-                name: packageName,
-                uri: Uri.file(projectDestinationFolder),
-            };
-            this.projectManager.add(createdPackage);
             return createdPackage;
         }
         return undefined;
