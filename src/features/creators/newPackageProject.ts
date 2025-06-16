@@ -1,7 +1,7 @@
 import * as fs from 'fs-extra';
 import * as path from 'path';
 import { commands, l10n, MarkdownString, QuickInputButtons, Uri, window, workspace } from 'vscode';
-import { PythonProject, PythonProjectCreator, PythonProjectCreatorOptions } from '../../api';
+import { PythonEnvironment, PythonProject, PythonProjectCreator, PythonProjectCreatorOptions } from '../../api';
 import { NEW_PROJECT_TEMPLATES_FOLDER } from '../../common/constants';
 import { traceError } from '../../common/logging';
 import { showInputBoxWithButtons } from '../../common/window.apis';
@@ -11,7 +11,6 @@ import {
     manageCopilotInstructionsFile,
     manageLaunchJsonFile,
     promptForVenv,
-    quickCreateNewVenv,
     replaceInFilesAndNames,
 } from './creationHelpers';
 
@@ -115,6 +114,7 @@ export class NewPackageProject implements PythonProjectCreator {
 
             // 4. Create virtual environment if requested
             let createdPackage: PythonProject | undefined;
+            let createdEnv: PythonEnvironment | undefined;
             if (createVenv) {
                 createdPackage = {
                     name: packageName,
@@ -123,19 +123,41 @@ export class NewPackageProject implements PythonProjectCreator {
 
                 // add package to list of packages before creating the venv
                 this.projectManager.add(createdPackage);
-                await quickCreateNewVenv(this.envManagers, projectDestinationFolder);
+                // gets default environment manager
+                const en = this.envManagers.getEnvironmentManager(undefined);
+                if (en?.supportsQuickCreate) {
+                    // opt to use quickCreate if available
+                    createdEnv = await en.create(Uri.file(projectDestinationFolder), { quickCreate: true });
+                } else if (!options?.quickCreate && en?.supportsCreate) {
+                    // if quickCreate unavailable, use create method only if project is not quickCreate
+                    createdEnv = await en.create(Uri.file(projectDestinationFolder), {});
+                } else {
+                    // get venv manager or any manager that supports quick creating environments
+                    const venvManager = this.envManagers.managers.find(
+                        (m) => m.id === 'ms-python.python:venv' || m.supportsQuickCreate,
+                    );
+                    if (venvManager) {
+                        createdEnv = await venvManager.create(Uri.file(projectDestinationFolder), {
+                            quickCreate: true,
+                        });
+                    } else {
+                        window.showErrorMessage(l10n.t('Creating virtual environment failed during package creation.'));
+                    }
+                }
             }
-
-            // 5. Get the Python environment for the destination folder
-            // could be either the one created in an early step or an existing one
-            const pythonEnvironment = await this.envManagers.getEnvironment(Uri.parse(projectDestinationFolder));
-
-            if (!pythonEnvironment) {
-                window.showErrorMessage(l10n.t('Python environment not found.'));
+            // 5. Get the Python environment for the destination folder if not already created
+            createdEnv = createdEnv || (await this.envManagers.getEnvironment(Uri.parse(projectDestinationFolder)));
+            if (!createdEnv) {
+                window.showErrorMessage(
+                    l10n.t('Project created but unable to be correlated to correct Python environment.'),
+                );
                 return undefined;
             }
 
-            // add custom github copilot instructions
+            // 6. Set the Python environment for the package
+            this.envManagers.setEnvironment(createdPackage?.uri, createdEnv);
+
+            // 7. add custom github copilot instructions
             if (createCopilotInstructions) {
                 const packageInstructionsPath = path.join(
                     NEW_PROJECT_TEMPLATES_FOLDER,
