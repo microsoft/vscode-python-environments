@@ -1,4 +1,4 @@
-import { Disposable, EventEmitter, Uri, workspace, ConfigurationTarget, Event } from 'vscode';
+import { ConfigurationTarget, Disposable, Event, EventEmitter, Uri, workspace } from 'vscode';
 import {
     DidChangeEnvironmentEventArgs,
     DidChangeEnvironmentsEventArgs,
@@ -10,13 +10,14 @@ import {
     PythonProject,
     SetEnvironmentScope,
 } from '../api';
-import { traceError, traceVerbose } from '../common/logging';
 import {
-    EditAllManagerSettings,
-    getDefaultEnvManagerSetting,
-    getDefaultPkgManagerSetting,
-    setAllManagerSettings,
-} from './settings/settingHelpers';
+    EnvironmentManagerAlreadyRegisteredError,
+    PackageManagerAlreadyRegisteredError,
+} from '../common/errors/AlreadyRegisteredError';
+import { traceError, traceVerbose } from '../common/logging';
+import { EventNames } from '../common/telemetry/constants';
+import { sendTelemetryEvent } from '../common/telemetry/sender';
+import { getCallingExtension } from '../common/utils/frameUtils';
 import {
     DidChangeEnvironmentManagerEventArgs,
     DidChangePackageManagerEventArgs,
@@ -30,13 +31,12 @@ import {
     PythonProjectManager,
     PythonProjectSettings,
 } from '../internal.api';
-import { getCallingExtension } from '../common/utils/frameUtils';
 import {
-    EnvironmentManagerAlreadyRegisteredError,
-    PackageManagerAlreadyRegisteredError,
-} from '../common/errors/AlreadyRegisteredError';
-import { sendTelemetryEvent } from '../common/telemetry/sender';
-import { EventNames } from '../common/telemetry/constants';
+    EditAllManagerSettings,
+    getDefaultEnvManagerSetting,
+    getDefaultPkgManagerSetting,
+    setAllManagerSettings,
+} from './settings/settingHelpers';
 
 function generateId(name: string): string {
     const newName = name.toLowerCase().replace(/[^a-zA-Z0-9-_]/g, '_');
@@ -165,6 +165,10 @@ export class PythonEnvironmentManagers implements EnvironmentManagers {
         this._onDidChangePackages.dispose();
     }
 
+    /**
+     * Returns the environment manager for the given context.
+     * Uses the default from settings if context is undefined or a Uri; otherwise uses the id or environment's managerId passed in via context.
+     */
     public getEnvironmentManager(context: EnvironmentManagerScope): InternalEnvironmentManager | undefined {
         if (this._environmentManagers.size === 0) {
             traceError('No environment managers registered');
@@ -256,6 +260,10 @@ export class PythonEnvironmentManagers implements EnvironmentManagers {
         }
     }
 
+    /**
+     * Sets the environment for a single scope, scope of undefined checks 'global'.
+     * If given an array of scopes, delegates to setEnvironments for batch setting.
+     */
     public async setEnvironment(scope: SetEnvironmentScope, environment?: PythonEnvironment): Promise<void> {
         if (Array.isArray(scope)) {
             return this.setEnvironments(scope, environment);
@@ -299,6 +307,10 @@ export class PythonEnvironmentManagers implements EnvironmentManagers {
         }
     }
 
+    /**
+     * Sets the given environment for the specified project URIs or globally.
+     * If a list of URIs is provided, sets the environment for each project; if 'global', sets it as the global environment.
+     */
     public async setEnvironments(scope: Uri[] | string, environment?: PythonEnvironment): Promise<void> {
         if (environment) {
             const manager = this.managers.find((m) => m.id === environment.envId.managerId);
@@ -403,6 +415,44 @@ export class PythonEnvironmentManagers implements EnvironmentManagers {
         }
     }
 
+    /**
+     * Sets the environment for the given scopes, but only if the scope is not already set (i.e., is global or undefined).
+     * Existing environments for a scope are not overwritten.
+     *
+     */
+    public async setEnvironmentsIfUnset(scope: Uri[] | string, environment?: PythonEnvironment): Promise<void> {
+        if (!environment) {
+            return;
+        }
+        if (typeof scope === 'string' && scope === 'global') {
+            const current = await this.getEnvironment(undefined);
+            if (!current) {
+                await this.setEnvironments('global', environment);
+            }
+        } else if (Array.isArray(scope)) {
+            const urisToSet: Uri[] = [];
+            for (const uri of scope) {
+                const current = await this.getEnvironment(uri);
+                if (!current || current.envId.managerId === 'ms-python.python:system') {
+                    // If the current environment is not set or is the system environment, set the new environment.
+                    urisToSet.push(uri);
+                }
+            }
+            if (urisToSet.length > 0) {
+                await this.setEnvironments(urisToSet, environment);
+            }
+        }
+    }
+
+    /**
+     * Gets the current Python environment for the given scope URI or undefined for 'global'.
+     *
+     * This method queries the appropriate environment manager for the latest environment for the scope.
+     * It also updates the internal cache and fires an event if the environment has changed since last check.
+     *
+     * @param scope The scope to get the environment.
+     * @returns The current PythonEnvironment for the scope, or undefined if none is set.
+     */
     async getEnvironment(scope: GetEnvironmentScope): Promise<PythonEnvironment | undefined> {
         const manager = this.getEnvironmentManager(scope);
         if (!manager) {
