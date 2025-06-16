@@ -1,6 +1,6 @@
 import { Disposable, LogOutputChannel } from 'vscode';
 import { PythonEnvironmentApi } from '../../api';
-import { traceInfo, traceWarn } from '../../common/logging';
+import { traceInfo } from '../../common/logging';
 import { getPythonApi } from '../../features/pythonApi';
 import { NativePythonFinder } from '../common/nativePythonFinder';
 import { PoetryManager } from './poetryManager';
@@ -17,18 +17,11 @@ export async function registerPoetryFeatures(
     try {
         const poetryPath = await getPoetry(nativeFinder);
         if (poetryPath) {
-            const version = await getPoetryVersion(poetryPath);
-            if (!version) {
-                traceWarn(
-                    'Poetry found at {0}, but unable to determine version. Poetry features will not be enabled.',
-                    poetryPath,
-                );
-                return;
-            }
             traceInfo(
-                'The `shell` command is not available by default in Poetry versions 2.0.0 and above. Therefore all shell activation will be handled by calling `source <path-to-activate>`. If you face any problems with shell activation, please file an issue at https://github.com/microsoft/vscode-python-environments/issues to help us improve this implementation. Note the current version of Poetry is {0}.',
-                version,
+                'The `shell` command is not available by default in Poetry versions 2.0.0 and above. Therefore all shell activation will be handled by calling `source <path-to-activate>`. If you face any problems with shell activation, please file an issue at https://github.com/microsoft/vscode-python-environments/issues to help us improve this implementation.',
             );
+            const version = await getPoetryVersion(poetryPath);
+            traceInfo(`Poetry found at ${poetryPath}, version: ${version}`);
             const envManager = new PoetryManager(nativeFinder, api);
             const pkgManager = new PoetryPackageManager(api, outputChannel, envManager);
 
