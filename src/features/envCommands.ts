@@ -1,3 +1,5 @@
+import * as fs from 'fs-extra';
+import * as path from 'path';
 import { commands, QuickInputButtons, TaskExecution, TaskRevealKind, Terminal, Uri, workspace } from 'vscode';
 import {
     CreateEnvironmentOptions,
@@ -516,8 +518,9 @@ export async function createTerminalCommand(
         const pw = await pickProject(api.getPythonProjects());
         if (pw) {
             const env = await api.getEnvironment(pw.uri);
+            const cwd = await findParentIfFile(pw.uri.fsPath);
             if (env) {
-                return await tm.create(env, { cwd: pw.uri });
+                return await tm.create(env, { cwd });
             }
         }
     } else if (context instanceof Uri) {
@@ -525,13 +528,15 @@ export async function createTerminalCommand(
         const env = await api.getEnvironment(uri);
         const pw = api.getPythonProject(uri);
         if (env && pw) {
-            return await tm.create(env, { cwd: pw.uri });
+            const cwd = await findParentIfFile(pw.uri.fsPath);
+            return await tm.create(env, { cwd });
         }
     } else if (context instanceof ProjectItem) {
         const view = context as ProjectItem;
         const env = await api.getEnvironment(view.project.uri);
+        const cwd = await findParentIfFile(view.project.uri.fsPath);
         if (env) {
-            const terminal = await tm.create(env, { cwd: view.project.uri });
+            const terminal = await tm.create(env, { cwd });
             terminal.show();
             return terminal;
         }
@@ -546,11 +551,21 @@ export async function createTerminalCommand(
         const view = context as PythonEnvTreeItem;
         const pw = await pickProject(api.getPythonProjects());
         if (pw) {
-            const terminal = await tm.create(view.environment, { cwd: pw.uri });
+            const cwd = await findParentIfFile(pw.uri.fsPath);
+            const terminal = await tm.create(view.environment, { cwd });
             terminal.show();
             return terminal;
         }
     }
+}
+
+export async function findParentIfFile(cwd: string): Promise<string> {
+    const stat = await fs.stat(cwd);
+    if (stat.isFile()) {
+        // If the project is a file, use the directory of the file as the cwd
+        return path.dirname(cwd);
+    }
+    return cwd;
 }
 
 export async function runInTerminalCommand(
