@@ -216,6 +216,7 @@ export async function getPoetryVersion(poetry: string): Promise<string | undefin
         // Handle both formats:
         // Old: "Poetry version 1.5.1"
         // New: "Poetry (version 2.1.3)"
+        traceInfo(`Poetry version output: ${stdout.trim()}`);
         const match = stdout.match(/Poetry (?:version|[\(\s]+version[\s\)]+)([0-9]+\.[0-9]+\.[0-9]+)/i);
         return match ? match[1] : undefined;
     } catch {
