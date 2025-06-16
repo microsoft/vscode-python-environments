@@ -1,6 +1,6 @@
 import { Disposable, LogOutputChannel } from 'vscode';
 import { PythonEnvironmentApi } from '../../api';
-import { traceInfo } from '../../common/logging';
+import { traceInfo, traceWarn } from '../../common/logging';
 import { getPythonApi } from '../../features/pythonApi';
 import { NativePythonFinder } from '../common/nativePythonFinder';
 import { PoetryManager } from './poetryManager';
@@ -19,7 +19,7 @@ export async function registerPoetryFeatures(
         if (poetryPath) {
             const version = await getPoetryVersion(poetryPath);
             if (!version) {
-                traceInfo(
+                traceWarn(
                     'Poetry found at {0}, but unable to determine version. Poetry features will not be enabled.',
                     poetryPath,
                 );
