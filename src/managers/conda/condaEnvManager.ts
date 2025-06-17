@@ -1,3 +1,4 @@
+import * as fs from 'fs-extra';
 import * as path from 'path';
 import { Disposable, EventEmitter, l10n, LogOutputChannel, MarkdownString, ProgressLocation, Uri } from 'vscode';
 import {
@@ -19,6 +20,7 @@ import {
     SetEnvironmentScope,
 } from '../../api';
 import { CondaStrings } from '../../common/localize';
+import { traceError } from '../../common/logging';
 import { createDeferred, Deferred } from '../../common/utils/deferred';
 import { showErrorMessage, withProgress } from '../../common/window.apis';
 import { NativePythonFinder } from '../common/nativePythonFinder';
@@ -167,6 +169,20 @@ export class CondaEnvManager implements EnvironmentManager, Disposable {
             }
             if (result) {
                 this.addEnvironment(result);
+
+                // If the environment is inside the workspace, add a .gitignore file
+                try {
+                    const projectUris = this.api.getPythonProjects().map((p) => p.uri.fsPath);
+                    const envPath = result.environmentPath?.fsPath;
+                    if (envPath && projectUris.some((root) => envPath.startsWith(root))) {
+                        const gitignorePath = path.join(envPath, '.gitignore');
+                        await fs.writeFile(gitignorePath, '*\n', { flag: 'w' });
+                    }
+                } catch (err) {
+                    traceError(
+                        `Failed to create .gitignore in conda env: ${err instanceof Error ? err.message : String(err)}`,
+                    );
+                }
             }
 
             return result;
