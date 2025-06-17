@@ -77,7 +77,7 @@ export interface IEventNamePropertyMapping {
     };
 
     /* __GDPR__
-        "package.install": {
+        "package_management": {
             "managerId": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "owner": "karthiknadig" },
             "result": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "owner": "karthiknadig" }
         }
