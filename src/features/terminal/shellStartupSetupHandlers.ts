@@ -13,7 +13,7 @@ export async function handleSettingUpShellProfile(
     const shells = providers.map((p) => p.shellType).join(', ');
     const response = await showInformationMessage(
         l10n.t(
-            'To use "{0}" activation, the shell profiles need to be set up. Do you want to set it up now?',
+            'To enable "{0}" activation, your shell profile(s) need to be updated to include the necessary startup scripts. Would you like to proceed with these changes?',
             ACT_TYPE_SHELL,
         ),
         { modal: true, detail: l10n.t('Shells: {0}', shells) },

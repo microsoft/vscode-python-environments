@@ -140,7 +140,12 @@ export class NewPackageProject implements PythonProjectCreator {
                             quickCreate: true,
                         });
                     } else {
-                        window.showErrorMessage(l10n.t('Creating virtual environment failed during package creation.'));
+                        window.showErrorMessage(
+                            l10n.t(
+                                'Creating virtual environment "{0}" failed during package creation since no environment manager supports quick create.',
+                                packageName,
+                            ),
+                        );
                     }
                 }
             }
