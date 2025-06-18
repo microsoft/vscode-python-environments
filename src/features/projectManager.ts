@@ -171,7 +171,6 @@ export class PythonProjectManagerImpl implements PythonProjectManager {
     }
 
     getProjects(uris?: Uri[]): ReadonlyArray<PythonProject> {
-        console.log('getProjects', uris);
         if (uris === undefined) {
             return Array.from(this._projects.values());
         } else {
