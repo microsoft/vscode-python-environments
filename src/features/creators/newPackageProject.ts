@@ -117,7 +117,7 @@ export class NewPackageProject implements PythonProjectCreator {
                 uri: Uri.file(projectDestinationFolder),
             };
             // add package to list of packages
-            this.projectManager.add(createdPackage);
+            await this.projectManager.add(createdPackage);
 
             // 4. Create virtual environment if requested
             let createdEnv: PythonEnvironment | undefined;
