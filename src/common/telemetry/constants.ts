@@ -11,6 +11,7 @@ export enum EventNames {
     VENV_CREATION = 'VENV.CREATION',
 
     PACKAGE_MANAGEMENT = 'PACKAGE_MANAGEMENT',
+    ADD_PROJECT = 'ADD_PROJECT',
 }
 
 // Map all events to their properties
@@ -85,5 +86,20 @@ export interface IEventNamePropertyMapping {
     [EventNames.PACKAGE_MANAGEMENT]: {
         managerId: string;
         result: 'success' | 'error' | 'cancelled';
+    };
+
+    /* __GDPR__
+        "add_project": {
+            "template": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "owner": "eleanorjboyd" },
+            "quickCreate": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "owner": "eleanorjboyd" },
+            "totalProjectCount": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "owner": "eleanorjboyd" },
+            "triggeredLocation": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "owner": "eleanorjboyd" }
+        }
+    */
+    [EventNames.ADD_PROJECT]: {
+        template: string;
+        quickCreate: boolean;
+        totalProjectCount: number;
+        triggeredLocation: 'templateCreate' | 'add' | 'addGivenResource';
     };
 }
