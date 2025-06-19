@@ -1,4 +1,4 @@
-import { commands, extensions, ExtensionContext, LogOutputChannel, Terminal, Uri, window, workspace } from 'vscode';
+import { commands, ExtensionContext, extensions, LogOutputChannel, Terminal, Uri, window, workspace } from 'vscode';
 import { PythonEnvironment, PythonEnvironmentApi, PythonProjectCreator } from './api';
 import { ensureCorrectVersion } from './common/extVersion';
 import { registerLogger, traceError, traceInfo } from './common/logging';
@@ -8,6 +8,7 @@ import { StopWatch } from './common/stopWatch';
 import { EventNames } from './common/telemetry/constants';
 import { sendManagerSelectionTelemetry } from './common/telemetry/helpers';
 import { sendTelemetryEvent } from './common/telemetry/sender';
+import { createSimpleDebounce } from './common/utils/debounce';
 import { createDeferred } from './common/utils/deferred';
 import {
     activeTerminal,
@@ -75,27 +76,27 @@ import { registerPyenvFeatures } from './managers/pyenv/main';
 async function collectEnvironmentInfo(
     context: ExtensionContext,
     envManagers: EnvironmentManagers,
-    projectManager: PythonProjectManager
+    projectManager: PythonProjectManager,
 ): Promise<string> {
     const info: string[] = [];
-    
+
     try {
         // Extension version
         const extensionVersion = context.extension?.packageJSON?.version || 'unknown';
         info.push(`Extension Version: ${extensionVersion}`);
-        
+
         // Python extension version
         const pythonExtension = extensions.getExtension('ms-python.python');
         const pythonVersion = pythonExtension?.packageJSON?.version || 'not installed';
         info.push(`Python Extension Version: ${pythonVersion}`);
-        
+
         // Environment managers
         const managers = envManagers.managers;
         info.push(`\nRegistered Environment Managers (${managers.length}):`);
-        managers.forEach(manager => {
+        managers.forEach((manager) => {
             info.push(`  - ${manager.id} (${manager.displayName})`);
         });
-        
+
         // Available environments
         const allEnvironments: PythonEnvironment[] = [];
         for (const manager of managers) {
@@ -106,7 +107,7 @@ async function collectEnvironmentInfo(
                 info.push(`  Error getting environments from ${manager.id}: ${err}`);
             }
         }
-        
+
         info.push(`\nTotal Available Environments: ${allEnvironments.length}`);
         if (allEnvironments.length > 0) {
             info.push('Environment Details:');
@@ -117,8 +118,9 @@ async function collectEnvironmentInfo(
                 info.push(`  ... and ${allEnvironments.length - 10} more environments`);
             }
         }
-        
+
         // Python projects
+        console.log('getProjects called from extension.ts activate');
         const projects = projectManager.getProjects();
         info.push(`\nPython Projects (${projects.length}):`);
         for (let index = 0; index < projects.length; index++) {
@@ -133,22 +135,25 @@ async function collectEnvironmentInfo(
                 info.push(`     Error getting environment: ${err}`);
             }
         }
-        
+
         // Current settings (non-sensitive)
         const config = workspace.getConfiguration('python-envs');
         info.push('\nExtension Settings:');
         info.push(`  Default Environment Manager: ${config.get('defaultEnvManager')}`);
         info.push(`  Default Package Manager: ${config.get('defaultPackageManager')}`);
         info.push(`  Terminal Auto Activation: ${config.get('terminal.autoActivationType')}`);
-        
     } catch (err) {
         info.push(`\nError collecting environment information: ${err}`);
     }
-    
+
     return info.join('\n');
 }
 
 export async function activate(context: ExtensionContext): Promise<PythonEnvironmentApi> {
+    // Debounced version of updateViewsAndStatus to avoid excessive UI updates
+    const debouncedUpdateViewsAndStatus = createSimpleDebounce(200, () => {
+        updateViewsAndStatus(statusBar, workspaceView, managerView, api);
+    });
     const start = new StopWatch();
 
     // Logging should be set up before anything else.
@@ -366,11 +371,11 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
         commands.registerCommand('python-envs.reportIssue', async () => {
             try {
                 const issueData = await collectEnvironmentInfo(context, envManagers, projectManager);
-                
+
                 await commands.executeCommand('workbench.action.openIssueReporter', {
                     extensionId: 'ms-python.vscode-python-envs',
                     issueTitle: '[Python Environments] ',
-                    issueBody: `<!-- Please describe the issue you're experiencing -->\n\n<!-- The following information was automatically generated -->\n\n<details>\n<summary>Environment Information</summary>\n\n\`\`\`\n${issueData}\n\`\`\`\n\n</details>`
+                    issueBody: `<!-- Please describe the issue you're experiencing -->\n\n<!-- The following information was automatically generated -->\n\n<details>\n<summary>Environment Information</summary>\n\n\`\`\`\n${issueData}\n\`\`\`\n\n</details>`,
                 });
             } catch (error) {
                 window.showErrorMessage(`Failed to open issue reporter: ${error}`);
@@ -387,22 +392,16 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
                 }
             }
         }),
-        window.onDidChangeActiveTextEditor(async () => {
-            updateViewsAndStatus(statusBar, workspaceView, managerView, api);
+        window.onDidChangeActiveTextEditor(() => {
+            debouncedUpdateViewsAndStatus.trigger();
         }),
-        envManagers.onDidChangeEnvironment(async () => {
-            updateViewsAndStatus(statusBar, workspaceView, managerView, api);
-        }),
-        envManagers.onDidChangeEnvironments(async () => {
-            updateViewsAndStatus(statusBar, workspaceView, managerView, api);
-        }),
-        envManagers.onDidChangeEnvironmentFiltered(async (e) => {
+        envManagers.onDidChangeEnvironmentFiltered((e) => {
             managerView.environmentChanged(e);
             const location = e.uri?.fsPath ?? 'global';
             traceInfo(
                 `Internal: Changed environment from ${e.old?.displayName} to ${e.new?.displayName} for: ${location}`,
             );
-            updateViewsAndStatus(statusBar, workspaceView, managerView, api);
+            debouncedUpdateViewsAndStatus.trigger();
         }),
         onDidChangeTerminalShellIntegration(async (e) => {
             const shellEnv = e.shellIntegration?.env;
@@ -425,6 +424,16 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
                     }
                 }
             }
+        }),
+    );
+
+    // Register these listeners last to avoid triggering them during activation/setup
+    context.subscriptions.push(
+        envManagers.onDidChangeEnvironment(() => {
+            debouncedUpdateViewsAndStatus.trigger();
+        }),
+        envManagers.onDidChangeEnvironments(() => {
+            debouncedUpdateViewsAndStatus.trigger();
         }),
     );
 
