@@ -254,7 +254,8 @@
             {
                 "command": "python-envs.reportIssue",
                 "title": "%python-envs.reportIssue.title%",
-                "category": "Python Environments"
+                "category": "Python Environments",
+                "when": "config.python.useEnvironmentsExtension != false"
             }
         ],
         "menus": {
@@ -301,7 +302,7 @@
                 },
                 {
                     "command": "python-envs.runAsTask",
-                    "when": "true"
+                    "when": "config.python.useEnvironmentsExtension != false"
                 },
                 {
                     "command": "python-envs.terminal.activate",
@@ -326,6 +327,18 @@
                 {
                     "command": "python-envs.createAny",
                     "when": "false"
+                },
+                {
+                    "command": "python-envs.createNewProjectFromTemplate",
+                    "when": "config.python.useEnvironmentsExtension != false"
+                },
+                {
+                    "command": "python-envs.terminal.revertStartupScriptChanges",
+                    "when": "config.python.useEnvironmentsExtension != false"
+                },
+                {
+                    "command": "python-envs.reportIssue",
+                    "when": "config.python.useEnvironmentsExtension != false"
                 }
             ],
             "view/item/context": [
@@ -463,7 +476,8 @@
                 {
                     "id": "python",
                     "title": "Python",
-                    "icon": "files/logo.svg"
+                    "icon": "files/logo.svg",
+                    "when": "config.python.useEnvironmentsExtension != false"
                 }
             ]
         },
@@ -473,13 +487,15 @@
                     "id": "python-projects",
                     "name": "Python Projects",
                     "icon": "files/logo.svg",
-                    "contextualTitle": "Python Projects"
+                    "contextualTitle": "Python Projects",
+                    "when": "config.python.useEnvironmentsExtension != false"
                 },
                 {
                     "id": "env-managers",
                     "name": "Environment Managers",
                     "icon": "files/logo.svg",
-                    "contextualTitle": "Environment Managers"
+                    "contextualTitle": "Environment Managers",
+                    "when": "config.python.useEnvironmentsExtension != false"
                 }
             ]
         },
