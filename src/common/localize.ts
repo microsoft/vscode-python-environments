@@ -34,8 +34,8 @@ export namespace PackageManagement {
     export const commonPackages = l10n.t('Common Packages');
     export const selectPackagesToInstall = l10n.t('Select packages to install');
     export const enterPackageNames = l10n.t('Enter package names');
-    export const searchCommonPackages = l10n.t('Search common `PyPI` packages');
-    export const searchCommonPackagesDescription = l10n.t('Search and Install common `PyPI` packages');
+    export const searchCommonPackages = l10n.t('Search `PyPI` packages');
+    export const searchCommonPackagesDescription = l10n.t('Search and install popular `PyPI` packages');
     export const workspaceDependencies = l10n.t('Install project dependencies');
     export const workspaceDependenciesDescription = l10n.t('Install packages found in dependency files.');
     export const selectPackagesToUninstall = l10n.t('Select packages to uninstall');
@@ -90,8 +90,6 @@ export namespace VenvManagerStrings {
     export const venvName = l10n.t('Enter a name for the virtual environment');
     export const venvNameErrorEmpty = l10n.t('Name cannot be empty');
     export const venvNameErrorExists = l10n.t('A folder with the same name already exists');
-
-    export const venvCreating = l10n.t('Creating virtual environment');
     export const venvCreateFailed = l10n.t('Failed to create virtual environment');
 
     export const venvRemoving = l10n.t('Removing virtual environment');

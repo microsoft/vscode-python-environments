@@ -288,7 +288,11 @@ async function createWithProgress(
     return await withProgress(
         {
             location: ProgressLocation.Notification,
-            title: VenvManagerStrings.venvCreating,
+            title: l10n.t(
+                'Creating virtual environment named {0} using python version {1}.',
+                path.basename(envPath),
+                basePython.version,
+            ),
         },
         async () => {
             try {
