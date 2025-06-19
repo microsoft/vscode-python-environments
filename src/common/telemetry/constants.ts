@@ -12,6 +12,13 @@ export enum EventNames {
 
     PACKAGE_MANAGEMENT = 'PACKAGE_MANAGEMENT',
     ADD_PROJECT = 'ADD_PROJECT',
+    /**
+     * Telemetry event for when a Python environment is created via command.
+     * Properties:
+     * - manager: string (the id of the environment manager used, or 'none')
+     * - triggeredLocation: string (where the create command is called from)
+     */
+    CREATE_ENVIRONMENT = 'CREATE_ENVIRONMENT',
 }
 
 // Map all events to their properties
@@ -101,5 +108,16 @@ export interface IEventNamePropertyMapping {
         quickCreate: boolean;
         totalProjectCount: number;
         triggeredLocation: 'templateCreate' | 'add' | 'addGivenResource';
+    };
+
+    /* __GDPR__
+        "create_environment": {
+            "manager": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "owner": "eleanorjboyd" },
+            "triggeredLocation": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "owner": "eleanorjboyd" }
+        }
+    */
+    [EventNames.CREATE_ENVIRONMENT]: {
+        manager: string;
+        triggeredLocation: string;
     };
 }

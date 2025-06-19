@@ -231,9 +231,23 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
             await refreshPackagesCommand(item, envManagers);
         }),
         commands.registerCommand('python-envs.create', async (item) => {
+            // Telemetry: record environment creation attempt with selected manager
+            let managerId = 'unknown';
+            if (item && item.manager && item.manager.id) {
+                managerId = item.manager.id;
+            }
+            sendTelemetryEvent(EventNames.CREATE_ENVIRONMENT, undefined, {
+                manager: managerId,
+                triggeredLocation: 'createSpecifiedCommand',
+            });
             return await createEnvironmentCommand(item, envManagers, projectManager);
         }),
         commands.registerCommand('python-envs.createAny', async (options) => {
+            // Telemetry: record environment creation attempt with no specific manager
+            sendTelemetryEvent(EventNames.CREATE_ENVIRONMENT, undefined, {
+                manager: 'none',
+                triggeredLocation: 'createAnyCommand',
+            });
             return await createAnyEnvironmentCommand(
                 envManagers,
                 projectManager,
