@@ -1,4 +1,4 @@
-import { commands, extensions, ExtensionContext, LogOutputChannel, Terminal, Uri, window, workspace } from 'vscode';
+import { commands, ExtensionContext, extensions, LogOutputChannel, Terminal, Uri, window, workspace } from 'vscode';
 import { PythonEnvironment, PythonEnvironmentApi, PythonProjectCreator } from './api';
 import { ensureCorrectVersion } from './common/extVersion';
 import { registerLogger, traceError, traceInfo } from './common/logging';
@@ -75,27 +75,26 @@ import { registerPyenvFeatures } from './managers/pyenv/main';
 async function collectEnvironmentInfo(
     context: ExtensionContext,
     envManagers: EnvironmentManagers,
-    projectManager: PythonProjectManager
+    projectManager: PythonProjectManager,
 ): Promise<string> {
     const info: string[] = [];
-    
     try {
         // Extension version
         const extensionVersion = context.extension?.packageJSON?.version || 'unknown';
         info.push(`Extension Version: ${extensionVersion}`);
-        
+
         // Python extension version
         const pythonExtension = extensions.getExtension('ms-python.python');
         const pythonVersion = pythonExtension?.packageJSON?.version || 'not installed';
         info.push(`Python Extension Version: ${pythonVersion}`);
-        
+
         // Environment managers
         const managers = envManagers.managers;
         info.push(`\nRegistered Environment Managers (${managers.length}):`);
-        managers.forEach(manager => {
+        managers.forEach((manager) => {
             info.push(`  - ${manager.id} (${manager.displayName})`);
         });
-        
+
         // Available environments
         const allEnvironments: PythonEnvironment[] = [];
         for (const manager of managers) {
@@ -106,7 +105,7 @@ async function collectEnvironmentInfo(
                 info.push(`  Error getting environments from ${manager.id}: ${err}`);
             }
         }
-        
+
         info.push(`\nTotal Available Environments: ${allEnvironments.length}`);
         if (allEnvironments.length > 0) {
             info.push('Environment Details:');
@@ -117,7 +116,7 @@ async function collectEnvironmentInfo(
                 info.push(`  ... and ${allEnvironments.length - 10} more environments`);
             }
         }
-        
+
         // Python projects
         const projects = projectManager.getProjects();
         info.push(`\nPython Projects (${projects.length}):`);
@@ -133,23 +132,33 @@ async function collectEnvironmentInfo(
                 info.push(`     Error getting environment: ${err}`);
             }
         }
-        
+
         // Current settings (non-sensitive)
         const config = workspace.getConfiguration('python-envs');
         info.push('\nExtension Settings:');
         info.push(`  Default Environment Manager: ${config.get('defaultEnvManager')}`);
         info.push(`  Default Package Manager: ${config.get('defaultPackageManager')}`);
         info.push(`  Terminal Auto Activation: ${config.get('terminal.autoActivationType')}`);
-        
     } catch (err) {
         info.push(`\nError collecting environment information: ${err}`);
     }
-    
+
     return info.join('\n');
 }
 
 export async function activate(context: ExtensionContext): Promise<PythonEnvironmentApi> {
     const start = new StopWatch();
+
+    // Attempt to set setting of config.python.useEnvironmentsExtension to true
+    try {
+        const config = workspace.getConfiguration('python');
+        await config.update('useEnvironmentsExtension', true, true);
+    } catch (err) {
+        traceError(
+            'Failed to set config.python.useEnvironmentsExtension to true. Please do so manually in your user settings now to ensure the Python environment extension is enabled during upcoming experimentation.',
+            err,
+        );
+    }
 
     // Logging should be set up before anything else.
     const outputChannel: LogOutputChannel = createLogOutputChannel('Python Environments');
@@ -366,11 +375,11 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
         commands.registerCommand('python-envs.reportIssue', async () => {
             try {
                 const issueData = await collectEnvironmentInfo(context, envManagers, projectManager);
-                
+
                 await commands.executeCommand('workbench.action.openIssueReporter', {
                     extensionId: 'ms-python.vscode-python-envs',
                     issueTitle: '[Python Environments] ',
-                    issueBody: `<!-- Please describe the issue you're experiencing -->\n\n<!-- The following information was automatically generated -->\n\n<details>\n<summary>Environment Information</summary>\n\n\`\`\`\n${issueData}\n\`\`\`\n\n</details>`
+                    issueBody: `<!-- Please describe the issue you're experiencing -->\n\n<!-- The following information was automatically generated -->\n\n<details>\n<summary>Environment Information</summary>\n\n\`\`\`\n${issueData}\n\`\`\`\n\n</details>`,
                 });
             } catch (error) {
                 window.showErrorMessage(`Failed to open issue reporter: ${error}`);
