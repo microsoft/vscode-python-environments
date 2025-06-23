@@ -66,6 +66,7 @@ import { EnvironmentManagers, ProjectCreators, PythonProjectManager } from './in
 import { registerSystemPythonFeatures } from './managers/builtin/main';
 import { SysPythonManager } from './managers/builtin/sysPythonManager';
 import { createNativePythonFinder, NativePythonFinder } from './managers/common/nativePythonFinder';
+import { IDisposable } from './managers/common/types';
 import { registerCondaFeatures } from './managers/conda/main';
 import { registerPoetryFeatures } from './managers/poetry/main';
 import { registerPyenvFeatures } from './managers/pyenv/main';
@@ -149,17 +150,13 @@ async function collectEnvironmentInfo(
 }
 
 export async function activate(context: ExtensionContext): Promise<PythonEnvironmentApi | undefined> {
-    // Add a 5 second delay before continuing activation
-    await new Promise((resolve) => setTimeout(resolve, 5000));
     const useEnvironmentsExtension = getConfiguration('python').get<boolean>('useEnvironmentsExtension', true);
     if (!useEnvironmentsExtension) {
         traceWarn(
             'The Python environments extension has been disabled via a setting. If you would like to opt into using the extension, please add the following to your user settings (note that updating this setting requires a window reload afterwards):\n\n"python.useEnvironmentsExtension": true',
         );
+        deactivate(context);
         return;
-        // const extension = extensions.getExtension(context.extension.id);
-        // if (extension) {
-        //     await extension.deactivate();
     } else {
         const start = new StopWatch();
 
@@ -468,4 +465,24 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
     }
 }
 
-export function deactivate() {}
+/**
+ * Safely dispose each of the disposables.
+ */
+export async function disposeAll(disposables: IDisposable[]): Promise<void> {
+    await Promise.all(
+        disposables.map(async (d) => {
+            try {
+                return Promise.resolve(d.dispose());
+            } catch (_err) {
+                // do nothing
+            }
+            return Promise.resolve();
+        }),
+    );
+}
+
+export async function deactivate(context: ExtensionContext) {
+    await disposeAll(context.subscriptions);
+    context.subscriptions.length = 0; // Clear subscriptions to prevent memory leaks
+    traceInfo('Python Environments extension deactivated.');
+}
