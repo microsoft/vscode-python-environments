@@ -25,20 +25,20 @@ export enum EventNames {
 export interface IEventNamePropertyMapping {
     /* __GDPR__
        "extension.activation_duration": {
-           "duration" : { "classification": "SystemMetaData", "purpose": "FeatureInsight", "owner": "karthiknadig" }
+           "duration" : { "classification": "SystemMetaData", "purpose": "FeatureInsight", "owner": "eleanorjboyd" }
        }
     */
     [EventNames.EXTENSION_ACTIVATION_DURATION]: never | undefined;
     /* __GDPR__
        "extension.manager_registration_duration": {
-           "duration" : { "classification": "SystemMetaData", "purpose": "FeatureInsight", "owner": "karthiknadig" }
+           "duration" : { "classification": "SystemMetaData", "purpose": "FeatureInsight", "owner": "eleanorjboyd" }
        }
     */
     [EventNames.EXTENSION_MANAGER_REGISTRATION_DURATION]: never | undefined;
 
     /* __GDPR__
         "environment_manager.registered": {
-            "managerId" : { "classification": "SystemMetaData", "purpose": "FeatureInsight", "owner": "karthiknadig" }
+            "managerId" : { "classification": "SystemMetaData", "purpose": "FeatureInsight", "owner": "eleanorjboyd" }
         }
     */
     [EventNames.ENVIRONMENT_MANAGER_REGISTERED]: {
@@ -47,7 +47,7 @@ export interface IEventNamePropertyMapping {
 
     /* __GDPR__
         "package_manager.registered": {
-            "managerId" : { "classification": "SystemMetaData", "purpose": "FeatureInsight", "owner": "karthiknadig" }
+            "managerId" : { "classification": "SystemMetaData", "purpose": "FeatureInsight", "owner": "eleanorjboyd" }
         }
     */
     [EventNames.PACKAGE_MANAGER_REGISTERED]: {
@@ -56,7 +56,7 @@ export interface IEventNamePropertyMapping {
 
     /* __GDPR__
         "environment_manager.selected": {
-            "managerId" : { "classification": "SystemMetaData", "purpose": "FeatureInsight", "owner": "karthiknadig" }
+            "managerId" : { "classification": "SystemMetaData", "purpose": "FeatureInsight", "owner": "eleanorjboyd" }
         }
     */
     [EventNames.ENVIRONMENT_MANAGER_SELECTED]: {
@@ -65,7 +65,7 @@ export interface IEventNamePropertyMapping {
 
     /* __GDPR__
         "package_manager.selected": {
-            "managerId" : { "classification": "SystemMetaData", "purpose": "FeatureInsight", "owner": "karthiknadig" }
+            "managerId" : { "classification": "SystemMetaData", "purpose": "FeatureInsight", "owner": "eleanorjboyd" }
         }
     */
     [EventNames.PACKAGE_MANAGER_SELECTED]: {
@@ -73,11 +73,11 @@ export interface IEventNamePropertyMapping {
     };
 
     /* __GDPR__
-        "venv.using_uv": {"owner": "karthiknadig" }
+        "venv.using_uv": {"owner": "eleanorjboyd" }
     */
     [EventNames.VENV_USING_UV]: never | undefined /* __GDPR__
         "venv.creation": {
-            "creationType": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "owner": "karthiknadig" }
+            "creationType": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "owner": "eleanorjboyd" }
         }
     */;
     [EventNames.VENV_CREATION]: {
@@ -86,8 +86,8 @@ export interface IEventNamePropertyMapping {
 
     /* __GDPR__
         "package_management": {
-            "managerId": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "owner": "karthiknadig" },
-            "result": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "owner": "karthiknadig" }
+            "managerId": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "owner": "eleanorjboyd" },
+            "result": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "owner": "eleanorjboyd" }
         }
     */
     [EventNames.PACKAGE_MANAGEMENT]: {
