@@ -1,4 +1,4 @@
-import { commands, extensions, ExtensionContext, LogOutputChannel, Terminal, Uri, window, workspace } from 'vscode';
+import { commands, ExtensionContext, extensions, LogOutputChannel, Terminal, Uri, window, workspace } from 'vscode';
 import { PythonEnvironment, PythonEnvironmentApi, PythonProjectCreator } from './api';
 import { ensureCorrectVersion } from './common/extVersion';
 import { registerLogger, traceError, traceInfo } from './common/logging';
@@ -75,21 +75,9 @@ import { registerPyenvFeatures } from './managers/pyenv/main';
 async function collectEnvironmentInfo(
     context: ExtensionContext,
     envManagers: EnvironmentManagers,
-    projectManager: PythonProjectManager
+    projectManager: PythonProjectManager,
 ): Promise<string> {
     const info: string[] = [];
-
-    // Attempt to set setting of config.python.useEnvironmentsExtension to true
-    try {
-        const config = workspace.getConfiguration('python');
-        await config.update('useEnvironmentsExtension', true, true);
-    } catch (err) {
-        traceError(
-            'Failed to set config.python.useEnvironmentsExtension to true. Please do so manually in your user settings now to ensure the Python environment extension is enabled during upcoming experimentation.',
-            err,
-        );
-    }
-
     try {
         // Extension version
         const extensionVersion = context.extension?.packageJSON?.version || 'unknown';
@@ -160,6 +148,17 @@ async function collectEnvironmentInfo(
 
 export async function activate(context: ExtensionContext): Promise<PythonEnvironmentApi> {
     const start = new StopWatch();
+
+    // Attempt to set setting of config.python.useEnvironmentsExtension to true
+    try {
+        const config = workspace.getConfiguration('python');
+        await config.update('useEnvironmentsExtension', true, true);
+    } catch (err) {
+        traceError(
+            'Failed to set config.python.useEnvironmentsExtension to true. Please do so manually in your user settings now to ensure the Python environment extension is enabled during upcoming experimentation.',
+            err,
+        );
+    }
 
     // Logging should be set up before anything else.
     const outputChannel: LogOutputChannel = createLogOutputChannel('Python Environments');
@@ -376,11 +375,11 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
         commands.registerCommand('python-envs.reportIssue', async () => {
             try {
                 const issueData = await collectEnvironmentInfo(context, envManagers, projectManager);
-                
+
                 await commands.executeCommand('workbench.action.openIssueReporter', {
                     extensionId: 'ms-python.vscode-python-envs',
                     issueTitle: '[Python Environments] ',
-                    issueBody: `<!-- Please describe the issue you're experiencing -->\n\n<!-- The following information was automatically generated -->\n\n<details>\n<summary>Environment Information</summary>\n\n\`\`\`\n${issueData}\n\`\`\`\n\n</details>`
+                    issueBody: `<!-- Please describe the issue you're experiencing -->\n\n<!-- The following information was automatically generated -->\n\n<details>\n<summary>Environment Information</summary>\n\n\`\`\`\n${issueData}\n\`\`\`\n\n</details>`,
                 });
             } catch (error) {
                 window.showErrorMessage(`Failed to open issue reporter: ${error}`);
