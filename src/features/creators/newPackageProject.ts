@@ -140,12 +140,20 @@ export class NewPackageProject implements PythonProjectCreator {
                             quickCreate: true,
                         });
                     } else {
-                        window.showErrorMessage(
+                        const action = await window.showErrorMessage(
                             l10n.t(
-                                'Creating virtual environment "{0}" failed during package creation since no environment manager supports quick create.',
+                                'Attempt at creating a virtual environment as part of new package "{0}" creation failed. Default environment manager does not support creating environments and no alternative was found.',
                                 packageName,
                             ),
+                            l10n.t('Create Environment Manually'),
                         );
+                        if (action === l10n.t('Create Environment Manually')) {
+                            await commands.executeCommand('python-envs.createAny', {
+                                uri: createdPackage.uri,
+                                selectEnvironment: true,
+                            });
+                            createdEnv = await this.envManagers.getEnvironment(createdPackage.uri);
+                        }
                     }
                 }
             }
