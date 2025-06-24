@@ -28,6 +28,7 @@ import {
     pickPackageManager,
     pickWorkspaceFolder,
 } from '../common/pickers/managers';
+import { getGlobalVenvLocation } from '../managers/builtin/venvUtils';
 import { pickProject, pickProjectMany } from '../common/pickers/projects';
 import { activeTextEditor, showErrorMessage, showInformationMessage, showTextDocument } from '../common/window.apis';
 import { quoteArgs } from './execution/execUtils';
@@ -137,11 +138,23 @@ export async function createAnyEnvironmentCommand(
         const managerId = await pickEnvironmentManager(em.managers.filter((m) => m.supportsCreate));
         const manager = em.managers.find((m) => m.id === managerId);
         if (manager) {
-            const env = await manager.create('global', { ...options });
-            if (select && env) {
-                await manager.set(undefined, env);
+            // For global environment creation when no workspace is open,
+            // we should first get the folder location, open it, and then create the environment
+            // in that opened workspace rather than creating a truly "global" environment
+            
+            // First, get the folder where the user wants to create the virtual environment
+            const folderUri = await getGlobalVenvLocation();
+            if (folderUri) {
+                // Open the selected folder in VS Code
+                await commands.executeCommand('vscode.openFolder', folderUri);
+                // Note: Opening a folder in VS Code will reload the extension context.
+                // The user will need to trigger environment creation again in the newly opened workspace.
+                // This is the expected behavior based on the issue discussion.
+                return undefined;
+            } else {
+                // User cancelled folder selection
+                return undefined;
             }
-            return env;
         }
     } else if (projects.length > 0) {
         const selected = await pickProjectMany(projects, options?.showBackButton);

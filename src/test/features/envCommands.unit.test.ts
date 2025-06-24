@@ -4,6 +4,7 @@ import * as sinon from 'sinon';
 import { EnvironmentManagers, InternalEnvironmentManager, PythonProjectManager } from '../../internal.api';
 import * as projectApi from '../../common/pickers/projects';
 import * as managerApi from '../../common/pickers/managers';
+import * as venvUtils from '../../managers/builtin/venvUtils';
 import { PythonEnvironment, PythonProject } from '../../api';
 import { createAnyEnvironmentCommand } from '../../features/envCommands';
 import { Uri } from 'vscode';
@@ -15,6 +16,8 @@ suite('Create Any Environment Command Tests', () => {
     let env: typeMoq.IMock<PythonEnvironment>;
     let pickProjectManyStub: sinon.SinonStub;
     let pickEnvironmentManagerStub: sinon.SinonStub;
+    let getGlobalVenvLocationStub: sinon.SinonStub;
+    let executeCommandStub: sinon.SinonStub;
     let project: PythonProject = {
         uri: Uri.file('/some/test/workspace/folder'),
         name: 'test-folder',
@@ -48,6 +51,15 @@ suite('Create Any Environment Command Tests', () => {
 
         pickEnvironmentManagerStub = sinon.stub(managerApi, 'pickEnvironmentManager');
         pickProjectManyStub = sinon.stub(projectApi, 'pickProjectMany');
+        getGlobalVenvLocationStub = sinon.stub(venvUtils, 'getGlobalVenvLocation');
+        // Create a mock function and assign it to executeCommand
+        executeCommandStub = sinon.stub();
+        // We need to mock at the require level since vscode.commands might not be available
+        const vscode = require('vscode');
+        if (!vscode.commands) {
+            vscode.commands = {};
+        }
+        vscode.commands.executeCommand = executeCommandStub;
     });
 
     teardown(() => {
@@ -56,37 +68,90 @@ suite('Create Any Environment Command Tests', () => {
 
     test('Create global venv (no-workspace): no-select', async () => {
         pm.setup((p) => p.getProjects(typeMoq.It.isAny())).returns(() => []);
+        
+        // With the new behavior, manager.create should not be called for global environments
         manager
             .setup((m) => m.create('global', typeMoq.It.isAny()))
             .returns(() => Promise.resolve(env.object))
-            .verifiable(typeMoq.Times.once());
+            .verifiable(typeMoq.Times.never());
 
         manager.setup((m) => m.set(typeMoq.It.isAny(), typeMoq.It.isAny())).verifiable(typeMoq.Times.never());
 
         pickEnvironmentManagerStub.resolves(manager.object.id);
         pickProjectManyStub.resolves([]);
+        
+        // Mock the folder selection and command execution
+        const testFolderUri = Uri.file('/test/folder');
+        getGlobalVenvLocationStub.resolves(testFolderUri);
+        executeCommandStub.resolves();
 
         const result = await createAnyEnvironmentCommand(em.object, pm.object, { selectEnvironment: false });
-        // Add assertions to verify the result
-        assert.strictEqual(result, env.object, 'Expected the created environment to match the mocked environment.');
+        
+        // With the new behavior, the function should return undefined and open the folder
+        assert.strictEqual(result, undefined, 'Expected undefined result as folder should be opened instead');
+        
+        // Verify that the folder was opened
+        assert.strictEqual(executeCommandStub.calledWith('vscode.openFolder', testFolderUri), true, 'Expected vscode.openFolder to be called with the selected folder');
+        
         manager.verifyAll();
     });
 
     test('Create global venv (no-workspace): select', async () => {
         pm.setup((p) => p.getProjects(typeMoq.It.isAny())).returns(() => []);
+        
+        // With the new behavior, manager.create should not be called for global environments
         manager
             .setup((m) => m.create('global', typeMoq.It.isAny()))
             .returns(() => Promise.resolve(env.object))
-            .verifiable(typeMoq.Times.once());
+            .verifiable(typeMoq.Times.never());
 
-        manager.setup((m) => m.set(undefined, env.object)).verifiable(typeMoq.Times.once());
+        manager.setup((m) => m.set(undefined, env.object)).verifiable(typeMoq.Times.never());
 
         pickEnvironmentManagerStub.resolves(manager.object.id);
         pickProjectManyStub.resolves([]);
+        
+        // Mock the folder selection and command execution
+        const testFolderUri = Uri.file('/test/folder');
+        getGlobalVenvLocationStub.resolves(testFolderUri);
+        executeCommandStub.resolves();
 
         const result = await createAnyEnvironmentCommand(em.object, pm.object, { selectEnvironment: true });
-        // Add assertions to verify the result
-        assert.strictEqual(result, env.object, 'Expected the created environment to match the mocked environment.');
+        
+        // With the new behavior, the function should return undefined and open the folder
+        assert.strictEqual(result, undefined, 'Expected undefined result as folder should be opened instead');
+        
+        // Verify that the folder was opened
+        assert.strictEqual(executeCommandStub.calledWith('vscode.openFolder', testFolderUri), true, 'Expected vscode.openFolder to be called with the selected folder');
+        
+        manager.verifyAll();
+    });
+
+    test('Create global venv (no-workspace): user cancels folder selection', async () => {
+        pm.setup((p) => p.getProjects(typeMoq.It.isAny())).returns(() => []);
+        
+        // Manager methods should not be called if user cancels
+        manager
+            .setup((m) => m.create('global', typeMoq.It.isAny()))
+            .returns(() => Promise.resolve(env.object))
+            .verifiable(typeMoq.Times.never());
+
+        manager.setup((m) => m.set(typeMoq.It.isAny(), typeMoq.It.isAny())).verifiable(typeMoq.Times.never());
+
+        pickEnvironmentManagerStub.resolves(manager.object.id);
+        pickProjectManyStub.resolves([]);
+        
+        // Mock user cancelling folder selection
+        getGlobalVenvLocationStub.resolves(undefined);
+        executeCommandStub.resolves();
+
+        const result = await createAnyEnvironmentCommand(em.object, pm.object, { selectEnvironment: false });
+        
+        // Should return undefined when user cancels
+        assert.strictEqual(result, undefined, 'Expected undefined result when user cancels folder selection');
+        
+        // Verify that openFolder was not called
+        assert.strictEqual(executeCommandStub.called, false, 'Expected vscode.openFolder to not be called when user cancels');
+        
         manager.verifyAll();
     });
 
