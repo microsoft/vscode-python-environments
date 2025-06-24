@@ -78,6 +78,7 @@ async function collectEnvironmentInfo(
     projectManager: PythonProjectManager,
 ): Promise<string> {
     const info: string[] = [];
+
     try {
         // Extension version
         const extensionVersion = context.extension?.packageJSON?.version || 'unknown';
@@ -241,9 +242,23 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
             await refreshPackagesCommand(item, envManagers);
         }),
         commands.registerCommand('python-envs.create', async (item) => {
+            // Telemetry: record environment creation attempt with selected manager
+            let managerId = 'unknown';
+            if (item && item.manager && item.manager.id) {
+                managerId = item.manager.id;
+            }
+            sendTelemetryEvent(EventNames.CREATE_ENVIRONMENT, undefined, {
+                manager: managerId,
+                triggeredLocation: 'createSpecifiedCommand',
+            });
             return await createEnvironmentCommand(item, envManagers, projectManager);
         }),
         commands.registerCommand('python-envs.createAny', async (options) => {
+            // Telemetry: record environment creation attempt with no specific manager
+            sendTelemetryEvent(EventNames.CREATE_ENVIRONMENT, undefined, {
+                manager: 'none',
+                triggeredLocation: 'createAnyCommand',
+            });
             return await createAnyEnvironmentCommand(
                 envManagers,
                 projectManager,
@@ -282,13 +297,28 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
         }),
         commands.registerCommand('python-envs.addPythonProject', async () => {
             await addPythonProjectCommand(undefined, projectManager, envManagers, projectCreators);
+            const totalProjectCount = projectManager.getProjects().length + 1;
+            sendTelemetryEvent(EventNames.ADD_PROJECT, undefined, {
+                template: 'none',
+                quickCreate: false,
+                totalProjectCount,
+                triggeredLocation: 'add',
+            });
         }),
         commands.registerCommand('python-envs.addPythonProjectGivenResource', async (resource) => {
             // Set context to show/hide menu item depending on whether the resource is already a Python project
             if (resource instanceof Uri) {
                 commands.executeCommand('setContext', 'python-envs:isExistingProject', isExistingProject(resource));
             }
+
             await addPythonProjectCommand(resource, projectManager, envManagers, projectCreators);
+            const totalProjectCount = projectManager.getProjects().length + 1;
+            sendTelemetryEvent(EventNames.ADD_PROJECT, undefined, {
+                template: 'none',
+                quickCreate: false,
+                totalProjectCount,
+                triggeredLocation: 'addGivenResource',
+            });
         }),
         commands.registerCommand('python-envs.removePythonProject', async (item) => {
             // Clear environment association before removing project
@@ -344,6 +374,9 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
         commands.registerCommand(
             'python-envs.createNewProjectFromTemplate',
             async (projectType: string, quickCreate: boolean, newProjectName: string, newProjectPath: string) => {
+                let projectTemplateName = projectType || 'unknown';
+                let triggeredLocation: 'templateCreate' = 'templateCreate';
+                let totalProjectCount = projectManager.getProjects().length + 1;
                 if (quickCreate) {
                     if (!projectType || !newProjectName || !newProjectPath) {
                         throw new Error('Project type, name, and path are required for quick create.');
@@ -367,9 +400,16 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
                 } else {
                     const selected = await newProjectSelection(projectCreators.getProjectCreators());
                     if (selected) {
+                        projectTemplateName = selected.name || 'unknown';
                         await selected.create();
                     }
                 }
+                sendTelemetryEvent(EventNames.ADD_PROJECT, undefined, {
+                    template: projectTemplateName,
+                    quickCreate: quickCreate,
+                    totalProjectCount,
+                    triggeredLocation,
+                });
             },
         ),
         commands.registerCommand('python-envs.reportIssue', async () => {
