@@ -1,12 +1,12 @@
-import { Uri, ThemeIcon, QuickPickItem, QuickPickItemKind, ProgressLocation, QuickInputButtons } from 'vscode';
-import { IconPath, PythonEnvironment, PythonProject } from '../../api';
+import { ProgressLocation, QuickInputButtons, QuickPickItem, QuickPickItemKind, ThemeIcon, Uri } from 'vscode';
+import { CreateEnvironmentOptions, IconPath, PythonEnvironment, PythonProject } from '../../api';
 import { InternalEnvironmentManager } from '../../internal.api';
 import { Common, Interpreter, Pickers } from '../localize';
-import { showQuickPickWithButtons, showQuickPick, showOpenDialog, withProgress } from '../window.apis';
 import { traceError } from '../logging';
-import { pickEnvironmentManager } from './managers';
-import { handlePythonPath } from '../utils/pythonPath';
 import { isWindows } from '../utils/platformUtils';
+import { handlePythonPath } from '../utils/pythonPath';
+import { showOpenDialog, showQuickPick, showQuickPickWithButtons, withProgress } from '../window.apis';
+import { pickEnvironmentManager } from './managers';
 
 type QuickPickIcon =
     | Uri
@@ -77,12 +77,23 @@ async function createEnvironment(
         projectEnvManagers.filter((m) => m.supportsCreate),
     );
 
-    const manager = managers.find((m) => m.id === managerId);
+    let manager: InternalEnvironmentManager | undefined;
+    let createOptions: CreateEnvironmentOptions | undefined = undefined;
+    if (managerId?.includes(`QuickCreate#`)) {
+        manager = managers.find((m) => m.id === managerId.split('#')[1]);
+        createOptions = {
+            projects: projectEnvManagers.map((m) => m),
+            quickCreate: true,
+        } as CreateEnvironmentOptions;
+    } else {
+        manager = managers.find((m) => m.id === managerId);
+    }
+
     if (manager) {
         try {
             const env = await manager.create(
                 options.projects.map((p) => p.uri),
-                undefined,
+                createOptions,
             );
             return env;
         } catch (ex) {
