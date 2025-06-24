@@ -1,6 +1,15 @@
 import * as fs from 'fs/promises';
 import * as path from 'path';
-import { EventEmitter, l10n, LogOutputChannel, MarkdownString, ProgressLocation, ThemeIcon, Uri } from 'vscode';
+import {
+    commands,
+    EventEmitter,
+    l10n,
+    LogOutputChannel,
+    MarkdownString,
+    ProgressLocation,
+    ThemeIcon,
+    Uri,
+} from 'vscode';
 import {
     CreateEnvironmentOptions,
     CreateEnvironmentScope,
@@ -162,6 +171,7 @@ export class VenvManager implements EnvironmentManager {
                     showQuickAndCustomOptions: options?.quickCreate === undefined,
                 });
             }
+
             if (environment) {
                 this.addEnvironment(environment, true);
 
@@ -173,6 +183,21 @@ export class VenvManager implements EnvironmentManager {
                 } catch (err) {
                     traceError(
                         `Failed to create .gitignore in venv: ${err instanceof Error ? err.message : String(err)}`,
+                    );
+                }
+
+                // Open the parent folder of the venv in the current window immediately after creation
+                const envParent = path.dirname(environment.sysPrefix);
+                try {
+                    await commands.executeCommand('vscode.openFolder', Uri.file(envParent), {
+                        forceNewWindow: false,
+                    });
+                } catch (error) {
+                    showErrorMessage(
+                        l10n.t('Failed to open venv parent folder: but venv was still created in {0}', envParent),
+                    );
+                    traceError(
+                        `Failed to open venv parent folder: ${error instanceof Error ? error.message : String(error)}`,
                     );
                 }
             }
