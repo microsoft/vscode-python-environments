@@ -1,3 +1,4 @@
+import * as fs from 'fs/promises';
 import * as path from 'path';
 import { EventEmitter, l10n, LogOutputChannel, MarkdownString, ProgressLocation, ThemeIcon, Uri } from 'vscode';
 import {
@@ -20,6 +21,7 @@ import {
 } from '../../api';
 import { PYTHON_EXTENSION_ID } from '../../common/constants';
 import { VenvManagerStrings } from '../../common/localize';
+import { traceError } from '../../common/logging';
 import { createDeferred, Deferred } from '../../common/utils/deferred';
 import { showErrorMessage, withProgress } from '../../common/window.apis';
 import { findParentIfFile } from '../../features/envCommands';
@@ -162,6 +164,17 @@ export class VenvManager implements EnvironmentManager {
             }
             if (environment) {
                 this.addEnvironment(environment, true);
+
+                // Add .gitignore to the .venv folder
+                try {
+                    const venvDir = environment.environmentPath.fsPath;
+                    const gitignorePath = path.join(venvDir, '.gitignore');
+                    await fs.writeFile(gitignorePath, '*\n', { flag: 'w' });
+                } catch (err) {
+                    traceError(
+                        `Failed to create .gitignore in venv: ${err instanceof Error ? err.message : String(err)}`,
+                    );
+                }
             }
             return environment;
         } finally {

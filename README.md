@@ -1,4 +1,4 @@
-# Python Environments (experimental)
+# Python Environments (preview)
 
 ## Overview
 
@@ -62,22 +62,32 @@ A "Python Project" is any file or folder that contains runnable Python code and 
 
 Projects can be added via the Python Environments pane or in the File Explorer by right-clicking on the folder/file and selecting the "Add as Python Project" menu item.
 
-There are a couple of ways that you can add a Python Project from the Python Environments panel:
+There are a few ways to add a Python Project from the Python Environments panel:
 
 | Name         | Description                                                            |
 | ------------ | ---------------------------------------------------------------------- |
 | Add Existing | Allows you to add an existing folder from the file explorer.           |
 | Auto find    | Searches for folders that contain `pyproject.toml` or `setup.py` files |
+| Create New   | Creates a new project from a template. | 
+
+#### Create New Project from Template 
+The **Python Envs: Create New Project from Template** command simplifies the process of starting a new Python project by scaffolding it for you. Whether in a new workspace or an existing one, this command configures the environment and boilerplate file structure, so you don’t have to worry about the initial setup, and only the code you want to write. There are currently two project types supported:
+
+- Package: A structured Python package with files like `__init__.py` and setup configurations.
+- Script: A simple project for standalone Python scripts, ideal for quick tasks or just to get you started.
 
 ## Command Reference
 
+All commands can be accessed via the Command Palette (`ctrl/cmd + Shift + P`):
+
 | Name                                               | Description                                                                                                                            |
 | -------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
-| Python: Create Environment                         | Create a virtual environment using your preferred environment manager preconfigured with "Quick Create" or configured to your choices. |
-| Python: Manage Packages                            | Install and uninstall packages in a given Python environment.                                                                          |
-| Python: Activate Environment in Current Terminal   | Activates the currently opened terminal with a particular environment.                                                                 |
-| Python: Deactivate Environment in Current Terminal | Deactivates environment in currently opened terminal.                                                                                  |
-| Python: Run as Task                                | Runs Python module as a task.                                                                                                          |
+| Create Environment                         | Create a virtual environment using your preferred environment manager preconfigured with "Quick Create" or configured to your choices. |
+| Manage Packages                            | Install and uninstall packages in a given Python environment.                                                                          |
+| Activate Environment in Current Terminal   | Activates the currently opened terminal with a particular environment.                                                                 |
+| Deactivate Environment in Current Terminal | Deactivates environment in currently opened terminal.                                                                                  |
+| Run as Task                                | Runs Python module as a task.                                                                                                          |
+| Create New Project from Template | Creates scaffolded project with virtual environments based on a template. | 
 
 ## Settings Reference
 
