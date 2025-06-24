@@ -150,6 +150,17 @@ async function collectEnvironmentInfo(
 export async function activate(context: ExtensionContext): Promise<PythonEnvironmentApi> {
     const start = new StopWatch();
 
+    // Attempt to set setting of config.python.useEnvironmentsExtension to true
+    try {
+        const config = workspace.getConfiguration('python');
+        await config.update('useEnvironmentsExtension', true, true);
+    } catch (err) {
+        traceError(
+            'Failed to set config.python.useEnvironmentsExtension to true. Please do so manually in your user settings now to ensure the Python environment extension is enabled during upcoming experimentation.',
+            err,
+        );
+    }
+
     // Logging should be set up before anything else.
     const outputChannel: LogOutputChannel = createLogOutputChannel('Python Environments');
     context.subscriptions.push(outputChannel, registerLogger(outputChannel));
