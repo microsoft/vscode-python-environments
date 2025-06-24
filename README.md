@@ -78,14 +78,16 @@ The **Python Envs: Create New Project from Template** command simplifies the pro
 
 ## Command Reference
 
+All commands can be accessed via the Command Palette (`ctrl/cmd + Shift + P`):
+
 | Name                                               | Description                                                                                                                            |
 | -------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
-| Python: Create Environment                         | Create a virtual environment using your preferred environment manager preconfigured with "Quick Create" or configured to your choices. |
-| Python: Manage Packages                            | Install and uninstall packages in a given Python environment.                                                                          |
-| Python: Activate Environment in Current Terminal   | Activates the currently opened terminal with a particular environment.                                                                 |
-| Python: Deactivate Environment in Current Terminal | Deactivates environment in currently opened terminal.                                                                                  |
-| Python: Run as Task                                | Runs Python module as a task.                                                                                                          |
-| Python: Create New Project from Template | Creates scaffolded project with virtual environments based on a template. | 
+| Create Environment                         | Create a virtual environment using your preferred environment manager preconfigured with "Quick Create" or configured to your choices. |
+| Manage Packages                            | Install and uninstall packages in a given Python environment.                                                                          |
+| Activate Environment in Current Terminal   | Activates the currently opened terminal with a particular environment.                                                                 |
+| Deactivate Environment in Current Terminal | Deactivates environment in currently opened terminal.                                                                                  |
+| Run as Task                                | Runs Python module as a task.                                                                                                          |
+| Create New Project from Template | Creates scaffolded project with virtual environments based on a template. | 
 
 ## Settings Reference
 
