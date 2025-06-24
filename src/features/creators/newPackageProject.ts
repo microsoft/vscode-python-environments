@@ -142,7 +142,7 @@ export class NewPackageProject implements PythonProjectCreator {
                     } else {
                         const action = await window.showErrorMessage(
                             l10n.t(
-                                'Attempt at creating a virtual environment as part of new package "{0}" creation failed. Default environment manager does not support creating environments and no alternative was found.',
+                                'Could not automatically create a virtual environment for the new package "{0}" because your default environment manager does not support this operation and no alternative was available.',
                                 packageName,
                             ),
                             l10n.t('Create Environment Manually'),
