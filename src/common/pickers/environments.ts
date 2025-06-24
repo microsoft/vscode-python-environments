@@ -1,5 +1,5 @@
 import { ProgressLocation, QuickInputButtons, QuickPickItem, QuickPickItemKind, ThemeIcon, Uri } from 'vscode';
-import { IconPath, PythonEnvironment, PythonProject } from '../../api';
+import { CreateEnvironmentOptions, IconPath, PythonEnvironment, PythonProject } from '../../api';
 import { InternalEnvironmentManager } from '../../internal.api';
 import { Common, Interpreter, Pickers } from '../localize';
 import { traceError } from '../logging';
@@ -79,13 +79,24 @@ async function createEnvironment(
         projectEnvManagers.filter((m) => m.supportsCreate),
     );
 
-    const manager = managers.find((m) => m.id === managerId);
+    let manager: InternalEnvironmentManager | undefined;
+    let createOptions: CreateEnvironmentOptions | undefined = undefined;
+    if (managerId?.includes(`QuickCreate#`)) {
+        manager = managers.find((m) => m.id === managerId.split('#')[1]);
+        createOptions = {
+            projects: projectEnvManagers.map((m) => m),
+            quickCreate: true,
+        } as CreateEnvironmentOptions;
+    } else {
+        manager = managers.find((m) => m.id === managerId);
+    }
+
     if (manager) {
         try {
             // add telemetry here
             const env = await manager.create(
                 options.projects.map((p) => p.uri),
-                undefined,
+                createOptions,
             );
             return env;
         } catch (ex) {
