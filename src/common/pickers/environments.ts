@@ -3,6 +3,8 @@ import { CreateEnvironmentOptions, IconPath, PythonEnvironment, PythonProject } 
 import { InternalEnvironmentManager } from '../../internal.api';
 import { Common, Interpreter, Pickers } from '../localize';
 import { traceError } from '../logging';
+import { EventNames } from '../telemetry/constants';
+import { sendTelemetryEvent } from '../telemetry/sender';
 import { isWindows } from '../utils/platformUtils';
 import { handlePythonPath } from '../utils/pythonPath';
 import { showOpenDialog, showQuickPick, showQuickPickWithButtons, withProgress } from '../window.apis';
@@ -91,6 +93,7 @@ async function createEnvironment(
 
     if (manager) {
         try {
+            // add telemetry here
             const env = await manager.create(
                 options.projects.map((p) => p.uri),
                 createOptions,
@@ -122,6 +125,10 @@ async function pickEnvironmentImpl(
         if (selected.label === Interpreter.browsePath) {
             return browseForPython(managers, projectEnvManagers);
         } else if (selected.label === Interpreter.createVirtualEnvironment) {
+            sendTelemetryEvent(EventNames.CREATE_ENVIRONMENT, undefined, {
+                manager: 'none',
+                triggeredLocation: 'pickEnv',
+            });
             return createEnvironment(managers, projectEnvManagers, options);
         }
         return (selected as { result: PythonEnvironment })?.result;
