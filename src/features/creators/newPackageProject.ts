@@ -142,12 +142,12 @@ export class NewPackageProject implements PythonProjectCreator {
                     } else {
                         const action = await window.showErrorMessage(
                             l10n.t(
-                                'Could not automatically create a virtual environment for the new package "{0}" because your default environment manager does not support this operation and no alternative was available.',
+                                'A virtual environment could not be created for the new package "{0}" because your default environment manager does not support this operation and no alternative was available.',
                                 packageName,
                             ),
-                            l10n.t('Create Environment Manually'),
+                            l10n.t('Create custom environment'),
                         );
-                        if (action === l10n.t('Create Environment Manually')) {
+                        if (action === l10n.t('Create custom environment')) {
                             await commands.executeCommand('python-envs.createAny', {
                                 uri: createdPackage.uri,
                                 selectEnvironment: true,
