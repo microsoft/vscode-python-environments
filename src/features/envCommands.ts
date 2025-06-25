@@ -654,7 +654,6 @@ export async function revealProjectInExplorer(item: unknown): Promise<void> {
     if (item instanceof ProjectItem) {
         const projectUri = item.project.uri;
         await commands.executeCommand('revealInExplorer', projectUri);
-        traceInfo(`Revealed project in explorer: ${projectUri.fsPath}`);
     } else {
         traceVerbose(`Invalid context for reveal project in explorer: ${item}`);
     }

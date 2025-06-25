@@ -407,7 +407,6 @@
                 },
                 {
                     "command": "python-envs.revealProjectInExplorer",
-                    "group": "inline",
                     "when": "view == python-projects && viewItem =~ /.*python-workspace.*/"
                 },
                 {
