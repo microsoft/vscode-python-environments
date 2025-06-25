@@ -34,5 +34,6 @@
     "python-envs.createNewProjectFromTemplate.title": "Create New Project from Template",
     "python-envs.terminal.activate.title": "Activate Environment in Current Terminal",
     "python-envs.terminal.deactivate.title": "Deactivate Environment in Current Terminal",
-    "python-envs.uninstallPackage.title": "Uninstall Package"
+    "python-envs.uninstallPackage.title": "Uninstall Package",
+    "python-envs.revealProjectInExplorer.title": "Reveal Project in Explorer"
 }

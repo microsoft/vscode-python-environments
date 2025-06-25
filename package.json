@@ -255,6 +255,12 @@
                 "command": "python-envs.reportIssue",
                 "title": "%python-envs.reportIssue.title%",
                 "category": "Python Environments"
+            },
+            {
+                "command": "python-envs.revealProjectInExplorer",
+                "title": "%python-envs.revealProjectInExplorer.title%",
+                "category": "Python Envs",
+                "icon": "$(folder-opened)"
             }
         ],
         "menus": {
@@ -326,6 +332,10 @@
                 {
                     "command": "python-envs.createAny",
                     "when": "false"
+                },
+                {
+                    "command": "python-envs.revealProjectInExplorer",
+                    "when": "false"
                 }
             ],
             "view/item/context": [
@@ -393,6 +403,10 @@
                 {
                     "command": "python-envs.copyProjectPath",
                     "group": "inline",
+                    "when": "view == python-projects && viewItem =~ /.*python-workspace.*/"
+                },
+                {
+                    "command": "python-envs.revealProjectInExplorer",
                     "when": "view == python-projects && viewItem =~ /.*python-workspace.*/"
                 },
                 {

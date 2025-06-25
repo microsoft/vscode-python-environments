@@ -649,3 +649,12 @@ export async function copyPathToClipboard(item: unknown): Promise<void> {
         traceVerbose(`Invalid context for copy path to clipboard: ${item}`);
     }
 }
+
+export async function revealProjectInExplorer(item: unknown): Promise<void> {
+    if (item instanceof ProjectItem) {
+        const projectUri = item.project.uri;
+        await commands.executeCommand('revealInExplorer', projectUri);
+    } else {
+        traceVerbose(`Invalid context for reveal project in explorer: ${item}`);
+    }
+}

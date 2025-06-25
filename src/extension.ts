@@ -32,6 +32,7 @@ import {
     refreshPackagesCommand,
     removeEnvironmentCommand,
     removePythonProject,
+    revealProjectInExplorer,
     runAsTaskCommand,
     runInDedicatedTerminalCommand,
     runInTerminalCommand,
@@ -355,6 +356,9 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
         }),
         commands.registerCommand('python-envs.copyProjectPath', async (item) => {
             await copyPathToClipboard(item);
+        }),
+        commands.registerCommand('python-envs.revealProjectInExplorer', async (item) => {
+            await revealProjectInExplorer(item);
         }),
         commands.registerCommand('python-envs.terminal.activate', async () => {
             const terminal = activeTerminal();
