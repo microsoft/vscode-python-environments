@@ -105,6 +105,14 @@ export namespace VenvManagerStrings {
     export const quickCreateDescription = l10n.t('Create a virtual environment in the workspace root');
     export const customize = l10n.t('Custom');
     export const customizeDescription = l10n.t('Choose python version, location, packages, name, etc.');
+
+    // New strings for retry functionality
+    export const packageInstallationFailedTitle = l10n.t('Package installation failed');
+    export const packageInstallationFailedMessage = l10n.t('Environment was created successfully, but package installation failed. Would you like to select packages to install?');
+    export const retryPackageInstallation = l10n.t('Select Packages');
+    export const environmentCreationFailedTitle = l10n.t('Environment creation failed');
+    export const environmentCreationFailedMessage = l10n.t('Failed to create virtual environment. Would you like to try again?');
+    export const retryEnvironmentCreation = l10n.t('Retry');
 }
 
 export namespace SysManagerStrings {

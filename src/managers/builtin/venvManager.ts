@@ -32,7 +32,7 @@ import { PYTHON_EXTENSION_ID } from '../../common/constants';
 import { VenvManagerStrings } from '../../common/localize';
 import { traceError } from '../../common/logging';
 import { createDeferred, Deferred } from '../../common/utils/deferred';
-import { showErrorMessage, withProgress } from '../../common/window.apis';
+import { showErrorMessage, showInformationMessage, withProgress } from '../../common/window.apis';
 import { findParentIfFile } from '../../features/envCommands';
 import { NativePythonFinder } from '../common/nativePythonFinder';
 import { getLatest, shortVersion, sortEnvironments } from '../common/utils';
@@ -51,6 +51,7 @@ import {
     setVenvForWorkspace,
     setVenvForWorkspaces,
 } from './venvUtils';
+import { getWorkspacePackagesToInstall } from './pipUtils';
 
 export class VenvManager implements EnvironmentManager {
     private collection: PythonEnvironment[] = [];
@@ -143,7 +144,7 @@ export class VenvManager implements EnvironmentManager {
             let environment: PythonEnvironment | undefined = undefined;
             if (options?.quickCreate) {
                 if (this.globalEnv && this.globalEnv.version.startsWith('3.')) {
-                    environment = await quickCreateVenv(
+                    const result = await quickCreateVenv(
                         this.nativeFinder,
                         this.api,
                         this.log,
@@ -152,6 +153,28 @@ export class VenvManager implements EnvironmentManager {
                         venvRoot,
                         options?.additionalPackages,
                     );
+
+                    if (result.environmentCreated) {
+                        environment = result.environment;
+                        
+                        // Handle package installation failure
+                        if (!result.packagesInstalled && result.packageInstallationError) {
+                            this.log.warn(`Quick Create: Package installation failed: ${result.packageInstallationError.message}`);
+                            // Show notification with retry option for package installation
+                            setImmediate(async () => {
+                                await this.showPackageInstallationFailureNotification(environment!, venvRoot);
+                            });
+                        }
+                    } else {
+                        // Environment creation failed completely
+                        this.log.error(`Quick Create: Environment creation failed: ${result.environmentCreationError?.message}`);
+                        // Show notification with retry option for entire environment creation
+                        setImmediate(async () => {
+                            await this.showEnvironmentCreationFailureNotification(scope, options);
+                        });
+                        showErrorMessage(VenvManagerStrings.venvCreateFailed);
+                        return;
+                    }
                 } else if (!this.globalEnv) {
                     this.log.error('No base python found');
                     showErrorMessage(VenvManagerStrings.venvErrorNoBasePython);
@@ -577,5 +600,71 @@ export class VenvManager implements EnvironmentManager {
             }
         });
         return projects;
+    }
+
+    /**
+     * Handles retry package installation flow after quick create.
+     */
+    private async handlePackageInstallationRetry(
+        environment: PythonEnvironment,
+        venvRoot: Uri,
+    ): Promise<void> {
+        try {
+            const project = this.api.getPythonProject(venvRoot);
+            const packages = await getWorkspacePackagesToInstall(
+                this.api,
+                { showSkipOption: true, install: [] },
+                project ? [project] : undefined,
+                environment,
+                this.log,
+            );
+
+            if (packages && (packages.install.length > 0 || packages.uninstall.length > 0)) {
+                await this.api.managePackages(environment, {
+                    upgrade: false,
+                    install: packages.install,
+                    uninstall: packages.uninstall,
+                });
+                this.log.info('Package installation retry succeeded');
+            }
+        } catch (error) {
+            this.log.error(`Package installation retry failed: ${error}`);
+            showErrorMessage(l10n.t('Package installation failed again: {0}', String(error)));
+        }
+    }
+
+    /**
+     * Shows notification for package installation failure with retry option.
+     */
+    private async showPackageInstallationFailureNotification(
+        environment: PythonEnvironment,
+        venvRoot: Uri,
+    ): Promise<void> {
+        const result = await showInformationMessage(
+            VenvManagerStrings.packageInstallationFailedMessage,
+            VenvManagerStrings.retryPackageInstallation,
+        );
+        
+        if (result === VenvManagerStrings.retryPackageInstallation) {
+            await this.handlePackageInstallationRetry(environment, venvRoot);
+        }
+    }
+
+    /**
+     * Shows notification for environment creation failure with retry option.
+     */
+    private async showEnvironmentCreationFailureNotification(
+        scope: CreateEnvironmentScope,
+        options: CreateEnvironmentOptions | undefined,
+    ): Promise<void> {
+        const result = await showInformationMessage(
+            VenvManagerStrings.environmentCreationFailedMessage,
+            VenvManagerStrings.retryEnvironmentCreation,
+        );
+        
+        if (result === VenvManagerStrings.retryEnvironmentCreation) {
+            // Retry the entire create flow
+            await this.create(scope, options);
+        }
     }
 }

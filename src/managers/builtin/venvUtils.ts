@@ -33,6 +33,41 @@ import { resolveSystemPythonEnvironmentPath } from './utils';
 export const VENV_WORKSPACE_KEY = `${ENVS_EXTENSION_ID}:venv:WORKSPACE_SELECTED`;
 export const VENV_GLOBAL_KEY = `${ENVS_EXTENSION_ID}:venv:GLOBAL_SELECTED`;
 
+/**
+ * Result of environment creation operation.
+ */
+export interface CreateEnvironmentResult {
+    /**
+     * The created environment, if successful.
+     */
+    environment?: PythonEnvironment;
+    
+    /**
+     * Whether environment creation succeeded.
+     */
+    environmentCreated: boolean;
+    
+    /**
+     * Whether package installation succeeded (only relevant if environmentCreated is true).
+     */
+    packagesInstalled: boolean;
+    
+    /**
+     * Error that occurred during environment creation.
+     */
+    environmentCreationError?: Error;
+    
+    /**
+     * Error that occurred during package installation.
+     */
+    packageInstallationError?: Error;
+    
+    /**
+     * Packages that were attempted to be installed.
+     */
+    attemptedPackages?: PipPackages;
+}
+
 export async function clearVenvCache(): Promise<void> {
     const keys = [VENV_WORKSPACE_KEY, VENV_GLOBAL_KEY];
     const state = await getWorkspacePersistentState();
@@ -281,7 +316,7 @@ async function createWithProgress(
     venvRoot: Uri,
     envPath: string,
     packages?: PipPackages,
-) {
+): Promise<CreateEnvironmentResult> {
     const pythonPath =
         os.platform() === 'win32' ? path.join(envPath, 'Scripts', 'python.exe') : path.join(envPath, 'bin', 'python');
 
@@ -290,7 +325,14 @@ async function createWithProgress(
             location: ProgressLocation.Notification,
             title: VenvManagerStrings.venvCreating,
         },
-        async () => {
+        async (): Promise<CreateEnvironmentResult> => {
+            let env: PythonEnvironment | undefined;
+            let environmentCreated = false;
+            let packagesInstalled = false;
+            let environmentCreationError: Error | undefined;
+            let packageInstallationError: Error | undefined;
+
+            // Step 1: Create the virtual environment
             try {
                 const useUv = await isUvInstalled(log);
                 if (basePython.execInfo?.run.executable) {
@@ -315,20 +357,48 @@ async function createWithProgress(
                 }
 
                 const resolved = await nativeFinder.resolve(pythonPath);
-                const env = api.createPythonEnvironmentItem(await getPythonInfo(resolved), manager);
-                if (packages && (packages.install.length > 0 || packages.uninstall.length > 0)) {
+                env = api.createPythonEnvironmentItem(await getPythonInfo(resolved), manager);
+                environmentCreated = true;
+                log.info(`Virtual environment created successfully: ${envPath}`);
+            } catch (e) {
+                environmentCreationError = e instanceof Error ? e : new Error(String(e));
+                log.error(`Failed to create virtual environment: ${environmentCreationError.message}`);
+                return {
+                    environmentCreated: false,
+                    packagesInstalled: false,
+                    environmentCreationError,
+                    attemptedPackages: packages,
+                };
+            }
+
+            // Step 2: Install packages if environment was created successfully
+            if (env && packages && (packages.install.length > 0 || packages.uninstall.length > 0)) {
+                try {
                     await api.managePackages(env, {
                         upgrade: false,
-                        install: packages?.install,
-                        uninstall: packages?.uninstall ?? [],
+                        install: packages.install,
+                        uninstall: packages.uninstall ?? [],
                     });
+                    packagesInstalled = true;
+                    log.info('Packages installed successfully');
+                } catch (e) {
+                    packageInstallationError = e instanceof Error ? e : new Error(String(e));
+                    log.error(`Failed to install packages: ${packageInstallationError.message}`);
+                    // Note: environment is still created, just packages failed
                 }
-                return env;
-            } catch (e) {
-                log.error(`Failed to create virtual environment: ${e}`);
-                showErrorMessage(VenvManagerStrings.venvCreateFailed);
-                return;
+            } else {
+                // No packages to install, consider this successful
+                packagesInstalled = true;
             }
+
+            return {
+                environment: env,
+                environmentCreated,
+                packagesInstalled,
+                environmentCreationError,
+                packageInstallationError,
+                attemptedPackages: packages,
+            };
         },
     );
 }
@@ -361,7 +431,7 @@ export async function quickCreateVenv(
     baseEnv: PythonEnvironment,
     venvRoot: Uri,
     additionalPackages?: string[],
-): Promise<PythonEnvironment | undefined> {
+): Promise<CreateEnvironmentResult> {
     const project = api.getPythonProject(venvRoot);
 
     sendTelemetryEvent(EventNames.VENV_CREATION, undefined, { creationType: 'quick' });
@@ -408,7 +478,15 @@ export async function createPythonVenv(
     if (customize === undefined) {
         return;
     } else if (customize === false) {
-        return quickCreateVenv(nativeFinder, api, log, manager, sortedEnvs[0], venvRoot, options.additionalPackages);
+        const result = await quickCreateVenv(nativeFinder, api, log, manager, sortedEnvs[0], venvRoot, options.additionalPackages);
+        if (!result.environmentCreated) {
+            showErrorMessage(VenvManagerStrings.venvCreateFailed);
+            return;
+        }
+        if (!result.packagesInstalled && result.packageInstallationError) {
+            log.warn(`Package installation failed during quick create: ${result.packageInstallationError.message}`);
+        }
+        return result.environment;
     } else {
         sendTelemetryEvent(EventNames.VENV_CREATION, undefined, { creationType: 'custom' });
     }
@@ -450,10 +528,21 @@ export async function createPythonVenv(
     const allPackages = [];
     allPackages.push(...(packages?.install ?? []), ...(options.additionalPackages ?? []));
 
-    return await createWithProgress(nativeFinder, api, log, manager, basePython, venvRoot, envPath, {
+    const result = await createWithProgress(nativeFinder, api, log, manager, basePython, venvRoot, envPath, {
         install: allPackages,
         uninstall: [],
     });
+
+    if (!result.environmentCreated) {
+        showErrorMessage(VenvManagerStrings.venvCreateFailed);
+        return;
+    }
+
+    if (!result.packagesInstalled && result.packageInstallationError) {
+        log.warn(`Package installation failed: ${result.packageInstallationError.message}`);
+    }
+
+    return result.environment;
 }
 
 export async function removeVenv(environment: PythonEnvironment, log: LogOutputChannel): Promise<boolean> {
