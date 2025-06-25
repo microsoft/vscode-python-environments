@@ -1,5 +1,6 @@
 import assert from 'assert';
 import { Uri } from 'vscode';
+import { PythonProject } from '../../api';
 import { PythonProjectManagerImpl } from '../../features/projectManager';
 
 suite('Project Manager Update URI tests', () => {
@@ -24,7 +25,7 @@ suite('Project Manager Update URI tests', () => {
         });
         
         // Access private _projects map to manually add the project for testing
-        (projectManager as any)._projects.set(oldUri.toString(), project);
+        (projectManager as unknown as { _projects: Map<string, PythonProject> })._projects.set(oldUri.toString(), project);
 
         // Verify project exists with old URI
         const oldProject = projectManager.get(oldUri);
@@ -71,8 +72,9 @@ suite('Project Manager Update URI tests', () => {
         const project2 = projectManager.create('Project2', project2Uri);
         
         // Access private _projects map to manually add projects for testing
-        (projectManager as any)._projects.set(project1Uri.toString(), project1);
-        (projectManager as any)._projects.set(project2Uri.toString(), project2);
+        const pmWithPrivateAccess = projectManager as unknown as { _projects: Map<string, PythonProject> };
+        pmWithPrivateAccess._projects.set(project1Uri.toString(), project1);
+        pmWithPrivateAccess._projects.set(project2Uri.toString(), project2);
 
         // Verify both projects exist
         assert.ok(projectManager.get(project1Uri), 'Project1 should exist');
