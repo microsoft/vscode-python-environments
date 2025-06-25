@@ -287,7 +287,12 @@ export interface PythonProjectManager extends Disposable {
     ): PythonProject;
     add(pyWorkspace: PythonProject | PythonProject[]): Promise<void>;
     remove(pyWorkspace: PythonProject | PythonProject[]): void;
-    updateProjectUri(oldUri: Uri, newUri: Uri): void;
+    updateProject(
+        existingUri: Uri,
+        newName?: string,
+        newUri?: Uri,
+        newOptions?: { description?: string; tooltip?: string | MarkdownString; iconPath?: IconPath },
+    ): Promise<void>;
     getProjects(uris?: Uri[]): ReadonlyArray<PythonProject>;
     get(uri: Uri): PythonProject | undefined;
     onDidChangeProjects: Event<PythonProject[] | undefined>;

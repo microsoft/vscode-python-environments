@@ -21,11 +21,14 @@ suite('Project Manager Update URI tests', () => {
         // Create a project and manually add it to the internal map to bypass the complex add method
         const project = projectManager.create('TestProject', oldUri, {
             description: 'Test project',
-            tooltip: 'Test tooltip'
+            tooltip: 'Test tooltip',
         });
-        
+
         // Access private _projects map to manually add the project for testing
-        (projectManager as unknown as { _projects: Map<string, PythonProject> })._projects.set(oldUri.toString(), project);
+        (projectManager as unknown as { _projects: Map<string, PythonProject> })._projects.set(
+            oldUri.toString(),
+            project,
+        );
 
         // Verify project exists with old URI
         const oldProject = projectManager.get(oldUri);
@@ -33,7 +36,7 @@ suite('Project Manager Update URI tests', () => {
         assert.equal(oldProject.uri.fsPath, oldUri.fsPath, 'Old URI should match');
 
         // Update the project URI
-        projectManager.updateProjectUri(oldUri, newUri);
+        projectManager.updateProject(oldUri, 'project', newUri);
 
         // Verify project no longer exists with old URI
         const oldProjectAfterUpdate = projectManager.get(oldUri);
@@ -55,7 +58,7 @@ suite('Project Manager Update URI tests', () => {
         // Try to update a project that doesn't exist
         // This should not throw an error
         assert.doesNotThrow(() => {
-            projectManager.updateProjectUri(oldUri, newUri);
+            projectManager.updateProject(oldUri, 'project', newUri);
         }, 'Should handle non-existent project gracefully');
 
         // Verify no project was created
@@ -70,7 +73,7 @@ suite('Project Manager Update URI tests', () => {
         // Create projects and manually add them to the internal map
         const project1 = projectManager.create('Project1', project1Uri);
         const project2 = projectManager.create('Project2', project2Uri);
-        
+
         // Access private _projects map to manually add projects for testing
         const pmWithPrivateAccess = projectManager as unknown as { _projects: Map<string, PythonProject> };
         pmWithPrivateAccess._projects.set(project1Uri.toString(), project1);

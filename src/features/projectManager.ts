@@ -170,33 +170,39 @@ export class PythonProjectManagerImpl implements PythonProjectManager {
         this._onDidChangeProjects.fire(Array.from(this._projects.values()));
     }
 
-    updateProjectUri(oldUri: Uri, newUri: Uri): void {
-        const oldKey = oldUri.toString();
-        const project = this._projects.get(oldKey);
-        
+    /**
+     * Update a project by removing the old one and adding a new one with updated properties.
+     * @param existingUri The URI of the project to update.
+     * @param newName The new name for the project (optional, defaults to old name).
+     * @param newUri The new URI for the project (optional, defaults to old URI).
+     * @param newOptions New options for the project (optional, merged with old options).
+     */
+    async updateProject(
+        existingUri: Uri,
+        newName?: string,
+        newUri?: Uri,
+        newOptions?: { description?: string; tooltip?: string | MarkdownString; iconPath?: IconPath },
+    ): Promise<void> {
+        const project = this.get(existingUri);
         if (!project) {
             return;
         }
 
-        // Remove the project with the old URI
-        this._projects.delete(oldKey);
-        
-        // Create a new project instance with the updated URI
-        const updatedProject = this.create(
-            path.basename(newUri.fsPath),
-            newUri,
-            {
-                description: project.description,
-                tooltip: project.tooltip,
-                iconPath: (project as PythonProjectsImpl).iconPath, // Cast to implementation to access iconPath
-            }
-        );
-        
-        // Add the updated project
-        this._projects.set(newUri.toString(), updatedProject);
-        
-        // Fire the change event to update the view
-        this._onDidChangeProjects.fire(Array.from(this._projects.values()));
+        // Remove the old project
+        this.remove(project);
+
+        // Prepare new values
+        const name = newName ?? project.name;
+        const uri = newUri ?? project.uri;
+        const options = {
+            description: newOptions?.description ?? project.description,
+            tooltip: newOptions?.tooltip ?? project.tooltip,
+            iconPath: newOptions?.iconPath ?? (project as PythonProjectsImpl).iconPath,
+        };
+
+        // Create and add the new project
+        const updatedProject = this.create(name, uri, options);
+        await this.add(updatedProject);
     }
 
     getProjects(uris?: Uri[]): ReadonlyArray<PythonProject> {
@@ -212,7 +218,7 @@ export class PythonProjectManagerImpl implements PythonProjectManager {
             }
             return projects;
         }
-    }
+    }0
 
     get(uri: Uri): PythonProject | undefined {
         let pythonProject = this._projects.get(uri.toString());
