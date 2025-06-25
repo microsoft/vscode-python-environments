@@ -36,7 +36,7 @@ suite('Project Manager Update URI tests', () => {
         assert.equal(oldProject.uri.fsPath, oldUri.fsPath, 'Old URI should match');
 
         // Update the project URI
-        projectManager.updateProject(oldUri, 'project', newUri);
+        projectManager.modifyProject(oldUri, 'project', newUri);
 
         // Verify project no longer exists with old URI
         const oldProjectAfterUpdate = projectManager.get(oldUri);
@@ -58,7 +58,7 @@ suite('Project Manager Update URI tests', () => {
         // Try to update a project that doesn't exist
         // This should not throw an error
         assert.doesNotThrow(() => {
-            projectManager.updateProject(oldUri, 'project', newUri);
+            projectManager.modifyProject(oldUri, 'project', newUri);
         }, 'Should handle non-existent project gracefully');
 
         // Verify no project was created

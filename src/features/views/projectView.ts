@@ -266,7 +266,7 @@ export class ProjectView implements TreeDataProvider<ProjectTreeItem> {
                 }
 
                 const newProjectUri = Uri.file(newProjectPath);
-                await this.projectManager.updateProject(project.uri, undefined, newProjectUri);
+                await this.projectManager.modifyProject(project.uri, undefined, newProjectUri);
             }
 
             if (affectedProjects.length > 0) {

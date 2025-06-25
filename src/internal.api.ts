@@ -287,7 +287,7 @@ export interface PythonProjectManager extends Disposable {
     ): PythonProject;
     add(pyWorkspace: PythonProject | PythonProject[]): Promise<void>;
     remove(pyWorkspace: PythonProject | PythonProject[]): void;
-    updateProject(
+    modifyProject(
         existingUri: Uri,
         newName?: string,
         newUri?: Uri,

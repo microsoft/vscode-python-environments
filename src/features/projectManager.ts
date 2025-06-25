@@ -177,7 +177,7 @@ export class PythonProjectManagerImpl implements PythonProjectManager {
      * @param newUri The new URI for the project (optional, defaults to old URI).
      * @param newOptions New options for the project (optional, merged with old options).
      */
-    async updateProject(
+    async modifyProject(
         existingUri: Uri,
         newName?: string,
         newUri?: Uri,
