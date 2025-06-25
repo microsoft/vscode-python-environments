@@ -218,7 +218,7 @@ export class PythonProjectManagerImpl implements PythonProjectManager {
             }
             return projects;
         }
-    }0
+    }
 
     get(uri: Uri): PythonProject | undefined {
         let pythonProject = this._projects.get(uri.toString());
