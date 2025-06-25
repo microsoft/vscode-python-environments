@@ -170,6 +170,35 @@ export class PythonProjectManagerImpl implements PythonProjectManager {
         this._onDidChangeProjects.fire(Array.from(this._projects.values()));
     }
 
+    updateProjectUri(oldUri: Uri, newUri: Uri): void {
+        const oldKey = oldUri.toString();
+        const project = this._projects.get(oldKey);
+        
+        if (!project) {
+            return;
+        }
+
+        // Remove the project with the old URI
+        this._projects.delete(oldKey);
+        
+        // Create a new project instance with the updated URI
+        const updatedProject = this.create(
+            path.basename(newUri.fsPath),
+            newUri,
+            {
+                description: project.description,
+                tooltip: project.tooltip,
+                iconPath: (project as PythonProjectsImpl).iconPath, // Cast to implementation to access iconPath
+            }
+        );
+        
+        // Add the updated project
+        this._projects.set(newUri.toString(), updatedProject);
+        
+        // Fire the change event to update the view
+        this._onDidChangeProjects.fire(Array.from(this._projects.values()));
+    }
+
     getProjects(uris?: Uri[]): ReadonlyArray<PythonProject> {
         if (uris === undefined) {
             return Array.from(this._projects.values());
