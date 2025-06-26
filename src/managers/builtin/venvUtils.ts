@@ -33,6 +33,26 @@ import { resolveSystemPythonEnvironmentPath } from './utils';
 export const VENV_WORKSPACE_KEY = `${ENVS_EXTENSION_ID}:venv:WORKSPACE_SELECTED`;
 export const VENV_GLOBAL_KEY = `${ENVS_EXTENSION_ID}:venv:GLOBAL_SELECTED`;
 
+/**
+ * Result of environment creation operation.
+ */
+export interface CreateEnvironmentResult {
+    /**
+     * The created environment, if successful.
+     */
+    environment?: PythonEnvironment;
+
+    /*
+     * Exists if error occurred during environment creation and includes error explanation.
+     */
+    envCreationErr?: string;
+
+    /*
+     * Exists if error occurred while installing packages and includes error description.
+     */
+    pkgInstallationErr?: string;
+}
+
 export async function clearVenvCache(): Promise<void> {
     const keys = [VENV_WORKSPACE_KEY, VENV_GLOBAL_KEY];
     const state = await getWorkspacePersistentState();
@@ -281,7 +301,7 @@ async function createWithProgress(
     venvRoot: Uri,
     envPath: string,
     packages?: PipPackages,
-) {
+): Promise<CreateEnvironmentResult | undefined> {
     const pythonPath =
         os.platform() === 'win32' ? path.join(envPath, 'Scripts', 'python.exe') : path.join(envPath, 'bin', 'python');
 
@@ -295,8 +315,10 @@ async function createWithProgress(
             ),
         },
         async () => {
+            const result: CreateEnvironmentResult = {};
             try {
                 const useUv = await isUvInstalled(log);
+                // env creation
                 if (basePython.execInfo?.run.executable) {
                     if (useUv) {
                         await runUV(
@@ -313,26 +335,33 @@ async function createWithProgress(
                         );
                     }
                     if (!(await fsapi.pathExists(pythonPath))) {
-                        log.error('no python executable found in virtual environment');
                         throw new Error('no python executable found in virtual environment');
                     }
                 }
 
+                // handle admin of new env
                 const resolved = await nativeFinder.resolve(pythonPath);
                 const env = api.createPythonEnvironmentItem(await getPythonInfo(resolved), manager);
+
+                // install packages
                 if (packages && (packages.install.length > 0 || packages.uninstall.length > 0)) {
-                    await api.managePackages(env, {
-                        upgrade: false,
-                        install: packages?.install,
-                        uninstall: packages?.uninstall ?? [],
-                    });
+                    try {
+                        await api.managePackages(env, {
+                            upgrade: false,
+                            install: packages?.install,
+                            uninstall: packages?.uninstall ?? [],
+                        });
+                    } catch (e) {
+                        // error occurred while installing packages
+                        result.pkgInstallationErr = e instanceof Error ? e.message : String(e);
+                    }
                 }
-                return env;
+                result.environment = env;
             } catch (e) {
                 log.error(`Failed to create virtual environment: ${e}`);
-                showErrorMessage(VenvManagerStrings.venvCreateFailed);
-                return;
+                result.envCreationErr = `Failed to create virtual environment: ${e}`;
             }
+            return result;
         },
     );
 }
@@ -365,7 +394,7 @@ export async function quickCreateVenv(
     baseEnv: PythonEnvironment,
     venvRoot: Uri,
     additionalPackages?: string[],
-): Promise<PythonEnvironment | undefined> {
+): Promise<CreateEnvironmentResult | undefined> {
     const project = api.getPythonProject(venvRoot);
 
     sendTelemetryEvent(EventNames.VENV_CREATION, undefined, { creationType: 'quick' });
@@ -387,6 +416,7 @@ export async function quickCreateVenv(
         venvPath = `${venvPath}-${i}`;
     }
 
+    // createWithProgress handles building CreateEnvironmentResult and adding err msgs
     return await createWithProgress(nativeFinder, api, log, manager, baseEnv, venvRoot, venvPath, {
         install: allPackages,
         uninstall: [],
@@ -401,7 +431,7 @@ export async function createPythonVenv(
     basePythons: PythonEnvironment[],
     venvRoot: Uri,
     options: { showQuickAndCustomOptions: boolean; additionalPackages?: string[] },
-): Promise<PythonEnvironment | undefined> {
+): Promise<CreateEnvironmentResult | undefined> {
     const sortedEnvs = ensureGlobalEnv(basePythons, log);
 
     let customize: boolean | undefined = true;
@@ -421,7 +451,9 @@ export async function createPythonVenv(
     const basePython = await pickEnvironmentFrom(sortedEnvs);
     if (!basePython || !basePython.execInfo) {
         log.error('No base python selected, cannot create virtual environment.');
-        return;
+        return {
+            envCreationErr: 'No base python selected, cannot create virtual environment.',
+        };
     }
 
     const name = await showInputBox({
@@ -439,7 +471,9 @@ export async function createPythonVenv(
     });
     if (!name) {
         log.error('No name entered, cannot create virtual environment.');
-        return;
+        return {
+            envCreationErr: 'No name entered, cannot create virtual environment.',
+        };
     }
 
     const envPath = path.join(venvRoot.fsPath, name);

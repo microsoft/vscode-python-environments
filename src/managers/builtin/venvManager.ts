@@ -38,6 +38,7 @@ import { NativePythonFinder } from '../common/nativePythonFinder';
 import { getLatest, shortVersion, sortEnvironments } from '../common/utils';
 import {
     clearVenvCache,
+    CreateEnvironmentResult,
     createPythonVenv,
     findVirtualEnvironments,
     getDefaultGlobalVenvLocation,
@@ -140,10 +141,25 @@ export class VenvManager implements EnvironmentManager {
             const venvRoot: Uri = Uri.file(await findParentIfFile(uri.fsPath));
 
             const globals = await this.baseManager.getEnvironments('global');
-            let environment: PythonEnvironment | undefined = undefined;
+            let result: CreateEnvironmentResult | undefined = undefined;
             if (options?.quickCreate) {
+                // error on missing information
+                if (!this.globalEnv) {
+                    this.log.error('No base python found');
+                    showErrorMessage(VenvManagerStrings.venvErrorNoBasePython);
+                    throw new Error('No base python found');
+                }
+                if (!this.globalEnv.version.startsWith('3.')) {
+                    this.log.error('Did not find any base python 3.*');
+                    globals.forEach((e, i) => {
+                        this.log.error(`${i}: ${e.version} : ${e.environmentPath.fsPath}`);
+                    });
+                    showErrorMessage(VenvManagerStrings.venvErrorNoPython3);
+                    throw new Error('Did not find any base python 3.*');
+                }
                 if (this.globalEnv && this.globalEnv.version.startsWith('3.')) {
-                    environment = await quickCreateVenv(
+                    // quick create given correct information
+                    result = await quickCreateVenv(
                         this.nativeFinder,
                         this.api,
                         this.log,
@@ -152,27 +168,18 @@ export class VenvManager implements EnvironmentManager {
                         venvRoot,
                         options?.additionalPackages,
                     );
-                } else if (!this.globalEnv) {
-                    this.log.error('No base python found');
-                    showErrorMessage(VenvManagerStrings.venvErrorNoBasePython);
-                    throw new Error('No base python found');
-                } else if (!this.globalEnv.version.startsWith('3.')) {
-                    this.log.error('Did not find any base python 3.*');
-                    globals.forEach((e, i) => {
-                        this.log.error(`${i}: ${e.version} : ${e.environmentPath.fsPath}`);
-                    });
-                    showErrorMessage(VenvManagerStrings.venvErrorNoPython3);
-                    throw new Error('Did not find any base python 3.*');
                 }
             } else {
-                environment = await createPythonVenv(this.nativeFinder, this.api, this.log, this, globals, venvRoot, {
-                    // If quickCreate is not set that means the user triggered this method from
-                    // environment manager View, by selecting the venv manager.
+                // If quickCreate is not set that means the user triggered this method from
+                // environment manager View, by selecting the venv manager.
+                result = await createPythonVenv(this.nativeFinder, this.api, this.log, this, globals, venvRoot, {
                     showQuickAndCustomOptions: options?.quickCreate === undefined,
                 });
             }
 
-            if (environment) {
+            if (result?.environment) {
+                const environment = result.environment;
+
                 this.addEnvironment(environment, true);
 
                 // Add .gitignore to the .venv folder
@@ -201,7 +208,7 @@ export class VenvManager implements EnvironmentManager {
                     );
                 }
             }
-            return environment;
+            return result?.environment ?? undefined;
         } finally {
             this.skipWatcherRefresh = false;
         }
