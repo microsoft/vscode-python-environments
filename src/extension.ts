@@ -1,7 +1,7 @@
 import { commands, ExtensionContext, extensions, LogOutputChannel, Terminal, Uri, window, workspace } from 'vscode';
 import { PythonEnvironment, PythonEnvironmentApi, PythonProjectCreator } from './api';
 import { ensureCorrectVersion } from './common/extVersion';
-import { registerLogger, traceError, traceInfo } from './common/logging';
+import { registerLogger, traceError, traceInfo, traceWarn } from './common/logging';
 import { clearPersistentState, setPersistentState } from './common/persistentState';
 import { newProjectSelection } from './common/pickers/managers';
 import { StopWatch } from './common/stopWatch';
@@ -15,6 +15,7 @@ import {
     onDidChangeActiveTerminal,
     onDidChangeTerminalShellIntegration,
 } from './common/window.apis';
+import { getConfiguration } from './common/workspace.apis';
 import { createManagerReady } from './features/common/managerReady';
 import { AutoFindProjects } from './features/creators/autoFindProjects';
 import { ExistingProjects } from './features/creators/existingProjects';
@@ -66,6 +67,7 @@ import { EnvironmentManagers, ProjectCreators, PythonProjectManager } from './in
 import { registerSystemPythonFeatures } from './managers/builtin/main';
 import { SysPythonManager } from './managers/builtin/sysPythonManager';
 import { createNativePythonFinder, NativePythonFinder } from './managers/common/nativePythonFinder';
+import { IDisposable } from './managers/common/types';
 import { registerCondaFeatures } from './managers/conda/main';
 import { registerPoetryFeatures } from './managers/poetry/main';
 import { registerPyenvFeatures } from './managers/pyenv/main';
@@ -148,19 +150,16 @@ async function collectEnvironmentInfo(
     return info.join('\n');
 }
 
-export async function activate(context: ExtensionContext): Promise<PythonEnvironmentApi> {
-    const start = new StopWatch();
-
-    // Attempt to set setting of config.python.useEnvironmentsExtension to true
-    try {
-        const config = workspace.getConfiguration('python');
-        await config.update('useEnvironmentsExtension', true, true);
-    } catch (err) {
-        traceError(
-            'Failed to set config.python.useEnvironmentsExtension to true. Please do so manually in your user settings now to ensure the Python environment extension is enabled during upcoming experimentation.',
-            err,
+export async function activate(context: ExtensionContext): Promise<PythonEnvironmentApi | undefined> {
+    const useEnvironmentsExtension = getConfiguration('python').get<boolean>('useEnvironmentsExtension', true);
+    if (!useEnvironmentsExtension) {
+        traceWarn(
+            'The Python environments extension has been disabled via a setting. If you would like to opt into using the extension, please add the following to your user settings (note that updating this setting requires a window reload afterwards):\n\n"python.useEnvironmentsExtension": true',
         );
+        deactivate(context);
+        return;
     }
+    const start = new StopWatch();
 
     // Logging should be set up before anything else.
     const outputChannel: LogOutputChannel = createLogOutputChannel('Python Environments');
@@ -508,4 +507,21 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
     return api;
 }
 
-export function deactivate() {}
+export async function disposeAll(disposables: IDisposable[]): Promise<void> {
+    await Promise.all(
+        disposables.map(async (d) => {
+            try {
+                return Promise.resolve(d.dispose());
+            } catch (_err) {
+                // do nothing
+            }
+            return Promise.resolve();
+        }),
+    );
+}
+
+export async function deactivate(context: ExtensionContext) {
+    await disposeAll(context.subscriptions);
+    context.subscriptions.length = 0; // Clear subscriptions to prevent memory leaks
+    traceInfo('Python Environments extension deactivated.');
+}
