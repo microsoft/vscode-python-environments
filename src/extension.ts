@@ -156,7 +156,7 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
         traceWarn(
             'The Python environments extension has been disabled via a setting. If you would like to opt into using the extension, please add the following to your user settings (note that updating this setting requires a window reload afterwards):\n\n"python.useEnvironmentsExtension": true',
         );
-        deactivate(context);
+        await deactivate(context);
         return;
     }
     const start = new StopWatch();
