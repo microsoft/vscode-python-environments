@@ -110,7 +110,8 @@
                 "command": "python-envs.setEnvManager",
                 "title": "%python-envs.setEnvManager.title%",
                 "category": "Python",
-                "icon": "$(gear)"
+                "icon": "$(gear)",
+                "when": "config.python.useEnvironmentsExtension != false"
             },
             {
                 "command": "python-envs.setPkgManager",
@@ -292,6 +293,22 @@
                 {
                     "command": "python-envs.addPythonProjectGivenResource",
                     "when": "false"
+                },
+                {
+                    "command": "python-envs.setEnvManager",
+                    "when": "config.python.useEnvironmentsExtension != false"
+                },
+                {
+                    "command": "python-envs.packages",
+                    "when": "config.python.useEnvironmentsExtension != false"
+                },
+                {
+                    "command": "python-envs.set",
+                    "when": "config.python.useEnvironmentsExtension != false"
+                },
+                {
+                    "command": "python-envs.setPkgManager",
+                    "when": "config.python.useEnvironmentsExtension != false"
                 },
                 {
                     "command": "python-envs.removePythonProject",
