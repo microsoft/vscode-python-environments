@@ -1,8 +1,9 @@
 import { Disposable, StatusBarAlignment, StatusBarItem, ThemeColor } from 'vscode';
+import { PythonEnvironment } from '../../api';
 import { createStatusBarItem } from '../../common/window.apis';
 
 export interface PythonStatusBar extends Disposable {
-    show(text?: string): void;
+    show(env?: PythonEnvironment): void;
     hide(): void;
 }
 
@@ -19,9 +20,15 @@ export class PythonStatusBarImpl implements Disposable {
         this.disposables.push(this.statusBarItem);
     }
 
-    public show(text?: string) {
-        this.statusBarItem.text = text ?? 'Select Python Interpreter';
-        this.statusBarItem.backgroundColor = text ? undefined : new ThemeColor('statusBarItem.warningBackground');
+    public show(env?: PythonEnvironment) {
+        if (env) {
+            this.statusBarItem.text = env.displayName ?? 'Select Python Interpreter';
+            this.statusBarItem.tooltip = env.environmentPath?.fsPath ?? '';
+        } else {
+            this.statusBarItem.text = 'Select Python Interpreter';
+            this.statusBarItem.tooltip = 'Select Python Interpreter';
+        }
+        this.statusBarItem.backgroundColor = env ? undefined : new ThemeColor('statusBarItem.warningBackground');
         this.statusBarItem.show();
     }
 
