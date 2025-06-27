@@ -1,9 +1,9 @@
-import { activeTextEditor } from '../../common/window.apis';
-import { ProjectView } from './projectView';
-import { EnvManagerView } from './envManagersView';
-import { PythonStatusBar } from './pythonStatusBar';
-import { isPythonProjectFile } from '../../common/utils/fileNameUtils';
 import { PythonEnvironmentApi } from '../../api';
+import { isPythonProjectFile } from '../../common/utils/fileNameUtils';
+import { activeTextEditor } from '../../common/window.apis';
+import { EnvManagerView } from './envManagersView';
+import { ProjectView } from './projectView';
+import { PythonStatusBar } from './pythonStatusBar';
 
 export function updateViewsAndStatus(
     statusBar: PythonStatusBar,
@@ -31,7 +31,7 @@ export function updateViewsAndStatus(
     workspaceView.reveal(activeDocument.uri);
     setImmediate(async () => {
         const env = await api.getEnvironment(activeDocument.uri);
-        statusBar.show(env?.displayName);
+        statusBar.show(env);
         managerView.reveal(env);
     });
 }
