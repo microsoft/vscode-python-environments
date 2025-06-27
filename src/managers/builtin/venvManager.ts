@@ -194,17 +194,20 @@ export class VenvManager implements EnvironmentManager {
                 }
 
                 // Open the parent folder of the venv in the current window immediately after creation
-                const envParent = path.dirname(environment.sysPrefix);
+                const envParent = environment.sysPrefix;
                 try {
-                    await commands.executeCommand('vscode.openFolder', Uri.file(envParent), {
-                        forceNewWindow: false,
-                    });
+                    await commands.executeCommand('revealInExplorer', Uri.file(envParent));
                 } catch (error) {
                     showErrorMessage(
-                        l10n.t('Failed to open venv parent folder: but venv was still created in {0}', envParent),
+                        l10n.t(
+                            'Failed to reveal venv parent folder in VS Code Explorer: but venv was still created in {0}',
+                            envParent,
+                        ),
                     );
                     traceError(
-                        `Failed to open venv parent folder: ${error instanceof Error ? error.message : String(error)}`,
+                        `Failed to reveal venv parent folder in VS Code Explorer: ${
+                            error instanceof Error ? error.message : String(error)
+                        }`,
                     );
                 }
             }
