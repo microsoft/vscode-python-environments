@@ -11,7 +11,7 @@ import { isCopilotInstalled, manageCopilotInstructionsFile, replaceInFilesAndNam
 export class NewScriptProject implements PythonProjectCreator {
     public readonly name = l10n.t('newScript');
     public readonly displayName = l10n.t('Script');
-    public readonly description = l10n.t('Creates a new script folder in your current workspace with PEP 723 support');
+    public readonly description = l10n.t('Creates a new script folder in your current workspace');
     public readonly tooltip = new MarkdownString(l10n.t('Create a new Python script'));
 
     constructor(private readonly projectManager: PythonProjectManager) {}
