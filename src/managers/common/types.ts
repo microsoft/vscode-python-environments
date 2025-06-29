@@ -43,3 +43,6 @@ export interface Installable {
      */
     readonly uri?: Uri;
 }
+export interface IDisposable {
+    dispose(): void | undefined | Promise<void>;
+}
