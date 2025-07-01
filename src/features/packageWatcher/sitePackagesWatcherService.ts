@@ -129,6 +129,7 @@ export class SitePackagesWatcherService implements Disposable {
 
     /**
      * Handles site-packages changes by triggering a package refresh.
+     * Uses debouncing to avoid excessive refresh calls when multiple files change rapidly.
      */
     private async onSitePackagesChange(environment: PythonEnvironment): Promise<void> {
         try {
@@ -138,6 +139,7 @@ export class SitePackagesWatcherService implements Disposable {
             const packageManager = this.getPackageManagerForEnvironment(environment);
             if (packageManager) {
                 // Trigger refresh asynchronously to avoid blocking file system events
+                // Use setImmediate to ensure the refresh happens after all current file system events
                 setImmediate(async () => {
                     try {
                         await packageManager.refresh(environment);
