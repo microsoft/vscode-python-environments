@@ -63,6 +63,7 @@ import { ProjectView } from './features/views/projectView';
 import { PythonStatusBarImpl } from './features/views/pythonStatusBar';
 import { updateViewsAndStatus } from './features/views/revealHandler';
 import { ProjectItem } from './features/views/treeViewItems';
+import { SitePackagesWatcherService } from './features/packageWatcher';
 import { EnvironmentManagers, ProjectCreators, PythonProjectManager } from './internal.api';
 import { registerSystemPythonFeatures } from './managers/builtin/main';
 import { SysPythonManager } from './managers/builtin/sysPythonManager';
@@ -190,6 +191,10 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
     const envManagers: EnvironmentManagers = new PythonEnvironmentManagers(projectManager);
     createManagerReady(envManagers, projectManager, context.subscriptions);
     context.subscriptions.push(envManagers);
+
+    // Initialize automatic package refresh service
+    const sitePackagesWatcher = new SitePackagesWatcherService(envManagers);
+    context.subscriptions.push(sitePackagesWatcher);
 
     const terminalActivation = new TerminalActivationImpl();
     const shellEnvsProviders = createShellEnvProviders();
