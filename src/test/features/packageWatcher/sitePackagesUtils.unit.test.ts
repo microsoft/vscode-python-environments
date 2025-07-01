@@ -1,156 +1,86 @@
 import * as assert from 'assert';
 import * as path from 'path';
-import * as fs from 'fs-extra';
-import * as os from 'os';
-import { PythonEnvironment } from '../../../api';
-import { resolveSitePackagesPath, isSitePackagesDirectory } from '../../../features/packageWatcher/sitePackagesUtils';
+import { Uri } from 'vscode';
+import { resolvePackageFolderFromSysPrefix } from '../../../features/packageWatcher/sitePackagesUtils';
 
 suite('Site-Packages Utils', () => {
-    let tempDir: string;
-
-    setup(async () => {
-        tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'sitepackages-test-'));
-    });
-
-    teardown(async () => {
-        await fs.remove(tempDir);
-    });
-
-    suite('resolveSitePackagesPath', () => {
-        test('should return undefined for environment without sysPrefix', async () => {
-            const mockEnv = {
-                sysPrefix: '',
-                displayName: 'Test Environment',
-            } as PythonEnvironment;
-
-            const result = await resolveSitePackagesPath(mockEnv);
+    suite('resolvePackageFolderFromSysPrefix', () => {
+        test('should return undefined for empty sysPrefix', () => {
+            const result = resolvePackageFolderFromSysPrefix('');
             assert.equal(result, undefined);
         });
 
-        test('should find Windows site-packages path', async () => {
-            const mockSysPrefix = path.join(tempDir, 'python-env');
-            const sitePackagesPath = path.join(mockSysPrefix, 'Lib', 'site-packages');
-            
-            // Create the directory structure
-            await fs.ensureDir(sitePackagesPath);
-            
-            const mockEnv = {
-                sysPrefix: mockSysPrefix,
-                displayName: 'Test Environment',
-            } as PythonEnvironment;
+        test('should return undefined for undefined sysPrefix', () => {
+            const result = resolvePackageFolderFromSysPrefix(undefined as any);
+            assert.equal(result, undefined);
+        });
 
+        test('should resolve Windows site-packages path', () => {
+            const mockSysPrefix = 'C:\\Python39';
+            const expected = Uri.file(path.join(mockSysPrefix, 'Lib', 'site-packages'));
+            
             // Mock Windows platform
             const originalPlatform = process.platform;
             Object.defineProperty(process, 'platform', { value: 'win32', configurable: true });
 
             try {
-                const result = await resolveSitePackagesPath(mockEnv);
+                const result = resolvePackageFolderFromSysPrefix(mockSysPrefix);
                 assert.notEqual(result, undefined);
-                assert.equal(result?.fsPath, sitePackagesPath);
+                assert.equal(result?.fsPath, expected.fsPath);
             } finally {
                 Object.defineProperty(process, 'platform', { value: originalPlatform, configurable: true });
             }
         });
 
-        test('should find Unix site-packages path', async () => {
-            const mockSysPrefix = path.join(tempDir, 'python-env');
-            const sitePackagesPath = path.join(mockSysPrefix, 'lib', 'python3.10', 'site-packages');
+        test('should resolve Unix site-packages path for standard environments', () => {
+            const mockSysPrefix = '/usr/local/python39';
+            const expected = Uri.file(path.join(mockSysPrefix, 'lib', 'python3', 'site-packages'));
             
-            // Create the directory structure
-            await fs.ensureDir(sitePackagesPath);
-            
-            const mockEnv = {
-                sysPrefix: mockSysPrefix,
-                displayName: 'Test Environment',
-            } as PythonEnvironment;
-
             // Mock Unix platform
             const originalPlatform = process.platform;
             Object.defineProperty(process, 'platform', { value: 'linux', configurable: true });
 
             try {
-                const result = await resolveSitePackagesPath(mockEnv);
+                const result = resolvePackageFolderFromSysPrefix(mockSysPrefix);
                 assert.notEqual(result, undefined);
-                assert.equal(result?.fsPath, sitePackagesPath);
+                assert.equal(result?.fsPath, expected.fsPath);
             } finally {
                 Object.defineProperty(process, 'platform', { value: originalPlatform, configurable: true });
             }
         });
 
-        test('should return undefined when no site-packages directory exists', async () => {
-            const mockSysPrefix = path.join(tempDir, 'nonexistent-env');
+        test('should resolve conda environment package path', () => {
+            const mockSysPrefix = '/home/user/miniconda3/envs/myenv';
+            const expected = Uri.file(path.join(mockSysPrefix, 'site-packages'));
             
-            const mockEnv = {
-                sysPrefix: mockSysPrefix,
-                displayName: 'Test Environment',
-            } as PythonEnvironment;
+            // Mock Unix platform
+            const originalPlatform = process.platform;
+            Object.defineProperty(process, 'platform', { value: 'linux', configurable: true });
 
-            const result = await resolveSitePackagesPath(mockEnv);
-            assert.equal(result, undefined);
-        });
-    });
-
-    suite('isSitePackagesDirectory', () => {
-        test('should return false for non-existent path', async () => {
-            const nonExistentPath = path.join(tempDir, 'nonexistent');
-            const result = await isSitePackagesDirectory(nonExistentPath);
-            assert.equal(result, false);
+            try {
+                const result = resolvePackageFolderFromSysPrefix(mockSysPrefix);
+                assert.notEqual(result, undefined);
+                assert.equal(result?.fsPath, expected.fsPath);
+            } finally {
+                Object.defineProperty(process, 'platform', { value: originalPlatform, configurable: true });
+            }
         });
 
-        test('should return false for file instead of directory', async () => {
-            const filePath = path.join(tempDir, 'testfile.txt');
-            await fs.writeFile(filePath, 'test content');
+        test('should resolve anaconda environment package path', () => {
+            const mockSysPrefix = '/opt/anaconda3/envs/tensorflow';
+            const expected = Uri.file(path.join(mockSysPrefix, 'site-packages'));
             
-            const result = await isSitePackagesDirectory(filePath);
-            assert.equal(result, false);
-        });
+            // Mock Unix platform
+            const originalPlatform = process.platform;
+            Object.defineProperty(process, 'platform', { value: 'linux', configurable: true });
 
-        test('should return true for directory with pip marker', async () => {
-            const sitePackagesPath = path.join(tempDir, 'site-packages');
-            const pipPath = path.join(sitePackagesPath, 'pip');
-            
-            await fs.ensureDir(pipPath);
-            
-            const result = await isSitePackagesDirectory(sitePackagesPath);
-            assert.equal(result, true);
-        });
-
-        test('should return true for directory with setuptools marker', async () => {
-            const sitePackagesPath = path.join(tempDir, 'site-packages');
-            const setuptoolsPath = path.join(sitePackagesPath, 'setuptools');
-            
-            await fs.ensureDir(setuptoolsPath);
-            
-            const result = await isSitePackagesDirectory(sitePackagesPath);
-            assert.equal(result, true);
-        });
-
-        test('should return true for directory with __pycache__ marker', async () => {
-            const sitePackagesPath = path.join(tempDir, 'site-packages');
-            const pycachePath = path.join(sitePackagesPath, '__pycache__');
-            
-            await fs.ensureDir(pycachePath);
-            
-            const result = await isSitePackagesDirectory(sitePackagesPath);
-            assert.equal(result, true);
-        });
-
-        test('should return true for non-empty directory even without markers', async () => {
-            const sitePackagesPath = path.join(tempDir, 'site-packages');
-            const somePackagePath = path.join(sitePackagesPath, 'some-package');
-            
-            await fs.ensureDir(somePackagePath);
-            
-            const result = await isSitePackagesDirectory(sitePackagesPath);
-            assert.equal(result, true);
-        });
-
-        test('should return false for empty directory', async () => {
-            const emptyPath = path.join(tempDir, 'empty-dir');
-            await fs.ensureDir(emptyPath);
-            
-            const result = await isSitePackagesDirectory(emptyPath);
-            assert.equal(result, false);
+            try {
+                const result = resolvePackageFolderFromSysPrefix(mockSysPrefix);
+                assert.notEqual(result, undefined);
+                assert.equal(result?.fsPath, expected.fsPath);
+            } finally {
+                Object.defineProperty(process, 'platform', { value: originalPlatform, configurable: true });
+            }
         });
     });
 });

@@ -3,10 +3,9 @@ import { PythonEnvironment } from '../../api';
 import { traceError, traceInfo, traceVerbose } from '../../common/logging';
 import { createFileSystemWatcher } from '../../common/workspace.apis';
 import { EnvironmentManagers, InternalDidChangeEnvironmentsEventArgs, InternalPackageManager } from '../../internal.api';
-import { resolveSitePackagesPath } from './sitePackagesUtils';
 
 /**
- * Manages file system watchers for site-packages directories across all Python environments.
+ * Manages file system watchers for package directories across all Python environments.
  * Automatically refreshes package lists when packages are installed or uninstalled.
  */
 export class SitePackagesWatcherService implements Disposable {
@@ -74,7 +73,7 @@ export class SitePackagesWatcherService implements Disposable {
     }
 
     /**
-     * Adds a file system watcher for the given environment's site-packages directory.
+     * Adds a file system watcher for the given environment's package directory.
      */
     private async addWatcherForEnvironment(environment: PythonEnvironment): Promise<void> {
         const envId = environment.envId.id;
@@ -85,14 +84,14 @@ export class SitePackagesWatcherService implements Disposable {
             return;
         }
 
-        try {
-            const sitePackagesUri = await resolveSitePackagesPath(environment);
-            if (!sitePackagesUri) {
-                traceVerbose(`Could not resolve site-packages path for environment: ${environment.displayName}`);
-                return;
-            }
+        // Check if environment has a packageFolder defined
+        if (!environment.packageFolder) {
+            traceVerbose(`No packageFolder defined for environment: ${environment.displayName}`);
+            return;
+        }
 
-            const pattern = `${sitePackagesUri.fsPath}/**`;
+        try {
+            const pattern = `${environment.packageFolder.fsPath}/**`;
             const watcher = createFileSystemWatcher(
                 pattern,
                 false, // don't ignore create events
@@ -101,12 +100,12 @@ export class SitePackagesWatcherService implements Disposable {
             );
 
             // Set up event handlers
-            watcher.onDidCreate(() => this.onSitePackagesChange(environment));
-            watcher.onDidChange(() => this.onSitePackagesChange(environment));
-            watcher.onDidDelete(() => this.onSitePackagesChange(environment));
+            watcher.onDidCreate(() => this.onPackageDirectoryChange(environment));
+            watcher.onDidChange(() => this.onPackageDirectoryChange(environment));
+            watcher.onDidDelete(() => this.onPackageDirectoryChange(environment));
 
             this.watchers.set(envId, watcher);
-            traceInfo(`Created site-packages watcher for environment: ${environment.displayName} at ${sitePackagesUri.fsPath}`);
+            traceInfo(`Created package directory watcher for environment: ${environment.displayName} at ${environment.packageFolder.fsPath}`);
 
         } catch (error) {
             traceError(`Failed to create watcher for environment ${environment.displayName}:`, error);
@@ -123,17 +122,17 @@ export class SitePackagesWatcherService implements Disposable {
         if (watcher) {
             watcher.dispose();
             this.watchers.delete(envId);
-            traceInfo(`Removed site-packages watcher for environment: ${environment.displayName}`);
+            traceInfo(`Removed package directory watcher for environment: ${environment.displayName}`);
         }
     }
 
     /**
-     * Handles site-packages changes by triggering a package refresh.
+     * Handles package directory changes by triggering a package refresh.
      * Uses debouncing to avoid excessive refresh calls when multiple files change rapidly.
      */
-    private async onSitePackagesChange(environment: PythonEnvironment): Promise<void> {
+    private async onPackageDirectoryChange(environment: PythonEnvironment): Promise<void> {
         try {
-            traceVerbose(`Site-packages changed for environment: ${environment.displayName}, triggering package refresh`);
+            traceVerbose(`Package directory changed for environment: ${environment.displayName}, triggering package refresh`);
             
             // Get the package manager for this environment
             const packageManager = this.getPackageManagerForEnvironment(environment);
@@ -152,7 +151,7 @@ export class SitePackagesWatcherService implements Disposable {
                 traceVerbose(`No package manager found for environment: ${environment.displayName}`);
             }
         } catch (error) {
-            traceError(`Error handling site-packages change for environment ${environment.displayName}:`, error);
+            traceError(`Error handling package directory change for environment ${environment.displayName}:`, error);
         }
     }
 

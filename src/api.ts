@@ -214,6 +214,12 @@ export interface PythonEnvironmentInfo {
     readonly sysPrefix: string;
 
     /**
+     * Path to the packages directory (e.g., site-packages) where Python packages are installed for this environment.
+     * This is used for monitoring package installations and automatically refreshing package lists.
+     */
+    readonly packageFolder?: Uri;
+
+    /**
      * Optional `group` for this environment. This is used to group environments in the Environment Manager UI.
      */
     readonly group?: string | EnvironmentGroupInfo;

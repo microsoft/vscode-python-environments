@@ -1,2 +1,2 @@
 export { SitePackagesWatcherService } from './sitePackagesWatcherService';
-export { resolveSitePackagesPath, isSitePackagesDirectory } from './sitePackagesUtils';
+export { resolvePackageFolderFromSysPrefix } from './sitePackagesUtils';

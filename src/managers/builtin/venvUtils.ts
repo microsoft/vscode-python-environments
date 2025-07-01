@@ -19,6 +19,7 @@ import {
     withProgress,
 } from '../../common/window.apis';
 import { getConfiguration } from '../../common/workspace.apis';
+import { resolvePackageFolderFromSysPrefix } from '../../features/packageWatcher';
 import {
     isNativeEnvInfo,
     NativeEnvInfo,
@@ -147,6 +148,7 @@ async function getPythonInfo(env: NativeEnvInfo): Promise<PythonEnvironmentInfo>
             environmentPath: Uri.file(env.executable),
             iconPath: new ThemeIcon('python'),
             sysPrefix: env.prefix,
+            packageFolder: resolvePackageFolderFromSysPrefix(env.prefix),
             execInfo: {
                 run: {
                     executable: env.executable,

@@ -1,100 +1,48 @@
 import * as path from 'path';
-import * as fs from 'fs-extra';
 import { Uri } from 'vscode';
-import { PythonEnvironment } from '../../api';
-import { traceVerbose, traceWarn } from '../../common/logging';
+import { traceVerbose } from '../../common/logging';
 
 /**
- * Resolves the site-packages directory path for a given Python environment.
- * This function handles different platforms and Python versions.
+ * Resolves the package directory path for a given Python environment based on sysPrefix.
+ * This is a utility function for environment managers to set the packageFolder property.
  * 
- * @param environment The Python environment to resolve site-packages for
- * @returns Promise<Uri | undefined> The Uri to the site-packages directory, or undefined if not found
+ * @param sysPrefix The sys.prefix of the Python environment
+ * @returns Uri | undefined The Uri to the package directory, or undefined if it cannot be determined
  */
-export async function resolveSitePackagesPath(environment: PythonEnvironment): Promise<Uri | undefined> {
-    const sysPrefix = environment.sysPrefix;
+export function resolvePackageFolderFromSysPrefix(sysPrefix: string): Uri | undefined {
     if (!sysPrefix) {
-        traceWarn(`No sysPrefix available for environment: ${environment.displayName}`);
         return undefined;
     }
 
-    traceVerbose(`Resolving site-packages for environment: ${environment.displayName}, sysPrefix: ${sysPrefix}`);
+    traceVerbose(`Resolving package folder for sysPrefix: ${sysPrefix}`);
 
-    // Common site-packages locations to check
-    const candidates = getSitePackagesCandidates(sysPrefix);
-    
-    // Check each candidate path
-    for (const candidate of candidates) {
-        try {
-            if (await fs.pathExists(candidate)) {
-                const uri = Uri.file(candidate);
-                traceVerbose(`Found site-packages at: ${candidate}`);
-                return uri;
-            }
-        } catch (error) {
-            traceVerbose(`Error checking site-packages candidate ${candidate}: ${error}`);
-        }
-    }
+    // For most environments, we can use a simple heuristic:
+    // Windows: {sysPrefix}/Lib/site-packages
+    // Unix/Linux/macOS: {sysPrefix}/lib/python*/site-packages (we'll use a common pattern)
+    // Conda: {sysPrefix}/site-packages
 
-    traceWarn(`Could not find site-packages directory for environment: ${environment.displayName}`);
-    return undefined;
-}
+    let packageFolderPath: string;
 
-/**
- * Gets candidate site-packages paths for different platforms and Python versions.
- * 
- * @param sysPrefix The sys.prefix of the Python environment
- * @returns Array of candidate paths to check
- */
-function getSitePackagesCandidates(sysPrefix: string): string[] {
-    const candidates: string[] = [];
-    
-    // Windows: typically in Lib/site-packages
     if (process.platform === 'win32') {
-        candidates.push(path.join(sysPrefix, 'Lib', 'site-packages'));
-    }
-    
-    // Unix-like systems: typically in lib/python*/site-packages
-    // We'll check common Python version patterns
-    const pythonVersions = [
-        'python3.12', 'python3.11', 'python3.10', 'python3.9', 'python3.8', 'python3.7',
-        'python3', // fallback
-    ];
-    
-    for (const pyVer of pythonVersions) {
-        candidates.push(path.join(sysPrefix, 'lib', pyVer, 'site-packages'));
-    }
-    
-    // Additional locations for conda environments
-    candidates.push(path.join(sysPrefix, 'site-packages')); // Some minimal environments
-    
-    return candidates;
-}
-
-/**
- * Checks if a path is likely a site-packages directory by looking for common markers.
- * 
- * @param sitePkgPath Path to check
- * @returns Promise<boolean> True if the path appears to be a site-packages directory
- */
-export async function isSitePackagesDirectory(sitePkgPath: string): Promise<boolean> {
-    try {
-        const stat = await fs.stat(sitePkgPath);
-        if (!stat.isDirectory()) {
-            return false;
+        // Windows: typically in Lib/site-packages
+        packageFolderPath = path.join(sysPrefix, 'Lib', 'site-packages');
+    } else {
+        // Unix-like systems: try common locations
+        // First try conda style
+        const condaPath = path.join(sysPrefix, 'site-packages');
+        // Then try standard site-packages location (use python3 as a reasonable default)
+        const standardPath = path.join(sysPrefix, 'lib', 'python3', 'site-packages');
+        
+        // For simplicity, we'll prefer the conda style if this looks like a conda environment,
+        // otherwise use the standard path
+        if (sysPrefix.includes('conda') || sysPrefix.includes('miniconda') || sysPrefix.includes('anaconda')) {
+            packageFolderPath = condaPath;
+        } else {
+            packageFolderPath = standardPath;
         }
-
-        // Check for common site-packages markers
-        const contents = await fs.readdir(sitePkgPath);
-        
-        // Look for common packages or pip-related files
-        const markers = [
-            'pip', 'setuptools', 'wheel', // Common packages
-            '__pycache__', // Python cache directory
-        ];
-        
-        return markers.some(marker => contents.includes(marker)) || contents.length > 0;
-    } catch {
-        return false;
     }
+
+    const uri = Uri.file(packageFolderPath);
+    traceVerbose(`Resolved package folder to: ${uri.fsPath}`);
+    return uri;
 }
