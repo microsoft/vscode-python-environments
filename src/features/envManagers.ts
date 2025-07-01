@@ -16,6 +16,7 @@ import {
 } from '../common/errors/AlreadyRegisteredError';
 import { traceError, traceVerbose } from '../common/logging';
 import { EventNames } from '../common/telemetry/constants';
+import { sendPackageChangeTelemetry } from '../common/telemetry/helpers';
 import { sendTelemetryEvent } from '../common/telemetry/sender';
 import { getCallingExtension } from '../common/utils/frameUtils';
 import {
@@ -130,13 +131,19 @@ export class PythonEnvironmentManagers implements EnvironmentManagers {
 
         disposables.push(
             mgr.onDidChangePackages((e: DidChangePackagesEventArgs) => {
-                setImmediate(() =>
-                    this._onDidChangePackages.fire({
-                        environment: e.environment,
-                        manager: mgr,
-                        changes: e.changes,
-                    }),
-                );
+                const internalEvent = {
+                    environment: e.environment,
+                    manager: mgr,
+                    changes: e.changes,
+                };
+                
+                setImmediate(() => {
+                    // Send telemetry for package changes
+                    sendPackageChangeTelemetry(internalEvent);
+                    
+                    // Fire the internal event
+                    this._onDidChangePackages.fire(internalEvent);
+                });
             }),
         );
 

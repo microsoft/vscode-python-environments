@@ -19,6 +19,16 @@ export enum EventNames {
      * - triggeredLocation: string (where the create command is called from)
      */
     CREATE_ENVIRONMENT = 'CREATE_ENVIRONMENT',
+    
+    /**
+     * Telemetry event for when packages are changed in a Python environment.
+     * Properties:
+     * - environmentType: string (the type of environment: venv, conda, system, etc.)
+     * - action: string (install, uninstall, or change)
+     * - packageManager: string (the id of the package manager used)
+     * - packageCount: number (number of packages changed)
+     */
+    PACKAGE_CHANGES = 'PACKAGE_CHANGES',
 }
 
 // Map all events to their properties
@@ -119,5 +129,20 @@ export interface IEventNamePropertyMapping {
     [EventNames.CREATE_ENVIRONMENT]: {
         manager: string;
         triggeredLocation: string;
+    };
+
+    /* __GDPR__
+        "package_changes": {
+            "environmentType": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "owner": "eleanorjboyd" },
+            "action": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "owner": "eleanorjboyd" },
+            "packageManager": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "owner": "eleanorjboyd" },
+            "packageCount": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "owner": "eleanorjboyd" }
+        }
+    */
+    [EventNames.PACKAGE_CHANGES]: {
+        environmentType: string;
+        action: string;
+        packageManager: string;
+        packageCount: number;
     };
 }
