@@ -29,7 +29,7 @@ import {
     pickWorkspaceFolder,
 } from '../common/pickers/managers';
 import { pickProject, pickProjectMany } from '../common/pickers/projects';
-import { activeTextEditor, showErrorMessage, showInformationMessage, showTextDocument } from '../common/window.apis';
+import { activeTextEditor, showErrorMessage, showInformationMessage } from '../common/window.apis';
 import { quoteArgs } from './execution/execUtils';
 import { runAsTask } from './execution/runAsTask';
 import { runInTerminal } from './terminal/runInTerminal';
@@ -450,10 +450,7 @@ export async function addPythonProjectCommand(
     }
 
     try {
-        const result = await creator.create(options);
-        if (result instanceof Uri) {
-            await showTextDocument(result);
-        }
+        await creator.create(options);
     } catch (ex) {
         if (ex === QuickInputButtons.Back) {
             return addPythonProjectCommand(resource, wm, em, pc);

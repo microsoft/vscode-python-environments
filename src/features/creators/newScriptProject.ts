@@ -4,7 +4,7 @@ import { commands, l10n, MarkdownString, QuickInputButtons, Uri, window, workspa
 import { PythonProject, PythonProjectCreator, PythonProjectCreatorOptions } from '../../api';
 import { NEW_PROJECT_TEMPLATES_FOLDER } from '../../common/constants';
 import { traceError } from '../../common/logging';
-import { showInputBoxWithButtons } from '../../common/window.apis';
+import { showInputBoxWithButtons, showTextDocument } from '../../common/window.apis';
 import { PythonProjectManager } from '../../internal.api';
 import { isCopilotInstalled, manageCopilotInstructionsFile, replaceInFilesAndNames } from './creationHelpers';
 
@@ -120,6 +120,9 @@ export class NewScriptProject implements PythonProjectCreator {
                 uri: Uri.file(scriptDestination),
             };
             this.projectManager.add(createdScript);
+
+            await showTextDocument(createdScript.uri);
+
             return createdScript;
         }
         return undefined;
