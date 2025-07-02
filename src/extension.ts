@@ -152,6 +152,7 @@ async function collectEnvironmentInfo(
 
 export async function activate(context: ExtensionContext): Promise<PythonEnvironmentApi | undefined> {
     const useEnvironmentsExtension = getConfiguration('python').get<boolean>('useEnvironmentsExtension', true);
+    traceInfo(`Experiment Status: useEnvironmentsExtension setting set to ${useEnvironmentsExtension}`);
     if (!useEnvironmentsExtension) {
         traceWarn(
             'The Python environments extension has been disabled via a setting. If you would like to opt into using the extension, please add the following to your user settings (note that updating this setting requires a window reload afterwards):\n\n"python.useEnvironmentsExtension": true',
