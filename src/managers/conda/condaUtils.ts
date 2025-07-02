@@ -28,6 +28,7 @@ import {
 import { ENVS_EXTENSION_ID, EXTENSION_ROOT_DIR } from '../../common/constants';
 import { showErrorMessageWithLogs } from '../../common/errors/utils';
 import { Common, CondaStrings, PackageManagement, Pickers } from '../../common/localize';
+import { resolvePackageFolderFromSysPrefix } from '../../features/packageWatcher';
 import { traceInfo } from '../../common/logging';
 import { getWorkspacePersistentState } from '../../common/persistentState';
 import { pickProject } from '../../common/pickers/projects';
@@ -359,6 +360,7 @@ function getNamedCondaPythonInfo(
         tooltip: prefix,
         version: version,
         sysPrefix: prefix,
+        packageFolder: resolvePackageFolderFromSysPrefix(prefix),
         execInfo: {
             run: { executable: path.join(executable) },
             activatedRun: {
@@ -453,6 +455,7 @@ function getPrefixesCondaPythonInfo(
         tooltip: prefix,
         version: version,
         sysPrefix: prefix,
+        packageFolder: resolvePackageFolderFromSysPrefix(prefix),
         execInfo: {
             run: { executable: path.join(executable) },
             activatedRun: {
@@ -479,6 +482,7 @@ function getCondaWithoutPython(name: string, prefix: string, conda: string): Pyt
         tooltip: l10n.t('Conda environment without Python'),
         version: 'no-python',
         sysPrefix: prefix,
+        packageFolder: resolvePackageFolderFromSysPrefix(prefix),
         iconPath: new ThemeIcon('stop'),
         execInfo: {
             run: { executable: conda },
@@ -826,6 +830,7 @@ export async function quickCreateConda(
                             deactivation: [{ executable: 'conda', args: ['deactivate'] }],
                         },
                         sysPrefix: prefix,
+                        packageFolder: resolvePackageFolderFromSysPrefix(prefix),
                         group: 'Prefix',
                     },
                     manager,
