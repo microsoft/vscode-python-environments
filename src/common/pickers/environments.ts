@@ -157,6 +157,12 @@ export async function pickEnvironment(
     ];
 
     if (options?.recommended) {
+        const pathDescription = options.recommended.displayPath;
+        const description =
+            options.recommended.description && options.recommended.description.trim()
+                ? `${options.recommended.description} (${pathDescription})`
+                : pathDescription;
+
         items.push(
             {
                 label: Common.recommended,
@@ -164,7 +170,7 @@ export async function pickEnvironment(
             },
             {
                 label: options.recommended.displayName,
-                description: options.recommended.description,
+                description: description,
                 result: options.recommended,
                 iconPath: getIconPath(options.recommended.iconPath),
             },
@@ -179,9 +185,13 @@ export async function pickEnvironment(
         const envs = await manager.getEnvironments('all');
         items.push(
             ...envs.map((e) => {
+                const pathDescription = e.displayPath;
+                const description =
+                    e.description && e.description.trim() ? `${e.description} (${pathDescription})` : pathDescription;
+
                 return {
                     label: e.displayName ?? e.name,
-                    description: e.description,
+                    description: description,
                     result: e,
                     manager: manager,
                     iconPath: getIconPath(e.iconPath),
@@ -194,12 +204,18 @@ export async function pickEnvironment(
 }
 
 export async function pickEnvironmentFrom(environments: PythonEnvironment[]): Promise<PythonEnvironment | undefined> {
-    const items = environments.map((e) => ({
-        label: e.displayName ?? e.name,
-        description: e.description,
-        e: e,
-        iconPath: getIconPath(e.iconPath),
-    }));
+    const items = environments.map((e) => {
+        const pathDescription = e.displayPath;
+        const description =
+            e.description && e.description.trim() ? `${e.description} (${pathDescription})` : pathDescription;
+
+        return {
+            label: e.displayName ?? e.name,
+            description: description,
+            e: e,
+            iconPath: getIconPath(e.iconPath),
+        };
+    });
     const selected = await showQuickPick(items, {
         placeHolder: Pickers.Environments.selectEnvironment,
         ignoreFocusOut: true,
