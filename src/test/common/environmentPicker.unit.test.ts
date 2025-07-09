@@ -28,50 +28,46 @@ suite('Environment Picker Description Logic', () => {
     suite('Description formatting with interpreter path', () => {
         test('should use displayPath as description when no original description exists', () => {
             const env = createMockEnvironment('/usr/local/bin/python');
-            
+
             // This is the logic from our updated picker
             const pathDescription = env.displayPath;
-            const description = env.description && env.description.trim()
-                ? `${env.description} (${pathDescription})`
-                : pathDescription;
-            
+            const description =
+                env.description && env.description.trim() ? `${env.description} (${pathDescription})` : pathDescription;
+
             assert.strictEqual(description, '/usr/local/bin/python');
         });
 
         test('should append displayPath to existing description in parentheses', () => {
             const env = createMockEnvironment('/home/user/.venv/bin/python', 'Virtual Environment');
-            
+
             // This is the logic from our updated picker
             const pathDescription = env.displayPath;
-            const description = env.description && env.description.trim()
-                ? `${env.description} (${pathDescription})`
-                : pathDescription;
-            
+            const description =
+                env.description && env.description.trim() ? `${env.description} (${pathDescription})` : pathDescription;
+
             assert.strictEqual(description, 'Virtual Environment (/home/user/.venv/bin/python)');
         });
 
         test('should handle complex paths correctly', () => {
             const complexPath = '/usr/local/anaconda3/envs/my-project-env/bin/python';
             const env = createMockEnvironment(complexPath, 'Conda Environment');
-            
+
             // This is the logic from our updated picker
             const pathDescription = env.displayPath;
-            const description = env.description && env.description.trim()
-                ? `${env.description} (${pathDescription})`
-                : pathDescription;
-            
+            const description =
+                env.description && env.description.trim() ? `${env.description} (${pathDescription})` : pathDescription;
+
             assert.strictEqual(description, `Conda Environment (${complexPath})`);
         });
 
         test('should handle empty description correctly', () => {
             const env = createMockEnvironment('/opt/python/bin/python', '');
-            
-            // This is the logic from our updated picker  
+
+            // This is the logic from our updated picker
             const pathDescription = env.displayPath;
-            const description = env.description && env.description.trim()
-                ? `${env.description} (${pathDescription})`
-                : pathDescription;
-            
+            const description =
+                env.description && env.description.trim() ? `${env.description} (${pathDescription})` : pathDescription;
+
             // Empty string should be treated like no description, so just use path
             assert.strictEqual(description, '/opt/python/bin/python');
         });
@@ -79,13 +75,12 @@ suite('Environment Picker Description Logic', () => {
         test('should handle Windows paths correctly', () => {
             const windowsPath = 'C:\\Python39\\python.exe';
             const env = createMockEnvironment(windowsPath, 'System Python');
-            
+
             // This is the logic from our updated picker
             const pathDescription = env.displayPath;
-            const description = env.description && env.description.trim()
-                ? `${env.description} (${pathDescription})`
-                : pathDescription;
-            
+            const description =
+                env.description && env.description.trim() ? `${env.description} (${pathDescription})` : pathDescription;
+
             assert.strictEqual(description, 'System Python (C:\\Python39\\python.exe)');
         });
     });

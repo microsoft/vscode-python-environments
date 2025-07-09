@@ -157,12 +157,12 @@ export async function pickEnvironment(
     ];
 
     if (options?.recommended) {
-        // Include interpreter path in description for recommended environment too
         const pathDescription = options.recommended.displayPath;
-        const description = options.recommended.description && options.recommended.description.trim()
-            ? `${options.recommended.description} (${pathDescription})`
-            : pathDescription;
-            
+        const description =
+            options.recommended.description && options.recommended.description.trim()
+                ? `${options.recommended.description} (${pathDescription})`
+                : pathDescription;
+
         items.push(
             {
                 label: Common.recommended,
@@ -185,12 +185,10 @@ export async function pickEnvironment(
         const envs = await manager.getEnvironments('all');
         items.push(
             ...envs.map((e) => {
-                // Include interpreter path in description. If original description exists and is not empty, append path to it.
                 const pathDescription = e.displayPath;
-                const description = e.description && e.description.trim()
-                    ? `${e.description} (${pathDescription})`
-                    : pathDescription;
-                
+                const description =
+                    e.description && e.description.trim() ? `${e.description} (${pathDescription})` : pathDescription;
+
                 return {
                     label: e.displayName ?? e.name,
                     description: description,
@@ -207,12 +205,10 @@ export async function pickEnvironment(
 
 export async function pickEnvironmentFrom(environments: PythonEnvironment[]): Promise<PythonEnvironment | undefined> {
     const items = environments.map((e) => {
-        // Include interpreter path in description. If original description exists and is not empty, append path to it.
         const pathDescription = e.displayPath;
-        const description = e.description && e.description.trim()
-            ? `${e.description} (${pathDescription})`
-            : pathDescription;
-        
+        const description =
+            e.description && e.description.trim() ? `${e.description} (${pathDescription})` : pathDescription;
+
         return {
             label: e.displayName ?? e.name,
             description: description,
