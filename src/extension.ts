@@ -12,6 +12,7 @@ import { createDeferred } from './common/utils/deferred';
 import {
     activeTerminal,
     createLogOutputChannel,
+    createTerminal,
     onDidChangeActiveTerminal,
     onDidChangeTerminalShellIntegration,
 } from './common/window.apis';
@@ -66,7 +67,11 @@ import { ProjectItem } from './features/views/treeViewItems';
 import { EnvironmentManagers, ProjectCreators, PythonProjectManager } from './internal.api';
 import { registerSystemPythonFeatures } from './managers/builtin/main';
 import { SysPythonManager } from './managers/builtin/sysPythonManager';
-import { createNativePythonFinder, NativePythonFinder } from './managers/common/nativePythonFinder';
+import {
+    createNativePythonFinder,
+    getNativePythonToolsPath,
+    NativePythonFinder,
+} from './managers/common/nativePythonFinder';
 import { IDisposable } from './managers/common/types';
 import { registerCondaFeatures } from './managers/conda/main';
 import { registerPoetryFeatures } from './managers/poetry/main';
@@ -427,6 +432,20 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
                 });
             } catch (error) {
                 window.showErrorMessage(`Failed to open issue reporter: ${error}`);
+            }
+        }),
+        commands.registerCommand('python-envs.runPetInTerminal', async () => {
+            try {
+                const petPath = await getNativePythonToolsPath();
+                const terminal = createTerminal({
+                    name: 'Python Environment Tool (PET)',
+                });
+                terminal.show();
+                terminal.sendText(`"${petPath}"`, true);
+                traceInfo(`Running PET in terminal: ${petPath}`);
+            } catch (error) {
+                traceError('Error running PET in terminal', error);
+                window.showErrorMessage(`Failed to run Python Environment Tool: ${error}`);
             }
         }),
         terminalActivation.onDidChangeTerminalActivationState(async (e) => {
