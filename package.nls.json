@@ -35,5 +35,6 @@
     "python-envs.terminal.activate.title": "Activate Environment in Current Terminal",
     "python-envs.terminal.deactivate.title": "Deactivate Environment in Current Terminal",
     "python-envs.uninstallPackage.title": "Uninstall Package",
-    "python-envs.revealProjectInExplorer.title": "Reveal Project in Explorer"
+    "python-envs.revealProjectInExplorer.title": "Reveal Project in Explorer",
+    "python-envs.runPetInTerminal.title": "Run Python Environment Tool (PET) in Terminal"
 }

@@ -262,6 +262,13 @@
                 "title": "%python-envs.revealProjectInExplorer.title%",
                 "category": "Python Envs",
                 "icon": "$(folder-opened)"
+            },
+            {
+                "command": "python-envs.runPetInTerminal",
+                "title": "%python-envs.runPetInTerminal.title%",
+                "category": "Python",
+                "icon": "$(terminal)",
+                "when": "config.python.useEnvironmentsExtension != false"
             }
         ],
         "menus": {

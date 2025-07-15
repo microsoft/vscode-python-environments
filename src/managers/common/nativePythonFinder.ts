@@ -14,7 +14,7 @@ import { traceVerbose } from '../../common/logging';
 import { isWindows } from '../../common/utils/platformUtils';
 import { getUserHomeDir, untildify } from '../../common/utils/pathUtils';
 
-async function getNativePythonToolsPath(): Promise<string> {
+export async function getNativePythonToolsPath(): Promise<string> {
     const envsExt = getExtension(ENVS_EXTENSION_ID);
     if (envsExt) {
         const petPath = path.join(envsExt.extensionPath, 'python-env-tools', 'bin', isWindows() ? 'pet.exe' : 'pet');
