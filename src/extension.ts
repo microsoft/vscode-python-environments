@@ -67,7 +67,11 @@ import { ProjectItem } from './features/views/treeViewItems';
 import { EnvironmentManagers, ProjectCreators, PythonProjectManager } from './internal.api';
 import { registerSystemPythonFeatures } from './managers/builtin/main';
 import { SysPythonManager } from './managers/builtin/sysPythonManager';
-import { createNativePythonFinder, getNativePythonToolsPath, NativePythonFinder } from './managers/common/nativePythonFinder';
+import {
+    createNativePythonFinder,
+    getNativePythonToolsPath,
+    NativePythonFinder,
+} from './managers/common/nativePythonFinder';
 import { IDisposable } from './managers/common/types';
 import { registerCondaFeatures } from './managers/conda/main';
 import { registerPoetryFeatures } from './managers/poetry/main';
@@ -434,10 +438,10 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
             try {
                 const petPath = await getNativePythonToolsPath();
                 const terminal = createTerminal({
-                    name: 'Python Environment Tool (PET)'
+                    name: 'Python Environment Tool (PET)',
                 });
                 terminal.show();
-                terminal.sendText(`"${petPath}"\n`);
+                terminal.sendText(`"${petPath}"`, true);
                 traceInfo(`Running PET in terminal: ${petPath}`);
             } catch (error) {
                 traceError('Error running PET in terminal', error);
