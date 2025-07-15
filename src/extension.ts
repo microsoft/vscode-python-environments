@@ -434,12 +434,11 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
             try {
                 const petPath = await getNativePythonToolsPath();
                 const terminal = createTerminal({
-                    name: 'Python Environment Tool (PET)',
-                    shellPath: petPath,
-                    shellArgs: []
+                    name: 'Python Environment Tool (PET)'
                 });
                 terminal.show();
-                traceInfo(`Created terminal with PET: ${petPath}`);
+                terminal.sendText(`"${petPath}"\n`);
+                traceInfo(`Running PET in terminal: ${petPath}`);
             } catch (error) {
                 traceError('Error running PET in terminal', error);
                 window.showErrorMessage(`Failed to run Python Environment Tool: ${error}`);
