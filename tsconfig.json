@@ -1,5 +1,8 @@
 {
     "compilerOptions": {
+        "jsx": "react",
+        "jsxFactory": "vscpp",
+        "jsxFragmentFactory": "vscppf",
         "module": "NodeNext",
         "moduleResolution": "NodeNext",
         "target": "ES2020",

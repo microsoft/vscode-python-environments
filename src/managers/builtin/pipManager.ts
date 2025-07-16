@@ -8,6 +8,7 @@ import {
     ThemeIcon,
     window,
 } from 'vscode';
+import { Disposable } from 'vscode-jsonrpc';
 import {
     DidChangePackagesEventArgs,
     IconPath,
@@ -18,10 +19,15 @@ import {
     PythonEnvironment,
     PythonEnvironmentApi,
 } from '../../api';
-import { managePackages, refreshPackages } from './utils';
-import { Disposable } from 'vscode-jsonrpc';
-import { VenvManager } from './venvManager';
+import { PythonHelperChatParticipant } from '../../features/chat/pythonHelperChatParticipant';
+import {
+    ChatEnvironmentErrorInfo,
+    ERROR_CHAT_CONTEXT_QUEUE,
+    sendPromptIfCopilotChatInstalled,
+} from '../../features/chat/send_prompt';
 import { getWorkspacePackagesToInstall } from './pipUtils';
+import { managePackages, refreshPackages } from './utils';
+import { VenvManager } from './venvManager';
 
 function getChanges(before: Package[], after: Package[]): { kind: PackageChangeKind; pkg: Package }[] {
     const changes: { kind: PackageChangeKind; pkg: Package }[] = [];
@@ -84,10 +90,12 @@ export class PipPackageManager implements PackageManager, Disposable {
                 cancellable: true,
             },
             async (_progress, token) => {
+                let beforeP: Package[];
                 try {
-                    const before = this.packages.get(environment.envId.id) ?? [];
+                    const beforePackages = this.packages.get(environment.envId.id);
+                    beforeP = Array.isArray(beforePackages) ? beforePackages : [];
                     const after = await managePackages(environment, manageOptions, this.api, this, token);
-                    const changes = getChanges(before, after);
+                    const changes = getChanges(beforeP, after);
                     this.packages.set(environment.envId.id, after);
                     this._onDidChangePackages.fire({ environment, manager: this, changes });
                 } catch (e) {
@@ -96,12 +104,19 @@ export class PipPackageManager implements PackageManager, Disposable {
                     }
                     this.log.error('Error managing packages', e);
                     setImmediate(async () => {
-                        const result = await window.showErrorMessage('Error managing packages', 'View Output');
+                        const result = await window.showErrorMessage(
+                            'Error managing packages',
+                            'View Output',
+                            'Diagnose with AI',
+                        );
                         if (result === 'View Output') {
                             this.log.show();
+                            return;
+                        }
+                        if (result === 'Diagnose with AI') {
+                            await this.ifDiagnose(environment, e, options, beforeP);
                         }
                     });
-                    throw e;
                 }
             },
         );
@@ -134,5 +149,36 @@ export class PipPackageManager implements PackageManager, Disposable {
     dispose(): void {
         this._onDidChangePackages.dispose();
         this.packages.clear();
+    }
+    async ifDiagnose(
+        environment: PythonEnvironment,
+        e: unknown,
+        options: PackageManagementOptions,
+        beforeP: Package[],
+    ): Promise<void> {
+        const errorMsg = e instanceof Error ? e.message : String(e);
+        const stack = e instanceof Error ? e.stack ?? '' : '';
+
+        const ch = PythonHelperChatParticipant.getInstance();
+        if (!ch) {
+            this.log.error('PythonHelperChatParticipant is not registered');
+            return;
+        }
+        const chatErrorInfo: ChatEnvironmentErrorInfo = {
+            errorMessage: errorMsg,
+            stackTrace: stack,
+            attemptedPackages: options.install ?? [],
+            packageManager: this.displayName ?? this.name,
+            environment: {
+                displayName: environment.displayName,
+                environmentPath: environment.environmentPath.fsPath ?? environment.environmentPath.toString(),
+                version: environment.version,
+            },
+            packagesBeforeInstall: beforeP.map((p) => p.name),
+            tools: ['installPythonPackage', 'configurePythonEnvironment', 'getPythonEnvironmentInfo'],
+        };
+        ERROR_CHAT_CONTEXT_QUEUE.push(chatErrorInfo);
+        const prompt2 = `@pythonHelper Please help me diagnose the following error when attempting a package management operation using pip.`;
+        sendPromptIfCopilotChatInstalled(prompt2);
     }
 }
