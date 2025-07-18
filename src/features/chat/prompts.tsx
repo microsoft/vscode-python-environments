@@ -17,35 +17,50 @@ export interface PythonEnvsPromptProps extends BasePromptElementProps {
 
 export class PythonEnvsPrompt extends PromptElement<PythonEnvsPromptProps, void> {
 	render(_state: void, _sizing: PromptSizing) {
+        traceWarn('Render function called'); // Log when render is invoked
 
+        // this.props is PythonEnvsPromptProps
         const isContext = !ERROR_CHAT_CONTEXT_QUEUE.isEmpty();
-                if (!isContext) {
-                    traceWarn('No context found for python helper chat participant');
-                    return;
-                }
+        traceWarn('Context queue is empty:', !isContext); // Log the state of the context queue
+
+        if (!isContext) {
+            traceWarn('No context found for python helper chat participant');
+            return;
+        }
+
         const contextErr: ChatEnvironmentErrorInfo | undefined = ERROR_CHAT_CONTEXT_QUEUE.pop();
+        traceWarn('Popped context error:', contextErr); // Log the popped context error
+
         if (!contextErr) {
             traceWarn('No context error found for python helper chat participant');
             return;
         }
+
         const attemptedPackages = contextErr.attemptedPackages.join(', ');
         const packagesBeforeInstall = contextErr.packagesBeforeInstall.join(', ');
-        console.log(packagesBeforeInstall)
+        traceWarn('Attempted packages:', attemptedPackages); // Log attempted packages
+        traceWarn('Packages before install:', packagesBeforeInstall); // Log packages before install
+
         const envString = contextErr.environment.displayName + ' (' + contextErr.environment.environmentPath + ') ' + contextErr.environment.version;
-        console.log(envString);
+        traceWarn('Environment string:', envString); // Log environment string
 
         const rawPrompt = this.props.request.prompt .replace(/^@pythonHelper\s*/, '');
-                    let _errorInfo: ChatEnvironmentErrorInfo | undefined;
-                    try {
-                        _errorInfo = JSON.parse(rawPrompt);
-                    } catch (e) {
-                        // Handle parse error
-                    }
-        return (
-            <>
+        traceWarn('Raw prompt:', rawPrompt); // Log the raw prompt
+
+        // let errorInfo: ChatEnvironmentErrorInfo | undefined;
+        // try {
+        //     errorInfo = JSON.stringify(rawPrompt);
+        //     traceWarn('Parsed error info:', errorInfo); // Log parsed error info
+        // } catch (e) {
+        //     console.error('Error parsing raw prompt the prompt:', rawPrompt);
+        //     traceWarn('Error parsing raw prompt:', e); // Log parsing error
+        // }
+        const msg =  <>
                 <UserMessage priority={100}>🚨 **Package Management Error**##<br /> ❗ Error Details<br />``` <br /> {contextErr.errorMessage}<br />```<br />Stack Trace<br />```<br />{contextErr.stackTrace}<br />```<br />## 📝 **Context**<br />**Attempted Packages:**{attemptedPackages}<br /><br /> **Package Manager:** {contextErr.packageManager}<br /> **Environment:** {envString}<br /> **Packages Before Install:** {packagesBeforeInstall}<br />## 🛠️ **How to Diagnose & Fix**<br />1. **Diagnose the error above.**<br />2. **Suggest a fix.**<br />3. Use the following tools where applicable:<br />- `installPythonPackage`: Install a package with a version specification, etc.<br />   -`configurePythonEnvironment`: Create an environment with the given attributes.<br /> If you see one best path forward, start doing that WITHOUT asking the user again. If you see 2 to 3 paths to solve this problem, reply with the two paths like so: `button1: prompt solution` `button2: prompt solution</UserMessage>
             </>
-        )
+
+        traceWarn('Returning message final:', msg); // Log the final message to be returned
+        return msg;
 
         //  <UserMessage priority={69}><br /> **Attempted Packages:**{attemptedPackages}<br /> **Package Manager:** {contextErr.packageManager}<br /> **Environment:** {contextErr.environment}<br /> **Packages Before Install:** {contextErr.packagesBeforeInstall}</UserMessage>
                         // <UserMessage priority={67}><br /> **Environment:** {envString}<br /></UserMessage>

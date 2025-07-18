@@ -2,6 +2,7 @@
 // //     const token: CancellationToken = new CancellationTokenSource().token;
 
 import { commands, extensions, l10n, ProgressLocation, ProgressOptions, window } from 'vscode';
+import { traceInfo, traceWarn } from '../../common/logging';
 
 // import {
 //     CancellationToken,
@@ -95,30 +96,41 @@ function isCopilotChatInstalled(): boolean {
     return !!extensions.getExtension(COPILOT_CHAT_EXTENSION_ID);
 }
 export async function sendPromptIfCopilotChatInstalled(prompt: string): Promise<void> {
+    traceInfo('Checking if Copilot Chat is installed'); // Log check start
+
     const sendPrompt = async () => {
-        // Artificial delay to work around
-        // https://github.com/microsoft/vscode-copilot/issues/16541
+        traceInfo('Preparing to send prompt to Copilot Chat'); // Log prompt preparation
+
         const progressOptions: ProgressOptions = {
             location: ProgressLocation.Notification,
             title: l10n.t('Analyzing your python environment extension logs...'),
             cancellable: false,
         };
         await window.withProgress(progressOptions, async () => {
+            traceInfo('Showing progress notification'); // Log progress notification
             await new Promise((resolve) => setTimeout(resolve, 5));
         });
+
+        traceInfo('Executing chat open command with prompt:', prompt); // Log command execution
+
         const abc = await commands.executeCommand('workbench.action.chat.open', {
             query: prompt,
             mode: 'agent',
         });
+
         if (abc) {
-            console.log('Chat opened successfully');
+            traceInfo('Chat opened successfully'); // Log success
+        } else {
+            traceWarn('Failed to open chat'); // Log failure
         }
     };
-    // If the user has Copilot Chat installed, assume they are
-    // logged in and can receive the 'sendToNewChat' command
+
     if (isCopilotChatInstalled()) {
+        traceInfo('Copilot Chat is installed, sending prompt'); // Log installation check
         await sendPrompt();
         return;
+    } else {
+        traceWarn('Copilot Chat is not installed'); // Log absence
     }
 }
 
