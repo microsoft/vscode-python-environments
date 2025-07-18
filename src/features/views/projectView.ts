@@ -12,7 +12,7 @@ import {
 import { PythonEnvironment } from '../../api';
 import { ProjectViews } from '../../common/localize';
 import { createSimpleDebounce } from '../../common/utils/debounce';
-import { onDidChangeConfiguration } from '../../common/workspace.apis';
+import { onDidChangeConfiguration, onDidDeleteFiles, onDidRenameFiles } from '../../common/workspace.apis';
 import { EnvironmentManagers, PythonProjectManager } from '../../internal.api';
 import {
     GlobalProjectItem,
@@ -67,6 +67,12 @@ export class ProjectView implements TreeDataProvider<ProjectTreeItem> {
                 ) {
                     this.debouncedUpdateProject.trigger();
                 }
+            }),
+            onDidRenameFiles((e) => {
+                this.handleFileRenames(e);
+            }),
+            onDidDeleteFiles((e) => {
+                this.handleFileDeletions(e);
             }),
         );
     }
@@ -222,6 +228,77 @@ export class ProjectView implements TreeDataProvider<ProjectTreeItem> {
     }
     getParent(element: ProjectTreeItem): ProviderResult<ProjectTreeItem> {
         return element.parent;
+    }
+
+    private async handleFileRenames(e: {
+        readonly files: ReadonlyArray<{ readonly oldUri: Uri; readonly newUri: Uri }>;
+    }): Promise<void> {
+        const projects = this.projectManager.getProjects();
+
+        for (const { oldUri, newUri } of e.files) {
+            // Check if any project matches the old URI exactly or is contained within it
+            const affectedProjects = projects.filter((project) => {
+                const projectPath = project.uri.fsPath;
+                const oldPath = oldUri.fsPath;
+
+                // Check if the project path is the same as or is a child of the renamed path
+                return (
+                    projectPath === oldPath ||
+                    projectPath.startsWith(oldPath + '/') ||
+                    projectPath.startsWith(oldPath + '\\')
+                );
+            });
+
+            for (const project of affectedProjects) {
+                const projectPath = project.uri.fsPath;
+                const oldPath = oldUri.fsPath;
+                const newPath = newUri.fsPath;
+
+                // Calculate the new project path
+                let newProjectPath: string;
+                if (projectPath === oldPath) {
+                    // Project path is exactly the renamed path
+                    newProjectPath = newPath;
+                } else {
+                    // Project path is a child of the renamed path
+                    const relativePath = projectPath.substring(oldPath.length);
+                    newProjectPath = newPath + relativePath;
+                }
+
+                const newProjectUri = Uri.file(newProjectPath);
+                await this.projectManager.modifyProject(project.uri, undefined, newProjectUri);
+            }
+
+            if (affectedProjects.length > 0) {
+                // only trigger update if there are affected projects
+                this.debouncedUpdateProject.trigger();
+            }
+        }
+    }
+
+    private handleFileDeletions(e: { readonly files: ReadonlyArray<Uri> }): void {
+        const projects = this.projectManager.getProjects();
+
+        for (const deletedUri of e.files) {
+            // Check if any project matches the deleted URI exactly or is contained within it
+            const affectedProjects = projects.filter((project) => {
+                const projectPath = project.uri.fsPath;
+                const deletedPath = deletedUri.fsPath;
+
+                // Check if the project path is the same as or is a child of the deleted path
+                return (
+                    projectPath === deletedPath ||
+                    projectPath.startsWith(deletedPath + '/') ||
+                    projectPath.startsWith(deletedPath + '\\')
+                );
+            });
+
+            if (affectedProjects.length > 0) {
+                this.projectManager.remove(affectedProjects);
+                // If there are affected projects, trigger an update
+                this.debouncedUpdateProject.trigger();
+            }
+        }
     }
 
     dispose() {
