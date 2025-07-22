@@ -191,8 +191,9 @@ export class VenvManager implements EnvironmentManager {
                     try {
                         const stat = await fs.stat(envPath.fsPath);
                         if (!stat.isDirectory()) {
-                            // If the env path is a file (likely the python binary), use its parent directory
-                            envPath = Uri.file(path.dirname(envPath.fsPath));
+                            // If the env path is a file (likely the python binary), use parent-parent as the env path
+                            // following format of .venv/bin/python or .venv\Scripts\python.exe
+                            envPath = Uri.file(path.dirname(path.dirname(envPath.fsPath)));
                         }
                     } catch (err) {
                         // If stat fails, fallback to original envPath
