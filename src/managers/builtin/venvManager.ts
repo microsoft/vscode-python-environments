@@ -187,23 +187,23 @@ export class VenvManager implements EnvironmentManager {
                 // Add .gitignore to the .venv folder
                 try {
                     // determine if env path is python binary or environment folder
-                    let envPath = environment.environmentPath;
+                    let envPath = environment.environmentPath.fsPath;
                     try {
-                        const stat = await fs.stat(envPath.fsPath);
+                        const stat = await fs.stat(envPath);
                         if (!stat.isDirectory()) {
                             // If the env path is a file (likely the python binary), use parent-parent as the env path
                             // following format of .venv/bin/python or .venv\Scripts\python.exe
-                            envPath = Uri.file(path.dirname(path.dirname(envPath.fsPath)));
+                            envPath = Uri.file(path.dirname(path.dirname(envPath))).fsPath;
                         }
                     } catch (err) {
                         // If stat fails, fallback to original envPath
                         traceWarn(
-                            `Failed to stat environment path: ${envPath.fsPath}. Error: ${
+                            `Failed to stat environment path: ${envPath}. Error: ${
                                 err instanceof Error ? err.message : String(err)
                             }, continuing to attempt to create .gitignore.`,
                         );
                     }
-                    const gitignorePath = path.join(envPath.fsPath, '.gitignore');
+                    const gitignorePath = path.join(envPath, '.gitignore');
                     await fs.writeFile(gitignorePath, '*\n', { flag: 'w' });
                 } catch (err) {
                     traceError(
