@@ -30,7 +30,7 @@ import {
 } from '../../api';
 import { PYTHON_EXTENSION_ID } from '../../common/constants';
 import { VenvManagerStrings } from '../../common/localize';
-import { traceError } from '../../common/logging';
+import { traceError, traceWarn } from '../../common/logging';
 import { createDeferred, Deferred } from '../../common/utils/deferred';
 import { showErrorMessage, withProgress } from '../../common/window.apis';
 import { findParentIfFile } from '../../features/envCommands';
@@ -186,12 +186,29 @@ export class VenvManager implements EnvironmentManager {
 
                 // Add .gitignore to the .venv folder
                 try {
-                    const venvDir = environment.environmentPath.fsPath;
-                    const gitignorePath = path.join(venvDir, '.gitignore');
+                    // determine if env path is python binary or environment folder
+                    let envPath = environment.environmentPath;
+                    try {
+                        const stat = await fs.stat(envPath.fsPath);
+                        if (!stat.isDirectory()) {
+                            // If the env path is a file (likely the python binary), use its parent directory
+                            envPath = Uri.file(path.dirname(envPath.fsPath));
+                        }
+                    } catch (err) {
+                        // If stat fails, fallback to original envPath
+                        traceWarn(
+                            `Failed to stat environment path: ${envPath.fsPath}. Error: ${
+                                err instanceof Error ? err.message : String(err)
+                            }, continuing to attempt to create .gitignore.`,
+                        );
+                    }
+                    const gitignorePath = path.join(envPath.fsPath, '.gitignore');
                     await fs.writeFile(gitignorePath, '*\n', { flag: 'w' });
                 } catch (err) {
                     traceError(
-                        `Failed to create .gitignore in venv: ${err instanceof Error ? err.message : String(err)}`,
+                        `Failed to create .gitignore in venv: ${
+                            err instanceof Error ? err.message : String(err)
+                        }, continuing.`,
                     );
                 }
 
