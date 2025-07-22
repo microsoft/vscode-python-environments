@@ -40,6 +40,12 @@
     "contributes": {
         "configuration": {
             "properties": {
+                "python-envs.injectEnvVarsInTerminals": {
+                    "type": "boolean",
+                    "default": false,
+                    "description": "%python-envs.injectEnvVarsInTerminals.description%",
+                    "scope": "window"
+                },
                 "python-envs.defaultEnvManager": {
                     "type": "string",
                     "description": "%python-envs.defaultEnvManager.description%",
