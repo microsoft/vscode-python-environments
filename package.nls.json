@@ -1,6 +1,6 @@
 {
     "python-envs.defaultEnvManager.description": "The default environment manager for creating and managing environments.",
-    "python-envs.injectEnvVarsInTerminals.description": "This setting defaults to false and toggles if environment variables found in the workspace are set for new terminals.",
+    "python-envs.injectEnvVarsInTerminals.description": "Whether to inject environment variables into terminals on creating new terminals through the environments extension, defaults to false.",
     "python-envs.defaultPackageManager.description": "The default package manager for installing packages in environments.",
     "python-envs.pythonProjects.description": "The list of Python projects.",
     "python-envs.pythonProjects.path.description": "The path to a folder or file in the workspace to be treated as a Python project.",

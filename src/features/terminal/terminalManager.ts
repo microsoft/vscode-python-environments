@@ -1,9 +1,9 @@
 import * as fsapi from 'fs-extra';
 import * as path from 'path';
-import { Disposable, EventEmitter, ExtensionContext, ProgressLocation, Terminal, TerminalOptions, Uri } from 'vscode';
+import { Disposable, EventEmitter, ProgressLocation, Terminal, TerminalOptions, Uri } from 'vscode';
 import { PythonEnvironment, PythonEnvironmentApi, PythonProject, PythonTerminalCreateOptions } from '../../api';
 import { ActivationStrings } from '../../common/localize';
-import { traceInfo, traceVerbose } from '../../common/logging';
+import { traceError, traceInfo, traceVerbose } from '../../common/logging';
 import {
     createTerminal,
     onDidChangeWindowState,
@@ -84,7 +84,6 @@ export class TerminalManagerImpl implements TerminalManager {
         private readonly ta: TerminalActivationInternal,
         private readonly startupEnvProviders: ShellEnvsProvider[],
         private readonly startupScriptProviders: ShellStartupScriptProvider[],
-        private readonly context: ExtensionContext,
     ) {
         this.disposables.push(
             this.onTerminalOpenedEmitter,
@@ -106,7 +105,6 @@ export class TerminalManagerImpl implements TerminalManager {
                     env = await getEnvironmentForTerminal(api, t);
                 }
                 if (env) {
-                    await this.injectEnvironmentVariables(env);
                     await this.autoActivateOnTerminalOpen(t, env);
                 }
             }),
@@ -214,29 +212,6 @@ export class TerminalManagerImpl implements TerminalManager {
         return ACT_TYPE_COMMAND;
     }
 
-    private async injectEnvironmentVariables(environment: PythonEnvironment): Promise<void> {
-        const config = getConfiguration('python-envs');
-        const inject = config.get<boolean>('injectEnvVarsInTerminals', false);
-        if (!inject) {
-            traceInfo('Skipping environment variable injection based on `injectEnvVarsInTerminals` setting.');
-            return;
-        }
-        const api = await getPythonApi();
-        const project = api.getPythonProject(environment.environmentPath);
-        if (project) {
-            const envVars = await api.getEnvironmentVariables(project.uri);
-            const collection = this.context.environmentVariableCollection;
-            // clear the env var collection to remove any existing env vars
-            collection.clear();
-            for (const [key, value] of Object.entries(envVars)) {
-                if (value === undefined) {
-                    continue; // Skip undefined values
-                }
-                collection.append(key, value);
-            }
-        }
-    }
-
     private async autoActivateOnTerminalOpen(terminal: Terminal, environment: PythonEnvironment): Promise<void> {
         let actType = getAutoActivationType();
         const shellType = identifyTerminalShell(terminal);
@@ -283,6 +258,38 @@ export class TerminalManagerImpl implements TerminalManager {
             });
         }
 
+        const config = getConfiguration('python-envs');
+        const isEnvVarsInjectionEnabled = config.get<boolean>('injectEnvVarsInTerminals', false);
+        if (isEnvVarsInjectionEnabled) {
+            // update the environment variables with project specific ones
+            try {
+                const api = await getPythonApi();
+                const project = api.getPythonProject(environment.environmentPath);
+                if (project) {
+                    const projectEnvVars = await api.getEnvironmentVariables(project.uri);
+                    if (envVars === undefined) {
+                        // If envVars is undefined, we initialize it to an empty object.
+                        envVars = {};
+                    }
+
+                    for (const [key, value] of Object.entries(projectEnvVars)) {
+                        if (value === undefined) {
+                            // undefined as value means we want to remove the variable
+                            delete envVars[key];
+                        } else {
+                            envVars[key] = value;
+                        }
+                    }
+                } else {
+                    traceVerbose(`No project found during terminal creation for ${environment.displayName}`);
+                }
+            } catch (ex) {
+                traceError(
+                    `Failed to get environment variables for project: ${ex}, starting terminal without project environment variables.`,
+                );
+            }
+        }
+
         // Uncomment the code line below after the issue is resolved:
         // https://github.com/microsoft/vscode-python-environments/issues/172
         // const name = options.name ?? `Python: ${environment.displayName}`;
@@ -310,7 +317,6 @@ export class TerminalManagerImpl implements TerminalManager {
             // We add it to skip activation on open to prevent double activation.
             // We can activate it ourselves since we are creating it.
             this.skipActivationOnOpen.add(newTerminal);
-            await this.injectEnvironmentVariables(environment);
             await this.autoActivateOnTerminalOpen(newTerminal, environment);
         }
 
@@ -395,12 +401,6 @@ export class TerminalManagerImpl implements TerminalManager {
     }
 
     public async initialize(api: PythonEnvironmentApi): Promise<void> {
-        for (const t of terminals()) {
-            const env = this.ta.getEnvironment(t) ?? (await getEnvironmentForTerminal(api, t));
-            if (env) {
-                await this.injectEnvironmentVariables(env);
-            }
-        }
         const actType = getAutoActivationType();
         if (actType === ACT_TYPE_COMMAND) {
             await Promise.all(terminals().map(async (t) => this.activateUsingCommand(api, t)));

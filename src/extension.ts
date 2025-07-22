@@ -205,7 +205,6 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
         terminalActivation,
         shellEnvsProviders,
         shellStartupProviders,
-        context,
     );
     context.subscriptions.push(terminalActivation, terminalManager);
 
