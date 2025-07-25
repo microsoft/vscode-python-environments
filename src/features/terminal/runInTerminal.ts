@@ -28,9 +28,17 @@ export async function runInTerminal(
                 deferred.resolve();
             }
         });
+
+        const shouldSurroundWithQuotes =
+            executable.includes(' ') && !executable.startsWith('"') && !executable.endsWith('"');
+        // Handle case where executable contains white-spaces.
+        if (shouldSurroundWithQuotes) {
+            executable = `"${executable}"`;
+        }
+
         if (shellType === ShellConstants.PWSH && !executable.startsWith('&')) {
             // PowerShell requires commands to be prefixed with '&' to run them.
-            executable = `& "${executable}"`;
+            executable = `& ${executable}`;
         }
         execution = terminal.shellIntegration.executeCommand(executable, allArgs);
         await deferred.promise;
