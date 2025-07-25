@@ -318,7 +318,7 @@ class PythonEnvironmentApiImpl implements PythonEnvironmentApi {
             environment,
         );
         await runInTerminal(environment, terminal, options);
-        return terminal;
+        return Promise.resolve(terminal);
     }
     runAsTask(environment: PythonEnvironment, options: PythonTaskExecutionOptions): Promise<TaskExecution> {
         return runAsTask(environment, options);

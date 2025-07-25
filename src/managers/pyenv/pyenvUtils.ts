@@ -177,7 +177,10 @@ function nativeToPythonEnv(
 
     const sv = shortVersion(info.version);
     const name = info.name || info.displayName || path.basename(info.prefix);
-    const displayName = info.displayName || `pyenv (${sv})`;
+    let displayName = info.displayName || `pyenv (${sv})`;
+    if (info.kind === NativePythonEnvironmentKind.pyenvVirtualEnv) {
+        displayName = `${name} (${sv})`;
+    }
 
     const shellActivation: Map<string, PythonCommandRunConfiguration[]> = new Map();
     const shellDeactivation: Map<string, PythonCommandRunConfiguration[]> = new Map();
@@ -232,7 +235,10 @@ export async function refreshPyenv(
     const envs = data
         .filter((e) => isNativeEnvInfo(e))
         .map((e) => e as NativeEnvInfo)
-        .filter((e) => e.kind === NativePythonEnvironmentKind.pyenv);
+        .filter(
+            (e) =>
+                e.kind === NativePythonEnvironmentKind.pyenv || e.kind === NativePythonEnvironmentKind.pyenvVirtualEnv,
+        );
 
     const collection: PythonEnvironment[] = [];
 
