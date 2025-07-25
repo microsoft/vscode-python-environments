@@ -28,7 +28,7 @@ import {
 import { ENVS_EXTENSION_ID, EXTENSION_ROOT_DIR } from '../../common/constants';
 import { showErrorMessageWithLogs } from '../../common/errors/utils';
 import { Common, CondaStrings, PackageManagement, Pickers } from '../../common/localize';
-import { traceInfo } from '../../common/logging';
+import { traceError, traceInfo } from '../../common/logging';
 import { getWorkspacePersistentState } from '../../common/persistentState';
 import { pickProject } from '../../common/pickers/projects';
 import { createDeferred } from '../../common/utils/deferred';
@@ -1085,9 +1085,10 @@ async function getCondaHookPs1Path(condaPath: string): Promise<string> {
     if (found) {
         return found as string;
     }
-    throw new Error(
-        `Conda hook not found in expected locations. Tried: ${condaRootCandidates.join(
+    traceError(
+        `Conda hook not found in any of the expected locations: ${condaRootCandidates.join(
             ', ',
-        )} based on conda executable at ${condaPath}.`,
+        )}, given conda path: ${condaPath}`,
     );
+    return path.join(condaRoot, 'shell', 'condabin', 'conda-hook.ps1');
 }
