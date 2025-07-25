@@ -323,7 +323,7 @@ function getNamedCondaPythonInfo(
             ]);
             shellDeactivation.set(ShellConstants.ZSH, [{ executable: 'conda', args: ['deactivate'] }]);
         }
-        const psActivate = path.join(path.dirname(path.dirname(conda)), 'shell', 'condabin', 'conda-hook.ps1');
+        const psActivate = getCondaHookPs1Path(conda);
         shellActivation.set(ShellConstants.PWSH, [
             { executable: '&', args: [psActivate] },
             { executable: 'conda', args: ['activate', name] },
@@ -416,7 +416,7 @@ function getPrefixesCondaPythonInfo(
             ]);
             shellDeactivation.set(ShellConstants.ZSH, [{ executable: 'conda', args: ['deactivate'] }]);
         }
-        const psActivate = path.join(path.dirname(path.dirname(conda)), 'shell', 'condabin', 'conda-hook.ps1');
+        const psActivate = getCondaHookPs1Path(conda);
         shellActivation.set(ShellConstants.PWSH, [
             { executable: '&', args: [psActivate] },
             { executable: 'conda', args: ['activate', prefix] },
@@ -1051,4 +1051,36 @@ export async function checkForNoPythonCondaEnvironment(
         }
     }
     return environment;
+}
+
+/**
+ * Returns the best guess path to conda-hook.ps1 given a conda executable path.
+ *
+ * Searches for conda-hook.ps1 in these locations (relative to the conda root):
+ *   - shell/condabin/
+ *   - Library/shell/condabin/
+ *   - condabin/
+ *   - etc/profile.d/
+ */
+function getCondaHookPs1Path(condaPath: string): string {
+    const condaRoot = path.dirname(path.dirname(condaPath));
+
+    let condaRootCandidates: string[] = [];
+    condaRootCandidates.push(path.join(condaRoot, 'shell', 'condabin'));
+    condaRootCandidates.push(path.join(condaRoot, 'Library', 'shell', 'condabin'));
+    condaRootCandidates.push(path.join(condaRoot, 'condabin'));
+    condaRootCandidates.push(path.join(condaRoot, 'etc', 'profile.d'));
+
+    for (const hookSearchDir of condaRootCandidates) {
+        const candidate = path.join(hookSearchDir, 'conda-hook.ps1');
+        if (fse.existsSync(candidate)) {
+            traceInfo(`Conda hook found at: ${candidate}`);
+            return candidate;
+        }
+    }
+    throw new Error(
+        `Conda hook not found in expected locations. Tried: ${condaRootCandidates.join(
+            ', ',
+        )} based on conda executable at ${condaPath}.`,
+    ); // Throw an error if not found
 }
