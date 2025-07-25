@@ -29,9 +29,8 @@ export async function runInTerminal(
             }
         });
         if (shellType === ShellConstants.PWSH && !executable.startsWith('&')) {
-            executable = quoteArgs([executable, ...allArgs]).join(' ');
             // PowerShell requires commands to be prefixed with '&' to run them.
-            executable = `& ${executable}`;
+            executable = `& "${executable}"`;
         }
         execution = terminal.shellIntegration.executeCommand(executable, allArgs);
         await deferred.promise;
