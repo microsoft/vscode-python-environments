@@ -28,7 +28,7 @@ import {
 import { ENVS_EXTENSION_ID, EXTENSION_ROOT_DIR } from '../../common/constants';
 import { showErrorMessageWithLogs } from '../../common/errors/utils';
 import { Common, CondaStrings, PackageManagement, Pickers } from '../../common/localize';
-import { traceInfo } from '../../common/logging';
+import { traceError, traceInfo } from '../../common/logging';
 import { getWorkspacePersistentState } from '../../common/persistentState';
 import { pickProject } from '../../common/pickers/projects';
 import { createDeferred } from '../../common/utils/deferred';
@@ -280,13 +280,13 @@ function isPrefixOf(roots: string[], e: string): boolean {
     return false;
 }
 
-function getNamedCondaPythonInfo(
+async function getNamedCondaPythonInfo(
     name: string,
     prefix: string,
     executable: string,
     version: string,
     conda: string,
-): PythonEnvironmentInfo {
+): Promise<PythonEnvironmentInfo> {
     const sv = shortVersion(version);
     const shellActivation: Map<string, PythonCommandRunConfiguration[]> = new Map();
     const shellDeactivation: Map<string, PythonCommandRunConfiguration[]> = new Map();
@@ -323,7 +323,7 @@ function getNamedCondaPythonInfo(
             ]);
             shellDeactivation.set(ShellConstants.ZSH, [{ executable: 'conda', args: ['deactivate'] }]);
         }
-        const psActivate = path.join(path.dirname(path.dirname(conda)), 'shell', 'condabin', 'conda-hook.ps1');
+        const psActivate = await getCondaHookPs1Path(conda);
         shellActivation.set(ShellConstants.PWSH, [
             { executable: '&', args: [psActivate] },
             { executable: 'conda', args: ['activate', name] },
@@ -374,12 +374,12 @@ function getNamedCondaPythonInfo(
     };
 }
 
-function getPrefixesCondaPythonInfo(
+async function getPrefixesCondaPythonInfo(
     prefix: string,
     executable: string,
     version: string,
     conda: string,
-): PythonEnvironmentInfo {
+): Promise<PythonEnvironmentInfo> {
     const sv = shortVersion(version);
     const shellActivation: Map<string, PythonCommandRunConfiguration[]> = new Map();
     const shellDeactivation: Map<string, PythonCommandRunConfiguration[]> = new Map();
@@ -416,7 +416,7 @@ function getPrefixesCondaPythonInfo(
             ]);
             shellDeactivation.set(ShellConstants.ZSH, [{ executable: 'conda', args: ['deactivate'] }]);
         }
-        const psActivate = path.join(path.dirname(path.dirname(conda)), 'shell', 'condabin', 'conda-hook.ps1');
+        const psActivate = await getCondaHookPs1Path(conda);
         shellActivation.set(ShellConstants.PWSH, [
             { executable: '&', args: [psActivate] },
             { executable: 'conda', args: ['activate', prefix] },
@@ -487,14 +487,14 @@ function getCondaWithoutPython(name: string, prefix: string, conda: string): Pyt
     };
 }
 
-function nativeToPythonEnv(
+async function nativeToPythonEnv(
     e: NativeEnvInfo,
     api: PythonEnvironmentApi,
     manager: EnvironmentManager,
     log: LogOutputChannel,
     conda: string,
     condaPrefixes: string[],
-): PythonEnvironment | undefined {
+): Promise<PythonEnvironment | undefined> {
     if (!(e.prefix && e.executable && e.version)) {
         let name = e.name;
         const environment = api.createPythonEnvironmentItem(
@@ -507,14 +507,14 @@ function nativeToPythonEnv(
 
     if (e.name === 'base') {
         const environment = api.createPythonEnvironmentItem(
-            getNamedCondaPythonInfo('base', e.prefix, e.executable, e.version, conda),
+            await getNamedCondaPythonInfo('base', e.prefix, e.executable, e.version, conda),
             manager,
         );
         log.info(`Found base environment: ${e.prefix}`);
         return environment;
     } else if (!isPrefixOf(condaPrefixes, e.prefix)) {
         const environment = api.createPythonEnvironmentItem(
-            getPrefixesCondaPythonInfo(e.prefix, e.executable, e.version, conda),
+            await getPrefixesCondaPythonInfo(e.prefix, e.executable, e.version, conda),
             manager,
         );
         log.info(`Found prefix environment: ${e.prefix}`);
@@ -523,7 +523,7 @@ function nativeToPythonEnv(
         const basename = path.basename(e.prefix);
         const name = e.name ?? basename;
         const environment = api.createPythonEnvironmentItem(
-            getNamedCondaPythonInfo(name, e.prefix, e.executable, e.version, conda),
+            await getNamedCondaPythonInfo(name, e.prefix, e.executable, e.version, conda),
             manager,
         );
         log.info(`Found named environment: ${e.prefix}`);
@@ -586,8 +586,8 @@ export async function refreshCondaEnvs(
             .filter((e) => e.kind === NativePythonEnvironmentKind.conda);
         const collection: PythonEnvironment[] = [];
 
-        envs.forEach((e) => {
-            const environment = nativeToPythonEnv(e, api, manager, log, condaPath, condaPrefixes);
+        envs.forEach(async (e) => {
+            const environment = await nativeToPythonEnv(e, api, manager, log, condaPath, condaPrefixes);
             if (environment) {
                 collection.push(environment);
             }
@@ -699,7 +699,7 @@ async function createNamedCondaEnvironment(
                 const version = await getVersion(envPath);
 
                 const environment = api.createPythonEnvironmentItem(
-                    getNamedCondaPythonInfo(envName, envPath, path.join(envPath, bin), version, await getConda()),
+                    await getNamedCondaPythonInfo(envName, envPath, path.join(envPath, bin), version, await getConda()),
                     manager,
                 );
                 return environment;
@@ -757,7 +757,7 @@ async function createPrefixCondaEnvironment(
                 const version = await getVersion(prefix);
 
                 const environment = api.createPythonEnvironmentItem(
-                    getPrefixesCondaPythonInfo(prefix, path.join(prefix, bin), version, await getConda()),
+                    await getPrefixesCondaPythonInfo(prefix, path.join(prefix, bin), version, await getConda()),
                     manager,
                 );
                 return environment;
@@ -1051,4 +1051,44 @@ export async function checkForNoPythonCondaEnvironment(
         }
     }
     return environment;
+}
+
+/**
+ * Returns the best guess path to conda-hook.ps1 given a conda executable path.
+ *
+ * Searches for conda-hook.ps1 in these locations (relative to the conda root):
+ *   - shell/condabin/
+ *   - Library/shell/condabin/
+ *   - condabin/
+ *   - etc/profile.d/
+ */
+async function getCondaHookPs1Path(condaPath: string): Promise<string> {
+    const condaRoot = path.dirname(path.dirname(condaPath));
+
+    const condaRootCandidates: string[] = [
+        path.join(condaRoot, 'shell', 'condabin'),
+        path.join(condaRoot, 'Library', 'shell', 'condabin'),
+        path.join(condaRoot, 'condabin'),
+        path.join(condaRoot, 'etc', 'profile.d'),
+    ];
+
+    const checks = condaRootCandidates.map(async (hookSearchDir) => {
+        const candidate = path.join(hookSearchDir, 'conda-hook.ps1');
+        if (await fse.pathExists(candidate)) {
+            traceInfo(`Conda hook found at: ${candidate}`);
+            return candidate;
+        }
+        return undefined;
+    });
+    const results = await Promise.all(checks);
+    const found = results.find(Boolean);
+    if (found) {
+        return found as string;
+    }
+    traceError(
+        `Conda hook not found in any of the expected locations: ${condaRootCandidates.join(
+            ', ',
+        )}, given conda path: ${condaPath}`,
+    );
+    return path.join(condaRoot, 'shell', 'condabin', 'conda-hook.ps1');
 }
