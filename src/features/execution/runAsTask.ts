@@ -25,8 +25,12 @@ export async function runAsTask(
 ): Promise<TaskExecution> {
     const workspace: WorkspaceFolder | TaskScope = getWorkspaceFolderOrDefault(options.project?.uri);
 
-    const executable =
+    let executable =
         environment.execInfo?.activatedRun?.executable ?? environment.execInfo?.run.executable ?? 'python';
+    // Quote the executable if it contains spaces and is not already quoted
+    if (executable.includes(' ') && !(executable.startsWith('"') && executable.endsWith('"'))) {
+        executable = `"${executable}"`;
+    }
     const args = environment.execInfo?.activatedRun?.args ?? environment.execInfo?.run.args ?? [];
     const allArgs = [...args, ...options.args];
 
