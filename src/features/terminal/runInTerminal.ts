@@ -20,7 +20,11 @@ export async function runInTerminal(
     const args = environment.execInfo?.activatedRun?.args ?? environment.execInfo?.run.args ?? [];
     const allArgs = [...args, ...(options.args ?? [])];
 
-    if (terminal.shellIntegration) {
+    const shellType = identifyTerminalShell(terminal);
+    
+    // For PowerShell terminals, always use sendText to ensure proper command formatting
+    // with '&' operator and argument quoting, even when shell integration is available
+    if (terminal.shellIntegration && shellType !== ShellConstants.PWSH) {
         let execution: TerminalShellExecution | undefined;
         const deferred = createDeferred<void>();
         const disposable = onDidEndTerminalShellExecution((e) => {
@@ -32,7 +36,6 @@ export async function runInTerminal(
         execution = terminal.shellIntegration.executeCommand(executable, allArgs);
         await deferred.promise;
     } else {
-        const shellType = identifyTerminalShell(terminal);
         let text = quoteArgs([executable, ...allArgs]).join(' ');
         if (shellType === ShellConstants.PWSH && !text.startsWith('&')) {
             // PowerShell requires commands to be prefixed with '&' to run them.
