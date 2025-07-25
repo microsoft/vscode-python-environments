@@ -8,10 +8,10 @@ import {
     Uri,
     WorkspaceFolder,
 } from 'vscode';
-import { PythonTaskExecutionOptions } from '../../api';
-import { getWorkspaceFolder } from '../../common/workspace.apis';
-import { PythonEnvironment } from '../../api';
+import { PythonEnvironment, PythonTaskExecutionOptions } from '../../api';
 import { executeTask } from '../../common/tasks.apis';
+import { getWorkspaceFolder } from '../../common/workspace.apis';
+import { quoteArg } from './execUtils';
 
 function getWorkspaceFolderOrDefault(uri?: Uri): WorkspaceFolder | TaskScope {
     const workspace = uri ? getWorkspaceFolder(uri) : undefined;
@@ -25,12 +25,8 @@ export async function runAsTask(
 ): Promise<TaskExecution> {
     const workspace: WorkspaceFolder | TaskScope = getWorkspaceFolderOrDefault(options.project?.uri);
 
-    let executable =
-        environment.execInfo?.activatedRun?.executable ?? environment.execInfo?.run.executable ?? 'python';
-    // Quote the executable if it contains spaces and is not already quoted
-    if (executable.includes(' ') && !(executable.startsWith('"') && executable.endsWith('"'))) {
-        executable = `"${executable}"`;
-    }
+    let executable = environment.execInfo?.activatedRun?.executable ?? environment.execInfo?.run.executable ?? 'python';
+    quoteArg(executable);
     const args = environment.execInfo?.activatedRun?.args ?? environment.execInfo?.run.args ?? [];
     const allArgs = [...args, ...options.args];
 
