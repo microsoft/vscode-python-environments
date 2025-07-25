@@ -26,7 +26,7 @@ export async function runAsTask(
     const workspace: WorkspaceFolder | TaskScope = getWorkspaceFolderOrDefault(options.project?.uri);
 
     let executable = environment.execInfo?.activatedRun?.executable ?? environment.execInfo?.run.executable ?? 'python';
-    quoteArg(executable);
+    executable = quoteArg(executable);
     const args = environment.execInfo?.activatedRun?.args ?? environment.execInfo?.run.args ?? [];
     const allArgs = [...args, ...options.args];
 
