@@ -3,7 +3,7 @@ import * as path from 'path';
 import { Disposable, EventEmitter, ProgressLocation, Terminal, TerminalOptions, Uri } from 'vscode';
 import { PythonEnvironment, PythonEnvironmentApi, PythonProject, PythonTerminalCreateOptions } from '../../api';
 import { ActivationStrings } from '../../common/localize';
-import { traceInfo, traceVerbose } from '../../common/logging';
+import { traceError, traceInfo, traceVerbose } from '../../common/logging';
 import {
     createTerminal,
     onDidChangeWindowState,
@@ -256,6 +256,38 @@ export class TerminalManagerImpl implements TerminalManager {
                     });
                 }
             });
+        }
+
+        const config = getConfiguration('python-envs');
+        const isEnvVarsInjectionEnabled = config.get<boolean>('injectEnvVarsInTerminals', false);
+        if (isEnvVarsInjectionEnabled) {
+            // update the environment variables with project specific ones
+            try {
+                const api = await getPythonApi();
+                const project = api.getPythonProject(environment.environmentPath);
+                if (project) {
+                    const projectEnvVars = await api.getEnvironmentVariables(project.uri);
+                    if (envVars === undefined) {
+                        // If envVars is undefined, we initialize it to an empty object.
+                        envVars = {};
+                    }
+
+                    for (const [key, value] of Object.entries(projectEnvVars)) {
+                        if (value === undefined) {
+                            // undefined as value means we want to remove the variable
+                            delete envVars[key];
+                        } else {
+                            envVars[key] = value;
+                        }
+                    }
+                } else {
+                    traceVerbose(`No project found during terminal creation for ${environment.displayName}`);
+                }
+            } catch (ex) {
+                traceError(
+                    `Failed to get environment variables for project: ${ex}, starting terminal without project environment variables.`,
+                );
+            }
         }
 
         // Uncomment the code line below after the issue is resolved:
