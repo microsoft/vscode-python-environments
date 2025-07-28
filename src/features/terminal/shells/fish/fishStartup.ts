@@ -34,9 +34,12 @@ function getActivationContent(key: string): string {
     const lineSep = '\n';
     return [
         `# version: ${FISH_SCRIPT_VERSION}`,
-        `if test "$TERM_PROGRAM" = "vscode"; and set -q ${key}`,
-        `    eval $${key}`,
-        'end',
+        `if not set -q VSCODE_PYTHON_AUTOACTIVATE_GUARD`,
+        `    set -gx VSCODE_PYTHON_AUTOACTIVATE_GUARD 1`,
+        `    if test "$TERM_PROGRAM" = "vscode"; and set -q ${key}`,
+        `        eval $${key}`,
+        `    end`,
+        `end`,
     ].join(lineSep);
 }
 

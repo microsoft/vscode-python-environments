@@ -113,11 +113,14 @@ function getActivationContent(): string {
     const lineSep = isWindows() ? '\r\n' : '\n';
     const activationContent = [
         `#version: ${PWSH_SCRIPT_VERSION}`,
-        `if (($env:TERM_PROGRAM -eq 'vscode') -and ($null -ne $env:${POWERSHELL_ENV_KEY})) {`,
-        '    try {',
-        `        Invoke-Expression $env:${POWERSHELL_ENV_KEY}`,
-        '    } catch {',
-        `        Write-Error "Failed to activate Python environment: $_" -ErrorAction Continue`,
+        `if (-not $env:VSCODE_PYTHON_AUTOACTIVATE_GUARD) {`,
+        `    $env:VSCODE_PYTHON_AUTOACTIVATE_GUARD = '1'`,
+        `    if (($env:TERM_PROGRAM -eq 'vscode') -and ($null -ne $env:${POWERSHELL_ENV_KEY})) {`,
+        '        try {',
+        `            Invoke-Expression $env:${POWERSHELL_ENV_KEY}`,
+        '        } catch {',
+        `            Write-Error "Failed to activate Python environment: $_" -ErrorAction Continue`,
+        '        }',
         '    }',
         '}',
     ].join(lineSep);
