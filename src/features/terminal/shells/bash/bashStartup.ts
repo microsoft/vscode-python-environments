@@ -48,9 +48,12 @@ function getActivationContent(key: string): string {
     const lineSep = '\n';
     return [
         `# version: ${BASH_SCRIPT_VERSION}`,
-        `if [ -n "$${key}" ] && [ "$TERM_PROGRAM" = "vscode" ]; then`,
-        `    eval "$${key}" || true`,
-        'fi',
+        `if [ -z "$VSCODE_PYTHON_AUTOACTIVATE_GUARD" ]; then`,
+        `    export VSCODE_PYTHON_AUTOACTIVATE_GUARD=1`,
+        `    if [ -n "$${key}" ] && [ "$TERM_PROGRAM" = "vscode" ]; then`,
+        `        eval "$${key}" || true`,
+        `    fi`,
+        `fi`,
     ].join(lineSep);
 }
 
