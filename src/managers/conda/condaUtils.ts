@@ -418,20 +418,6 @@ async function readProfile(profilePath: string): Promise<boolean> {
     return false;
 }
 
-// async function readCmdCondaInit(): Promise<boolean> {
-//     if (!isWindows()) {
-//         return false;
-//     }
-//     try {
-//         const { stdout } = await exec('reg query "HKCU\\Software\\Microsoft\\Command Processor" /v AutoRun', {
-//             windowsHide: true,
-//         });
-//         return stdout.includes('conda') && stdout.includes('activate');
-//     } catch {
-//         return false;
-//     }
-// }
-
 async function getPrefixesCondaPythonInfo(
     prefix: string,
     executable: string,
