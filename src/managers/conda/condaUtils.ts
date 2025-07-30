@@ -1053,6 +1053,9 @@ export async function checkForNoPythonCondaEnvironment(
     return environment;
 }
 
+// Cache for conda hook paths to avoid redundant filesystem checks
+const condaHookPathCache = new Map<string, Promise<string>>();
+
 /**
  * Returns the best guess path to conda-hook.ps1 given a conda executable path.
  *
@@ -1063,32 +1066,45 @@ export async function checkForNoPythonCondaEnvironment(
  *   - etc/profile.d/
  */
 async function getCondaHookPs1Path(condaPath: string): Promise<string> {
-    const condaRoot = path.dirname(path.dirname(condaPath));
-
-    const condaRootCandidates: string[] = [
-        path.join(condaRoot, 'shell', 'condabin'),
-        path.join(condaRoot, 'Library', 'shell', 'condabin'),
-        path.join(condaRoot, 'condabin'),
-        path.join(condaRoot, 'etc', 'profile.d'),
-    ];
-
-    const checks = condaRootCandidates.map(async (hookSearchDir) => {
-        const candidate = path.join(hookSearchDir, 'conda-hook.ps1');
-        if (await fse.pathExists(candidate)) {
-            traceInfo(`Conda hook found at: ${candidate}`);
-            return candidate;
-        }
-        return undefined;
-    });
-    const results = await Promise.all(checks);
-    const found = results.find(Boolean);
-    if (found) {
-        return found as string;
+    // Check cache first
+    const cachedPath = condaHookPathCache.get(condaPath);
+    if (cachedPath) {
+        return cachedPath;
     }
-    traceError(
-        `Conda hook not found in any of the expected locations: ${condaRootCandidates.join(
-            ', ',
-        )}, given conda path: ${condaPath}`,
-    );
-    return path.join(condaRoot, 'shell', 'condabin', 'conda-hook.ps1');
+
+    // Create the promise for finding the hook path
+    const hookPathPromise = (async () => {
+        const condaRoot = path.dirname(path.dirname(condaPath));
+
+        const condaRootCandidates: string[] = [
+            path.join(condaRoot, 'shell', 'condabin'),
+            path.join(condaRoot, 'Library', 'shell', 'condabin'),
+            path.join(condaRoot, 'condabin'),
+            path.join(condaRoot, 'etc', 'profile.d'),
+        ];
+
+        const checks = condaRootCandidates.map(async (hookSearchDir) => {
+            const candidate = path.join(hookSearchDir, 'conda-hook.ps1');
+            if (await fse.pathExists(candidate)) {
+                traceInfo(`Conda hook found at: ${candidate}`);
+                return candidate;
+            }
+            return undefined;
+        });
+        const results = await Promise.all(checks);
+        const found = results.find(Boolean);
+        if (found) {
+            return found as string;
+        }
+        traceError(
+            `Conda hook not found in any of the expected locations: ${condaRootCandidates.join(
+                ', ',
+            )}, given conda path: ${condaPath}`,
+        );
+        return path.join(condaRoot, 'shell', 'condabin', 'conda-hook.ps1');
+    })();
+
+    // Store in cache and return
+    condaHookPathCache.set(condaPath, hookPathPromise);
+    return hookPathPromise;
 }
