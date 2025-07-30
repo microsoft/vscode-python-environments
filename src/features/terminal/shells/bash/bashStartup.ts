@@ -27,14 +27,14 @@ async function isGitBashInstalled(): Promise<boolean> {
     return false;
 }
 
-async function getBashProfiles(): Promise<string> {
+export async function getBashProfiles(): Promise<string> {
     const homeDir = os.homedir();
     const profile: string = path.join(homeDir, '.bashrc');
 
     return profile;
 }
 
-async function getZshProfiles(): Promise<string> {
+export async function getZshProfiles(): Promise<string> {
     const homeDir = os.homedir();
     const profile: string = path.join(homeDir, '.zshrc');
 

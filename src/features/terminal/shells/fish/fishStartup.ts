@@ -19,7 +19,7 @@ async function isFishInstalled(): Promise<boolean> {
     }
 }
 
-async function getFishProfile(): Promise<string> {
+export async function getFishProfile(): Promise<string> {
     const homeDir = os.homedir();
     // Fish configuration is typically at ~/.config/fish/config.fish
     const profilePath = path.join(homeDir, '.config', 'fish', 'config.fish');
@@ -154,5 +154,9 @@ export class FishStartupProvider implements ShellStartupScriptProvider {
 
     clearCache(): Promise<void> {
         return Promise.resolve();
+    }
+
+    getProfilePath(): Promise<string | undefined> {
+        return getFishProfile();
     }
 }

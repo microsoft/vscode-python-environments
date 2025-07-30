@@ -52,7 +52,7 @@ async function isPowerShellInstalled(shell: string): Promise<boolean> {
     }
 }
 
-async function getProfileForShell(shell: 'powershell' | 'pwsh'): Promise<string> {
+export async function getProfileForShell(shell: 'powershell' | 'pwsh'): Promise<string> {
     const cachedPath = getProfilePathCache(shell);
     if (cachedPath) {
         traceInfo(`SHELL: ${shell} profile path from cache: ${cachedPath}`);

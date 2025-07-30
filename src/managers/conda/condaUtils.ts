@@ -44,6 +44,9 @@ import {
 import { getConfiguration } from '../../common/workspace.apis';
 import { ShellConstants } from '../../features/common/shellConstants';
 import { quoteArgs } from '../../features/execution/execUtils';
+import { getBashProfiles, getZshProfiles } from '../../features/terminal/shells/bash/bashStartup';
+import { getProfileForShell } from '../../features/terminal/shells/pwsh/pwshStartup';
+import { getShProfiles } from '../../features/terminal/shells/sh/shStartup';
 import {
     isNativeEnvInfo,
     NativeEnvInfo,
@@ -293,41 +296,51 @@ async function getNamedCondaPythonInfo(
 
     if (conda.includes('/') || conda.includes('\\')) {
         const shActivate = path.join(path.dirname(path.dirname(conda)), 'etc', 'profile.d', 'conda.sh');
+        const profileInit = await checkProfileForCondaInitialization();
 
         if (isWindows()) {
-            shellActivation.set(ShellConstants.GITBASH, [
-                { executable: '.', args: [pathForGitBash(shActivate)] },
-                { executable: 'conda', args: ['activate', name] },
-            ]);
+            // didn't find gitbash
+            const rcGitBash: PythonCommandRunConfiguration[] = [{ executable: 'conda', args: ['activate', name] }];
+            if (!profileInit.get(ShellConstants.GITBASH)) {
+                rcGitBash.unshift({ executable: '.', args: [pathForGitBash(shActivate)] });
+            }
+            shellActivation.set(ShellConstants.GITBASH, rcGitBash);
             shellDeactivation.set(ShellConstants.GITBASH, [{ executable: 'conda', args: ['deactivate'] }]);
 
+            // not sure about cmd and how to find profile
             const cmdActivate = path.join(path.dirname(conda), 'activate.bat');
             shellActivation.set(ShellConstants.CMD, [{ executable: cmdActivate, args: [name] }]);
             shellDeactivation.set(ShellConstants.CMD, [{ executable: 'conda', args: ['deactivate'] }]);
         } else {
-            shellActivation.set(ShellConstants.BASH, [
-                { executable: '.', args: [shActivate] },
-                { executable: 'conda', args: ['activate', name] },
-            ]);
+            // bash
+            const rc: PythonCommandRunConfiguration[] = [{ executable: 'conda', args: ['activate', name] }];
+            if (!profileInit.get(ShellConstants.BASH)) {
+                rc.unshift({ executable: '.', args: [shActivate] });
+            }
+            shellActivation.set(ShellConstants.BASH, rc);
             shellDeactivation.set(ShellConstants.BASH, [{ executable: 'conda', args: ['deactivate'] }]);
 
-            shellActivation.set(ShellConstants.SH, [
-                { executable: '.', args: [shActivate] },
-                { executable: 'conda', args: ['activate', name] },
-            ]);
+            const rcSh: PythonCommandRunConfiguration[] = [{ executable: 'conda', args: ['activate', name] }];
+            if (!profileInit.get(ShellConstants.SH)) {
+                rcSh.unshift({ executable: '.', args: [shActivate] });
+            }
+            shellActivation.set(ShellConstants.SH, rcSh);
             shellDeactivation.set(ShellConstants.SH, [{ executable: 'conda', args: ['deactivate'] }]);
 
-            shellActivation.set(ShellConstants.ZSH, [
-                { executable: '.', args: [shActivate] },
-                { executable: 'conda', args: ['activate', name] },
-            ]);
+            // zsh
+            const rcZsh: PythonCommandRunConfiguration[] = [{ executable: 'conda', args: ['activate', name] }];
+            if (!profileInit.get(ShellConstants.ZSH)) {
+                rcZsh.unshift({ executable: '.', args: [shActivate] });
+            }
+            shellActivation.set(ShellConstants.ZSH, rcZsh);
             shellDeactivation.set(ShellConstants.ZSH, [{ executable: 'conda', args: ['deactivate'] }]);
         }
-        const psActivate = await getCondaHookPs1Path(conda);
-        shellActivation.set(ShellConstants.PWSH, [
-            { executable: '&', args: [psActivate] },
-            { executable: 'conda', args: ['activate', name] },
-        ]);
+        const rcPwsh: PythonCommandRunConfiguration[] = [{ executable: 'conda', args: ['activate', name] }];
+        if (!profileInit.get(ShellConstants.PWSH)) {
+            const psActivate = await getCondaHookPs1Path(conda);
+            rcPwsh.unshift({ executable: '.', args: [psActivate] });
+        }
+        shellActivation.set(ShellConstants.PWSH, rcPwsh);
         shellDeactivation.set(ShellConstants.PWSH, [{ executable: 'conda', args: ['deactivate'] }]);
     } else {
         shellActivation.set(ShellConstants.GITBASH, [{ executable: 'conda', args: ['activate', name] }]);
@@ -373,6 +386,51 @@ async function getNamedCondaPythonInfo(
         group: name !== 'base' ? 'Named' : undefined,
     };
 }
+
+async function checkProfileForCondaInitialization(): Promise<Map<string, boolean>> {
+    const profileStatusMap = new Map<string, boolean>();
+
+    // bash
+    const bashProfiles = await getBashProfiles();
+    const containsInitBash = await readProfile(bashProfiles);
+    profileStatusMap.set(ShellConstants.BASH, containsInitBash);
+    // zsh
+    const zshProfiles = await getZshProfiles();
+    const containsInitZsh = await readProfile(zshProfiles);
+    profileStatusMap.set(ShellConstants.ZSH, containsInitZsh);
+
+    // sh
+    const shProfiles = await getShProfiles();
+    const containsInitSh = await readProfile(shProfiles);
+    profileStatusMap.set(ShellConstants.SH, containsInitSh);
+
+    const pwshProfiles = await getProfileForShell('pwsh');
+    const containsInitPwsh = await readProfile(pwshProfiles);
+    profileStatusMap.set(ShellConstants.PWSH, containsInitPwsh);
+
+    return profileStatusMap;
+}
+async function readProfile(profilePath: string): Promise<boolean> {
+    if (await fse.pathExists(profilePath)) {
+        const content = await fse.readFile(profilePath, 'utf8');
+        return content.includes('# >>> conda initialize >>>#');
+    }
+    return false;
+}
+
+// async function readCmdCondaInit(): Promise<boolean> {
+//     if (!isWindows()) {
+//         return false;
+//     }
+//     try {
+//         const { stdout } = await exec('reg query "HKCU\\Software\\Microsoft\\Command Processor" /v AutoRun', {
+//             windowsHide: true,
+//         });
+//         return stdout.includes('conda') && stdout.includes('activate');
+//     } catch {
+//         return false;
+//     }
+// }
 
 async function getPrefixesCondaPythonInfo(
     prefix: string,
