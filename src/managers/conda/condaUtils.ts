@@ -1157,6 +1157,17 @@ async function getCondaHookPs1Path(condaPath: string): Promise<string> {
     // Create the promise for finding the hook path
     const hookPathPromise = (async () => {
         const condaRoot = path.dirname(path.dirname(condaPath));
+        const condaRootCandidates: string[] = [
+            path.join(condaRoot, 'shell', 'condabin', 'conda-hook.ps1'),
+            path.join(condaRoot, 'Library', 'shell', 'condabin', 'conda-hook.ps1'),
+            path.join(condaRoot, 'condabin', 'conda-hook.ps1'),
+            path.join(condaRoot, 'etc', 'profile.d', 'conda-hook.ps1'),
+        ];
+
+        const condaHookLocation = await findFileInLocations(condaRootCandidates, 'conda-hook.ps1', condaPath);
+        if (condaHookLocation) {
+            return condaHookLocation;
+        }
         return path.join(condaRoot, 'shell', 'condabin', 'conda-hook.ps1');
     })();
 
