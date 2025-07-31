@@ -292,7 +292,7 @@ async function getNamedCondaPythonInfo(
     const shellDeactivation: Map<string, PythonCommandRunConfiguration[]> = new Map();
 
     if (conda.includes('/') || conda.includes('\\')) {
-        const shActivate = path.join(path.dirname(path.dirname(conda)), 'etc', 'profile.d', 'conda.sh');
+        const shActivate = await getCondaShPath(conda);
 
         if (isWindows()) {
             shellActivation.set(ShellConstants.GITBASH, [
@@ -385,7 +385,7 @@ async function getPrefixesCondaPythonInfo(
     const shellDeactivation: Map<string, PythonCommandRunConfiguration[]> = new Map();
 
     if (conda.includes('/') || conda.includes('\\')) {
-        const shActivate = path.join(path.dirname(path.dirname(conda)), 'etc', 'profile.d', 'conda.sh');
+        const shActivate = await getCondaShPath(conda);
 
         if (isWindows()) {
             shellActivation.set(ShellConstants.GITBASH, [
@@ -1055,6 +1055,88 @@ export async function checkForNoPythonCondaEnvironment(
 
 // Cache for conda hook paths to avoid redundant filesystem checks
 const condaHookPathCache = new Map<string, Promise<string>>();
+const condaShPathCache = new Map<string, Promise<string>>();
+
+/**
+ * Helper function that checks for a file in a list of locations.
+ * Returns the first location where the file exists, or undefined if not found.
+ */
+async function findFileInLocations(
+    locations: string[],
+    description: string,
+    condaPath: string,
+): Promise<string | undefined> {
+    for (const location of locations) {
+        if (await fse.pathExists(location)) {
+            traceInfo(`${description} found in ${location}`);
+            return location;
+        }
+    }
+    traceError(
+        `${description} not found in any of the locations: ${locations.join(', ')}, ` +
+            `given conda path: ${condaPath}`,
+    );
+    return undefined;
+}
+
+/**
+ * Returns the path to conda.sh given a conda executable path.
+ *
+ * Searches for conda.sh in these locations (relative to the conda root):
+ * - etc/profile.d/conda.sh
+ * - shell/etc/profile.d/conda.sh
+ * - Library/etc/profile.d/conda.sh
+ * - lib/pythonX.Y/site-packages/conda/shell/etc/profile.d/conda.sh
+ * - site-packages/conda/shell/etc/profile.d/conda.sh
+ * Also checks some system-level locations
+ */
+async function getCondaShPath(condaPath: string): Promise<string> {
+    // Check cache first
+    const cachedPath = condaShPathCache.get(condaPath);
+    if (cachedPath) {
+        return cachedPath;
+    }
+
+    // Create the promise for finding the conda.sh path
+    const shPathPromise = (async () => {
+        const condaRoot = path.dirname(path.dirname(condaPath));
+
+        // First try standard conda installation locations
+        const standardLocations = [
+            path.join(condaRoot, 'etc', 'profile.d', 'conda.sh'),
+            path.join(condaRoot, 'shell', 'etc', 'profile.d', 'conda.sh'),
+            path.join(condaRoot, 'Library', 'etc', 'profile.d', 'conda.sh'),
+        ];
+
+        // Check standard locations first
+        const standardLocation = await findFileInLocations(standardLocations, 'conda.sh', condaPath);
+        if (standardLocation) {
+            return standardLocation;
+        }
+
+        // If not found in standard locations, try pip install locations
+        const possiblePythonVersions = ['python3.9', 'python3.10', 'python3.11', 'python3.12', 'python3.8'];
+        const pipInstallLocations = [
+            ...possiblePythonVersions.map((ver) =>
+                path.join(condaRoot, 'lib', ver, 'site-packages', 'conda', 'shell', 'etc', 'profile.d', 'conda.sh'),
+            ),
+            path.join(condaRoot, 'site-packages', 'conda', 'shell', 'etc', 'profile.d', 'conda.sh'),
+        ];
+
+        // Check pip install locations
+        const pipLocation = await findFileInLocations(pipInstallLocations, 'conda.sh', condaPath);
+        if (pipLocation) {
+            return pipLocation;
+        }
+
+        // Fall back to the traditional location as a last resort
+        return path.join(condaRoot, 'etc', 'profile.d', 'conda.sh');
+    })();
+
+    // Store in cache and return
+    condaShPathCache.set(condaPath, shPathPromise);
+    return shPathPromise;
+}
 
 /**
  * Returns the best guess path to conda-hook.ps1 given a conda executable path.
@@ -1076,31 +1158,19 @@ async function getCondaHookPs1Path(condaPath: string): Promise<string> {
     const hookPathPromise = (async () => {
         const condaRoot = path.dirname(path.dirname(condaPath));
 
-        const condaRootCandidates: string[] = [
-            path.join(condaRoot, 'shell', 'condabin'),
-            path.join(condaRoot, 'Library', 'shell', 'condabin'),
-            path.join(condaRoot, 'condabin'),
-            path.join(condaRoot, 'etc', 'profile.d'),
+        const hookLocations = [
+            path.join(condaRoot, 'shell', 'condabin', 'conda-hook.ps1'),
+            path.join(condaRoot, 'Library', 'shell', 'condabin', 'conda-hook.ps1'),
+            path.join(condaRoot, 'condabin', 'conda-hook.ps1'),
+            path.join(condaRoot, 'etc', 'profile.d', 'conda-hook.ps1'),
         ];
 
-        const checks = condaRootCandidates.map(async (hookSearchDir) => {
-            const candidate = path.join(hookSearchDir, 'conda-hook.ps1');
-            if (await fse.pathExists(candidate)) {
-                traceInfo(`Conda hook found at: ${candidate}`);
-                return candidate;
-            }
-            return undefined;
-        });
-        const results = await Promise.all(checks);
-        const found = results.find(Boolean);
+        const found = await findFileInLocations(hookLocations, 'conda-hook.ps1', condaPath);
         if (found) {
-            return found as string;
+            return found;
         }
-        traceError(
-            `Conda hook not found in any of the expected locations: ${condaRootCandidates.join(
-                ', ',
-            )}, given conda path: ${condaPath}`,
-        );
+
+        // Fall back to the traditional location as a last resort
         return path.join(condaRoot, 'shell', 'condabin', 'conda-hook.ps1');
     })();
 
