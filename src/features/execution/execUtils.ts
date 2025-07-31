@@ -1,4 +1,4 @@
-function quoteArg(arg: string): string {
+export function quoteArg(arg: string): string {
     if (arg.indexOf(' ') >= 0 && !(arg.startsWith('"') && arg.endsWith('"'))) {
         return `"${arg}"`;
     }
