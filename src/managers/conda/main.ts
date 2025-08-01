@@ -5,7 +5,7 @@ import { CondaPackageManager } from './condaPackageManager';
 import { getPythonApi } from '../../features/pythonApi';
 import { NativePythonFinder } from '../common/nativePythonFinder';
 import { traceInfo } from '../../common/logging';
-import { getConda } from './condaUtils';
+import { getConda, searchCondaSourcingInfo } from './condaUtils';
 
 export async function registerCondaFeatures(
     nativeFinder: NativePythonFinder,
@@ -16,6 +16,10 @@ export async function registerCondaFeatures(
 
     try {
         await getConda(nativeFinder);
+        
+        // Search for conda sourcing scripts and shell profile information
+        await searchCondaSourcingInfo();
+        
         const envManager = new CondaEnvManager(nativeFinder, api, log);
         const packageManager = new CondaPackageManager(api, log);
 
