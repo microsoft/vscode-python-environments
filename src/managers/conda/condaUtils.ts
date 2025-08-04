@@ -280,6 +280,7 @@ function isPrefixOf(roots: string[], e: string): boolean {
     return false;
 }
 
+let condaActivateScriptCache: string | undefined = undefined;
 async function getNamedCondaPythonInfo(
     name: string,
     prefix: string,
@@ -291,7 +292,52 @@ async function getNamedCondaPythonInfo(
     const shellActivation: Map<string, PythonCommandRunConfiguration[]> = new Map();
     const shellDeactivation: Map<string, PythonCommandRunConfiguration[]> = new Map();
 
-    if (conda.includes('/') || conda.includes('\\')) {
+    let activateScriptPath = undefined;
+
+    // check if bin/activate script exists
+    const condaFolder = path.dirname(path.dirname(conda));
+
+    // this is it from the python ext
+    // const activatePath = (
+    //     condaPath ? path.join(path.dirname(condaPath), 'activate') : 'activate'
+    // ).fileToCommandArgumentForPythonExt(); // maybe global activate?
+    if (!condaActivateScriptCache) {
+        const activateScript = isWindows()
+            ? path.join(condaFolder, 'Scripts', 'activate.bat')
+            : path.join(condaFolder, 'bin', 'activate');
+        if (!condaActivateScriptCache && (await fse.pathExists(activateScript))) {
+            // if activate script exists, default to using it
+            activateScriptPath = activateScript;
+            condaActivateScriptCache = activateScriptPath;
+        }
+    } else {
+        activateScriptPath = condaActivateScriptCache;
+    }
+
+    if (activateScriptPath) {
+        const sourcingCommand: PythonCommandRunConfiguration = { executable: 'source', args: [activateScriptPath] };
+
+        shellActivation.set(ShellConstants.GITBASH, [
+            sourcingCommand,
+            { executable: 'conda', args: ['activate', name] },
+        ]);
+        shellDeactivation.set(ShellConstants.GITBASH, [{ executable: 'conda', args: ['deactivate'] }]);
+
+        shellActivation.set(ShellConstants.CMD, [sourcingCommand, { executable: 'conda', args: ['activate', name] }]);
+        shellDeactivation.set(ShellConstants.CMD, [{ executable: 'conda', args: ['deactivate'] }]);
+
+        shellActivation.set(ShellConstants.BASH, [sourcingCommand, { executable: 'conda', args: ['activate', name] }]);
+        shellDeactivation.set(ShellConstants.BASH, [{ executable: 'conda', args: ['deactivate'] }]);
+
+        shellActivation.set(ShellConstants.SH, [sourcingCommand, { executable: 'conda', args: ['activate', name] }]);
+        shellDeactivation.set(ShellConstants.SH, [{ executable: 'conda', args: ['deactivate'] }]);
+
+        shellActivation.set(ShellConstants.ZSH, [sourcingCommand, { executable: 'conda', args: ['activate', name] }]);
+        shellDeactivation.set(ShellConstants.ZSH, [{ executable: 'conda', args: ['deactivate'] }]);
+
+        shellActivation.set(ShellConstants.PWSH, [sourcingCommand, { executable: 'conda', args: ['activate', name] }]);
+        shellDeactivation.set(ShellConstants.PWSH, [{ executable: 'conda', args: ['deactivate'] }]);
+    } else if (conda.includes('/') || conda.includes('\\')) {
         const shActivate = path.join(path.dirname(path.dirname(conda)), 'etc', 'profile.d', 'conda.sh');
 
         if (isWindows()) {
