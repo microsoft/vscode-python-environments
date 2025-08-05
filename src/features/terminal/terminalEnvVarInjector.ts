@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation. All rights reserved.
 // Licensed under the MIT License.
 
-import * as fsapi from 'fs-extra';
+import * as fse from 'fs-extra';
 import * as path from 'path';
 import {
     Disposable,
@@ -82,8 +82,7 @@ export class TerminalEnvVarInjector implements Disposable {
                 );
                 await this.injectEnvironmentVariablesForWorkspace(workspaceFolder);
             } else {
-                // Initial load - update all workspaces
-                traceVerbose('TerminalEnvVarInjector: Clearing existing environment variables for initial load');
+                // No provided workspace - update all workspaces
                 this.envVarCollection.clear();
 
                 const workspaceFolders = workspace.workspaceFolders;
@@ -115,29 +114,26 @@ export class TerminalEnvVarInjector implements Disposable {
             // Track which .env file is being used for logging
             const config = getConfiguration('python', workspaceUri); // why did this get .env file?? // returns like all of them
             const envFilePath = config.get<string>('envFile');
-            const resolvedEnvFilePath = envFilePath
+            const resolvedEnvFilePath: string | undefined = envFilePath
                 ? path.resolve(resolveVariables(envFilePath, workspaceUri))
                 : undefined;
-            const defaultEnvFilePath = path.join(workspaceUri.fsPath, '.env');
+            const defaultEnvFilePath: string = path.join(workspaceUri.fsPath, '.env');
 
-            let activeEnvFilePath: string | undefined;
-            if (resolvedEnvFilePath && (await fsapi.pathExists(resolvedEnvFilePath))) {
-                activeEnvFilePath = resolvedEnvFilePath;
-                traceVerbose(`TerminalEnvVarInjector: Using python.envFile setting: ${activeEnvFilePath}`);
-            } else if (await fsapi.pathExists(defaultEnvFilePath)) {
-                activeEnvFilePath = defaultEnvFilePath;
-                traceVerbose(`TerminalEnvVarInjector: Using default .env file: ${activeEnvFilePath}`);
+            let activeEnvFilePath: string = resolvedEnvFilePath || defaultEnvFilePath;
+            if (activeEnvFilePath && (await fse.pathExists(activeEnvFilePath))) {
+                traceVerbose(`TerminalEnvVarInjector: Using env file: ${activeEnvFilePath}`);
             } else {
-                traceVerbose(`TerminalEnvVarInjector: No .env file found for workspace: ${workspaceUri.fsPath}`);
+                traceVerbose(
+                    `TerminalEnvVarInjector: No .env file found for workspace: ${workspaceUri.fsPath}, not injecting environment variables.`,
+                );
                 return; // No .env file to inject
             }
 
+            // use scoped environment variable collection
             const envVarScope = this.getEnvironmentVariableCollectionScoped({ workspaceFolder });
             envVarScope.clear(); // Clear existing variables for this workspace
-            
-            // Inject environment variables into the collection
+
             for (const [key, value] of Object.entries(envVars)) {
-                // inject into correctly scoped environment collection
                 if (value === undefined) {
                     // Remove the environment variable if the value is undefined
                     envVarScope.delete(key);
