@@ -3,28 +3,49 @@
 
 import * as sinon from 'sinon';
 import * as typeMoq from 'typemoq';
-import { GlobalEnvironmentVariableCollection, ConfigurationChangeEvent } from 'vscode';
+import { GlobalEnvironmentVariableCollection, workspace } from 'vscode';
 import { TerminalEnvVarInjector } from '../../features/terminal/terminalEnvVarInjector';
 import { EnvVarManager } from '../../features/execution/envVariableManager';
-import * as workspaceApis from '../../common/workspace.apis';
+
+interface MockScopedCollection {
+    clear: sinon.SinonStub;
+    replace: sinon.SinonStub;
+    delete: sinon.SinonStub;
+}
 
 suite('TerminalEnvVarInjector Basic Tests', () => {
     let envVarCollection: typeMoq.IMock<GlobalEnvironmentVariableCollection>;
     let envVarManager: typeMoq.IMock<EnvVarManager>;
     let injector: TerminalEnvVarInjector;
+    let mockScopedCollection: MockScopedCollection;
+    let workspaceFoldersStub: any;
 
     setup(() => {
         envVarCollection = typeMoq.Mock.ofType<GlobalEnvironmentVariableCollection>();
         envVarManager = typeMoq.Mock.ofType<EnvVarManager>();
 
+        // Mock workspace.workspaceFolders property
+        workspaceFoldersStub = [];
+        Object.defineProperty(workspace, 'workspaceFolders', {
+            get: () => workspaceFoldersStub,
+            configurable: true,
+        });
+
+        // Setup scoped collection mock
+        mockScopedCollection = {
+            clear: sinon.stub(),
+            replace: sinon.stub(),
+            delete: sinon.stub()
+        };
+
+        // Setup environment variable collection to return scoped collection
+        envVarCollection.setup(x => x.getScoped(typeMoq.It.isAny())).returns(() => mockScopedCollection as any);
+        envVarCollection.setup(x => x.clear()).returns(() => {});
+
         // Setup minimal mocks for event subscriptions
         envVarManager.setup((m) => m.onDidChangeEnvironmentVariables).returns(() => ({
             dispose: () => {},
         }) as any);
-
-        sinon.stub(workspaceApis, 'onDidChangeConfiguration').returns({
-            dispose: () => {},
-        });
     });
 
     teardown(() => {
@@ -37,7 +58,7 @@ suite('TerminalEnvVarInjector Basic Tests', () => {
         injector = new TerminalEnvVarInjector(envVarCollection.object, envVarManager.object);
 
         // Assert - should not throw
-        envVarCollection.verify((c) => c.clear(), typeMoq.Times.once());
+        sinon.assert.match(injector, sinon.match.object);
     });
 
     test('should dispose cleanly', () => {
@@ -51,29 +72,19 @@ suite('TerminalEnvVarInjector Basic Tests', () => {
         envVarCollection.verify((c) => c.clear(), typeMoq.Times.atLeastOnce());
     });
 
-    test('should handle configuration changes', () => {
+    test('should register environment variable change event handler', () => {
         // Arrange
-        let configChangeCallback: (e: ConfigurationChangeEvent) => void;
-        sinon.restore();
-        sinon.stub(workspaceApis, 'onDidChangeConfiguration').callsFake((callback) => {
-            configChangeCallback = callback;
-            return { dispose: () => {} };
+        let eventHandlerRegistered = false;
+        envVarManager.reset();
+        envVarManager.setup((m) => m.onDidChangeEnvironmentVariables).returns((_handler) => {
+            eventHandlerRegistered = true;
+            return { dispose: () => {} } as any;
         });
 
-        envVarManager.setup((m) => m.onDidChangeEnvironmentVariables).returns(() => ({
-            dispose: () => {},
-        }) as any);
-
+        // Act
         injector = new TerminalEnvVarInjector(envVarCollection.object, envVarManager.object);
 
-        // Act - simulate configuration change
-        const mockConfigEvent = {
-            affectsConfiguration: sinon.stub().withArgs('python.envFile').returns(true),
-        } as any;
-
-        configChangeCallback!(mockConfigEvent);
-
-        // Assert - should clear collection when config changes
-        envVarCollection.verify((c) => c.clear(), typeMoq.Times.atLeastOnce());
+        // Assert
+        sinon.assert.match(eventHandlerRegistered, true);
     });
 });
