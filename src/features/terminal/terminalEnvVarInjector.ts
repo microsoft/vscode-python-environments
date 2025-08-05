@@ -1,10 +1,17 @@
 // Copyright (c) Microsoft Corporation. All rights reserved.
 // Licensed under the MIT License.
 
-import * as path from 'path';
 import * as fsapi from 'fs-extra';
-import { Disposable, Uri, workspace, GlobalEnvironmentVariableCollection } from 'vscode';
-import { traceVerbose, traceError } from '../../common/logging';
+import * as path from 'path';
+import {
+    Disposable,
+    EnvironmentVariableScope,
+    GlobalEnvironmentVariableCollection,
+    workspace,
+    WorkspaceFolder,
+} from 'vscode';
+import { traceError, traceVerbose } from '../../common/logging';
+import { resolveVariables } from '../../common/utils/internalVariables';
 import { getConfiguration, onDidChangeConfiguration } from '../../common/workspace.apis';
 import { EnvVarManager } from '../execution/envVariableManager';
 
@@ -58,6 +65,7 @@ export class TerminalEnvVarInjector implements Disposable {
      * Update environment variables in the terminal collection.
      */
     private async updateEnvironmentVariables(): Promise<void> {
+        // every time ONE is changed, we change ALL of them (not sure this is the right approach)
         try {
             // Clear existing environment variables
             traceVerbose('TerminalEnvVarInjector: Clearing existing environment variables');
@@ -72,7 +80,7 @@ export class TerminalEnvVarInjector implements Disposable {
 
             // Process environment variables for each workspace folder
             for (const folder of workspaceFolders) {
-                await this.injectEnvironmentVariablesForWorkspace(folder.uri);
+                await this.injectEnvironmentVariablesForWorkspace(folder);
             }
 
             traceVerbose('TerminalEnvVarInjector: Environment variable injection completed');
@@ -84,7 +92,8 @@ export class TerminalEnvVarInjector implements Disposable {
     /**
      * Inject environment variables for a specific workspace.
      */
-    private async injectEnvironmentVariablesForWorkspace(workspaceUri: Uri): Promise<void> {
+    private async injectEnvironmentVariablesForWorkspace(workspaceFolder: WorkspaceFolder): Promise<void> {
+        const workspaceUri = workspaceFolder.uri;
         try {
             traceVerbose(`TerminalEnvVarInjector: Processing workspace: ${workspaceUri.fsPath}`);
 
@@ -92,9 +101,11 @@ export class TerminalEnvVarInjector implements Disposable {
             const envVars = await this.envVarManager.getEnvironmentVariables(workspaceUri);
 
             // Track which .env file is being used for logging
-            const config = getConfiguration('python', workspaceUri);
+            const config = getConfiguration('python', workspaceUri); // why did this get .env file?? // returns like all of them
             const envFilePath = config.get<string>('envFile');
-            const resolvedEnvFilePath = envFilePath ? path.resolve(envFilePath) : undefined;
+            const resolvedEnvFilePath = envFilePath
+                ? path.resolve(resolveVariables(envFilePath, workspaceUri))
+                : undefined;
             const defaultEnvFilePath = path.join(workspaceUri.fsPath, '.env');
 
             let activeEnvFilePath: string | undefined;
@@ -106,17 +117,21 @@ export class TerminalEnvVarInjector implements Disposable {
                 traceVerbose(`TerminalEnvVarInjector: Using default .env file: ${activeEnvFilePath}`);
             } else {
                 traceVerbose(`TerminalEnvVarInjector: No .env file found for workspace: ${workspaceUri.fsPath}`);
+                return; // No .env file to inject
             }
 
             // Inject environment variables into the collection
             let injectedCount = 0;
             for (const [key, value] of Object.entries(envVars)) {
-                if (value !== undefined && value !== process.env[key]) {
-                    // Only inject if the value is different from the current process environment
-                    this.envVarCollection.replace(key, value);
-                    injectedCount++;
-                    traceVerbose(`TerminalEnvVarInjector: Injected ${key}=${value}`);
+                // inject into correctly scoped environment collection
+                const envVarScope = this.getEnvironmentVariableCollectionScoped({ workspaceFolder });
+                if (value === undefined) {
+                    // Remove the environment variable if the value is undefined
+                    envVarScope.delete(key);
+                } else {
+                    envVarScope.replace(key, value);
                 }
+                injectedCount++;
             }
 
             if (injectedCount > 0) {
@@ -143,8 +158,13 @@ export class TerminalEnvVarInjector implements Disposable {
         traceVerbose('TerminalEnvVarInjector: Disposing');
         this.disposables.forEach((disposable) => disposable.dispose());
         this.disposables = [];
-        
+
         // Clear all environment variables from the collection
         this.envVarCollection.clear();
+    }
+
+    private getEnvironmentVariableCollectionScoped(scope: EnvironmentVariableScope = {}) {
+        const envVarCollection = this.envVarCollection as GlobalEnvironmentVariableCollection;
+        return envVarCollection.getScoped(scope);
     }
 }
