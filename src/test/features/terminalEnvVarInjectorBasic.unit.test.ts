@@ -4,8 +4,8 @@
 import * as sinon from 'sinon';
 import * as typeMoq from 'typemoq';
 import { GlobalEnvironmentVariableCollection, workspace } from 'vscode';
-import { TerminalEnvVarInjector } from '../../features/terminal/terminalEnvVarInjector';
 import { EnvVarManager } from '../../features/execution/envVariableManager';
+import { TerminalEnvVarInjector } from '../../features/terminal/terminalEnvVarInjector';
 
 interface MockScopedCollection {
     clear: sinon.SinonStub;
@@ -18,6 +18,7 @@ suite('TerminalEnvVarInjector Basic Tests', () => {
     let envVarManager: typeMoq.IMock<EnvVarManager>;
     let injector: TerminalEnvVarInjector;
     let mockScopedCollection: MockScopedCollection;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     let workspaceFoldersStub: any;
 
     setup(() => {
@@ -35,17 +36,23 @@ suite('TerminalEnvVarInjector Basic Tests', () => {
         mockScopedCollection = {
             clear: sinon.stub(),
             replace: sinon.stub(),
-            delete: sinon.stub()
+            delete: sinon.stub(),
         };
 
         // Setup environment variable collection to return scoped collection
-        envVarCollection.setup(x => x.getScoped(typeMoq.It.isAny())).returns(() => mockScopedCollection as any);
-        envVarCollection.setup(x => x.clear()).returns(() => {});
+        envVarCollection.setup((x) => x.getScoped(typeMoq.It.isAny())).returns(() => mockScopedCollection as any);
+        envVarCollection.setup((x) => x.clear()).returns(() => {});
 
         // Setup minimal mocks for event subscriptions
-        envVarManager.setup((m) => m.onDidChangeEnvironmentVariables).returns(() => ({
-            dispose: () => {},
-        }) as any);
+        envVarManager
+            .setup((m) => m.onDidChangeEnvironmentVariables)
+            .returns(
+                () =>
+                    ({
+                        dispose: () => {},
+                        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                    } as any),
+            );
     });
 
     teardown(() => {
@@ -76,10 +83,13 @@ suite('TerminalEnvVarInjector Basic Tests', () => {
         // Arrange
         let eventHandlerRegistered = false;
         envVarManager.reset();
-        envVarManager.setup((m) => m.onDidChangeEnvironmentVariables).returns((_handler) => {
-            eventHandlerRegistered = true;
-            return { dispose: () => {} } as any;
-        });
+        envVarManager
+            .setup((m) => m.onDidChangeEnvironmentVariables)
+            .returns((_handler) => {
+                eventHandlerRegistered = true;
+                // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                return { dispose: () => {} } as any;
+            });
 
         // Act
         injector = new TerminalEnvVarInjector(envVarCollection.object, envVarManager.object);
