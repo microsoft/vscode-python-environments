@@ -116,7 +116,7 @@ export class TerminalEnvVarInjector implements Disposable {
             envVarScope.clear(); // Clear existing variables for this workspace
 
             // Track which .env file is being used for logging
-            const config = getConfiguration('python', workspaceUri); // why did this get .env file?? // returns like all of them
+            const config = getConfiguration('python', workspaceUri);
             const envFilePath = config.get<string>('envFile');
             const resolvedEnvFilePath: string | undefined = envFilePath
                 ? path.resolve(resolveVariables(envFilePath, workspaceUri))
