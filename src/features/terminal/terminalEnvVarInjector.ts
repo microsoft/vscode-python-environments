@@ -111,6 +111,10 @@ export class TerminalEnvVarInjector implements Disposable {
         try {
             const envVars = await this.envVarManager.getEnvironmentVariables(workspaceUri);
 
+            // use scoped environment variable collection
+            const envVarScope = this.getEnvironmentVariableCollectionScoped({ workspaceFolder });
+            envVarScope.clear(); // Clear existing variables for this workspace
+
             // Track which .env file is being used for logging
             const config = getConfiguration('python', workspaceUri); // why did this get .env file?? // returns like all of them
             const envFilePath = config.get<string>('envFile');
@@ -128,10 +132,6 @@ export class TerminalEnvVarInjector implements Disposable {
                 );
                 return; // No .env file to inject
             }
-
-            // use scoped environment variable collection
-            const envVarScope = this.getEnvironmentVariableCollectionScoped({ workspaceFolder });
-            envVarScope.clear(); // Clear existing variables for this workspace
 
             for (const [key, value] of Object.entries(envVars)) {
                 if (value === undefined) {
