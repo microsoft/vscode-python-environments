@@ -1223,7 +1223,7 @@ export interface DidChangeEnvironmentVariablesEventArgs {
     /**
      * The type of change that occurred.
      */
-    changeTye: FileChangeType;
+    changeType: FileChangeType;
 }
 
 export interface PythonEnvironmentVariablesApi {

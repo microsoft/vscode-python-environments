@@ -12,7 +12,7 @@ import {
 } from 'vscode';
 import { traceError, traceVerbose } from '../../common/logging';
 import { resolveVariables } from '../../common/utils/internalVariables';
-import { getConfiguration, onDidChangeConfiguration } from '../../common/workspace.apis';
+import { getConfiguration, getWorkspaceFolder } from '../../common/workspace.apis';
 import { EnvVarManager } from '../execution/envVariableManager';
 
 /**
@@ -35,25 +35,34 @@ export class TerminalEnvVarInjector implements Disposable {
     private async initialize(): Promise<void> {
         traceVerbose('TerminalEnvVarInjector: Initializing environment variable injection');
 
-        // Listen for configuration changes to python.envFile setting
-        this.disposables.push(
-            onDidChangeConfiguration((e) => {
-                if (e.affectsConfiguration('python.envFile')) {
-                    traceVerbose('TerminalEnvVarInjector: python.envFile setting changed, reloading env vars');
-                    this.updateEnvironmentVariables().catch((error) => {
-                        traceError('TerminalEnvVarInjector: Error updating env vars after setting change:', error);
-                    });
-                }
-            }),
-        );
-
         // Listen for environment variable changes from the manager
         this.disposables.push(
-            this.envVarManager.onDidChangeEnvironmentVariables(() => {
-                traceVerbose('TerminalEnvVarInjector: Environment variables changed, reloading');
-                this.updateEnvironmentVariables().catch((error) => {
-                    traceError('TerminalEnvVarInjector: Error updating env vars after change event:', error);
-                });
+            this.envVarManager.onDidChangeEnvironmentVariables((args) => {
+                if (!args.uri) {
+                    // No specific URI, reload all workspaces
+                    this.updateEnvironmentVariables().catch((error) => {
+                        traceError('Failed to update environment variables:', error);
+                    });
+                    return;
+                }
+
+                const affectedWorkspace = getWorkspaceFolder(args.uri);
+                if (!affectedWorkspace) {
+                    // No workspace folder found for this URI, reloading all workspaces
+                    this.updateEnvironmentVariables().catch((error) => {
+                        traceError('Failed to update environment variables:', error);
+                    });
+                    return;
+                }
+
+                if (args.changeType === 2) {
+                    // FileChangeType.Deleted
+                    this.clearWorkspaceVariables(affectedWorkspace);
+                } else {
+                    this.updateEnvironmentVariables(affectedWorkspace).catch((error) => {
+                        traceError('Failed to update environment variables:', error);
+                    });
+                }
             }),
         );
 
@@ -64,23 +73,29 @@ export class TerminalEnvVarInjector implements Disposable {
     /**
      * Update environment variables in the terminal collection.
      */
-    private async updateEnvironmentVariables(): Promise<void> {
-        // every time ONE is changed, we change ALL of them (not sure this is the right approach)
+    private async updateEnvironmentVariables(workspaceFolder?: WorkspaceFolder): Promise<void> {
         try {
-            // Clear existing environment variables
-            traceVerbose('TerminalEnvVarInjector: Clearing existing environment variables');
-            this.envVarCollection.clear();
+            if (workspaceFolder) {
+                // Update only the specified workspace
+                traceVerbose(
+                    `TerminalEnvVarInjector: Updating environment variables for workspace: ${workspaceFolder.uri.fsPath}`,
+                );
+                await this.injectEnvironmentVariablesForWorkspace(workspaceFolder);
+            } else {
+                // Initial load - update all workspaces
+                traceVerbose('TerminalEnvVarInjector: Clearing existing environment variables for initial load');
+                this.envVarCollection.clear();
 
-            // Get environment variables for all workspace folders
-            const workspaceFolders = workspace.workspaceFolders;
-            if (!workspaceFolders || workspaceFolders.length === 0) {
-                traceVerbose('TerminalEnvVarInjector: No workspace folders found, skipping env var injection');
-                return;
-            }
+                const workspaceFolders = workspace.workspaceFolders;
+                if (!workspaceFolders || workspaceFolders.length === 0) {
+                    traceVerbose('TerminalEnvVarInjector: No workspace folders found, skipping env var injection');
+                    return;
+                }
 
-            // Process environment variables for each workspace folder
-            for (const folder of workspaceFolders) {
-                await this.injectEnvironmentVariablesForWorkspace(folder);
+                traceVerbose('TerminalEnvVarInjector: Updating environment variables for all workspaces');
+                for (const folder of workspaceFolders) {
+                    await this.injectEnvironmentVariablesForWorkspace(folder);
+                }
             }
 
             traceVerbose('TerminalEnvVarInjector: Environment variable injection completed');
@@ -95,9 +110,6 @@ export class TerminalEnvVarInjector implements Disposable {
     private async injectEnvironmentVariablesForWorkspace(workspaceFolder: WorkspaceFolder): Promise<void> {
         const workspaceUri = workspaceFolder.uri;
         try {
-            traceVerbose(`TerminalEnvVarInjector: Processing workspace: ${workspaceUri.fsPath}`);
-
-            // Get environment variables for this workspace
             const envVars = await this.envVarManager.getEnvironmentVariables(workspaceUri);
 
             // Track which .env file is being used for logging
@@ -120,28 +132,18 @@ export class TerminalEnvVarInjector implements Disposable {
                 return; // No .env file to inject
             }
 
+            const envVarScope = this.getEnvironmentVariableCollectionScoped({ workspaceFolder });
+            envVarScope.clear(); // Clear existing variables for this workspace
+            
             // Inject environment variables into the collection
-            let injectedCount = 0;
             for (const [key, value] of Object.entries(envVars)) {
                 // inject into correctly scoped environment collection
-                const envVarScope = this.getEnvironmentVariableCollectionScoped({ workspaceFolder });
                 if (value === undefined) {
                     // Remove the environment variable if the value is undefined
                     envVarScope.delete(key);
                 } else {
                     envVarScope.replace(key, value);
                 }
-                injectedCount++;
-            }
-
-            if (injectedCount > 0) {
-                traceVerbose(
-                    `TerminalEnvVarInjector: Injected ${injectedCount} environment variables for workspace: ${workspaceUri.fsPath}`,
-                );
-            } else {
-                traceVerbose(
-                    `TerminalEnvVarInjector: No environment variables to inject for workspace: ${workspaceUri.fsPath}`,
-                );
             }
         } catch (error) {
             traceError(
@@ -166,5 +168,17 @@ export class TerminalEnvVarInjector implements Disposable {
     private getEnvironmentVariableCollectionScoped(scope: EnvironmentVariableScope = {}) {
         const envVarCollection = this.envVarCollection as GlobalEnvironmentVariableCollection;
         return envVarCollection.getScoped(scope);
+    }
+
+    /**
+     * Clear all environment variables for a workspace.
+     */
+    private clearWorkspaceVariables(workspaceFolder: WorkspaceFolder): void {
+        try {
+            const scope = this.getEnvironmentVariableCollectionScoped({ workspaceFolder });
+            scope.clear();
+        } catch (error) {
+            traceError(`Failed to clear environment variables for workspace ${workspaceFolder.uri.fsPath}:`, error);
+        }
     }
 }

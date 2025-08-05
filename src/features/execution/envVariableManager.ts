@@ -25,13 +25,13 @@ export class PythonEnvVariableManager implements EnvVarManager {
             this._onDidChangeEnvironmentVariables,
             this.watcher,
             this.watcher.onDidCreate((e) =>
-                this._onDidChangeEnvironmentVariables.fire({ uri: e, changeTye: FileChangeType.Created }),
+                this._onDidChangeEnvironmentVariables.fire({ uri: e, changeType: FileChangeType.Created }),
             ),
             this.watcher.onDidChange((e) =>
-                this._onDidChangeEnvironmentVariables.fire({ uri: e, changeTye: FileChangeType.Changed }),
+                this._onDidChangeEnvironmentVariables.fire({ uri: e, changeType: FileChangeType.Changed }),
             ),
             this.watcher.onDidDelete((e) =>
-                this._onDidChangeEnvironmentVariables.fire({ uri: e, changeTye: FileChangeType.Deleted }),
+                this._onDidChangeEnvironmentVariables.fire({ uri: e, changeType: FileChangeType.Deleted }),
             ),
         );
     }
