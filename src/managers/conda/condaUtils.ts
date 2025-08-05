@@ -132,6 +132,14 @@ async function findConda(): Promise<readonly string[] | undefined> {
     }
 }
 
+/**
+ * Resolves the path to the conda executable using multiple fallback strategies:
+ * 1. Cached path if available
+ * 2. Previously saved path from persistent workspace state
+ * 3. Search in system PATH
+ * 4. Query native finder for conda installations
+ * Throws if conda cannot be found through any method.
+ */
 async function getCondaExecutable(native?: NativePythonFinder): Promise<string> {
     if (condaPath) {
         traceInfo(`Using conda from cache: ${condaPath}`);
@@ -180,6 +188,11 @@ export async function getConda(native?: NativePythonFinder): Promise<string> {
     return await getCondaExecutable(native);
 }
 
+/**
+ * Internal function to execute conda commands with proper error handling, logging, and cancellation support.
+ * Spawns a shell process to run conda and collects both stdout and stderr output.
+ * Handles command cancellation and non-zero exit codes.
+ */
 async function _runConda(
     conda: string,
     args: string[],
@@ -280,6 +293,12 @@ function isPrefixOf(roots: string[], e: string): boolean {
     return false;
 }
 
+/**
+ * Constructs environment info for a named conda environment with shell-specific activation/deactivation commands.
+ * Handles different shell types (bash, zsh, cmd, powershell, git bash) and their specific activation requirements.
+ * For absolute conda paths, includes the full conda.sh/conda-hook.ps1 activation sequence.
+ * For conda on PATH, uses direct conda activate/deactivate commands.
+ */
 async function getNamedCondaPythonInfo(
     name: string,
     prefix: string,
@@ -468,6 +487,10 @@ async function getPrefixesCondaPythonInfo(
     };
 }
 
+/**
+ * Creates a special PythonEnvironmentInfo object for conda environments that don't have Python installed.
+ * These environments are marked with a stop icon and version 'no-python' to indicate their incomplete state.
+ */
 function getCondaWithoutPython(name: string, prefix: string, conda: string): PythonEnvironmentInfo {
     return {
         name: name,
@@ -487,6 +510,14 @@ function getCondaWithoutPython(name: string, prefix: string, conda: string): Pyt
     };
 }
 
+/**
+ * Converts a native environment info object (found via PET) into a Python environment object.
+ * Handles different types of conda environments:
+ * - Base environment
+ * - Named environments in conda prefixes
+ * - Prefix-based environments outside conda prefixes
+ * - Environments without Python installed
+ */
 async function nativeToPythonEnv(
     e: NativeEnvInfo,
     api: PythonEnvironmentApi,
@@ -551,6 +582,11 @@ export async function resolveCondaPath(
     }
 }
 
+/**
+ * Discovers and refreshes the list of conda environments in the system.
+ * Uses the native finder (PET) to detect environments (both on and not on the PATH) and converts them to PythonEnvironment objects.
+ * Returns a sorted list of all found conda environments.
+ */
 export async function refreshCondaEnvs(
     hardRefresh: boolean,
     nativeFinder: NativePythonFinder,
@@ -629,6 +665,13 @@ async function getLocation(api: PythonEnvironmentApi, uris: Uri | Uri[]): Promis
     return api.getPythonProject(Array.isArray(uris) ? uris[0] : uris)?.uri.fsPath;
 }
 
+/**
+ * Creates a new conda environment with user interaction to determine the type and location.
+ * Supports two types of environments:
+ * 1. Named environments (stored in conda's envs directory)
+ * 2. Prefix environments (stored in a specific location)
+ * Handles both single and multi-project scenarios for environment creation.
+ */
 export async function createCondaEnvironment(
     api: PythonEnvironmentApi,
     log: LogOutputChannel,
@@ -891,6 +934,13 @@ export async function refreshPackages(
     return packages;
 }
 
+/**
+ * Handles package installation, uninstallation and updates in a conda environment.
+ * Can perform multiple operations in sequence:
+ * 1. Uninstall specified packages
+ * 2. Install new packages with optional upgrade of existing packages
+ * Returns the updated list of installed packages after operations complete.
+ */
 export async function managePackages(
     environment: PythonEnvironment,
     options: PackageManagementOptions,
