@@ -36,6 +36,7 @@
         "url": "https://github.com/microsoft/vscode-python-environments/issues"
     },
     "main": "./dist/extension.js",
+    "l10n": "./l10n",
     "icon": "icon.png",
     "contributes": {
         "configuration": {
