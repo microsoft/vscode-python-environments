@@ -2,7 +2,7 @@ import * as fsapi from 'fs-extra';
 import * as path from 'path';
 import { Event, EventEmitter, FileChangeType, Uri } from 'vscode';
 import { Disposable } from 'vscode-jsonrpc';
-import { DidChangeEnvironmentVariablesEventArgs, PythonEnvironmentVariablesApi } from '../../api';
+import { DidChangeEnvironmentVariablesEventArgs, EnvironmentVariableScope, PythonEnvironmentVariablesApi } from '../../api';
 import { resolveVariables } from '../../common/utils/internalVariables';
 import { createFileSystemWatcher, getConfiguration } from '../../common/workspace.apis';
 import { PythonProjectManager } from '../../internal.api';
@@ -40,35 +40,44 @@ export class PythonEnvVariableManager implements EnvVarManager {
         uri: Uri,
         overrides?: ({ [key: string]: string | undefined } | Uri)[],
         baseEnvVar?: { [key: string]: string | undefined },
+        scope: EnvironmentVariableScope = EnvironmentVariableScope.All,
     ): Promise<{ [key: string]: string | undefined }> {
         const project = this.pm.get(uri);
 
         const base = baseEnvVar || { ...process.env };
         let env = base;
 
-        const config = getConfiguration('python', project?.uri ?? uri);
-        let envFilePath = config.get<string>('envFile');
-        envFilePath = envFilePath ? path.normalize(resolveVariables(envFilePath, uri)) : undefined;
-
-        if (envFilePath && (await fsapi.pathExists(envFilePath))) {
-            const other = await parseEnvFile(Uri.file(envFilePath));
-            env = mergeEnvVariables(env, other);
+        // Handle Process scope - return only the base environment variables
+        if (scope === EnvironmentVariableScope.Process) {
+            return env;
         }
 
-        let projectEnvFilePath = project ? path.normalize(path.join(project.uri.fsPath, '.env')) : undefined;
-        if (
-            projectEnvFilePath &&
-            projectEnvFilePath?.toLowerCase() !== envFilePath?.toLowerCase() &&
-            (await fsapi.pathExists(projectEnvFilePath))
-        ) {
-            const other = await parseEnvFile(Uri.file(projectEnvFilePath));
-            env = mergeEnvVariables(env, other);
-        }
+        // Handle Terminal scope or All scope - include .env files
+        if (scope & EnvironmentVariableScope.Terminal) {
+            const config = getConfiguration('python', project?.uri ?? uri);
+            let envFilePath = config.get<string>('envFile');
+            envFilePath = envFilePath ? path.normalize(resolveVariables(envFilePath, uri)) : undefined;
 
-        if (overrides) {
-            for (const override of overrides) {
-                const other = override instanceof Uri ? await parseEnvFile(override) : override;
+            if (envFilePath && (await fsapi.pathExists(envFilePath))) {
+                const other = await parseEnvFile(Uri.file(envFilePath));
                 env = mergeEnvVariables(env, other);
+            }
+
+            let projectEnvFilePath = project ? path.normalize(path.join(project.uri.fsPath, '.env')) : undefined;
+            if (
+                projectEnvFilePath &&
+                projectEnvFilePath?.toLowerCase() !== envFilePath?.toLowerCase() &&
+                (await fsapi.pathExists(projectEnvFilePath))
+            ) {
+                const other = await parseEnvFile(Uri.file(projectEnvFilePath));
+                env = mergeEnvVariables(env, other);
+            }
+
+            if (overrides) {
+                for (const override of overrides) {
+                    const other = override instanceof Uri ? await parseEnvFile(override) : override;
+                    env = mergeEnvVariables(env, other);
+                }
             }
         }
 

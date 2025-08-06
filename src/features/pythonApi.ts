@@ -29,6 +29,7 @@ import {
     PythonTerminalCreateOptions,
     DidChangeEnvironmentVariablesEventArgs,
     CreateEnvironmentOptions,
+    EnvironmentVariableScope,
 } from '../api';
 import {
     EnvironmentManagers,
@@ -333,8 +334,9 @@ class PythonEnvironmentApiImpl implements PythonEnvironmentApi {
         uri: Uri,
         overrides?: ({ [key: string]: string | undefined } | Uri)[],
         baseEnvVar?: { [key: string]: string | undefined },
+        scope?: EnvironmentVariableScope,
     ): Promise<{ [key: string]: string | undefined }> {
-        return this.envVarManager.getEnvironmentVariables(checkUri(uri) as Uri, overrides, baseEnvVar);
+        return this.envVarManager.getEnvironmentVariables(checkUri(uri) as Uri, overrides, baseEnvVar, scope);
     }
 }
 

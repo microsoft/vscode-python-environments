@@ -5,11 +5,12 @@ import * as fse from 'fs-extra';
 import * as path from 'path';
 import {
     Disposable,
-    EnvironmentVariableScope,
+    EnvironmentVariableScope as VSCodeEnvironmentVariableScope,
     GlobalEnvironmentVariableCollection,
     workspace,
     WorkspaceFolder,
 } from 'vscode';
+import { EnvironmentVariableScope } from '../../api';
 import { traceError, traceVerbose } from '../../common/logging';
 import { resolveVariables } from '../../common/utils/internalVariables';
 import { getConfiguration, getWorkspaceFolder } from '../../common/workspace.apis';
@@ -109,7 +110,12 @@ export class TerminalEnvVarInjector implements Disposable {
     private async injectEnvironmentVariablesForWorkspace(workspaceFolder: WorkspaceFolder): Promise<void> {
         const workspaceUri = workspaceFolder.uri;
         try {
-            const envVars = await this.envVarManager.getEnvironmentVariables(workspaceUri);
+            const envVars = await this.envVarManager.getEnvironmentVariables(
+                workspaceUri,
+                undefined,
+                undefined,
+                EnvironmentVariableScope.Terminal
+            );
 
             // use scoped environment variable collection
             const envVarScope = this.getEnvironmentVariableCollectionScoped({ workspaceFolder });
@@ -161,7 +167,7 @@ export class TerminalEnvVarInjector implements Disposable {
         this.envVarCollection.clear();
     }
 
-    private getEnvironmentVariableCollectionScoped(scope: EnvironmentVariableScope = {}) {
+    private getEnvironmentVariableCollectionScoped(scope: VSCodeEnvironmentVariableScope = {}) {
         const envVarCollection = this.envVarCollection as GlobalEnvironmentVariableCollection;
         return envVarCollection.getScoped(scope);
     }
