@@ -58,6 +58,7 @@ import { ShellStartupActivationVariablesManagerImpl } from './features/terminal/
 import { cleanupStartupScripts } from './features/terminal/shellStartupSetupHandlers';
 import { TerminalActivationImpl } from './features/terminal/terminalActivationState';
 import { TerminalManager, TerminalManagerImpl } from './features/terminal/terminalManager';
+import { TerminalEnvVarInjector } from './features/terminal/terminalEnvVarInjector';
 import { getAutoActivationType, getEnvironmentForTerminal } from './features/terminal/utils';
 import { EnvManagerView } from './features/views/envManagersView';
 import { ProjectView } from './features/views/projectView';
@@ -238,6 +239,13 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
         shellEnvsProviders,
         api,
     );
+
+    // Initialize terminal environment variable injection
+    const terminalEnvVarInjector = new TerminalEnvVarInjector(
+        context.environmentVariableCollection,
+        envVarManager,
+    );
+    context.subscriptions.push(terminalEnvVarInjector);
 
     context.subscriptions.push(
         shellStartupVarsMgr,

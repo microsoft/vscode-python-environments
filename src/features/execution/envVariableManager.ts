@@ -1,12 +1,12 @@
-import * as path from 'path';
 import * as fsapi from 'fs-extra';
-import { Uri, Event, EventEmitter, FileChangeType } from 'vscode';
-import { DidChangeEnvironmentVariablesEventArgs, PythonEnvironmentVariablesApi } from '../../api';
+import * as path from 'path';
+import { Event, EventEmitter, FileChangeType, Uri } from 'vscode';
 import { Disposable } from 'vscode-jsonrpc';
+import { DidChangeEnvironmentVariablesEventArgs, PythonEnvironmentVariablesApi } from '../../api';
+import { resolveVariables } from '../../common/utils/internalVariables';
 import { createFileSystemWatcher, getConfiguration } from '../../common/workspace.apis';
 import { PythonProjectManager } from '../../internal.api';
 import { mergeEnvVariables, parseEnvFile } from './envVarUtils';
-import { resolveVariables } from '../../common/utils/internalVariables';
 
 export interface EnvVarManager extends PythonEnvironmentVariablesApi, Disposable {}
 
@@ -25,13 +25,13 @@ export class PythonEnvVariableManager implements EnvVarManager {
             this._onDidChangeEnvironmentVariables,
             this.watcher,
             this.watcher.onDidCreate((e) =>
-                this._onDidChangeEnvironmentVariables.fire({ uri: e, changeTye: FileChangeType.Created }),
+                this._onDidChangeEnvironmentVariables.fire({ uri: e, changeType: FileChangeType.Created }),
             ),
             this.watcher.onDidChange((e) =>
-                this._onDidChangeEnvironmentVariables.fire({ uri: e, changeTye: FileChangeType.Changed }),
+                this._onDidChangeEnvironmentVariables.fire({ uri: e, changeType: FileChangeType.Changed }),
             ),
             this.watcher.onDidDelete((e) =>
-                this._onDidChangeEnvironmentVariables.fire({ uri: e, changeTye: FileChangeType.Deleted }),
+                this._onDidChangeEnvironmentVariables.fire({ uri: e, changeType: FileChangeType.Deleted }),
             ),
         );
     }
@@ -48,7 +48,7 @@ export class PythonEnvVariableManager implements EnvVarManager {
 
         const config = getConfiguration('python', project?.uri ?? uri);
         let envFilePath = config.get<string>('envFile');
-        envFilePath = envFilePath ? path.normalize(resolveVariables(envFilePath)) : undefined;
+        envFilePath = envFilePath ? path.normalize(resolveVariables(envFilePath, uri)) : undefined;
 
         if (envFilePath && (await fsapi.pathExists(envFilePath))) {
             const other = await parseEnvFile(Uri.file(envFilePath));
