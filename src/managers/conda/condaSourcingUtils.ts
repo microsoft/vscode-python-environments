@@ -280,22 +280,32 @@ async function getCondaBatActivationFile(condaPath: string): Promise<string | un
  * This function checks for a local 'activate' script in the same directory as the conda executable.
  * This script is used for direct conda activation without shell-specific configuration.
  */
+
+const knownSourcingScriptCache: string[] = [];
 export async function getLocalActivationScript(condaPath: string): Promise<string | undefined> {
-    const activatePath = path.join(path.dirname(condaPath), 'activate');
-    traceVerbose(`Checking for local activation script at: ${activatePath}`);
+    const sourcingScript = isWindows()
+        ? path.join(condaPath, 'Scripts', 'activate.bat')
+        : path.join(condaPath, 'bin', 'activate');
+    traceVerbose(`Checking for local activation script at: ${sourcingScript}`);
 
     if (!condaPath) {
         traceVerbose('No conda path provided, cannot find local activation script');
         return undefined;
     }
 
+    if (knownSourcingScriptCache.includes(sourcingScript)) {
+        traceVerbose(`Found local activation script in cache at: ${sourcingScript}`);
+        return sourcingScript;
+    }
+
     try {
-        const exists = await fse.pathExists(activatePath);
+        const exists = await fse.pathExists(sourcingScript);
         if (exists) {
-            traceInfo(`Found local activation script at: ${activatePath}`);
-            return activatePath;
+            traceInfo(`Found local activation script at: ${sourcingScript}, adding to cache.`);
+            knownSourcingScriptCache.push(sourcingScript);
+            return sourcingScript;
         } else {
-            traceVerbose(`No local activation script found at: ${activatePath}`);
+            traceVerbose(`No local activation script found at: ${sourcingScript}`);
             return undefined;
         }
     } catch (err) {

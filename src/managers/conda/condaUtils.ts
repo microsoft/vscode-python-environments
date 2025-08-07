@@ -438,15 +438,10 @@ async function generateShellActivationMap2(
     }
     traceInfo(`Local activation script status: ${localSourcingPath ? 'found at ' + localSourcingPath : 'not found'}`);
 
-    // Determine the preferred sourcing path based on platform
-    const preferredSourcingPath = isWindows()
-        ? localSourcingPath || globalSourcingScript
-        : globalSourcingScript || localSourcingPath;
-    traceInfo(
-        `Selected preferred sourcing path give machine type of ${isWindows() ? 'Windows' : 'non-Windows'} is: ${
-            preferredSourcingPath ?? 'none found'
-        }`,
-    );
+    // Determine the preferred sourcing path with preference to local
+    const preferredSourcingPath = localSourcingPath || globalSourcingScript;
+
+    traceInfo(`Selected preferred sourcing path is: ${preferredSourcingPath ?? 'none found'}`);
 
     // P2: Return shell activation if we have no sourcing
     if (!preferredSourcingPath) {
