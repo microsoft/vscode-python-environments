@@ -13,6 +13,7 @@ import {
 import { traceError, traceVerbose } from '../../common/logging';
 import { resolveVariables } from '../../common/utils/internalVariables';
 import { getConfiguration, getWorkspaceFolder } from '../../common/workspace.apis';
+import { showInformationMessage } from '../../common/window.apis';
 import { EnvVarManager } from '../execution/envVariableManager';
 
 /**
@@ -111,13 +112,34 @@ export class TerminalEnvVarInjector implements Disposable {
         try {
             // Check if environment variable injection is enabled
             const config = getConfiguration('python', workspaceUri);
-            const injectEnvFile = config.get<boolean>('terminal.injectEnvFile', false);
+            const useEnvFile = config.get<boolean>('terminal.useEnvFile', false);
+            const envFilePath = config.get<string>('envFile');
             
             // use scoped environment variable collection
             const envVarScope = this.getEnvironmentVariableCollectionScoped({ workspaceFolder });
             envVarScope.clear(); // Clear existing variables for this workspace
 
-            if (!injectEnvFile) {
+            // Check if python.envFile is set but useEnvFile is false (default) and show notification
+            if (!useEnvFile && envFilePath) {
+                traceVerbose(
+                    `TerminalEnvVarInjector: python.envFile is set but python.terminal.useEnvFile is false for workspace: ${workspaceUri.fsPath}`,
+                );
+                
+                // Show information message to user
+                showInformationMessage(
+                    'The python.envFile setting is configured but will not take effect in terminals. Enable the "python.terminal.useEnvFile" setting to use environment variables from .env files in terminals.',
+                    'Open Settings'
+                ).then((selection) => {
+                    if (selection === 'Open Settings') {
+                        // Open VS Code settings to the python.terminal.useEnvFile setting
+                        import('vscode').then(vscode => {
+                            vscode.commands.executeCommand('workbench.action.openSettings', 'python.terminal.useEnvFile');
+                        });
+                    }
+                });
+            }
+
+            if (!useEnvFile) {
                 traceVerbose(
                     `TerminalEnvVarInjector: Environment variable injection disabled for workspace: ${workspaceUri.fsPath}`,
                 );
@@ -127,7 +149,6 @@ export class TerminalEnvVarInjector implements Disposable {
             const envVars = await this.envVarManager.getEnvironmentVariables(workspaceUri);
 
             // Track which .env file is being used for logging
-            const envFilePath = config.get<string>('envFile');
             const resolvedEnvFilePath: string | undefined = envFilePath
                 ? path.resolve(resolveVariables(envFilePath, workspaceUri))
                 : undefined;
