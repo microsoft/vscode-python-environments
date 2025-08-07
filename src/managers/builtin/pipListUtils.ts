@@ -22,7 +22,7 @@ export function parsePipList(data: string): PipPackage[] {
             const name = parts[0].trim();
             const version = parts[1].trim();
             if (!isValidVersion(version)) {
-                break;
+                continue;
             }
             const pkg = {
                 name,
