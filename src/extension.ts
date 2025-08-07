@@ -17,6 +17,7 @@ import {
     onDidChangeTerminalShellIntegration,
 } from './common/window.apis';
 import { getConfiguration } from './common/workspace.apis';
+import { registerChatParticipant } from './features/chat/chatParticipant';
 import { createManagerReady } from './features/common/managerReady';
 import { AutoFindProjects } from './features/creators/autoFindProjects';
 import { ExistingProjects } from './features/creators/existingProjects';
@@ -239,6 +240,7 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
         shellEnvsProviders,
         api,
     );
+    registerChatParticipant(context);
 
     // Initialize terminal environment variable injection
     const terminalEnvVarInjector = new TerminalEnvVarInjector(
