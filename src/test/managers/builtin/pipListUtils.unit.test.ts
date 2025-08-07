@@ -1,13 +1,13 @@
+import assert from 'assert';
 import * as fs from 'fs-extra';
 import * as path from 'path';
-import { EXTENSION_TEST_ROOT } from '../../constants';
 import { parsePipList } from '../../../managers/builtin/pipListUtils';
-import assert from 'assert';
+import { EXTENSION_TEST_ROOT } from '../../constants';
 
 const TEST_DATA_ROOT = path.join(EXTENSION_TEST_ROOT, 'managers', 'builtin');
 
 suite('Pip List Parser tests', () => {
-    const testNames = ['piplist1', 'piplist2'];
+    const testNames = ['piplist1', 'piplist2', 'piplist3'];
 
     testNames.forEach((testName) => {
         test(`Test parsing pip list output ${testName}`, async () => {
