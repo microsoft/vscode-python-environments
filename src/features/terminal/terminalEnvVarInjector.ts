@@ -109,14 +109,24 @@ export class TerminalEnvVarInjector implements Disposable {
     private async injectEnvironmentVariablesForWorkspace(workspaceFolder: WorkspaceFolder): Promise<void> {
         const workspaceUri = workspaceFolder.uri;
         try {
-            const envVars = await this.envVarManager.getEnvironmentVariables(workspaceUri);
-
+            // Check if environment variable injection is enabled
+            const config = getConfiguration('python', workspaceUri);
+            const injectEnvFile = config.get<boolean>('terminal.injectEnvFile', false);
+            
             // use scoped environment variable collection
             const envVarScope = this.getEnvironmentVariableCollectionScoped({ workspaceFolder });
             envVarScope.clear(); // Clear existing variables for this workspace
 
+            if (!injectEnvFile) {
+                traceVerbose(
+                    `TerminalEnvVarInjector: Environment variable injection disabled for workspace: ${workspaceUri.fsPath}`,
+                );
+                return; // Injection is disabled
+            }
+
+            const envVars = await this.envVarManager.getEnvironmentVariables(workspaceUri);
+
             // Track which .env file is being used for logging
-            const config = getConfiguration('python', workspaceUri);
             const envFilePath = config.get<string>('envFile');
             const resolvedEnvFilePath: string | undefined = envFilePath
                 ? path.resolve(resolveVariables(envFilePath, workspaceUri))

@@ -103,6 +103,12 @@
                         "%python-envs.terminal.autoActivationType.off%"
                     ],
                     "scope": "machine"
+                },
+                "python.terminal.injectEnvFile": {
+                    "type": "boolean",
+                    "description": "Controls whether environment variables from .env files and python.envFile setting are injected into terminals",
+                    "default": false,
+                    "scope": "resource"
                 }
             }
         },
