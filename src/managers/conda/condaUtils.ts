@@ -387,7 +387,7 @@ interface ShellCommandMaps {
  * @returns Promise resolving to shell-specific activation/deactivation command maps
  */
 async function generateShellActivationMap2(
-    prefix: string, // this is more the prefix?? this is the conda manager not the conda exec
+    prefix: string,
     envManager: EnvironmentManager,
     name?: string,
 ): Promise<ShellCommandMaps> {
