@@ -55,7 +55,7 @@ import { selectFromCommonPackagesToInstall } from '../common/pickers';
 import { Installable } from '../common/types';
 import { shortVersion, sortEnvironments } from '../common/utils';
 import { CondaEnvManager } from './condaEnvManager';
-import { getLocalActivationScript } from './condaSourcingUtils';
+import { getCondaHookPs1Path, getLocalActivationScript } from './condaSourcingUtils';
 
 export const CONDA_PATH_KEY = `${ENVS_EXTENSION_ID}:conda:CONDA_PATH`;
 export const CONDA_PREFIXES_KEY = `${ENVS_EXTENSION_ID}:conda:CONDA_PREFIXES`;
@@ -391,76 +391,117 @@ async function generateShellActivationMap2(
     envManager: EnvironmentManager,
     name?: string,
 ): Promise<ShellCommandMaps> {
-    // Determine the environment identifier to use
-    const envIdentifier = name ? name : prefix;
+    // Array to collect all logs
+    const logs: string[] = [];
+    let shellMaps: ShellCommandMaps;
 
-    traceInfo(
-        `Generating shell activation map for conda environment identifier: "${envIdentifier}" (prefix: "${prefix}", name: "${
-            name ?? 'undefined'
-        }")`,
-    );
-
-    let condaCommonActivate: PythonCommandRunConfiguration | undefined = {
-        executable: 'conda',
-        args: ['activate', envIdentifier],
-    };
-    let condaCommonDeactivate: PythonCommandRunConfiguration | undefined = {
-        executable: 'conda',
-        args: ['deactivate'],
-    };
-
-    if (!(envManager instanceof CondaEnvManager) || !envManager.sourcingInformation) {
-        traceError(
-            'Conda environment manager is not available, unable to generate shell activation map correctly- returning default conda activation paths.',
-        );
-        return generateShellActivationMapFromConfig([condaCommonActivate], [condaCommonDeactivate]);
-    }
-
-    const { isActiveOnLaunch, globalSourcingScript, shellSourcingScripts } = envManager.sourcingInformation;
-    traceVerbose(
-        `isActiveOnLaunch: ${isActiveOnLaunch}, globalSourcingScript: ${globalSourcingScript}, shellSourcingScripts: ${shellSourcingScripts?.join(
-            ', ',
-        )}`,
-    );
-
-    // P1: first check to see if conda is already active in the whole VS Code workspace via sourcing info (set at startup)
-    if (isActiveOnLaunch) {
-        traceInfo('Conda is already active on launch, using default activation commands');
-        return generateShellActivationMapFromConfig([condaCommonActivate], [condaCommonDeactivate]);
-    }
-
-    // get the local activation path, if exists use this
-    let localSourcingPath: string | undefined;
     try {
-        localSourcingPath = await getLocalActivationScript(prefix);
-    } catch {
-        console.log('tragic error');
+        // Determine the environment identifier to use
+        const envIdentifier = name ? name : prefix;
+
+        logs.push(`Environment Configuration:
+    - Identifier: "${envIdentifier}"
+    - Prefix: "${prefix}"
+    - Name: "${name ?? 'undefined'}"
+`);
+
+        let condaCommonActivate: PythonCommandRunConfiguration | undefined = {
+            executable: 'conda',
+            args: ['activate', envIdentifier],
+        };
+        let condaCommonDeactivate: PythonCommandRunConfiguration | undefined = {
+            executable: 'conda',
+            args: ['deactivate'],
+        };
+
+        if (!(envManager instanceof CondaEnvManager) || !envManager.sourcingInformation) {
+            logs.push('⚠️ Error: Conda environment manager is not available, using default conda activation paths');
+            shellMaps = await generateShellActivationMapFromConfig([condaCommonActivate], [condaCommonDeactivate]);
+            return shellMaps;
+        }
+
+        const { isActiveOnLaunch, globalSourcingScript, shellSourcingScripts } = envManager.sourcingInformation;
+        logs.push(`Sourcing Information:
+    - Active on Launch: ${isActiveOnLaunch}
+    - Global Script: ${globalSourcingScript ?? 'none'}
+    - Shell Scripts: ${shellSourcingScripts?.join(', ') ?? 'none'}
+`);
+
+        // P1: first check to see if conda is already active in the whole VS Code workspace via sourcing info (set at startup)
+        if (isActiveOnLaunch) {
+            logs.push('✓ Conda already active on launch, using default activation commands');
+            shellMaps = await generateShellActivationMapFromConfig([condaCommonActivate], [condaCommonDeactivate]);
+            return shellMaps;
+        }
+
+        // get the local activation path, if exists use this
+        let localSourcingPath: string | undefined;
+        try {
+            localSourcingPath = await getLocalActivationScript(prefix);
+        } catch (err) {
+            logs.push(
+                `⚠️ Error getting local activation script: ${err instanceof Error ? err.message : 'Unknown error'}`,
+            );
+        }
+
+        logs.push(`Local Activation:
+    - Status: ${localSourcingPath ? 'Found' : 'Not Found'}
+    - Path: ${localSourcingPath ?? 'N/A'}
+`);
+
+        // Determine the preferred sourcing path with preference to local
+        const preferredSourcingPath = localSourcingPath || globalSourcingScript;
+        logs.push(`Preferred Sourcing:
+    - Selected Path: ${preferredSourcingPath ?? 'none found'}
+    - Source: ${localSourcingPath ? 'Local' : globalSourcingScript ? 'Global' : 'None'}
+`);
+
+        // P2: Return shell activation if we have no sourcing
+        if (!preferredSourcingPath) {
+            logs.push('⚠️ No sourcing path found, using default conda activation');
+            shellMaps = await generateShellActivationMapFromConfig([condaCommonActivate], [condaCommonDeactivate]);
+            return shellMaps;
+        }
+
+        // P3: Handle Windows specifically ;this is carryover from vscode-python
+        if (isWindows()) {
+            logs.push('✓ Using Windows-specific activation configuration');
+            shellMaps = await windowsExceptionGenerateConfig(
+                preferredSourcingPath,
+                envIdentifier,
+                envManager.sourcingInformation.condaFolder,
+            );
+            return shellMaps;
+        }
+
+        logs.push('✓ Using source command with preferred path');
+        const condaSourcingPathFirst = {
+            executable: 'source',
+            args: [preferredSourcingPath, envIdentifier],
+        };
+        shellMaps = await generateShellActivationMapFromConfig([condaSourcingPathFirst], [condaCommonDeactivate]);
+        return shellMaps;
+    } catch (error) {
+        logs.push(
+            `❌ Error in shell activation map generation: ${error instanceof Error ? error.message : 'Unknown error'}`,
+        );
+        traceError('Failed to generate shell activation map. Falling back to default conda activation');
+        // Fall back to default conda activation in case of error
+        shellMaps = await generateShellActivationMapFromConfig(
+            [{ executable: 'conda', args: ['activate', name || prefix] }],
+            [{ executable: 'conda', args: ['deactivate'] }],
+        );
+        return shellMaps;
+    } finally {
+        // Always print logs in a nicely formatted block, even if there was an error
+        traceInfo(
+            [
+                '=== Conda Shell Activation Map Generation ===',
+                ...logs,
+                '==========================================',
+            ].join('\n'),
+        );
     }
-    traceInfo(`Local activation script status: ${localSourcingPath ? 'found at ' + localSourcingPath : 'not found'}`);
-
-    // Determine the preferred sourcing path with preference to local
-    const preferredSourcingPath = localSourcingPath || globalSourcingScript;
-
-    traceInfo(`Selected preferred sourcing path is: ${preferredSourcingPath ?? 'none found'}`);
-
-    // P2: Return shell activation if we have no sourcing
-    if (!preferredSourcingPath) {
-        traceInfo('No sourcing path found, falling back to default conda activation');
-        return generateShellActivationMapFromConfig([condaCommonActivate], [condaCommonDeactivate]);
-    }
-
-    // P3: Handle Windows specifically ;this is carryover from vscode-python
-    if (isWindows()) {
-        traceInfo('Using Windows-specific activation configuration');
-        return windowsExceptionGenerateConfig(preferredSourcingPath, envIdentifier);
-    }
-
-    traceInfo('Sourcing with preferred path before launching');
-    const condaSourcingPathFirst = {
-        executable: 'source',
-        args: [preferredSourcingPath, envIdentifier],
-    };
-    return generateShellActivationMapFromConfig([condaSourcingPathFirst], [condaCommonDeactivate]);
 }
 
 async function generateShellActivationMapFromConfig(
@@ -493,7 +534,11 @@ async function generateShellActivationMapFromConfig(
     return { shellActivation, shellDeactivation };
 }
 
-async function windowsExceptionGenerateConfig(sourceInitPath: string, prefix: string): Promise<ShellCommandMaps> {
+async function windowsExceptionGenerateConfig(
+    sourceInitPath: string,
+    prefix: string,
+    condaFolder: string,
+): Promise<ShellCommandMaps> {
     const shellActivation: Map<string, PythonCommandRunConfiguration[]> = new Map();
     const shellDeactivation: Map<string, PythonCommandRunConfiguration[]> = new Map();
 
@@ -503,22 +548,34 @@ async function windowsExceptionGenerateConfig(sourceInitPath: string, prefix: st
     // source pathInit ENVNAME for all NON bash
 
     // not bash activate
-    const NonBashActivate = [{ executable: sourceInitPath, args: ['conda', 'activate', prefix] }];
-    // yes bash activate
-    const bashActivate = [{ executable: 'source', args: [sourceInitPath, prefix] }];
-    //common deactivate
-    let condaCommonActivate: PythonCommandRunConfiguration | undefined = {
+    const ps1Hook = await getCondaHookPs1Path(condaFolder);
+    traceVerbose(`PS1 hook path: ${ps1Hook ?? 'not found'}`);
+    const activation = ps1Hook ? ps1Hook : sourceInitPath;
+
+    const pwshActivate = [{ executable: activation }, { executable: 'conda', args: ['activate', prefix] }];
+    const cmdActivate = [{ executable: sourceInitPath }, { executable: 'conda', args: ['activate', prefix] }];
+
+    const bashActivate = [{ executable: 'source', args: [sourceInitPath.replace(/\\/g, '/'), prefix] }];
+    // TODO: for bashActivate the sep is \ but needs to be / ??? tried on gitbash
+    traceVerbose(
+        `Windows activation commands: 
+        PowerShell: ${JSON.stringify(pwshActivate)}, 
+        CMD: ${JSON.stringify(cmdActivate)},
+        Bash: ${JSON.stringify(bashActivate)}`,
+    );
+
+    let condaCommonDeactivate: PythonCommandRunConfiguration | undefined = {
         executable: 'conda',
-        args: ['activate', prefix],
+        args: ['deactivate'],
     };
     shellActivation.set(ShellConstants.GITBASH, bashActivate);
-    shellDeactivation.set(ShellConstants.GITBASH, [condaCommonActivate]);
+    shellDeactivation.set(ShellConstants.GITBASH, [condaCommonDeactivate]);
 
-    shellActivation.set(ShellConstants.CMD, NonBashActivate);
-    shellDeactivation.set(ShellConstants.CMD, [condaCommonActivate]);
+    shellActivation.set(ShellConstants.CMD, cmdActivate);
+    shellDeactivation.set(ShellConstants.CMD, [condaCommonDeactivate]);
 
-    shellActivation.set(ShellConstants.PWSH, NonBashActivate);
-    shellDeactivation.set(ShellConstants.PWSH, [condaCommonActivate]);
+    shellActivation.set(ShellConstants.PWSH, pwshActivate);
+    shellDeactivation.set(ShellConstants.PWSH, [condaCommonDeactivate]);
 
     return { shellActivation, shellDeactivation };
 }
