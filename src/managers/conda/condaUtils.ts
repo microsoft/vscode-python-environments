@@ -28,7 +28,7 @@ import {
 import { ENVS_EXTENSION_ID, EXTENSION_ROOT_DIR } from '../../common/constants';
 import { showErrorMessageWithLogs } from '../../common/errors/utils';
 import { Common, CondaStrings, PackageManagement, Pickers } from '../../common/localize';
-import { traceError, traceInfo, traceVerbose } from '../../common/logging';
+import { traceInfo, traceVerbose } from '../../common/logging';
 import { getWorkspacePersistentState } from '../../common/persistentState';
 import { pickProject } from '../../common/pickers/projects';
 import { createDeferred } from '../../common/utils/deferred';
@@ -415,17 +415,12 @@ async function generateShellActivationMap2(
         };
 
         if (!(envManager instanceof CondaEnvManager) || !envManager.sourcingInformation) {
-            logs.push('⚠️ Error: Conda environment manager is not available, using default conda activation paths');
+            logs.push('Error: Conda environment manager is not available, using default conda activation paths');
             shellMaps = await generateShellActivationMapFromConfig([condaCommonActivate], [condaCommonDeactivate]);
             return shellMaps;
         }
 
-        const { isActiveOnLaunch, globalSourcingScript, shellSourcingScripts } = envManager.sourcingInformation;
-        logs.push(`Sourcing Information:
-    - Active on Launch: ${isActiveOnLaunch}
-    - Global Script: ${globalSourcingScript ?? 'none'}
-    - Shell Scripts: ${shellSourcingScripts?.join(', ') ?? 'none'}
-`);
+        const { isActiveOnLaunch, globalSourcingScript } = envManager.sourcingInformation;
 
         // P1: first check to see if conda is already active in the whole VS Code workspace via sourcing info (set at startup)
         if (isActiveOnLaunch) {
@@ -439,9 +434,7 @@ async function generateShellActivationMap2(
         try {
             localSourcingPath = await getLocalActivationScript(prefix);
         } catch (err) {
-            logs.push(
-                `⚠️ Error getting local activation script: ${err instanceof Error ? err.message : 'Unknown error'}`,
-            );
+            logs.push(`Error getting local activation script: ${err instanceof Error ? err.message : 'Unknown error'}`);
         }
 
         logs.push(`Local Activation:
@@ -458,7 +451,7 @@ async function generateShellActivationMap2(
 
         // P2: Return shell activation if we have no sourcing
         if (!preferredSourcingPath) {
-            logs.push('⚠️ No sourcing path found, using default conda activation');
+            logs.push('No sourcing path found, using default conda activation');
             shellMaps = await generateShellActivationMapFromConfig([condaCommonActivate], [condaCommonDeactivate]);
             return shellMaps;
         }
@@ -483,9 +476,8 @@ async function generateShellActivationMap2(
         return shellMaps;
     } catch (error) {
         logs.push(
-            `❌ Error in shell activation map generation: ${error instanceof Error ? error.message : 'Unknown error'}`,
+            `Error in shell activation map generation: ${error instanceof Error ? error.message : 'Unknown error'}`,
         );
-        traceError('Failed to generate shell activation map. Falling back to default conda activation');
         // Fall back to default conda activation in case of error
         shellMaps = await generateShellActivationMapFromConfig(
             [{ executable: 'conda', args: ['activate', name || prefix] }],
@@ -542,12 +534,6 @@ async function windowsExceptionGenerateConfig(
     const shellActivation: Map<string, PythonCommandRunConfiguration[]> = new Map();
     const shellDeactivation: Map<string, PythonCommandRunConfiguration[]> = new Map();
 
-    // set the NOT gitbash and bash to be
-    /// sourceInitPath conda activate ENVNAME
-    // localActivationPath conda activate prefix
-    // source pathInit ENVNAME for all NON bash
-
-    // not bash activate
     const ps1Hook = await getCondaHookPs1Path(condaFolder);
     traceVerbose(`PS1 hook path: ${ps1Hook ?? 'not found'}`);
     const activation = ps1Hook ? ps1Hook : sourceInitPath;
@@ -556,7 +542,6 @@ async function windowsExceptionGenerateConfig(
     const cmdActivate = [{ executable: sourceInitPath }, { executable: 'conda', args: ['activate', prefix] }];
 
     const bashActivate = [{ executable: 'source', args: [sourceInitPath.replace(/\\/g, '/'), prefix] }];
-    // TODO: for bashActivate the sep is \ but needs to be / ??? tried on gitbash
     traceVerbose(
         `Windows activation commands: 
         PowerShell: ${JSON.stringify(pwshActivate)}, 

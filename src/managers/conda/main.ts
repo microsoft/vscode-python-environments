@@ -19,7 +19,7 @@ export async function registerCondaFeatures(
         // get Conda will return only ONE conda manager, that correlates to a single conda install
         const condaPath: string = await getConda(nativeFinder);
         const sourcingStatus: CondaSourcingStatus = await constructCondaSourcingStatus(condaPath);
-        traceInfo('Conda Sourcing Status:', sourcingStatus.toString());
+        traceInfo(sourcingStatus.toString());
 
         const envManager = new CondaEnvManager(nativeFinder, api, log);
         const packageManager = new CondaPackageManager(api, log);

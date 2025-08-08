@@ -89,7 +89,7 @@ export async function constructCondaSourcingStatus(condaPath: string): Promise<C
     const globalSourcingScript: string | undefined = await findGlobalSourcingScript(sourcingStatus.condaFolder);
     if (globalSourcingScript) {
         sourcingStatus.globalSourcingScript = globalSourcingScript;
-        // TODO: determine if we want to exit here or continue to generate all the other activation scripts
+        // note: future iterations could decide to exit here instead of continuing to generate all the other activation scripts
     }
 
     // find and save all of the shell specific sourcing scripts
@@ -111,19 +111,18 @@ export async function findGlobalSourcingScript(condaFolder: string): Promise<str
         ? path.join(condaFolder, 'Scripts', 'activate.bat')
         : path.join(condaFolder, 'bin', 'activate');
 
-    traceVerbose(`Checking for global conda sourcing script at: ${sourcingScript}`);
     if (await fse.pathExists(sourcingScript)) {
         traceInfo(`Found global conda sourcing script at: ${sourcingScript}`);
         return sourcingScript;
     } else {
-        traceInfo(`No global conda sourcing script found.`);
+        traceInfo(`No global conda sourcing script found.  at: ${sourcingScript}`);
         return undefined;
     }
 }
 
 export async function findShellSourcingScripts(sourcingStatus: CondaSourcingStatus): Promise<string[]> {
     const logs: string[] = [];
-    logs.push('=== Conda Shell Script Search ===');
+    logs.push('=== Conda Sourcing Shell Script Search ===');
 
     let ps1Script: string | undefined;
     let shScript: string | undefined;
@@ -134,11 +133,10 @@ export async function findShellSourcingScripts(sourcingStatus: CondaSourcingStat
         logs.push('Searching for PowerShell hook script...');
         try {
             ps1Script = await getCondaHookPs1Path(sourcingStatus.condaFolder);
-            logs.push(`  Status: ${ps1Script ? '✓ Found' : '✗ Not found'}`);
-            logs.push(`  Path: ${ps1Script ?? 'N/A'}`);
+            logs.push(`  Path: ${ps1Script ?? '✗ Not found'}`);
         } catch (err) {
             logs.push(
-                `  ⚠️ Error during PowerShell script search: ${err instanceof Error ? err.message : 'Unknown error'}`,
+                `  Error during PowerShell script search: ${err instanceof Error ? err.message : 'Unknown error'}`,
             );
         }
 
@@ -146,25 +144,21 @@ export async function findShellSourcingScripts(sourcingStatus: CondaSourcingStat
         logs.push('\nSearching for Shell script...');
         try {
             shScript = await getCondaShPath(sourcingStatus.condaFolder);
-            logs.push(`  Status: ${shScript ? '✓ Found' : '✗ Not found'}`);
-            logs.push(`  Path: ${shScript ?? 'N/A'}`);
+            logs.push(`  Path: ${shScript ?? '✗ Not found'}`);
         } catch (err) {
-            logs.push(`  ⚠️ Error during Shell script search: ${err instanceof Error ? err.message : 'Unknown error'}`);
+            logs.push(`  Error during Shell script search: ${err instanceof Error ? err.message : 'Unknown error'}`);
         }
 
         // Search for Windows CMD script (activate.bat)
         logs.push('\nSearching for Windows CMD script...');
         try {
             cmdActivate = await getCondaBatActivationFile(sourcingStatus.condaPath);
-            logs.push(`  Status: ${cmdActivate ? '✓ Found' : '✗ Not found'}`);
-            logs.push(`  Path: ${cmdActivate ?? 'N/A'}`);
+            logs.push(`  Path: ${cmdActivate ?? '✗ Not found'}`);
         } catch (err) {
-            logs.push(`  ⚠️ Error during CMD script search: ${err instanceof Error ? err.message : 'Unknown error'}`);
+            logs.push(`  Error during CMD script search: ${err instanceof Error ? err.message : 'Unknown error'}`);
         }
     } catch (error) {
-        logs.push(
-            `\n❌ Critical error during script search: ${error instanceof Error ? error.message : 'Unknown error'}`,
-        );
+        logs.push(`\nCritical error during script search: ${error instanceof Error ? error.message : 'Unknown error'}`);
     } finally {
         logs.push('\nSearch Summary:');
         logs.push(`  PowerShell: ${ps1Script ? '✓' : '✗'}`);
@@ -189,8 +183,6 @@ export async function findShellSourcingScripts(sourcingStatus: CondaSourcingStat
  *   - etc/profile.d/
  */
 export async function getCondaHookPs1Path(condaFolder: string): Promise<string | undefined> {
-    // Check cache first
-
     // Create the promise for finding the hook path
     const hookPathPromise = (async () => {
         const condaRootCandidates: string[] = [
@@ -216,7 +208,6 @@ export async function getCondaHookPs1Path(condaFolder: string): Promise<string |
         return undefined;
     })();
 
-    // Store in cache and return
     return hookPathPromise;
 }
 
@@ -325,11 +316,6 @@ async function getCondaBatActivationFile(condaPath: string): Promise<string | un
 
 const knownSourcingScriptCache: string[] = [];
 export async function getLocalActivationScript(condaPath: string): Promise<string | undefined> {
-    if (!condaPath) {
-        traceVerbose('No conda path provided, cannot find local activation script');
-        return undefined;
-    }
-
     // Define all possible paths to check
     const paths = [
         // Direct path
@@ -351,7 +337,6 @@ export async function getLocalActivationScript(condaPath: string): Promise<strin
             traceVerbose(`Found local activation script in cache at: ${sourcingScript}`);
             return sourcingScript;
         }
-        traceVerbose(`Checking for local activation script at: ${sourcingScript}`);
         try {
             const exists = await fse.pathExists(sourcingScript);
             if (exists) {
