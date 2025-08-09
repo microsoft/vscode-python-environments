@@ -24,6 +24,7 @@ import { traceError } from '../../common/logging';
 import { createDeferred, Deferred } from '../../common/utils/deferred';
 import { showErrorMessage, withProgress } from '../../common/window.apis';
 import { NativePythonFinder } from '../common/nativePythonFinder';
+import { CondaSourcingStatus } from './condaSourcingUtils';
 import {
     checkForNoPythonCondaEnvironment,
     clearCondaCache,
@@ -51,6 +52,8 @@ export class CondaEnvManager implements EnvironmentManager, Disposable {
 
     private readonly _onDidChangeEnvironments = new EventEmitter<DidChangeEnvironmentsEventArgs>();
     public readonly onDidChangeEnvironments = this._onDidChangeEnvironments.event;
+
+    public sourcingInformation: CondaSourcingStatus | undefined;
 
     constructor(
         private readonly nativeFinder: NativePythonFinder,
