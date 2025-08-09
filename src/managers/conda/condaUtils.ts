@@ -134,23 +134,31 @@ async function findConda(): Promise<readonly string[] | undefined> {
 
 async function getCondaExecutable(native?: NativePythonFinder): Promise<string> {
     if (condaPath) {
-        traceInfo(`Using conda from cache: ${condaPath}`);
-        return untildify(condaPath);
+        if (await fse.pathExists(untildify(condaPath))) {
+            traceInfo(`Using conda from cache: ${condaPath}`);
+            return untildify(condaPath);
+        }
     }
 
     const state = await getWorkspacePersistentState();
     condaPath = await state.get<string>(CONDA_PATH_KEY);
     if (condaPath) {
-        traceInfo(`Using conda from persistent state: ${condaPath}`);
-        return untildify(condaPath);
+        if (await fse.pathExists(untildify(condaPath))) {
+            traceInfo(`Using conda from persistent state: ${condaPath}`);
+            return untildify(condaPath);
+        }
     }
 
     const paths = await findConda();
     if (paths && paths.length > 0) {
-        condaPath = paths[0];
-        traceInfo(`Using conda from PATH: ${condaPath}`);
-        await state.set(CONDA_PATH_KEY, condaPath);
-        return condaPath;
+        for (let i = 0; i < paths.length; i++) {
+            condaPath = paths[i];
+            if (await fse.pathExists(untildify(condaPath))) {
+                traceInfo(`Using conda from PATH: ${condaPath}`);
+                await state.set(CONDA_PATH_KEY, condaPath);
+                return condaPath;
+            }
+        }
     }
 
     if (native) {
@@ -160,10 +168,14 @@ async function getCondaExecutable(native?: NativePythonFinder): Promise<string> 
             .map((e) => e as NativeEnvManagerInfo)
             .filter((e) => e.tool.toLowerCase() === 'conda');
         if (managers.length > 0) {
-            condaPath = managers[0].executable;
-            traceInfo(`Using conda from native finder: ${condaPath}`);
-            await state.set(CONDA_PATH_KEY, condaPath);
-            return condaPath;
+            for (let i = 0; i < managers.length; i++) {
+                condaPath = managers[i].executable;
+                if (await fse.pathExists(untildify(condaPath))) {
+                    traceInfo(`Using conda from native finder: ${condaPath}`);
+                    await state.set(CONDA_PATH_KEY, condaPath);
+                    return condaPath;
+                }
+            }
         }
     }
 
