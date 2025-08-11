@@ -4,6 +4,7 @@
 import * as fse from 'fs-extra';
 import * as path from 'path';
 import {
+    ConfigurationChangeEvent,
     Disposable,
     EnvironmentVariableScope,
     GlobalEnvironmentVariableCollection,
@@ -12,7 +13,7 @@ import {
 } from 'vscode';
 import { traceError, traceVerbose } from '../../common/logging';
 import { resolveVariables } from '../../common/utils/internalVariables';
-import { getConfiguration, getWorkspaceFolder } from '../../common/workspace.apis';
+import { getConfiguration, getWorkspaceFolder, onDidChangeConfiguration } from '../../common/workspace.apis';
 import { showInformationMessage } from '../../common/window.apis';
 import { EnvVarManager } from '../execution/envVariableManager';
 
@@ -22,6 +23,7 @@ import { EnvVarManager } from '../execution/envVariableManager';
  */
 export class TerminalEnvVarInjector implements Disposable {
     private disposables: Disposable[] = [];
+    private readonly previousSettingsState = new Map<string, { useEnvFile: boolean | undefined; envFile: string | undefined }>();
 
     constructor(
         private readonly envVarCollection: GlobalEnvironmentVariableCollection,
@@ -35,6 +37,21 @@ export class TerminalEnvVarInjector implements Disposable {
      */
     private async initialize(): Promise<void> {
         traceVerbose('TerminalEnvVarInjector: Initializing environment variable injection');
+
+        // Initialize previous settings state for all workspaces
+        const workspaceFolders = workspace.workspaceFolders;
+        if (workspaceFolders) {
+            for (const folder of workspaceFolders) {
+                this.updatePreviousSettingsState(folder);
+            }
+        }
+
+        // Listen for configuration changes to show notifications when settings change
+        this.disposables.push(
+            onDidChangeConfiguration((event: ConfigurationChangeEvent) => {
+                this.handleConfigurationChange(event);
+            }),
+        );
 
         // Listen for environment variable changes from the manager
         this.disposables.push(
@@ -69,6 +86,109 @@ export class TerminalEnvVarInjector implements Disposable {
 
         // Initial load of environment variables
         await this.updateEnvironmentVariables();
+    }
+
+    /**
+     * Handle configuration changes and show notifications when relevant settings change.
+     */
+    private handleConfigurationChange(event: ConfigurationChangeEvent): void {
+        const workspaceFolders = workspace.workspaceFolders;
+        if (!workspaceFolders) {
+            return;
+        }
+
+        for (const folder of workspaceFolders) {
+            if (event.affectsConfiguration('python.terminal.useEnvFile', folder.uri) ||
+                event.affectsConfiguration('python.envFile', folder.uri)) {
+                
+                const folderKey = folder.uri.toString();
+                const previousState = this.previousSettingsState.get(folderKey);
+                const currentState = this.getCurrentSettingsState(folder);
+
+                if (previousState && this.shouldShowNotification(previousState, currentState)) {
+                    this.showSettingsChangeNotification(currentState);
+                }
+
+                this.previousSettingsState.set(folderKey, currentState);
+                
+                // Update environment variables for this workspace
+                this.updateEnvironmentVariables(folder).catch((error) => {
+                    traceError('Failed to update environment variables after configuration change:', error);
+                });
+            }
+        }
+    }
+
+    /**
+     * Get current settings state for a workspace.
+     */
+    private getCurrentSettingsState(workspaceFolder: WorkspaceFolder): { useEnvFile: boolean | undefined; envFile: string | undefined } {
+        const config = getConfiguration('python', workspaceFolder.uri);
+        return {
+            useEnvFile: config.get<boolean>('terminal.useEnvFile'),
+            envFile: config.get<string>('envFile')
+        };
+    }
+
+    /**
+     * Update the previous settings state for a workspace.
+     */
+    private updatePreviousSettingsState(workspaceFolder: WorkspaceFolder): void {
+        const folderKey = workspaceFolder.uri.toString();
+        this.previousSettingsState.set(folderKey, this.getCurrentSettingsState(workspaceFolder));
+    }
+
+    /**
+     * Determine if we should show a notification based on settings changes.
+     */
+    private shouldShowNotification(
+        previousState: { useEnvFile: boolean | undefined; envFile: string | undefined },
+        currentState: { useEnvFile: boolean | undefined; envFile: string | undefined }
+    ): boolean {
+        // Show notification if:
+        // 1. useEnvFile changed from undefined/false to true
+        // 2. envFile changed from undefined to set (any string value)
+        // And ensure both settings are configured correctly
+
+        const useEnvFileChanged = !previousState.useEnvFile && currentState.useEnvFile;
+        const envFileChanged = !previousState.envFile && !!currentState.envFile;
+
+        if (useEnvFileChanged || envFileChanged) {
+            // If one is set but the other isn't, show notification
+            if ((currentState.envFile && !currentState.useEnvFile) || 
+                (currentState.useEnvFile && !currentState.envFile)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * Show notification about settings configuration.
+     */
+    private showSettingsChangeNotification(currentState: { useEnvFile: boolean | undefined; envFile: string | undefined }): void {
+        let message: string;
+        
+        if (currentState.envFile && !currentState.useEnvFile) {
+            message = 'The python.envFile setting is configured but will not take effect in terminals. Enable the "python.terminal.useEnvFile" setting to use environment variables from .env files in terminals.';
+        } else if (currentState.useEnvFile && !currentState.envFile) {
+            message = 'The python.terminal.useEnvFile setting is enabled. Consider setting "python.envFile" to specify a custom .env file path, or ensure a .env file exists in your workspace root.';
+        } else {
+            return; // Both are properly configured, no notification needed
+        }
+
+        showInformationMessage(message, 'Open Settings').then((selection) => {
+            if (selection === 'Open Settings') {
+                // Open VS Code settings to the relevant setting
+                import('vscode').then(vscode => {
+                    const settingToOpen = currentState.envFile && !currentState.useEnvFile 
+                        ? 'python.terminal.useEnvFile'
+                        : 'python.envFile';
+                    vscode.commands.executeCommand('workbench.action.openSettings', settingToOpen);
+                });
+            }
+        });
     }
 
     /**
@@ -113,64 +233,47 @@ export class TerminalEnvVarInjector implements Disposable {
             // Check if environment variable injection is enabled
             const config = getConfiguration('python', workspaceUri);
             const useEnvFile = config.get<boolean>('terminal.useEnvFile', false);
-            const envFilePath = config.get<string>('envFile');
             
             // use scoped environment variable collection
             const envVarScope = this.getEnvironmentVariableCollectionScoped({ workspaceFolder });
             envVarScope.clear(); // Clear existing variables for this workspace
 
-            // Check if python.envFile is set but useEnvFile is false (default) and show notification
-            if (!useEnvFile && envFilePath) {
+            // Only inject if useEnvFile is true
+            if (useEnvFile) {
                 traceVerbose(
-                    `TerminalEnvVarInjector: python.envFile is set but python.terminal.useEnvFile is false for workspace: ${workspaceUri.fsPath}`,
+                    `TerminalEnvVarInjector: Environment variable injection enabled for workspace: ${workspaceUri.fsPath}`,
                 );
-                
-                // Show information message to user
-                showInformationMessage(
-                    'The python.envFile setting is configured but will not take effect in terminals. Enable the "python.terminal.useEnvFile" setting to use environment variables from .env files in terminals.',
-                    'Open Settings'
-                ).then((selection) => {
-                    if (selection === 'Open Settings') {
-                        // Open VS Code settings to the python.terminal.useEnvFile setting
-                        import('vscode').then(vscode => {
-                            vscode.commands.executeCommand('workbench.action.openSettings', 'python.terminal.useEnvFile');
-                        });
-                    }
-                });
-            }
 
-            if (!useEnvFile) {
+                const envVars = await this.envVarManager.getEnvironmentVariables(workspaceUri);
+
+                // Track which .env file is being used for logging
+                const envFilePath = config.get<string>('envFile');
+                const resolvedEnvFilePath: string | undefined = envFilePath
+                    ? path.resolve(resolveVariables(envFilePath, workspaceUri))
+                    : undefined;
+                const defaultEnvFilePath: string = path.join(workspaceUri.fsPath, '.env');
+
+                let activeEnvFilePath: string = resolvedEnvFilePath || defaultEnvFilePath;
+                if (activeEnvFilePath && (await fse.pathExists(activeEnvFilePath))) {
+                    traceVerbose(`TerminalEnvVarInjector: Using env file: ${activeEnvFilePath}`);
+                    
+                    for (const [key, value] of Object.entries(envVars)) {
+                        if (value === undefined) {
+                            // Remove the environment variable if the value is undefined
+                            envVarScope.delete(key);
+                        } else {
+                            envVarScope.replace(key, value);
+                        }
+                    }
+                } else {
+                    traceVerbose(
+                        `TerminalEnvVarInjector: No .env file found for workspace: ${workspaceUri.fsPath}, not injecting environment variables.`,
+                    );
+                }
+            } else {
                 traceVerbose(
                     `TerminalEnvVarInjector: Environment variable injection disabled for workspace: ${workspaceUri.fsPath}`,
                 );
-                return; // Injection is disabled
-            }
-
-            const envVars = await this.envVarManager.getEnvironmentVariables(workspaceUri);
-
-            // Track which .env file is being used for logging
-            const resolvedEnvFilePath: string | undefined = envFilePath
-                ? path.resolve(resolveVariables(envFilePath, workspaceUri))
-                : undefined;
-            const defaultEnvFilePath: string = path.join(workspaceUri.fsPath, '.env');
-
-            let activeEnvFilePath: string = resolvedEnvFilePath || defaultEnvFilePath;
-            if (activeEnvFilePath && (await fse.pathExists(activeEnvFilePath))) {
-                traceVerbose(`TerminalEnvVarInjector: Using env file: ${activeEnvFilePath}`);
-            } else {
-                traceVerbose(
-                    `TerminalEnvVarInjector: No .env file found for workspace: ${workspaceUri.fsPath}, not injecting environment variables.`,
-                );
-                return; // No .env file to inject
-            }
-
-            for (const [key, value] of Object.entries(envVars)) {
-                if (value === undefined) {
-                    // Remove the environment variable if the value is undefined
-                    envVarScope.delete(key);
-                } else {
-                    envVarScope.replace(key, value);
-                }
             }
         } catch (error) {
             traceError(
@@ -185,7 +288,7 @@ export class TerminalEnvVarInjector implements Disposable {
      */
     dispose(): void {
         traceVerbose('TerminalEnvVarInjector: Disposing');
-        this.disposables.forEach((disposable) => disposable.dispose());
+        this.disposables.forEach((disposable) => disposable?.dispose());
         this.disposables = [];
 
         // Clear all environment variables from the collection

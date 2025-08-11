@@ -106,7 +106,7 @@
                 },
                 "python.terminal.useEnvFile": {
                     "type": "boolean",
-                    "description": "Controls whether environment variables from .env files and python.envFile setting are injected into terminals",
+                    "description": "%python-envs.terminal.useEnvFile.description%",
                     "default": false,
                     "scope": "resource"
                 }

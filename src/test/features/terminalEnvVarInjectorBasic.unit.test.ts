@@ -3,9 +3,10 @@
 
 import * as sinon from 'sinon';
 import * as typeMoq from 'typemoq';
-import { GlobalEnvironmentVariableCollection, workspace } from 'vscode';
+import { GlobalEnvironmentVariableCollection, workspace, EnvironmentVariableCollection } from 'vscode';
 import { EnvVarManager } from '../../features/execution/envVariableManager';
 import { TerminalEnvVarInjector } from '../../features/terminal/terminalEnvVarInjector';
+import * as workspaceApi from '../../common/workspace.apis';
 
 interface MockScopedCollection {
     clear: sinon.SinonStub;
@@ -20,6 +21,7 @@ suite('TerminalEnvVarInjector Basic Tests', () => {
     let mockScopedCollection: MockScopedCollection;
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     let workspaceFoldersStub: any;
+    let onDidChangeConfigurationStub: sinon.SinonStub;
 
     setup(() => {
         envVarCollection = typeMoq.Mock.ofType<GlobalEnvironmentVariableCollection>();
@@ -40,8 +42,14 @@ suite('TerminalEnvVarInjector Basic Tests', () => {
         };
 
         // Setup environment variable collection to return scoped collection
-        envVarCollection.setup((x) => x.getScoped(typeMoq.It.isAny())).returns(() => mockScopedCollection as any);
+        envVarCollection.setup((x) => x.getScoped(typeMoq.It.isAny())).returns(() => mockScopedCollection as unknown as EnvironmentVariableCollection);
         envVarCollection.setup((x) => x.clear()).returns(() => {});
+
+        // Mock onDidChangeConfiguration to return a disposable
+        onDidChangeConfigurationStub = sinon.stub(workspaceApi, 'onDidChangeConfiguration');
+        onDidChangeConfigurationStub.returns({
+            dispose: () => {}
+        });
 
         // Setup minimal mocks for event subscriptions
         envVarManager

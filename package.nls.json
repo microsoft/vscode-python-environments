@@ -36,5 +36,6 @@
     "python-envs.terminal.deactivate.title": "Deactivate Environment in Current Terminal",
     "python-envs.uninstallPackage.title": "Uninstall Package",
     "python-envs.revealProjectInExplorer.title": "Reveal Project in Explorer",
-    "python-envs.runPetInTerminal.title": "Run Python Environment Tool (PET) in Terminal"
+    "python-envs.runPetInTerminal.title": "Run Python Environment Tool (PET) in Terminal",
+    "python-envs.terminal.useEnvFile.description": "Controls whether environment variables from .env files and python.envFile setting are injected into terminals"
 }
