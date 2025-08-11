@@ -450,12 +450,59 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
         commands.registerCommand('python-envs.runPetInTerminal', async () => {
             try {
                 const petPath = await getNativePythonToolsPath();
+                
+                // Show quick pick menu for PET operation selection
+                const selectedOption = await window.showQuickPick([
+                    {
+                        label: 'Find All Environments',
+                        description: 'Finds all environments and reports them to the standard output',
+                        detail: 'Runs: pet find --verbose'
+                    },
+                    {
+                        label: 'Resolve Environment...',
+                        description: 'Resolves & reports the details of the environment to the standard output',
+                        detail: 'Runs: pet resolve <path>'
+                    }
+                ], {
+                    placeHolder: 'Select a Python Environment Tool (PET) operation',
+                    ignoreFocusOut: true
+                });
+
+                if (!selectedOption) {
+                    return; // User cancelled
+                }
+
                 const terminal = createTerminal({
                     name: 'Python Environment Tool (PET)',
                 });
                 terminal.show();
-                terminal.sendText(`"${petPath}"`, true);
-                traceInfo(`Running PET in terminal: ${petPath}`);
+
+                if (selectedOption.label === 'Find All Environments') {
+                    // Run pet find --verbose
+                    terminal.sendText(`"${petPath}" find --verbose`, true);
+                    traceInfo(`Running PET find command: ${petPath} find --verbose`);
+                } else if (selectedOption.label === 'Resolve Environment...') {
+                    // Show input box for path
+                    const inputPath = await window.showInputBox({
+                        prompt: 'Enter the path to the Python executable to resolve',
+                        placeHolder: '/path/to/python/executable',
+                        ignoreFocusOut: true,
+                        validateInput: (value) => {
+                            if (!value || value.trim().length === 0) {
+                                return 'Please enter a valid path';
+                            }
+                            return null;
+                        }
+                    });
+
+                    if (!inputPath) {
+                        return; // User cancelled
+                    }
+
+                    // Run pet resolve with the provided path
+                    terminal.sendText(`"${petPath}" resolve "${inputPath.trim()}"`, true);
+                    traceInfo(`Running PET resolve command: ${petPath} resolve "${inputPath.trim()}"`);
+                }
             } catch (error) {
                 traceError('Error running PET in terminal', error);
                 window.showErrorMessage(`Failed to run Python Environment Tool: ${error}`);
