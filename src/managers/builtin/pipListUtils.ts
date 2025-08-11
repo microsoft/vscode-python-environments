@@ -4,6 +4,11 @@ export interface PipPackage {
     displayName: string;
     description: string;
 }
+export function isValidVersion(version: string): boolean {
+    return /^([1-9][0-9]*!)?(0|[1-9][0-9]*)(\.(0|[1-9][0-9]*))*((a|b|rc)(0|[1-9][0-9]*))?(\.post(0|[1-9][0-9]*))?(\.dev(0|[1-9][0-9]*))?$/.test(
+        version,
+    );
+}
 export function parsePipList(data: string): PipPackage[] {
     const collection: PipPackage[] = [];
 
@@ -13,9 +18,12 @@ export function parsePipList(data: string): PipPackage[] {
             continue;
         }
         const parts = line.split(' ').filter((e) => e);
-        if (parts.length > 1) {
+        if (parts.length === 2) {
             const name = parts[0].trim();
             const version = parts[1].trim();
+            if (!isValidVersion(version)) {
+                continue;
+            }
             const pkg = {
                 name,
                 version,

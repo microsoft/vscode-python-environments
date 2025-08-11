@@ -94,12 +94,42 @@ export const ACT_TYPE_SHELL = 'shellStartup';
 export const ACT_TYPE_COMMAND = 'command';
 export const ACT_TYPE_OFF = 'off';
 export type AutoActivationType = 'off' | 'command' | 'shellStartup';
+/**
+ * Determines the auto-activation type for Python environments in terminals.
+ *
+ * The following types are supported:
+ * - 'shellStartup': Environment is activated via shell startup scripts
+ * - 'command': Environment is activated via explicit command
+ * - 'off': Auto-activation is disabled
+ *
+ * Priority order:
+ * 1. python-envs.terminal.autoActivationType setting
+ * 2. python.terminal.activateEnvironment setting (if false updates python-envs.terminal.autoActivationType)
+ * 3. Default to 'command' if no setting is found
+ *
+ * @returns {AutoActivationType} The determined auto-activation type
+ */
 export function getAutoActivationType(): AutoActivationType {
-    // 'startup' auto-activation means terminal is activated via shell startup scripts.
-    // 'command' auto-activation means terminal is activated via a command.
-    // 'off' means no auto-activation.
-    const config = getConfiguration('python-envs');
-    return config.get<AutoActivationType>('terminal.autoActivationType', 'command');
+    const pyEnvsConfig = getConfiguration('python-envs');
+
+    const pyEnvsActivationType = pyEnvsConfig.get<AutoActivationType | undefined>(
+        'terminal.autoActivationType',
+        undefined,
+    );
+    if (pyEnvsActivationType !== undefined) {
+        return pyEnvsActivationType;
+    }
+
+    const pythonConfig = getConfiguration('python');
+    const pythonActivateSetting = pythonConfig.get<boolean | undefined>('terminal.activateEnvironment', undefined);
+    if (pythonActivateSetting !== undefined) {
+        if (pythonActivateSetting === false) {
+            pyEnvsConfig.set('terminal.autoActivationType', ACT_TYPE_OFF);
+        }
+        return pythonActivateSetting ? ACT_TYPE_COMMAND : ACT_TYPE_OFF;
+    }
+
+    return ACT_TYPE_COMMAND;
 }
 
 export async function setAutoActivationType(value: AutoActivationType): Promise<void> {

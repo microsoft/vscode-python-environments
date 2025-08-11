@@ -9,6 +9,7 @@ import { EventNames } from './common/telemetry/constants';
 import { sendManagerSelectionTelemetry } from './common/telemetry/helpers';
 import { sendTelemetryEvent } from './common/telemetry/sender';
 import { createDeferred } from './common/utils/deferred';
+import { isWindows } from './common/utils/platformUtils';
 import {
     activeTerminal,
     createLogOutputChannel,
@@ -57,8 +58,9 @@ import {
 import { ShellStartupActivationVariablesManagerImpl } from './features/terminal/shellStartupActivationVariablesManager';
 import { cleanupStartupScripts } from './features/terminal/shellStartupSetupHandlers';
 import { TerminalActivationImpl } from './features/terminal/terminalActivationState';
+import { TerminalEnvVarInjector } from './features/terminal/terminalEnvVarInjector';
 import { TerminalManager, TerminalManagerImpl } from './features/terminal/terminalManager';
-import { getEnvironmentForTerminal } from './features/terminal/utils';
+import { getAutoActivationType, getEnvironmentForTerminal } from './features/terminal/utils';
 import { EnvManagerView } from './features/views/envManagersView';
 import { ProjectView } from './features/views/projectView';
 import { PythonStatusBarImpl } from './features/views/pythonStatusBar';
@@ -144,10 +146,15 @@ async function collectEnvironmentInfo(
 
         // Current settings (non-sensitive)
         const config = workspace.getConfiguration('python-envs');
+        const pyConfig = workspace.getConfiguration('python');
         info.push('\nExtension Settings:');
         info.push(`  Default Environment Manager: ${config.get('defaultEnvManager')}`);
         info.push(`  Default Package Manager: ${config.get('defaultPackageManager')}`);
-        info.push(`  Terminal Auto Activation: ${config.get('terminal.autoActivationType')}`);
+        const pyenvAct = config.get('terminal.autoActivationType', undefined);
+        const pythonAct = pyConfig.get('terminal.activateEnvironment', undefined);
+        info.push(
+            `Auto-activation is "${getAutoActivationType()}". Activation based on first 'py-env.terminal.autoActivationType' setting which is '${pyenvAct}' and 'python.terminal.activateEnvironment' if the first is undefined which is '${pythonAct}'.\n`,
+        );
     } catch (err) {
         info.push(`\nError collecting environment information: ${err}`);
     }
@@ -233,6 +240,10 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
         shellEnvsProviders,
         api,
     );
+
+    // Initialize terminal environment variable injection
+    const terminalEnvVarInjector = new TerminalEnvVarInjector(context.environmentVariableCollection, envVarManager);
+    context.subscriptions.push(terminalEnvVarInjector);
 
     context.subscriptions.push(
         shellStartupVarsMgr,
@@ -437,12 +448,63 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
         commands.registerCommand('python-envs.runPetInTerminal', async () => {
             try {
                 const petPath = await getNativePythonToolsPath();
+
+                // Show quick pick menu for PET operation selection
+                const selectedOption = await window.showQuickPick(
+                    [
+                        {
+                            label: 'Find All Environments',
+                            description: 'Finds all environments and reports them to the standard output',
+                            detail: 'Runs: pet find --verbose',
+                        },
+                        {
+                            label: 'Resolve Environment...',
+                            description: 'Resolves & reports the details of the environment to the standard output',
+                            detail: 'Runs: pet resolve <path>',
+                        },
+                    ],
+                    {
+                        placeHolder: 'Select a Python Environment Tool (PET) operation',
+                        ignoreFocusOut: true,
+                    },
+                );
+
+                if (!selectedOption) {
+                    return; // User cancelled
+                }
+
                 const terminal = createTerminal({
                     name: 'Python Environment Tool (PET)',
                 });
                 terminal.show();
-                terminal.sendText(`"${petPath}"`, true);
-                traceInfo(`Running PET in terminal: ${petPath}`);
+
+                if (selectedOption.label === 'Find All Environments') {
+                    // Run pet find --verbose
+                    terminal.sendText(`"${petPath}" find --verbose`, true);
+                    traceInfo(`Running PET find command: ${petPath} find --verbose`);
+                } else if (selectedOption.label === 'Resolve Environment...') {
+                    // Show input box for path
+                    const placeholder = isWindows() ? 'C:\\path\\to\\python\\executable' : '/path/to/python/executable';
+                    const inputPath = await window.showInputBox({
+                        prompt: 'Enter the path to the Python executable to resolve',
+                        placeHolder: placeholder,
+                        ignoreFocusOut: true,
+                        validateInput: (value) => {
+                            if (!value || value.trim().length === 0) {
+                                return 'Please enter a valid path';
+                            }
+                            return null;
+                        },
+                    });
+
+                    if (!inputPath) {
+                        return; // User cancelled
+                    }
+
+                    // Run pet resolve with the provided path
+                    terminal.sendText(`"${petPath}" resolve "${inputPath.trim()}"`, true);
+                    traceInfo(`Running PET resolve command: ${petPath} resolve "${inputPath.trim()}"`);
+                }
             } catch (error) {
                 traceError('Error running PET in terminal', error);
                 window.showErrorMessage(`Failed to run Python Environment Tool: ${error}`);
