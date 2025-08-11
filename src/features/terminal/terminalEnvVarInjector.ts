@@ -23,7 +23,7 @@ import { EnvVarManager } from '../execution/envVariableManager';
  */
 export class TerminalEnvVarInjector implements Disposable {
     private disposables: Disposable[] = [];
-    private readonly previousSettingsState = new Map<string, { useEnvFile: boolean | undefined; envFile: string | undefined }>();
+    private readonly previousEnvFileState = new Map<string, string | undefined>();
 
     constructor(
         private readonly envVarCollection: GlobalEnvironmentVariableCollection,
@@ -38,11 +38,11 @@ export class TerminalEnvVarInjector implements Disposable {
     private async initialize(): Promise<void> {
         traceVerbose('TerminalEnvVarInjector: Initializing environment variable injection');
 
-        // Initialize previous settings state for all workspaces
+        // Initialize previous envFile state for all workspaces
         const workspaceFolders = workspace.workspaceFolders;
         if (workspaceFolders) {
             for (const folder of workspaceFolders) {
-                this.updatePreviousSettingsState(folder);
+                this.updatePreviousEnvFileState(folder);
             }
         }
 
@@ -89,7 +89,7 @@ export class TerminalEnvVarInjector implements Disposable {
     }
 
     /**
-     * Handle configuration changes and show notifications when relevant settings change.
+     * Handle configuration changes and show notifications when python.envFile is set.
      */
     private handleConfigurationChange(event: ConfigurationChangeEvent): void {
         const workspaceFolders = workspace.workspaceFolders;
@@ -98,20 +98,24 @@ export class TerminalEnvVarInjector implements Disposable {
         }
 
         for (const folder of workspaceFolders) {
+            if (event.affectsConfiguration('python.envFile', folder.uri)) {
+                
+                const folderKey = folder.uri.toString();
+                const previousEnvFile = this.previousEnvFileState.get(folderKey);
+                const currentEnvFile = this.getCurrentEnvFile(folder);
+
+                // Show notification if envFile was just set and useEnvFile is not true
+                if (!previousEnvFile && currentEnvFile && !this.getCurrentUseEnvFile(folder)) {
+                    this.showEnvFileSetNotification();
+                }
+
+                this.previousEnvFileState.set(folderKey, currentEnvFile);
+            }
+            
+            // Still need to update environment variables when either setting changes
             if (event.affectsConfiguration('python.terminal.useEnvFile', folder.uri) ||
                 event.affectsConfiguration('python.envFile', folder.uri)) {
                 
-                const folderKey = folder.uri.toString();
-                const previousState = this.previousSettingsState.get(folderKey);
-                const currentState = this.getCurrentSettingsState(folder);
-
-                if (previousState && this.shouldShowNotification(previousState, currentState)) {
-                    this.showSettingsChangeNotification(currentState);
-                }
-
-                this.previousSettingsState.set(folderKey, currentState);
-                
-                // Update environment variables for this workspace
                 this.updateEnvironmentVariables(folder).catch((error) => {
                     traceError('Failed to update environment variables after configuration change:', error);
                 });
@@ -120,72 +124,40 @@ export class TerminalEnvVarInjector implements Disposable {
     }
 
     /**
-     * Get current settings state for a workspace.
+     * Get current envFile setting for a workspace.
      */
-    private getCurrentSettingsState(workspaceFolder: WorkspaceFolder): { useEnvFile: boolean | undefined; envFile: string | undefined } {
+    private getCurrentEnvFile(workspaceFolder: WorkspaceFolder): string | undefined {
         const config = getConfiguration('python', workspaceFolder.uri);
-        return {
-            useEnvFile: config.get<boolean>('terminal.useEnvFile'),
-            envFile: config.get<string>('envFile')
-        };
+        return config.get<string>('envFile');
     }
 
     /**
-     * Update the previous settings state for a workspace.
+     * Get current useEnvFile setting for a workspace.
      */
-    private updatePreviousSettingsState(workspaceFolder: WorkspaceFolder): void {
+    private getCurrentUseEnvFile(workspaceFolder: WorkspaceFolder): boolean {
+        const config = getConfiguration('python', workspaceFolder.uri);
+        return config.get<boolean>('terminal.useEnvFile', false);
+    }
+
+    /**
+     * Update the previous envFile state for a workspace.
+     */
+    private updatePreviousEnvFileState(workspaceFolder: WorkspaceFolder): void {
         const folderKey = workspaceFolder.uri.toString();
-        this.previousSettingsState.set(folderKey, this.getCurrentSettingsState(workspaceFolder));
+        this.previousEnvFileState.set(folderKey, this.getCurrentEnvFile(workspaceFolder));
     }
 
     /**
-     * Determine if we should show a notification based on settings changes.
+     * Show notification when envFile is set but useEnvFile is not enabled.
      */
-    private shouldShowNotification(
-        previousState: { useEnvFile: boolean | undefined; envFile: string | undefined },
-        currentState: { useEnvFile: boolean | undefined; envFile: string | undefined }
-    ): boolean {
-        // Show notification if:
-        // 1. useEnvFile changed from undefined/false to true
-        // 2. envFile changed from undefined to set (any string value)
-        // And ensure both settings are configured correctly
-
-        const useEnvFileChanged = !previousState.useEnvFile && currentState.useEnvFile;
-        const envFileChanged = !previousState.envFile && !!currentState.envFile;
-
-        if (useEnvFileChanged || envFileChanged) {
-            // If one is set but the other isn't, show notification
-            if ((currentState.envFile && !currentState.useEnvFile) || 
-                (currentState.useEnvFile && !currentState.envFile)) {
-                return true;
-            }
-        }
-
-        return false;
-    }
-
-    /**
-     * Show notification about settings configuration.
-     */
-    private showSettingsChangeNotification(currentState: { useEnvFile: boolean | undefined; envFile: string | undefined }): void {
-        let message: string;
+    private showEnvFileSetNotification(): void {
+        const message = 'The python.envFile setting is configured but will not take effect in terminals. Enable the "python.terminal.useEnvFile" setting to use environment variables from .env files in terminals.';
         
-        if (currentState.envFile && !currentState.useEnvFile) {
-            message = 'The python.envFile setting is configured but will not take effect in terminals. Enable the "python.terminal.useEnvFile" setting to use environment variables from .env files in terminals.';
-        } else if (currentState.useEnvFile && !currentState.envFile) {
-            message = 'The python.terminal.useEnvFile setting is enabled. Consider setting "python.envFile" to specify a custom .env file path, or ensure a .env file exists in your workspace root.';
-        } else {
-            return; // Both are properly configured, no notification needed
-        }
-
         showInformationMessage(message, 'Open Settings').then((selection) => {
             if (selection === 'Open Settings') {
-                // Open VS Code settings to the relevant setting
+                // Open VS Code settings to the useEnvFile setting
                 import('vscode').then(vscode => {
-                    const settingToOpen = currentState.envFile && !currentState.useEnvFile 
-                        ? 'python.terminal.useEnvFile'
-                        : 'python.envFile';
-                    vscode.commands.executeCommand('workbench.action.openSettings', settingToOpen);
+                    vscode.commands.executeCommand('workbench.action.openSettings', 'python.terminal.useEnvFile');
                 });
             }
         });
