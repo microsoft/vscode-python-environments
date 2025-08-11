@@ -300,7 +300,7 @@ async function getNamedCondaPythonInfo(
     _conda: string, // TODO:: fix this, why is it not being used to build the info object
     envManager: EnvironmentManager,
 ): Promise<PythonEnvironmentInfo> {
-    const { shellActivation, shellDeactivation } = await generateShellActivationMap2(prefix, envManager, name);
+    const { shellActivation, shellDeactivation } = await buildShellActivationMapForConda(prefix, envManager, name);
     const sv = shortVersion(version);
 
     return {
@@ -345,7 +345,7 @@ async function getPrefixesCondaPythonInfo(
 ): Promise<PythonEnvironmentInfo> {
     const sv = shortVersion(version);
 
-    const { shellActivation, shellDeactivation } = await generateShellActivationMap2(prefix, envManager);
+    const { shellActivation, shellDeactivation } = await buildShellActivationMapForConda(prefix, envManager);
 
     const basename = path.basename(prefix);
     return {
@@ -386,12 +386,11 @@ interface ShellCommandMaps {
  * @param name Optional name of the conda environment. If provided, used instead of prefix for activation
  * @returns Promise resolving to shell-specific activation/deactivation command maps
  */
-async function generateShellActivationMap2(
+async function buildShellActivationMapForConda(
     prefix: string,
     envManager: EnvironmentManager,
     name?: string,
 ): Promise<ShellCommandMaps> {
-    // Array to collect all logs
     const logs: string[] = [];
     let shellMaps: ShellCommandMaps;
 
@@ -502,26 +501,23 @@ async function generateShellActivationMapFromConfig(
 ): Promise<ShellCommandMaps> {
     const shellActivation: Map<string, PythonCommandRunConfiguration[]> = new Map();
     const shellDeactivation: Map<string, PythonCommandRunConfiguration[]> = new Map();
+    shellActivation.set(ShellConstants.GITBASH, activate);
+    shellDeactivation.set(ShellConstants.GITBASH, deactivate);
 
-    if (isWindows()) {
-        shellActivation.set(ShellConstants.GITBASH, activate);
-        shellDeactivation.set(ShellConstants.GITBASH, deactivate);
+    shellActivation.set(ShellConstants.CMD, activate);
+    shellDeactivation.set(ShellConstants.CMD, deactivate);
 
-        shellActivation.set(ShellConstants.CMD, activate);
-        shellDeactivation.set(ShellConstants.CMD, deactivate);
+    shellActivation.set(ShellConstants.BASH, activate);
+    shellDeactivation.set(ShellConstants.BASH, deactivate);
 
-        shellActivation.set(ShellConstants.PWSH, activate);
-        shellDeactivation.set(ShellConstants.PWSH, deactivate);
-    } else {
-        shellActivation.set(ShellConstants.BASH, activate);
-        shellDeactivation.set(ShellConstants.BASH, deactivate);
+    shellActivation.set(ShellConstants.SH, activate);
+    shellDeactivation.set(ShellConstants.SH, deactivate);
 
-        shellActivation.set(ShellConstants.SH, activate);
-        shellDeactivation.set(ShellConstants.SH, deactivate);
+    shellActivation.set(ShellConstants.ZSH, activate);
+    shellDeactivation.set(ShellConstants.ZSH, deactivate);
 
-        shellActivation.set(ShellConstants.ZSH, activate);
-        shellDeactivation.set(ShellConstants.ZSH, deactivate);
-    }
+    shellActivation.set(ShellConstants.PWSH, activate);
+    shellDeactivation.set(ShellConstants.PWSH, deactivate);
 
     return { shellActivation, shellDeactivation };
 }
