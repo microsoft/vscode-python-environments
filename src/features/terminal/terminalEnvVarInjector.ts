@@ -7,6 +7,7 @@ import {
     Disposable,
     EnvironmentVariableScope,
     GlobalEnvironmentVariableCollection,
+    window,
     workspace,
     WorkspaceFolder,
 } from 'vscode';
@@ -55,11 +56,37 @@ export class TerminalEnvVarInjector implements Disposable {
                     return;
                 }
 
+                // Check if env file injection is enabled when variables change
+                const config = getConfiguration('python', args.uri);
+                const useEnvFile = config.get<boolean>('terminal.useEnvFile', false);
+                const envFilePath = config.get<string>('envFile');
+
+                // Only show notification when env vars change and we have an env file but injection is disabled
+                if (!useEnvFile && envFilePath) {
+                    window.showInformationMessage(
+                        'An environment file is configured but terminal environment injection is disabled. Enable "python.terminal.useEnvFile" to use environment variables from .env files in terminals.',
+                    );
+                }
+
                 if (args.changeType === 2) {
                     // FileChangeType.Deleted
                     this.clearWorkspaceVariables(affectedWorkspace);
                 } else {
                     this.updateEnvironmentVariables(affectedWorkspace).catch((error) => {
+                        traceError('Failed to update environment variables:', error);
+                    });
+                }
+            }),
+        );
+
+        // Listen for changes to the python.envFile setting
+        this.disposables.push(
+            workspace.onDidChangeConfiguration((e) => {
+                if (e.affectsConfiguration('python.envFile')) {
+                    traceVerbose(
+                        'TerminalEnvVarInjector: python.envFile setting changed, updating environment variables',
+                    );
+                    this.updateEnvironmentVariables().catch((error) => {
                         traceError('Failed to update environment variables:', error);
                     });
                 }
@@ -115,9 +142,19 @@ export class TerminalEnvVarInjector implements Disposable {
             const envVarScope = this.getEnvironmentVariableCollectionScoped({ workspaceFolder });
             envVarScope.clear(); // Clear existing variables for this workspace
 
-            // Track which .env file is being used for logging
+            // Check if env file injection is enabled
             const config = getConfiguration('python', workspaceUri);
+            const useEnvFile = config.get<boolean>('terminal.useEnvFile', false);
             const envFilePath = config.get<string>('envFile');
+
+            if (!useEnvFile) {
+                traceVerbose(
+                    `TerminalEnvVarInjector: Env file injection disabled for workspace: ${workspaceUri.fsPath}`,
+                );
+                return;
+            }
+
+            // Track which .env file is being used for logging
             const resolvedEnvFilePath: string | undefined = envFilePath
                 ? path.resolve(resolveVariables(envFilePath, workspaceUri))
                 : undefined;
