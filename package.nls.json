@@ -10,6 +10,7 @@
     "python-envs.terminal.autoActivationType.command": "Activation by executing a command in the terminal.",
     "python-envs.terminal.autoActivationType.shellStartup": "Activation by modifying the terminal shell startup script. To use this feature we will need to modify your shell startup scripts.",
     "python-envs.terminal.autoActivationType.off": "No automatic activation of environments.",
+    "python-envs.terminal.useEnvFile.description": "Controls whether environment variables from .env files and python.envFile setting are injected into terminals.",
     "python-envs.terminal.revertStartupScriptChanges.title": "Revert Shell Startup Script Changes",
     "python-envs.reportIssue.title": "Report Issue",
     "python-envs.setEnvManager.title": "Set Environment Manager",
