@@ -103,7 +103,7 @@ export function shellIntegrationForActiveTerminal(name: string, profile: string)
 
     if (hasShellIntegration) {
         traceInfo(
-            `SHELL: Shell integration is available in one of the terminals. Activate scripts will be evaluated at shell integration level. 
+            `SHELL: Shell integration is available on your active terminal.  Python activate scripts will be evaluated at shell integration level. 
                 Skipping modification of ${name} profile at: ${profile}`,
         );
         return true;
