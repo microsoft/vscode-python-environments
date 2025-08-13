@@ -11,9 +11,12 @@ export async function handleSettingUpShellProfile(
     callback: (provider: ShellStartupScriptProvider, result: boolean) => void,
 ): Promise<void> {
     const shells = providers.map((p) => p.shellType).join(', ');
+    // TODO: Get opinions on potentially modifying the prompt
+    //       - If shell integration is active, we won't need to modify user's shell profile, init scripts.
+    //       - Current prompt we have below may not be the most accurate description.
     const response = await showInformationMessage(
         l10n.t(
-            'To enable "{0}" activation, your shell profile(s) need to be updated to include the necessary startup scripts. Would you like to proceed with these changes?',
+            'To enable "{0}" activation, your shell profile(s) may need to be updated to include the necessary startup scripts. Would you like to proceed with these changes?',
             ACT_TYPE_SHELL,
         ),
         { modal: true, detail: l10n.t('Shells: {0}', shells) },

@@ -11,7 +11,12 @@ import assert from 'assert';
 import { getWorkspacePersistentState } from '../../../../common/persistentState';
 import { ShellConstants } from '../../../common/shellConstants';
 import { hasStartupCode, insertStartupCode, removeStartupCode } from '../common/editUtils';
-import { extractProfilePath, PROFILE_TAG_END, PROFILE_TAG_START } from '../common/shellUtils';
+import {
+    extractProfilePath,
+    PROFILE_TAG_END,
+    PROFILE_TAG_START,
+    shellIntegrationForActiveTerminal,
+} from '../common/shellUtils';
 import { POWERSHELL_ENV_KEY, PWSH_SCRIPT_VERSION } from './pwshConstants';
 
 const PWSH_PROFILE_PATH_CACHE_KEY = 'PWSH_PROFILE_PATH_CACHE';
@@ -140,6 +145,9 @@ async function isPowerShellStartupSetup(shell: string, profile: string): Promise
 }
 
 async function setupPowerShellStartup(shell: string, profile: string): Promise<boolean> {
+    if (shellIntegrationForActiveTerminal(shell, profile)) {
+        return true;
+    }
     const activationContent = getActivationContent();
 
     try {
