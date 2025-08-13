@@ -103,6 +103,12 @@
                         "%python-envs.terminal.autoActivationType.off%"
                     ],
                     "scope": "machine"
+                },
+                "python.terminal.useEnvFile": {
+                    "type": "boolean",
+                    "description": "%python-envs.terminal.useEnvFile.description%",
+                    "default": false,
+                    "scope": "resource"
                 }
             }
         },
