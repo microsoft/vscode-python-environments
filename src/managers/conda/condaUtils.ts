@@ -329,7 +329,7 @@ async function getNamedCondaPythonInfo(
             run: { executable: path.join(executable) },
             activatedRun: {
                 executable: 'conda',
-                args: ['run', '--live-stream', '--name', name, 'python'],
+                args: ['run', '--name', name, 'python'],
             },
             activation: [{ executable: 'conda', args: ['activate', name] }],
             deactivation: [{ executable: 'conda', args: ['deactivate'] }],
@@ -374,7 +374,7 @@ async function getPrefixesCondaPythonInfo(
             run: { executable: path.join(executable) },
             activatedRun: {
                 executable: conda,
-                args: ['run', '--live-stream', '--prefix', prefix, 'python'],
+                args: ['run', '--prefix', prefix, 'python'],
             },
             activation: [{ executable: conda, args: ['activate', prefix] }],
             deactivation: [{ executable: conda, args: ['deactivate'] }],
@@ -938,7 +938,7 @@ export async function quickCreateConda(
                             run: { executable: path.join(prefix, bin) },
                             activatedRun: {
                                 executable: 'conda',
-                                args: ['run', '--live-stream', '-p', prefix, 'python'],
+                                args: ['run', '-p', prefix, 'python'],
                             },
                             activation: [{ executable: 'conda', args: ['activate', prefix] }],
                             deactivation: [{ executable: 'conda', args: ['deactivate'] }],
