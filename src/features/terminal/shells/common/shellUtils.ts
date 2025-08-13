@@ -1,7 +1,7 @@
-import { window } from 'vscode';
 import { PythonCommandRunConfiguration, PythonEnvironment } from '../../../../api';
 import { traceInfo } from '../../../../common/logging';
 import { isWindows } from '../../../../common/utils/platformUtils';
+import { activeTerminalShellIntegration } from '../../../../common/window.apis';
 import { ShellConstants } from '../../../common/shellConstants';
 import { quoteArgs } from '../../../execution/execUtils';
 
@@ -99,7 +99,7 @@ export function extractProfilePath(content: string): string | undefined {
 }
 
 export function shellIntegrationForActiveTerminal(name: string, profile: string): boolean {
-    const hasShellIntegration = window.activeTerminal?.shellIntegration;
+    const hasShellIntegration = activeTerminalShellIntegration();
 
     if (hasShellIntegration) {
         traceInfo(
