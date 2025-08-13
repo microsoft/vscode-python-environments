@@ -76,17 +76,6 @@ async function setupStartup(profile: string, key: string, name: string): Promise
     const activationContent = getActivationContent(key);
 
     try {
-        // Question #1: Ask about the guard, if that is needed in core.
-        // NEED THE GUARD IN CORE.
-
-        // Question #2: I want to check if shell integration script had proper value for VSCODE_BASH_ACTIVATE, and has evaluated that before doing all below?
-
-        // VSCODE_PYTHON_ACTIVATE;
-
-        // Because if it did, we dont have to bother `insertStartupCode` in user's profile files.
-        //     - We would know shell integration script has proper value of ACTIVATE via checking if that var is non-empty
-        //     - We would know if that has been evaluated if shell integration --> (shell integration script would have ran and evaled, if not we show error)
-
         if (await fs.pathExists(profile)) {
             const content = await fs.readFile(profile, 'utf8');
             if (hasStartupCode(content, regionStart, regionEnd, [key])) {
