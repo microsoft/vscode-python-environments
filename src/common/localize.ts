@@ -24,6 +24,7 @@ export namespace WorkbenchStrings {
 export namespace Interpreter {
     export const statusBarSelect = l10n.t('Select Interpreter');
     export const browsePath = l10n.t('Browse...');
+    export const enterPath = l10n.t('Enter Path...');
     export const createVirtualEnvironment = l10n.t('Create Virtual Environment...');
 }
 

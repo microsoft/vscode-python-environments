@@ -7,7 +7,7 @@ import { EventNames } from '../telemetry/constants';
 import { sendTelemetryEvent } from '../telemetry/sender';
 import { isWindows } from '../utils/platformUtils';
 import { handlePythonPath } from '../utils/pythonPath';
-import { showOpenDialog, showQuickPick, showQuickPickWithButtons, withProgress } from '../window.apis';
+import { showInputBoxWithButtons, showOpenDialog, showQuickPick, showQuickPickWithButtons, withProgress } from '../window.apis';
 import { pickEnvironmentManager } from './managers';
 
 type QuickPickIcon =
@@ -56,6 +56,41 @@ async function browseForPython(
     }
     const uri = uris[0];
 
+    const environment = await withProgress(
+        {
+            location: ProgressLocation.Notification,
+            cancellable: false,
+        },
+        async (reporter, token) => {
+            const env = await handlePythonPath(uri, managers, projectEnvManagers, reporter, token);
+            return env;
+        },
+    );
+    return environment;
+}
+
+async function enterPythonPath(
+    managers: InternalEnvironmentManager[],
+    projectEnvManagers: InternalEnvironmentManager[],
+): Promise<PythonEnvironment | undefined> {
+    const placeholder = isWindows() ? 'C:\\path\\to\\python\\executable' : '/path/to/python/executable';
+    const inputPath = await showInputBoxWithButtons({
+        prompt: 'Enter the path to the Python executable',
+        placeHolder: placeholder,
+        ignoreFocusOut: true,
+        validateInput: (value) => {
+            if (!value || value.trim().length === 0) {
+                return 'Please enter a valid path';
+            }
+            return null;
+        },
+    });
+
+    if (!inputPath) {
+        return; // User cancelled
+    }
+
+    const uri = Uri.file(inputPath.trim());
     const environment = await withProgress(
         {
             location: ProgressLocation.Notification,
@@ -124,6 +159,8 @@ async function pickEnvironmentImpl(
     if (selected && !Array.isArray(selected)) {
         if (selected.label === Interpreter.browsePath) {
             return browseForPython(managers, projectEnvManagers);
+        } else if (selected.label === Interpreter.enterPath) {
+            return enterPythonPath(managers, projectEnvManagers);
         } else if (selected.label === Interpreter.createVirtualEnvironment) {
             sendTelemetryEvent(EventNames.CREATE_ENVIRONMENT, undefined, {
                 manager: 'none',
@@ -145,6 +182,10 @@ export async function pickEnvironment(
         {
             label: Interpreter.browsePath,
             iconPath: new ThemeIcon('folder'),
+        },
+        {
+            label: Interpreter.enterPath,
+            iconPath: new ThemeIcon('edit'),
         },
         {
             label: '',

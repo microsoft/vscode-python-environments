@@ -4,6 +4,7 @@
 import assert from 'node:assert';
 import { Uri } from 'vscode';
 import { PythonEnvironment } from '../../api';
+import { Interpreter } from '../../common/localize';
 
 /**
  * Test the logic used in environment pickers to include interpreter paths in descriptions
@@ -82,6 +83,23 @@ suite('Environment Picker Description Logic', () => {
                 env.description && env.description.trim() ? `${env.description} (${pathDescription})` : pathDescription;
 
             assert.strictEqual(description, 'System Python (C:\\Python39\\python.exe)');
+        });
+    });
+
+    suite('Picker options availability', () => {
+        test('should have Browse option available', () => {
+            assert.strictEqual(typeof Interpreter.browsePath, 'string');
+            assert.strictEqual(Interpreter.browsePath, 'Browse...');
+        });
+
+        test('should have Enter Path option available', () => {
+            assert.strictEqual(typeof Interpreter.enterPath, 'string');
+            assert.strictEqual(Interpreter.enterPath, 'Enter Path...');
+        });
+
+        test('should have Create Virtual Environment option available', () => {
+            assert.strictEqual(typeof Interpreter.createVirtualEnvironment, 'string');
+            assert.strictEqual(Interpreter.createVirtualEnvironment, 'Create Virtual Environment...');
         });
     });
 });
