@@ -56,9 +56,17 @@ export class ExistingProjects implements PythonProjectCreator {
 
         if (filtered.length === 0) {
             // No new projects found that are not already in the project manager
-            traceInfo('All discovered projects are already registered in the project manager');
+            traceInfo(
+                `All selected resources are already registered in the project manager: ${existingAddUri
+                    .map((uri) => uri.fsPath)
+                    .join(', ')}`,
+            );
             setImmediate(() => {
-                showWarningMessage('No new projects found');
+                if (existingAddUri.length === 1) {
+                    showWarningMessage(`Selected resource already exists as project.`);
+                } else {
+                    showWarningMessage('Selected resources already exist as projects.');
+                }
             });
             return;
         }

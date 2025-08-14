@@ -70,22 +70,27 @@ export class AutoFindProjects implements PythonProjectCreator {
         const filtered = files.filter((uri) => {
             const p = this.pm.get(uri);
             if (p) {
-                // Skip this project if:
-                // 1. There's already a project registered with exactly the same path
-                // 2. There's already a project registered with this project's parent directory path
+                // Skip this project if there's already a project registered with exactly the same path
                 const np = path.normalize(p.uri.fsPath);
                 const nf = path.normalize(uri.fsPath);
-                const nfp = path.dirname(nf);
-                return np !== nf && np !== nfp;
+                return np !== nf;
             }
             return true;
         });
 
         if (filtered.length === 0) {
             // No new projects found that are not already in the project manager
-            traceInfo('All discovered projects are already registered in the project manager');
+            traceInfo(
+                `All selected resources are already registered in the project manager: ${files
+                    .map((uri) => uri.fsPath)
+                    .join(', ')}`,
+            );
             setImmediate(() => {
-                showWarningMessage('No new projects found');
+                if (files.length === 1) {
+                    showWarningMessage(`${files[0].fsPath} already exists as project.`);
+                } else {
+                    showWarningMessage('Selected resources already exist as projects.');
+                }
             });
             return;
         }
