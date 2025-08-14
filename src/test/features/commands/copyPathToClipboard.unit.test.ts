@@ -1,14 +1,14 @@
 import * as sinon from 'sinon';
+import { Uri } from 'vscode';
+import { PythonEnvironment } from '../../../api';
 import * as envApis from '../../../common/env.apis';
 import { copyPathToClipboard } from '../../../features/envCommands';
 import {
-    ProjectItem,
-    ProjectEnvironment,
-    PythonEnvTreeItem,
     EnvManagerTreeItem,
+    ProjectEnvironment,
+    ProjectItem,
+    PythonEnvTreeItem,
 } from '../../../features/views/treeViewItems';
-import { Uri } from 'vscode';
-import { PythonEnvironment } from '../../../api';
 import { InternalEnvironmentManager } from '../../../internal.api';
 
 suite('Copy Path To Clipboard', () => {
@@ -73,12 +73,12 @@ suite('Copy Path To Clipboard', () => {
                 name: 'base',
                 displayName: 'base (3.12.2)',
                 displayPath: '/opt/conda/envs/base',
-                execInfo: { 
+                execInfo: {
                     run: { executable: '/opt/conda/envs/base/bin/python' },
                     activatedRun: {
                         executable: 'conda',
                         args: ['run', '--name', 'base', 'python'],
-                    }
+                    },
                 },
             } as PythonEnvironment,
             new EnvManagerTreeItem({ name: 'conda', id: 'conda' } as InternalEnvironmentManager),
@@ -98,12 +98,12 @@ suite('Copy Path To Clipboard', () => {
                 name: 'myenv',
                 displayName: 'myenv (3.11.5)',
                 displayPath: '/opt/conda/envs/myenv',
-                execInfo: { 
+                execInfo: {
                     run: { executable: '/opt/conda/envs/myenv/bin/python' },
                     activatedRun: {
                         executable: 'conda',
                         args: ['run', '--prefix', '/opt/conda/envs/myenv', 'python'],
-                    }
+                    },
                 },
             } as PythonEnvironment,
             new EnvManagerTreeItem({ name: 'conda', id: 'conda' } as InternalEnvironmentManager),

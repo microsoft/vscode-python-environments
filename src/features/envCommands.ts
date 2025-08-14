@@ -637,7 +637,6 @@ export async function copyPathToClipboard(item: unknown): Promise<void> {
         await clipboardWriteText(projectPath);
         traceInfo(`Copied project path to clipboard: ${projectPath}`);
     } else if (item instanceof ProjectEnvironment || item instanceof PythonEnvTreeItem) {
-        // For copying interpreter path, we want the actual executable path, not the full command
         const run = item.environment.execInfo.run;
         const envPath = run.executable;
         await clipboardWriteText(envPath);
