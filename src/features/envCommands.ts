@@ -30,7 +30,6 @@ import {
 } from '../common/pickers/managers';
 import { pickProject, pickProjectMany } from '../common/pickers/projects';
 import { activeTextEditor, showErrorMessage, showInformationMessage } from '../common/window.apis';
-import { quoteArgs } from './execution/execUtils';
 import { runAsTask } from './execution/runAsTask';
 import { runInTerminal } from './terminal/runInTerminal';
 import { TerminalManager } from './terminal/terminalManager';
@@ -638,8 +637,9 @@ export async function copyPathToClipboard(item: unknown): Promise<void> {
         await clipboardWriteText(projectPath);
         traceInfo(`Copied project path to clipboard: ${projectPath}`);
     } else if (item instanceof ProjectEnvironment || item instanceof PythonEnvTreeItem) {
-        const run = item.environment.execInfo.activatedRun ?? item.environment.execInfo.run;
-        const envPath = quoteArgs([run.executable, ...(run.args ?? [])]).join(' ');
+        // For copying interpreter path, we want the actual executable path, not the full command
+        const run = item.environment.execInfo.run;
+        const envPath = run.executable;
         await clipboardWriteText(envPath);
         traceInfo(`Copied environment path to clipboard: ${envPath}`);
     } else {
