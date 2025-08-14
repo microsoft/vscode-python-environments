@@ -70,10 +70,13 @@ export class AutoFindProjects implements PythonProjectCreator {
         const filtered = files.filter((uri) => {
             const p = this.pm.get(uri);
             if (p) {
-                // Skip this project if there's already a project registered with exactly the same path
+                // Skip this project if:
+                // 1. There's already a project registered with exactly the same path
+                // 2. There's already a project registered with this project's parent directory path
                 const np = path.normalize(p.uri.fsPath);
                 const nf = path.normalize(uri.fsPath);
-                return np !== nf;
+                const nfp = path.dirname(nf);
+                return np !== nf && np !== nfp;
             }
             return true;
         });
