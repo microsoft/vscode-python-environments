@@ -1,5 +1,7 @@
 import { PythonCommandRunConfiguration, PythonEnvironment } from '../../../../api';
+import { traceInfo } from '../../../../common/logging';
 import { isWindows } from '../../../../common/utils/platformUtils';
+import { activeTerminalShellIntegration } from '../../../../common/window.apis';
 import { ShellConstants } from '../../../common/shellConstants';
 import { quoteArgs } from '../../../execution/execUtils';
 
@@ -94,4 +96,17 @@ export function extractProfilePath(content: string): string | undefined {
         return extractedPath;
     }
     return undefined;
+}
+
+export function shellIntegrationForActiveTerminal(name: string, profile: string): boolean {
+    const hasShellIntegration = activeTerminalShellIntegration();
+
+    if (hasShellIntegration) {
+        traceInfo(
+            `SHELL: Shell integration is available on your active terminal.  Python activate scripts will be evaluated at shell integration level. 
+                Skipping modification of ${name} profile at: ${profile}`,
+        );
+        return true;
+    }
+    return false;
 }

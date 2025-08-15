@@ -5,6 +5,7 @@ import which from 'which';
 import { traceError, traceInfo, traceVerbose } from '../../../../common/logging';
 import { ShellConstants } from '../../../common/shellConstants';
 import { hasStartupCode, insertStartupCode, removeStartupCode } from '../common/editUtils';
+import { shellIntegrationForActiveTerminal } from '../common/shellUtils';
 import { ShellScriptEditState, ShellSetupState, ShellStartupScriptProvider } from '../startupProvider';
 import { BASH_ENV_KEY, BASH_SCRIPT_VERSION, ZSH_ENV_KEY } from './bashConstants';
 
@@ -69,6 +70,9 @@ async function isStartupSetup(profile: string, key: string): Promise<ShellSetupS
 }
 
 async function setupStartup(profile: string, key: string, name: string): Promise<boolean> {
+    if (shellIntegrationForActiveTerminal(name, profile)) {
+        return true;
+    }
     const activationContent = getActivationContent(key);
 
     try {

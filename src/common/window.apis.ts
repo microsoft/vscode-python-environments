@@ -61,6 +61,10 @@ export function activeTerminal(): Terminal | undefined {
     return window.activeTerminal;
 }
 
+export function activeTerminalShellIntegration() {
+    return window.activeTerminal?.shellIntegration;
+}
+
 export function activeTextEditor(): TextEditor | undefined {
     return window.activeTextEditor;
 }
