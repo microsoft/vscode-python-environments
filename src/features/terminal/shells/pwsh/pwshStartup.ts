@@ -146,6 +146,7 @@ async function isPowerShellStartupSetup(shell: string, profile: string): Promise
 
 async function setupPowerShellStartup(shell: string, profile: string): Promise<boolean> {
     if (shellIntegrationForActiveTerminal(shell, profile)) {
+        removePowerShellStartup(shell, profile);
         return true;
     }
     const activationContent = getActivationContent();
