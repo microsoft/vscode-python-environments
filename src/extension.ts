@@ -189,14 +189,6 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
     const projectManager: PythonProjectManager = new PythonProjectManagerImpl();
     context.subscriptions.push(projectManager);
 
-    // Helper function to check if a resource is an existing Python project
-    const isExistingProject = (uri: Uri | undefined): boolean => {
-        if (!uri) {
-            return false;
-        }
-        return projectManager.get(uri) !== undefined;
-    };
-
     const envVarManager: EnvVarManager = new PythonEnvVariableManager(projectManager);
     context.subscriptions.push(envVarManager);
 
@@ -323,11 +315,6 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
             });
         }),
         commands.registerCommand('python-envs.addPythonProjectGivenResource', async (resource) => {
-            // Set context to show/hide menu item depending on whether the resource is already a Python project
-            if (resource instanceof Uri) {
-                commands.executeCommand('setContext', 'python-envs:isExistingProject', isExistingProject(resource));
-            }
-
             await addPythonProjectCommand(resource, projectManager, envManagers, projectCreators);
             const totalProjectCount = projectManager.getProjects().length + 1;
             sendTelemetryEvent(EventNames.ADD_PROJECT, undefined, {
