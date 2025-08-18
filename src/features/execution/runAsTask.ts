@@ -9,6 +9,7 @@ import {
     WorkspaceFolder,
 } from 'vscode';
 import { PythonEnvironment, PythonTaskExecutionOptions } from '../../api';
+import { traceInfo } from '../../common/logging';
 import { executeTask } from '../../common/tasks.apis';
 import { getWorkspaceFolder } from '../../common/workspace.apis';
 import { quoteArg } from './execUtils';
@@ -29,6 +30,7 @@ export async function runAsTask(
     executable = quoteArg(executable);
     const args = environment.execInfo?.activatedRun?.args ?? environment.execInfo?.run.args ?? [];
     const allArgs = [...args, ...options.args];
+    traceInfo(`Running as task: ${executable} ${allArgs.join(' ')}`);
 
     const task = new Task(
         { type: 'python' },
