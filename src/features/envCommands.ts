@@ -597,7 +597,6 @@ export async function runInDedicatedTerminalCommand(
         const project = api.getPythonProject(uri);
         const environment = await api.getEnvironment(uri);
 
-        // add resolution here
         if (environment && project) {
             const resolvedEnv = await api.resolveEnvironment(environment.environmentPath);
             const envFinal = resolvedEnv ?? environment;
@@ -632,7 +631,6 @@ export async function runAsTaskCommand(item: unknown, api: PythonEnvironmentApi)
             );
         }
     } else if (item === undefined) {
-        // If no context is provided, try to use the active text editor
         const uri = activeTextEditor()?.document.uri;
         if (uri) {
             return runAsTaskCommand(uri, api);
