@@ -574,8 +574,10 @@ export async function runInTerminalCommand(
         const project = api.getPythonProject(uri);
         const environment = await api.getEnvironment(uri);
         if (environment && project) {
-            const terminal = await tm.getProjectTerminal(project, environment);
-            await runInTerminal(environment, terminal, {
+            const resolvedEnv = await api.resolveEnvironment(environment.environmentPath);
+            const envFinal = resolvedEnv ?? environment;
+            const terminal = await tm.getProjectTerminal(project, envFinal);
+            await runInTerminal(envFinal, terminal, {
                 cwd: project.uri,
                 args: [item.fsPath],
                 show: true,
@@ -594,9 +596,12 @@ export async function runInDedicatedTerminalCommand(
         const uri = item as Uri;
         const project = api.getPythonProject(uri);
         const environment = await api.getEnvironment(uri);
+
         if (environment && project) {
-            const terminal = await tm.getDedicatedTerminal(item, project, environment);
-            await runInTerminal(environment, terminal, {
+            const resolvedEnv = await api.resolveEnvironment(environment.environmentPath);
+            const envFinal = resolvedEnv ?? environment;
+            const terminal = await tm.getDedicatedTerminal(item, project, envFinal);
+            await runInTerminal(envFinal, terminal, {
                 cwd: project.uri,
                 args: [item.fsPath],
                 show: true,
@@ -612,8 +617,10 @@ export async function runAsTaskCommand(item: unknown, api: PythonEnvironmentApi)
         const project = api.getPythonProject(uri);
         const environment = await api.getEnvironment(uri);
         if (environment) {
+            const resolvedEnv = await api.resolveEnvironment(environment.environmentPath);
+            const envFinal = resolvedEnv ?? environment;
             return await runAsTask(
-                environment,
+                envFinal,
                 {
                     project,
                     args: [item.fsPath],
