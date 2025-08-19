@@ -16,6 +16,7 @@ import { getConfiguration, onDidChangeConfiguration } from '../../common/workspa
 import { isActivatableEnvironment } from '../common/activation';
 import { identifyTerminalShell } from '../common/shellDetector';
 import { getPythonApi } from '../pythonApi';
+import { shellIntegrationForActiveTerminal } from './shells/common/shellUtils';
 import { ShellEnvsProvider, ShellSetupState, ShellStartupScriptProvider } from './shells/startupProvider';
 import { handleSettingUpShellProfile } from './shellStartupSetupHandlers';
 import {
@@ -153,9 +154,20 @@ export class TerminalManagerImpl implements TerminalManager {
                     traceVerbose(`Checking shell profile for ${p.shellType}.`);
                     const state = await p.isSetup();
                     if (state === ShellSetupState.NotSetup) {
-                        this.shellSetup.set(p.shellType, false);
-                        shellsToSetup.push(p);
-                        traceVerbose(`Shell profile for ${p.shellType} is not setup.`);
+                        // Check if shell integration is available before marking for setup
+                        if (shellIntegrationForActiveTerminal(p.name)) {
+                            this.shellSetup.set(p.shellType, true);
+                            traceVerbose(
+                                `Shell integration available for ${p.shellType}, skipping prompt, and profile modification.`,
+                            );
+                        } else {
+                            // No shell integration, mark for setup
+                            this.shellSetup.set(p.shellType, false);
+                            shellsToSetup.push(p);
+                            traceVerbose(
+                                `Shell integration is NOT avaoiable. Shell profile for ${p.shellType} is not setup.`,
+                            );
+                        }
                     } else if (state === ShellSetupState.Setup) {
                         this.shellSetup.set(p.shellType, true);
                         traceVerbose(`Shell profile for ${p.shellType} is setup.`);

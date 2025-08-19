@@ -98,7 +98,7 @@ export function extractProfilePath(content: string): string | undefined {
     return undefined;
 }
 
-export function shellIntegrationForActiveTerminal(name: string, profile: string): boolean {
+export function shellIntegrationForActiveTerminal(name: string, profile?: string): boolean {
     const hasShellIntegration = activeTerminalShellIntegration();
 
     if (hasShellIntegration) {
