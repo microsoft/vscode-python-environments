@@ -418,6 +418,8 @@ export async function addPythonProjectCommand(
                     };
                 }
                 await existingProjectsCreator.create(options);
+                // trigger refresh to populate environments within the new project
+                await Promise.all(em.managers.map((m) => m.refresh(options?.rootUri)));
                 return;
             } catch (ex) {
                 if (ex === QuickInputButtons.Back) {
@@ -450,6 +452,8 @@ export async function addPythonProjectCommand(
 
     try {
         await creator.create(options);
+        // trigger refresh to populate environments within the new project
+        await Promise.all(em.managers.map((m) => m.refresh(options?.rootUri)));
     } catch (ex) {
         if (ex === QuickInputButtons.Back) {
             return addPythonProjectCommand(resource, wm, em, pc);
