@@ -59,6 +59,7 @@ async function isStartupSetup(profilePath: string, key: string): Promise<boolean
 async function setupStartup(profilePath: string, key: string): Promise<boolean> {
     try {
         if (shellIntegrationForActiveTerminal('fish', profilePath)) {
+            removeFishStartup(profilePath, key);
             return true;
         }
         const activationContent = getActivationContent(key);

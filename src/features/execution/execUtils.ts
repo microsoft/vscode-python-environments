@@ -1,4 +1,4 @@
-export function quoteArg(arg: string): string {
+export function quoteStringIfNecessary(arg: string): string {
     if (arg.indexOf(' ') >= 0 && !(arg.startsWith('"') && arg.endsWith('"'))) {
         return `"${arg}"`;
     }
@@ -6,5 +6,5 @@ export function quoteArg(arg: string): string {
 }
 
 export function quoteArgs(args: string[]): string[] {
-    return args.map(quoteArg);
+    return args.map(quoteStringIfNecessary);
 }

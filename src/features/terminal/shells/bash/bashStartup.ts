@@ -71,10 +71,10 @@ async function isStartupSetup(profile: string, key: string): Promise<ShellSetupS
 
 async function setupStartup(profile: string, key: string, name: string): Promise<boolean> {
     if (shellIntegrationForActiveTerminal(name, profile)) {
+        removeStartup(profile, key);
         return true;
     }
     const activationContent = getActivationContent(key);
-
     try {
         if (await fs.pathExists(profile)) {
             const content = await fs.readFile(profile, 'utf8');
