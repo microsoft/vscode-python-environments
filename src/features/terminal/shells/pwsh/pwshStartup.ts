@@ -17,7 +17,7 @@ import {
     PROFILE_TAG_START,
     shellIntegrationForActiveTerminal,
 } from '../common/shellUtils';
-import { POWERSHELL_ENV_KEY, PWSH_SCRIPT_VERSION } from './pwshConstants';
+import { POWERSHELL_ENV_KEY, POWERSHELL_OLD_ENV_KEY, PWSH_SCRIPT_VERSION } from './pwshConstants';
 
 const PWSH_PROFILE_PATH_CACHE_KEY = 'PWSH_PROFILE_PATH_CACHE';
 const PS5_PROFILE_PATH_CACHE_KEY = 'PS5_PROFILE_PATH_CACHE';
@@ -171,22 +171,22 @@ async function setupPowerShellStartup(shell: string, profile: string): Promise<b
     }
 }
 
-async function removePowerShellStartup(shell: string, profile: string): Promise<boolean> {
+async function removePowerShellStartup(shell: string, profile: string, key: string): Promise<boolean> {
     if (!(await fs.pathExists(profile))) {
         return true;
     }
 
     try {
         const content = await fs.readFile(profile, 'utf8');
-        if (hasStartupCode(content, regionStart, regionEnd, [POWERSHELL_ENV_KEY])) {
+        if (hasStartupCode(content, regionStart, regionEnd, [key])) {
             await fs.writeFile(profile, removeStartupCode(content, regionStart, regionEnd));
-            traceInfo(`SHELL: Removed activation from ${shell} profile at: ${profile}`);
+            traceInfo(`SHELL: Removed activation from ${shell} profile at: ${profile}, for key: ${key}`);
         } else {
-            traceInfo(`SHELL: No activation code found in ${shell} profile at: ${profile}`);
+            traceInfo(`SHELL: No activation code found in ${shell} profile at: ${profile}, for key: ${key}`);
         }
         return true;
     } catch (err) {
-        traceError(`SHELL: Failed to remove startup code for ${shell} profile at: ${profile}`, err);
+        traceError(`SHELL: Failed to remove startup code for ${shell} profile at: ${profile}, for key: ${key}`, err);
         return false;
     }
 }
@@ -301,7 +301,9 @@ export class PwshStartupProvider implements ShellStartupScriptProvider {
 
             try {
                 const profile = await getProfileForShell(shell);
-                const success = await removePowerShellStartup(shell, profile);
+                // Remove old environment variable if it exists
+                await removePowerShellStartup(shell, profile, POWERSHELL_OLD_ENV_KEY);
+                const success = await removePowerShellStartup(shell, profile, POWERSHELL_ENV_KEY);
                 anyEdited.push(success ? ShellScriptEditState.Edited : ShellScriptEditState.NotEdited);
             } catch (err) {
                 traceError(`Failed to remove ${shell} startup`, err);
