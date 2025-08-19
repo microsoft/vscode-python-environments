@@ -8,7 +8,7 @@ import { ShellConstants } from '../../../common/shellConstants';
 import { hasStartupCode, insertStartupCode, removeStartupCode } from '../common/editUtils';
 import { shellIntegrationForActiveTerminal } from '../common/shellUtils';
 import { ShellScriptEditState, ShellSetupState, ShellStartupScriptProvider } from '../startupProvider';
-import { FISH_ENV_KEY, FISH_SCRIPT_VERSION } from './fishConstants';
+import { FISH_ENV_KEY, FISH_OLD_ENV_KEY, FISH_SCRIPT_VERSION } from './fishConstants';
 
 async function isFishInstalled(): Promise<boolean> {
     try {
@@ -93,11 +93,11 @@ async function removeFishStartup(profilePath: string, key: string): Promise<bool
         const content = await fs.readFile(profilePath, 'utf8');
         if (hasStartupCode(content, regionStart, regionEnd, [key])) {
             await fs.writeFile(profilePath, removeStartupCode(content, regionStart, regionEnd));
-            traceInfo(`Removed activation from fish profile at: ${profilePath}`);
+            traceInfo(`Removed activation from fish profile at: ${profilePath}, for key: ${key}`);
         }
         return true;
     } catch (err) {
-        traceVerbose(`Failed to remove fish startup`, err);
+        traceVerbose(`Failed to remove fish startup, for key: ${key}`, err);
         return false;
     }
 }
@@ -149,6 +149,8 @@ export class FishStartupProvider implements ShellStartupScriptProvider {
 
         try {
             const fishProfile = await getFishProfile();
+            // Remove old environment variable if it exists
+            await removeFishStartup(fishProfile, FISH_OLD_ENV_KEY);
             const success = await removeFishStartup(fishProfile, FISH_ENV_KEY);
             return success ? ShellScriptEditState.Edited : ShellScriptEditState.NotEdited;
         } catch (err) {

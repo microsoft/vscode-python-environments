@@ -7,7 +7,7 @@ import { ShellConstants } from '../../../common/shellConstants';
 import { hasStartupCode, insertStartupCode, removeStartupCode } from '../common/editUtils';
 import { shellIntegrationForActiveTerminal } from '../common/shellUtils';
 import { ShellScriptEditState, ShellSetupState, ShellStartupScriptProvider } from '../startupProvider';
-import { BASH_ENV_KEY, BASH_SCRIPT_VERSION, ZSH_ENV_KEY } from './bashConstants';
+import { BASH_ENV_KEY, BASH_OLD_ENV_KEY, BASH_SCRIPT_VERSION, ZSH_ENV_KEY, ZSH_OLD_ENV_KEY } from './bashConstants';
 
 async function isBashLikeInstalled(): Promise<boolean> {
     const result = await Promise.all([which('bash', { nothrow: true }), which('sh', { nothrow: true })]);
@@ -106,13 +106,13 @@ async function removeStartup(profile: string, key: string): Promise<boolean> {
         const content = await fs.readFile(profile, 'utf8');
         if (hasStartupCode(content, regionStart, regionEnd, [key])) {
             await fs.writeFile(profile, removeStartupCode(content, regionStart, regionEnd));
-            traceInfo(`SHELL: Removed activation from profile at: ${profile}`);
+            traceInfo(`SHELL: Removed activation from profile at: ${profile}, for key: ${key}`);
         } else {
-            traceVerbose(`Profile at ${profile} does not contain activation code`);
+            traceVerbose(`Profile at ${profile} does not contain activation code, for key: ${key}`);
         }
         return true;
     } catch (err) {
-        traceVerbose(`Failed to remove ${profile} startup`, err);
+        traceVerbose(`Failed to remove ${profile} startup, for key: ${key}`, err);
         return false;
     }
 }
@@ -171,6 +171,8 @@ export class BashStartupProvider implements ShellStartupScriptProvider {
 
         try {
             const bashProfile = await getBashProfiles();
+            // Remove old environment variable if it exists
+            await removeStartup(bashProfile, BASH_OLD_ENV_KEY);
             const result = await removeStartup(bashProfile, BASH_ENV_KEY);
             return result ? ShellScriptEditState.Edited : ShellScriptEditState.NotEdited;
         } catch (err) {
@@ -233,6 +235,7 @@ export class ZshStartupProvider implements ShellStartupScriptProvider {
         }
         try {
             const zshProfiles = await getZshProfiles();
+            await removeStartup(zshProfiles, ZSH_OLD_ENV_KEY);
             const result = await removeStartup(zshProfiles, ZSH_ENV_KEY);
             return result ? ShellScriptEditState.Edited : ShellScriptEditState.NotEdited;
         } catch (err) {
@@ -293,6 +296,7 @@ export class GitBashStartupProvider implements ShellStartupScriptProvider {
 
         try {
             const bashProfiles = await getBashProfiles();
+            await removeStartup(bashProfiles, BASH_OLD_ENV_KEY);
             const result = await removeStartup(bashProfiles, BASH_ENV_KEY);
             return result ? ShellScriptEditState.Edited : ShellScriptEditState.NotEdited;
         } catch (err) {
