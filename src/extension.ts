@@ -19,6 +19,7 @@ import {
 } from './common/window.apis';
 import { getConfiguration } from './common/workspace.apis';
 import { createManagerReady } from './features/common/managerReady';
+import { identifyTerminalShell } from './features/common/shellDetector';
 import { AutoFindProjects } from './features/creators/autoFindProjects';
 import { ExistingProjects } from './features/creators/existingProjects';
 import { NewPackageProject } from './features/creators/newPackageProject';
@@ -49,7 +50,7 @@ import { PythonProjectManagerImpl } from './features/projectManager';
 import { getPythonApi, setPythonApi } from './features/pythonApi';
 import { registerCompletionProvider } from './features/settings/settingCompletions';
 import { setActivateMenuButtonContext } from './features/terminal/activateMenuButton';
-import { normalizeShellPath } from './features/terminal/shells/common/shellUtils';
+import { getShellCommandAsString, normalizeShellPath } from './features/terminal/shells/common/shellUtils';
 import {
     clearShellProfileCache,
     createShellEnvProviders,
@@ -435,6 +436,7 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
         commands.registerCommand('python-envs.runPetInTerminal', async () => {
             try {
                 const petPath = await getNativePythonToolsPath();
+                let command: { subcommand: string; args?: string[] } | undefined;
 
                 // Show quick pick menu for PET operation selection
                 const selectedOption = await window.showQuickPick(
@@ -467,8 +469,7 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
 
                 if (selectedOption.label === 'Find All Environments') {
                     // Run pet find --verbose
-                    terminal.sendText(`"${petPath}" find --verbose`, true);
-                    traceInfo(`Running PET find command: ${petPath} find --verbose`);
+                    command = { subcommand: 'find', args: ['--verbose'] };
                 } else if (selectedOption.label === 'Resolve Environment...') {
                     // Show input box for path
                     const placeholder = isWindows() ? 'C:\\path\\to\\python\\executable' : '/path/to/python/executable';
@@ -489,8 +490,15 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
                     }
 
                     // Run pet resolve with the provided path
-                    terminal.sendText(`"${petPath}" resolve "${inputPath.trim()}"`, true);
-                    traceInfo(`Running PET resolve command: ${petPath} resolve "${inputPath.trim()}"`);
+                    command = { subcommand: 'resolve', args: [inputPath.trim()] };
+                }
+
+                if (command) {
+                    const execString = getShellCommandAsString(identifyTerminalShell(terminal), [
+                        { executable: petPath, args: [command.subcommand, ...(command.args || [])] },
+                    ]);
+                    terminal.sendText(execString, true);
+                    traceInfo(`Running PET ${command.subcommand} command: ${execString}`);
                 }
             } catch (error) {
                 traceError('Error running PET in terminal', error);
