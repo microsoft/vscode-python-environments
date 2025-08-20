@@ -1,10 +1,26 @@
 // Utility functions for Pipenv environment management
 
-import { traceInfo } from '../../common/logging';
-import { getWorkspacePersistentState } from '../../common/persistentState';
-import { ENVS_EXTENSION_ID } from '../../common/constants';
-import { NativePythonFinder } from '../common/nativePythonFinder';
+import * as path from 'path';
+import { Uri } from 'vscode';
 import which from 'which';
+import {
+    EnvironmentManager,
+    PythonCommandRunConfiguration,
+    PythonEnvironment,
+    PythonEnvironmentApi,
+    PythonEnvironmentInfo,
+} from '../../api';
+import { ENVS_EXTENSION_ID } from '../../common/constants';
+import { traceError, traceInfo } from '../../common/logging';
+import { getWorkspacePersistentState } from '../../common/persistentState';
+import {
+    isNativeEnvInfo,
+    NativeEnvInfo,
+    NativeEnvManagerInfo,
+    NativePythonEnvironmentKind,
+    NativePythonFinder,
+} from '../common/nativePythonFinder';
+import { shortVersion } from '../common/utils';
 
 export const PIPENV_PATH_KEY = `${ENVS_EXTENSION_ID}:pipenv:PIPENV_PATH`;
 export const PIPENV_WORKSPACE_KEY = `${ENVS_EXTENSION_ID}:pipenv:WORKSPACE_SELECTED`;
@@ -18,6 +34,12 @@ async function findPipenv(): Promise<string | undefined> {
     } catch {
         return undefined;
     }
+}
+
+async function setPipenv(pipenv: string): Promise<void> {
+    pipenvPath = pipenv;
+    const state = await getWorkspacePersistentState();
+    await state.set(PIPENV_PATH_KEY, pipenv);
 }
 
 export async function clearPipenvCache(): Promise<void> {
@@ -44,14 +66,175 @@ export async function getPipenv(native?: NativePythonFinder): Promise<string | u
         return foundPipenv;
     }
 
-    // TODO: Add fallback to native finder when available
+    // Use native finder as fallback
     if (native) {
-        // Future enhancement: use native finder to locate pipenv
-        traceInfo('Native finder available but not yet implemented for pipenv detection');
+        const data = await native.refresh(false);
+        const managers = data
+            .filter((e) => !isNativeEnvInfo(e))
+            .map((e) => e as NativeEnvManagerInfo)
+            .filter((e) => e.tool.toLowerCase() === 'pipenv');
+        if (managers.length > 0) {
+            pipenvPath = managers[0].executable;
+            traceInfo(`Using pipenv from native finder: ${pipenvPath}`);
+            await state.set(PIPENV_PATH_KEY, pipenvPath);
+            return pipenvPath;
+        }
     }
 
     traceInfo('Pipenv not found');
     return undefined;
+}
+
+function nativeToPythonEnv(
+    info: NativeEnvInfo,
+    api: PythonEnvironmentApi,
+    manager: EnvironmentManager,
+    pipenv: string,
+): PythonEnvironment | undefined {
+    if (!(info.prefix && info.executable && info.version)) {
+        traceError(`Incomplete pipenv environment info: ${JSON.stringify(info)}`);
+        return undefined;
+    }
+
+    const sv = shortVersion(info.version);
+    const name = info.name || info.displayName || path.basename(info.prefix);
+    const displayName = info.displayName || `pipenv (${sv})`;
+
+    const shellActivation: Map<string, PythonCommandRunConfiguration[]> = new Map();
+    const shellDeactivation: Map<string, PythonCommandRunConfiguration[]> = new Map();
+
+    // Use 'pipenv shell' for activation and 'exit' for deactivation
+    shellActivation.set('unknown', [{ executable: pipenv, args: ['shell'] }]);
+    shellDeactivation.set('unknown', [{ executable: 'exit', args: [] }]);
+
+    const environment: PythonEnvironmentInfo = {
+        name: name,
+        displayName: displayName,
+        shortDisplayName: displayName,
+        displayPath: info.prefix,
+        version: info.version,
+        environmentPath: Uri.file(info.prefix),
+        description: undefined,
+        tooltip: info.prefix,
+        execInfo: {
+            run: { executable: info.executable },
+            shellActivation,
+            shellDeactivation,
+        },
+        sysPrefix: info.prefix,
+        group: 'pipenv',
+    };
+
+    return api.createPythonEnvironmentItem(environment, manager);
+}
+
+export async function refreshPipenv(
+    hardRefresh: boolean,
+    nativeFinder: NativePythonFinder,
+    api: PythonEnvironmentApi,
+    manager: EnvironmentManager,
+): Promise<PythonEnvironment[]> {
+    traceInfo('Refreshing pipenv environments');
+    const data = await nativeFinder.refresh(hardRefresh);
+
+    let pipenv = await getPipenv();
+
+    if (pipenv === undefined) {
+        const managers = data
+            .filter((e) => !isNativeEnvInfo(e))
+            .map((e) => e as NativeEnvManagerInfo)
+            .filter((e) => e.tool.toLowerCase() === 'pipenv');
+
+        if (managers.length > 0) {
+            pipenv = managers[0].executable;
+            await setPipenv(pipenv);
+        }
+    }
+
+    const envs = data
+        .filter((e) => isNativeEnvInfo(e))
+        .map((e) => e as NativeEnvInfo)
+        .filter((e) => e.kind === NativePythonEnvironmentKind.pipenv);
+
+    const collection: PythonEnvironment[] = [];
+
+    envs.forEach((e) => {
+        if (pipenv) {
+            const environment = nativeToPythonEnv(e, api, manager, pipenv);
+            if (environment) {
+                collection.push(environment);
+            }
+        }
+    });
+
+    traceInfo(`Found ${collection.length} pipenv environments`);
+    return collection;
+}
+
+export async function resolvePipenvPath(
+    fsPath: string,
+    nativeFinder: NativePythonFinder,
+    api: PythonEnvironmentApi,
+    manager: EnvironmentManager,
+): Promise<PythonEnvironment | undefined> {
+    const resolved = await nativeFinder.resolve(fsPath);
+
+    if (resolved.kind === NativePythonEnvironmentKind.pipenv) {
+        const pipenv = await getPipenv(nativeFinder);
+        if (pipenv) {
+            return nativeToPythonEnv(resolved, api, manager, pipenv);
+        }
+    }
+
+    return undefined;
+}
+
+// Persistence functions for workspace/global environment selection
+export async function getPipenvForGlobal(): Promise<string | undefined> {
+    const state = await getWorkspacePersistentState();
+    return await state.get(PIPENV_GLOBAL_KEY);
+}
+
+export async function setPipenvForGlobal(pipenvPath: string | undefined): Promise<void> {
+    const state = await getWorkspacePersistentState();
+    await state.set(PIPENV_GLOBAL_KEY, pipenvPath);
+}
+
+export async function getPipenvForWorkspace(fsPath: string): Promise<string | undefined> {
+    const state = await getWorkspacePersistentState();
+    const data: { [key: string]: string } | undefined = await state.get(PIPENV_WORKSPACE_KEY);
+    if (data) {
+        try {
+            return data[fsPath];
+        } catch {
+            return undefined;
+        }
+    }
+    return undefined;
+}
+
+export async function setPipenvForWorkspace(fsPath: string, envPath: string | undefined): Promise<void> {
+    const state = await getWorkspacePersistentState();
+    const data: { [key: string]: string } = (await state.get(PIPENV_WORKSPACE_KEY)) ?? {};
+    if (envPath) {
+        data[fsPath] = envPath;
+    } else {
+        delete data[fsPath];
+    }
+    await state.set(PIPENV_WORKSPACE_KEY, data);
+}
+
+export async function setPipenvForWorkspaces(fsPath: string[], envPath: string | undefined): Promise<void> {
+    const state = await getWorkspacePersistentState();
+    const data: { [key: string]: string } = (await state.get(PIPENV_WORKSPACE_KEY)) ?? {};
+    fsPath.forEach((s) => {
+        if (envPath) {
+            data[s] = envPath;
+        } else {
+            delete data[s];
+        }
+    });
+    await state.set(PIPENV_WORKSPACE_KEY, data);
 }
 
 export class PipenvUtils {
