@@ -19,32 +19,32 @@ import { PipenvStrings } from '../../common/localize';
 import { NativePythonFinder } from '../common/nativePythonFinder';
 
 export class PipenvManager implements EnvironmentManager {
-    private collection: PythonEnvironment[] = [];
-    private fsPathToEnv: Map<string, PythonEnvironment> = new Map();
-    private globalEnv: PythonEnvironment | undefined;
-
     private readonly _onDidChangeEnvironment = new EventEmitter<DidChangeEnvironmentEventArgs>();
     public readonly onDidChangeEnvironment = this._onDidChangeEnvironment.event;
 
     private readonly _onDidChangeEnvironments = new EventEmitter<DidChangeEnvironmentsEventArgs>();
     public readonly onDidChangeEnvironments = this._onDidChangeEnvironments.event;
-    constructor(private readonly nativeFinder: NativePythonFinder, private readonly api: PythonEnvironmentApi) {
+
+    public readonly name: string;
+    public readonly displayName: string;
+    public readonly preferredPackageManagerId: string;
+    public readonly description?: string;
+    public readonly tooltip: string | MarkdownString;
+    public readonly iconPath?: IconPath;
+
+    constructor(
+        public readonly nativeFinder: NativePythonFinder, 
+        public readonly api: PythonEnvironmentApi
+    ) {
         this.name = 'pipenv';
         this.displayName = 'Pipenv';
-        this.preferredPackageManagerId = 'ms-python.python:pip';
+        this.preferredPackageManagerId = 'ms-python.python:pipenv';
         this.tooltip = new MarkdownString(PipenvStrings.pipenvManager, true);
     }
 
-    name: string;
-    displayName: string;
-    preferredPackageManagerId: string;
-    description?: string;
-    tooltip: string | MarkdownString;
-    iconPath?: IconPath;
-
     public dispose() {
-        this.collection = [];
-        this.fsPathToEnv.clear();
+        this._onDidChangeEnvironment.dispose();
+        this._onDidChangeEnvironments.dispose();
     }
 
     quickCreateConfig?(): QuickCreateConfig | undefined {
@@ -65,29 +65,33 @@ export class PipenvManager implements EnvironmentManager {
     }
 
     async refresh(_scope: RefreshEnvironmentsScope): Promise<void> {
-        // To be implemented
+        // TODO: Implement pipenv environment refresh
+        // This should discover pipenv environments and update the collection
     }
 
     async getEnvironments(_scope: GetEnvironmentsScope): Promise<PythonEnvironment[]> {
-        // To be implemented
+        // TODO: Implement pipenv environment discovery
+        // This should return all discovered pipenv environments
         return [];
     }
 
     async set(_scope: SetEnvironmentScope, _environment?: PythonEnvironment): Promise<void> {
-        // To be implemented
+        // TODO: Implement setting pipenv environment for a scope
+        // This should update the selected environment for the given scope
     }
 
     async get(_scope: GetEnvironmentScope): Promise<PythonEnvironment | undefined> {
-        // To be implemented
+        // TODO: Implement getting the selected pipenv environment for a scope
         return undefined;
     }
 
     async resolve(_context: ResolveEnvironmentContext): Promise<PythonEnvironment | undefined> {
-        // To be implemented
+        // TODO: Implement resolving a path to a pipenv environment
         return undefined;
     }
 
     async clearCache?(): Promise<void> {
-        // To be implemented
+        // TODO: Implement cache clearing
+        // This should clear any cached environment discovery data
     }
 }
