@@ -4,6 +4,7 @@ import { traceInfo } from '../../common/logging';
 import { getPythonApi } from '../../features/pythonApi';
 import { NativePythonFinder } from '../common/nativePythonFinder';
 import { PipenvManager } from './pipenvManager';
+import { PipenvPackageManager } from './pipenvPackageManager';
 import { getPipenv } from './pipenvUtils';
 
 export async function registerPipenvFeatures(
@@ -17,7 +18,14 @@ export async function registerPipenvFeatures(
 
         if (pipenv) {
             const mgr = new PipenvManager(nativeFinder, api);
-            disposables.push(mgr, api.registerEnvironmentManager(mgr));
+            const packageManager = new PipenvPackageManager(api);
+            
+            disposables.push(
+                mgr,
+                packageManager,
+                api.registerEnvironmentManager(mgr),
+                api.registerPackageManager(packageManager)
+            );
         } else {
             traceInfo('Pipenv not found, turning off pipenv features.');
         }
