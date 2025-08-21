@@ -42,6 +42,8 @@ import {
     setEnvironmentCommand,
     setEnvManagerCommand,
     setPackageManagerCommand,
+    addFolderToPythonPathCommand,
+    openPythonPathFileCommand,
 } from './features/envCommands';
 import { PythonEnvironmentManagers } from './features/envManagers';
 import { EnvVarManager, PythonEnvVariableManager } from './features/execution/envVariableManager';
@@ -360,6 +362,12 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
         }),
         commands.registerCommand('python-envs.copyProjectPath', async (item) => {
             await copyPathToClipboard(item);
+        }),
+        commands.registerCommand('python-envs.addFolderToPythonPath', async (item) => {
+            await addFolderToPythonPathCommand(item, envManagers);
+        }),
+        commands.registerCommand('python-envs.openPythonPathFile', async (item) => {
+            await openPythonPathFileCommand(item, envManagers);
         }),
         commands.registerCommand('python-envs.revealProjectInExplorer', async (item) => {
             await revealProjectInExplorer(item);
