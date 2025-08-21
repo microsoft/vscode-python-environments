@@ -52,13 +52,10 @@ export class PipenvManager implements EnvironmentManager {
 
     private _initialized: Deferred<void> | undefined;
 
-    constructor(
-        public readonly nativeFinder: NativePythonFinder, 
-        public readonly api: PythonEnvironmentApi
-    ) {
+    constructor(public readonly nativeFinder: NativePythonFinder, public readonly api: PythonEnvironmentApi) {
         this.name = 'pipenv';
         this.displayName = 'Pipenv';
-        this.preferredPackageManagerId = 'ms-python.python:pipenv';
+        this.preferredPackageManagerId = 'ms-python.python:pip';
         this.tooltip = new MarkdownString(PipenvStrings.pipenvManager, true);
     }
 
@@ -114,9 +111,8 @@ export class PipenvManager implements EnvironmentManager {
     }
 
     private findEnvironmentByPath(fsPath: string): PythonEnvironment | undefined {
-        return this.collection.find((env) => 
-            env.environmentPath.fsPath === fsPath || 
-            env.execInfo?.run.executable === fsPath
+        return this.collection.find(
+            (env) => env.environmentPath.fsPath === fsPath || env.execInfo?.run.executable === fsPath,
         );
     }
 
@@ -139,7 +135,7 @@ export class PipenvManager implements EnvironmentManager {
 
     async refresh(scope: RefreshEnvironmentsScope): Promise<void> {
         const hardRefresh = scope === undefined; // hard refresh when scope is undefined
-        
+
         await withProgress(
             {
                 location: ProgressLocation.Window,
@@ -152,7 +148,7 @@ export class PipenvManager implements EnvironmentManager {
 
                 // Fire change events for environments that were added or removed
                 const changes: { environment: PythonEnvironment; kind: EnvironmentChangeKind }[] = [];
-                
+
                 // Find removed environments
                 oldCollection.forEach((oldEnv) => {
                     if (!this.collection.find((newEnv) => newEnv.envId.id === oldEnv.envId.id)) {
@@ -203,7 +199,7 @@ export class PipenvManager implements EnvironmentManager {
             const before = this.globalEnv;
             this.globalEnv = environment;
             await setPipenvForGlobal(environment?.environmentPath.fsPath);
-            
+
             if (before?.envId.id !== this.globalEnv?.envId.id) {
                 this._onDidChangeEnvironment.fire({ uri: undefined, old: before, new: this.globalEnv });
             }
@@ -223,7 +219,7 @@ export class PipenvManager implements EnvironmentManager {
             } else {
                 this.fsPathToEnv.delete(project.uri.fsPath);
             }
-            
+
             await setPipenvForWorkspace(project.uri.fsPath, environment?.environmentPath.fsPath);
 
             if (before?.envId.id !== environment?.envId.id) {
