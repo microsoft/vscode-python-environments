@@ -20,7 +20,7 @@ import {
     NativePythonEnvironmentKind,
     NativePythonFinder,
 } from '../common/nativePythonFinder';
-import { shortVersion } from '../common/utils';
+import { getShellActivationCommands, shortVersion } from '../common/utils';
 
 export const PIPENV_PATH_KEY = `${ENVS_EXTENSION_ID}:pipenv:PIPENV_PATH`;
 export const PIPENV_WORKSPACE_KEY = `${ENVS_EXTENSION_ID}:pipenv:WORKSPACE_SELECTED`;
@@ -85,12 +85,11 @@ export async function getPipenv(native?: NativePythonFinder): Promise<string | u
     return undefined;
 }
 
-function nativeToPythonEnv(
+async function nativeToPythonEnv(
     info: NativeEnvInfo,
     api: PythonEnvironmentApi,
     manager: EnvironmentManager,
-    pipenv: string,
-): PythonEnvironment | undefined {
+): Promise<PythonEnvironment | undefined> {
     if (!(info.prefix && info.executable && info.version)) {
         traceError(`Incomplete pipenv environment info: ${JSON.stringify(info)}`);
         return undefined;
@@ -100,12 +99,18 @@ function nativeToPythonEnv(
     const name = info.name || info.displayName || path.basename(info.prefix);
     const displayName = info.displayName || `pipenv (${sv})`;
 
-    const shellActivation: Map<string, PythonCommandRunConfiguration[]> = new Map();
-    const shellDeactivation: Map<string, PythonCommandRunConfiguration[]> = new Map();
+    // Derive the environment's bin/scripts directory from the python executable
+    const binDir = path.dirname(info.executable);
+    let shellActivation: Map<string, PythonCommandRunConfiguration[]> = new Map();
+    let shellDeactivation: Map<string, PythonCommandRunConfiguration[]> = new Map();
 
-    // Use 'pipenv shell' for activation and 'exit' for deactivation
-    shellActivation.set('unknown', [{ executable: pipenv, args: ['shell'] }]);
-    shellDeactivation.set('unknown', [{ executable: 'exit', args: [] }]);
+    try {
+        const maps = await getShellActivationCommands(binDir);
+        shellActivation = maps.shellActivation;
+        shellDeactivation = maps.shellDeactivation;
+    } catch (ex) {
+        traceError(`Failed to compute shell activation commands for pipenv at ${binDir}: ${ex}`);
+    }
 
     const environment: PythonEnvironmentInfo = {
         name: name,
@@ -122,7 +127,6 @@ function nativeToPythonEnv(
             shellDeactivation,
         },
         sysPrefix: info.prefix,
-        group: 'pipenv',
     };
 
     return api.createPythonEnvironmentItem(environment, manager);
@@ -158,14 +162,14 @@ export async function refreshPipenv(
 
     const collection: PythonEnvironment[] = [];
 
-    envs.forEach((e) => {
+    for (const e of envs) {
         if (pipenv) {
-            const environment = nativeToPythonEnv(e, api, manager, pipenv);
+            const environment = await nativeToPythonEnv(e, api, manager);
             if (environment) {
                 collection.push(environment);
             }
         }
-    });
+    }
 
     traceInfo(`Found ${collection.length} pipenv environments`);
     return collection;
@@ -182,7 +186,7 @@ export async function resolvePipenvPath(
     if (resolved.kind === NativePythonEnvironmentKind.pipenv) {
         const pipenv = await getPipenv(nativeFinder);
         if (pipenv) {
-            return nativeToPythonEnv(resolved, api, manager, pipenv);
+            return await nativeToPythonEnv(resolved, api, manager);
         }
     }
 
