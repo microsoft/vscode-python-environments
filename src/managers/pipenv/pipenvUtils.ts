@@ -240,7 +240,3 @@ export async function setPipenvForWorkspaces(fsPath: string[], envPath: string |
     });
     await state.set(PIPENV_WORKSPACE_KEY, data);
 }
-
-export class PipenvUtils {
-    // Add static helper methods for pipenv operations here
-}

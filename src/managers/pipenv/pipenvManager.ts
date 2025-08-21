@@ -12,7 +12,6 @@ import {
     PythonEnvironment,
     PythonEnvironmentApi,
     PythonProject,
-    QuickCreateConfig,
     RefreshEnvironmentsScope,
     ResolveEnvironmentContext,
     SetEnvironmentScope,
@@ -116,21 +115,12 @@ export class PipenvManager implements EnvironmentManager {
         );
     }
 
-    quickCreateConfig?(): QuickCreateConfig | undefined {
-        // To be implemented
-        return undefined;
-    }
-
     async create?(
         _scope: CreateEnvironmentScope,
         _options?: CreateEnvironmentOptions,
     ): Promise<PythonEnvironment | undefined> {
         // To be implemented
         return undefined;
-    }
-
-    async remove?(_environment: PythonEnvironment): Promise<void> {
-        // To be implemented
     }
 
     async refresh(scope: RefreshEnvironmentsScope): Promise<void> {
