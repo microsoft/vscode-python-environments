@@ -614,39 +614,50 @@ async function resolveDefaultInterpreter(
 
     if (defaultInterpreterPath) {
         const defaultManager = getConfiguration('python-envs').get<string>('defaultEnvManager', 'undefined');
+        traceInfo(`resolveDefaultInterpreter setting exists; found defaultEnvManager: ${defaultManager}`);
         if (!defaultManager || defaultManager === 'ms-python.python:venv') {
-            // if user has defaultInterpreterPath and no defaultEnvManager set then resolve the defaultInterpreterPath setting
-            const resolved: NativeEnvInfo = await nativeFinder.resolve(defaultInterpreterPath);
-            if (resolved && resolved.executable) {
-                const resolvedEnv = await api.resolveEnvironment(Uri.file(resolved.executable));
+            try {
+                const resolved: NativeEnvInfo = await nativeFinder.resolve(defaultInterpreterPath);
+                if (resolved && resolved.executable) {
+                    const resolvedEnv = await api.resolveEnvironment(Uri.file(resolved.executable));
+                    traceInfo(`[resolveDefaultInterpreter] API resolved environment: ${JSON.stringify(resolvedEnv)}`);
 
-                let findEnvManager = envManagers.managers.find((m) => m.id === resolvedEnv?.envId.managerId);
-
-                if (!findEnvManager) {
-                    findEnvManager = envManagers.managers.find((m) => m.id === 'ms-python.python:system');
-                }
-                if (resolvedEnv) {
-                    const newEnv: PythonEnvironment = {
-                        envId: {
-                            id: resolvedEnv?.envId.id,
-                            managerId: resolvedEnv?.envId.managerId ?? '',
-                        },
-                        name: 'defaultInterpreterPath: ' + (resolved.version ?? ''),
-                        displayName: 'defaultInterpreterPath: ' + (resolved.version ?? ''),
-                        version: resolved.version ?? '',
-                        displayPath: defaultInterpreterPath ?? '',
-                        environmentPath: defaultInterpreterPath ? Uri.file(defaultInterpreterPath) : Uri.file(''),
-                        sysPrefix: resolved.arch ?? '',
-                        execInfo: {
-                            run: {
-                                executable: defaultInterpreterPath ?? '',
-                            },
-                        },
-                    };
-                    if (workspace.workspaceFolders?.[0] && findEnvManager) {
-                        await api.setEnvironment(workspace.workspaceFolders[0].uri, newEnv);
+                    let findEnvManager = envManagers.managers.find((m) => m.id === resolvedEnv?.envId.managerId);
+                    if (!findEnvManager) {
+                        findEnvManager = envManagers.managers.find((m) => m.id === 'ms-python.python:system');
                     }
+                    if (resolvedEnv) {
+                        const newEnv: PythonEnvironment = {
+                            envId: {
+                                id: resolvedEnv?.envId.id,
+                                managerId: resolvedEnv?.envId.managerId ?? '',
+                            },
+                            name: 'defaultInterpreterPath: ' + (resolved.version ?? ''),
+                            displayName: 'defaultInterpreterPath: ' + (resolved.version ?? ''),
+                            version: resolved.version ?? '',
+                            displayPath: defaultInterpreterPath ?? '',
+                            environmentPath: defaultInterpreterPath ? Uri.file(defaultInterpreterPath) : Uri.file(''),
+                            sysPrefix: resolved.arch ?? '',
+                            execInfo: {
+                                run: {
+                                    executable: defaultInterpreterPath ?? '',
+                                },
+                            },
+                        };
+                        if (workspace.workspaceFolders?.[0] && findEnvManager) {
+                            traceInfo(
+                                `[resolveDefaultInterpreter] Setting environment for workspace: ${workspace.workspaceFolders[0].uri.fsPath}`,
+                            );
+                            await api.setEnvironment(workspace.workspaceFolders[0].uri, newEnv);
+                        }
+                    }
+                } else {
+                    traceWarn(
+                        `[resolveDefaultInterpreter] NativeFinder did not resolve an executable for path: ${defaultInterpreterPath}`,
+                    );
                 }
+            } catch (err) {
+                traceError(`[resolveDefaultInterpreter] Error resolving default interpreter: ${err}`);
             }
         }
     }
