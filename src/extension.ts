@@ -497,7 +497,7 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
                     const execString = getShellCommandAsString(identifyTerminalShell(terminal), [
                         { executable: petPath, args: [command.subcommand, ...(command.args || [])] },
                     ]);
-                    terminal.sendText(execString, true);
+                    terminal.sendText(execString);
                     traceInfo(`Running PET ${command.subcommand} command: ${execString}`);
                 }
             } catch (error) {
