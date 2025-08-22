@@ -63,8 +63,6 @@ The following environment managers are supported out of the box:
 
 Environment managers are responsible for specifying which package manager will be used by default to install and manage Python packages within the environment (`venv` uses `pip` by default). This ensures that packages are managed consistently according to the preferred tools and settings of the chosen environment manager.
 
-
-
 ### Package Management
 
 The extension also provides an interface to install and uninstall Python packages, and provides APIs for extension developers to contribute package managers of their choice.
