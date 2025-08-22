@@ -40,11 +40,30 @@ The following environment managers are supported out of the box:
 
 | Id                      | Name                    | Description                                                                                                                                                                                                   |
 | ----------------------- | ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| ms-python.python:venv   | `venv`                  | The default environment manager. It is a built-in environment manager provided by the Python standard library.                                                                                                |
-| ms-python.python:system | System Installed Python | These are global Python installs on your system. These are typically installed with your OS, from [python.org](https://www.python.org/), or any other OS package manager.                                     |
-| ms-python.python:conda  | `conda`                 | The [conda](https://conda.org) environment manager, as provided by conda distributions like [Anaconda Distribution](https://docs.anaconda.com/anaconda/) or [conda-forge](https://conda-forge.org/download/). |
+| ms-python.python:venv   | `venv`                  | Built-in environment manager provided by the Python standard library. Supports creating environments (interactive and quick create) and finding existing environments. |
+| ms-python.python:system | System Installed Python | Global Python installs on your system, typically installed with your OS, from [python.org](https://www.python.org/), or any other OS package manager. |
+| ms-python.python:conda  | `conda`                 | The [conda](https://conda.org) environment manager, as provided by conda distributions like [Anaconda Distribution](https://docs.anaconda.com/anaconda/) or [conda-forge](https://conda-forge.org/download/). Supports creating environments (interactive and quick create) and finding existing environments. |
+| ms-python.python:pyenv  | `pyenv`                 | The [pyenv](https://github.com/pyenv/pyenv) environment manager, used to manage multiple Python versions. Supports finding existing environments. |
+| ms-python.python:poetry | `poetry`                | The [poetry](https://python-poetry.org/) environment manager, used for dependency management and packaging in Python projects. Supports finding existing environments. |
+
+#### Supported Actions by Environment Manager
+
+| Environment Manager | Find Environments | Create | Quick Create |
+|---------------------|-------------------|--------|--------------|
+| venv                |        ✅         |   ✅   |      ✅      |
+| conda               |        ✅         |   ✅   |      ✅      |
+| pyenv               |        ✅         |        |              |
+| poetry              |        ✅         |        |              |
+| system              |        ✅         |        |              |
+
+**Legend:**
+- **Create**: Ability to create new environments interactively.
+- **Quick Create**: Ability to create environments with minimal user input.
+- **Find Environments**: Ability to discover and list existing environments.
 
 Environment managers are responsible for specifying which package manager will be used by default to install and manage Python packages within the environment (`venv` uses `pip` by default). This ensures that packages are managed consistently according to the preferred tools and settings of the chosen environment manager.
+
+
 
 ### Package Management
 
