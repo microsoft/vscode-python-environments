@@ -76,6 +76,16 @@ The extension uses `pip` as the default package manager, but you can use the pac
 | ms-python.python:pip   | `pip`   | Pip acts as the default package manager and it's typically built-in to Python.                                                                                                                            |
 | ms-python.python:conda | `conda` | The [conda](https://conda.org) package manager, as provided by conda distributions like [Anaconda Distribution](https://docs.anaconda.com/anaconda/) or [conda-forge](https://conda-forge.org/download/). |
 
+#### Default Package Manager by Environment Manager
+
+| Environment Manager | Default Package Manager |
+|---------------------|------------------------|
+| venv                | pip                    |
+| conda               | conda                  |
+| pyenv               | pip                    |
+| poetry              | poetry                 |
+| system              | pip                    |
+
 ### Project Management
 
 A "Python Project" is any file or folder that contains runnable Python code and needs its own environment. With the Python Environments extension, you can add files and folders as projects in your workspace and assign individual environments to them allowing you to run various projects more seamlessly.
