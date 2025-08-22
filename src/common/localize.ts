@@ -156,6 +156,12 @@ export namespace PyenvStrings {
     export const pyenvRefreshing = l10n.t('Refreshing Pyenv Python versions');
 }
 
+export namespace PipenvStrings {
+    export const pipenvManager = l10n.t('Manages Pipenv environments');
+    export const pipenvDiscovering = l10n.t('Discovering Pipenv environments');
+    export const pipenvRefreshing = l10n.t('Refreshing Pipenv environments');
+}
+
 export namespace PoetryStrings {
     export const poetryManager = l10n.t('Manages Poetry environments');
     export const poetryDiscovering = l10n.t('Discovering Poetry environments');
