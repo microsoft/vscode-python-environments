@@ -56,6 +56,7 @@ import { Installable } from '../common/types';
 import { shortVersion, sortEnvironments } from '../common/utils';
 import { CondaEnvManager } from './condaEnvManager';
 import { getCondaHookPs1Path, getLocalActivationScript } from './condaSourcingUtils';
+import { StopWatch } from '../../common/stopWatch';
 
 export const CONDA_PATH_KEY = `${ENVS_EXTENSION_ID}:conda:CONDA_PATH`;
 export const CONDA_PREFIXES_KEY = `${ENVS_EXTENSION_ID}:conda:CONDA_PREFIXES`;
@@ -202,6 +203,8 @@ async function _runConda(
 ): Promise<string> {
     const deferred = createDeferred<string>();
     args = quoteArgs(args);
+    const timer = new StopWatch();
+    deferred.promise.finally(() => traceInfo(`Ran conda in ${timer.elapsedTime}: ${conda} ${args.join(' ')}`));
     const proc = ch.spawn(conda, args, { shell: true });
 
     token?.onCancellationRequested(() => {

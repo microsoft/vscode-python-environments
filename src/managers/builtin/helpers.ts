@@ -9,7 +9,7 @@ export async function isUvInstalled(log?: LogOutputChannel): Promise<boolean> {
     if (available.completed) {
         return available.promise;
     }
-
+    log?.info(`Running: uv --version`);
     const proc = ch.spawn('uv', ['--version']);
     proc.on('error', () => {
         available.resolve(false);
