@@ -45,6 +45,7 @@ The following environment managers are supported out of the box:
 | ms-python.python:conda  | `conda`                 | The [conda](https://conda.org) environment manager, as provided by conda distributions like [Anaconda Distribution](https://docs.anaconda.com/anaconda/) or [conda-forge](https://conda-forge.org/download/). Supports creating environments (interactive and quick create) and finding existing environments. |
 | ms-python.python:pyenv  | `pyenv`                 | The [pyenv](https://github.com/pyenv/pyenv) environment manager, used to manage multiple Python versions. Supports finding existing environments. |
 | ms-python.python:poetry | `poetry`                | The [poetry](https://python-poetry.org/) environment manager, used for dependency management and packaging in Python projects. Supports finding existing environments. |
+| ms-python.python:pipenv | `pipenv`                | The [pipenv](https://pipenv.pypa.io/en/latest/) environment manager, used for managing Python dependencies and environments. Only supports finding existing environments. |
 
 #### Supported Actions by Environment Manager
 
@@ -55,6 +56,7 @@ The following environment managers are supported out of the box:
 | pyenv               |        ✅         |        |              |
 | poetry              |        ✅         |        |              |
 | system              |        ✅         |        |              |
+| pipenv              |        ✅         |        |              |
 
 **Legend:**
 - **Create**: Ability to create new environments interactively.
@@ -83,6 +85,7 @@ The extension uses `pip` as the default package manager, but you can use the pac
 | pyenv               | pip                    |
 | poetry              | poetry                 |
 | system              | pip                    |
+| pipenv              | pip                    |
 
 ### Project Management
 
