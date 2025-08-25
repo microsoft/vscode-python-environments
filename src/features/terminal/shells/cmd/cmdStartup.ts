@@ -10,8 +10,14 @@ import { ShellConstants } from '../../../common/shellConstants';
 import { hasStartupCode, insertStartupCode, removeStartupCode } from '../common/editUtils';
 import { ShellScriptEditState, ShellSetupState, ShellStartupScriptProvider } from '../startupProvider';
 import { CMD_ENV_KEY, CMD_SCRIPT_VERSION } from './cmdConstants';
+import { StopWatch } from '../../../../common/stopWatch';
 
-const exec = promisify(cp.exec);
+function execCommand(command: string) {
+    const timer = new StopWatch();
+    return promisify(cp.exec)(command, { windowsHide: true }).finally(() =>
+        traceInfo(`Executed command: ${command} in ${timer.elapsedTime}`),
+    );
+}
 
 async function isCmdInstalled(): Promise<boolean> {
     if (!isWindows()) {
@@ -94,9 +100,7 @@ async function checkRegistryAutoRun(mainBatchFile: string, regMainBatchFile: str
 
     try {
         // Check if AutoRun is set in the registry to call our batch file
-        const { stdout } = await exec('reg query "HKCU\\Software\\Microsoft\\Command Processor" /v AutoRun', {
-            windowsHide: true,
-        });
+        const { stdout } = await execCommand('reg query "HKCU\\Software\\Microsoft\\Command Processor" /v AutoRun');
 
         // Check if the output contains our batch file path
         return stdout.includes(regMainBatchFile) || stdout.includes(mainBatchFile);
@@ -112,9 +116,7 @@ async function getExistingAutoRun(): Promise<string | undefined> {
     }
 
     try {
-        const { stdout } = await exec('reg query "HKCU\\Software\\Microsoft\\Command Processor" /v AutoRun', {
-            windowsHide: true,
-        });
+        const { stdout } = await execCommand('reg query "HKCU\\Software\\Microsoft\\Command Processor" /v AutoRun');
 
         const match = stdout.match(/AutoRun\s+REG_SZ\s+(.*)/);
         if (match && match[1]) {
@@ -135,9 +137,8 @@ async function setupRegistryAutoRun(mainBatchFile: string): Promise<boolean> {
 
     try {
         // Set the registry key to call our main batch file
-        await exec(
+        await execCommand(
             `reg add "HKCU\\Software\\Microsoft\\Command Processor" /v AutoRun /t REG_SZ /d "if exist \\"${mainBatchFile}\\" call \\"${mainBatchFile}\\"" /f`,
-            { windowsHide: true },
         );
 
         traceInfo(
