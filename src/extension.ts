@@ -598,8 +598,9 @@ export async function disposeAll(disposables: IDisposable[]): Promise<void> {
  * Resolves and sets the default Python interpreter for the workspace based on the
  * 'python.defaultInterpreterPath' setting and the selected environment manager.
  * If the setting is present and no default environment manager is set (or is venv),
- * attempts to resolve the interpreter path using the native finder, then creates and
- * sets a PythonEnvironment object for the workspace.
+ * attempts to resolve the interpreter path using the native finder. If the resolved
+ * path differs from the configured path, then creates and sets a PythonEnvironment
+ * object for the workspace.
  *
  * @param nativeFinder - The NativePythonFinder instance used to resolve interpreter paths.
  * @param envManagers - The EnvironmentManagers instance containing all registered managers.
@@ -619,6 +620,10 @@ async function resolveDefaultInterpreter(
             try {
                 const resolved: NativeEnvInfo = await nativeFinder.resolve(defaultInterpreterPath);
                 if (resolved && resolved.executable) {
+                    if (resolved.executable === defaultInterpreterPath) {
+                        // no action required, the path is already correct
+                        return;
+                    }
                     const resolvedEnv = await api.resolveEnvironment(Uri.file(resolved.executable));
                     traceInfo(`[resolveDefaultInterpreter] API resolved environment: ${JSON.stringify(resolvedEnv)}`);
 
