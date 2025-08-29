@@ -9,6 +9,7 @@ import { EventNames } from './common/telemetry/constants';
 import { sendManagerSelectionTelemetry } from './common/telemetry/helpers';
 import { sendTelemetryEvent } from './common/telemetry/sender';
 import { createDeferred } from './common/utils/deferred';
+import { normalizePath } from './common/utils/pathUtils';
 import { isWindows } from './common/utils/platformUtils';
 import {
     activeTerminal,
@@ -620,7 +621,7 @@ async function resolveDefaultInterpreter(
             try {
                 const resolved: NativeEnvInfo = await nativeFinder.resolve(defaultInterpreterPath);
                 if (resolved && resolved.executable) {
-                    if (resolved.executable === defaultInterpreterPath) {
+                    if (normalizePath(resolved.executable) === normalizePath(defaultInterpreterPath)) {
                         // no action required, the path is already correct
                         return;
                     }
