@@ -694,12 +694,14 @@ export async function refreshCondaEnvs(
             .filter((e) => e.kind === NativePythonEnvironmentKind.conda);
         const collection: PythonEnvironment[] = [];
 
-        envs.forEach(async (e) => {
-            const environment = await nativeToPythonEnv(e, api, manager, log, condaPath, condaPrefixes);
-            if (environment) {
-                collection.push(environment);
-            }
-        });
+        await Promise.all(
+            envs.map(async (e) => {
+                const environment = await nativeToPythonEnv(e, api, manager, log, condaPath, condaPrefixes);
+                if (environment) {
+                    collection.push(environment);
+                }
+            }),
+        );
 
         return sortEnvironments(collection);
     }
