@@ -254,10 +254,10 @@
                 "icon": "$(copy)"
             },
             {
-                "command": "python-envs.terminal.revertStartupScriptChanges",
-                "title": "%python-envs.terminal.revertStartupScriptChanges.title%",
+                "command": "python-envs.terminal.manageShellStartup",
+                "title": "%python-envs.terminal.manageShellStartup.title%",
                 "category": "Python Envs",
-                "icon": "$(discard)"
+                "icon": "$(gear)"
             },
             {
                 "command": "python-envs.reportIssue",
@@ -373,7 +373,7 @@
                     "when": "config.python.useEnvironmentsExtension != false"
                 },
                 {
-                    "command": "python-envs.terminal.revertStartupScriptChanges",
+                    "command": "python-envs.terminal.manageShellStartup",
                     "when": "config.python.useEnvironmentsExtension != false"
                 },
                 {
