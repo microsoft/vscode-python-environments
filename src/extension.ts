@@ -57,7 +57,8 @@ import {
     createShellStartupProviders,
 } from './features/terminal/shells/providers';
 import { ShellStartupActivationVariablesManagerImpl } from './features/terminal/shellStartupActivationVariablesManager';
-import { cleanupStartupScripts } from './features/terminal/shellStartupSetupHandlers';
+import { showShellManagementMenu } from './features/terminal/shellManagement';
+
 import { TerminalActivationImpl } from './features/terminal/terminalActivationState';
 import { TerminalEnvVarInjector } from './features/terminal/terminalEnvVarInjector';
 import { TerminalManager, TerminalManagerImpl } from './features/terminal/terminalManager';
@@ -243,8 +244,8 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
     context.subscriptions.push(
         shellStartupVarsMgr,
         registerCompletionProvider(envManagers),
-        commands.registerCommand('python-envs.terminal.revertStartupScriptChanges', async () => {
-            await cleanupStartupScripts(shellStartupProviders);
+        commands.registerCommand('python-envs.terminal.manageShellStartup', async () => {
+            await showShellManagementMenu(shellStartupProviders);
         }),
         commands.registerCommand('python-envs.viewLogs', () => outputChannel.show()),
         commands.registerCommand('python-envs.refreshAllManagers', async () => {
