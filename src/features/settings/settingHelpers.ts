@@ -330,8 +330,8 @@ export async function addPythonProjectSetting(edits: EditProjectSettings[]): Pro
             } else {
                 overrides.push({
                     path: path.relative(w.uri.fsPath, pwPath).replace(/\\/g, '/'),
-                    envManager,
-                    packageManager: pkgManager,
+                    envManager: e.envManager ?? envManager,
+                    packageManager: e.packageManager ?? pkgManager,
                     workspace: isMultiroot ? w.name : undefined,
                 });
             }
