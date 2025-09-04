@@ -180,7 +180,7 @@ export async function findVirtualEnvironments(
 
     for (const e of envs) {
         if (!(e.prefix && e.executable && e.version)) {
-            log.warn(`Invalid conda environment: ${JSON.stringify(e)}`);
+            log.warn(`Invalid venv environment: ${JSON.stringify(e)}`);
             continue;
         }
 
