@@ -1,8 +1,11 @@
 import * as fs from 'fs-extra';
 import path from 'path';
-import { PythonCommandRunConfiguration, PythonEnvironment } from '../../api';
+import { commands, ConfigurationTarget, window, workspace } from 'vscode';
+import { PythonCommandRunConfiguration, PythonEnvironment, PythonEnvironmentApi } from '../../api';
 import { isWindows } from '../../common/utils/platformUtils';
 import { ShellConstants } from '../../features/common/shellConstants';
+import { getDefaultEnvManagerSetting, setDefaultEnvManagerBroken } from '../../features/settings/settingHelpers';
+import { PythonProjectManager } from '../../internal.api';
 import { Installable } from './types';
 
 export function noop() {
@@ -193,4 +196,42 @@ export async function getShellActivationCommands(binDir: string): Promise<{
         shellActivation,
         shellDeactivation,
     };
+}
+
+export async function notifyMissingManagerIfDefault(
+    managerId: string,
+    projectManager: PythonProjectManager,
+    api: PythonEnvironmentApi,
+) {
+    const defaultEnvManager = getDefaultEnvManagerSetting(projectManager);
+    if (defaultEnvManager === managerId) {
+        setDefaultEnvManagerBroken(true);
+        await api.refreshEnvironments(undefined);
+        window
+            .showErrorMessage(
+                `The default environment manager is set to '${defaultEnvManager}', but the ${
+                    managerId.split(':')[1]
+                } executable could not be found.`,
+                'Reset setting',
+                'View setting',
+                'Close',
+            )
+            .then((selection) => {
+                if (selection === 'Reset setting') {
+                    // Remove the setting from all scopes
+                    const config = workspace.getConfiguration('python-envs');
+                    const inspect = config.inspect('defaultEnvManager');
+                    if (inspect?.workspaceValue !== undefined) {
+                        // Remove from workspace settings
+                        config.update('defaultEnvManager', undefined, ConfigurationTarget.Workspace);
+                    } else if (inspect?.globalValue !== undefined) {
+                        // Remove from user settings
+                        config.update('defaultEnvManager', undefined, ConfigurationTarget.Global);
+                    }
+                }
+                if (selection === 'View setting') {
+                    commands.executeCommand('workbench.action.openSettings', 'python-envs.defaultEnvManager');
+                }
+            });
+    }
 }

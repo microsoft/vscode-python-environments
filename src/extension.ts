@@ -563,10 +563,10 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
         sysPythonManager.resolve(sysMgr);
         await Promise.all([
             registerSystemPythonFeatures(nativeFinder, context.subscriptions, outputChannel, sysMgr),
-            registerCondaFeatures(nativeFinder, context.subscriptions, outputChannel),
-            registerPyenvFeatures(nativeFinder, context.subscriptions),
-            registerPipenvFeatures(nativeFinder, context.subscriptions),
-            registerPoetryFeatures(nativeFinder, context.subscriptions, outputChannel),
+            registerCondaFeatures(nativeFinder, context.subscriptions, outputChannel, projectManager),
+            registerPyenvFeatures(nativeFinder, context.subscriptions, projectManager),
+            registerPipenvFeatures(nativeFinder, context.subscriptions, projectManager),
+            registerPoetryFeatures(nativeFinder, context.subscriptions, outputChannel, projectManager),
             shellStartupVarsMgr.initialize(),
         ]);
 
@@ -616,7 +616,7 @@ async function resolveDefaultInterpreter(
 
     if (defaultInterpreterPath) {
         const defaultManager = getConfiguration('python-envs').get<string>('defaultEnvManager', 'undefined');
-        traceInfo(`resolveDefaultInterpreter setting exists; found defaultEnvManager: ${defaultManager}`);
+        traceInfo(`resolveDefaultInterpreter setting exists; found defaultEnvManager: ${defaultManager}. `);
         if (!defaultManager || defaultManager === 'ms-python.python:venv') {
             try {
                 const resolved: NativeEnvInfo = await nativeFinder.resolve(defaultInterpreterPath);

@@ -31,13 +31,25 @@ function getSettings(
     return undefined;
 }
 
+let DEFAULT_ENV_MANAGER_BROKEN = false;
+
+export function setDefaultEnvManagerBroken(broken: boolean) {
+    DEFAULT_ENV_MANAGER_BROKEN = broken;
+}
+export function isDefaultEnvManagerBroken(): boolean {
+    return DEFAULT_ENV_MANAGER_BROKEN;
+}
+
 export function getDefaultEnvManagerSetting(wm: PythonProjectManager, scope?: Uri): string {
     const config = workspace.getConfiguration('python-envs', scope);
     const settings = getSettings(wm, config, scope);
     if (settings && settings.envManager.length > 0) {
         return settings.envManager;
     }
-
+    if (isDefaultEnvManagerBroken()) {
+        traceInfo(`Default environment manager is broken, using system default: ${DEFAULT_ENV_MANAGER_ID}`);
+        return DEFAULT_ENV_MANAGER_ID;
+    }
     const defaultManager = config.get<string>('defaultEnvManager');
     if (defaultManager === undefined || defaultManager === null || defaultManager === '') {
         traceError('No default environment manager set. Check setting python-envs.defaultEnvManager');

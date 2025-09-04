@@ -2,7 +2,9 @@ import { Disposable, LogOutputChannel } from 'vscode';
 import { PythonEnvironmentApi } from '../../api';
 import { traceInfo } from '../../common/logging';
 import { getPythonApi } from '../../features/pythonApi';
+import { PythonProjectManager } from '../../internal.api';
 import { NativePythonFinder } from '../common/nativePythonFinder';
+import { notifyMissingManagerIfDefault } from '../common/utils';
 import { PoetryManager } from './poetryManager';
 import { PoetryPackageManager } from './poetryPackageManager';
 import { getPoetry, getPoetryVersion } from './poetryUtils';
@@ -11,6 +13,7 @@ export async function registerPoetryFeatures(
     nativeFinder: NativePythonFinder,
     disposables: Disposable[],
     outputChannel: LogOutputChannel,
+    projectManager: PythonProjectManager,
 ): Promise<void> {
     const api: PythonEnvironmentApi = await getPythonApi();
 
@@ -31,8 +34,12 @@ export async function registerPoetryFeatures(
                 api.registerEnvironmentManager(envManager),
                 api.registerPackageManager(pkgManager),
             );
+        } else {
+            traceInfo('Poetry not found, turning off poetry features.');
+            await notifyMissingManagerIfDefault('ms-python.python:poetry', projectManager, api);
         }
     } catch (ex) {
         traceInfo('Poetry not found, turning off poetry features.', ex);
+        await notifyMissingManagerIfDefault('ms-python.python:poetry', projectManager, api);
     }
 }
