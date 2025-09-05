@@ -9,7 +9,7 @@ import {
 } from 'vscode';
 import { PythonProject } from '../../api';
 import { DEFAULT_ENV_MANAGER_ID, DEFAULT_PACKAGE_MANAGER_ID } from '../../common/constants';
-import { traceError, traceInfo } from '../../common/logging';
+import { traceError, traceInfo, traceWarn } from '../../common/logging';
 import { getWorkspaceFile, getWorkspaceFolders } from '../../common/workspace.apis';
 import { PythonProjectManager, PythonProjectSettings } from '../../internal.api';
 
@@ -31,17 +31,34 @@ function getSettings(
     return undefined;
 }
 
+let DEFAULT_ENV_MANAGER_BROKEN = false;
+let hasShownDefaultEnvManagerBrokenWarn = false;
+
+export function setDefaultEnvManagerBroken(broken: boolean) {
+    DEFAULT_ENV_MANAGER_BROKEN = broken;
+}
+export function isDefaultEnvManagerBroken(): boolean {
+    return DEFAULT_ENV_MANAGER_BROKEN;
+}
+
 export function getDefaultEnvManagerSetting(wm: PythonProjectManager, scope?: Uri): string {
     const config = workspace.getConfiguration('python-envs', scope);
     const settings = getSettings(wm, config, scope);
     if (settings && settings.envManager.length > 0) {
         return settings.envManager;
     }
-
+    // Only show the warning once per session
+    if (isDefaultEnvManagerBroken()) {
+        if (!hasShownDefaultEnvManagerBrokenWarn) {
+            traceWarn(`Default environment manager is broken, using system default: ${DEFAULT_ENV_MANAGER_ID}`);
+            hasShownDefaultEnvManagerBrokenWarn = true;
+        }
+        return DEFAULT_ENV_MANAGER_ID;
+    }
     const defaultManager = config.get<string>('defaultEnvManager');
     if (defaultManager === undefined || defaultManager === null || defaultManager === '') {
         traceError('No default environment manager set. Check setting python-envs.defaultEnvManager');
-        traceInfo(`Using system default package manager: ${DEFAULT_ENV_MANAGER_ID}`);
+        traceWarn(`Using system default package manager: ${DEFAULT_ENV_MANAGER_ID}`);
         return DEFAULT_ENV_MANAGER_ID;
     }
     return defaultManager;
