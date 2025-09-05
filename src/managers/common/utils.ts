@@ -1,7 +1,8 @@
 import * as fs from 'fs-extra';
 import path from 'path';
-import { commands, ConfigurationTarget, window, workspace } from 'vscode';
+import { commands, ConfigurationTarget, l10n, window, workspace } from 'vscode';
 import { PythonCommandRunConfiguration, PythonEnvironment, PythonEnvironmentApi } from '../../api';
+import { traceLog, traceVerbose } from '../../common/logging';
 import { isWindows } from '../../common/utils/platformUtils';
 import { ShellConstants } from '../../features/common/shellConstants';
 import { getDefaultEnvManagerSetting, setDefaultEnvManagerBroken } from '../../features/settings/settingHelpers';
@@ -198,6 +199,19 @@ export async function getShellActivationCommands(binDir: string): Promise<{
     };
 }
 
+// Tracks if the broken defaultEnvManager error message has been shown this session
+let hasShownBrokenDefaultEnvManagerError = false;
+
+/**
+ * Checks if the given managerId is set as the default environment manager for the project.
+ * If so, marks the default manager as broken, refreshes environments, and shows an error message to the user.
+ * The error message offers to reset the setting, view the setting, or close.
+ * The error message is only shown once per session.
+ *
+ * @param managerId The environment manager id to check.
+ * @param projectManager The Python project manager instance.
+ * @param api The Python environment API instance.
+ */
 export async function notifyMissingManagerIfDefault(
     managerId: string,
     projectManager: PythonProjectManager,
@@ -205,28 +219,44 @@ export async function notifyMissingManagerIfDefault(
 ) {
     const defaultEnvManager = getDefaultEnvManagerSetting(projectManager);
     if (defaultEnvManager === managerId) {
+        if (hasShownBrokenDefaultEnvManagerError) {
+            return;
+        }
+        hasShownBrokenDefaultEnvManagerError = true;
         setDefaultEnvManagerBroken(true);
         await api.refreshEnvironments(undefined);
         window
             .showErrorMessage(
-                `The default environment manager is set to '${defaultEnvManager}', but the ${
-                    managerId.split(':')[1]
-                } executable could not be found.`,
-                'Reset setting',
-                'View setting',
-                'Close',
+                l10n.t(
+                    "The default environment manager is set to '{0}', but the {1} executable could not be found.",
+                    defaultEnvManager,
+                    managerId.split(':')[1],
+                ),
+                l10n.t('Reset setting'),
+                l10n.t('View setting'),
+                l10n.t('Close'),
             )
-            .then((selection) => {
+            .then(async (selection) => {
                 if (selection === 'Reset setting') {
-                    // Remove the setting from all scopes
-                    const config = workspace.getConfiguration('python-envs');
-                    const inspect = config.inspect('defaultEnvManager');
-                    if (inspect?.workspaceValue !== undefined) {
-                        // Remove from workspace settings
-                        config.update('defaultEnvManager', undefined, ConfigurationTarget.Workspace);
-                    } else if (inspect?.globalValue !== undefined) {
-                        // Remove from user settings
-                        config.update('defaultEnvManager', undefined, ConfigurationTarget.Global);
+                    const result = await removeFirstDefaultEnvManagerSettingDetailed(managerId);
+                    if (!result.found) {
+                        window
+                            .showErrorMessage(
+                                l10n.t(
+                                    "Could not find a setting for 'defaultEnvManager' set to '{0}' to reset.",
+                                    managerId,
+                                ),
+                                l10n.t('Open settings'),
+                                l10n.t('Close'),
+                            )
+                            .then((sel) => {
+                                if (sel === 'Open settings') {
+                                    commands.executeCommand(
+                                        'workbench.action.openSettings',
+                                        'python-envs.defaultEnvManager',
+                                    );
+                                }
+                            });
                     }
                 }
                 if (selection === 'View setting') {
@@ -234,4 +264,38 @@ export async function notifyMissingManagerIfDefault(
                 }
             });
     }
+}
+
+/**
+ * Removes the first occurrence of 'defaultEnvManager' set to managerId, returns where it was removed, and logs the action.
+ * @param managerId The manager id to match and remove.
+ * @returns { found: boolean, scope?: string }
+ */
+export async function removeFirstDefaultEnvManagerSettingDetailed(
+    managerId: string,
+): Promise<{ found: boolean; scope?: string }> {
+    const config = workspace.getConfiguration('python-envs');
+    const inspect = config.inspect('defaultEnvManager');
+
+    // Workspace folder settings (multi-root)
+    if (inspect?.workspaceFolderValue !== undefined && inspect.workspaceFolderValue === managerId) {
+        await config.update('defaultEnvManager', undefined, ConfigurationTarget.WorkspaceFolder);
+        traceLog("[python-envs] Removed 'defaultEnvManager' from Workspace Folder settings.");
+        return { found: true, scope: 'Workspace Folder' };
+    }
+    // Workspace settings
+    if (inspect?.workspaceValue !== undefined && inspect.workspaceValue === managerId) {
+        await config.update('defaultEnvManager', undefined, ConfigurationTarget.Workspace);
+        traceLog("[python-envs] Removed 'defaultEnvManager' from Workspace settings.");
+        return { found: true, scope: 'Workspace' };
+    }
+    // User/global settings
+    if (inspect?.globalValue !== undefined && inspect.globalValue === managerId) {
+        await config.update('defaultEnvManager', undefined, ConfigurationTarget.Global);
+        traceLog("[python-envs] Removed 'defaultEnvManager' from User/Global settings.");
+        return { found: true, scope: 'User/Global' };
+    }
+    // No matching setting found
+    traceVerbose(`[python-envs] Could not find 'defaultEnvManager' set to '${managerId}' in any scope.`);
+    return { found: false };
 }
