@@ -196,10 +196,9 @@ class NativePythonFinderImpl implements NativePythonFinder {
                 uriSearchPaths.push(...venvFolders);
                 return { searchPaths: uriSearchPaths };
             }
-        } else {
-            // if no options, then search venvFolders
-            return { searchPaths: venvFolders };
         }
+        // return undefined to use configured defaults (for nativeFinder refresh)
+        return undefined;
     }
 
     private start(): rpc.MessageConnection {
