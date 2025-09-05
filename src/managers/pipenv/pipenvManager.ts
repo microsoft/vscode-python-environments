@@ -1,7 +1,5 @@
 import { EventEmitter, MarkdownString, ProgressLocation, Uri } from 'vscode';
 import {
-    CreateEnvironmentOptions,
-    CreateEnvironmentScope,
     DidChangeEnvironmentEventArgs,
     DidChangeEnvironmentsEventArgs,
     EnvironmentChangeKind,
@@ -113,14 +111,6 @@ export class PipenvManager implements EnvironmentManager {
         return this.collection.find(
             (env) => env.environmentPath.fsPath === fsPath || env.execInfo?.run.executable === fsPath,
         );
-    }
-
-    async create?(
-        _scope: CreateEnvironmentScope,
-        _options?: CreateEnvironmentOptions,
-    ): Promise<PythonEnvironment | undefined> {
-        // To be implemented
-        return undefined;
     }
 
     async refresh(scope: RefreshEnvironmentsScope): Promise<void> {
