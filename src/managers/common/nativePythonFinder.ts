@@ -8,7 +8,7 @@ import { PythonProjectApi } from '../../api';
 import { ENVS_EXTENSION_ID, PYTHON_EXTENSION_ID } from '../../common/constants';
 import { getExtension } from '../../common/extension.apis';
 import { traceVerbose } from '../../common/logging';
-import { getUserHomeDir, untildify } from '../../common/utils/pathUtils';
+import { untildify } from '../../common/utils/pathUtils';
 import { isWindows } from '../../common/utils/platformUtils';
 import { createRunningWorkerPool, WorkerPool } from '../../common/utils/workerPool';
 import { getConfiguration } from '../../common/workspace.apis';
@@ -184,15 +184,22 @@ class NativePythonFinderImpl implements NativePythonFinder {
     }
 
     private getRefreshOptions(options?: NativePythonEnvironmentKind | Uri[]): RefreshOptions | undefined {
+        // settings on where else to search
+        const venvFolders = getPythonSettingAndUntildify<string[]>('venvFolders') ?? [];
         if (options) {
             if (typeof options === 'string') {
+                // kind
                 return { searchKind: options };
             }
             if (Array.isArray(options)) {
-                return { searchPaths: options.map((item) => item.fsPath) };
+                const uriSearchPaths = options.map((item) => item.fsPath);
+                uriSearchPaths.push(...venvFolders);
+                return { searchPaths: uriSearchPaths };
             }
+        } else {
+            // if no options, then search venvFolders
+            return { searchPaths: venvFolders };
         }
-        return undefined;
     }
 
     private start(): rpc.MessageConnection {
@@ -355,10 +362,9 @@ function getCustomVirtualEnvDirs(): string[] {
         venvDirs.push(untildify(venvPath));
     }
     const venvFolders = getPythonSettingAndUntildify<string[]>('venvFolders') ?? [];
-    const homeDir = getUserHomeDir();
-    if (homeDir) {
-        venvFolders.map((item) => path.join(homeDir, item)).forEach((d) => venvDirs.push(d));
-    }
+    venvFolders.forEach((item) => {
+        venvDirs.push(item);
+    });
     return Array.from(new Set(venvDirs));
 }
 
