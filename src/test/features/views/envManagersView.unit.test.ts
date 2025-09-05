@@ -3,8 +3,8 @@ import * as sinon from 'sinon';
 import { InternalEnvironmentManager } from '../../../internal.api';
 
 suite('EnvManagerView Logic Tests', () => {
-    test('Pipenv manager should be identified by name', () => {
-        // Create pipenv manager with correct name
+    test('All managers should have refresh method', () => {
+        // Create pipenv manager
         const pipenvManager = new InternalEnvironmentManager('pipenv-manager', {
             name: 'pipenv',
             displayName: 'Pipenv',
@@ -17,12 +17,12 @@ suite('EnvManagerView Logic Tests', () => {
             get: () => Promise.resolve(undefined),
         });
 
-        // Create other manager with different name
-        const otherManager = new InternalEnvironmentManager('other-manager', {
-            name: 'other',
-            displayName: 'Other',
-            description: 'Other environment manager',
-            preferredPackageManagerId: 'pip',
+        // Create other manager
+        const condaManager = new InternalEnvironmentManager('conda-manager', {
+            name: 'conda',
+            displayName: 'Conda',
+            description: 'Conda environment manager',
+            preferredPackageManagerId: 'conda',
             refresh: () => Promise.resolve(),
             getEnvironments: () => Promise.resolve([]),
             resolve: () => Promise.resolve(undefined),
@@ -30,17 +30,19 @@ suite('EnvManagerView Logic Tests', () => {
             get: () => Promise.resolve(undefined),
         });
 
-        // Test that pipenv manager is correctly identified
+        // Test that both managers have the required properties
         assert.strictEqual(pipenvManager.name, 'pipenv');
-        assert.strictEqual(otherManager.name, 'other');
+        assert.strictEqual(condaManager.name, 'conda');
+        assert.ok(typeof pipenvManager.refresh === 'function');
+        assert.ok(typeof condaManager.refresh === 'function');
     });
 
-    test('Refresh method exists on manager and can be called', async () => {
+    test('Refresh method exists on any manager and can be called', async () => {
         const refreshSpy = sinon.spy();
         
         const manager = new InternalEnvironmentManager('test-manager', {
-            name: 'pipenv',
-            displayName: 'Pipenv',
+            name: 'any-manager',
+            displayName: 'Any Manager',
             description: 'Test manager',
             preferredPackageManagerId: 'pip',
             refresh: refreshSpy,

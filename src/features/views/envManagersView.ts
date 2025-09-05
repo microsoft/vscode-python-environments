@@ -96,10 +96,8 @@ export class EnvManagerView implements TreeDataProvider<EnvTreeItem>, Disposable
             const manager = (element as EnvManagerTreeItem).manager;
             const views: EnvTreeItem[] = [];
             
-            // Refresh Pipenv manager when expanded to pick up newly created environments
-            if (manager.name === 'pipenv') {
-                await manager.refresh(undefined);
-            }
+            // Refresh manager when expanded to pick up newly created environments
+            await manager.refresh(undefined);
             
             const envs = await manager.getEnvironments('all');
             envs.filter((e) => !e.group).forEach((env) => {
