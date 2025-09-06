@@ -1,6 +1,7 @@
+import * as cp from 'child_process';
 import * as fs from 'fs-extra';
 import * as path from 'path';
-import { commands, QuickInputButtons, TaskExecution, TaskRevealKind, Terminal, Uri, workspace } from 'vscode';
+import { commands, QuickInputButtons, TaskExecution, TaskRevealKind, Terminal, Uri, window, workspace } from 'vscode';
 import {
     CreateEnvironmentOptions,
     PythonEnvironment,
@@ -43,6 +44,354 @@ import {
     ProjectPackage,
     PythonEnvTreeItem,
 } from './views/treeViewItems';
+
+export async function getSitePackagesDirs(environment: PythonEnvironment): Promise<string[]> {
+    const python = environment.execInfo.run.executable;
+
+    const code = [
+        'import json, sys',
+        'paths = set()',
+        'sp = sys.prefix',
+        'try:\n    import sysconfig\n    p = sysconfig.get_paths()\n    for k in ("purelib","platlib"):\n        v = p.get(k)\n        if v and v.startswith(sp): paths.add(v)\nexcept Exception: pass',
+        'try:\n    import site\n    gsp = getattr(site, "getsitepackages", lambda: [])\n    for v in (gsp() or []):\n        if v and v.startswith(sp): paths.add(v)\nexcept Exception: pass',
+        'print(json.dumps(sorted(paths)))',
+    ].join('; ');
+
+    try {
+        const proc = cp.spawn(python, ['-c', code], { stdio: ['ignore', 'pipe', 'pipe'] });
+        const out: string[] = [];
+        const err: string[] = [];
+        proc.stdout.setEncoding('utf8');
+        proc.stderr.setEncoding('utf8');
+        await new Promise<void>((resolve) => {
+            proc.stdout.on('data', (d: string) => out.push(d));
+            proc.stderr.on('data', (d: string) => err.push(d));
+            proc.on('close', () => resolve());
+        });
+
+        if (out.length > 0) {
+            const text = out.join('').trim();
+            const arr = JSON.parse(text);
+            if (Array.isArray(arr)) {
+                const fixedDirs = arr.map((dir: string) => fixUNCPath(dir));
+                traceVerbose(`Found site-packages directories: ${JSON.stringify(fixedDirs)}`);
+                return fixedDirs as string[];
+            }
+        }
+
+        if (err.length > 0) {
+            traceVerbose(`Python stderr output: ${err.join('')}`);
+        }
+    } catch (ex) {
+        traceError('Error getting site-packages paths via Python execution', ex);
+    }
+
+    const candidates: string[] = [];
+    const base = fixUNCPath(environment.sysPrefix);
+    const pyVer = environment.version?.match(/^(\d+\.\d+)/)?.[1];
+
+    if (pyVer) {
+        candidates.push(path.join(base, 'Lib', 'site-packages'));
+        candidates.push(path.join(base, 'lib', `python${pyVer}`, 'site-packages'));
+    } else {
+        candidates.push(path.join(base, 'Lib', 'site-packages'));
+    }
+
+    traceVerbose(`Using fallback site-packages directories: ${JSON.stringify(candidates)}`);
+    return candidates;
+}
+
+function fixUNCPath(pathString: string): string {
+    if (pathString.startsWith('UNC\\')) {
+        return '\\' + pathString.substring(3);
+    }
+    return pathString;
+}
+
+function normalizeForCompare(pathString: string): string {
+    let normalized = fixUNCPath(pathString);
+    normalized = path.resolve(normalized);
+
+    if (process.platform === 'win32') {
+        normalized = normalized.replace(/\//g, '\\').toLowerCase();
+    } else {
+        normalized = normalized.replace(/\\/g, '/');
+    }
+
+    if (normalized.length > 1) {
+        normalized = normalized.replace(/[\\/]+$/, '');
+    }
+
+    return normalized;
+}
+
+export async function addPathToPth(
+    sitePackagesDir: string,
+    folderPath: string,
+): Promise<{ file: string; wrote: boolean; already: boolean } | undefined> {
+    const fixedSitePackagesDir = fixUNCPath(sitePackagesDir);
+
+    try {
+        if (!(await fs.pathExists(fixedSitePackagesDir))) {
+            traceVerbose(`Site packages directory does not exist: ${fixedSitePackagesDir}`);
+            return undefined;
+        }
+
+        const pthFile = path.join(fixedSitePackagesDir, 'vscode_extra_paths.pth');
+        let content = '';
+
+        if (await fs.pathExists(pthFile)) {
+            content = await fs.readFile(pthFile, 'utf8');
+        }
+
+        const lines = content
+            .split(/\r?\n/)
+            .map((line) => line.trim())
+            .filter((line) => line.length > 0);
+
+        const normalizedPath = normalizeForCompare(folderPath);
+        const existingPaths = lines.map((line) => normalizeForCompare(line));
+        const hasAlready = existingPaths.includes(normalizedPath);
+
+        if (!hasAlready) {
+            lines.push(normalizedPath);
+            const newContent = lines.join('\n') + '\n';
+            await fs.writeFile(pthFile, newContent, 'utf8');
+            traceVerbose(`Added path to .pth file: ${normalizedPath}`);
+            return { file: pthFile, wrote: true, already: false };
+        }
+
+        traceVerbose(`Path already exists in .pth file: ${normalizedPath}`);
+        return { file: pthFile, wrote: false, already: true };
+    } catch (ex) {
+        traceError(`Failed to write .pth file at ${fixedSitePackagesDir}`, ex);
+        return undefined;
+    }
+}
+
+export async function addFolderToPythonPathCommand(context: unknown, em: EnvironmentManagers): Promise<void> {
+    let environment: PythonEnvironment | undefined;
+
+    if (context instanceof PythonEnvTreeItem) {
+        environment = context.environment;
+    } else {
+        const editor = activeTextEditor();
+        const uri = editor?.document?.uri;
+
+        if (uri) {
+            environment = await em.getEnvironment(uri);
+        }
+
+        if (!environment) {
+            const managers = em.managers;
+            environment = await pickEnvironment(managers, em.getProjectEnvManagers([]), { projects: [] });
+        }
+    }
+
+    if (!environment) {
+        showErrorMessage('No Python environment selected.');
+        return;
+    }
+
+    let folderPath: string | undefined;
+
+    if (context instanceof Uri) {
+        folderPath = context.fsPath;
+    } else {
+        const picked = await window.showOpenDialog({
+            canSelectFiles: false,
+            canSelectFolders: true,
+            canSelectMany: false,
+            openLabel: 'Add to Python PATH',
+        });
+
+        if (!picked || picked.length === 0) {
+            return;
+        }
+
+        folderPath = picked[0].fsPath;
+    }
+
+    if (!folderPath) {
+        return;
+    }
+
+    const dirs = await getSitePackagesDirs(environment);
+
+    if (dirs.length === 0) {
+        showErrorMessage('Could not find site-packages directory for this environment.');
+        return;
+    }
+
+    let successFile: string | undefined;
+    let alreadyFile: string | undefined;
+
+    for (const dir of dirs) {
+        try {
+            const result = await addPathToPth(dir, folderPath);
+
+            if (result && (await fs.pathExists(result.file))) {
+                const stat = await fs.stat(result.file).catch(() => undefined);
+
+                if (stat?.isFile()) {
+                    const content = await fs.readFile(result.file, 'utf8').catch(() => '');
+                    const lines = content
+                        .split(/\r?\n/)
+                        .map((line) => line.trim())
+                        .filter((line) => line.length > 0);
+
+                    const normalizedLines = lines.map((line) => normalizeForCompare(line));
+                    const hasPath = normalizedLines.includes(normalizeForCompare(folderPath));
+
+                    if (hasPath) {
+                        if (result.wrote) {
+                            successFile = result.file;
+                            break;
+                        } else if (result.already) {
+                            alreadyFile = result.file;
+                        }
+                    }
+                }
+            }
+        } catch (ex) {
+            traceVerbose(`Failed to process site-packages directory ${dir}: ${ex}`);
+        }
+    }
+
+    await showResultToUser(successFile, alreadyFile, folderPath);
+}
+
+async function showResultToUser(
+    successFile: string | undefined,
+    alreadyFile: string | undefined,
+    folderPath: string,
+): Promise<void> {
+    if (successFile) {
+        const choice = await window.showInformationMessage(
+            `Added to Python Path: ${folderPath}`,
+            'Open .pth',
+            'Reveal in File Explorer',
+            'Copy .pth Path',
+        );
+
+        await handleUserChoice(choice, successFile);
+    } else if (alreadyFile) {
+        const choice = await window.showInformationMessage(
+            `Already in Python Path: ${folderPath}`,
+            'Open .pth',
+            'Reveal in File Explorer',
+            'Copy .pth Path',
+        );
+
+        await handleUserChoice(choice, alreadyFile);
+    } else {
+        showErrorMessage(
+            'Could not add folder to Python Path. No writable site-packages directory found for this environment.',
+        );
+    }
+}
+
+async function handleUserChoice(choice: string | undefined, filePath: string): Promise<void> {
+    switch (choice) {
+        case 'Open .pth':
+            try {
+                const doc = await workspace.openTextDocument(Uri.file(filePath));
+                await window.showTextDocument(doc, { preview: false });
+            } catch (ex) {
+                traceError(`Failed to open .pth file ${filePath}`, ex);
+            }
+            break;
+        case 'Reveal in File Explorer':
+            await commands.executeCommand('revealFileInOS', Uri.file(filePath));
+            break;
+        case 'Copy .pth Path':
+            await clipboardWriteText(filePath);
+            break;
+    }
+}
+
+export async function openPythonPathFileCommand(context: unknown, em: EnvironmentManagers): Promise<void> {
+    try {
+        let environment: PythonEnvironment | undefined;
+
+        if (context instanceof PythonEnvTreeItem) {
+            environment = context.environment;
+        } else {
+            const editor = activeTextEditor();
+            const uri = editor?.document?.uri;
+
+            if (uri) {
+                environment = await em.getEnvironment(uri);
+            }
+
+            if (!environment) {
+                const managers = em.managers;
+                environment = await pickEnvironment(managers, em.getProjectEnvManagers([]), { projects: [] });
+            }
+        }
+
+        if (!environment) {
+            showErrorMessage('No Python environment selected.');
+            return;
+        }
+
+        const sitePackagesDirs = await getSitePackagesDirs(environment);
+
+        if (sitePackagesDirs.length === 0) {
+            showErrorMessage(
+                `Could not find site-packages directory for environment: ${
+                    environment.displayName || environment.environmentPath.fsPath
+                }`,
+            );
+            return;
+        }
+
+        let vscodeExtraPathsPth: string | undefined;
+
+        for (const sitePackagesDir of sitePackagesDirs) {
+            const pthFilePath = path.join(sitePackagesDir, 'vscode_extra_paths.pth');
+            try {
+                if (await fs.pathExists(pthFilePath)) {
+                    vscodeExtraPathsPth = pthFilePath;
+                    break;
+                }
+            } catch (error) {
+                traceVerbose(`Could not check for .pth file in ${sitePackagesDir}: ${error}`);
+            }
+        }
+
+        if (!vscodeExtraPathsPth) {
+            const defaultPthPath = path.join(sitePackagesDirs[0], 'vscode_extra_paths.pth');
+
+            const action = await showInformationMessage(
+                `No Python path file found in environment: ${
+                    environment.displayName || environment.environmentPath.fsPath
+                }. Would you like to create one?`,
+                'Create File',
+                'Cancel',
+            );
+
+            if (action === 'Create File') {
+                try {
+                    await fs.writeFile(defaultPthPath, '# Python path entries\n# Add one path per line\n');
+
+                    const document = await workspace.openTextDocument(Uri.file(defaultPthPath));
+                    await window.showTextDocument(document);
+                } catch (error) {
+                    showErrorMessage(
+                        `Failed to create Python path file: ${error instanceof Error ? error.message : String(error)}`,
+                    );
+                }
+            }
+            return;
+        }
+
+        const document = await workspace.openTextDocument(Uri.file(vscodeExtraPathsPth));
+        await window.showTextDocument(document);
+    } catch (error) {
+        showErrorMessage(`Failed to open Python path file: ${error instanceof Error ? error.message : String(error)}`);
+    }
+}
 
 export async function refreshManagerCommand(context: unknown): Promise<void> {
     if (context instanceof EnvManagerTreeItem) {
