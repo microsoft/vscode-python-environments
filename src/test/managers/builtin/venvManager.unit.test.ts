@@ -3,6 +3,9 @@ import * as sinon from 'sinon';
 import { LogOutputChannel } from 'vscode';
 import { VenvManager } from '../../../managers/builtin/venvManager';
 import * as helpers from '../../../managers/builtin/helpers';
+import { PythonEnvironmentApi } from '../../../api';
+import { NativePythonFinder } from '../../../managers/common/nativePythonFinder';
+import { EnvironmentManager } from '../../../api';
 
 suite('VenvManager uv labeling tests', () => {
     let sandbox: sinon.SinonSandbox;
@@ -20,12 +23,12 @@ suite('VenvManager uv labeling tests', () => {
         sandbox.stub(helpers, 'isUvInstalled').resolves(false);
         
         // Create mocks for required dependencies
-        const mockNativeFinder = {} as any;
-        const mockApi = {} as any;
-        const mockBaseManager = {} as any;
+        const mockNativeFinder = {} as NativePythonFinder;
+        const mockApi = {} as PythonEnvironmentApi;
+        const mockBaseManager = {} as EnvironmentManager;
         const mockLog = {} as LogOutputChannel;
         
-        const mockInternalRefresh = sandbox.stub(VenvManager.prototype, 'internalRefresh' as any).resolves();
+        const mockInternalRefresh = sandbox.stub(VenvManager.prototype, 'internalRefresh' as keyof VenvManager).resolves();
         
         const manager = new VenvManager(mockNativeFinder, mockApi, mockBaseManager, mockLog);
         
@@ -44,14 +47,14 @@ suite('VenvManager uv labeling tests', () => {
         sandbox.stub(helpers, 'isUvInstalled').resolves(true);
         
         // Create mocks for required dependencies
-        const mockNativeFinder = {} as any;
-        const mockApi = {} as any;
-        const mockBaseManager = {} as any;
+        const mockNativeFinder = {} as NativePythonFinder;
+        const mockApi = {} as PythonEnvironmentApi;
+        const mockBaseManager = {} as EnvironmentManager;
         const mockLog = {
             info: sandbox.stub()
-        } as any;
+        } as unknown as LogOutputChannel;
         
-        const mockInternalRefresh = sandbox.stub(VenvManager.prototype, 'internalRefresh' as any).resolves();
+        const mockInternalRefresh = sandbox.stub(VenvManager.prototype, 'internalRefresh' as keyof VenvManager).resolves();
         
         const manager = new VenvManager(mockNativeFinder, mockApi, mockBaseManager, mockLog);
         
@@ -63,7 +66,7 @@ suite('VenvManager uv labeling tests', () => {
         // Verify displayName is updated when uv is available
         assert.strictEqual(manager.displayName, 'venv [uv]');
         assert.ok(mockInternalRefresh.calledOnce);
-        assert.ok(mockLog.info.calledWith('uv detected - updating venv manager display name'));
+        assert.ok((mockLog as unknown as { info: sinon.SinonStub }).info.calledWith('uv detected - updating venv manager display name'));
     });
 
     test('should only initialize once and preserve displayName', async () => {
@@ -71,14 +74,14 @@ suite('VenvManager uv labeling tests', () => {
         sandbox.stub(helpers, 'isUvInstalled').resolves(true);
         
         // Create mocks for required dependencies
-        const mockNativeFinder = {} as any;
-        const mockApi = {} as any;
-        const mockBaseManager = {} as any;
+        const mockNativeFinder = {} as NativePythonFinder;
+        const mockApi = {} as PythonEnvironmentApi;
+        const mockBaseManager = {} as EnvironmentManager;
         const mockLog = {
             info: sandbox.stub()
-        } as any;
+        } as unknown as LogOutputChannel;
         
-        const mockInternalRefresh = sandbox.stub(VenvManager.prototype, 'internalRefresh' as any).resolves();
+        const mockInternalRefresh = sandbox.stub(VenvManager.prototype, 'internalRefresh' as keyof VenvManager).resolves();
         
         const manager = new VenvManager(mockNativeFinder, mockApi, mockBaseManager, mockLog);
         
@@ -89,6 +92,6 @@ suite('VenvManager uv labeling tests', () => {
         // Verify displayName is set correctly and internal refresh is called only once
         assert.strictEqual(manager.displayName, 'venv [uv]');
         assert.ok(mockInternalRefresh.calledOnce);
-        assert.ok(mockLog.info.calledOnce);
+        assert.ok((mockLog as unknown as { info: sinon.SinonStub }).info.calledOnce);
     });
 });
