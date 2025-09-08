@@ -52,7 +52,6 @@ import {
     setVenvForWorkspace,
     setVenvForWorkspaces,
 } from './venvUtils';
-import { isUvInstalled } from './helpers';
 
 export class VenvManager implements EnvironmentManager {
     private collection: PythonEnvironment[] = [];
@@ -98,13 +97,6 @@ export class VenvManager implements EnvironmentManager {
         this._initialized = createDeferred();
 
         try {
-            // Check if uv is available and update display name accordingly
-            const uvAvailable = await isUvInstalled(this.log);
-            if (uvAvailable) {
-                this.displayName = 'venv [uv]';
-                this.log?.info('uv detected - updating venv manager display name');
-            }
-            
             await this.internalRefresh(undefined, false, VenvManagerStrings.venvInitialize);
         } finally {
             this._initialized.resolve();
@@ -125,6 +117,14 @@ export class VenvManager implements EnvironmentManager {
                 shortVersion(this.globalEnv.version),
             ),
         };
+    }
+
+    /**
+     * Updates the display name for this environment manager.
+     * @param name The new display name to set.
+     */
+    public setDisplayName(name: string): void {
+        this.displayName = name;
     }
 
     async create(

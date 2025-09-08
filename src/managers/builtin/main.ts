@@ -5,6 +5,7 @@ import { onDidEndTerminalShellExecution } from '../../common/window.apis';
 import { createFileSystemWatcher, onDidDeleteFiles } from '../../common/workspace.apis';
 import { getPythonApi } from '../../features/pythonApi';
 import { NativePythonFinder } from '../common/nativePythonFinder';
+import { isUvInstalled } from './helpers';
 import { PipPackageManager } from './pipManager';
 import { isPipInstallCommand } from './pipUtils';
 import { SysPythonManager } from './sysPythonManager';
@@ -19,6 +20,12 @@ export async function registerSystemPythonFeatures(
     const api: PythonEnvironmentApi = await getPythonApi();
     const venvManager = new VenvManager(nativeFinder, api, envManager, log);
     const pkgManager = new PipPackageManager(api, log, venvManager);
+
+    const uvAvailable = await isUvInstalled(log);
+    if (uvAvailable) {
+        venvManager.setDisplayName('venv [uv]');
+        log.info('uv detected - updating venv manager display name');
+    }
 
     disposables.push(
         api.registerPackageManager(pkgManager),
