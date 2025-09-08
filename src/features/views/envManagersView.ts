@@ -95,10 +95,6 @@ export class EnvManagerView implements TreeDataProvider<EnvTreeItem>, Disposable
         if (element.kind === EnvTreeItemKind.manager) {
             const manager = (element as EnvManagerTreeItem).manager;
             const views: EnvTreeItem[] = [];
-            
-            // Refresh manager when expanded to pick up newly created environments
-            await manager.refresh(undefined);
-            
             const envs = await manager.getEnvironments('all');
             envs.filter((e) => !e.group).forEach((env) => {
                 const view = new PythonEnvTreeItem(env, element as EnvManagerTreeItem, this.selected.get(env.envId.id));
