@@ -52,6 +52,7 @@ import {
     setVenvForWorkspace,
     setVenvForWorkspaces,
 } from './venvUtils';
+import { isUvInstalled } from './helpers';
 
 export class VenvManager implements EnvironmentManager {
     private collection: PythonEnvironment[] = [];
@@ -66,7 +67,7 @@ export class VenvManager implements EnvironmentManager {
     public readonly onDidChangeEnvironments = this._onDidChangeEnvironments.event;
 
     readonly name: string;
-    readonly displayName: string;
+    displayName: string; // Made mutable to update with uv detection
     readonly preferredPackageManagerId: string;
     readonly description?: string | undefined;
     readonly tooltip?: string | MarkdownString | undefined;
@@ -97,6 +98,13 @@ export class VenvManager implements EnvironmentManager {
         this._initialized = createDeferred();
 
         try {
+            // Check if uv is available and update display name accordingly
+            const uvAvailable = await isUvInstalled(this.log);
+            if (uvAvailable) {
+                this.displayName = 'venv [uv]';
+                this.log?.info('uv detected - updating venv manager display name');
+            }
+            
             await this.internalRefresh(undefined, false, VenvManagerStrings.venvInitialize);
         } finally {
             this._initialized.resolve();
