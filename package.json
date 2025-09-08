@@ -497,6 +497,18 @@
                     "when": "explorerViewletVisible && resourceExtname == .py"
                 }
             ],
+            "editor/title": [
+                {
+                    "command": "python-envs.terminal.activate",
+                    "group": "navigation",
+                    "when": "resourceScheme == vscode-terminal && config.python-envs.terminal.showActivateButton && pythonTerminalActivation && !pythonTerminalActivated"
+                },
+                {
+                    "command": "python-envs.terminal.deactivate",
+                    "group": "navigation",
+                    "when": "resourceScheme == vscode-terminal && config.python-envs.terminal.showActivateButton && pythonTerminalActivation && pythonTerminalActivated"
+                }
+            ],
             "editor/title/run": [
                 {
                     "command": "python-envs.runAsTask",
