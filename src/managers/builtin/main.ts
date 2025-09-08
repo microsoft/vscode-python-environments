@@ -1,5 +1,6 @@
 import { Disposable, LogOutputChannel } from 'vscode';
 import { PythonEnvironmentApi } from '../../api';
+import { setVenvManagerStrings, VenvManagerStringsWithUv } from '../../common/localize';
 import { createSimpleDebounce } from '../../common/utils/debounce';
 import { onDidEndTerminalShellExecution } from '../../common/window.apis';
 import { createFileSystemWatcher, onDidDeleteFiles } from '../../common/workspace.apis';
@@ -25,6 +26,8 @@ export async function registerSystemPythonFeatures(
     if (uvAvailable) {
         venvManager.setDisplayName('venv [uv]');
         log.info('uv detected - updating venv manager display name');
+        // Switch all venv-related UI strings to uv versions
+        setVenvManagerStrings(VenvManagerStringsWithUv);
     }
 
     disposables.push(

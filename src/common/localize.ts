@@ -77,32 +77,74 @@ export namespace ProjectViews {
     export const noPackages = l10n.t('No packages found');
 }
 
-export namespace VenvManagerStrings {
-    export const venvManagerDescription = l10n.t('Manages virtual environments created using `venv`');
-    export const venvInitialize = l10n.t('Initializing virtual environments');
-    export const venvRefreshing = l10n.t('Refreshing virtual environments');
-    export const venvGlobalFolder = l10n.t('Select a folder to create a global virtual environment');
-    export const venvGlobalFoldersSetting = l10n.t('Venv Folders Setting');
+export class VenvManagerStringsNoUv {
+    static venvManagerDescription = l10n.t('Manages virtual environments created using `venv`');
+    static venvInitialize = l10n.t('Initializing virtual environments');
+    static venvRefreshing = l10n.t('Refreshing virtual environments');
+    static venvGlobalFolder = l10n.t('Select a folder to create a global virtual environment');
+    static venvGlobalFoldersSetting = l10n.t('Venv Folders Setting');
 
-    export const venvErrorNoBasePython = l10n.t('No base Python found');
-    export const venvErrorNoPython3 = l10n.t('Did not find any base Python 3');
+    static venvErrorNoBasePython = l10n.t('No base Python found');
+    static venvErrorNoPython3 = l10n.t('Did not find any base Python 3');
 
-    export const venvName = l10n.t('Enter a name for the virtual environment');
-    export const venvNameErrorEmpty = l10n.t('Name cannot be empty');
-    export const venvNameErrorExists = l10n.t('A folder with the same name already exists');
-    export const venvCreateFailed = l10n.t('Failed to create virtual environment');
+    static venvName = l10n.t('Enter a name for the virtual environment');
+    static venvNameErrorEmpty = l10n.t('Name cannot be empty');
+    static venvNameErrorExists = l10n.t('A folder with the same name already exists');
+    static venvCreateFailed = l10n.t('Failed to create virtual environment');
 
-    export const venvRemoving = l10n.t('Removing virtual environment');
-    export const venvRemoveFailed = l10n.t('Failed to remove virtual environment');
+    static venvRemoving = l10n.t('Removing virtual environment');
+    static venvRemoveFailed = l10n.t('Failed to remove virtual environment');
 
-    export const installEditable = l10n.t('Install project as editable');
-    export const searchingDependencies = l10n.t('Searching for dependencies');
+    static installEditable = l10n.t('Install project as editable');
+    static searchingDependencies = l10n.t('Searching for dependencies');
 
-    export const selectQuickOrCustomize = l10n.t('Select environment creation mode');
-    export const quickCreate = l10n.t('Quick Create');
-    export const quickCreateDescription = l10n.t('Create a virtual environment in the workspace root');
-    export const customize = l10n.t('Custom');
-    export const customizeDescription = l10n.t('Choose python version, location, packages, name, etc.');
+    static selectQuickOrCustomize = l10n.t('Select environment creation mode');
+    static quickCreate = l10n.t('Quick Create');
+    static quickCreateDescription = l10n.t('Create a virtual environment in the workspace root');
+    static customize = l10n.t('Custom');
+    static customizeDescription = l10n.t('Choose python version, location, packages, name, etc.');
+}
+
+export class VenvManagerStringsWithUv {
+    static venvManagerDescription = l10n.t('Manages virtual environments created using `venv [uv]`');
+    static venvInitialize = l10n.t('Initializing virtual environments');
+    static venvRefreshing = l10n.t('Refreshing virtual environments');
+    static venvGlobalFolder = l10n.t('Select a folder to create a global virtual environment');
+    static venvGlobalFoldersSetting = l10n.t('Venv Folders Setting');
+
+    static venvErrorNoBasePython = l10n.t('No base Python found');
+    static venvErrorNoPython3 = l10n.t('Did not find any base Python 3');
+
+    static venvName = l10n.t('Enter a name for the virtual environment');
+    static venvNameErrorEmpty = l10n.t('Name cannot be empty');
+    static venvNameErrorExists = l10n.t('A folder with the same name already exists');
+    static venvCreateFailed = l10n.t('Failed to create virtual environment');
+
+    static venvRemoving = l10n.t('Removing virtual environment');
+    static venvRemoveFailed = l10n.t('Failed to remove virtual environment');
+
+    static installEditable = l10n.t('Install project as editable');
+    static searchingDependencies = l10n.t('Searching for dependencies');
+
+    static selectQuickOrCustomize = l10n.t('Select environment creation mode');
+    static quickCreate = l10n.t('Quick Create');
+    static quickCreateDescription = l10n.t(
+        'Create a virtual environment in the workspace root using uv for fast installs',
+    );
+    static customize = l10n.t('Custom');
+    static customizeDescription = l10n.t(
+        'Choose python version, location, packages, name, etc. (uses uv for installs)',
+    );
+}
+
+/**
+ * VenvManagerStrings is assigned to either VenvManagerStringsNoUv or VenvManagerStringsWithUv
+ * depending on which environment manager is active. This variable can be reassigned at runtime.
+ */
+export let VenvManagerStrings: typeof VenvManagerStringsNoUv | typeof VenvManagerStringsWithUv = VenvManagerStringsNoUv;
+
+export function setVenvManagerStrings(val: typeof VenvManagerStringsNoUv | typeof VenvManagerStringsWithUv) {
+    VenvManagerStrings = val;
 }
 
 export namespace SysManagerStrings {
