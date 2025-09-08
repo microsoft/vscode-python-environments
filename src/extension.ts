@@ -563,10 +563,10 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
         sysPythonManager.resolve(sysMgr);
         await Promise.all([
             registerSystemPythonFeatures(nativeFinder, context.subscriptions, outputChannel, sysMgr),
-            registerCondaFeatures(nativeFinder, context.subscriptions, outputChannel),
-            registerPyenvFeatures(nativeFinder, context.subscriptions),
-            registerPipenvFeatures(nativeFinder, context.subscriptions),
-            registerPoetryFeatures(nativeFinder, context.subscriptions, outputChannel),
+            registerCondaFeatures(nativeFinder, context.subscriptions, outputChannel, projectManager),
+            registerPyenvFeatures(nativeFinder, context.subscriptions, projectManager),
+            registerPipenvFeatures(nativeFinder, context.subscriptions, projectManager),
+            registerPoetryFeatures(nativeFinder, context.subscriptions, outputChannel, projectManager),
             shellStartupVarsMgr.initialize(),
         ]);
 
@@ -596,15 +596,9 @@ export async function disposeAll(disposables: IDisposable[]): Promise<void> {
 }
 
 /**
- * Resolves and sets the default Python interpreter for the workspace based on the
- * 'python.defaultInterpreterPath' setting and the selected environment manager.
- * If the setting is present and no default environment manager is set (or is venv),
- * attempts to resolve the interpreter path using the native finder. If the resolved
- * path differs from the configured path, then creates and sets a PythonEnvironment
- * object for the workspace.
- *
- * @param nativeFinder - The NativePythonFinder instance used to resolve interpreter paths.
- * @param envManagers - The EnvironmentManagers instance containing all registered managers.
+ * Sets the default Python interpreter for the workspace if the user has not explicitly set 'defaultEnvManager' or it is set to venv.
+ * @param nativeFinder -  used to resolve interpreter paths.
+ * @param envManagers - contains all registered managers.
  * @param api - The PythonEnvironmentApi for environment resolution and setting.
  */
 async function resolveDefaultInterpreter(
@@ -615,9 +609,13 @@ async function resolveDefaultInterpreter(
     const defaultInterpreterPath = getConfiguration('python').get<string>('defaultInterpreterPath');
 
     if (defaultInterpreterPath) {
-        const defaultManager = getConfiguration('python-envs').get<string>('defaultEnvManager', 'undefined');
-        traceInfo(`resolveDefaultInterpreter setting exists; found defaultEnvManager: ${defaultManager}`);
-        if (!defaultManager || defaultManager === 'ms-python.python:venv') {
+        const config = getConfiguration('python-envs');
+        const inspect = config.inspect<string>('defaultEnvManager');
+        const userDefinedDefaultManager =
+            inspect?.workspaceFolderValue !== undefined ||
+            inspect?.workspaceValue !== undefined ||
+            inspect?.globalValue !== undefined;
+        if (!userDefinedDefaultManager) {
             try {
                 const resolved: NativeEnvInfo = await nativeFinder.resolve(defaultInterpreterPath);
                 if (resolved && resolved.executable) {

@@ -2,7 +2,9 @@ import { Disposable, LogOutputChannel } from 'vscode';
 import { PythonEnvironmentApi } from '../../api';
 import { traceInfo } from '../../common/logging';
 import { getPythonApi } from '../../features/pythonApi';
+import { PythonProjectManager } from '../../internal.api';
 import { NativePythonFinder } from '../common/nativePythonFinder';
+import { notifyMissingManagerIfDefault } from '../common/utils';
 import { CondaEnvManager } from './condaEnvManager';
 import { CondaPackageManager } from './condaPackageManager';
 import { CondaSourcingStatus, constructCondaSourcingStatus } from './condaSourcingUtils';
@@ -12,6 +14,7 @@ export async function registerCondaFeatures(
     nativeFinder: NativePythonFinder,
     disposables: Disposable[],
     log: LogOutputChannel,
+    projectManager: PythonProjectManager,
 ): Promise<void> {
     const api: PythonEnvironmentApi = await getPythonApi();
 
@@ -34,5 +37,6 @@ export async function registerCondaFeatures(
         );
     } catch (ex) {
         traceInfo('Conda not found, turning off conda features.', ex);
+        await notifyMissingManagerIfDefault('ms-python.python:conda', projectManager, api);
     }
 }
