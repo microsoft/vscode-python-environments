@@ -29,7 +29,7 @@ import {
     SetEnvironmentScope,
 } from '../../api';
 import { PYTHON_EXTENSION_ID } from '../../common/constants';
-import { VenvManagerStringsNoUv } from '../../common/localize';
+import { VenvManagerCommonStrings, VenvManagerStringsNoUv } from '../../common/localize';
 import { traceError, traceWarn } from '../../common/logging';
 import { createDeferred, Deferred } from '../../common/utils/deferred';
 import { showErrorMessage, withProgress } from '../../common/window.apis';
@@ -97,7 +97,7 @@ export class VenvManager implements EnvironmentManager {
         this._initialized = createDeferred();
 
         try {
-            await this.internalRefresh(undefined, false, VenvManagerStringsNoUv.venvInitialize);
+            await this.internalRefresh(undefined, false, VenvManagerCommonStrings.venvInitialize);
         } finally {
             this._initialized.resolve();
         }
@@ -156,7 +156,7 @@ export class VenvManager implements EnvironmentManager {
                 // error on missing information
                 if (!this.globalEnv) {
                     this.log.error('No base python found');
-                    showErrorMessage(VenvManagerStringsNoUv.venvErrorNoBasePython);
+                    showErrorMessage(VenvManagerCommonStrings.venvErrorNoBasePython);
                     throw new Error('No base python found');
                 }
                 if (!this.globalEnv.version.startsWith('3.')) {
@@ -164,7 +164,7 @@ export class VenvManager implements EnvironmentManager {
                     globals.forEach((e, i) => {
                         this.log.error(`${i}: ${e.version} : ${e.environmentPath.fsPath}`);
                     });
-                    showErrorMessage(VenvManagerStringsNoUv.venvErrorNoPython3);
+                    showErrorMessage(VenvManagerCommonStrings.venvErrorNoPython3);
                     throw new Error('Did not find any base python 3.*');
                 }
                 if (this.globalEnv && this.globalEnv.version.startsWith('3.')) {
@@ -292,14 +292,14 @@ export class VenvManager implements EnvironmentManager {
     }
 
     async refresh(scope: RefreshEnvironmentsScope): Promise<void> {
-        return this.internalRefresh(scope, true, VenvManagerStringsNoUv.venvRefreshing);
+        return this.internalRefresh(scope, true, VenvManagerCommonStrings.venvRefreshing);
     }
 
     async watcherRefresh(): Promise<void> {
         if (this.skipWatcherRefresh) {
             return;
         }
-        return this.internalRefresh(undefined, true, VenvManagerStringsNoUv.venvRefreshing);
+        return this.internalRefresh(undefined, true, VenvManagerCommonStrings.venvRefreshing);
     }
 
     private async internalRefresh(

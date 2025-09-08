@@ -4,7 +4,7 @@ import * as path from 'path';
 import { LogOutputChannel, ProgressLocation, QuickInputButtons, QuickPickItem, Uri } from 'vscode';
 import { PackageManagementOptions, PythonEnvironment, PythonEnvironmentApi, PythonProject } from '../../api';
 import { EXTENSION_ROOT_DIR } from '../../common/constants';
-import { PackageManagement, Pickers, VenvManagerStringsNoUv } from '../../common/localize';
+import { PackageManagement, Pickers, VenvManagerCommonStrings, VenvManagerStrings } from '../../common/localize';
 import { traceInfo } from '../../common/logging';
 import { showQuickPickWithButtons, withProgress } from '../../common/window.apis';
 import { findFiles } from '../../common/workspace.apis';
@@ -36,7 +36,7 @@ function getTomlInstallable(toml: tomljs.JsonMap, tomlPath: Uri): Installable[] 
         extras.push({
             name,
             displayName: name,
-            description: VenvManagerStringsNoUv.installEditable,
+            description: VenvManagerStrings.installEditable,
             group: 'TOML',
             args: ['-e', projectDir],
             uri: tomlPath,
@@ -177,7 +177,7 @@ export async function getProjectInstallable(
     await withProgress(
         {
             location: ProgressLocation.Notification,
-            title: VenvManagerStringsNoUv.searchingDependencies,
+            title: VenvManagerCommonStrings.searchingDependencies,
         },
         async (_progress, token) => {
             const results: Uri[] = (

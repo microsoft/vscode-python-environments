@@ -77,64 +77,41 @@ export namespace ProjectViews {
     export const noPackages = l10n.t('No packages found');
 }
 
-export class VenvManagerStringsNoUv {
-    static venvManagerDescription = l10n.t('Manages virtual environments created using `venv`');
+export class VenvManagerCommonStrings {
     static venvInitialize = l10n.t('Initializing virtual environments');
     static venvRefreshing = l10n.t('Refreshing virtual environments');
     static venvGlobalFolder = l10n.t('Select a folder to create a global virtual environment');
     static venvGlobalFoldersSetting = l10n.t('Venv Folders Setting');
-
     static venvErrorNoBasePython = l10n.t('No base Python found');
     static venvErrorNoPython3 = l10n.t('Did not find any base Python 3');
-
     static venvName = l10n.t('Enter a name for the virtual environment');
     static venvNameErrorEmpty = l10n.t('Name cannot be empty');
     static venvNameErrorExists = l10n.t('A folder with the same name already exists');
     static venvCreateFailed = l10n.t('Failed to create virtual environment');
-
     static venvRemoving = l10n.t('Removing virtual environment');
     static venvRemoveFailed = l10n.t('Failed to remove virtual environment');
-
-    static installEditable = l10n.t('Install project as editable');
     static searchingDependencies = l10n.t('Searching for dependencies');
-
     static selectQuickOrCustomize = l10n.t('Select environment creation mode');
     static quickCreate = l10n.t('Quick Create');
-    static quickCreateDescription = l10n.t('Create a virtual environment in the workspace root');
     static customize = l10n.t('Custom');
+}
+
+export class VenvManagerStringsNoUv {
+    static venvManagerDescription = l10n.t('Manages virtual environments created using `venv`');
+    static quickCreateDescription = l10n.t('Create a virtual environment in the workspace root');
     static customizeDescription = l10n.t('Choose python version, location, packages, name, etc.');
+    static installEditable = l10n.t('Install project as editable');
 }
 
 export class VenvManagerStringsWithUv {
     static venvManagerDescription = l10n.t('Manages virtual environments created using `venv [uv]`');
-    static venvInitialize = l10n.t('Initializing virtual environments');
-    static venvRefreshing = l10n.t('Refreshing virtual environments');
-    static venvGlobalFolder = l10n.t('Select a folder to create a global virtual environment');
-    static venvGlobalFoldersSetting = l10n.t('Venv Folders Setting');
-
-    static venvErrorNoBasePython = l10n.t('No base Python found');
-    static venvErrorNoPython3 = l10n.t('Did not find any base Python 3');
-
-    static venvName = l10n.t('Enter a name for the virtual environment');
-    static venvNameErrorEmpty = l10n.t('Name cannot be empty');
-    static venvNameErrorExists = l10n.t('A folder with the same name already exists');
-    static venvCreateFailed = l10n.t('Failed to create virtual environment');
-
-    static venvRemoving = l10n.t('Removing virtual environment');
-    static venvRemoveFailed = l10n.t('Failed to remove virtual environment');
-
-    static installEditable = l10n.t('Install project as editable');
-    static searchingDependencies = l10n.t('Searching for dependencies');
-
-    static selectQuickOrCustomize = l10n.t('Select environment creation mode');
-    static quickCreate = l10n.t('Quick Create');
     static quickCreateDescription = l10n.t(
         'Create a virtual environment in the workspace root using uv for fast installs',
     );
-    static customize = l10n.t('Custom');
     static customizeDescription = l10n.t(
         'Choose python version, location, packages, name, etc. (uses uv for installs)',
     );
+    static installEditable = l10n.t('Install project as editable using uv');
 }
 
 /**
