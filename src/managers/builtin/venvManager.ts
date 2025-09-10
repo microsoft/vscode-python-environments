@@ -66,7 +66,7 @@ export class VenvManager implements EnvironmentManager {
     public readonly onDidChangeEnvironments = this._onDidChangeEnvironments.event;
 
     readonly name: string;
-    displayName: string; // Made mutable to update with uv detection
+    displayName: string;
     readonly preferredPackageManagerId: string;
     readonly description?: string | undefined;
     readonly tooltip?: string | MarkdownString | undefined;

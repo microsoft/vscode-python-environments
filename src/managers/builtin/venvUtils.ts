@@ -306,17 +306,12 @@ async function createWithProgress(
         os.platform() === 'win32' ? path.join(envPath, 'Scripts', 'python.exe') : path.join(envPath, 'bin', 'python');
 
     const useUv = await isUvInstalled(log);
-    const progressTitle = useUv
-        ? l10n.t(
-              'Creating virtual environment named {0} using python version {1} [uv].',
-              path.basename(envPath),
-              basePython.version,
-          )
-        : l10n.t(
-              'Creating virtual environment named {0} using python version {1}.',
-              path.basename(envPath),
-              basePython.version,
-          );
+    const progressTitle = l10n.t(
+        'Creating virtual environment named {0} using python version {1}{2}.',
+        path.basename(envPath),
+        basePython.version,
+        useUv ? ' [uv]' : '',
+    );
 
     return await withProgress(
         {
