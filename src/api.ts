@@ -379,7 +379,7 @@ export interface EnvironmentManager {
     quickCreateConfig?(): QuickCreateConfig | undefined;
 
     /**
-     * Creates a new Python environment within the specified scope. Create should support adding a .gitignore file if it creates a folder within the workspace.
+     * Creates a new Python environment within the specified scope. Create should support adding a .gitignore file if it creates a folder within the workspace. If a manager does not support environment creation, do not implement this method; the UI disables "create" options when `this.manager.create === undefined`.
      * @param scope - The scope within which to create the environment.
      * @param options - Optional parameters for creating the Python environment.
      * @returns A promise that resolves to the created Python environment, or undefined if creation failed.
