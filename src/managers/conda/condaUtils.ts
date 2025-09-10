@@ -757,8 +757,19 @@ export async function pickPythonVersion(
     );
 
     // Sort versions by major version (descending), ignoring minor/patch for simplicity
-    const getMajor = (v: string) => parseInt(v.split('.')[0]);
-    versions = versions.sort((a, b) => getMajor(b) - getMajor(a));
+    const parseMajorMinor = (v: string) => {
+        const m = v.match(/^(\d+)(?:\.(\d+))?/);
+        return { major: m ? Number(m[1]) : 0, minor: m && m[2] ? Number(m[2]) : 0 };
+    };
+
+    versions = versions.sort((a, b) => {
+        const pa = parseMajorMinor(a);
+        const pb = parseMajorMinor(b);
+        if (pa.major !== pb.major) {
+            return pb.major - pa.major;
+        } // desc by major
+        return pb.minor - pa.minor; // desc by minor
+    });
 
     if (!versions || versions.length === 0) {
         versions = ['3.13', '3.12', '3.11', '3.10', '3.9'];
