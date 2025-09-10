@@ -2,12 +2,12 @@ import * as ch from 'child_process';
 import * as fs from 'fs-extra';
 import * as path from 'path';
 import { PassThrough } from 'stream';
-import { Disposable, ExtensionContext, LogOutputChannel, Uri } from 'vscode';
+import { Disposable, ExtensionContext, LogOutputChannel, Uri, workspace } from 'vscode';
 import * as rpc from 'vscode-jsonrpc/node';
 import { PythonProjectApi } from '../../api';
 import { ENVS_EXTENSION_ID, PYTHON_EXTENSION_ID } from '../../common/constants';
 import { getExtension } from '../../common/extension.apis';
-import { traceVerbose } from '../../common/logging';
+import { traceVerbose, traceLog } from '../../common/logging';
 import { untildify } from '../../common/utils/pathUtils';
 import { isWindows } from '../../common/utils/platformUtils';
 import { createRunningWorkerPool, WorkerPool } from '../../common/utils/workerPool';
@@ -326,10 +326,24 @@ class NativePythonFinderImpl implements NativePythonFinder {
      * Must be invoked when ever there are changes to any data related to the configuration details.
      */
     private async configure() {
+        // Get custom virtual environment directories
+        const customVenvDirs = getCustomVirtualEnvDirs();
+        
+        // Get final search set from searchPaths setting
+        const finalSearchSet = await createFinalSearchSet();
+        
+        // Combine and deduplicate all environment directories
+        const allEnvironmentDirectories = [...customVenvDirs, ...finalSearchSet];
+        const environmentDirectories = Array.from(new Set(allEnvironmentDirectories));
+        
+        traceLog('Custom venv directories:', customVenvDirs);
+        traceLog('Final search set:', finalSearchSet);
+        traceLog('Combined environment directories:', environmentDirectories);
+
         const options: ConfigurationOptions = {
             workspaceDirectories: this.api.getPythonProjects().map((item) => item.uri.fsPath),
-            // We do not want to mix this with `search_paths`
-            environmentDirectories: getCustomVirtualEnvDirs(),
+            // Include both custom venv dirs and search paths
+            environmentDirectories,
             condaExecutable: getPythonSettingAndUntildify<string>('condaPath'),
             poetryExecutable: getPythonSettingAndUntildify<string>('poetryPath'),
             cacheDirectory: this.cacheDirectory?.fsPath,
@@ -378,6 +392,93 @@ function getPythonSettingAndUntildify<T>(name: string, scope?: Uri): T | undefin
         return value ? (untildify(value as string) as unknown as T) : undefined;
     }
     return value;
+}
+
+function getPythonEnvSettingAndUntildify<T>(name: string, scope?: Uri): T | undefined {
+    const value = getConfiguration('python-env', scope).get<T>(name);
+    if (typeof value === 'string') {
+        return value ? (untildify(value as string) as unknown as T) : undefined;
+    }
+    return value;
+}
+
+/**
+ * Creates the final search set from configured search paths.
+ * Handles executables, directories, and regex patterns.
+ */
+async function createFinalSearchSet(): Promise<string[]> {
+    const searchPaths = getPythonEnvSettingAndUntildify<string[]>('searchPaths') ?? [];
+    const finalSearchSet: string[] = [];
+
+    traceLog('Processing search paths:', searchPaths);
+
+    for (const searchPath of searchPaths) {
+        try {
+            if (!searchPath || searchPath.trim() === '') {
+                continue;
+            }
+
+            const trimmedPath = searchPath.trim();
+            
+            // Check if it's a regex pattern (contains regex special characters)
+            // Note: Windows paths contain backslashes, so we need to be more careful
+            const regexChars = /[*?[\]{}()^$+|]/;
+            const hasBackslash = trimmedPath.includes('\\');
+            const isWindowsPath = hasBackslash && (trimmedPath.match(/^[A-Za-z]:\\/) || trimmedPath.match(/^\\\\[^\\]+\\/));
+            const isRegexPattern = regexChars.test(trimmedPath) || (hasBackslash && !isWindowsPath);
+            
+            if (isRegexPattern) {
+                traceLog('Processing regex pattern:', trimmedPath);
+                traceLog('Warning: Using regex patterns in searchPaths may cause performance issues');
+                
+                // Use workspace.findFiles to search for python executables
+                const foundFiles = await workspace.findFiles(trimmedPath, null);
+                
+                for (const file of foundFiles) {
+                    const filePath = file.fsPath;
+                    // Check if it's likely a python executable
+                    if (filePath.toLowerCase().includes('python') || path.basename(filePath).startsWith('python')) {
+                        // Get grand-grand parent folder (file -> bin -> env -> this)
+                        const grandGrandParent = path.dirname(path.dirname(path.dirname(filePath)));
+                        if (grandGrandParent && grandGrandParent !== path.dirname(grandGrandParent)) {
+                            finalSearchSet.push(grandGrandParent);
+                            traceLog('Added grand-grand parent from regex match:', grandGrandParent);
+                        }
+                    }
+                }
+            } 
+            // Check if it's a direct executable path
+            else if (await fs.pathExists(trimmedPath) && (await fs.stat(trimmedPath)).isFile()) {
+                traceLog('Processing executable path:', trimmedPath);
+                // Get grand-grand parent folder
+                const grandGrandParent = path.dirname(path.dirname(path.dirname(trimmedPath)));
+                if (grandGrandParent && grandGrandParent !== path.dirname(grandGrandParent)) {
+                    finalSearchSet.push(grandGrandParent);
+                    traceLog('Added grand-grand parent from executable:', grandGrandParent);
+                }
+            }
+            // Check if it's a directory path
+            else if (await fs.pathExists(trimmedPath) && (await fs.stat(trimmedPath)).isDirectory()) {
+                traceLog('Processing directory path:', trimmedPath);
+                // Add directory as-is
+                finalSearchSet.push(trimmedPath);
+                traceLog('Added directory as-is:', trimmedPath);
+            }
+            // If path doesn't exist, try to check if it could be an executable that might exist later
+            else {
+                traceLog('Path does not exist, treating as potential directory:', trimmedPath);
+                // Treat as directory path for future resolution
+                finalSearchSet.push(trimmedPath);
+            }
+        } catch (error) {
+            traceLog('Error processing search path:', searchPath, error);
+        }
+    }
+
+    // Remove duplicates and return
+    const uniquePaths = Array.from(new Set(finalSearchSet));
+    traceLog('Final search set created:', uniquePaths);
+    return uniquePaths;
 }
 
 export function getCacheDirectory(context: ExtensionContext): Uri {
