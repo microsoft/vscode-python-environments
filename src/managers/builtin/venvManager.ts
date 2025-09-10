@@ -317,7 +317,7 @@ export class VenvManager implements EnvironmentManager {
                     this.api,
                     this.log,
                     this,
-                    scope ? [scope] : this.api.getPythonProjects().map((p) => p.uri),
+                    scope ? [scope] : undefined,
                 );
                 await this.loadEnvMap();
 
