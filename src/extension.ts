@@ -498,7 +498,7 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
             shellStartupVarsMgr.initialize(),
         ]);
 
-        resolveDefaultInterpreter(nativeFinder, envManagers, api);
+        await resolveDefaultInterpreter(nativeFinder, envManagers, api);
 
         sendTelemetryEvent(EventNames.EXTENSION_MANAGER_REGISTRATION_DURATION, start.elapsedTime);
         await terminalManager.initialize(api);
