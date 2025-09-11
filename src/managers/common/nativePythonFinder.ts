@@ -202,7 +202,7 @@ class NativePythonFinderImpl implements NativePythonFinder {
     }
 
     private start(): rpc.MessageConnection {
-        this.outputChannel.info(`Starting Python Locator ${this.toolPath} server`);
+        this.outputChannel.info(`[pet] Starting Python Locator ${this.toolPath} server`);
 
         // jsonrpc package cannot handle messages coming through too quickly.
         // Lets handle the messages and close the stream only when
@@ -213,7 +213,7 @@ class NativePythonFinderImpl implements NativePythonFinder {
         try {
             const proc = ch.spawn(this.toolPath, ['server'], { env: process.env });
             proc.stdout.pipe(readable, { end: false });
-            proc.stderr.on('data', (data) => this.outputChannel.error(data.toString()));
+            proc.stderr.on('data', (data) => this.outputChannel.error(`[pet] ${data.toString()}`));
             writable.pipe(proc.stdin, { end: false });
 
             disposables.push({
@@ -223,12 +223,12 @@ class NativePythonFinderImpl implements NativePythonFinder {
                             proc.kill();
                         }
                     } catch (ex) {
-                        this.outputChannel.error('Error disposing finder', ex);
+                        this.outputChannel.error('[pet] Error disposing finder', ex);
                     }
                 },
             });
         } catch (ex) {
-            this.outputChannel.error(`Error starting Python Finder ${this.toolPath} server`, ex);
+            this.outputChannel.error(`[pet] Error starting Python Finder ${this.toolPath} server`, ex);
         }
         const connection = rpc.createMessageConnection(
             new rpc.StreamMessageReader(readable),
@@ -241,27 +241,28 @@ class NativePythonFinderImpl implements NativePythonFinder {
                 writable.end();
             }),
             connection.onError((ex) => {
-                this.outputChannel.error('Connection Error:', ex);
+                this.outputChannel.error('[pet] Connection Error:', ex);
             }),
             connection.onNotification('log', (data: NativeLog) => {
+                const msg = `[pet] ${data.message}`;
                 switch (data.level) {
                     case 'info':
-                        this.outputChannel.info(data.message);
+                        this.outputChannel.info(msg);
                         break;
                     case 'warning':
-                        this.outputChannel.warn(data.message);
+                        this.outputChannel.warn(msg);
                         break;
                     case 'error':
-                        this.outputChannel.error(data.message);
+                        this.outputChannel.error(msg);
                         break;
                     case 'debug':
-                        this.outputChannel.debug(data.message);
+                        this.outputChannel.debug(msg);
                         break;
                     default:
-                        this.outputChannel.trace(data.message);
+                        this.outputChannel.trace(msg);
                 }
             }),
-            connection.onNotification('telemetry', (data) => this.outputChannel.info(`Telemetry: `, data)),
+            connection.onNotification('telemetry', (data) => this.outputChannel.info('[pet] Telemetry: ', data)),
             connection.onClose(() => {
                 disposables.forEach((d) => d.dispose());
             }),
@@ -288,7 +289,9 @@ class NativePythonFinderImpl implements NativePythonFinder {
                                     executable: data.executable,
                                 })
                                 .then((environment: NativeEnvInfo) => {
-                                    this.outputChannel.info(`Resolved ${environment.executable}`);
+                                    this.outputChannel.info(
+                                        `Resolved environment during PET refresh: ${environment.executable}`,
+                                    );
                                     nativeInfo.push(environment);
                                 })
                                 .catch((ex) =>
@@ -307,7 +310,7 @@ class NativePythonFinderImpl implements NativePythonFinder {
             await this.connection.sendRequest<{ duration: number }>('refresh', refreshOptions);
             await Promise.all(unresolved);
         } catch (ex) {
-            this.outputChannel.error('Error refreshing', ex);
+            this.outputChannel.error('[pet] Error refreshing', ex);
             throw ex;
         } finally {
             disposables.forEach((d) => d.dispose());
@@ -333,13 +336,15 @@ class NativePythonFinderImpl implements NativePythonFinder {
         };
         // No need to send a configuration request, is there are no changes.
         if (JSON.stringify(options) === JSON.stringify(this.lastConfiguration || {})) {
+            this.outputChannel.debug('[pet] configure: No changes detected, skipping configuration update.');
             return;
         }
+        this.outputChannel.info('[pet] configure: Sending configuration update:', JSON.stringify(options));
         try {
             this.lastConfiguration = options;
             await this.connection.sendRequest('configure', options);
         } catch (ex) {
-            this.outputChannel.error('Configuration error', ex);
+            this.outputChannel.error('[pet] configure: Configuration error', ex);
         }
     }
 }

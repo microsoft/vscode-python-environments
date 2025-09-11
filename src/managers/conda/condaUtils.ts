@@ -31,6 +31,7 @@ import { Common, CondaStrings, PackageManagement, Pickers } from '../../common/l
 import { traceInfo, traceVerbose } from '../../common/logging';
 import { getWorkspacePersistentState } from '../../common/persistentState';
 import { pickProject } from '../../common/pickers/projects';
+import { StopWatch } from '../../common/stopWatch';
 import { createDeferred } from '../../common/utils/deferred';
 import { untildify } from '../../common/utils/pathUtils';
 import { isWindows } from '../../common/utils/platformUtils';
@@ -56,7 +57,6 @@ import { Installable } from '../common/types';
 import { shortVersion, sortEnvironments } from '../common/utils';
 import { CondaEnvManager } from './condaEnvManager';
 import { getCondaHookPs1Path, getLocalActivationScript } from './condaSourcingUtils';
-import { StopWatch } from '../../common/stopWatch';
 
 export const CONDA_PATH_KEY = `${ENVS_EXTENSION_ID}:conda:CONDA_PATH`;
 export const CONDA_PREFIXES_KEY = `${ENVS_EXTENSION_ID}:conda:CONDA_PREFIXES`;
@@ -694,12 +694,14 @@ export async function refreshCondaEnvs(
             .filter((e) => e.kind === NativePythonEnvironmentKind.conda);
         const collection: PythonEnvironment[] = [];
 
-        envs.forEach(async (e) => {
-            const environment = await nativeToPythonEnv(e, api, manager, log, condaPath, condaPrefixes);
-            if (environment) {
-                collection.push(environment);
-            }
-        });
+        await Promise.all(
+            envs.map(async (e) => {
+                const environment = await nativeToPythonEnv(e, api, manager, log, condaPath, condaPrefixes);
+                if (environment) {
+                    collection.push(environment);
+                }
+            }),
+        );
 
         return sortEnvironments(collection);
     }
@@ -742,7 +744,6 @@ function trimVersionToMajorMinor(version: string): string {
     const match = version.match(/^(\d+\.\d+\.\d+)/);
     return match ? match[1] : version;
 }
-
 export async function pickPythonVersion(
     api: PythonEnvironmentApi,
     token?: CancellationToken,
@@ -755,11 +756,25 @@ export async function pickPythonVersion(
                 .filter(Boolean)
                 .map((v) => trimVersionToMajorMinor(v)), // cut to 3 digits
         ),
-    )
-        .sort()
-        .reverse();
-    if (!versions) {
-        versions = ['3.11', '3.10', '3.9', '3.12', '3.13'];
+    );
+
+    // Sort versions by major version (descending), ignoring minor/patch for simplicity
+    const parseMajorMinor = (v: string) => {
+        const m = v.match(/^(\d+)(?:\.(\d+))?/);
+        return { major: m ? Number(m[1]) : 0, minor: m && m[2] ? Number(m[2]) : 0 };
+    };
+
+    versions = versions.sort((a, b) => {
+        const pa = parseMajorMinor(a);
+        const pb = parseMajorMinor(b);
+        if (pa.major !== pb.major) {
+            return pb.major - pa.major;
+        } // desc by major
+        return pb.minor - pa.minor; // desc by minor
+    });
+
+    if (!versions || versions.length === 0) {
+        versions = ['3.13', '3.12', '3.11', '3.10', '3.9'];
     }
     const items: QuickPickItem[] = versions.map((v) => ({
         label: v === RECOMMENDED_CONDA_PYTHON ? `$(star-full) Python` : 'Python',
