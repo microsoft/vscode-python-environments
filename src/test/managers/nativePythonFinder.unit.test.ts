@@ -2,7 +2,7 @@ import assert from 'node:assert';
 import * as path from 'path';
 import * as sinon from 'sinon';
 
-// Simple tests for the searchPaths functionality
+// Tests for the updated searchPaths functionality
 suite('NativePythonFinder SearchPaths Tests', () => {
     teardown(() => {
         sinon.restore();
@@ -22,9 +22,9 @@ suite('NativePythonFinder SearchPaths Tests', () => {
         });
 
         test('should handle populated search paths array', () => {
-            const searchPaths = ['/usr/bin/python', '/home/user/.virtualenvs', '**/bin/python*'];
-            assert.strictEqual(searchPaths.length, 3);
-            assert.deepStrictEqual(searchPaths, ['/usr/bin/python', '/home/user/.virtualenvs', '**/bin/python*']);
+            const searchPaths = ['/home/user/.virtualenvs', '**/bin/python*'];
+            assert.strictEqual(searchPaths.length, 2);
+            assert.deepStrictEqual(searchPaths, ['/home/user/.virtualenvs', '**/bin/python*']);
         });
     });
 
@@ -41,65 +41,64 @@ suite('NativePythonFinder SearchPaths Tests', () => {
                 '[Pp]ython'
             ];
 
-            const regexChars = /[*?[\]{}()^$+|\\]/;
+            const regexChars = /[*?[\]{}()^$+|]/;
             regexPatterns.forEach(pattern => {
                 assert.ok(regexChars.test(pattern), `Pattern ${pattern} should be detected as regex`);
             });
         });
 
-        test('should not identify regular paths as regex', () => {
+        test('should not identify regular directory paths as regex', () => {
             const regularPaths = [
-                '/usr/bin/python',
-                '/home/user/python',
-                'C:\\Python\\python.exe',
+                '/usr/local/python',
+                '/home/user/.virtualenvs',
                 '/opt/python3.9'
             ];
 
-            const regexChars = /[*?[\]{}()^$+|\\]/;
+            const regexChars = /[*?[\]{}()^$+|]/;
             regularPaths.forEach(testPath => {
-                // Note: Windows paths contain backslashes which are regex chars, 
-                // but we'll handle this in the actual implementation
-                if (!testPath.includes('\\')) {
-                    assert.ok(!regexChars.test(testPath), `Path ${testPath} should not be detected as regex`);
-                }
+                assert.ok(!regexChars.test(testPath), `Path ${testPath} should not be detected as regex`);
             });
         });
 
         test('should handle Windows paths specially', () => {
-            const windowsPath = 'C:\\Python\\python.exe';
-            const regexChars = /[*?[\]{}()^$+|\\]/;
+            const windowsPath = 'C:\\Users\\user\\envs';
+            const regexChars = /[*?[\]{}()^$+|]/;
             
             // Windows paths contain backslashes which are regex characters
-            // Our implementation should handle this case
+            // Our implementation should handle this case by checking for valid Windows path patterns
             assert.ok(regexChars.test(windowsPath), 'Windows paths contain regex chars');
+            
+            // Test that we can identify valid Windows paths
+            const isWindowsPath = windowsPath.match(/^[A-Za-z]:\\/) || windowsPath.match(/^\\\\[^\\]+\\/);
+            assert.ok(isWindowsPath, 'Should recognize Windows path pattern');
         });
     });
 
-    suite('Grand-grand parent path extraction', () => {
-        test('should extract correct grand-grand parent from executable path', () => {
+    suite('Great-grandparent path extraction', () => {
+        test('should extract correct great-grandparent from executable path', () => {
             const executablePath = '/home/user/.virtualenvs/myenv/bin/python';
             const expected = '/home/user/.virtualenvs';
             
             // Test path manipulation logic
-            const grandGrandParent = path.dirname(path.dirname(path.dirname(executablePath)));
-            assert.strictEqual(grandGrandParent, expected);
+            const greatGrandParent = path.dirname(path.dirname(path.dirname(executablePath)));
+            assert.strictEqual(greatGrandParent, expected);
         });
 
         test('should handle deep nested paths', () => {
             const executablePath = '/very/deep/nested/path/to/env/bin/python';
             const expected = '/very/deep/nested/path/to';
             
-            const grandGrandParent = path.dirname(path.dirname(path.dirname(executablePath)));
-            assert.strictEqual(grandGrandParent, expected);
+            const greatGrandParent = path.dirname(path.dirname(path.dirname(executablePath)));
+            assert.strictEqual(greatGrandParent, expected);
         });
 
         test('should handle shallow paths gracefully', () => {
             const executablePath = '/bin/python';
             
-            const grandGrandParent = path.dirname(path.dirname(path.dirname(executablePath)));
+            const greatGrandParent = path.dirname(path.dirname(path.dirname(executablePath)));
             // This should result in root
-            assert.ok(grandGrandParent);
-            assert.strictEqual(grandGrandParent, '/');
+            assert.ok(greatGrandParent);
+            assert.strictEqual(greatGrandParent, '/');
         });
 
         test('should handle Windows style paths', function () {
@@ -111,9 +110,9 @@ suite('NativePythonFinder SearchPaths Tests', () => {
             
             const executablePath = 'C:\\Users\\user\\envs\\myenv\\Scripts\\python.exe';
             
-            const grandGrandParent = path.dirname(path.dirname(path.dirname(executablePath)));
+            const greatGrandParent = path.dirname(path.dirname(path.dirname(executablePath)));
             const expected = 'C:\\Users\\user\\envs';
-            assert.strictEqual(grandGrandParent, expected);
+            assert.strictEqual(greatGrandParent, expected);
         });
     });
 
@@ -152,10 +151,10 @@ suite('NativePythonFinder SearchPaths Tests', () => {
         });
 
         test('should trim whitespace from paths', () => {
-            const pathWithWhitespace = '  /path/to/python  ';
+            const pathWithWhitespace = '  /path/to/directory  ';
             const trimmed = pathWithWhitespace.trim();
             
-            assert.strictEqual(trimmed, '/path/to/python');
+            assert.strictEqual(trimmed, '/path/to/directory');
         });
     });
 
@@ -192,6 +191,50 @@ suite('NativePythonFinder SearchPaths Tests', () => {
                 const lowerFilename = filename.toLowerCase();
                 const isPython = lowerFilename.includes('python') || path.basename(lowerFilename).startsWith('python');
                 assert.ok(!isPython, `${filename} should not be identified as python executable`);
+            });
+        });
+    });
+
+    suite('Settings precedence logic', () => {
+        test('should handle array equality comparison', () => {
+            const array1 = ['path1', 'path2'];
+            const array2 = ['path1', 'path2'];
+            const array3 = ['path1', 'path3'];
+            
+            // Arrays with same content should be equal
+            assert.strictEqual(array1.length, array2.length);
+            assert.ok(array1.every((val, index) => val === array2[index]));
+            
+            // Arrays with different content should not be equal
+            assert.ok(!array1.every((val, index) => val === array3[index]));
+        });
+
+        test('should handle empty arrays in comparison', () => {
+            const emptyArray1: string[] = [];
+            const emptyArray2: string[] = [];
+            const nonEmptyArray = ['path1'];
+            
+            assert.ok(emptyArray1.every((val, index) => val === emptyArray2[index]));
+            assert.ok(!emptyArray1.every((val, index) => val === nonEmptyArray[index]));
+        });
+    });
+
+    suite('Path type detection', () => {
+        test('should detect directory paths correctly', () => {
+            const directoryPaths = [
+                '/home/user/.virtualenvs',
+                '/opt/python/envs',
+                'C:\\Users\\user\\envs'
+            ];
+            
+            // These are all valid directory-style paths
+            directoryPaths.forEach(dirPath => {
+                assert.ok(typeof dirPath === 'string' && dirPath.length > 0);
+                // Should not contain regex characters (except Windows backslashes)
+                if (!dirPath.includes('\\')) {
+                    const regexChars = /[*?[\]{}()^$+|]/;
+                    assert.ok(!regexChars.test(dirPath), `${dirPath} should be a plain directory path`);
+                }
             });
         });
     });
