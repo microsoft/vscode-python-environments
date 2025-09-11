@@ -62,34 +62,38 @@ suite('NativePythonFinder SearchPaths Tests', () => {
 
         test('should handle Windows paths specially', () => {
             const windowsPath = 'C:\\Users\\user\\envs';
-            const regexChars = /[*?[\]{}()^$+|]/;
+            const regexChars = /[*?[\]{}()^$+|\\]/; // Added backslash to match implementation
             
             // Windows paths contain backslashes which are regex characters
             // Our implementation should handle this case by checking for valid Windows path patterns
             assert.ok(regexChars.test(windowsPath), 'Windows paths contain regex chars');
             
-            // Test that we can identify valid Windows paths
-            const isWindowsPath = windowsPath.match(/^[A-Za-z]:\\/) || windowsPath.match(/^\\\\[^\\]+\\/);
+            // Test that we can identify valid Windows paths and NOT treat them as regex
+            const hasBackslash = windowsPath.includes('\\');
+            const isWindowsPath = hasBackslash && (windowsPath.match(/^[A-Za-z]:\\/) || windowsPath.match(/^\\\\[^\\]+\\/));
+            const isRegexPattern = regexChars.test(windowsPath) && !isWindowsPath;
+            
             assert.ok(isWindowsPath, 'Should recognize Windows path pattern');
+            assert.ok(!isRegexPattern, 'Should not treat Windows path as regex pattern');
         });
     });
 
-    suite('Great-grandparent path extraction', () => {
-        test('should extract correct great-grandparent from executable path', () => {
+    suite('Environment directory path extraction', () => {
+        test('should extract correct environment directory from executable path', () => {
             const executablePath = '/home/user/.virtualenvs/myenv/bin/python';
             const expected = '/home/user/.virtualenvs';
             
             // Test path manipulation logic
-            const greatGrandParent = path.dirname(path.dirname(path.dirname(executablePath)));
-            assert.strictEqual(greatGrandParent, expected);
+            const environmentDir = path.dirname(path.dirname(path.dirname(executablePath)));
+            assert.strictEqual(environmentDir, expected);
         });
 
         test('should handle deep nested paths', () => {
             const executablePath = '/very/deep/nested/path/to/env/bin/python';
             const expected = '/very/deep/nested/path/to';
             
-            const greatGrandParent = path.dirname(path.dirname(path.dirname(executablePath)));
-            assert.strictEqual(greatGrandParent, expected);
+            const environmentDir = path.dirname(path.dirname(path.dirname(executablePath)));
+            assert.strictEqual(environmentDir, expected);
         });
 
         test('should handle shallow paths gracefully', () => {
@@ -214,8 +218,11 @@ suite('NativePythonFinder SearchPaths Tests', () => {
             const emptyArray2: string[] = [];
             const nonEmptyArray = ['path1'];
             
+            // Empty arrays should be equal (every element matches)
             assert.ok(emptyArray1.every((val, index) => val === emptyArray2[index]));
-            assert.ok(!emptyArray1.every((val, index) => val === nonEmptyArray[index]));
+            
+            // Empty array should not match non-empty array (lengths differ)
+            assert.ok(emptyArray1.length !== nonEmptyArray.length);
         });
     });
 

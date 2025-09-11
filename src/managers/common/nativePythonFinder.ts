@@ -326,23 +326,14 @@ class NativePythonFinderImpl implements NativePythonFinder {
      * Must be invoked when ever there are changes to any data related to the configuration details.
      */
     private async configure() {
-        // Get custom virtual environment directories from legacy python settings
-        const customVenvDirs = getCustomVirtualEnvDirs();
-        
-        // Get additional search paths from the new searchPaths setting
+        // Get all extra search paths including legacy settings and new searchPaths
         const extraSearchPaths = await getAllExtraSearchPaths();
         
-        // Combine and deduplicate all environment directories
-        const allEnvironmentDirectories = [...customVenvDirs, ...extraSearchPaths];
-        const environmentDirectories = Array.from(new Set(allEnvironmentDirectories));
-        
-        traceLog('Legacy custom venv directories:', customVenvDirs);
-        traceLog('Extra search paths from settings:', extraSearchPaths);
-        traceLog('Final combined environment directories:', environmentDirectories);
+        traceLog('Final environment directories:', extraSearchPaths);
 
         const options: ConfigurationOptions = {
             workspaceDirectories: this.api.getPythonProjects().map((item) => item.uri.fsPath),
-            environmentDirectories,
+            environmentDirectories: extraSearchPaths,
             condaExecutable: getPythonSettingAndUntildify<string>('condaPath'),
             poetryExecutable: getPythonSettingAndUntildify<string>('poetryPath'),
             cacheDirectory: this.cacheDirectory?.fsPath,
@@ -394,34 +385,39 @@ function getPythonSettingAndUntildify<T>(name: string, scope?: Uri): T | undefin
 }
 
 /**
- * Extracts the great-grandparent directory from a Python executable path.
+ * Extracts the environment directory from a Python executable path.
  * This follows the pattern: executable -> bin -> env -> search directory
  * @param executablePath Path to Python executable
- * @returns The great-grandparent directory path, or undefined if not found
+ * @returns The environment directory path, or undefined if not found
  */
-function extractGreatGrandparentDirectory(executablePath: string): string | undefined {
+function extractEnvironmentDirectory(executablePath: string): string | undefined {
     try {
-        const grandGrandParent = path.dirname(path.dirname(path.dirname(executablePath)));
-        if (grandGrandParent && grandGrandParent !== path.dirname(grandGrandParent)) {
-            traceLog('Extracted great-grandparent directory:', grandGrandParent, 'from executable:', executablePath);
-            return grandGrandParent;
+        const environmentDir = path.dirname(path.dirname(path.dirname(executablePath)));
+        if (environmentDir && environmentDir !== path.dirname(environmentDir)) {
+            traceLog('Extracted environment directory:', environmentDir, 'from executable:', executablePath);
+            return environmentDir;
         } else {
-            traceLog('Warning: Could not find valid great-grandparent directory for executable:', executablePath);
+            traceLog('Warning: identified executable python at', executablePath, 'not configured in correct folder structure, skipping');
             return undefined;
         }
     } catch (error) {
-        traceLog('Error extracting great-grandparent directory from:', executablePath, 'Error:', error);
+        traceLog('Error extracting environment directory from:', executablePath, 'Error:', error);
         return undefined;
     }
 }
 
 /**
  * Gets all extra environment search paths from various configuration sources.
- * Combines python.venvFolders (for migration) and python-env.searchPaths settings.
+ * Combines python.venvFolders (for migration), python-env.searchPaths settings, and legacy custom venv dirs.
  * @returns Array of search directory paths
  */
 async function getAllExtraSearchPaths(): Promise<string[]> {
     const searchDirectories: string[] = [];
+    
+    // Get custom virtual environment directories from legacy python settings
+    const customVenvDirs = getCustomVirtualEnvDirs();
+    searchDirectories.push(...customVenvDirs);
+    traceLog('Added legacy custom venv directories:', customVenvDirs);
     
     // Handle migration from python.venvFolders to python-env.searchPaths
     await handleVenvFoldersMigration();
@@ -440,35 +436,32 @@ async function getAllExtraSearchPaths(): Promise<string[]> {
             
             // Check if it's a regex pattern (contains regex special characters)
             // Note: Windows paths contain backslashes, so we need to be more careful
-            const regexChars = /[*?[\]{}()^$+|]/;
+            const regexChars = /[*?[\]{}()^$+|\\]/;
             const hasBackslash = trimmedPath.includes('\\');
             const isWindowsPath = hasBackslash && (trimmedPath.match(/^[A-Za-z]:\\/) || trimmedPath.match(/^\\\\[^\\]+\\/));
-            const isRegexPattern = regexChars.test(trimmedPath) || (hasBackslash && !isWindowsPath);
+            const isRegexPattern = regexChars.test(trimmedPath) && !isWindowsPath;
             
             if (isRegexPattern) {
                 traceLog('Processing regex pattern for Python environment discovery:', trimmedPath);
                 traceLog('Warning: Using regex patterns in searchPaths may cause performance issues due to file system scanning');
                 
-                // Use workspace.findFiles to search for python executables
-                const foundFiles = await workspace.findFiles(trimmedPath, null);
-                traceLog('Regex pattern search found', foundFiles.length, 'files matching pattern:', trimmedPath);
+                // Modify the regex to search for directories that might contain Python executables
+                // Instead of searching for executables directly, we append python pattern to find parent directories
+                const directoryPattern = trimmedPath.endsWith('python*') ? trimmedPath.replace(/python\*$/, '') : trimmedPath;
+                
+                // Use workspace.findFiles to search for directories or python-related files
+                const foundFiles = await workspace.findFiles(directoryPattern + '**/python*', null);
+                traceLog('Regex pattern search found', foundFiles.length, 'files matching pattern:', directoryPattern + '**/python*');
                 
                 for (const file of foundFiles) {
                     const filePath = file.fsPath;
                     traceLog('Evaluating file from regex search:', filePath);
                     
-                    // Check if it's likely a python executable
-                    if (filePath.toLowerCase().includes('python') || path.basename(filePath).startsWith('python')) {
-                        traceLog('File appears to be a Python executable:', filePath);
-                        
-                        // Get great-grandparent folder (file -> bin -> env -> this)
-                        const greatGrandParent = extractGreatGrandparentDirectory(filePath);
-                        if (greatGrandParent) {
-                            searchDirectories.push(greatGrandParent);
-                            traceLog('Added search directory from regex match:', greatGrandParent);
-                        }
-                    } else {
-                        traceLog('File does not appear to be a Python executable, skipping:', filePath);
+                    // Get environment folder (file -> bin -> env -> this)
+                    const environmentDir = extractEnvironmentDirectory(filePath);
+                    if (environmentDir) {
+                        searchDirectories.push(environmentDir);
+                        traceLog('Added search directory from regex match:', environmentDir);
                     }
                 }
                 
@@ -480,9 +473,13 @@ async function getAllExtraSearchPaths(): Promise<string[]> {
                 searchDirectories.push(trimmedPath);
                 traceLog('Added directory as search path:', trimmedPath);
             }
-            // If path doesn't exist, try to check if it could be a directory that might exist later
+            // If path doesn't exist, add it anyway as it might exist in the future
+            // This handles cases where:
+            // - Virtual environments might be created later
+            // - Network drives that might not be mounted yet
+            // - Symlinks to directories that might be created
             else {
-                traceLog('Path does not exist currently, treating as potential directory for future resolution:', trimmedPath);
+                traceLog('Path does not exist currently, adding for future resolution when environments may be created:', trimmedPath);
                 searchDirectories.push(trimmedPath);
             }
         } catch (error) {
@@ -503,32 +500,22 @@ async function getAllExtraSearchPaths(): Promise<string[]> {
  */
 function getSearchPathsWithPrecedence(): string[] {
     try {
-        // Get the workspace folders for proper precedence checking
-        const workspaceFolders = workspace.workspaceFolders;
-        
-        // Try workspaceFolder level first (most specific)
-        if (workspaceFolders && workspaceFolders.length > 0) {
-            for (const folder of workspaceFolders) {
-                const config = getConfiguration('python-env', folder.uri);
-                const inspection = config.inspect<string[]>('searchPaths');
-                
-                if (inspection?.workspaceFolderValue) {
-                    traceLog('Using workspaceFolder level searchPaths setting from:', folder.uri.fsPath);
-                    return untildifyArray(inspection.workspaceFolderValue);
-                }
-            }
-        }
-        
-        // Try workspace level next
+        // Use VS Code configuration inspection to handle precedence automatically
         const config = getConfiguration('python-env');
         const inspection = config.inspect<string[]>('searchPaths');
+        
+        // VS Code automatically handles precedence: workspaceFolder -> workspace -> user
+        // We check each level in order and return the first one found
+        if (inspection?.workspaceFolderValue) {
+            traceLog('Using workspaceFolder level searchPaths setting');
+            return untildifyArray(inspection.workspaceFolderValue);
+        }
         
         if (inspection?.workspaceValue) {
             traceLog('Using workspace level searchPaths setting');
             return untildifyArray(inspection.workspaceValue);
         }
         
-        // Fall back to user level
         if (inspection?.globalValue) {
             traceLog('Using user level searchPaths setting');
             return untildifyArray(inspection.globalValue);
@@ -564,7 +551,6 @@ async function handleVenvFoldersMigration(): Promise<void> {
         const venvFolders = venvFoldersInspection?.globalValue;
         
         if (!venvFolders || venvFolders.length === 0) {
-            traceLog('No python.venvFolders setting found, skipping migration');
             return;
         }
         
