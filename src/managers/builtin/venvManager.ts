@@ -29,7 +29,7 @@ import {
     SetEnvironmentScope,
 } from '../../api';
 import { PYTHON_EXTENSION_ID } from '../../common/constants';
-import { VenvManagerStrings } from '../../common/localize';
+import { VenvManagerCommonStrings, VenvManagerStringsNoUv } from '../../common/localize';
 import { traceError, traceWarn } from '../../common/logging';
 import { createDeferred, Deferred } from '../../common/utils/deferred';
 import { showErrorMessage, withProgress } from '../../common/window.apis';
@@ -66,7 +66,7 @@ export class VenvManager implements EnvironmentManager {
     public readonly onDidChangeEnvironments = this._onDidChangeEnvironments.event;
 
     readonly name: string;
-    readonly displayName: string;
+    displayName: string;
     readonly preferredPackageManagerId: string;
     readonly description?: string | undefined;
     readonly tooltip?: string | MarkdownString | undefined;
@@ -83,7 +83,7 @@ export class VenvManager implements EnvironmentManager {
         // Descriptions were a bit too visually noisy
         // https://github.com/microsoft/vscode-python-environments/issues/167
         this.description = undefined;
-        this.tooltip = new MarkdownString(VenvManagerStrings.venvManagerDescription, true);
+        this.tooltip = new MarkdownString(VenvManagerStringsNoUv.venvManagerDescription, true);
         this.preferredPackageManagerId = 'ms-python.python:pip';
         this.iconPath = new ThemeIcon('python');
     }
@@ -97,7 +97,7 @@ export class VenvManager implements EnvironmentManager {
         this._initialized = createDeferred();
 
         try {
-            await this.internalRefresh(undefined, false, VenvManagerStrings.venvInitialize);
+            await this.internalRefresh(undefined, false, VenvManagerCommonStrings.venvInitialize);
         } finally {
             this._initialized.resolve();
         }
@@ -117,6 +117,14 @@ export class VenvManager implements EnvironmentManager {
                 shortVersion(this.globalEnv.version),
             ),
         };
+    }
+
+    /**
+     * Updates the display name for this environment manager.
+     * @param name The new display name to set.
+     */
+    public setDisplayName(name: string): void {
+        this.displayName = name;
     }
 
     async create(
@@ -148,7 +156,7 @@ export class VenvManager implements EnvironmentManager {
                 // error on missing information
                 if (!this.globalEnv) {
                     this.log.error('No base python found');
-                    showErrorMessage(VenvManagerStrings.venvErrorNoBasePython);
+                    showErrorMessage(VenvManagerCommonStrings.venvErrorNoBasePython);
                     throw new Error('No base python found');
                 }
                 if (!this.globalEnv.version.startsWith('3.')) {
@@ -156,7 +164,7 @@ export class VenvManager implements EnvironmentManager {
                     globals.forEach((e, i) => {
                         this.log.error(`${i}: ${e.version} : ${e.environmentPath.fsPath}`);
                     });
-                    showErrorMessage(VenvManagerStrings.venvErrorNoPython3);
+                    showErrorMessage(VenvManagerCommonStrings.venvErrorNoPython3);
                     throw new Error('Did not find any base python 3.*');
                 }
                 if (this.globalEnv && this.globalEnv.version.startsWith('3.')) {
@@ -284,14 +292,14 @@ export class VenvManager implements EnvironmentManager {
     }
 
     async refresh(scope: RefreshEnvironmentsScope): Promise<void> {
-        return this.internalRefresh(scope, true, VenvManagerStrings.venvRefreshing);
+        return this.internalRefresh(scope, true, VenvManagerCommonStrings.venvRefreshing);
     }
 
     async watcherRefresh(): Promise<void> {
         if (this.skipWatcherRefresh) {
             return;
         }
-        return this.internalRefresh(undefined, true, VenvManagerStrings.venvRefreshing);
+        return this.internalRefresh(undefined, true, VenvManagerCommonStrings.venvRefreshing);
     }
 
     private async internalRefresh(
