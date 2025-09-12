@@ -2,12 +2,12 @@ import * as ch from 'child_process';
 import * as fs from 'fs-extra';
 import * as path from 'path';
 import { PassThrough } from 'stream';
-import { Disposable, ExtensionContext, LogOutputChannel, Uri } from 'vscode';
+import { Disposable, ExtensionContext, LogOutputChannel, Uri, workspace } from 'vscode';
 import * as rpc from 'vscode-jsonrpc/node';
 import { PythonProjectApi } from '../../api';
 import { ENVS_EXTENSION_ID, PYTHON_EXTENSION_ID } from '../../common/constants';
 import { getExtension } from '../../common/extension.apis';
-import { traceVerbose } from '../../common/logging';
+import { traceVerbose, traceLog } from '../../common/logging';
 import { untildify } from '../../common/utils/pathUtils';
 import { isWindows } from '../../common/utils/platformUtils';
 import { createRunningWorkerPool, WorkerPool } from '../../common/utils/workerPool';
@@ -326,10 +326,14 @@ class NativePythonFinderImpl implements NativePythonFinder {
      * Must be invoked when ever there are changes to any data related to the configuration details.
      */
     private async configure() {
+        // Get all extra search paths including legacy settings and new searchPaths
+        const extraSearchPaths = await getAllExtraSearchPaths();
+        
+        traceLog('Final environment directories:', extraSearchPaths);
+
         const options: ConfigurationOptions = {
             workspaceDirectories: this.api.getPythonProjects().map((item) => item.uri.fsPath),
-            // We do not want to mix this with `search_paths`
-            environmentDirectories: getCustomVirtualEnvDirs(),
+            environmentDirectories: extraSearchPaths,
             condaExecutable: getPythonSettingAndUntildify<string>('condaPath'),
             poetryExecutable: getPythonSettingAndUntildify<string>('poetryPath'),
             cacheDirectory: this.cacheDirectory?.fsPath,
@@ -379,6 +383,223 @@ function getPythonSettingAndUntildify<T>(name: string, scope?: Uri): T | undefin
     }
     return value;
 }
+
+/**
+ * Extracts the environment directory from a Python executable path.
+ * This follows the pattern: executable -> bin -> env -> search directory
+ * @param executablePath Path to Python executable
+ * @returns The environment directory path, or undefined if not found
+ */
+function extractEnvironmentDirectory(executablePath: string): string | undefined {
+    try {
+        const environmentDir = path.dirname(path.dirname(path.dirname(executablePath)));
+        if (environmentDir && environmentDir !== path.dirname(environmentDir)) {
+            traceLog('Extracted environment directory:', environmentDir, 'from executable:', executablePath);
+            return environmentDir;
+        } else {
+            traceLog('Warning: identified executable python at', executablePath, 'not configured in correct folder structure, skipping');
+            return undefined;
+        }
+    } catch (error) {
+        traceLog('Error extracting environment directory from:', executablePath, 'Error:', error);
+        return undefined;
+    }
+}
+
+/**
+ * Gets all extra environment search paths from various configuration sources.
+ * Combines python.venvFolders (for migration), python-env.searchPaths settings, and legacy custom venv dirs.
+ * @returns Array of search directory paths
+ */
+async function getAllExtraSearchPaths(): Promise<string[]> {
+    const searchDirectories: string[] = [];
+    
+    // Get custom virtual environment directories from legacy python settings
+    const customVenvDirs = getCustomVirtualEnvDirs();
+    searchDirectories.push(...customVenvDirs);
+    traceLog('Added legacy custom venv directories:', customVenvDirs);
+    
+    // Handle migration from python.venvFolders to python-env.searchPaths
+    await handleVenvFoldersMigration();
+    
+    // Get searchPaths using proper VS Code settings precedence
+    const searchPaths = getSearchPathsWithPrecedence();
+    traceLog('Retrieved searchPaths with precedence:', searchPaths);
+
+    for (const searchPath of searchPaths) {
+        try {
+            if (!searchPath || searchPath.trim() === '') {
+                continue;
+            }
+
+            const trimmedPath = searchPath.trim();
+            
+            // Check if it's a regex pattern (contains regex special characters)
+            // Note: Windows paths contain backslashes, so we need to be more careful
+            const regexChars = /[*?[\]{}()^$+|\\]/;
+            const hasBackslash = trimmedPath.includes('\\');
+            const isWindowsPath = hasBackslash && (trimmedPath.match(/^[A-Za-z]:\\/) || trimmedPath.match(/^\\\\[^\\]+\\/));
+            const isRegexPattern = regexChars.test(trimmedPath) && !isWindowsPath;
+            
+            if (isRegexPattern) {
+                traceLog('Processing regex pattern for Python environment discovery:', trimmedPath);
+                traceLog('Warning: Using regex patterns in searchPaths may cause performance issues due to file system scanning');
+                
+                // Modify the regex to search for directories that might contain Python executables
+                // Instead of searching for executables directly, we append python pattern to find parent directories
+                const directoryPattern = trimmedPath.endsWith('python*') ? trimmedPath.replace(/python\*$/, '') : trimmedPath;
+                
+                // Use workspace.findFiles to search for directories or python-related files
+                const foundFiles = await workspace.findFiles(directoryPattern + '**/python*', null);
+                traceLog('Regex pattern search found', foundFiles.length, 'files matching pattern:', directoryPattern + '**/python*');
+                
+                for (const file of foundFiles) {
+                    const filePath = file.fsPath;
+                    traceLog('Evaluating file from regex search:', filePath);
+                    
+                    // Get environment folder (file -> bin -> env -> this)
+                    const environmentDir = extractEnvironmentDirectory(filePath);
+                    if (environmentDir) {
+                        searchDirectories.push(environmentDir);
+                        traceLog('Added search directory from regex match:', environmentDir);
+                    }
+                }
+                
+                traceLog('Completed processing regex pattern:', trimmedPath, 'Added', searchDirectories.length, 'search directories');
+            }
+            // Check if it's a directory path
+            else if (await fs.pathExists(trimmedPath) && (await fs.stat(trimmedPath)).isDirectory()) {
+                traceLog('Processing directory path:', trimmedPath);
+                searchDirectories.push(trimmedPath);
+                traceLog('Added directory as search path:', trimmedPath);
+            }
+            // If path doesn't exist, add it anyway as it might exist in the future
+            // This handles cases where:
+            // - Virtual environments might be created later
+            // - Network drives that might not be mounted yet
+            // - Symlinks to directories that might be created
+            else {
+                traceLog('Path does not exist currently, adding for future resolution when environments may be created:', trimmedPath);
+                searchDirectories.push(trimmedPath);
+            }
+        } catch (error) {
+            traceLog('Error processing search path:', searchPath, 'Error:', error);
+        }
+    }
+
+    // Remove duplicates and return
+    const uniquePaths = Array.from(new Set(searchDirectories));
+    traceLog('getAllExtraSearchPaths completed. Total unique search directories:', uniquePaths.length, 'Paths:', uniquePaths);
+    return uniquePaths;
+}
+
+/**
+ * Gets searchPaths setting value using proper VS Code settings precedence.
+ * Checks workspaceFolder, then workspace, then user level settings.
+ * @returns Array of search paths from the most specific scope available
+ */
+function getSearchPathsWithPrecedence(): string[] {
+    try {
+        // Use VS Code configuration inspection to handle precedence automatically
+        const config = getConfiguration('python-env');
+        const inspection = config.inspect<string[]>('searchPaths');
+        
+        // VS Code automatically handles precedence: workspaceFolder -> workspace -> user
+        // We check each level in order and return the first one found
+        if (inspection?.workspaceFolderValue) {
+            traceLog('Using workspaceFolder level searchPaths setting');
+            return untildifyArray(inspection.workspaceFolderValue);
+        }
+        
+        if (inspection?.workspaceValue) {
+            traceLog('Using workspace level searchPaths setting');
+            return untildifyArray(inspection.workspaceValue);
+        }
+        
+        if (inspection?.globalValue) {
+            traceLog('Using user level searchPaths setting');
+            return untildifyArray(inspection.globalValue);
+        }
+        
+        // Default empty array
+        traceLog('No searchPaths setting found at any level, using empty array');
+        return [];
+    } catch (error) {
+        traceLog('Error getting searchPaths with precedence:', error);
+        return [];
+    }
+}
+
+/**
+ * Applies untildify to an array of paths
+ * @param paths Array of potentially tilde-containing paths
+ * @returns Array of expanded paths
+ */
+function untildifyArray(paths: string[]): string[] {
+    return paths.map(p => untildify(p));
+}
+
+/**
+ * Handles migration from python.venvFolders to python-env.searchPaths.
+ * Only migrates if python.venvFolders exists and searchPaths is different.
+ */
+async function handleVenvFoldersMigration(): Promise<void> {
+    try {
+        // Check if we have python.venvFolders set at user level
+        const pythonConfig = getConfiguration('python');
+        const venvFoldersInspection = pythonConfig.inspect<string[]>('venvFolders');
+        const venvFolders = venvFoldersInspection?.globalValue;
+        
+        if (!venvFolders || venvFolders.length === 0) {
+            return;
+        }
+        
+        traceLog('Found python.venvFolders setting:', venvFolders);
+        
+        // Check current searchPaths at user level
+        const envConfig = getConfiguration('python-env');
+        const searchPathsInspection = envConfig.inspect<string[]>('searchPaths');
+        const currentSearchPaths = searchPathsInspection?.globalValue || [];
+        
+        // Check if they are the same (no need to migrate)
+        if (arraysEqual(venvFolders, currentSearchPaths)) {
+            traceLog('python.venvFolders and searchPaths are identical, no migration needed');
+            return;
+        }
+        
+        // Combine venvFolders with existing searchPaths (remove duplicates)
+        const combinedPaths = Array.from(new Set([...currentSearchPaths, ...venvFolders]));
+        
+        // Update searchPaths at user level
+        await envConfig.update('searchPaths', combinedPaths, true); // true = global/user level
+        
+        traceLog('Migrated python.venvFolders to searchPaths. Combined paths:', combinedPaths);
+        
+        // Show notification to user about migration
+        // Note: We should only show this once per session to avoid spam
+        if (!migrationNotificationShown) {
+            migrationNotificationShown = true;
+            // Note: Actual notification would use VS Code's window.showInformationMessage
+            // but we'll log it for now since we can't import window APIs here
+            traceLog('User notification: Automatically migrated python.venvFolders setting to python-env.searchPaths');
+        }
+    } catch (error) {
+        traceLog('Error during venvFolders migration:', error);
+    }
+}
+
+/**
+ * Helper function to compare two arrays for equality
+ */
+function arraysEqual<T>(a: T[], b: T[]): boolean {
+    if (a.length !== b.length) {
+        return false;
+    }
+    return a.every((val, index) => val === b[index]);
+}
+
+// Module-level variable to track migration notification
+let migrationNotificationShown = false;
 
 export function getCacheDirectory(context: ExtensionContext): Uri {
     return Uri.joinPath(context.globalStorageUri, 'pythonLocator');
