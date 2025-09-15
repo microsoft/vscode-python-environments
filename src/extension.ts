@@ -82,7 +82,6 @@ import {
 } from './managers/common/nativePythonFinder';
 import { IDisposable } from './managers/common/types';
 import { registerCondaFeatures } from './managers/conda/main';
-import { registerPipenvFeatures } from './managers/pipenv/main';
 import { registerPoetryFeatures } from './managers/poetry/main';
 import { registerPyenvFeatures } from './managers/pyenv/main';
 
@@ -493,7 +492,6 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
             registerSystemPythonFeatures(nativeFinder, context.subscriptions, outputChannel, sysMgr),
             registerCondaFeatures(nativeFinder, context.subscriptions, outputChannel, projectManager),
             registerPyenvFeatures(nativeFinder, context.subscriptions, projectManager),
-            registerPipenvFeatures(nativeFinder, context.subscriptions, projectManager),
             registerPoetryFeatures(nativeFinder, context.subscriptions, outputChannel, projectManager),
             shellStartupVarsMgr.initialize(),
         ]);
