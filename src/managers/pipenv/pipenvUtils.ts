@@ -231,7 +231,10 @@ export async function refreshPipenv(
     }
 
     const environments: PythonEnvironment[] = [];
-    const environmentInfos = data.filter(isNativeEnvInfo).filter((e) => e.kind === NativePythonEnvironmentKind.pipenv);
+    const environmentInfos = data
+        .filter((e) => isNativeEnvInfo(e))
+        .map((e) => e as NativeEnvInfo)
+        .filter((e) => e.kind === NativePythonEnvironmentKind.pipenv);
 
     for (const info of environmentInfos) {
         try {
@@ -252,46 +255,15 @@ export async function resolvePipenvPath(
     nativeFinder: NativePythonFinder,
     api: PythonEnvironmentApi,
 ): Promise<PythonEnvironment | undefined> {
-    const infos = await nativeFinder.resolve(interpreterPath);
-    for (const info of infos) {
+    try {
+        const info = await nativeFinder.resolve(interpreterPath.fsPath);
         if (isNativeEnvInfo(info) && info.kind === NativePythonEnvironmentKind.pipenv) {
-            const pythonEnvInfo = envToEnvInfo(info, api);
-            if (pythonEnvInfo) {
-                const resolved = await api.resolve([pythonEnvInfo]);
-                return resolved.length > 0 ? resolved[0] : undefined;
-            }
+            // Try to use the API to resolve the environment
+            const resolved = await api.resolveEnvironment(interpreterPath);
+            return resolved;
         }
+    } catch (ex) {
+        traceError(`Failed to resolve pipenv path: ${interpreterPath.fsPath}`, ex);
     }
     return undefined;
-}
-
-function envToEnvInfo(info: NativeEnvInfo, api: PythonEnvironmentApi): PythonEnvironmentInfo | undefined {
-    if (!info.executable) {
-        return undefined;
-    }
-
-    const executable = Uri.file(info.executable);
-    let displayName: string | undefined;
-    
-    if (info.project) {
-        // Extract project name from path for display
-        const projectName = path.basename(info.project);
-        displayName = `pipenv (${projectName})`;
-    } else {
-        displayName = info.displayName ?? 'pipenv';
-    }
-
-    const version = info.version ? shortVersion(info.version) : undefined;
-
-    return {
-        id: `pipenv:${info.executable}`,
-        displayName,
-        name: displayName,
-        executable,
-        version,
-        arch: info.arch,
-        kind: 'ms-python.python:pipenv',
-        projectPath: info.project ? Uri.file(info.project) : undefined,
-        distroOrgName: 'pipenv',
-    };
 }

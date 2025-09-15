@@ -1,4 +1,3 @@
-import * as path from 'path';
 import { Disposable, EventEmitter, MarkdownString, ProgressLocation, Uri } from 'vscode';
 import {
     DidChangeEnvironmentEventArgs,
@@ -7,10 +6,8 @@ import {
     EnvironmentManager,
     GetEnvironmentScope,
     GetEnvironmentsScope,
-    IconPath,
     PythonEnvironment,
     PythonEnvironmentApi,
-    PythonProject,
     RefreshEnvironmentsScope,
     ResolveEnvironmentContext,
     SetEnvironmentScope,
@@ -24,7 +21,6 @@ import { getLatest } from '../common/utils';
 import {
     clearPipenvCache,
     getPipenvForGlobal,
-    getPipenvForWorkspace,
     PIPENV_GLOBAL,
     refreshPipenv,
     resolvePipenvPath,
@@ -48,26 +44,13 @@ export class PipenvManager implements EnvironmentManager, Disposable {
         this.name = 'pipenv';
         this.displayName = 'Pipenv';
         this.preferredPackageManagerId = 'ms-python.python:pip';
-        this.id = 'ms-python.python:pipenv';
         this.description = PipenvStrings.pipenvManager;
-        this.supportsCreate = false;
-        this.supportsRemove = false;
     }
 
     public readonly name: string;
     public readonly displayName: string;
     public readonly preferredPackageManagerId: string;
-    public readonly id: string;
     public readonly description: string;
-    public readonly supportsCreate: boolean;
-    public readonly supportsRemove: boolean;
-
-    public get icon(): IconPath {
-        return {
-            light: Uri.file(path.join(__dirname, '..', '..', '..', 'images', 'pipenv-light.svg')),
-            dark: Uri.file(path.join(__dirname, '..', '..', '..', 'images', 'pipenv-dark.svg')),
-        };
-    }
 
     get tooltip(): string | MarkdownString | undefined {
         return this.description;
@@ -80,8 +63,8 @@ export class PipenvManager implements EnvironmentManager, Disposable {
         this._onDidChangeEnvironments.dispose();
     }
 
-    async refresh(scope?: RefreshEnvironmentsScope): Promise<void> {
-        const hardRefresh = scope?.hardRefresh ?? false;
+    async refresh(_scope?: RefreshEnvironmentsScope): Promise<void> {
+        const hardRefresh = false; // We'll use false for now, could be enhanced later
         const refreshPromise = createDeferred<PythonEnvironment[]>();
         this.refreshPromise = refreshPromise;
 
@@ -111,11 +94,12 @@ export class PipenvManager implements EnvironmentManager, Disposable {
                 }
             });
 
-            this._onDidChangeEnvironments.fire({
-                manager: this,
-                type: EnvironmentChangeKind.update,
-                environments,
-            });
+            this._onDidChangeEnvironments.fire(
+                environments.map((env) => ({
+                    kind: EnvironmentChangeKind.add,
+                    environment: env,
+                }))
+            );
 
             refreshPromise.resolve(environments);
         } catch (ex) {
@@ -135,8 +119,16 @@ export class PipenvManager implements EnvironmentManager, Disposable {
 
         const environments = this.collection.slice();
 
-        if (scope?.project) {
-            const projectPath = typeof scope.project === 'string' ? scope.project : scope.project.fsPath;
+        if (!scope || scope === 'all') {
+            return environments;
+        }
+
+        if (scope === 'global') {
+            return environments.filter((env) => env.group === PIPENV_GLOBAL);
+        }
+
+        if (scope instanceof Uri) {
+            const projectPath = scope.fsPath;
             return environments.filter((env) => {
                 if (env.environmentPath) {
                     const envPath = env.environmentPath.fsPath;
@@ -149,8 +141,40 @@ export class PipenvManager implements EnvironmentManager, Disposable {
         return environments;
     }
 
-    async getEnvironment(scope: GetEnvironmentScope): Promise<PythonEnvironment | undefined> {
-        const environmentPath = scope.environment;
+    async get(scope: GetEnvironmentScope): Promise<PythonEnvironment | undefined> {
+        if (this.collection.length === 0 && this.refreshPromise === undefined) {
+            await this.refresh();
+        }
+
+        if (this.refreshPromise) {
+            await this.refreshPromise.promise;
+        }
+
+        if (scope instanceof Uri) {
+            let env = this.fsPathToEnv.get(scope.fsPath);
+            if (env) {
+                return env;
+            }
+
+            // Try to find by project path
+            const projectPath = scope.fsPath;
+            return this.collection.find((env) => {
+                if (env.environmentPath) {
+                    const envPath = env.environmentPath.fsPath;
+                    return envPath.includes(projectPath) || projectPath.includes(envPath);
+                }
+                return false;
+            });
+        }
+
+        // Global scope - return the global environment if set
+        return this.globalEnv || (await getPipenvForGlobal())
+            ? getLatest(this.collection.filter((env) => env.group === PIPENV_GLOBAL))
+            : undefined;
+    }
+
+    async resolve(context: ResolveEnvironmentContext): Promise<PythonEnvironment | undefined> {
+        const environmentPath = context;
         const fsPath = environmentPath.fsPath;
 
         // Check if we already have it in our collection
@@ -173,15 +197,15 @@ export class PipenvManager implements EnvironmentManager, Disposable {
         return undefined;
     }
 
-    async resolve(context: ResolveEnvironmentContext): Promise<PythonEnvironment | undefined> {
-        return this.getEnvironment({ environment: context.interpreterPath });
-    }
-
-    async set(scope: SetEnvironmentScope): Promise<void> {
-        const { environment, project } = scope;
-
-        if (project) {
-            const projectPath = typeof project === 'string' ? project : project.fsPath;
+    async set(scope: SetEnvironmentScope, environment?: PythonEnvironment): Promise<void> {
+        if (scope === undefined) {
+            // Global setting
+            const envPath = environment?.environmentPath?.fsPath;
+            await setPipenvForGlobal(envPath);
+            this.globalEnv = environment;
+            traceInfo(`Set global pipenv environment: ${envPath || 'none'}`);
+        } else if (scope instanceof Uri) {
+            const projectPath = scope.fsPath;
             const envPath = environment?.environmentPath?.fsPath;
 
             if (envPath) {
@@ -191,61 +215,24 @@ export class PipenvManager implements EnvironmentManager, Disposable {
                 await setPipenvForWorkspace(projectPath, undefined);
                 traceInfo(`Cleared pipenv environment for project ${projectPath}`);
             }
-        } else {
-            // Global setting
+        } else if (Array.isArray(scope)) {
+            // Multiple projects
             const envPath = environment?.environmentPath?.fsPath;
-            await setPipenvForGlobal(envPath);
-            this.globalEnv = environment;
-            traceInfo(`Set global pipenv environment: ${envPath || 'none'}`);
+            const projectPaths = scope.map(uri => uri.fsPath);
+            await setPipenvForWorkspaces(projectPaths, envPath);
+            traceInfo(`Set pipenv environment for projects ${projectPaths.join(', ')}: ${envPath || 'none'}`);
         }
 
         this._onDidChangeEnvironment.fire({
-            manager: this,
-            type: EnvironmentChangeKind.update,
-            environment,
+            uri: scope instanceof Uri ? scope : undefined,
             old: undefined,
+            new: environment,
         });
     }
 
-    async create(): Promise<PythonEnvironment | undefined> {
-        // Pipenv doesn't support creation through this interface
-        // Users should use `pipenv install` directly in their project
-        return undefined;
-    }
+    // Pipenv doesn't support creation or removal through this interface
+    // Users should use `pipenv install` and `pipenv --rm` directly
 
-    async remove(): Promise<void> {
-        // Pipenv doesn't support removal through this interface  
-        // Users should use `pipenv --rm` directly in their project
-    }
-
-    async getPreferred(projects: PythonProject[]): Promise<PythonEnvironment | undefined> {
-        if (projects.length === 0) {
-            return this.globalEnv || (await getPipenvForGlobal())
-                ? getLatest(this.collection.filter((env) => env.group === PIPENV_GLOBAL))
-                : undefined;
-        }
-
-        const project = projects[0];
-        const projectPath = typeof project === 'string' ? project : project.fsPath;
-
-        // Check if we have a specific pipenv environment for this project
-        const preferredPath = await getPipenvForWorkspace(projectPath);
-        if (preferredPath) {
-            const env = this.fsPathToEnv.get(preferredPath);
-            if (env) {
-                return env;
-            }
-        }
-
-        // Look for pipenv environment in project directory
-        const projectEnvs = this.collection.filter((env) => {
-            if (env.environmentPath) {
-                const envPath = env.environmentPath.fsPath;
-                return envPath.includes(projectPath);
-            }
-            return false;
-        });
-
-        return getLatest(projectEnvs);
-    }
+    // Pipenv doesn't support creation or removal through this interface
+    // Users should use `pipenv install` and `pipenv --rm` directly
 }
