@@ -162,6 +162,12 @@ export namespace PoetryStrings {
     export const poetryRefreshing = l10n.t('Refreshing Poetry environments');
 }
 
+export namespace PipenvStrings {
+    export const pipenvManager = l10n.t('Manages Pipenv environments');
+    export const pipenvDiscovering = l10n.t('Discovering Pipenv environments');
+    export const pipenvRefreshing = l10n.t('Refreshing Pipenv environments');
+}
+
 export namespace ProjectCreatorString {
     export const addExistingProjects = l10n.t('Add Existing Projects');
     export const autoFindProjects = l10n.t('Auto Find Projects');
