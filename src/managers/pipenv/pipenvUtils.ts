@@ -121,7 +121,7 @@ export async function getPipenv(native?: NativePythonFinder): Promise<string | u
                     }
                 }
             }
-        } catch (error) {
+        } catch (_error) {
             // Ignore errors here as this is a fallback
         }
     }
@@ -135,7 +135,7 @@ export async function getPipenvVersion(pipenvPath: string): Promise<string | und
             require('child_process').exec(
                 `"${pipenvPath}" --version`,
                 { timeout: 30000 },
-                (error: any, stdout: string, _stderr: string) => {
+                (error: Error | null, stdout: string, _stderr: string) => {
                     if (error) {
                         reject(error);
                     } else {
