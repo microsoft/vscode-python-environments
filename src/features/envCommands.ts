@@ -476,7 +476,7 @@ export async function getPackageCommandOptions(
     environment: PythonEnvironment;
 }> {
     if (e === undefined) {
-        const project = await pickProject(pm.getProjects());
+        const project = await pickProject(pm.getProjects(), true);
         if (project) {
             return getPackageCommandOptions(project.uri, em, pm);
         }
@@ -515,7 +515,7 @@ export async function createTerminalCommand(
     tm: TerminalManager,
 ): Promise<Terminal | undefined> {
     if (context === undefined) {
-        const pw = await pickProject(api.getPythonProjects());
+        const pw = await pickProject(api.getPythonProjects(), true);
         if (pw) {
             const env = await api.getEnvironment(pw.uri);
             const cwd = await findParentIfFile(pw.uri.fsPath);
@@ -549,7 +549,7 @@ export async function createTerminalCommand(
         }
     } else if (context instanceof PythonEnvTreeItem) {
         const view = context as PythonEnvTreeItem;
-        const pw = await pickProject(api.getPythonProjects());
+        const pw = await pickProject(api.getPythonProjects(), true);
         if (pw) {
             const cwd = await findParentIfFile(pw.uri.fsPath);
             const terminal = await tm.create(view.environment, { cwd });

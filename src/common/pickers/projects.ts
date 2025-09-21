@@ -1,25 +1,26 @@
 import path from 'path';
 import { QuickPickItem } from 'vscode';
 import { PythonProject } from '../../api';
-import { showQuickPick, showQuickPickWithButtons } from '../window.apis';
+import { showQuickPickWithButtons } from '../window.apis';
 import { Pickers } from '../localize';
 
 interface ProjectQuickPickItem extends QuickPickItem {
     project: PythonProject;
 }
 
-export async function pickProject(projects: ReadonlyArray<PythonProject>): Promise<PythonProject | undefined> {
+export async function pickProject(projects: ReadonlyArray<PythonProject>, showBackButton?: boolean): Promise<PythonProject | undefined> {
     if (projects.length > 1) {
         const items: ProjectQuickPickItem[] = projects.map((pw) => ({
             label: path.basename(pw.uri.fsPath),
             description: pw.uri.fsPath,
             project: pw,
         }));
-        const item = await showQuickPick(items, {
+        const item = await showQuickPickWithButtons(items, {
             placeHolder: Pickers.Project.selectProject,
             ignoreFocusOut: true,
+            showBackButton: showBackButton,
         });
-        if (item) {
+        if (item && !Array.isArray(item)) {
             return item.project;
         }
     } else if (projects.length === 1) {

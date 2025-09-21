@@ -7,7 +7,7 @@ import { EventNames } from '../telemetry/constants';
 import { sendTelemetryEvent } from '../telemetry/sender';
 import { isWindows } from '../utils/platformUtils';
 import { handlePythonPath } from '../utils/pythonPath';
-import { showOpenDialog, showQuickPick, showQuickPickWithButtons, withProgress } from '../window.apis';
+import { showOpenDialog, showQuickPickWithButtons, withProgress } from '../window.apis';
 import { pickEnvironmentManager } from './managers';
 
 type QuickPickIcon =
@@ -203,7 +203,7 @@ export async function pickEnvironment(
     return pickEnvironmentImpl(items, managers, projectEnvManagers, options);
 }
 
-export async function pickEnvironmentFrom(environments: PythonEnvironment[]): Promise<PythonEnvironment | undefined> {
+export async function pickEnvironmentFrom(environments: PythonEnvironment[], showBackButton?: boolean): Promise<PythonEnvironment | undefined> {
     const items = environments.map((e) => {
         const pathDescription = e.displayPath;
         const description =
@@ -216,9 +216,10 @@ export async function pickEnvironmentFrom(environments: PythonEnvironment[]): Pr
             iconPath: getIconPath(e.iconPath),
         };
     });
-    const selected = await showQuickPick(items, {
+    const selected = await showQuickPickWithButtons(items, {
         placeHolder: Pickers.Environments.selectEnvironment,
         ignoreFocusOut: true,
+        showBackButton: showBackButton,
     });
-    return (selected as { e: PythonEnvironment })?.e;
+    return (selected && !Array.isArray(selected) ? selected as { e: PythonEnvironment } : undefined)?.e;
 }

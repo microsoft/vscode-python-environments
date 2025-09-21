@@ -1,4 +1,4 @@
-import { CancellationToken, LogOutputChannel, ProgressLocation, QuickPickItem, Uri, window } from 'vscode';
+import { CancellationToken, LogOutputChannel, ProgressLocation, QuickPickItem, Uri } from 'vscode';
 import {
     EnvironmentManager,
     Package,
@@ -10,7 +10,7 @@ import {
 } from '../../api';
 import { showErrorMessageWithLogs } from '../../common/errors/utils';
 import { SysManagerStrings } from '../../common/localize';
-import { withProgress } from '../../common/window.apis';
+import { withProgress, showQuickPickWithButtons } from '../../common/window.apis';
 import {
     isNativeEnvInfo,
     NativeEnvInfo,
@@ -36,10 +36,11 @@ export async function pickPackages(uninstall: boolean, packages: string[] | Pack
         return asPackageQuickPickItem(pkg.name, pkg.version);
     });
 
-    const result = await window.showQuickPick(items, {
+    const result = await showQuickPickWithButtons(items, {
         placeHolder: uninstall ? SysManagerStrings.selectUninstall : SysManagerStrings.selectInstall,
         canPickMany: true,
         ignoreFocusOut: true,
+        showBackButton: true,
     });
 
     if (Array.isArray(result)) {

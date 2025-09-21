@@ -14,7 +14,7 @@ import {
     showErrorMessage,
     showInputBox,
     showOpenDialog,
-    showQuickPick,
+    showQuickPickWithButtons,
     showWarningMessage,
     withProgress,
 } from '../../common/window.apis';
@@ -242,12 +242,13 @@ export async function getGlobalVenvLocation(): Promise<Uri | undefined> {
         );
     }
 
-    const selected = await showQuickPick(items, {
+    const selected = await showQuickPickWithButtons(items, {
         placeHolder: VenvManagerStrings.venvGlobalFolder,
         ignoreFocusOut: true,
+        showBackButton: true,
     });
 
-    if (selected) {
+    if (selected && !Array.isArray(selected)) {
         if (selected.label === Common.browse) {
             const result = await showOpenDialog({
                 canSelectFiles: false,
@@ -266,7 +267,7 @@ export async function getGlobalVenvLocation(): Promise<Uri | undefined> {
 }
 
 async function createWithCustomization(version: string): Promise<boolean | undefined> {
-    const selection: QuickPickItem | undefined = await showQuickPick(
+    const selection: QuickPickItem | undefined = await showQuickPickWithButtons(
         [
             {
                 label: VenvManagerStrings.quickCreate,
@@ -281,8 +282,9 @@ async function createWithCustomization(version: string): Promise<boolean | undef
         {
             placeHolder: VenvManagerStrings.selectQuickOrCustomize,
             ignoreFocusOut: true,
+            showBackButton: true,
         },
-    );
+    ).then(result => Array.isArray(result) ? undefined : result);
 
     if (selection === undefined) {
         return undefined;
@@ -448,7 +450,7 @@ export async function createPythonVenv(
     }
     const project = api.getPythonProject(venvRoot);
 
-    const basePython = await pickEnvironmentFrom(sortedEnvs);
+    const basePython = await pickEnvironmentFrom(sortedEnvs, true);
     if (!basePython || !basePython.execInfo) {
         log.error('No base python selected, cannot create virtual environment.');
         return {

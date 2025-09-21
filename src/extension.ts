@@ -17,6 +17,7 @@ import {
     createTerminal,
     onDidChangeActiveTerminal,
     onDidChangeTerminalShellIntegration,
+    showQuickPickWithButtons,
 } from './common/window.apis';
 import { getConfiguration } from './common/workspace.apis';
 import { createManagerReady } from './features/common/managerReady';
@@ -368,7 +369,7 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
                 const petPath = await getNativePythonToolsPath();
 
                 // Show quick pick menu for PET operation selection
-                const selectedOption = await window.showQuickPick(
+                const selectedOption = await showQuickPickWithButtons(
                     [
                         {
                             label: 'Find All Environments',
@@ -384,10 +385,11 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
                     {
                         placeHolder: 'Select a Python Environment Tool (PET) operation',
                         ignoreFocusOut: true,
+                        showBackButton: true,
                     },
                 );
 
-                if (!selectedOption) {
+                if (!selectedOption || Array.isArray(selectedOption)) {
                     return; // User cancelled
                 }
 

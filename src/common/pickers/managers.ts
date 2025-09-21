@@ -82,6 +82,7 @@ export async function pickEnvironmentManager(
 export async function pickPackageManager(
     managers: InternalPackageManager[],
     defaultManagers?: InternalPackageManager[],
+    showBackButton?: boolean,
 ): Promise<string | undefined> {
     if (managers.length === 0) {
         return;
@@ -121,6 +122,7 @@ export async function pickPackageManager(
     const item = await showQuickPickWithButtons(items, {
         placeHolder: Pickers.Managers.selectPackageManager,
         ignoreFocusOut: true,
+        showBackButton: showBackButton,
     });
     return (item as QuickPickItem & { id: string })?.id;
 }
@@ -181,6 +183,7 @@ export async function pickCreator(creators: PythonProjectCreator[]): Promise<Pyt
     const selected = await showQuickPickWithButtons(items, {
         placeHolder: Pickers.Managers.selectProjectCreator,
         ignoreFocusOut: true,
+        showBackButton: true,
     });
 
     if (!selected) {

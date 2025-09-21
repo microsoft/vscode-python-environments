@@ -38,7 +38,6 @@ import { isWindows } from '../../common/utils/platformUtils';
 import {
     showErrorMessage,
     showInputBox,
-    showQuickPick,
     showQuickPickWithButtons,
     withProgress,
 } from '../../common/window.apis';
@@ -733,7 +732,7 @@ async function getLocation(api: PythonEnvironmentApi, uris: Uri | Uri[]): Promis
         } else {
             api.getPythonProjects().forEach((p) => projects.push(p));
         }
-        const project = await pickProject(projects);
+        const project = await pickProject(projects, true);
         return project?.uri.fsPath;
     }
     return api.getPythonProject(Array.isArray(uris) ? uris[0] : uris)?.uri.fsPath;
@@ -809,7 +808,7 @@ export async function createCondaEnvironment(
         Array.isArray(uris) && uris.length > 1
             ? 'Named'
             : (
-                  await showQuickPick(
+                  await showQuickPickWithButtons(
                       [
                           { label: CondaStrings.condaNamed, description: CondaStrings.condaNamedDescription },
                           { label: CondaStrings.condaPrefix, description: CondaStrings.condaPrefixDescription },
@@ -817,8 +816,9 @@ export async function createCondaEnvironment(
                       {
                           placeHolder: CondaStrings.condaSelectEnvType,
                           ignoreFocusOut: true,
+                          showBackButton: true,
                       },
-                  )
+                  ).then(result => Array.isArray(result) ? undefined : result)
               )?.label;
 
     const pythonVersion = await pickPythonVersion(api);
