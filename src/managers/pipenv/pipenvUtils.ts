@@ -96,8 +96,9 @@ async function nativeToPythonEnv(
     }
 
     const sv = shortVersion(info.version);
-    const name = info.name || info.displayName || path.basename(info.prefix);
-    const displayName = info.displayName || `pipenv (${sv})`;
+    const folderName = path.basename(info.prefix);
+    const name = info.name || info.displayName || folderName;
+    const displayName = info.displayName || `${folderName} (${sv})`;
 
     // Derive the environment's bin/scripts directory from the python executable
     const binDir = path.dirname(info.executable);
