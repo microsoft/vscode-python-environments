@@ -549,7 +549,10 @@ async function windowsExceptionGenerateConfig(
     traceVerbose(`PS1 hook path: ${ps1Hook ?? 'not found'}`);
     const activation = ps1Hook ? ps1Hook : sourceInitPath;
 
-    const pwshActivate = [{ executable: activation }, { executable: 'conda', args: ['activate', prefix] }];
+    // For PowerShell, we need to dot-source the conda-hook.ps1 script
+    const pwshActivate = ps1Hook 
+        ? [{ executable: '.', args: [ps1Hook] }, { executable: 'conda', args: ['activate', prefix] }]
+        : [{ executable: sourceInitPath }, { executable: 'conda', args: ['activate', prefix] }];
     const cmdActivate = [{ executable: sourceInitPath }, { executable: 'conda', args: ['activate', prefix] }];
 
     const bashActivate = [{ executable: 'source', args: [sourceInitPath.replace(/\\/g, '/'), prefix] }];
