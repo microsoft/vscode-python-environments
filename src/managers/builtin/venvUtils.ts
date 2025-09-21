@@ -10,6 +10,7 @@ import { getWorkspacePersistentState } from '../../common/persistentState';
 import { pickEnvironmentFrom } from '../../common/pickers/environments';
 import { EventNames } from '../../common/telemetry/constants';
 import { sendTelemetryEvent } from '../../common/telemetry/sender';
+import { normalizePath } from '../../common/utils/pathUtils';
 import {
     showErrorMessage,
     showInputBox,
@@ -501,8 +502,11 @@ export async function removeVenv(environment: PythonEnvironment, log: LogOutputC
         ? path.dirname(path.dirname(environment.environmentPath.fsPath))
         : environment.environmentPath.fsPath;
 
+    // Normalize path for UI display - ensure forward slashes on Windows
+    const displayPath = normalizePath(envPath);
+
     const confirm = await showWarningMessage(
-        l10n.t('Are you sure you want to remove {0}?', envPath),
+        l10n.t('Are you sure you want to remove {0}?', displayPath),
         {
             modal: true,
         },
@@ -529,7 +533,7 @@ export async function removeVenv(environment: PythonEnvironment, log: LogOutputC
         return result;
     }
 
-    traceInfo(`User cancelled removal of virtual environment: ${envPath}`);
+    traceInfo(`User cancelled removal of virtual environment: ${displayPath}`);
     return false;
 }
 
