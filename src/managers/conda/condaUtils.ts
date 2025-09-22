@@ -547,9 +547,8 @@ async function windowsExceptionGenerateConfig(
 
     const ps1Hook = await getCondaHookPs1Path(condaFolder);
     traceVerbose(`PS1 hook path: ${ps1Hook ?? 'not found'}`);
-    const activation = ps1Hook ? ps1Hook : sourceInitPath;
 
-    // For PowerShell, we need to dot-source the conda-hook.ps1 script
+    // For PowerShell, we need to dot-source the conda-hook.ps1 script if available
     const pwshActivate = ps1Hook 
         ? [{ executable: '.', args: [ps1Hook] }, { executable: 'conda', args: ['activate', prefix] }]
         : [{ executable: sourceInitPath }, { executable: 'conda', args: ['activate', prefix] }];

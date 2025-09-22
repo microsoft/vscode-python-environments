@@ -1,9 +1,11 @@
 import * as assert from 'assert';
 import {
     extractProfilePath,
+    getShellCommandAsString,
     PROFILE_TAG_END,
     PROFILE_TAG_START,
 } from '../../../../../features/terminal/shells/common/shellUtils';
+import { ShellConstants } from '../../../../../features/common/shellConstants';
 
 suite('Shell Utils', () => {
     suite('extractProfilePath', () => {
@@ -75,6 +77,43 @@ suite('Shell Utils', () => {
             const content = `${PROFILE_TAG_START}\n${expectedPath}\n${PROFILE_TAG_END}`;
             const result = extractProfilePath(content);
             assert.strictEqual(result, expectedPath);
+        });
+    });
+
+    suite('getShellCommandAsString PowerShell Conda Activation', () => {
+        test('should format PowerShell conda activation with dot-sourcing correctly', () => {
+            const command = [
+                { executable: '.', args: ['/path/to/conda-hook.ps1'] },
+                { executable: 'conda', args: ['activate', 'myenv'] }
+            ];
+            const result = getShellCommandAsString(ShellConstants.PWSH, command);
+            assert.strictEqual(result, '(. /path/to/conda-hook.ps1) ; (conda activate myenv)');
+        });
+
+        test('should format PowerShell conda activation with spaces in path correctly', () => {
+            const command = [
+                { executable: '.', args: ['/path with spaces/conda-hook.ps1'] },
+                { executable: 'conda', args: ['activate', 'my env'] }
+            ];
+            const result = getShellCommandAsString(ShellConstants.PWSH, command);
+            assert.strictEqual(result, '(. "/path with spaces/conda-hook.ps1") ; (conda activate "my env")');
+        });
+
+        test('should format PowerShell conda activation fallback correctly', () => {
+            const command = [
+                { executable: '/path/to/activate.bat' },
+                { executable: 'conda', args: ['activate', 'myenv'] }
+            ];
+            const result = getShellCommandAsString(ShellConstants.PWSH, command);
+            assert.strictEqual(result, '(/path/to/activate.bat) ; (conda activate myenv)');
+        });
+
+        test('should format single PowerShell command without parentheses', () => {
+            const command = [
+                { executable: 'conda', args: ['activate', 'myenv'] }
+            ];
+            const result = getShellCommandAsString(ShellConstants.PWSH, command);
+            assert.strictEqual(result, 'conda activate myenv');
         });
     });
 });
