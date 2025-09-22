@@ -331,8 +331,8 @@ async function getNamedCondaPythonInfo(
         execInfo: {
             run: { executable: path.join(executable) },
             activatedRun: {
-                executable: 'conda',
-                args: ['run', '--name', name, 'python'],
+                executable: path.join(executable),
+                args: [],
             },
             activation: [{ executable: 'conda', args: ['activate', name] }],
             deactivation: [{ executable: 'conda', args: ['deactivate'] }],
@@ -376,8 +376,8 @@ async function getPrefixesCondaPythonInfo(
         execInfo: {
             run: { executable: path.join(executable) },
             activatedRun: {
-                executable: conda,
-                args: ['run', '--prefix', prefix, 'python'],
+                executable: path.join(executable),
+                args: [],
             },
             activation: [{ executable: conda, args: ['activate', prefix] }],
             deactivation: [{ executable: conda, args: ['deactivate'] }],
@@ -991,6 +991,7 @@ export async function quickCreateConda(
     additionalPackages?: string[],
 ): Promise<PythonEnvironment | undefined> {
     const prefix = path.join(fsPath, name);
+    const execPath = os.platform() === 'win32' ? path.join(prefix, 'python.exe') : path.join(prefix, 'bin', 'python');
 
     return await withProgress(
         {
@@ -999,7 +1000,6 @@ export async function quickCreateConda(
         },
         async () => {
             try {
-                const bin = os.platform() === 'win32' ? 'python.exe' : 'python';
                 await runCondaExecutable(['create', '--yes', '--prefix', prefix, 'python'], log);
                 if (additionalPackages && additionalPackages.length > 0) {
                     await runConda(['install', '--yes', '--prefix', prefix, ...additionalPackages], log);
@@ -1015,10 +1015,10 @@ export async function quickCreateConda(
                         description: prefix,
                         version,
                         execInfo: {
-                            run: { executable: path.join(prefix, bin) },
+                            run: { executable: execPath },
                             activatedRun: {
-                                executable: 'conda',
-                                args: ['run', '-p', prefix, 'python'],
+                                executable: execPath,
+                                args: [],
                             },
                             activation: [{ executable: 'conda', args: ['activate', prefix] }],
                             deactivation: [{ executable: 'conda', args: ['deactivate'] }],
