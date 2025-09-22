@@ -6,12 +6,13 @@ import { ShellConstants } from '../../../common/shellConstants';
 import { quoteArgs } from '../../../execution/execUtils';
 
 function getCommandAsString(command: PythonCommandRunConfiguration[], shell: string, delimiter: string): string {
-    const parts = [];
+    let parts = [];
     for (const cmd of command) {
         const args = cmd.args ?? [];
         parts.push(quoteArgs([normalizeShellPath(cmd.executable, shell), ...args]).join(' '));
     }
     if (shell === ShellConstants.PWSH) {
+        parts = parts.map((p) => (p.startsWith('"') ? `& ${p}` : p));
         if (parts.length === 1) {
             return parts[0];
         }
