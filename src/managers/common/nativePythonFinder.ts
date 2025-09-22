@@ -408,7 +408,7 @@ function extractEnvironmentDirectory(executablePath: string): string | undefined
 
 /**
  * Gets all extra environment search paths from various configuration sources.
- * Combines python.venvFolders (for migration), python-env.searchPaths settings, and legacy custom venv dirs.
+ * Combines legacy python settings (with migration), python-env.searchPaths settings.
  * @returns Array of search directory paths
  */
 async function getAllExtraSearchPaths(): Promise<string[]> {
@@ -419,8 +419,8 @@ async function getAllExtraSearchPaths(): Promise<string[]> {
     searchDirectories.push(...customVenvDirs);
     traceLog('Added legacy custom venv directories:', customVenvDirs);
     
-    // Handle migration from python.venvFolders to python-env.searchPaths
-    await handleVenvFoldersMigration();
+    // Handle migration from legacy python settings to python-env.searchPaths
+    await handleLegacyPythonSettingsMigration();
     
     // Get searchPaths using proper VS Code settings precedence
     const searchPaths = getSearchPathsWithPrecedence();
@@ -445,19 +445,15 @@ async function getAllExtraSearchPaths(): Promise<string[]> {
                 traceLog('Processing regex pattern for Python environment discovery:', trimmedPath);
                 traceLog('Warning: Using regex patterns in searchPaths may cause performance issues due to file system scanning');
                 
-                // Modify the regex to search for directories that might contain Python executables
-                // Instead of searching for executables directly, we append python pattern to find parent directories
-                const directoryPattern = trimmedPath.endsWith('python*') ? trimmedPath.replace(/python\*$/, '') : trimmedPath;
-                
-                // Use workspace.findFiles to search for directories or python-related files
-                const foundFiles = await workspace.findFiles(directoryPattern + '**/python*', null);
-                traceLog('Regex pattern search found', foundFiles.length, 'files matching pattern:', directoryPattern + '**/python*');
+                // Use workspace.findFiles to search with the regex pattern as literally as possible
+                const foundFiles = await workspace.findFiles(trimmedPath, null);
+                traceLog('Regex pattern search found', foundFiles.length, 'files matching pattern:', trimmedPath);
                 
                 for (const file of foundFiles) {
                     const filePath = file.fsPath;
                     traceLog('Evaluating file from regex search:', filePath);
                     
-                    // Get environment folder (file -> bin -> env -> this)
+                    // Extract environment directory from the found file path
                     const environmentDir = extractEnvironmentDirectory(filePath);
                     if (environmentDir) {
                         searchDirectories.push(environmentDir);
@@ -473,13 +469,9 @@ async function getAllExtraSearchPaths(): Promise<string[]> {
                 searchDirectories.push(trimmedPath);
                 traceLog('Added directory as search path:', trimmedPath);
             }
-            // If path doesn't exist, add it anyway as it might exist in the future
-            // This handles cases where:
-            // - Virtual environments might be created later
-            // - Network drives that might not be mounted yet
-            // - Symlinks to directories that might be created
+            // Path doesn't exist yet - might be created later (virtual envs, network drives, symlinks)
             else {
-                traceLog('Path does not exist currently, adding for future resolution when environments may be created:', trimmedPath);
+                traceLog('Path does not exist currently, adding for future resolution:', trimmedPath);
                 searchDirectories.push(trimmedPath);
             }
         } catch (error) {
@@ -540,40 +532,59 @@ function untildifyArray(paths: string[]): string[] {
 }
 
 /**
- * Handles migration from python.venvFolders to python-env.searchPaths.
- * Only migrates if python.venvFolders exists and searchPaths is different.
+ * Handles migration from legacy python settings (python.venvPath and python.venvFolders) to python-env.searchPaths.
+ * Only migrates if legacy settings exist and searchPaths is different.
  */
-async function handleVenvFoldersMigration(): Promise<void> {
+async function handleLegacyPythonSettingsMigration(): Promise<void> {
     try {
-        // Check if we have python.venvFolders set at user level
         const pythonConfig = getConfiguration('python');
-        const venvFoldersInspection = pythonConfig.inspect<string[]>('venvFolders');
-        const venvFolders = venvFoldersInspection?.globalValue;
+        const envConfig = getConfiguration('python-env');
         
-        if (!venvFolders || venvFolders.length === 0) {
+        // Get legacy settings
+        const venvPathInspection = pythonConfig.inspect<string>('venvPath');
+        const venvPath = venvPathInspection?.globalValue;
+        
+        const venvFoldersInspection = pythonConfig.inspect<string[]>('venvFolders');
+        const venvFolders = venvFoldersInspection?.globalValue || [];
+        
+        // Collect all legacy paths
+        const legacyPaths: string[] = [];
+        if (venvPath) {
+            legacyPaths.push(venvPath);
+        }
+        legacyPaths.push(...venvFolders);
+        
+        if (legacyPaths.length === 0) {
             return;
         }
         
-        traceLog('Found python.venvFolders setting:', venvFolders);
+        traceLog('Found legacy python settings - venvPath:', venvPath, 'venvFolders:', venvFolders);
         
         // Check current searchPaths at user level
-        const envConfig = getConfiguration('python-env');
         const searchPathsInspection = envConfig.inspect<string[]>('searchPaths');
         const currentSearchPaths = searchPathsInspection?.globalValue || [];
         
         // Check if they are the same (no need to migrate)
-        if (arraysEqual(venvFolders, currentSearchPaths)) {
-            traceLog('python.venvFolders and searchPaths are identical, no migration needed');
+        if (arraysEqual(legacyPaths, currentSearchPaths)) {
+            traceLog('Legacy settings and searchPaths are identical, no migration needed');
             return;
         }
         
-        // Combine venvFolders with existing searchPaths (remove duplicates)
-        const combinedPaths = Array.from(new Set([...currentSearchPaths, ...venvFolders]));
+        // Combine legacy paths with existing searchPaths (remove duplicates)
+        const combinedPaths = Array.from(new Set([...currentSearchPaths, ...legacyPaths]));
         
         // Update searchPaths at user level
         await envConfig.update('searchPaths', combinedPaths, true); // true = global/user level
         
-        traceLog('Migrated python.venvFolders to searchPaths. Combined paths:', combinedPaths);
+        // Delete the old legacy settings
+        if (venvPath) {
+            await pythonConfig.update('venvPath', undefined, true);
+        }
+        if (venvFolders.length > 0) {
+            await pythonConfig.update('venvFolders', undefined, true);
+        }
+        
+        traceLog('Migrated legacy python settings to searchPaths and removed old settings. Combined paths:', combinedPaths);
         
         // Show notification to user about migration
         // Note: We should only show this once per session to avoid spam
@@ -581,10 +592,11 @@ async function handleVenvFoldersMigration(): Promise<void> {
             migrationNotificationShown = true;
             // Note: Actual notification would use VS Code's window.showInformationMessage
             // but we'll log it for now since we can't import window APIs here
-            traceLog('User notification: Automatically migrated python.venvFolders setting to python-env.searchPaths');
+            const settingsRemoved = [venvPath ? 'python.venvPath' : '', venvFolders.length > 0 ? 'python.venvFolders' : ''].filter(Boolean).join(' and ');
+            traceLog(`User notification: Automatically migrated ${settingsRemoved} to python-env.searchPaths and removed the old settings.`);
         }
     } catch (error) {
-        traceLog('Error during venvFolders migration:', error);
+        traceLog('Error during legacy python settings migration:', error);
     }
 }
 
