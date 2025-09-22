@@ -110,11 +110,20 @@
                     "default": false,
                     "scope": "resource"
                 },
-                "python-env.searchPaths": {
+                "python-env.globalSearchPaths": {
                     "type": "array",
-                    "description": "%python-env.searchPaths.description%",
+                    "description": "%python-env.globalSearchPaths.description%",
                     "default": [],
-                    "scope": "window",
+                    "scope": "application",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "python-env.workspaceSearchPaths": {
+                    "type": "array",
+                    "description": "%python-env.workspaceSearchPaths.description%",
+                    "default": [],
+                    "scope": "resource",
                     "items": {
                         "type": "string"
                     }
