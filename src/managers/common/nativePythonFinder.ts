@@ -408,7 +408,7 @@ function extractEnvironmentDirectory(executablePath: string): string | undefined
 
 /**
  * Gets all extra environment search paths from various configuration sources.
- * Combines legacy python settings (with migration), python-env.searchPaths settings.
+ * Combines legacy python settings (with migration), globalSearchPaths, and workspaceSearchPaths.
  * @returns Array of search directory paths
  */
 async function getAllExtraSearchPaths(): Promise<string[]> {
@@ -419,20 +419,50 @@ async function getAllExtraSearchPaths(): Promise<string[]> {
     searchDirectories.push(...customVenvDirs);
     traceLog('Added legacy custom venv directories:', customVenvDirs);
     
-    // Handle migration from legacy python settings to python-env.searchPaths
+    // Handle migration from legacy python settings to new search paths settings
     await handleLegacyPythonSettingsMigration();
     
-    // Get searchPaths using proper VS Code settings precedence
-    const searchPaths = getSearchPathsWithPrecedence();
-    traceLog('Retrieved searchPaths with precedence:', searchPaths);
+    // Get globalSearchPaths (absolute paths, no regex)
+    const globalSearchPaths = getGlobalSearchPaths();
+    traceLog('Retrieved globalSearchPaths:', globalSearchPaths);
+    
+    // Process global search paths (absolute directories only, no regex)
+    for (const globalPath of globalSearchPaths) {
+        try {
+            if (!globalPath || globalPath.trim() === '') {
+                continue;
+            }
 
-    for (const searchPath of searchPaths) {
+            const trimmedPath = globalPath.trim();
+            traceLog('Processing global search path:', trimmedPath);
+            
+            // Global paths must be absolute directories only (no regex patterns)
+            if (await fs.pathExists(trimmedPath) && (await fs.stat(trimmedPath)).isDirectory()) {
+                searchDirectories.push(trimmedPath);
+                traceLog('Added global directory as search path:', trimmedPath);
+            } else {
+                // Path doesn't exist yet - might be created later
+                traceLog('Global path does not exist currently, adding for future resolution:', trimmedPath);
+                searchDirectories.push(trimmedPath);
+            }
+        } catch (error) {
+            traceLog('Error processing global search path:', globalPath, 'Error:', error);
+        }
+    }
+    
+    // Get workspaceSearchPaths (can include regex patterns)
+    const workspaceSearchPaths = getWorkspaceSearchPaths();
+    traceLog('Retrieved workspaceSearchPaths:', workspaceSearchPaths);
+
+    // Process workspace search paths (can be directories or regex patterns)
+    for (const searchPath of workspaceSearchPaths) {
         try {
             if (!searchPath || searchPath.trim() === '') {
                 continue;
             }
 
             const trimmedPath = searchPath.trim();
+            traceLog('Processing workspace search path:', trimmedPath);
             
             // Check if it's a regex pattern (contains regex special characters)
             // Note: Windows paths contain backslashes, so we need to be more careful
@@ -443,7 +473,7 @@ async function getAllExtraSearchPaths(): Promise<string[]> {
             
             if (isRegexPattern) {
                 traceLog('Processing regex pattern for Python environment discovery:', trimmedPath);
-                traceLog('Warning: Using regex patterns in searchPaths may cause performance issues due to file system scanning');
+                traceLog('Warning: Using regex patterns in workspaceSearchPaths may cause performance issues due to file system scanning');
                 
                 // Use workspace.findFiles to search with the regex pattern as literally as possible
                 const foundFiles = await workspace.findFiles(trimmedPath, null);
@@ -461,21 +491,21 @@ async function getAllExtraSearchPaths(): Promise<string[]> {
                     }
                 }
                 
-                traceLog('Completed processing regex pattern:', trimmedPath, 'Added', searchDirectories.length, 'search directories');
+                traceLog('Completed processing regex pattern:', trimmedPath);
             }
             // Check if it's a directory path
             else if (await fs.pathExists(trimmedPath) && (await fs.stat(trimmedPath)).isDirectory()) {
-                traceLog('Processing directory path:', trimmedPath);
+                traceLog('Processing workspace directory path:', trimmedPath);
                 searchDirectories.push(trimmedPath);
-                traceLog('Added directory as search path:', trimmedPath);
+                traceLog('Added workspace directory as search path:', trimmedPath);
             }
-            // Path doesn't exist yet - might be created later (virtual envs, network drives, symlinks)
+            // Path doesn't exist yet - might be created later
             else {
-                traceLog('Path does not exist currently, adding for future resolution:', trimmedPath);
+                traceLog('Workspace path does not exist currently, adding for future resolution:', trimmedPath);
                 searchDirectories.push(trimmedPath);
             }
         } catch (error) {
-            traceLog('Error processing search path:', searchPath, 'Error:', error);
+            traceLog('Error processing workspace search path:', searchPath, 'Error:', error);
         }
     }
 
@@ -486,38 +516,48 @@ async function getAllExtraSearchPaths(): Promise<string[]> {
 }
 
 /**
- * Gets searchPaths setting value using proper VS Code settings precedence.
- * Checks workspaceFolder, then workspace, then user level settings.
- * @returns Array of search paths from the most specific scope available
+ * Gets globalSearchPaths setting with proper validation.
+ * Only gets user-level (global) setting since this setting is application-scoped.
  */
-function getSearchPathsWithPrecedence(): string[] {
+function getGlobalSearchPaths(): string[] {
     try {
-        // Use VS Code configuration inspection to handle precedence automatically
-        const config = getConfiguration('python-env');
-        const inspection = config.inspect<string[]>('searchPaths');
+        const envConfig = getConfiguration('python-env');
+        const inspection = envConfig.inspect<string[]>('globalSearchPaths');
         
-        // VS Code automatically handles precedence: workspaceFolder -> workspace -> user
-        // We check each level in order and return the first one found
+        const globalPaths = inspection?.globalValue || [];
+        traceLog('Retrieved globalSearchPaths:', globalPaths);
+        return untildifyArray(globalPaths);
+    } catch (error) {
+        traceLog('Error getting globalSearchPaths:', error);
+        return [];
+    }
+}
+
+/**
+ * Gets workspaceSearchPaths setting with workspace precedence.
+ * Gets the most specific workspace-level setting available.
+ */
+function getWorkspaceSearchPaths(): string[] {
+    try {
+        const envConfig = getConfiguration('python-env');
+        const inspection = envConfig.inspect<string[]>('workspaceSearchPaths');
+        
+        // For workspace settings, prefer workspaceFolder > workspace
         if (inspection?.workspaceFolderValue) {
-            traceLog('Using workspaceFolder level searchPaths setting');
-            return untildifyArray(inspection.workspaceFolderValue);
+            traceLog('Using workspaceFolder level workspaceSearchPaths setting');
+            return inspection.workspaceFolderValue;
         }
         
         if (inspection?.workspaceValue) {
-            traceLog('Using workspace level searchPaths setting');
-            return untildifyArray(inspection.workspaceValue);
+            traceLog('Using workspace level workspaceSearchPaths setting');
+            return inspection.workspaceValue;
         }
         
-        if (inspection?.globalValue) {
-            traceLog('Using user level searchPaths setting');
-            return untildifyArray(inspection.globalValue);
-        }
-        
-        // Default empty array
-        traceLog('No searchPaths setting found at any level, using empty array');
+        // Default empty array (don't use global value for workspace settings)
+        traceLog('No workspaceSearchPaths setting found at workspace level, using empty array');
         return [];
     } catch (error) {
-        traceLog('Error getting searchPaths with precedence:', error);
+        traceLog('Error getting workspaceSearchPaths:', error);
         return [];
     }
 }
@@ -532,68 +572,90 @@ function untildifyArray(paths: string[]): string[] {
 }
 
 /**
- * Handles migration from legacy python settings (python.venvPath and python.venvFolders) to python-env.searchPaths.
- * Only migrates if legacy settings exist and searchPaths is different.
+ * Handles migration from legacy python settings to the new globalSearchPaths and workspaceSearchPaths settings.
+ * Legacy global settings go to globalSearchPaths, workspace settings go to workspaceSearchPaths.
+ * Does NOT delete the old settings, only adds them to the new settings.
  */
 async function handleLegacyPythonSettingsMigration(): Promise<void> {
     try {
         const pythonConfig = getConfiguration('python');
         const envConfig = getConfiguration('python-env');
         
-        // Get legacy settings
+        // Get legacy settings at all levels
         const venvPathInspection = pythonConfig.inspect<string>('venvPath');
-        const venvPath = venvPathInspection?.globalValue;
-        
         const venvFoldersInspection = pythonConfig.inspect<string[]>('venvFolders');
-        const venvFolders = venvFoldersInspection?.globalValue || [];
         
-        // Collect all legacy paths
-        const legacyPaths: string[] = [];
-        if (venvPath) {
-            legacyPaths.push(venvPath);
+        // Collect global (user-level) legacy paths for globalSearchPaths
+        const globalLegacyPaths: string[] = [];
+        if (venvPathInspection?.globalValue) {
+            globalLegacyPaths.push(venvPathInspection.globalValue);
         }
-        legacyPaths.push(...venvFolders);
+        if (venvFoldersInspection?.globalValue) {
+            globalLegacyPaths.push(...venvFoldersInspection.globalValue);
+        }
         
-        if (legacyPaths.length === 0) {
+        // Collect workspace-level legacy paths for workspaceSearchPaths
+        const workspaceLegacyPaths: string[] = [];
+        if (venvPathInspection?.workspaceValue) {
+            workspaceLegacyPaths.push(venvPathInspection.workspaceValue);
+        }
+        if (venvFoldersInspection?.workspaceValue) {
+            workspaceLegacyPaths.push(...venvFoldersInspection.workspaceValue);
+        }
+        if (venvPathInspection?.workspaceFolderValue) {
+            workspaceLegacyPaths.push(venvPathInspection.workspaceFolderValue);
+        }
+        if (venvFoldersInspection?.workspaceFolderValue) {
+            workspaceLegacyPaths.push(...venvFoldersInspection.workspaceFolderValue);
+        }
+        
+        if (globalLegacyPaths.length === 0 && workspaceLegacyPaths.length === 0) {
             return;
         }
         
-        traceLog('Found legacy python settings - venvPath:', venvPath, 'venvFolders:', venvFolders);
+        traceLog('Found legacy python settings - global paths:', globalLegacyPaths, 'workspace paths:', workspaceLegacyPaths);
         
-        // Check current searchPaths at user level
-        const searchPathsInspection = envConfig.inspect<string[]>('searchPaths');
-        const currentSearchPaths = searchPathsInspection?.globalValue || [];
-        
-        // Check if they are the same (no need to migrate)
-        if (arraysEqual(legacyPaths, currentSearchPaths)) {
-            traceLog('Legacy settings and searchPaths are identical, no migration needed');
-            return;
+        // Migrate global legacy paths to globalSearchPaths
+        if (globalLegacyPaths.length > 0) {
+            const globalSearchPathsInspection = envConfig.inspect<string[]>('globalSearchPaths');
+            const currentGlobalSearchPaths = globalSearchPathsInspection?.globalValue || [];
+            
+            // Only migrate if they are different
+            if (!arraysEqual(globalLegacyPaths, currentGlobalSearchPaths)) {
+                const combinedGlobalPaths = Array.from(new Set([...currentGlobalSearchPaths, ...globalLegacyPaths]));
+                await envConfig.update('globalSearchPaths', combinedGlobalPaths, true); // true = global/user level
+                traceLog('Migrated legacy global python settings to globalSearchPaths. Combined paths:', combinedGlobalPaths);
+            } else {
+                traceLog('Legacy global settings and globalSearchPaths are identical, no migration needed');
+            }
         }
         
-        // Combine legacy paths with existing searchPaths (remove duplicates)
-        const combinedPaths = Array.from(new Set([...currentSearchPaths, ...legacyPaths]));
-        
-        // Update searchPaths at user level
-        await envConfig.update('searchPaths', combinedPaths, true); // true = global/user level
-        
-        // Delete the old legacy settings
-        if (venvPath) {
-            await pythonConfig.update('venvPath', undefined, true);
+        // Migrate workspace legacy paths to workspaceSearchPaths
+        if (workspaceLegacyPaths.length > 0) {
+            const workspaceSearchPathsInspection = envConfig.inspect<string[]>('workspaceSearchPaths');
+            const currentWorkspaceSearchPaths = workspaceSearchPathsInspection?.workspaceValue || [];
+            
+            // Only migrate if they are different
+            if (!arraysEqual(workspaceLegacyPaths, currentWorkspaceSearchPaths)) {
+                const combinedWorkspacePaths = Array.from(new Set([...currentWorkspaceSearchPaths, ...workspaceLegacyPaths]));
+                await envConfig.update('workspaceSearchPaths', combinedWorkspacePaths, false); // false = workspace level
+                traceLog('Migrated legacy workspace python settings to workspaceSearchPaths. Combined paths:', combinedWorkspacePaths);
+            } else {
+                traceLog('Legacy workspace settings and workspaceSearchPaths are identical, no migration needed');
+            }
         }
-        if (venvFolders.length > 0) {
-            await pythonConfig.update('venvFolders', undefined, true);
-        }
-        
-        traceLog('Migrated legacy python settings to searchPaths and removed old settings. Combined paths:', combinedPaths);
         
         // Show notification to user about migration
-        // Note: We should only show this once per session to avoid spam
-        if (!migrationNotificationShown) {
+        if (!migrationNotificationShown && (globalLegacyPaths.length > 0 || workspaceLegacyPaths.length > 0)) {
             migrationNotificationShown = true;
-            // Note: Actual notification would use VS Code's window.showInformationMessage
-            // but we'll log it for now since we can't import window APIs here
-            const settingsRemoved = [venvPath ? 'python.venvPath' : '', venvFolders.length > 0 ? 'python.venvFolders' : ''].filter(Boolean).join(' and ');
-            traceLog(`User notification: Automatically migrated ${settingsRemoved} to python-env.searchPaths and removed the old settings.`);
+            const migratedSettings = [];
+            if (globalLegacyPaths.length > 0) {
+                migratedSettings.push('legacy global settings to python-env.globalSearchPaths');
+            }
+            if (workspaceLegacyPaths.length > 0) {
+                migratedSettings.push('legacy workspace settings to python-env.workspaceSearchPaths');
+            }
+            traceLog(`User notification: Automatically migrated ${migratedSettings.join(' and ')}.`);
         }
     } catch (error) {
         traceLog('Error during legacy python settings migration:', error);
