@@ -7,7 +7,6 @@ import { ENVS_EXTENSION_ID } from '../../common/constants';
 import { Common, VenvManagerStrings } from '../../common/localize';
 import { traceInfo } from '../../common/logging';
 import { getWorkspacePersistentState } from '../../common/persistentState';
-// Using direct access to environments rather than pickEnvironmentFrom
 import { EventNames } from '../../common/telemetry/constants';
 import { sendTelemetryEvent } from '../../common/telemetry/sender';
 import {
