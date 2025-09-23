@@ -37,8 +37,7 @@ import { untildify } from '../../common/utils/pathUtils';
 import { isWindows } from '../../common/utils/platformUtils';
 import {
     showErrorMessage,
-    showInputBox,
-    showQuickPick,
+    showInputBoxWithButtons,
     showQuickPickWithButtons,
     withProgress,
 } from '../../common/window.apis';
@@ -57,6 +56,7 @@ import { Installable } from '../common/types';
 import { shortVersion, sortEnvironments } from '../common/utils';
 import { CondaEnvManager } from './condaEnvManager';
 import { getCondaHookPs1Path, getLocalActivationScript } from './condaSourcingUtils';
+import { createStepBasedCondaFlow } from './condaStepBasedFlow';
 
 export const CONDA_PATH_KEY = `${ENVS_EXTENSION_ID}:conda:CONDA_PATH`;
 export const CONDA_PREFIXES_KEY = `${ENVS_EXTENSION_ID}:conda:CONDA_PREFIXES`;
@@ -241,7 +241,11 @@ async function runConda(args: string[], log?: LogOutputChannel, token?: Cancella
     return await _runConda(conda, args, log, token);
 }
 
-async function runCondaExecutable(args: string[], log?: LogOutputChannel, token?: CancellationToken): Promise<string> {
+export async function runCondaExecutable(
+    args: string[],
+    log?: LogOutputChannel,
+    token?: CancellationToken,
+): Promise<string> {
     const conda = await getCondaExecutable(undefined);
     return await _runConda(conda, args, log, token);
 }
@@ -253,7 +257,7 @@ async function getCondaInfo(): Promise<any> {
 }
 
 let prefixes: string[] | undefined;
-async function getPrefixes(): Promise<string[]> {
+export async function getPrefixes(): Promise<string[]> {
     if (prefixes) {
         return prefixes;
     }
@@ -275,7 +279,7 @@ export async function getDefaultCondaPrefix(): Promise<string> {
     return prefixes.length > 0 ? prefixes[0] : path.join(os.homedir(), '.conda', 'envs');
 }
 
-async function getVersion(root: string): Promise<string> {
+export async function getVersion(root: string): Promise<string> {
     const files = await fse.readdir(path.join(root, 'conda-meta'));
     for (let file of files) {
         if (file.startsWith('python-3') && file.endsWith('.json')) {
@@ -307,7 +311,7 @@ function isPrefixOf(roots: string[], e: string): boolean {
  * @param envManager The environment manager instance
  * @returns Promise resolving to a PythonEnvironmentInfo object
  */
-async function getNamedCondaPythonInfo(
+export async function getNamedCondaPythonInfo(
     name: string,
     prefix: string,
     executable: string,
@@ -351,7 +355,7 @@ async function getNamedCondaPythonInfo(
  * @param envManager The environment manager instance
  * @returns Promise resolving to a PythonEnvironmentInfo object
  */
-async function getPrefixesCondaPythonInfo(
+export async function getPrefixesCondaPythonInfo(
     prefix: string,
     executable: string,
     version: string,
@@ -710,7 +714,7 @@ export async function refreshCondaEnvs(
     return [];
 }
 
-function getName(api: PythonEnvironmentApi, uris?: Uri | Uri[]): string | undefined {
+export function getName(api: PythonEnvironmentApi, uris?: Uri | Uri[]): string | undefined {
     if (!uris) {
         return undefined;
     }
@@ -720,7 +724,7 @@ function getName(api: PythonEnvironmentApi, uris?: Uri | Uri[]): string | undefi
     return api.getPythonProject(Array.isArray(uris) ? uris[0] : uris)?.name;
 }
 
-async function getLocation(api: PythonEnvironmentApi, uris: Uri | Uri[]): Promise<string | undefined> {
+export async function getLocation(api: PythonEnvironmentApi, uris: Uri | Uri[]): Promise<string | undefined> {
     if (!uris || (Array.isArray(uris) && (uris.length === 0 || uris.length > 1))) {
         const projects: PythonProject[] = [];
         if (Array.isArray(uris)) {
@@ -740,7 +744,7 @@ async function getLocation(api: PythonEnvironmentApi, uris: Uri | Uri[]): Promis
 }
 const RECOMMENDED_CONDA_PYTHON = '3.11.11';
 
-function trimVersionToMajorMinor(version: string): string {
+export function trimVersionToMajorMinor(version: string): string {
     const match = version.match(/^(\d+\.\d+\.\d+)/);
     return match ? match[1] : version;
 }
@@ -804,46 +808,32 @@ export async function createCondaEnvironment(
     manager: EnvironmentManager,
     uris?: Uri | Uri[],
 ): Promise<PythonEnvironment | undefined> {
-    // step1 ask user for named or prefix environment
-    const envType =
-        Array.isArray(uris) && uris.length > 1
-            ? 'Named'
-            : (
-                  await showQuickPick(
-                      [
-                          { label: CondaStrings.condaNamed, description: CondaStrings.condaNamedDescription },
-                          { label: CondaStrings.condaPrefix, description: CondaStrings.condaPrefixDescription },
-                      ],
-                      {
-                          placeHolder: CondaStrings.condaSelectEnvType,
-                          ignoreFocusOut: true,
-                      },
-                  )
-              )?.label;
-
-    const pythonVersion = await pickPythonVersion(api);
-    if (envType) {
-        return envType === CondaStrings.condaNamed
-            ? await createNamedCondaEnvironment(api, log, manager, getName(api, uris ?? []), pythonVersion)
-            : await createPrefixCondaEnvironment(api, log, manager, await getLocation(api, uris ?? []), pythonVersion);
-    }
-    return undefined;
+    return createStepBasedCondaFlow(api, log, manager, uris);
 }
 
-async function createNamedCondaEnvironment(
+export async function createNamedCondaEnvironment(
     api: PythonEnvironmentApi,
     log: LogOutputChannel,
     manager: EnvironmentManager,
     name?: string,
     pythonVersion?: string,
 ): Promise<PythonEnvironment | undefined> {
-    name = await showInputBox({
-        prompt: CondaStrings.condaNamedInput,
-        value: name,
-        ignoreFocusOut: true,
-    });
-    if (!name) {
-        return;
+    try {
+        name = await showInputBoxWithButtons({
+            prompt: CondaStrings.condaNamedInput,
+            value: name,
+            ignoreFocusOut: true,
+            showBackButton: true,
+        });
+        if (!name) {
+            return;
+        }
+    } catch (ex) {
+        if (ex === QuickInputButtons.Back) {
+            // If back button was pressed, go back to the environment type selection
+            return await createCondaEnvironment(api, log, manager);
+        }
+        throw ex;
     }
 
     const envName: string = name;
@@ -897,76 +887,85 @@ async function createNamedCondaEnvironment(
     );
 }
 
-async function createPrefixCondaEnvironment(
+export async function createPrefixCondaEnvironment(
     api: PythonEnvironmentApi,
     log: LogOutputChannel,
     manager: EnvironmentManager,
     fsPath?: string,
     pythonVersion?: string,
 ): Promise<PythonEnvironment | undefined> {
-    if (!fsPath) {
-        return;
-    }
-
-    let name = `./.conda`;
-    if (await fse.pathExists(path.join(fsPath, '.conda'))) {
-        log.warn(`Environment "${path.join(fsPath, '.conda')}" already exists`);
-        const newName = await showInputBox({
-            prompt: l10n.t('Environment "{0}" already exists. Enter a different name', name),
-            ignoreFocusOut: true,
-            validateInput: (value) => {
-                if (value === name) {
-                    return CondaStrings.condaExists;
-                }
-                return undefined;
-            },
-        });
-        if (!newName) {
+    try {
+        if (!fsPath) {
             return;
         }
-        name = newName;
-    }
 
-    const prefix: string = path.isAbsolute(name) ? name : path.join(fsPath, name);
-
-    const runArgs = ['create', '--yes', '--prefix', prefix];
-    if (pythonVersion) {
-        runArgs.push(`python=${pythonVersion}`);
-    } else {
-        runArgs.push('python');
-    }
-
-    return await withProgress(
-        {
-            location: ProgressLocation.Notification,
-            title: `Creating conda environment: ${name}`,
-        },
-        async () => {
-            try {
-                const bin = os.platform() === 'win32' ? 'python.exe' : 'python';
-                const output = await runCondaExecutable(runArgs);
-                log.info(output);
-                const version = await getVersion(prefix);
-
-                const environment = api.createPythonEnvironmentItem(
-                    await getPrefixesCondaPythonInfo(
-                        prefix,
-                        path.join(prefix, bin),
-                        version,
-                        await getConda(),
-                        manager,
-                    ),
-                    manager,
-                );
-                return environment;
-            } catch (e) {
-                log.error('Failed to create conda environment', e);
-                setImmediate(async () => {
-                    await showErrorMessageWithLogs(CondaStrings.condaCreateFailed, log);
-                });
+        let name = `./.conda`;
+        if (await fse.pathExists(path.join(fsPath, '.conda'))) {
+            log.warn(`Environment "${path.join(fsPath, '.conda')}" already exists`);
+            const newName = await showInputBoxWithButtons({
+                prompt: l10n.t('Environment "{0}" already exists. Enter a different name', name),
+                ignoreFocusOut: true,
+                showBackButton: true,
+                validateInput: (value) => {
+                    if (value === name) {
+                        return CondaStrings.condaExists;
+                    }
+                    return undefined;
+                },
+            });
+            if (!newName) {
+                return;
             }
-        },
-    );
+            name = newName;
+        }
+
+        const prefix: string = path.isAbsolute(name) ? name : path.join(fsPath, name);
+
+        const runArgs = ['create', '--yes', '--prefix', prefix];
+        if (pythonVersion) {
+            runArgs.push(`python=${pythonVersion}`);
+        } else {
+            runArgs.push('python');
+        }
+
+        return await withProgress(
+            {
+                location: ProgressLocation.Notification,
+                title: `Creating conda environment: ${name}`,
+            },
+            async () => {
+                try {
+                    const bin = os.platform() === 'win32' ? 'python.exe' : 'python';
+                    const output = await runCondaExecutable(runArgs);
+                    log.info(output);
+                    const version = await getVersion(prefix);
+
+                    const environment = api.createPythonEnvironmentItem(
+                        await getPrefixesCondaPythonInfo(
+                            prefix,
+                            path.join(prefix, bin),
+                            version,
+                            await getConda(),
+                            manager,
+                        ),
+                        manager,
+                    );
+                    return environment;
+                } catch (e) {
+                    log.error('Failed to create conda environment', e);
+                    setImmediate(async () => {
+                        await showErrorMessageWithLogs(CondaStrings.condaCreateFailed, log);
+                    });
+                }
+            },
+        );
+    } catch (ex) {
+        if (ex === QuickInputButtons.Back) {
+            // If back button was pressed, go back to the environment type selection
+            return await createCondaEnvironment(api, log, manager);
+        }
+        throw ex;
+    }
 }
 
 export async function generateName(fsPath: string): Promise<string | undefined> {

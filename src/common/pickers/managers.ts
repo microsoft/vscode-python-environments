@@ -181,6 +181,7 @@ export async function pickCreator(creators: PythonProjectCreator[]): Promise<Pyt
     const selected = await showQuickPickWithButtons(items, {
         placeHolder: Pickers.Managers.selectProjectCreator,
         ignoreFocusOut: true,
+        showBackButton: true,
     });
 
     if (!selected) {
