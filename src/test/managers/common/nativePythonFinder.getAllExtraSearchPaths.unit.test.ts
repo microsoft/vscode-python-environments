@@ -1,4 +1,5 @@
 import assert from 'node:assert';
+import path from 'node:path';
 import * as sinon from 'sinon';
 import { Uri } from 'vscode';
 import * as logging from '../../../common/logging';
@@ -235,18 +236,17 @@ suite('getAllExtraSearchPaths Integration Tests', () => {
                 workspaceFolderValue: ['folder-level-path'],
             });
 
-            mockGetWorkspaceFolders.returns([
-                { uri: Uri.file('/workspace/project1') },
-                { uri: Uri.file('/workspace/project2') },
-            ]);
+            const workspace1 = Uri.file('/workspace/project1');
+            const workspace2 = Uri.file('/workspace/project2');
+            mockGetWorkspaceFolders.returns([{ uri: workspace1 }, { uri: workspace2 }]);
 
             // Run
             const result = await getAllExtraSearchPaths();
 
-            // Assert
+            // Assert - Use dynamic path construction based on actual workspace URIs
             const expected = new Set([
-                '/workspace/project1/folder-level-path',
-                '/workspace/project2/folder-level-path',
+                path.resolve(workspace1.fsPath, 'folder-level-path'),
+                path.resolve(workspace2.fsPath, 'folder-level-path'),
             ]);
             const actual = new Set(result);
             assert.strictEqual(actual.size, expected.size, 'Should have correct number of unique paths');
@@ -310,12 +310,13 @@ suite('getAllExtraSearchPaths Integration Tests', () => {
                 workspaceFolderValue: ['/absolute/workspace/path'],
             });
 
-            mockGetWorkspaceFolders.returns([{ uri: Uri.file('/workspace') }]);
+            const workspace = Uri.file('/workspace');
+            mockGetWorkspaceFolders.returns([{ uri: workspace }]);
 
             // Run
             const result = await getAllExtraSearchPaths();
 
-            // Assert
+            // Assert - For absolute paths, they should remain unchanged regardless of platform
             const expected = new Set(['/absolute/path1', '/absolute/path2', '/absolute/workspace/path']);
             const actual = new Set(result);
             assert.strictEqual(actual.size, expected.size, 'Should have correct number of unique paths');
@@ -331,19 +332,19 @@ suite('getAllExtraSearchPaths Integration Tests', () => {
                 workspaceFolderValue: ['venvs', '../shared-envs'],
             });
 
-            mockGetWorkspaceFolders.returns([
-                { uri: Uri.file('/workspace/project1') },
-                { uri: Uri.file('/workspace/project2') },
-            ]);
+            const workspace1 = Uri.file('/workspace/project1');
+            const workspace2 = Uri.file('/workspace/project2');
+            mockGetWorkspaceFolders.returns([{ uri: workspace1 }, { uri: workspace2 }]);
 
             // Run
             const result = await getAllExtraSearchPaths();
 
             // Assert - path.resolve() correctly resolves relative paths (order doesn't matter)
             const expected = new Set([
-                '/workspace/project1/venvs',
-                '/workspace/project2/venvs',
-                '/workspace/shared-envs', // ../shared-envs resolves to /workspace/shared-envs
+                path.resolve(workspace1.fsPath, 'venvs'),
+                path.resolve(workspace2.fsPath, 'venvs'),
+                path.resolve(workspace1.fsPath, '../shared-envs'), // Resolves against workspace1
+                path.resolve(workspace2.fsPath, '../shared-envs'), // Resolves against workspace2
             ]);
             const actual = new Set(result);
             assert.strictEqual(actual.size, expected.size, 'Should have correct number of unique paths');
@@ -384,7 +385,8 @@ suite('getAllExtraSearchPaths Integration Tests', () => {
                 workspaceFolderValue: ['valid-relative', '', '   \t\n   ', 'another-valid'],
             });
 
-            mockGetWorkspaceFolders.returns([{ uri: Uri.file('/workspace') }]);
+            const workspace = Uri.file('/workspace');
+            mockGetWorkspaceFolders.returns([{ uri: workspace }]);
 
             // Run
             const result = await getAllExtraSearchPaths();
@@ -393,8 +395,8 @@ suite('getAllExtraSearchPaths Integration Tests', () => {
             const expected = new Set([
                 '/valid/path',
                 '/another/valid/path',
-                '/workspace/valid-relative',
-                '/workspace/another-valid',
+                path.resolve(workspace.fsPath, 'valid-relative'),
+                path.resolve(workspace.fsPath, 'another-valid'),
             ]);
             const actual = new Set(result);
             assert.strictEqual(actual.size, expected.size, 'Should have correct number of unique paths');
@@ -428,10 +430,9 @@ suite('getAllExtraSearchPaths Integration Tests', () => {
                 workspaceFolderValue: ['.venv', 'project-envs', '/shared/team/envs'],
             });
 
-            mockGetWorkspaceFolders.returns([
-                { uri: Uri.file('/workspace/project1') },
-                { uri: Uri.file('/workspace/project2') },
-            ]);
+            const workspace1 = Uri.file('/workspace/project1');
+            const workspace2 = Uri.file('/workspace/project2');
+            mockGetWorkspaceFolders.returns([{ uri: workspace1 }, { uri: workspace2 }]);
 
             mockUntildify.withArgs('~/personal/envs').returns('/home/user/personal/envs');
 
@@ -444,10 +445,10 @@ suite('getAllExtraSearchPaths Integration Tests', () => {
                 '/legacy/venvs',
                 '/global/conda',
                 '/home/user/personal/envs',
-                '/workspace/project1/.venv',
-                '/workspace/project2/.venv',
-                '/workspace/project1/project-envs',
-                '/workspace/project2/project-envs',
+                path.resolve(workspace1.fsPath, '.venv'),
+                path.resolve(workspace2.fsPath, '.venv'),
+                path.resolve(workspace1.fsPath, 'project-envs'),
+                path.resolve(workspace2.fsPath, 'project-envs'),
                 '/shared/team/envs',
             ]);
             const actual = new Set(result);
@@ -468,13 +469,18 @@ suite('getAllExtraSearchPaths Integration Tests', () => {
                 workspaceFolderValue: ['/shared/path', 'workspace-unique'],
             });
 
-            mockGetWorkspaceFolders.returns([{ uri: Uri.file('/workspace') }]);
+            const workspace = Uri.file('/workspace');
+            mockGetWorkspaceFolders.returns([{ uri: workspace }]);
 
             // Run
             const result = await getAllExtraSearchPaths();
 
             // Assert - Duplicates should be removed (order doesn't matter)
-            const expected = new Set(['/shared/path', '/global/unique', '/workspace/workspace-unique']);
+            const expected = new Set([
+                '/shared/path',
+                '/global/unique',
+                path.resolve(workspace.fsPath, 'workspace-unique'),
+            ]);
             const actual = new Set(result);
             assert.strictEqual(actual.size, expected.size, 'Should have correct number of unique paths');
             assert.deepStrictEqual(actual, expected, 'Should contain exactly the expected paths');
