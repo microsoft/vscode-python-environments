@@ -1,5 +1,5 @@
 ---
-mode: agent
+applyTo: '**'
 ---
 
 # Testing Guide: Unit Tests and Integration Tests
@@ -490,3 +490,5 @@ You know you have good integration tests when:
 12. **Name test suites clearly** - use descriptive `suite()` names that work well with grep filtering
 
 ## Learnings
+
+-   Always use dynamic path construction with Node.js `path` module when testing functions that resolve paths against workspace folders to ensure cross-platform compatibility (1)
