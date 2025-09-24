@@ -2,16 +2,16 @@ import * as ch from 'child_process';
 import * as fs from 'fs-extra';
 import * as path from 'path';
 import { PassThrough } from 'stream';
-import { Disposable, ExtensionContext, LogOutputChannel, Uri, workspace } from 'vscode';
+import { Disposable, ExtensionContext, LogOutputChannel, Uri } from 'vscode';
 import * as rpc from 'vscode-jsonrpc/node';
 import { PythonProjectApi } from '../../api';
 import { ENVS_EXTENSION_ID, PYTHON_EXTENSION_ID } from '../../common/constants';
 import { getExtension } from '../../common/extension.apis';
-import { traceLog, traceVerbose } from '../../common/logging';
+import { traceError, traceLog, traceVerbose, traceWarn } from '../../common/logging';
 import { untildify } from '../../common/utils/pathUtils';
 import { isWindows } from '../../common/utils/platformUtils';
 import { createRunningWorkerPool, WorkerPool } from '../../common/utils/workerPool';
-import { getConfiguration } from '../../common/workspace.apis';
+import { getConfiguration, getWorkspaceFolders } from '../../common/workspace.apis';
 import { noop } from './utils';
 
 export async function getNativePythonToolsPath(): Promise<string> {
@@ -387,7 +387,7 @@ function getPythonSettingAndUntildify<T>(name: string, scope?: Uri): T | undefin
  * Combines legacy python settings (with migration), globalSearchPaths, and workspaceSearchPaths.
  * @returns Array of search directory paths
  */
-async function getAllExtraSearchPaths(): Promise<string[]> {
+export async function getAllExtraSearchPaths(): Promise<string[]> {
     const searchDirectories: string[] = [];
 
     // Handle migration from legacy python settings to new search paths settings
@@ -401,7 +401,7 @@ async function getAllExtraSearchPaths(): Promise<string[]> {
     }
 
     // Get globalSearchPaths
-    const globalSearchPaths = getGlobalSearchPaths();
+    const globalSearchPaths = getGlobalSearchPaths().filter((path) => path && path.trim() !== '');
     searchDirectories.push(...globalSearchPaths);
 
     // Get workspaceSearchPaths
@@ -420,14 +420,14 @@ async function getAllExtraSearchPaths(): Promise<string[]> {
             searchDirectories.push(trimmedPath);
         } else {
             // Relative path - resolve against all workspace folders
-            const workspaceFolders = workspace.workspaceFolders;
+            const workspaceFolders = getWorkspaceFolders();
             if (workspaceFolders) {
                 for (const workspaceFolder of workspaceFolders) {
                     const resolvedPath = path.resolve(workspaceFolder.uri.fsPath, trimmedPath);
                     searchDirectories.push(resolvedPath);
                 }
             } else {
-                traceLog('Warning: No workspace folders found for relative path:', trimmedPath);
+                traceWarn('Warning: No workspace folders found for relative path:', trimmedPath);
             }
         }
     }
@@ -455,7 +455,7 @@ function getGlobalSearchPaths(): string[] {
         const globalPaths = inspection?.globalValue || [];
         return untildifyArray(globalPaths);
     } catch (error) {
-        traceLog('Error getting globalSearchPaths:', error);
+        traceError('Error getting globalSearchPaths:', error);
         return [];
     }
 }
@@ -469,7 +469,7 @@ function getWorkspaceSearchPaths(): string[] {
         const inspection = envConfig.inspect<string[]>('workspaceSearchPaths');
 
         if (inspection?.globalValue) {
-            traceLog(
+            traceError(
                 'Error: python-env.workspaceSearchPaths is set at the user/global level, but this setting can only be set at the workspace or workspace folder level.',
             );
         }
@@ -486,7 +486,7 @@ function getWorkspaceSearchPaths(): string[] {
         // Default empty array (don't use global value for workspace settings)
         return [];
     } catch (error) {
-        traceLog('Error getting workspaceSearchPaths:', error);
+        traceError('Error getting workspaceSearchPaths:', error);
         return [];
     }
 }
@@ -561,7 +561,7 @@ async function handleLegacyPythonSettingsMigration(): Promise<boolean> {
 
         return true; // Legacy paths are now covered by globalSearchPaths
     } catch (error) {
-        traceLog('Error during legacy python settings migration:', error);
+        traceError('Error during legacy python settings migration:', error);
         return false; // On error, include legacy paths separately to be safe
     }
 }
