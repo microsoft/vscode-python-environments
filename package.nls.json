@@ -11,6 +11,8 @@
     "python-envs.terminal.autoActivationType.shellStartup": "Activation by modifying the terminal shell startup script. To use this feature we will need to modify your shell startup scripts.",
     "python-envs.terminal.autoActivationType.off": "No automatic activation of environments.",
     "python-envs.terminal.useEnvFile.description": "Controls whether environment variables from .env files and python.envFile setting are injected into terminals.",
+    "python-env.globalSearchPaths.description": "Global search paths for Python environments. Absolute directory paths that are searched at the user level.",
+    "python-env.workspaceSearchPaths.description": "Workspace search paths for Python environments. Can be absolute paths or relative directory paths searched within the workspace.",
     "python-envs.terminal.revertStartupScriptChanges.title": "Revert Shell Startup Script Changes",
     "python-envs.reportIssue.title": "Report Issue",
     "python-envs.setEnvManager.title": "Set Environment Manager",
