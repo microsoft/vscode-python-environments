@@ -93,3 +93,12 @@ export function untildify(path: string): string {
 export function getUserHomeDir(): string {
     return os.homedir();
 }
+
+/**
+ * Applies untildify to an array of paths
+ * @param paths Array of potentially tilde-containing paths
+ * @returns Array of expanded paths
+ */
+export function untildifyArray(paths: string[]): string[] {
+    return paths.map((p) => untildify(p));
+}

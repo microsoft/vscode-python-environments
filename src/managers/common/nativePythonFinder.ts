@@ -8,7 +8,7 @@ import { PythonProjectApi } from '../../api';
 import { ENVS_EXTENSION_ID, PYTHON_EXTENSION_ID } from '../../common/constants';
 import { getExtension } from '../../common/extension.apis';
 import { traceError, traceLog, traceVerbose, traceWarn } from '../../common/logging';
-import { untildify } from '../../common/utils/pathUtils';
+import { untildify, untildifyArray } from '../../common/utils/pathUtils';
 import { isWindows } from '../../common/utils/platformUtils';
 import { createRunningWorkerPool, WorkerPool } from '../../common/utils/workerPool';
 import { getConfiguration, getWorkspaceFolders } from '../../common/workspace.apis';
@@ -390,15 +390,9 @@ function getPythonSettingAndUntildify<T>(name: string, scope?: Uri): T | undefin
 export async function getAllExtraSearchPaths(): Promise<string[]> {
     const searchDirectories: string[] = [];
 
-    // Handle migration from legacy python settings to new search paths settings
-    const legacyPathsCovered = await handleLegacyPythonSettingsMigration();
-
-    // Only get legacy custom venv directories if they haven't been migrated to globalSearchPaths correctly
-    if (!legacyPathsCovered) {
-        const customVenvDirs = getCustomVirtualEnvDirsLegacy();
-        searchDirectories.push(...customVenvDirs);
-        traceLog('Added legacy custom venv directories (not covered by globalSearchPaths):', customVenvDirs);
-    }
+    // add legacy custom venv directories
+    const customVenvDirs = getCustomVirtualEnvDirsLegacy();
+    searchDirectories.push(...customVenvDirs);
 
     // Get globalSearchPaths
     const globalSearchPaths = getGlobalSearchPaths().filter((path) => path && path.trim() !== '');
@@ -490,84 +484,6 @@ function getWorkspaceSearchPaths(): string[] {
         return [];
     }
 }
-
-/**
- * Applies untildify to an array of paths
- * @param paths Array of potentially tilde-containing paths
- * @returns Array of expanded paths
- */
-function untildifyArray(paths: string[]): string[] {
-    return paths.map((p) => untildify(p));
-}
-
-/**
- * Handles migration from legacy python settings to the new globalSearchPaths setting.
- * Legacy settings (venvPath, venvFolders) are User-scoped only, so they all migrate to globalSearchPaths.
- * Does NOT delete the old settings, only adds them to the new settings.
- * @returns true if legacy paths are covered by globalSearchPaths (either already there or just migrated), false if legacy paths should be included separately
- */
-async function handleLegacyPythonSettingsMigration(): Promise<boolean> {
-    try {
-        const pythonConfig = getConfiguration('python');
-        const envConfig = getConfiguration('python-env');
-
-        // Get legacy settings at global level only (they were User-scoped)
-        const venvPathInspection = pythonConfig.inspect<string>('venvPath');
-        const venvFoldersInspection = pythonConfig.inspect<string[]>('venvFolders');
-
-        // Collect global (user-level) legacy paths for globalSearchPaths
-        const globalLegacyPaths: string[] = [];
-        if (venvPathInspection?.globalValue) {
-            globalLegacyPaths.push(venvPathInspection.globalValue);
-        }
-        if (venvFoldersInspection?.globalValue) {
-            globalLegacyPaths.push(...venvFoldersInspection.globalValue);
-        }
-
-        if (globalLegacyPaths.length === 0) {
-            // No legacy settings exist, so they're "covered" (nothing to worry about)
-            return true;
-        }
-
-        // Check if legacy paths are already in globalSearchPaths
-        const globalSearchPathsInspection = envConfig.inspect<string[]>('globalSearchPaths');
-        const currentGlobalSearchPaths = globalSearchPathsInspection?.globalValue || [];
-
-        // Check if all legacy paths are already covered by globalSearchPaths
-        const legacyPathsAlreadyCovered = globalLegacyPaths.every((legacyPath) =>
-            currentGlobalSearchPaths.includes(legacyPath),
-        );
-
-        if (legacyPathsAlreadyCovered) {
-            traceLog('All legacy paths are already in globalSearchPaths, no migration needed');
-            return true; // Legacy paths are covered
-        }
-
-        // Need to migrate - add legacy paths to globalSearchPaths
-        const combinedGlobalPaths = Array.from(new Set([...currentGlobalSearchPaths, ...globalLegacyPaths]));
-        await envConfig.update('globalSearchPaths', combinedGlobalPaths, true); // true = global/user level
-        traceLog(
-            'Migrated legacy global python settings to globalSearchPaths. globalSearchPaths setting is now:',
-            combinedGlobalPaths,
-        );
-
-        // Show notification to user about migration
-        if (!migrationNotificationShown) {
-            migrationNotificationShown = true;
-            traceLog(
-                'User notification: Automatically migrated legacy python settings to python-env.globalSearchPaths.',
-            );
-        }
-
-        return true; // Legacy paths are now covered by globalSearchPaths
-    } catch (error) {
-        traceError('Error during legacy python settings migration:', error);
-        return false; // On error, include legacy paths separately to be safe
-    }
-}
-
-// Module-level variable to track migration notification
-let migrationNotificationShown = false;
 
 export function getCacheDirectory(context: ExtensionContext): Uri {
     return Uri.joinPath(context.globalStorageUri, 'pythonLocator');
