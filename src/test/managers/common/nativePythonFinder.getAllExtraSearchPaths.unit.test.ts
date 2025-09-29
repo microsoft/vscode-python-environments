@@ -31,6 +31,13 @@ suite('getAllExtraSearchPaths Integration Tests', () => {
         mockGetConfiguration = sinon.stub(workspaceApis, 'getConfiguration');
         mockGetWorkspaceFolders = sinon.stub(workspaceApis, 'getWorkspaceFolders');
         mockUntildify = sinon.stub(pathUtils, 'untildify');
+        // Also stub the namespace import version that might be used by untildifyArray
+        sinon
+            .stub(pathUtils, 'untildifyArray')
+            .callsFake((paths: string[]) =>
+                paths.map((p) => (p.startsWith('~/') ? p.replace('~/', '/home/user/') : p)),
+            );
+
         mockTraceError = sinon.stub(logging, 'traceError');
         mockTraceWarn = sinon.stub(logging, 'traceWarn');
 
@@ -50,11 +57,24 @@ suite('getAllExtraSearchPaths Integration Tests', () => {
             update: sinon.stub(),
         };
 
-        // Default untildify behavior - return input unchanged
-        mockUntildify.callsFake((path: string) => path);
+        // Default untildify behavior - expand tildes to test paths
+        mockUntildify.callsFake((path: string) => {
+            if (path.startsWith('~/')) {
+                return path.replace('~/', '/home/user/');
+            }
+            return path;
+        });
+
+        // Set up default returns for legacy settings (return undefined by default)
+        pythonConfig.get.withArgs('venvPath').returns(undefined);
+        pythonConfig.get.withArgs('venvFolders').returns(undefined);
+
+        // Set up default returns for new settings
+        envConfig.inspect.withArgs('globalSearchPaths').returns({ globalValue: [] });
+        envConfig.inspect.withArgs('workspaceSearchPaths').returns({});
 
         // Default configuration behavior
-        mockGetConfiguration.callsFake((section: string) => {
+        mockGetConfiguration.callsFake((section: string, _scope?: unknown) => {
             if (section === 'python') {
                 return pythonConfig;
             }
@@ -69,11 +89,11 @@ suite('getAllExtraSearchPaths Integration Tests', () => {
         sinon.restore();
     });
 
-    suite('Legacy Migration Tests', () => {
+    suite('Legacy Path Consolidation Tests', () => {
         test('No legacy settings exist - returns empty paths', async () => {
             // Mock → No legacy settings, no new settings
-            pythonConfig.inspect.withArgs('venvPath').returns({ globalValue: undefined });
-            pythonConfig.inspect.withArgs('venvFolders').returns({ globalValue: undefined });
+            pythonConfig.get.withArgs('venvPath').returns(undefined);
+            pythonConfig.get.withArgs('venvFolders').returns(undefined);
             envConfig.inspect.withArgs('globalSearchPaths').returns({ globalValue: [] });
             envConfig.inspect.withArgs('workspaceSearchPaths').returns({});
 
@@ -82,13 +102,12 @@ suite('getAllExtraSearchPaths Integration Tests', () => {
 
             // Assert
             assert.deepStrictEqual(result, []);
-            assert(envConfig.update.notCalled, 'Should not update settings when no legacy paths exist');
         });
 
-        test('Legacy settings already migrated - uses globalSearchPaths only', async () => {
-            // Mock → Legacy paths exist but are already in globalSearchPaths
-            pythonConfig.inspect.withArgs('venvPath').returns({ globalValue: '/home/user/.virtualenvs' });
-            pythonConfig.inspect.withArgs('venvFolders').returns({ globalValue: ['/home/user/venvs'] });
+        test('Legacy and global paths are consolidated', async () => {
+            // Mock → Legacy paths and globalSearchPaths both exist
+            pythonConfig.get.withArgs('venvPath').returns('/home/user/.virtualenvs');
+            pythonConfig.get.withArgs('venvFolders').returns(['/home/user/venvs']);
             envConfig.inspect.withArgs('globalSearchPaths').returns({
                 globalValue: ['/home/user/.virtualenvs', '/home/user/venvs', '/additional/path'],
             });
@@ -97,117 +116,79 @@ suite('getAllExtraSearchPaths Integration Tests', () => {
             // Run
             const result = await getAllExtraSearchPaths();
 
-            // Assert
+            // Assert - Should consolidate all paths (duplicates removed)
             const expected = new Set(['/home/user/.virtualenvs', '/home/user/venvs', '/additional/path']);
             const actual = new Set(result);
             assert.strictEqual(actual.size, expected.size, 'Should have correct number of unique paths');
             assert.deepStrictEqual(actual, expected, 'Should contain exactly the expected paths');
-            assert(envConfig.update.notCalled, 'Should not update settings when legacy paths already migrated');
         });
 
-        test('Fresh migration needed - migrates legacy to globalSearchPaths', async () => {
-            // Mock → Legacy paths exist and need migration
-            pythonConfig.inspect.withArgs('venvPath').returns({ globalValue: '/home/user/.virtualenvs' });
-            pythonConfig.inspect
-                .withArgs('venvFolders')
-                .returns({ globalValue: ['/home/user/venvs', '/home/user/conda'] });
-            envConfig.inspect.withArgs('globalSearchPaths').returns({ globalValue: [] });
-            envConfig.inspect.withArgs('workspaceSearchPaths').returns({});
-            envConfig.update.resolves();
-
-            // After migration, the globalSearchPaths should return the migrated values
-            envConfig.inspect
-                .withArgs('globalSearchPaths')
-                .onSecondCall()
-                .returns({
-                    globalValue: ['/home/user/.virtualenvs', '/home/user/venvs', '/home/user/conda'],
-                });
-
-            // Run
-            const result = await getAllExtraSearchPaths();
-
-            // Assert
-            const expected = new Set(['/home/user/.virtualenvs', '/home/user/venvs', '/home/user/conda']);
-            const actual = new Set(result);
-            assert.strictEqual(actual.size, expected.size, 'Should have correct number of unique paths');
-            assert.deepStrictEqual(actual, expected, 'Should contain exactly the expected paths');
-            assert(
-                envConfig.update.calledOnceWith(
-                    'globalSearchPaths',
-                    ['/home/user/.virtualenvs', '/home/user/venvs', '/home/user/conda'],
-                    true,
-                ),
-            );
-        });
-
-        test('Partial migration - combines existing and new legacy paths', async () => {
-            // Mock → Some legacy paths already migrated, others need migration
-            pythonConfig.inspect.withArgs('venvPath').returns({ globalValue: '/home/user/.virtualenvs' });
-            pythonConfig.inspect
-                .withArgs('venvFolders')
-                .returns({ globalValue: ['/home/user/venvs', '/home/user/conda'] });
-            envConfig.inspect.withArgs('globalSearchPaths').returns({ globalValue: ['/home/user/.virtualenvs'] });
-            envConfig.inspect.withArgs('workspaceSearchPaths').returns({});
-            envConfig.update.resolves();
-
-            // After migration, globalSearchPaths should include all paths
-            envConfig.inspect
-                .withArgs('globalSearchPaths')
-                .onSecondCall()
-                .returns({
-                    globalValue: ['/home/user/.virtualenvs', '/home/user/venvs', '/home/user/conda'],
-                });
-
-            // Run
-            const result = await getAllExtraSearchPaths();
-
-            // Assert
-            const expected = new Set(['/home/user/.virtualenvs', '/home/user/venvs', '/home/user/conda']);
-            const actual = new Set(result);
-            assert.strictEqual(actual.size, expected.size, 'Should have correct number of unique paths');
-            assert.deepStrictEqual(actual, expected, 'Should contain exactly the expected paths');
-            assert(
-                envConfig.update.calledOnceWith(
-                    'globalSearchPaths',
-                    ['/home/user/.virtualenvs', '/home/user/venvs', '/home/user/conda'],
-                    true,
-                ),
-            );
-        });
-
-        test('Migration fails - falls back to including legacy paths separately', async () => {
-            // Mock → Migration throws error
-            pythonConfig.inspect.withArgs('venvPath').returns({ globalValue: '/home/user/.virtualenvs' });
-            pythonConfig.inspect.withArgs('venvFolders').returns({ globalValue: ['/home/user/venvs'] });
-            envConfig.inspect.withArgs('globalSearchPaths').returns({ globalValue: [] });
-            envConfig.inspect.withArgs('workspaceSearchPaths').returns({});
-            envConfig.update.rejects(new Error('Permission denied'));
-
-            // Mock legacy function behavior
+        test('Legacy paths included alongside new settings', async () => {
+            // Mock → Legacy paths exist, no globalSearchPaths
             pythonConfig.get.withArgs('venvPath').returns('/home/user/.virtualenvs');
-            pythonConfig.get.withArgs('venvFolders').returns(['/home/user/venvs']);
+            pythonConfig.get.withArgs('venvFolders').returns(['/home/user/venvs', '/home/user/conda']);
+            envConfig.inspect.withArgs('globalSearchPaths').returns({ globalValue: [] });
+            envConfig.inspect.withArgs('workspaceSearchPaths').returns({});
 
             // Run
             const result = await getAllExtraSearchPaths();
 
-            // Assert - Should fall back to legacy paths (order doesn't matter)
-            const expected = new Set(['/home/user/.virtualenvs', '/home/user/venvs']);
+            // Assert - Should include all legacy paths
+            const expected = new Set(['/home/user/.virtualenvs', '/home/user/venvs', '/home/user/conda']);
             const actual = new Set(result);
             assert.strictEqual(actual.size, expected.size, 'Should have correct number of unique paths');
             assert.deepStrictEqual(actual, expected, 'Should contain exactly the expected paths');
-            // Just verify that error was logged - don't be brittle about exact wording
-            assert(
-                mockTraceError.calledWith(sinon.match.string, sinon.match.instanceOf(Error)),
-                'Should log migration error',
-            );
+        });
+
+        test('Legacy and global paths combined with deduplication', async () => {
+            // Mock → Some overlap between legacy and global paths
+            pythonConfig.get.withArgs('venvPath').returns('/home/user/.virtualenvs');
+            pythonConfig.get.withArgs('venvFolders').returns(['/home/user/venvs', '/home/user/conda']);
+            envConfig.inspect
+                .withArgs('globalSearchPaths')
+                .returns({ globalValue: ['/home/user/.virtualenvs', '/additional/path'] });
+            envConfig.inspect.withArgs('workspaceSearchPaths').returns({});
+
+            // Run
+            const result = await getAllExtraSearchPaths();
+
+            // Assert - Should include all paths with duplicates removed
+            const expected = new Set([
+                '/home/user/.virtualenvs',
+                '/home/user/venvs',
+                '/home/user/conda',
+                '/additional/path',
+            ]);
+            const actual = new Set(result);
+            assert.strictEqual(actual.size, expected.size, 'Should have correct number of unique paths');
+            assert.deepStrictEqual(actual, expected, 'Should contain exactly the expected paths');
+        });
+
+        test('Legacy paths with untildify support', async () => {
+            // Mock → Legacy paths with tilde expansion
+            // Note: getPythonSettingAndUntildify only untildifies strings, not array items
+            // So we return the venvPath with tilde (will be untildified) and venvFolders pre-expanded
+            pythonConfig.get.withArgs('venvPath').returns('~/virtualenvs');
+            pythonConfig.get.withArgs('venvFolders').returns(['/home/user/conda/envs']); // Pre-expanded
+            envConfig.inspect.withArgs('globalSearchPaths').returns({ globalValue: [] });
+            envConfig.inspect.withArgs('workspaceSearchPaths').returns({});
+
+            // Run
+            const result = await getAllExtraSearchPaths();
+
+            // Assert
+            const expected = new Set(['/home/user/virtualenvs', '/home/user/conda/envs']);
+            const actual = new Set(result);
+            assert.strictEqual(actual.size, expected.size, 'Should have correct number of unique paths');
+            assert.deepStrictEqual(actual, expected, 'Should contain exactly the expected paths');
         });
     });
 
     suite('Configuration Source Tests', () => {
         test('Global search paths with tilde expansion', async () => {
             // Mock → No legacy, global paths with tildes
-            pythonConfig.inspect.withArgs('venvPath').returns({ globalValue: undefined });
-            pythonConfig.inspect.withArgs('venvFolders').returns({ globalValue: undefined });
+            pythonConfig.get.withArgs('venvPath').returns(undefined);
+            pythonConfig.get.withArgs('venvFolders').returns(undefined);
             envConfig.inspect.withArgs('globalSearchPaths').returns({
                 globalValue: ['~/virtualenvs', '~/conda/envs'],
             });
@@ -228,8 +209,8 @@ suite('getAllExtraSearchPaths Integration Tests', () => {
 
         test('Workspace folder setting preferred over workspace setting', async () => {
             // Mock → Workspace settings at different levels
-            pythonConfig.inspect.withArgs('venvPath').returns({ globalValue: undefined });
-            pythonConfig.inspect.withArgs('venvFolders').returns({ globalValue: undefined });
+            pythonConfig.get.withArgs('venvPath').returns(undefined);
+            pythonConfig.get.withArgs('venvFolders').returns(undefined);
             envConfig.inspect.withArgs('globalSearchPaths').returns({ globalValue: [] });
             envConfig.inspect.withArgs('workspaceSearchPaths').returns({
                 workspaceValue: ['workspace-level-path'],
@@ -255,8 +236,8 @@ suite('getAllExtraSearchPaths Integration Tests', () => {
 
         test('Global workspace setting logs error and is ignored', async () => {
             // Mock → Workspace setting incorrectly set at global level
-            pythonConfig.inspect.withArgs('venvPath').returns({ globalValue: undefined });
-            pythonConfig.inspect.withArgs('venvFolders').returns({ globalValue: undefined });
+            pythonConfig.get.withArgs('venvPath').returns(undefined);
+            pythonConfig.get.withArgs('venvFolders').returns(undefined);
             envConfig.inspect.withArgs('globalSearchPaths').returns({ globalValue: [] });
             envConfig.inspect.withArgs('workspaceSearchPaths').returns({
                 globalValue: ['should-be-ignored'],
@@ -276,8 +257,8 @@ suite('getAllExtraSearchPaths Integration Tests', () => {
 
         test('Configuration read errors return empty arrays', async () => {
             // Mock → Configuration throws errors
-            pythonConfig.inspect.withArgs('venvPath').returns({ globalValue: undefined });
-            pythonConfig.inspect.withArgs('venvFolders').returns({ globalValue: undefined });
+            pythonConfig.get.withArgs('venvPath').returns(undefined);
+            pythonConfig.get.withArgs('venvFolders').returns(undefined);
             envConfig.inspect.withArgs('globalSearchPaths').throws(new Error('Config read error'));
             envConfig.inspect.withArgs('workspaceSearchPaths').throws(new Error('Config read error'));
 
@@ -301,8 +282,8 @@ suite('getAllExtraSearchPaths Integration Tests', () => {
     suite('Path Resolution Tests', () => {
         test('Absolute paths used as-is', async () => {
             // Mock → Mix of absolute paths
-            pythonConfig.inspect.withArgs('venvPath').returns({ globalValue: undefined });
-            pythonConfig.inspect.withArgs('venvFolders').returns({ globalValue: undefined });
+            pythonConfig.get.withArgs('venvPath').returns(undefined);
+            pythonConfig.get.withArgs('venvFolders').returns(undefined);
             envConfig.inspect.withArgs('globalSearchPaths').returns({
                 globalValue: ['/absolute/path1', '/absolute/path2'],
             });
@@ -325,8 +306,8 @@ suite('getAllExtraSearchPaths Integration Tests', () => {
 
         test('Relative paths resolved against workspace folders', async () => {
             // Mock → Relative workspace paths with multiple workspace folders
-            pythonConfig.inspect.withArgs('venvPath').returns({ globalValue: undefined });
-            pythonConfig.inspect.withArgs('venvFolders').returns({ globalValue: undefined });
+            pythonConfig.get.withArgs('venvPath').returns(undefined);
+            pythonConfig.get.withArgs('venvFolders').returns(undefined);
             envConfig.inspect.withArgs('globalSearchPaths').returns({ globalValue: [] });
             envConfig.inspect.withArgs('workspaceSearchPaths').returns({
                 workspaceFolderValue: ['venvs', '../shared-envs'],
@@ -353,8 +334,8 @@ suite('getAllExtraSearchPaths Integration Tests', () => {
 
         test('Relative paths without workspace folders logs warning', async () => {
             // Mock → Relative paths but no workspace folders
-            pythonConfig.inspect.withArgs('venvPath').returns({ globalValue: undefined });
-            pythonConfig.inspect.withArgs('venvFolders').returns({ globalValue: undefined });
+            pythonConfig.get.withArgs('venvPath').returns(undefined);
+            pythonConfig.get.withArgs('venvFolders').returns(undefined);
             envConfig.inspect.withArgs('globalSearchPaths').returns({ globalValue: [] });
             envConfig.inspect.withArgs('workspaceSearchPaths').returns({
                 workspaceFolderValue: ['relative-path'],
@@ -376,8 +357,8 @@ suite('getAllExtraSearchPaths Integration Tests', () => {
 
         test('Empty and whitespace paths are skipped', async () => {
             // Mock → Mix of valid and invalid paths
-            pythonConfig.inspect.withArgs('venvPath').returns({ globalValue: undefined });
-            pythonConfig.inspect.withArgs('venvFolders').returns({ globalValue: undefined });
+            pythonConfig.get.withArgs('venvPath').returns(undefined);
+            pythonConfig.get.withArgs('venvFolders').returns(undefined);
             envConfig.inspect.withArgs('globalSearchPaths').returns({
                 globalValue: ['/valid/path', '', '  ', '/another/valid/path'],
             });
@@ -407,8 +388,8 @@ suite('getAllExtraSearchPaths Integration Tests', () => {
     suite('Integration Scenarios', () => {
         test('Fresh install - no settings configured', async () => {
             // Mock → Clean slate
-            pythonConfig.inspect.withArgs('venvPath').returns({ globalValue: undefined });
-            pythonConfig.inspect.withArgs('venvFolders').returns({ globalValue: undefined });
+            pythonConfig.get.withArgs('venvPath').returns(undefined);
+            pythonConfig.get.withArgs('venvFolders').returns(undefined);
             envConfig.inspect.withArgs('globalSearchPaths').returns({ globalValue: [] });
             envConfig.inspect.withArgs('workspaceSearchPaths').returns({});
 
@@ -421,8 +402,8 @@ suite('getAllExtraSearchPaths Integration Tests', () => {
 
         test('Power user - complex mix of all source types', async () => {
             // Mock → Complex real-world scenario
-            pythonConfig.inspect.withArgs('venvPath').returns({ globalValue: '/legacy/venv/path' });
-            pythonConfig.inspect.withArgs('venvFolders').returns({ globalValue: ['/legacy/venvs'] });
+            pythonConfig.get.withArgs('venvPath').returns('/legacy/venv/path');
+            pythonConfig.get.withArgs('venvFolders').returns(['/legacy/venvs']);
             envConfig.inspect.withArgs('globalSearchPaths').returns({
                 globalValue: ['/legacy/venv/path', '/legacy/venvs', '/global/conda', '~/personal/envs'],
             });
@@ -460,8 +441,8 @@ suite('getAllExtraSearchPaths Integration Tests', () => {
 
         test('Overlapping paths are deduplicated', async () => {
             // Mock → Duplicate paths from different sources
-            pythonConfig.inspect.withArgs('venvPath').returns({ globalValue: undefined });
-            pythonConfig.inspect.withArgs('venvFolders').returns({ globalValue: undefined });
+            pythonConfig.get.withArgs('venvPath').returns(undefined);
+            pythonConfig.get.withArgs('venvFolders').returns(undefined);
             envConfig.inspect.withArgs('globalSearchPaths').returns({
                 globalValue: ['/shared/path', '/global/unique'],
             });
@@ -486,28 +467,31 @@ suite('getAllExtraSearchPaths Integration Tests', () => {
             assert.deepStrictEqual(actual, expected, 'Should contain exactly the expected paths');
         });
 
-        test('Settings save failure during migration', async () => {
-            // Mock → Migration fails due to corrupted settings file
-            pythonConfig.inspect.withArgs('venvPath').returns({ globalValue: '/legacy/path' });
-            pythonConfig.inspect.withArgs('venvFolders').returns({ globalValue: undefined });
-            envConfig.inspect.withArgs('globalSearchPaths').returns({ globalValue: [] });
-            envConfig.inspect.withArgs('workspaceSearchPaths').returns({});
-            envConfig.update.rejects(new Error('Failed to save settings - file may be corrupted'));
-
-            // Mock legacy fallback
+        test('All path types consolidated together', async () => {
+            // Mock → Multiple path types from different sources
             pythonConfig.get.withArgs('venvPath').returns('/legacy/path');
-            pythonConfig.get.withArgs('venvFolders').returns([]);
+            pythonConfig.get.withArgs('venvFolders').returns(['/legacy/folder']);
+            envConfig.inspect.withArgs('globalSearchPaths').returns({ globalValue: ['/global/path'] });
+            envConfig.inspect.withArgs('workspaceSearchPaths').returns({
+                workspaceFolderValue: ['workspace-relative'],
+            });
+
+            const workspace = Uri.file('/workspace');
+            mockGetWorkspaceFolders.returns([{ uri: workspace }]);
 
             // Run
             const result = await getAllExtraSearchPaths();
 
-            // Assert - Should fall back to legacy paths
-            assert.deepStrictEqual(result, ['/legacy/path']);
-            // Just verify that migration error was logged - don't be brittle about exact wording
-            assert(
-                mockTraceError.calledWith(sinon.match.string, sinon.match.instanceOf(Error)),
-                'Should log migration error',
-            );
+            // Assert - Should consolidate all path types
+            const expected = new Set([
+                '/legacy/path',
+                '/legacy/folder',
+                '/global/path',
+                path.resolve(workspace.fsPath, 'workspace-relative'),
+            ]);
+            const actual = new Set(result);
+            assert.strictEqual(actual.size, expected.size, 'Should have correct number of unique paths');
+            assert.deepStrictEqual(actual, expected, 'Should contain exactly the expected paths');
         });
     });
 });
