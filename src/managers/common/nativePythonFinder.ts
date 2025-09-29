@@ -2,12 +2,12 @@ import * as ch from 'child_process';
 import * as fs from 'fs-extra';
 import * as path from 'path';
 import { PassThrough } from 'stream';
-import { Disposable, ExtensionContext, LogOutputChannel, Uri } from 'vscode';
+import { Disposable, ExtensionContext, LogOutputChannel, Uri, workspace } from 'vscode';
 import * as rpc from 'vscode-jsonrpc/node';
 import { PythonProjectApi } from '../../api';
 import { ENVS_EXTENSION_ID, PYTHON_EXTENSION_ID } from '../../common/constants';
 import { getExtension } from '../../common/extension.apis';
-import { traceVerbose } from '../../common/logging';
+import { traceLog, traceVerbose } from '../../common/logging';
 import { untildify } from '../../common/utils/pathUtils';
 import { isWindows } from '../../common/utils/platformUtils';
 import { createRunningWorkerPool, WorkerPool } from '../../common/utils/workerPool';
@@ -326,10 +326,14 @@ class NativePythonFinderImpl implements NativePythonFinder {
      * Must be invoked when ever there are changes to any data related to the configuration details.
      */
     private async configure() {
+        // Get all extra search paths including legacy settings and new searchPaths
+        const extraSearchPaths = await getAllExtraSearchPaths();
+
+        traceLog('Final environment directories:', extraSearchPaths);
+
         const options: ConfigurationOptions = {
             workspaceDirectories: this.api.getPythonProjects().map((item) => item.uri.fsPath),
-            // We do not want to mix this with `search_paths`
-            environmentDirectories: getCustomVirtualEnvDirs(),
+            environmentDirectories: extraSearchPaths,
             condaExecutable: getPythonSettingAndUntildify<string>('condaPath'),
             poetryExecutable: getPythonSettingAndUntildify<string>('poetryPath'),
             cacheDirectory: this.cacheDirectory?.fsPath,
@@ -357,9 +361,9 @@ type ConfigurationOptions = {
     cacheDirectory?: string;
 };
 /**
- * Gets all custom virtual environment locations to look for environments.
+ * Gets all custom virtual environment locations to look for environments from the legacy python settings (venvPath, venvFolders).
  */
-function getCustomVirtualEnvDirs(): string[] {
+function getCustomVirtualEnvDirsLegacy(): string[] {
     const venvDirs: string[] = [];
     const venvPath = getPythonSettingAndUntildify<string>('venvPath');
     if (venvPath) {
@@ -379,6 +383,272 @@ function getPythonSettingAndUntildify<T>(name: string, scope?: Uri): T | undefin
     }
     return value;
 }
+
+/**
+ * Checks if a search path is a regex pattern.
+ * A path is considered a regex pattern if it contains regex special characters
+ * but is not a Windows path (which can contain backslashes).
+ * @param searchPath The search path to check
+ * @returns true if the path is a regex pattern, false otherwise
+ */
+function isRegexSearchPattern(searchPath: string): boolean {
+    // Check if it's a regex pattern (contains regex special characters)
+    // Note: Windows paths contain backslashes, so we need to be more careful
+    const regexChars = /[*?[\]{}()^$+|\\]/;
+    const hasBackslash = searchPath.includes('\\');
+    const isWindowsPath = hasBackslash && (searchPath.match(/^[A-Za-z]:\\/) || searchPath.match(/^\\\\[^\\]+\\/));
+    return regexChars.test(searchPath) && !isWindowsPath;
+}
+
+/**
+ * Extracts the environment directory from a Python executable path.
+ * This follows the pattern: executable -> bin -> env -> search directory
+ * @param executablePath Path to Python executable
+ * @returns The environment directory path, or undefined if not found
+ */
+function extractEnvironmentDirectory(executablePath: string): string | undefined {
+    try {
+        // TODO: This logic may need to be adjusted for Windows paths (esp with Conda as doesn't use Scripts folder?)
+        const environmentDir = path.dirname(path.dirname(path.dirname(executablePath)));
+        if (environmentDir && environmentDir !== path.dirname(environmentDir)) {
+            traceLog('Extracted environment directory:', environmentDir, 'from executable:', executablePath);
+            return environmentDir;
+        } else {
+            traceLog(
+                'Warning: identified executable python at',
+                executablePath,
+                'not configured in correct folder structure, skipping',
+            );
+            return undefined;
+        }
+    } catch (error) {
+        traceLog('Error extracting environment directory from:', executablePath, 'Error:', error);
+        return undefined;
+    }
+}
+
+/**
+ * Gets all extra environment search paths from various configuration sources.
+ * Combines legacy python settings (with migration), globalSearchPaths, and workspaceSearchPaths.
+ * @returns Array of search directory paths
+ */
+async function getAllExtraSearchPaths(): Promise<string[]> {
+    const searchDirectories: string[] = [];
+
+    // Handle migration from legacy python settings to new search paths settings
+    const legacyPathsCovered = await handleLegacyPythonSettingsMigration();
+
+    // Only get legacy custom venv directories if they haven't been migrated to globalSearchPaths correctly
+    if (!legacyPathsCovered) {
+        const customVenvDirs = getCustomVirtualEnvDirsLegacy();
+        searchDirectories.push(...customVenvDirs);
+        traceLog('Added legacy custom venv directories (not covered by globalSearchPaths):', customVenvDirs);
+    } else {
+        traceLog('Skipping legacy custom venv directories - they are covered by globalSearchPaths');
+    }
+
+    // Get globalSearchPaths (absolute paths, no regex)
+    const globalSearchPaths = getGlobalSearchPaths();
+    traceLog('Retrieved globalSearchPaths:', globalSearchPaths);
+    for (const globalPath of globalSearchPaths) {
+        try {
+            if (!globalPath || globalPath.trim() === '') {
+                continue;
+            }
+            const trimmedPath = globalPath.trim();
+            traceLog('Processing global search path:', trimmedPath);
+            // Simply add the trimmed global path
+            searchDirectories.push(trimmedPath);
+        } catch (error) {
+            traceLog('Error processing global search path:', globalPath, 'Error:', error);
+        }
+    }
+
+    // Get workspaceSearchPaths (can include regex patterns)
+    const workspaceSearchPaths = getWorkspaceSearchPaths();
+    traceLog('Retrieved workspaceSearchPaths:', workspaceSearchPaths);
+    for (const searchPath of workspaceSearchPaths) {
+        try {
+            if (!searchPath || searchPath.trim() === '') {
+                continue;
+            }
+
+            const trimmedPath = searchPath.trim();
+            const isRegexPattern = isRegexSearchPattern(trimmedPath);
+
+            if (isRegexPattern) {
+                // Search for Python executables using the regex pattern
+                // Look for common Python executable names within the pattern
+                const pythonExecutablePatterns = isWindows()
+                    ? [`${trimmedPath}/**/python.exe`, `${trimmedPath}/**/python3.exe`]
+                    : [`${trimmedPath}/**/python`, `${trimmedPath}/**/python3`];
+
+                traceLog('Searching for Python executables with patterns:', pythonExecutablePatterns);
+                for (const pattern of pythonExecutablePatterns) {
+                    try {
+                        const foundFiles = await workspace.findFiles(pattern, null);
+                        traceLog(
+                            'Python executable search found',
+                            foundFiles.length,
+                            'files matching pattern:',
+                            pattern,
+                        );
+
+                        for (const file of foundFiles) {
+                            // given the executable path, extract and save the environment directory
+                            const environmentDir = extractEnvironmentDirectory(file.fsPath);
+                            if (environmentDir) {
+                                searchDirectories.push(environmentDir);
+                            }
+                        }
+                    } catch (error) {
+                        traceLog('Error searching for Python executables with pattern:', pattern, 'Error:', error);
+                    }
+                }
+            } else {
+                // If it's not a regex, treat it as a normal directory path and just add it
+                searchDirectories.push(trimmedPath);
+            }
+        } catch (error) {
+            traceLog('Error processing workspace search path:', searchPath, 'Error:', error);
+        }
+    }
+
+    // Remove duplicates and return
+    const uniquePaths = Array.from(new Set(searchDirectories));
+    traceLog(
+        'getAllExtraSearchPaths completed. Total unique search directories:',
+        uniquePaths.length,
+        'Paths:',
+        uniquePaths,
+    );
+    return uniquePaths;
+}
+
+/**
+ * Gets globalSearchPaths setting with proper validation.
+ * Only gets user-level (global) setting since this setting is application-scoped.
+ */
+function getGlobalSearchPaths(): string[] {
+    try {
+        const envConfig = getConfiguration('python-env');
+        const inspection = envConfig.inspect<string[]>('globalSearchPaths');
+
+        const globalPaths = inspection?.globalValue || [];
+        traceLog('Retrieved globalSearchPaths:', globalPaths);
+        return untildifyArray(globalPaths);
+    } catch (error) {
+        traceLog('Error getting globalSearchPaths:', error);
+        return [];
+    }
+}
+
+/**
+ * Gets workspaceSearchPaths setting with workspace precedence.
+ * Gets the most specific workspace-level setting available.
+ */
+function getWorkspaceSearchPaths(): string[] {
+    try {
+        const envConfig = getConfiguration('python-env');
+        const inspection = envConfig.inspect<string[]>('workspaceSearchPaths');
+
+        // For workspace settings, prefer workspaceFolder > workspace
+        if (inspection?.workspaceFolderValue) {
+            traceLog('Using workspaceFolder level workspaceSearchPaths setting');
+            return inspection.workspaceFolderValue;
+        }
+
+        if (inspection?.workspaceValue) {
+            traceLog('Using workspace level workspaceSearchPaths setting');
+            return inspection.workspaceValue;
+        }
+
+        // Default empty array (don't use global value for workspace settings)
+        traceLog('No workspaceSearchPaths setting found at workspace level, using empty array');
+        return [];
+    } catch (error) {
+        traceLog('Error getting workspaceSearchPaths:', error);
+        return [];
+    }
+}
+
+/**
+ * Applies untildify to an array of paths
+ * @param paths Array of potentially tilde-containing paths
+ * @returns Array of expanded paths
+ */
+function untildifyArray(paths: string[]): string[] {
+    return paths.map((p) => untildify(p));
+}
+
+/**
+ * Handles migration from legacy python settings to the new globalSearchPaths setting.
+ * Legacy settings (venvPath, venvFolders) are User-scoped only, so they all migrate to globalSearchPaths.
+ * Does NOT delete the old settings, only adds them to the new settings.
+ * @returns true if legacy paths are covered by globalSearchPaths (either already there or just migrated), false if legacy paths should be included separately
+ */
+async function handleLegacyPythonSettingsMigration(): Promise<boolean> {
+    try {
+        const pythonConfig = getConfiguration('python');
+        const envConfig = getConfiguration('python-env');
+
+        // Get legacy settings at global level only (they were User-scoped)
+        const venvPathInspection = pythonConfig.inspect<string>('venvPath');
+        const venvFoldersInspection = pythonConfig.inspect<string[]>('venvFolders');
+
+        // Collect global (user-level) legacy paths for globalSearchPaths
+        const globalLegacyPaths: string[] = [];
+        if (venvPathInspection?.globalValue) {
+            globalLegacyPaths.push(venvPathInspection.globalValue);
+        }
+        if (venvFoldersInspection?.globalValue) {
+            globalLegacyPaths.push(...venvFoldersInspection.globalValue);
+        }
+
+        if (globalLegacyPaths.length === 0) {
+            // No legacy settings exist, so they're "covered" (nothing to worry about)
+            traceLog('No legacy python settings found');
+            return true;
+        }
+
+        traceLog('Found legacy python settings - global paths:', globalLegacyPaths);
+
+        // Check if legacy paths are already in globalSearchPaths
+        const globalSearchPathsInspection = envConfig.inspect<string[]>('globalSearchPaths');
+        const currentGlobalSearchPaths = globalSearchPathsInspection?.globalValue || [];
+
+        // Check if all legacy paths are already covered by globalSearchPaths
+        const legacyPathsAlreadyCovered = globalLegacyPaths.every((legacyPath) =>
+            currentGlobalSearchPaths.includes(legacyPath),
+        );
+
+        if (legacyPathsAlreadyCovered) {
+            traceLog('All legacy paths are already in globalSearchPaths, no migration needed');
+            return true; // Legacy paths are covered
+        }
+
+        // Need to migrate - add legacy paths to globalSearchPaths
+        const combinedGlobalPaths = Array.from(new Set([...currentGlobalSearchPaths, ...globalLegacyPaths]));
+        await envConfig.update('globalSearchPaths', combinedGlobalPaths, true); // true = global/user level
+        traceLog('Migrated legacy global python settings to globalSearchPaths. Combined paths:', combinedGlobalPaths);
+
+        // Show notification to user about migration
+        if (!migrationNotificationShown) {
+            migrationNotificationShown = true;
+            traceLog(
+                'User notification: Automatically migrated legacy python settings to python-env.globalSearchPaths.',
+            );
+        }
+
+        return true; // Legacy paths are now covered by globalSearchPaths
+    } catch (error) {
+        traceLog('Error during legacy python settings migration:', error);
+        return false; // On error, include legacy paths separately to be safe
+    }
+}
+
+// Module-level variable to track migration notification
+let migrationNotificationShown = false;
 
 export function getCacheDirectory(context: ExtensionContext): Uri {
     return Uri.joinPath(context.globalStorageUri, 'pythonLocator');
