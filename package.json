@@ -114,7 +114,7 @@
                     "type": "array",
                     "description": "%python-env.globalSearchPaths.description%",
                     "default": [],
-                    "scope": "application",
+                    "scope": "machine",
                     "items": {
                         "type": "string"
                     }
