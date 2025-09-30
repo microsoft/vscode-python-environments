@@ -550,3 +550,4 @@ envConfig.inspect
 -   When fixing mock environment creation, use `null` to truly omit properties rather than `undefined` (1)
 -   Always recompile TypeScript after making import/export changes before running tests, as stubs won't work if they're applied to old compiled JavaScript that doesn't have the updated imports (2)
 -   Create proxy abstraction functions for Node.js APIs like `cp.spawn` to enable clean testing - use function overloads to preserve Node.js's intelligent typing while making the functions mockable (1)
+-   When unit tests fail with VS Code API errors like `TypeError: X is not a constructor` or `Cannot read properties of undefined (reading 'Y')`, check if VS Code APIs are properly mocked in `/src/test/unittests.ts` - add missing Task-related APIs (`Task`, `TaskScope`, `ShellExecution`, `TaskRevealKind`, `TaskPanelKind`) and namespace mocks (`tasks`) following the existing pattern of `mockedVSCode.X = vscodeMocks.vscMockExtHostedTypes.X` (1)

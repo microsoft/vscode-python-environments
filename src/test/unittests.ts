@@ -1,8 +1,8 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
+import { anything, instance, mock, when } from 'ts-mockito';
 import * as vscode from 'vscode';
 import * as vscodeMocks from './mocks/vsc';
 import { vscMockTelemetryReporter } from './mocks/vsc/telemetryReporter';
-import { anything, instance, mock, when } from 'ts-mockito';
 const Module = require('module');
 
 type VSCode = typeof vscode;
@@ -36,6 +36,7 @@ export function initialize() {
     generateMock('debug');
     generateMock('scm');
     generateMock('notebooks');
+    generateMock('tasks');
 
     // Use mock clipboard fo testing purposes.
     const clipboard = new MockClipboard();
@@ -131,5 +132,12 @@ mockedVSCode.LogLevel = vscodeMocks.LogLevel;
 (mockedVSCode as any).LSPCancellationError = vscodeMocks.vscMockExtHostedTypes.LSPCancellationError;
 mockedVSCode.TestRunProfileKind = vscodeMocks.TestRunProfileKind;
 mockedVSCode.LanguageModelTextPart = vscodeMocks.vscMockCopilotTools.LanguageModelTextPart;
+
+// Task-related mocks
+mockedVSCode.Task = vscodeMocks.vscMockExtHostedTypes.Task;
+mockedVSCode.TaskScope = vscodeMocks.vscMockExtHostedTypes.TaskScope;
+mockedVSCode.ShellExecution = vscodeMocks.vscMockExtHostedTypes.ShellExecution;
+mockedVSCode.TaskRevealKind = vscodeMocks.vscMockExtHostedTypes.TaskRevealKind;
+mockedVSCode.TaskPanelKind = vscodeMocks.vscMockExtHostedTypes.TaskPanelKind;
 
 initialize();
