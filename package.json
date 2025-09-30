@@ -109,6 +109,24 @@
                     "description": "%python-envs.terminal.useEnvFile.description%",
                     "default": false,
                     "scope": "resource"
+                },
+                "python-env.globalSearchPaths": {
+                    "type": "array",
+                    "description": "%python-env.globalSearchPaths.description%",
+                    "default": [],
+                    "scope": "machine",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "python-env.workspaceSearchPaths": {
+                    "type": "array",
+                    "description": "%python-env.workspaceSearchPaths.description%",
+                    "default": [],
+                    "scope": "resource",
+                    "items": {
+                        "type": "string"
+                    }
                 }
             }
         },

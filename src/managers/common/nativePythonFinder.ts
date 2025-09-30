@@ -7,11 +7,11 @@ import * as rpc from 'vscode-jsonrpc/node';
 import { PythonProjectApi } from '../../api';
 import { ENVS_EXTENSION_ID, PYTHON_EXTENSION_ID } from '../../common/constants';
 import { getExtension } from '../../common/extension.apis';
-import { traceVerbose } from '../../common/logging';
-import { untildify } from '../../common/utils/pathUtils';
+import { traceError, traceLog, traceVerbose, traceWarn } from '../../common/logging';
+import { untildify, untildifyArray } from '../../common/utils/pathUtils';
 import { isWindows } from '../../common/utils/platformUtils';
 import { createRunningWorkerPool, WorkerPool } from '../../common/utils/workerPool';
-import { getConfiguration } from '../../common/workspace.apis';
+import { getConfiguration, getWorkspaceFolders } from '../../common/workspace.apis';
 import { noop } from './utils';
 
 export async function getNativePythonToolsPath(): Promise<string> {
@@ -326,10 +326,12 @@ class NativePythonFinderImpl implements NativePythonFinder {
      * Must be invoked when ever there are changes to any data related to the configuration details.
      */
     private async configure() {
+        // Get all extra search paths including legacy settings and new searchPaths
+        const extraSearchPaths = await getAllExtraSearchPaths();
+
         const options: ConfigurationOptions = {
             workspaceDirectories: this.api.getPythonProjects().map((item) => item.uri.fsPath),
-            // We do not want to mix this with `search_paths`
-            environmentDirectories: getCustomVirtualEnvDirs(),
+            environmentDirectories: extraSearchPaths,
             condaExecutable: getPythonSettingAndUntildify<string>('condaPath'),
             poetryExecutable: getPythonSettingAndUntildify<string>('poetryPath'),
             cacheDirectory: this.cacheDirectory?.fsPath,
@@ -357,9 +359,9 @@ type ConfigurationOptions = {
     cacheDirectory?: string;
 };
 /**
- * Gets all custom virtual environment locations to look for environments.
+ * Gets all custom virtual environment locations to look for environments from the legacy python settings (venvPath, venvFolders).
  */
-function getCustomVirtualEnvDirs(): string[] {
+function getCustomVirtualEnvDirsLegacy(): string[] {
     const venvDirs: string[] = [];
     const venvPath = getPythonSettingAndUntildify<string>('venvPath');
     if (venvPath) {
@@ -378,6 +380,109 @@ function getPythonSettingAndUntildify<T>(name: string, scope?: Uri): T | undefin
         return value ? (untildify(value as string) as unknown as T) : undefined;
     }
     return value;
+}
+
+/**
+ * Gets all extra environment search paths from various configuration sources.
+ * Combines legacy python settings (with migration), globalSearchPaths, and workspaceSearchPaths.
+ * @returns Array of search directory paths
+ */
+export async function getAllExtraSearchPaths(): Promise<string[]> {
+    const searchDirectories: string[] = [];
+
+    // add legacy custom venv directories
+    const customVenvDirs = getCustomVirtualEnvDirsLegacy();
+    searchDirectories.push(...customVenvDirs);
+
+    // Get globalSearchPaths
+    const globalSearchPaths = getGlobalSearchPaths().filter((path) => path && path.trim() !== '');
+    searchDirectories.push(...globalSearchPaths);
+
+    // Get workspaceSearchPaths
+    const workspaceSearchPaths = getWorkspaceSearchPaths();
+
+    // Resolve relative paths against workspace folders
+    for (const searchPath of workspaceSearchPaths) {
+        if (!searchPath || searchPath.trim() === '') {
+            continue;
+        }
+
+        const trimmedPath = searchPath.trim();
+
+        if (path.isAbsolute(trimmedPath)) {
+            // Absolute path - use as is
+            searchDirectories.push(trimmedPath);
+        } else {
+            // Relative path - resolve against all workspace folders
+            const workspaceFolders = getWorkspaceFolders();
+            if (workspaceFolders) {
+                for (const workspaceFolder of workspaceFolders) {
+                    const resolvedPath = path.resolve(workspaceFolder.uri.fsPath, trimmedPath);
+                    searchDirectories.push(resolvedPath);
+                }
+            } else {
+                traceWarn('Warning: No workspace folders found for relative path:', trimmedPath);
+            }
+        }
+    }
+
+    // Remove duplicates and return
+    const uniquePaths = Array.from(new Set(searchDirectories));
+    traceLog(
+        'getAllExtraSearchPaths completed. Total unique search directories:',
+        uniquePaths.length,
+        'Paths:',
+        uniquePaths,
+    );
+    return uniquePaths;
+}
+
+/**
+ * Gets globalSearchPaths setting with proper validation.
+ * Only gets user-level (global) setting since this setting is application-scoped.
+ */
+function getGlobalSearchPaths(): string[] {
+    try {
+        const envConfig = getConfiguration('python-env');
+        const inspection = envConfig.inspect<string[]>('globalSearchPaths');
+
+        const globalPaths = inspection?.globalValue || [];
+        return untildifyArray(globalPaths);
+    } catch (error) {
+        traceError('Error getting globalSearchPaths:', error);
+        return [];
+    }
+}
+
+/**
+ * Gets the most specific workspace-level setting available for workspaceSearchPaths.
+ */
+function getWorkspaceSearchPaths(): string[] {
+    try {
+        const envConfig = getConfiguration('python-env');
+        const inspection = envConfig.inspect<string[]>('workspaceSearchPaths');
+
+        if (inspection?.globalValue) {
+            traceError(
+                'Error: python-env.workspaceSearchPaths is set at the user/global level, but this setting can only be set at the workspace or workspace folder level.',
+            );
+        }
+
+        // For workspace settings, prefer workspaceFolder > workspace
+        if (inspection?.workspaceFolderValue) {
+            return inspection.workspaceFolderValue;
+        }
+
+        if (inspection?.workspaceValue) {
+            return inspection.workspaceValue;
+        }
+
+        // Default empty array (don't use global value for workspace settings)
+        return [];
+    } catch (error) {
+        traceError('Error getting workspaceSearchPaths:', error);
+        return [];
+    }
 }
 
 export function getCacheDirectory(context: ExtensionContext): Uri {
