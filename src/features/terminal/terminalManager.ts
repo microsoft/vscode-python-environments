@@ -147,12 +147,11 @@ export class TerminalManagerImpl implements TerminalManager {
             const shellsToSetup: ShellStartupScriptProvider[] = [];
             await Promise.all(
                 providers.map(async (p) => {
+                    const state = await p.isSetup();
                     if (this.shellSetup.has(p.shellType)) {
                         // This ensures modified scripts are detected even after initial setup
-                        const currentState = await p.isSetup();
                         const cachedSetup = this.shellSetup.get(p.shellType);
-
-                        if ((currentState === ShellSetupState.Setup) !== cachedSetup) {
+                        if ((state === ShellSetupState.Setup) !== cachedSetup) {
                             traceVerbose(`Shell profile for ${p.shellType} state changed, updating cache.`);
                             // State changed - clear cache and re-evaluate
                             this.shellSetup.delete(p.shellType);
@@ -162,7 +161,6 @@ export class TerminalManagerImpl implements TerminalManager {
                         }
                     }
                     traceVerbose(`Checking shell profile for ${p.shellType}.`);
-                    const state = await p.isSetup();
                     if (state === ShellSetupState.NotSetup) {
                         if (shellIntegrationForActiveTerminal(p.name)) {
                             await p.teardownScripts();
