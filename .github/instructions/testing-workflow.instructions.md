@@ -537,7 +537,59 @@ envConfig.inspect
 -   ❌ Tests that don't clean up mocks properly
 -   ❌ Overly complex test setup that's hard to understand
 
-## 🧠 Agent Learning Patterns
+## � Common Pitfalls & Fast Diagnosis
+
+These recurring issues have caused wasted cycles. Follow the quick diagnosis flow to avoid them:
+
+### 1. 0 Tests Detected When Filtering (e.g. with --grep or targeted run)
+
+Likely Causes (in order):
+
+-   The TypeScript test file has not been compiled to `out/test/...` yet.
+-   The file was moved outside the compiler `rootDir` (tsconfig sets `rootDir: src`), so `tsc` will not emit it into `out/`.
+-   The grep / test name filter does not match the suite or test names.
+
+Diagnosis Checklist:
+
+1. Confirm compile step ran: if not in watch mode, run the compile test script (see below) **before** executing tests.
+2. Check for the emitted JS: derive the expected path (replace `src/` with `out/` and ensure the directory pattern matches `out/test/**/*.unit.test.js`). If the JS file is missing, it's a compilation / placement issue.
+3. Open the compiled JS and verify the `suite("<Your Suite Name>")` string literally appears; if missing, the source file wasn’t included or was misnamed.
+4. Re-run the test using the programmatic test tool (preferred) referencing the file path instead of a grep first; if that succeeds, refine your grep pattern.
+
+Remediation:
+
+-   Ensure unit test files live under `src/test/...` (since `rootDir` is `src`) so they are emitted under `out/test/...` and picked up by Mocha’s spec glob.
+-   Run `watch-tests` once (preferred) or a one-off `compile-tests` before first execution.
+-   Avoid relocating tests to a top-level `test/` folder unless tsconfig and spec globs are updated accordingly.
+
+### 2. Using Terminal First Instead of Test Tool
+
+Always default to the test execution tool (runTests) for:
+
+-   Precise targeting (single file / specific tests via testNames)
+-   Richer integration & structured output
+
+Use terminal (`npm run unittest`) only as a fallback.
+
+### 3. Infinite Watch Confusion
+
+If you started `npm run watch-tests`, do **not** also run `compile-tests` repeatedly—watch already handles incremental builds. Just re-run the test tool after edits.
+
+### Quick Flowchart
+
+0 tests? → Was TS compiled? (Check for `out/test/...js`) → If no: compile. → If yes: Is file under `src/test`? → If no: relocate. → If yes: Does suite name match grep / filter? → Adjust filter → Use runTests with direct file path.
+
+### Example Programmatic Run
+
+```
+await runTests({
+    files: ['/absolute/path/to/src/test/features/execution/execUtils.unit.test.ts']
+});
+```
+
+If that returns 0, re-check compilation path mapping.
+
+## Agent Learning Patterns
 
 ### Key Implementation Insights
 
@@ -550,3 +602,4 @@ envConfig.inspect
 -   When fixing mock environment creation, use `null` to truly omit properties rather than `undefined` (1)
 -   Always recompile TypeScript after making import/export changes before running tests, as stubs won't work if they're applied to old compiled JavaScript that doesn't have the updated imports (2)
 -   Create proxy abstraction functions for Node.js APIs like `cp.spawn` to enable clean testing - use function overloads to preserve Node.js's intelligent typing while making the functions mockable (1)
+-   When a targeted test run yields 0 tests, first verify the compiled JS exists under `out/test` (rootDir is `src`); absence almost always means the test file sits outside `src` or compilation hasn't run yet (1)

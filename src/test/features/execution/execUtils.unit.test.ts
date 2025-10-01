@@ -1,5 +1,5 @@
 import * as assert from 'assert';
-import { quoteStringIfNecessary, quoteArgs } from '../../../features/execution/execUtils';
+import { quoteArgs, quoteStringIfNecessary } from '../../../features/execution/execUtils';
 
 suite('Execution Utils Tests', () => {
     suite('quoteStringIfNecessary', () => {
