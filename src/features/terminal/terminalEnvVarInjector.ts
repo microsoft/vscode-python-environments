@@ -110,7 +110,6 @@ export class TerminalEnvVarInjector implements Disposable {
                 await this.injectEnvironmentVariablesForWorkspace(workspaceFolder);
             } else {
                 // No provided workspace - update all workspaces
-                this.envVarCollection.clear();
 
                 const workspaceFolders = workspace.workspaceFolders;
                 if (!workspaceFolders || workspaceFolders.length === 0) {
@@ -140,7 +139,6 @@ export class TerminalEnvVarInjector implements Disposable {
 
             // use scoped environment variable collection
             const envVarScope = this.getEnvironmentVariableCollectionScoped({ workspaceFolder });
-            envVarScope.clear(); // Clear existing variables for this workspace
 
             // Check if env file injection is enabled
             const config = getConfiguration('python', workspaceUri);
