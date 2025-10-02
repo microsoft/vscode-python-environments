@@ -147,15 +147,23 @@ export class TerminalManagerImpl implements TerminalManager {
             const shellsToSetup: ShellStartupScriptProvider[] = [];
             await Promise.all(
                 providers.map(async (p) => {
+                    const state = await p.isSetup();
                     if (this.shellSetup.has(p.shellType)) {
-                        traceVerbose(`Shell profile for ${p.shellType} already checked.`);
-                        return;
+                        // This ensures modified scripts are detected even after initial setup
+                        const cachedSetup = this.shellSetup.get(p.shellType);
+                        if ((state === ShellSetupState.Setup) !== cachedSetup) {
+                            traceVerbose(`Shell profile for ${p.shellType} state changed, updating cache.`);
+                            // State changed - clear cache and re-evaluate
+                            this.shellSetup.delete(p.shellType);
+                        } else {
+                            traceVerbose(`Shell profile for ${p.shellType} already checked.`);
+                            return;
+                        }
                     }
                     traceVerbose(`Checking shell profile for ${p.shellType}.`);
-                    const state = await p.isSetup();
                     if (state === ShellSetupState.NotSetup) {
-                        // Check if shell integration is available before marking for setup
                         if (shellIntegrationForActiveTerminal(p.name)) {
+                            await p.teardownScripts();
                             this.shellSetup.set(p.shellType, true);
                             traceVerbose(
                                 `Shell integration available for ${p.shellType}, skipping prompt, and profile modification.`,
@@ -169,6 +177,12 @@ export class TerminalManagerImpl implements TerminalManager {
                             );
                         }
                     } else if (state === ShellSetupState.Setup) {
+                        if (shellIntegrationForActiveTerminal(p.name)) {
+                            await p.teardownScripts();
+                            traceVerbose(
+                                `Shell integration available for ${p.shellType}, removed profile script in favor of shell integration.`,
+                            );
+                        }
                         this.shellSetup.set(p.shellType, true);
                         traceVerbose(`Shell profile for ${p.shellType} is setup.`);
                     } else if (state === ShellSetupState.NotInstalled) {
@@ -228,6 +242,7 @@ export class TerminalManagerImpl implements TerminalManager {
         let actType = getAutoActivationType();
         const shellType = identifyTerminalShell(terminal);
         if (actType === ACT_TYPE_SHELL) {
+            await this.handleSetupCheck(shellType);
             actType = await this.getEffectiveActivationType(shellType);
         }
 
