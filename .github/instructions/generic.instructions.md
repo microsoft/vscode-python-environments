@@ -30,3 +30,7 @@ Provide project context and coding guidelines that AI should follow when generat
 ## Documentation
 
 -   Add clear docstrings to public functions, describing their purpose, parameters, and behavior.
+
+## Learnings
+
+-   Avoid using 'any' types in TypeScript; import proper types from VS Code API and use specific interfaces for mocks and test objects (1)
