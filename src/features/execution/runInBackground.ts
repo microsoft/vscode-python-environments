@@ -1,5 +1,5 @@
-import * as cp from 'child_process';
 import { PythonBackgroundRunOptions, PythonEnvironment, PythonProcess } from '../../api';
+import { spawnProcess } from '../../common/childProcess.apis';
 import { traceError, traceInfo, traceWarn } from '../../common/logging';
 import { quoteStringIfNecessary } from './execUtils';
 
@@ -39,7 +39,11 @@ export async function runInBackground(
         traceWarn(`Error checking if executable exists: ${err instanceof Error ? err.message : String(err)}`);
     }
 
-    const proc = cp.spawn(executable, allArgs, { stdio: 'pipe', cwd: options.cwd, env: options.env });
+    const proc = spawnProcess(executable, allArgs, {
+        stdio: 'pipe',
+        cwd: options.cwd,
+        env: options.env,
+    });
 
     return {
         pid: proc.pid,
