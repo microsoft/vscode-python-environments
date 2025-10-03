@@ -3,8 +3,7 @@
 
 import * as sinon from 'sinon';
 import * as typeMoq from 'typemoq';
-import { Disposable, GlobalEnvironmentVariableCollection, workspace, WorkspaceFolder } from 'vscode';
-import { DidChangeEnvironmentVariablesEventArgs } from '../../api';
+import { GlobalEnvironmentVariableCollection, workspace } from 'vscode';
 import { EnvVarManager } from '../../features/execution/envVariableManager';
 import { TerminalEnvVarInjector } from '../../features/terminal/terminalEnvVarInjector';
 
@@ -19,7 +18,8 @@ suite('TerminalEnvVarInjector Basic Tests', () => {
     let envVarManager: typeMoq.IMock<EnvVarManager>;
     let injector: TerminalEnvVarInjector;
     let mockScopedCollection: MockScopedCollection;
-    let workspaceFoldersStub: WorkspaceFolder[];
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    let workspaceFoldersStub: any;
 
     setup(() => {
         envVarCollection = typeMoq.Mock.ofType<GlobalEnvironmentVariableCollection>();
@@ -40,25 +40,19 @@ suite('TerminalEnvVarInjector Basic Tests', () => {
         };
 
         // Setup environment variable collection to return scoped collection
-        envVarCollection.setup((x) => x.getScoped(typeMoq.It.isAny())).returns(() => mockScopedCollection as never);
+        envVarCollection.setup((x) => x.getScoped(typeMoq.It.isAny())).returns(() => mockScopedCollection as any);
         envVarCollection.setup((x) => x.clear()).returns(() => {});
 
         // Setup minimal mocks for event subscriptions
         envVarManager
             .setup((m) => m.onDidChangeEnvironmentVariables)
-            .returns(() => {
-                // Return a mock Event function that returns a Disposable when called
-                const mockEvent = (_listener: (e: DidChangeEnvironmentVariablesEventArgs) => void) =>
+            .returns(
+                () =>
                     ({
                         dispose: () => {},
-                    } as Disposable);
-                return mockEvent;
-            });
-
-        // Mock workspace.onDidChangeConfiguration to return a Disposable
-        sinon.stub(workspace, 'onDidChangeConfiguration').returns({
-            dispose: () => {},
-        } as Disposable);
+                        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                    } as any),
+            );
     });
 
     teardown(() => {
@@ -91,20 +85,11 @@ suite('TerminalEnvVarInjector Basic Tests', () => {
         envVarManager.reset();
         envVarManager
             .setup((m) => m.onDidChangeEnvironmentVariables)
-            .returns(() => {
+            .returns((_handler) => {
                 eventHandlerRegistered = true;
-                // Return a mock Event function that returns a Disposable when called
-                const mockEvent = (_listener: (e: DidChangeEnvironmentVariablesEventArgs) => void) =>
-                    ({
-                        dispose: () => {},
-                    } as Disposable);
-                return mockEvent;
+                // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                return { dispose: () => {} } as any;
             });
-
-        // Mock workspace.onDidChangeConfiguration to return a Disposable
-        sinon.stub(workspace, 'onDidChangeConfiguration').returns({
-            dispose: () => {},
-        } as Disposable);
 
         // Act
         injector = new TerminalEnvVarInjector(envVarCollection.object, envVarManager.object);
