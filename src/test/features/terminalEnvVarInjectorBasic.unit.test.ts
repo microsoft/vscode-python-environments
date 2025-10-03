@@ -54,6 +54,11 @@ suite('TerminalEnvVarInjector Basic Tests', () => {
                     } as Disposable);
                 return mockEvent;
             });
+
+        // Mock workspace.onDidChangeConfiguration to return a Disposable
+        sinon.stub(workspace, 'onDidChangeConfiguration').returns({
+            dispose: () => {},
+        } as Disposable);
     });
 
     teardown(() => {
@@ -95,6 +100,11 @@ suite('TerminalEnvVarInjector Basic Tests', () => {
                     } as Disposable);
                 return mockEvent;
             });
+
+        // Mock workspace.onDidChangeConfiguration to return a Disposable
+        sinon.stub(workspace, 'onDidChangeConfiguration').returns({
+            dispose: () => {},
+        } as Disposable);
 
         // Act
         injector = new TerminalEnvVarInjector(envVarCollection.object, envVarManager.object);
