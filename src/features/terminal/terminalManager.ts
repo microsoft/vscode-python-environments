@@ -129,7 +129,9 @@ export class TerminalManagerImpl implements TerminalManager {
                             await this.handleSetupCheck(shells);
                         }
                     } else {
-                        traceVerbose(`Auto activation type changed to ${actType}`);
+                        traceVerbose(`Auto activation type changed to ${actType}, we are cleaning up shell startup setup`);
+                         // Teardown scripts when switching away from shell startup activation
+                        await Promise.all(this.startupScriptProviders.map((p) => p.teardownScripts()));
                         this.shellSetup.clear();
                     }
                 }
