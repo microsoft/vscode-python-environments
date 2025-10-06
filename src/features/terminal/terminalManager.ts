@@ -16,7 +16,7 @@ import { getConfiguration, onDidChangeConfiguration } from '../../common/workspa
 import { isActivatableEnvironment } from '../common/activation';
 import { identifyTerminalShell } from '../common/shellDetector';
 import { getPythonApi } from '../pythonApi';
-import { shellIntegrationForActiveTerminal } from './shells/common/shellUtils';
+import { isWsl, shellIntegrationForActiveTerminal } from './shells/common/shellUtils';
 import { ShellEnvsProvider, ShellSetupState, ShellStartupScriptProvider } from './shells/startupProvider';
 import { handleSettingUpShellProfile } from './shellStartupSetupHandlers';
 import {
@@ -143,41 +143,42 @@ export class TerminalManagerImpl implements TerminalManager {
     private async handleSetupCheck(shellType: string | Set<string>): Promise<void> {
         const shellTypes = typeof shellType === 'string' ? new Set([shellType]) : shellType;
         const providers = this.startupScriptProviders.filter((p) => shellTypes.has(p.shellType));
-        if (providers.length > 0) {
+        if (providers.length > 0) {      
             const shellsToSetup: ShellStartupScriptProvider[] = [];
             await Promise.all(
                 providers.map(async (p) => {
                     const state = await p.isSetup();
+                    const currentSetup = (state === ShellSetupState.Setup);
+                    // Check if we already processed this shell and the state hasn't changed
                     if (this.shellSetup.has(p.shellType)) {
-                        // This ensures modified scripts are detected even after initial setup
                         const cachedSetup = this.shellSetup.get(p.shellType);
-                        if ((state === ShellSetupState.Setup) !== cachedSetup) {
-                            traceVerbose(`Shell profile for ${p.shellType} state changed, updating cache.`);
-                            // State changed - clear cache and re-evaluate
-                            this.shellSetup.delete(p.shellType);
-                        } else {
-                            traceVerbose(`Shell profile for ${p.shellType} already checked.`);
+                        if (currentSetup === cachedSetup) {
+                            traceVerbose(`Shell profile for ${p.shellType} already checked, state unchanged.`);
                             return;
                         }
+                        traceVerbose(`Shell profile for ${p.shellType} state changed from ${cachedSetup} to ${currentSetup}, re-evaluating.`);
                     }
                     traceVerbose(`Checking shell profile for ${p.shellType}.`);
                     if (state === ShellSetupState.NotSetup) {
-                        if (shellIntegrationForActiveTerminal(p.name)) {
+                        traceVerbose(`WSL detected: ${isWsl()}, Shell integration available: ${shellIntegrationForActiveTerminal(p.name)}`);
+
+                        if (shellIntegrationForActiveTerminal(p.name) && !isWsl()) {
+                            // Shell integration available and NOT in WSL - skip setup
                             await p.teardownScripts();
                             this.shellSetup.set(p.shellType, true);
                             traceVerbose(
-                                `Shell integration available for ${p.shellType}, skipping prompt, and profile modification.`,
+                                `Shell integration available for ${p.shellType} (not WSL), skipping prompt, and profile modification.`,
                             );
                         } else {
-                            // No shell integration, mark for setup
+                            // WSL (regardless of integration) OR no shell integration - needs setup
                             this.shellSetup.set(p.shellType, false);
                             shellsToSetup.push(p);
                             traceVerbose(
-                                `Shell integration is NOT avaoiable. Shell profile for ${p.shellType} is not setup.`,
+                                `Shell integration is NOT available. Shell profile for ${p.shellType} is not setup.`,
                             );
                         }
                     } else if (state === ShellSetupState.Setup) {
-                        if (shellIntegrationForActiveTerminal(p.name)) {
+                        if (shellIntegrationForActiveTerminal(p.name) && !isWsl()) {
                             await p.teardownScripts();
                             traceVerbose(
                                 `Shell integration available for ${p.shellType}, removed profile script in favor of shell integration.`,
