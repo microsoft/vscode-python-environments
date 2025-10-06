@@ -80,7 +80,6 @@ export class MockDocument implements TextDocument {
         this._onSave = onSave;
         this._language = language ?? this._language;
     }
-    encoding: string = 'utf8';
 
     public setContent(contents: string): void {
         this._contents = contents;
