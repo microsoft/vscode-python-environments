@@ -4,6 +4,11 @@ export function quoteStringIfNecessary(arg: string): string {
         return arg;
     }
 
+    // Don't quote single shell operators/special characters
+    if (arg.length === 1 && /[&|<>;()[\]{}$]/.test(arg)) {
+        return arg;
+    }
+
     // Quote if contains common shell special characters that are problematic across multiple shells
     // Includes: space, &, |, <, >, ;, ', ", `, (, ), [, ], {, }, $
     const needsQuoting = /[\s&|<>;'"`()\[\]{}$]/.test(arg);
