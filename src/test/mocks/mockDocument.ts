@@ -68,6 +68,8 @@ export class MockDocument implements TextDocument {
 
     private _onSave: (doc: TextDocument) => Promise<boolean>;
 
+    encoding = 'utf-8';
+
     constructor(
         contents: string,
         fileName: string,
