@@ -4,7 +4,7 @@ import * as path from 'path';
 import { l10n, LogOutputChannel, ProgressLocation, QuickPickItem, QuickPickItemKind, ThemeIcon, Uri } from 'vscode';
 import { EnvironmentManager, PythonEnvironment, PythonEnvironmentApi, PythonEnvironmentInfo } from '../../api';
 import { ENVS_EXTENSION_ID } from '../../common/constants';
-import { Common, VenvManagerStrings } from '../../common/localize';
+import { Common, VenvManagerCommonStrings, VenvManagerStrings, VenvManagerStringsNoUv } from '../../common/localize';
 import { traceInfo } from '../../common/logging';
 import { getWorkspacePersistentState } from '../../common/persistentState';
 import { pickEnvironmentFrom } from '../../common/pickers/environments';
@@ -210,7 +210,7 @@ export async function getGlobalVenvLocation(): Promise<Uri | undefined> {
     const items: FolderQuickPickItem[] = [
         {
             label: Common.browse,
-            description: VenvManagerStrings.venvGlobalFolder,
+            description: VenvManagerCommonStrings.venvGlobalFolder,
         },
     ];
 
@@ -218,7 +218,7 @@ export async function getGlobalVenvLocation(): Promise<Uri | undefined> {
     if (venvPaths.length > 0) {
         items.push(
             {
-                label: VenvManagerStrings.venvGlobalFoldersSetting,
+                label: VenvManagerCommonStrings.venvGlobalFoldersSetting,
                 kind: QuickPickItemKind.Separator,
             },
             ...venvPaths.map((p) => ({
@@ -244,7 +244,7 @@ export async function getGlobalVenvLocation(): Promise<Uri | undefined> {
     }
 
     const selected = await showQuickPick(items, {
-        placeHolder: VenvManagerStrings.venvGlobalFolder,
+        placeHolder: VenvManagerCommonStrings.venvGlobalFolder,
         ignoreFocusOut: true,
     });
 
@@ -270,24 +270,24 @@ async function createWithCustomization(version: string): Promise<boolean | undef
     const selection: QuickPickItem | undefined = await showQuickPick(
         [
             {
-                label: VenvManagerStrings.quickCreate,
-                description: VenvManagerStrings.quickCreateDescription,
+                label: VenvManagerCommonStrings.quickCreate,
+                description: VenvManagerStringsNoUv.quickCreateDescription,
                 detail: l10n.t('Uses Python version {0} and installs workspace dependencies.', version),
             },
             {
-                label: VenvManagerStrings.customize,
+                label: VenvManagerCommonStrings.customize,
                 description: VenvManagerStrings.customizeDescription,
             },
         ],
         {
-            placeHolder: VenvManagerStrings.selectQuickOrCustomize,
+            placeHolder: VenvManagerCommonStrings.selectQuickOrCustomize,
             ignoreFocusOut: true,
         },
     );
 
     if (selection === undefined) {
         return undefined;
-    } else if (selection.label === VenvManagerStrings.quickCreate) {
+    } else if (selection.label === VenvManagerCommonStrings.quickCreate) {
         return false;
     }
     return true;
@@ -306,19 +306,22 @@ async function createWithProgress(
     const pythonPath =
         os.platform() === 'win32' ? path.join(envPath, 'Scripts', 'python.exe') : path.join(envPath, 'bin', 'python');
 
+    const useUv = await isUvInstalled(log);
+    const progressTitle = l10n.t(
+        'Creating virtual environment named {0} using python version {1}{2}.',
+        path.basename(envPath),
+        basePython.version,
+        useUv ? ' [uv]' : '',
+    );
+
     return await withProgress(
         {
             location: ProgressLocation.Notification,
-            title: l10n.t(
-                'Creating virtual environment named {0} using python version {1}.',
-                path.basename(envPath),
-                basePython.version,
-            ),
+            title: progressTitle,
         },
         async () => {
             const result: CreateEnvironmentResult = {};
             try {
-                const useUv = await isUvInstalled(log);
                 // env creation
                 if (basePython.execInfo?.run.executable) {
                     if (useUv) {
@@ -354,13 +357,19 @@ async function createWithProgress(
                         });
                     } catch (e) {
                         // error occurred while installing packages
-                        result.pkgInstallationErr = e instanceof Error ? e.message : String(e);
+                        result.pkgInstallationErr = useUv
+                            ? `Failed to install packages with uv: ${e instanceof Error ? e.message : String(e)}`
+                            : e instanceof Error
+                            ? e.message
+                            : String(e);
                     }
                 }
                 result.environment = env;
             } catch (e) {
-                log.error(`Failed to create virtual environment: ${e}`);
-                result.envCreationErr = `Failed to create virtual environment: ${e}`;
+                result.envCreationErr = useUv
+                    ? `Failed to create virtual environment with uv: ${e}`
+                    : `Failed to create virtual environment: ${e}`;
+                log.error(result.envCreationErr);
             }
             return result;
         },
@@ -370,14 +379,14 @@ async function createWithProgress(
 export function ensureGlobalEnv(basePythons: PythonEnvironment[], log: LogOutputChannel): PythonEnvironment[] {
     if (basePythons.length === 0) {
         log.error('No base python found');
-        showErrorMessage(VenvManagerStrings.venvErrorNoBasePython);
+        showErrorMessage(VenvManagerCommonStrings.venvErrorNoBasePython);
         throw new Error('No base python found');
     }
 
     const filtered = basePythons.filter((e) => e.version.startsWith('3.'));
     if (filtered.length === 0) {
         log.error('Did not find any base python 3.*');
-        showErrorMessage(VenvManagerStrings.venvErrorNoPython3);
+        showErrorMessage(VenvManagerCommonStrings.venvErrorNoPython3);
         basePythons.forEach((e, i) => {
             log.error(`${i}: ${e.version} : ${e.environmentPath.fsPath}`);
         });
@@ -458,15 +467,15 @@ export async function createPythonVenv(
     }
 
     const name = await showInputBox({
-        prompt: VenvManagerStrings.venvName,
+        prompt: VenvManagerCommonStrings.venvName,
         value: '.venv',
         ignoreFocusOut: true,
         validateInput: async (value) => {
             if (!value) {
-                return VenvManagerStrings.venvNameErrorEmpty;
+                return VenvManagerCommonStrings.venvNameErrorEmpty;
             }
             if (await fsapi.pathExists(path.join(venvRoot.fsPath, value))) {
-                return VenvManagerStrings.venvNameErrorExists;
+                return VenvManagerCommonStrings.venvNameErrorExists;
             }
         },
     });
@@ -517,7 +526,7 @@ export async function removeVenv(environment: PythonEnvironment, log: LogOutputC
         const result = await withProgress(
             {
                 location: ProgressLocation.Notification,
-                title: VenvManagerStrings.venvRemoving,
+                title: VenvManagerCommonStrings.venvRemoving,
             },
             async () => {
                 try {
@@ -525,7 +534,7 @@ export async function removeVenv(environment: PythonEnvironment, log: LogOutputC
                     return true;
                 } catch (e) {
                     log.error(`Failed to remove virtual environment: ${e}`);
-                    showErrorMessage(VenvManagerStrings.venvRemoveFailed);
+                    showErrorMessage(VenvManagerCommonStrings.venvRemoveFailed);
                     return false;
                 }
             },
