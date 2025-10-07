@@ -36,8 +36,9 @@ async function getBashProfiles(): Promise<string> {
 }
 
 async function getZshProfiles(): Promise<string> {
-    const homeDir = os.homedir();
-    const profile: string = path.join(homeDir, '.zshrc');
+    const zdotdir = process.env.ZDOTDIR;
+    const baseDir = zdotdir || os.homedir();
+    const profile: string = path.join(baseDir, '.zshrc');
 
     return profile;
 }
