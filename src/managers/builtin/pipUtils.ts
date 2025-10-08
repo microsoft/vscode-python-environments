@@ -190,9 +190,7 @@ export async function getProjectInstallable(
             ).flat();
 
             // Deduplicate by fsPath
-            const uniqueResults = Array.from(
-                new Map(results.map((uri) => [uri.fsPath, uri])).values(),
-            );
+            const uniqueResults = Array.from(new Map(results.map((uri) => [uri.fsPath, uri])).values());
 
             const fsPaths = projects.map((p) => p.uri.fsPath);
             const filtered = uniqueResults

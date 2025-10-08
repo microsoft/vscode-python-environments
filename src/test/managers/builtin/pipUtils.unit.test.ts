@@ -33,7 +33,7 @@ suite('Pip Utils - getProjectInstallable', () => {
             },
         );
 
-        const workspacePath = path.resolve('/workspace');
+        const workspacePath = Uri.file('/test/path/root').fsPath;
         mockApi = {
             getPythonProject: (uri: Uri) => {
                 // Return a project for any URI in workspace
@@ -57,7 +57,7 @@ suite('Pip Utils - getProjectInstallable', () => {
                 return Promise.resolve([]);
             } else if (pattern === '*requirements*.txt') {
                 // This pattern should match root-level files
-                const workspacePath = path.resolve('/workspace');
+                const workspacePath = Uri.file('/test/path/root').fsPath;
                 return Promise.resolve([
                     Uri.file(path.join(workspacePath, 'requirements.txt')),
                     Uri.file(path.join(workspacePath, 'dev-requirements.txt')),
@@ -72,7 +72,7 @@ suite('Pip Utils - getProjectInstallable', () => {
         });
 
         // Act: Call getProjectInstallable
-        const workspacePath = path.resolve('/workspace');
+        const workspacePath = Uri.file('/test/path/root').fsPath;
         const projects = [{ name: 'workspace', uri: Uri.file(workspacePath) }];
         const result = await getProjectInstallable(mockApi as PythonEnvironmentApi, projects);
 
@@ -100,10 +100,10 @@ suite('Pip Utils - getProjectInstallable', () => {
         // Arrange: Mock both patterns to return the same file
         findFilesStub.callsFake((pattern: string) => {
             if (pattern === '**/*requirements*.txt') {
-                const workspacePath = path.resolve('/workspace');
+                const workspacePath = Uri.file('/test/path/root').fsPath;
                 return Promise.resolve([Uri.file(path.join(workspacePath, 'dev-requirements.txt'))]);
             } else if (pattern === '*requirements*.txt') {
-                const workspacePath = path.resolve('/workspace');
+                const workspacePath = Uri.file('/test/path/root').fsPath;
                 return Promise.resolve([
                     Uri.file(path.join(workspacePath, 'dev-requirements.txt')),
                     Uri.file(path.join(workspacePath, 'requirements.txt')),
@@ -117,7 +117,7 @@ suite('Pip Utils - getProjectInstallable', () => {
         });
 
         // Act: Call getProjectInstallable
-        const workspacePath = path.resolve('/workspace');
+        const workspacePath = Uri.file('/test/path/root').fsPath;
         const projects = [{ name: 'workspace', uri: Uri.file(workspacePath) }];
         const result = await getProjectInstallable(mockApi as PythonEnvironmentApi, projects);
 
@@ -132,13 +132,13 @@ suite('Pip Utils - getProjectInstallable', () => {
         // Arrange: Mock findFiles to return files in subdirectories
         findFilesStub.callsFake((pattern: string) => {
             if (pattern === '**/*requirements*.txt') {
-                const workspacePath = path.resolve('/workspace');
+                const workspacePath = Uri.file('/test/path/root').fsPath;
                 return Promise.resolve([Uri.file(path.join(workspacePath, 'subdir', 'dev-requirements.txt'))]);
             } else if (pattern === '*requirements*.txt') {
-                const workspacePath = path.resolve('/workspace');
+                const workspacePath = Uri.file('/test/path/root').fsPath;
                 return Promise.resolve([Uri.file(path.join(workspacePath, 'requirements.txt'))]);
             } else if (pattern === '**/requirements/*.txt') {
-                const workspacePath = path.resolve('/workspace');
+                const workspacePath = Uri.file('/test/path/root').fsPath;
                 return Promise.resolve([Uri.file(path.join(workspacePath, 'requirements', 'test.txt'))]);
             } else if (pattern === '**/pyproject.toml') {
                 return Promise.resolve([]);
@@ -147,7 +147,7 @@ suite('Pip Utils - getProjectInstallable', () => {
         });
 
         // Act: Call getProjectInstallable
-        const workspacePath = path.resolve('/workspace');
+        const workspacePath = Uri.file('/test/path/root').fsPath;
         const projects = [{ name: 'workspace', uri: Uri.file(workspacePath) }];
         const result = await getProjectInstallable(mockApi as PythonEnvironmentApi, projects);
 
@@ -175,8 +175,8 @@ suite('Pip Utils - getProjectInstallable', () => {
         // Arrange: Mock findFiles to return files from multiple directories
         findFilesStub.callsFake((pattern: string) => {
             if (pattern === '*requirements*.txt') {
-                const workspacePath = path.resolve('/workspace');
-                const otherPath = path.resolve('/other-dir');
+                const workspacePath = Uri.file('/test/path/root').fsPath;
+                const otherPath = Uri.file('/other-dir').fsPath;
                 return Promise.resolve([
                     Uri.file(path.join(workspacePath, 'requirements.txt')),
                     Uri.file(path.join(otherPath, 'requirements.txt')), // Should be filtered out
@@ -187,7 +187,7 @@ suite('Pip Utils - getProjectInstallable', () => {
         });
 
         // Act: Call with only workspace project
-        const workspacePath = path.resolve('/workspace');
+        const workspacePath = Uri.file('/test/path/root').fsPath;
         const projects = [{ name: 'workspace', uri: Uri.file(workspacePath) }];
         const result = await getProjectInstallable(mockApi as PythonEnvironmentApi, projects);
 
