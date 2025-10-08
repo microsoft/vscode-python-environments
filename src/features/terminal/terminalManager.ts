@@ -167,7 +167,7 @@ export class TerminalManagerImpl implements TerminalManager {
                     traceVerbose(`Checking shell profile for ${p.shellType}.`);
                     if (state === ShellSetupState.NotSetup) {
                         traceVerbose(
-                            `WSL detected: ${isWsl()}, Shell integration available: ${shellIntegrationForActiveTerminal(
+                            `WSL detected: ${isWsl()}, Shell integration available: ${await shellIntegrationForActiveTerminal(
                                 p.name,
                             )}`,
                         );
