@@ -58,6 +58,27 @@ async function isPowerShellInstalled(shell: string): Promise<boolean> {
     }
 }
 
+/**
+ * Detects the major version of PowerShell by executing a version query command.
+ * This helps with debugging activation issues since PowerShell 5.x and 7+ have different behaviors.
+ * @param shell The PowerShell executable name ('powershell' for Windows PowerShell or 'pwsh' for PowerShell Core/7+)
+ * @returns Promise resolving to the major version number as a string, or undefined if detection fails
+ */
+async function getPowerShellVersion(shell: 'powershell' | 'pwsh'): Promise<string | undefined> {
+    try {
+        const command = `${shell} -c '\$PSVersionTable.PSVersion.Major'`;
+        const versionOutput = await runCommand(command);
+        if (versionOutput && !isNaN(Number(versionOutput))) {
+            return versionOutput;
+        }
+        traceVerbose(`Failed to parse PowerShell version from output: ${versionOutput}`);
+        return undefined;
+    } catch (err) {
+        traceVerbose(`Failed to get PowerShell version for ${shell}`, err);
+        return undefined;
+    }
+}
+
 async function getProfileForShell(shell: 'powershell' | 'pwsh'): Promise<string> {
     const cachedPath = getProfilePathCache(shell);
     if (cachedPath) {
@@ -125,7 +146,8 @@ function getActivationContent(): string {
         '        try {',
         `            Invoke-Expression $env:${POWERSHELL_ENV_KEY}`,
         '        } catch {',
-        `            Write-Error "Failed to activate Python environment: $_" -ErrorAction Continue`,
+        `            $psVersion = $PSVersionTable.PSVersion.Major`,
+        `            Write-Error "Failed to activate Python environment (PowerShell $psVersion): $_" -ErrorAction Continue`,
         '        }',
         '    }',
         '}',
@@ -220,6 +242,12 @@ export class PwshStartupProvider implements ShellStartupScriptProvider {
                     results.set(shell, this._isPs5Installed);
                 } else {
                     const isInstalled = await isPowerShellInstalled(shell);
+                    if (isInstalled) {
+                        // Log PowerShell version for debugging activation issues
+                        const version = await getPowerShellVersion(shell);
+                        const versionText = version ? ` (version ${version})` : ' (version unknown)';
+                        traceInfo(`SHELL: ${shell} is installed${versionText}`);
+                    }
                     if (shell === 'pwsh') {
                         this._isPwshInstalled = isInstalled;
                     } else {
