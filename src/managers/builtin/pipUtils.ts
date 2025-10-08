@@ -183,13 +183,17 @@ export async function getProjectInstallable(
             const results: Uri[] = (
                 await Promise.all([
                     findFiles('**/*requirements*.txt', exclude, undefined, token),
+                    findFiles('*requirements*.txt', exclude, undefined, token),
                     findFiles('**/requirements/*.txt', exclude, undefined, token),
                     findFiles('**/pyproject.toml', exclude, undefined, token),
                 ])
             ).flat();
 
+            // Deduplicate by fsPath
+            const uniqueResults = Array.from(new Map(results.map((uri) => [uri.fsPath, uri])).values());
+
             const fsPaths = projects.map((p) => p.uri.fsPath);
-            const filtered = results
+            const filtered = uniqueResults
                 .filter((uri) => {
                     const p = api.getPythonProject(uri)?.uri.fsPath;
                     return p && fsPaths.includes(p);

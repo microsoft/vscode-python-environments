@@ -537,17 +537,16 @@ envConfig.inspect
 -   ❌ Tests that don't clean up mocks properly
 -   ❌ Overly complex test setup that's hard to understand
 
-## 🧠 Agent Learning Patterns
-
-### Key Implementation Insights
+## 🧠 Agent Learnings
 
 -   Always use dynamic path construction with Node.js `path` module when testing functions that resolve paths against workspace folders to ensure cross-platform compatibility (1)
 -   Use `runTests` tool for programmatic test execution rather than terminal commands for better integration and result parsing (1)
--   Mock wrapper functions (e.g., `workspaceApis.getConfiguration()`) instead of VS Code APIs directly to avoid stubbing issues (1)
+-   Mock wrapper functions (e.g., `workspaceApis.getConfiguration()`) instead of VS Code APIs directly to avoid stubbing issues (2)
 -   Start compilation with `npm run watch-tests` before test execution to ensure TypeScript files are built (1)
--   Use `sinon.match()` patterns for resilient assertions that don't break on minor output changes (1)
+-   Use `sinon.match()` patterns for resilient assertions that don't break on minor output changes (2)
 -   Fix test issues iteratively - run tests, analyze failures, apply fixes, repeat until passing (1)
 -   When fixing mock environment creation, use `null` to truly omit properties rather than `undefined` (1)
 -   Always recompile TypeScript after making import/export changes before running tests, as stubs won't work if they're applied to old compiled JavaScript that doesn't have the updated imports (2)
 -   Create proxy abstraction functions for Node.js APIs like `cp.spawn` to enable clean testing - use function overloads to preserve Node.js's intelligent typing while making the functions mockable (1)
 -   When unit tests fail with VS Code API errors like `TypeError: X is not a constructor` or `Cannot read properties of undefined (reading 'Y')`, check if VS Code APIs are properly mocked in `/src/test/unittests.ts` - add missing Task-related APIs (`Task`, `TaskScope`, `ShellExecution`, `TaskRevealKind`, `TaskPanelKind`) and namespace mocks (`tasks`) following the existing pattern of `mockedVSCode.X = vscodeMocks.vscMockExtHostedTypes.X` (1)
+-   Create minimal mock objects with only required methods and use TypeScript type assertions (e.g., mockApi as PythonEnvironmentApi) to satisfy interface requirements instead of implementing all interface methods when only specific methods are needed for the test (1)
