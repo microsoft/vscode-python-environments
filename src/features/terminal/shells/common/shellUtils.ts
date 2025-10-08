@@ -1,9 +1,11 @@
 import { PythonCommandRunConfiguration, PythonEnvironment } from '../../../../api';
 import { traceInfo } from '../../../../common/logging';
+import { sleep } from '../../../../common/utils/asyncUtils';
 import { isWindows } from '../../../../common/utils/platformUtils';
 import { activeTerminalShellIntegration } from '../../../../common/window.apis';
 import { ShellConstants } from '../../../common/shellConstants';
 import { quoteArgs } from '../../../execution/execUtils';
+import { SHELL_INTEGRATION_POLL_INTERVAL, SHELL_INTEGRATION_TIMEOUT } from '../../utils';
 
 function getCommandAsString(command: PythonCommandRunConfiguration[], shell: string, delimiter: string): string {
     const parts = [];
@@ -98,12 +100,19 @@ export function extractProfilePath(content: string): string | undefined {
     return undefined;
 }
 
-export function shellIntegrationForActiveTerminal(name: string, profile?: string): boolean {
-    const hasShellIntegration = activeTerminalShellIntegration();
+export async function shellIntegrationForActiveTerminal(name: string, profile?: string): Promise<boolean> {
+    let hasShellIntegration = activeTerminalShellIntegration();
+    let timeout = 0;
+
+    while (!hasShellIntegration && timeout < SHELL_INTEGRATION_TIMEOUT) {
+        await sleep(SHELL_INTEGRATION_POLL_INTERVAL);
+        timeout += SHELL_INTEGRATION_POLL_INTERVAL;
+        hasShellIntegration = activeTerminalShellIntegration();
+    }
 
     if (hasShellIntegration) {
         traceInfo(
-            `SHELL: Shell integration is available on your active terminal, with name ${name} and profile ${profile}. Python activate scripts will be evaluated at shell integration level, except in WSL.`
+            `SHELL: Shell integration is available on your active terminal, with name ${name} and profile ${profile}. Python activate scripts will be evaluated at shell integration level, except in WSL.`,
         );
         return true;
     }
@@ -112,8 +121,5 @@ export function shellIntegrationForActiveTerminal(name: string, profile?: string
 
 export function isWsl(): boolean {
     // WSL sets these environment variables
-     return !!(process.env.WSL_DISTRO_NAME || 
-             process.env.WSL_INTEROP || 
-             process.env.WSLENV);
+    return !!(process.env.WSL_DISTRO_NAME || process.env.WSL_INTEROP || process.env.WSLENV);
 }
-

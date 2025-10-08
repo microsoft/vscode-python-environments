@@ -4,8 +4,8 @@ import { PythonEnvironment, PythonProject, PythonProjectEnvironmentApi, PythonPr
 import { sleep } from '../../common/utils/asyncUtils';
 import { getConfiguration, getWorkspaceFolders } from '../../common/workspace.apis';
 
-const SHELL_INTEGRATION_TIMEOUT = 500; // 0.5 seconds
-const SHELL_INTEGRATION_POLL_INTERVAL = 20; // 0.02 seconds
+export const SHELL_INTEGRATION_TIMEOUT = 500; // 0.5 seconds
+export const SHELL_INTEGRATION_POLL_INTERVAL = 20; // 0.02 seconds
 
 export async function waitForShellIntegration(terminal: Terminal): Promise<boolean> {
     let timeout = 0;
