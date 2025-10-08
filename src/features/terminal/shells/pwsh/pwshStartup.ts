@@ -65,7 +65,7 @@ async function isPowerShellInstalled(shell: string): Promise<boolean> {
  */
 async function getPowerShellVersion(shell: 'powershell' | 'pwsh'): Promise<string | undefined> {
     try {
-        const command = `${shell} -Command "\$PSVersionTable.PSVersion.Major"`;
+        const command = `${shell} -c '\$PSVersionTable.PSVersion.Major'`;
         const versionOutput = await runCommand(command);
         if (versionOutput && !isNaN(Number(versionOutput))) {
             return versionOutput;
