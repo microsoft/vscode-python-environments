@@ -103,10 +103,17 @@ export function shellIntegrationForActiveTerminal(name: string, profile?: string
 
     if (hasShellIntegration) {
         traceInfo(
-            `SHELL: Shell integration is available on your active terminal.  Python activate scripts will be evaluated at shell integration level. 
-                Skipping modification of ${name} profile at: ${profile}`,
+            `SHELL: Shell integration is available on your active terminal, with name ${name} and profile ${profile}. Python activate scripts will be evaluated at shell integration level, except in WSL.`
         );
         return true;
     }
     return false;
 }
+
+export function isWsl(): boolean {
+    // WSL sets these environment variables
+     return !!(process.env.WSL_DISTRO_NAME || 
+             process.env.WSL_INTEROP || 
+             process.env.WSLENV);
+}
+

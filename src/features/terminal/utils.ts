@@ -103,32 +103,44 @@ export type AutoActivationType = 'off' | 'command' | 'shellStartup';
  * - 'off': Auto-activation is disabled
  *
  * Priority order:
- * 1. python-envs.terminal.autoActivationType setting
- * 2. python.terminal.activateEnvironment setting (if false updates python-envs.terminal.autoActivationType)
+ * 1. python-envs.terminal.autoActivationType
+ *    a. globalRemoteValue
+ *    b. globalLocalValue
+ *    c. globalValue
+ * 2. python.terminal.activateEnvironment setting (if false, returns 'off' & sets autoActivationType to 'off')
  * 3. Default to 'command' if no setting is found
  *
  * @returns {AutoActivationType} The determined auto-activation type
  */
 export function getAutoActivationType(): AutoActivationType {
     const pyEnvsConfig = getConfiguration('python-envs');
+    const pyEnvsActivationType = pyEnvsConfig.inspect<AutoActivationType>('terminal.autoActivationType');
 
-    const pyEnvsActivationType = pyEnvsConfig.get<AutoActivationType | undefined>(
-        'terminal.autoActivationType',
-        undefined,
-    );
-    if (pyEnvsActivationType !== undefined) {
-        return pyEnvsActivationType;
+    if (pyEnvsActivationType) {
+        // Priority order: globalRemoteValue > globalLocalValue > globalValue
+        const activationType = pyEnvsActivationType as Record<string, unknown>;
+
+        if ('globalRemoteValue' in pyEnvsActivationType && activationType.globalRemoteValue !== undefined) {
+            return activationType.globalRemoteValue as AutoActivationType;
+        }
+        if ('globalLocalValue' in pyEnvsActivationType && activationType.globalLocalValue !== undefined) {
+            return activationType.globalLocalValue as AutoActivationType;
+        }
+        if (pyEnvsActivationType.globalValue !== undefined) {
+            return pyEnvsActivationType.globalValue;
+        }
     }
 
+    // If none of the python-envs settings are defined, check the legacy python setting
     const pythonConfig = getConfiguration('python');
     const pythonActivateSetting = pythonConfig.get<boolean | undefined>('terminal.activateEnvironment', undefined);
-    if (pythonActivateSetting !== undefined) {
-        if (pythonActivateSetting === false) {
-            pyEnvsConfig.set('terminal.autoActivationType', ACT_TYPE_OFF);
-        }
-        return pythonActivateSetting ? ACT_TYPE_COMMAND : ACT_TYPE_OFF;
+    if (pythonActivateSetting === false) {
+        // Set autoActivationType to 'off' if python.terminal.activateEnvironment is false
+        pyEnvsConfig.update('terminal.autoActivationType', ACT_TYPE_OFF);
+        return ACT_TYPE_OFF;
     }
 
+    // Default to 'command' if no settings are found or if pythonActivateSetting is true/undefined
     return ACT_TYPE_COMMAND;
 }
 
