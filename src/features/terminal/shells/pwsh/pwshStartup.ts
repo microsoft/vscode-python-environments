@@ -168,7 +168,7 @@ async function isPowerShellStartupSetup(shell: string, profile: string): Promise
 }
 
 async function setupPowerShellStartup(shell: string, profile: string): Promise<boolean> {
-    if (shellIntegrationForActiveTerminal(shell, profile) && !isWsl()) {
+    if ((await shellIntegrationForActiveTerminal(shell, profile)) && !isWsl()) {
         removePowerShellStartup(shell, profile, POWERSHELL_OLD_ENV_KEY);
         removePowerShellStartup(shell, profile, POWERSHELL_ENV_KEY);
         return true;
