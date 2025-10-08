@@ -13,6 +13,7 @@ import {
 import { ENVS_EXTENSION_ID } from '../../common/constants';
 import { traceError, traceInfo } from '../../common/logging';
 import { getWorkspacePersistentState } from '../../common/persistentState';
+import { getSettingWorkspaceScope } from '../../features/settings/settingHelpers';
 import {
     isNativeEnvInfo,
     NativeEnvInfo,
@@ -44,6 +45,11 @@ async function setPipenv(pipenv: string): Promise<void> {
 
 export async function clearPipenvCache(): Promise<void> {
     pipenvPath = undefined;
+}
+
+function getPipenvPathFromSettings(): Uri[] {
+    const pipenvPath = getSettingWorkspaceScope<string>('python', 'pipenvPath');
+    return pipenvPath ? [Uri.file(pipenvPath)] : [];
 }
 
 export async function getPipenv(native?: NativePythonFinder): Promise<string | undefined> {
@@ -140,7 +146,9 @@ export async function refreshPipenv(
     manager: EnvironmentManager,
 ): Promise<PythonEnvironment[]> {
     traceInfo('Refreshing pipenv environments');
-    const data = await nativeFinder.refresh(hardRefresh);
+
+    const searchUris = getPipenvPathFromSettings();
+    const data = await nativeFinder.refresh(hardRefresh, searchUris.length > 0 ? searchUris : undefined);
 
     let pipenv = await getPipenv();
 

@@ -10,7 +10,7 @@ import {
 import { PythonProject } from '../../api';
 import { DEFAULT_ENV_MANAGER_ID, DEFAULT_PACKAGE_MANAGER_ID } from '../../common/constants';
 import { traceError, traceInfo, traceWarn } from '../../common/logging';
-import { getWorkspaceFile, getWorkspaceFolders } from '../../common/workspace.apis';
+import { getConfiguration, getWorkspaceFile, getWorkspaceFolders } from '../../common/workspace.apis';
 import { PythonProjectManager, PythonProjectSettings } from '../../internal.api';
 
 function getSettings(
@@ -392,4 +392,78 @@ export async function removePythonProjectSetting(edits: EditProjectSettings[]): 
         }
     });
     await Promise.all(promises);
+}
+
+/**
+ * Gets user-configured setting for window-scoped settings.
+ * Priority order: globalRemoteValue > globalLocalValue > globalValue
+ * @param section - The configuration section (e.g., 'python-envs')
+ * @param key - The configuration key (e.g., 'terminal.autoActivationType')
+ * @returns The user-configured value or undefined if not set by user
+ */
+export function getSettingWindowScope<T>(section: string, key: string): T | undefined {
+    const config = getConfiguration(section);
+    const inspect = config.inspect<T>(key);
+    if (!inspect) {
+        return undefined;
+    }
+
+    const inspectRecord = inspect as Record<string, unknown>;
+    if ('globalRemoteValue' in inspect && inspectRecord.globalRemoteValue !== undefined) {
+        return inspectRecord.globalRemoteValue as T;
+    }
+    if ('globalLocalValue' in inspect && inspectRecord.globalLocalValue !== undefined) {
+        return inspectRecord.globalLocalValue as T;
+    }
+    if (inspect.globalValue !== undefined) {
+        return inspect.globalValue;
+    }
+    return undefined;
+}
+
+/**
+ * Gets user-configured setting for workspace-scoped settings.
+ * Priority order: workspaceFolderValue > workspaceValue > globalValue
+ * @param section - The configuration section (e.g., 'python')
+ * @param key - The configuration key (e.g., 'pipenvPath')
+ * @param scope - Optional URI scope for workspace folder-specific settings
+ * @returns The user-configured value or undefined if not set by user
+ */
+export function getSettingWorkspaceScope<T>(section: string, key: string, scope?: Uri): T | undefined {
+    const config = getConfiguration(section, scope);
+    const inspect = config.inspect<T>(key);
+    if (!inspect) {
+        return undefined;
+    }
+
+    if (inspect.workspaceFolderValue !== undefined) {
+        return inspect.workspaceFolderValue;
+    }
+    if (inspect.workspaceValue !== undefined) {
+        return inspect.workspaceValue;
+    }
+    if (inspect.globalValue !== undefined) {
+        return inspect.globalValue;
+    }
+    return undefined;
+}
+
+/**
+ * Gets user-configured setting for user-scoped settings.
+ * Only checks globalValue (ignores defaultValue).
+ * @param section - The configuration section (e.g., 'python')
+ * @param key - The configuration key (e.g., 'pipenvPath')
+ * @returns The user-configured value or undefined if not set by user
+ */
+export function getSettingUserScope<T>(section: string, key: string): T | undefined {
+    const config = getConfiguration(section);
+    const inspect = config.inspect<T>(key);
+    if (!inspect) {
+        return undefined;
+    }
+
+    if (inspect.globalValue !== undefined) {
+        return inspect.globalValue;
+    }
+    return undefined;
 }
