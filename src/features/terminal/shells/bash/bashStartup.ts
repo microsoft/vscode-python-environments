@@ -68,7 +68,7 @@ async function isStartupSetup(profile: string, key: string): Promise<ShellSetupS
     return ShellSetupState.NotSetup;
 }
 async function setupStartup(profile: string, key: string, name: string): Promise<boolean> {
-    if (shellIntegrationForActiveTerminal(name, profile) && !isWsl()) {
+    if ((await shellIntegrationForActiveTerminal(name, profile)) && !isWsl()) {
         removeStartup(profile, key);
         return true;
     }
