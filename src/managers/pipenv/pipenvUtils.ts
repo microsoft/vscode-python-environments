@@ -48,7 +48,6 @@ export async function clearPipenvCache(): Promise<void> {
 }
 
 function getPipenvPathFromSettings(): Uri[] {
-    // python.pipenvPath is a workspace-scoped setting
     const pipenvPath = getSettingWorkspaceScope<string>('python', 'pipenvPath');
     return pipenvPath ? [Uri.file(pipenvPath)] : [];
 }
