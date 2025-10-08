@@ -1,11 +1,13 @@
-import { ExtensionContext, extensions, Uri, workspace } from 'vscode';
+import { ExtensionContext, extensions, QuickInputButtons, Uri, window, workspace } from 'vscode';
 import { PythonEnvironment, PythonEnvironmentApi } from './api';
 import { traceError, traceInfo, traceWarn } from './common/logging';
 import { normalizePath } from './common/utils/pathUtils';
+import { isWindows } from './common/utils/platformUtils';
+import { createTerminal, showInputBoxWithButtons } from './common/window.apis';
 import { getConfiguration } from './common/workspace.apis';
 import { getAutoActivationType } from './features/terminal/utils';
 import { EnvironmentManagers, PythonProjectManager } from './internal.api';
-import { NativeEnvInfo, NativePythonFinder } from './managers/common/nativePythonFinder';
+import { getNativePythonToolsPath, NativeEnvInfo, NativePythonFinder } from './managers/common/nativePythonFinder';
 
 /**
  * Collects relevant Python environment information for issue reporting
@@ -135,6 +137,90 @@ export function getUserConfiguredSetting<T>(section: string, key: string): T | u
         return inspect.globalValue;
     }
     return undefined;
+}
+
+/**
+ * Runs the Python Environment Tool (PET) in a terminal window, allowing users to
+ * execute various PET commands like finding all Python environments or resolving
+ * the details of a specific environment.
+ *
+ *
+ * @returns A Promise that resolves when the PET command has been executed or cancelled
+ */
+export async function runPetInTerminalImpl(): Promise<void> {
+    const petPath = await getNativePythonToolsPath();
+
+    // Show quick pick menu for PET operation selection
+    const selectedOption = await window.showQuickPick(
+        [
+            {
+                label: 'Find All Environments',
+                description: 'Finds all environments and reports them to the standard output',
+                detail: 'Runs: pet find --verbose',
+            },
+            {
+                label: 'Resolve Environment...',
+                description: 'Resolves & reports the details of the environment to the standard output',
+                detail: 'Runs: pet resolve <path>',
+            },
+        ],
+        {
+            placeHolder: 'Select a Python Environment Tool (PET) operation',
+            ignoreFocusOut: true,
+        },
+    );
+
+    if (!selectedOption) {
+        return; // User cancelled
+    }
+
+    if (selectedOption.label === 'Find All Environments') {
+        // Create and show terminal immediately for 'Find All Environments' option
+        const terminal = createTerminal({
+            name: 'Python Environment Tool (PET)',
+        });
+        terminal.show();
+
+        // Run pet find --verbose
+        terminal.sendText(`"${petPath}" find --verbose`, true);
+        traceInfo(`Running PET find command: ${petPath} find --verbose`);
+    } else if (selectedOption.label === 'Resolve Environment...') {
+        try {
+            // Show input box for path with back button
+            const placeholder = isWindows() ? 'C:\\path\\to\\python\\executable' : '/path/to/python/executable';
+            const inputPath = await showInputBoxWithButtons({
+                prompt: 'Enter the path to the Python executable to resolve',
+                placeHolder: placeholder,
+                ignoreFocusOut: true,
+                showBackButton: true,
+                validateInput: (value) => {
+                    if (!value || value.trim().length === 0) {
+                        return 'Please enter a valid path';
+                    }
+                    return null;
+                },
+            });
+
+            if (inputPath) {
+                // Only create and show terminal after path has been entered
+                const terminal = createTerminal({
+                    name: 'Python Environment Tool (PET)',
+                });
+                terminal.show();
+
+                // Run pet resolve with the provided path
+                terminal.sendText(`"${petPath}" resolve "${inputPath.trim()}"`, true);
+                traceInfo(`Running PET resolve command: ${petPath} resolve "${inputPath.trim()}"`);
+            }
+        } catch (ex) {
+            if (ex === QuickInputButtons.Back) {
+                // If back button was clicked, restart the flow
+                await runPetInTerminalImpl();
+                return;
+            }
+            throw ex; // Re-throw other errors
+        }
+    }
 }
 
 /**

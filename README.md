@@ -1,5 +1,6 @@
 # Python Environments (preview)
-> **Note:** The Python Environments icon may no longer appear in the Activity Bar due to the ongoing rollout of the Python Environments extension. To restore the extension, add `"python.useEnvironmentsExtension": true` to your User settings. This setting is temporarily necessary until the rollout is complete! 
+
+> **Note:** The Python Environments icon may no longer appear in the Activity Bar due to the ongoing rollout of the Python Environments extension. To restore the extension, add `"python.useEnvironmentsExtension": true` to your User settings. This setting is temporarily necessary until the rollout is complete!
 
 ## Overview
 
@@ -38,30 +39,31 @@ For more control, you can create a custom environment where you can specify Pyth
 
 The following environment managers are supported out of the box:
 
-| Id                      | Name                    | Description                                                                                                                                                                                                   |
-| ----------------------- | ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| ms-python.python:venv   | `venv`                  | Built-in environment manager provided by the Python standard library. Supports creating environments (interactive and quick create) and finding existing environments. |
-| ms-python.python:system | System Installed Python | Global Python installs on your system, typically installed with your OS, from [python.org](https://www.python.org/), or any other OS package manager. |
+| Id                      | Name                    | Description                                                                                                                                                                                                                                                                                                    |
+| ----------------------- | ----------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| ms-python.python:venv   | `venv`                  | Built-in environment manager provided by the Python standard library. Supports creating environments (interactive and quick create) and finding existing environments.                                                                                                                                         |
+| ms-python.python:system | System Installed Python | Global Python installs on your system, typically installed with your OS, from [python.org](https://www.python.org/), or any other OS package manager.                                                                                                                                                          |
 | ms-python.python:conda  | `conda`                 | The [conda](https://conda.org) environment manager, as provided by conda distributions like [Anaconda Distribution](https://docs.anaconda.com/anaconda/) or [conda-forge](https://conda-forge.org/download/). Supports creating environments (interactive and quick create) and finding existing environments. |
-| ms-python.python:pyenv  | `pyenv`                 | The [pyenv](https://github.com/pyenv/pyenv) environment manager, used to manage multiple Python versions. Supports finding existing environments. |
-| ms-python.python:poetry | `poetry`                | The [poetry](https://python-poetry.org/) environment manager, used for dependency management and packaging in Python projects. Supports finding existing environments. |
-| ms-python.python:pipenv | `pipenv`                | The [pipenv](https://pipenv.pypa.io/en/latest/) environment manager, used for managing Python dependencies and environments. Only supports finding existing environments. |
+| ms-python.python:pyenv  | `pyenv`                 | The [pyenv](https://github.com/pyenv/pyenv) environment manager, used to manage multiple Python versions. Supports finding existing environments.                                                                                                                                                              |
+| ms-python.python:poetry | `poetry`                | The [poetry](https://python-poetry.org/) environment manager, used for dependency management and packaging in Python projects. Supports finding existing environments.                                                                                                                                         |
+| ms-python.python:pipenv | `pipenv`                | The [pipenv](https://pipenv.pypa.io/en/latest/) environment manager, used for managing Python dependencies and environments. Only supports finding existing environments.                                                                                                                                      |
 
 #### Supported Actions by Environment Manager
 
 | Environment Manager | Find Environments | Create | Quick Create |
-|---------------------|-------------------|--------|--------------|
-| venv                |        ✅         |   ✅   |      ✅      |
-| conda               |        ✅         |   ✅   |      ✅      |
-| pyenv               |        ✅         |        |              |
-| poetry              |        ✅         |        |              |
-| system              |        ✅         |        |              |
-| pipenv              |        ✅         |        |              |
+| ------------------- | ----------------- | ------ | ------------ |
+| venv                | ✅                | ✅     | ✅           |
+| conda               | ✅                | ✅     | ✅           |
+| pyenv               | ✅                |        |              |
+| poetry              | ✅                |        |              |
+| system              | ✅                |        |              |
+| pipenv              | ✅                |        |              |
 
 **Legend:**
-- **Create**: Ability to create new environments interactively.
-- **Quick Create**: Ability to create environments with minimal user input.
-- **Find Environments**: Ability to discover and list existing environments.
+
+-   **Create**: Ability to create new environments interactively.
+-   **Quick Create**: Ability to create environments with minimal user input.
+-   **Find Environments**: Ability to discover and list existing environments.
 
 Environment managers are responsible for specifying which package manager will be used by default to install and manage Python packages within the environment (`venv` uses `pip` by default). This ensures that packages are managed consistently according to the preferred tools and settings of the chosen environment manager.
 
@@ -79,13 +81,13 @@ The extension uses `pip` as the default package manager, but you can use the pac
 #### Default Package Manager by Environment Manager
 
 | Environment Manager | Default Package Manager |
-|---------------------|------------------------|
-| venv                | pip                    |
-| conda               | conda                  |
-| pyenv               | pip                    |
-| poetry              | poetry                 |
-| system              | pip                    |
-| pipenv              | pip                    |
+| ------------------- | ----------------------- |
+| venv                | pip                     |
+| conda               | conda                   |
+| pyenv               | pip                     |
+| poetry              | poetry                  |
+| system              | pip                     |
+| pipenv              | pip                     |
 
 ### Project Management
 
@@ -99,26 +101,27 @@ There are a few ways to add a Python Project from the Python Environments panel:
 | ------------ | ---------------------------------------------------------------------- |
 | Add Existing | Allows you to add an existing folder from the file explorer.           |
 | Auto find    | Searches for folders that contain `pyproject.toml` or `setup.py` files |
-| Create New   | Creates a new project from a template. | 
+| Create New   | Creates a new project from a template.                                 |
 
-#### Create New Project from Template 
+#### Create New Project from Template
+
 The **Python Envs: Create New Project from Template** command simplifies the process of starting a new Python project by scaffolding it for you. Whether in a new workspace or an existing one, this command configures the environment and boilerplate file structure, so you don’t have to worry about the initial setup, and only the code you want to write. There are currently two project types supported:
 
-- Package: A structured Python package with files like `__init__.py` and setup configurations.
-- Script: A simple project for standalone Python scripts, ideal for quick tasks or just to get you started.
+-   Package: A structured Python package with files like `__init__.py` and setup configurations.
+-   Script: A simple project for standalone Python scripts, ideal for quick tasks or just to get you started.
 
 ## Command Reference
 
 All commands can be accessed via the Command Palette (`ctrl/cmd + Shift + P`):
 
-| Name                                               | Description                                                                                                                            |
-| -------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
+| Name                                       | Description                                                                                                                            |
+| ------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------- |
 | Create Environment                         | Create a virtual environment using your preferred environment manager preconfigured with "Quick Create" or configured to your choices. |
 | Manage Packages                            | Install and uninstall packages in a given Python environment.                                                                          |
 | Activate Environment in Current Terminal   | Activates the currently opened terminal with a particular environment.                                                                 |
 | Deactivate Environment in Current Terminal | Deactivates environment in currently opened terminal.                                                                                  |
 | Run as Task                                | Runs Python module as a task.                                                                                                          |
-| Create New Project from Template | Creates scaffolded project with virtual environments based on a template. | 
+| Create New Project from Template           | Creates scaffolded project with virtual environments based on a template.                                                              |
 
 ## Settings Reference
 
@@ -185,7 +188,7 @@ usage: `await vscode.commands.executeCommand('python-envs.createAny', options);`
 The Python Environments extension supports shell startup activation for environments. This feature allows you to automatically activate a Python environment when you open a terminal in VS Code. The activation is done by modifying the shell's startup script, which is supported for the following shells:
 
 -   **Bash**: `~/.bashrc`
--   **Zsh**: `~/.zshrc`
+-   **Zsh**: `~/.zshrc` (or `$ZDOTDIR/.zshrc` if `ZDOTDIR` is set)
 -   **Fish**: `~/.config/fish/config.fish`
 -   **PowerShell**:
     -   (Mac/Linux):`~/.config/powershell/profile.ps1`
@@ -255,7 +258,7 @@ fi
 
 ### zsh
 
-1. Adds or creates `~/.zshrc`
+1. Adds or creates `~/.zshrc` (or `$ZDOTDIR/.zshrc` if `ZDOTDIR` is set)
 2. Updates it with following code:
 
 ```zsh

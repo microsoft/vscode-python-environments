@@ -7,13 +7,11 @@ import { ENVS_EXTENSION_ID } from '../../common/constants';
 import { Common, VenvManagerStrings } from '../../common/localize';
 import { traceInfo } from '../../common/logging';
 import { getWorkspacePersistentState } from '../../common/persistentState';
-import { pickEnvironmentFrom } from '../../common/pickers/environments';
 import { EventNames } from '../../common/telemetry/constants';
 import { sendTelemetryEvent } from '../../common/telemetry/sender';
 import { normalizePath } from '../../common/utils/pathUtils';
 import {
     showErrorMessage,
-    showInputBox,
     showOpenDialog,
     showQuickPick,
     showWarningMessage,
@@ -28,8 +26,9 @@ import {
 } from '../common/nativePythonFinder';
 import { getShellActivationCommands, shortVersion, sortEnvironments } from '../common/utils';
 import { isUvInstalled, runPython, runUV } from './helpers';
-import { getProjectInstallable, getWorkspacePackagesToInstall, PipPackages } from './pipUtils';
+import { getProjectInstallable, PipPackages } from './pipUtils';
 import { resolveSystemPythonEnvironmentPath } from './utils';
+import { createStepBasedVenvFlow } from './venvStepBasedFlow';
 
 export const VENV_WORKSPACE_KEY = `${ENVS_EXTENSION_ID}:venv:WORKSPACE_SELECTED`;
 export const VENV_GLOBAL_KEY = `${ENVS_EXTENSION_ID}:venv:GLOBAL_SELECTED`;
@@ -266,34 +265,7 @@ export async function getGlobalVenvLocation(): Promise<Uri | undefined> {
     return undefined;
 }
 
-async function createWithCustomization(version: string): Promise<boolean | undefined> {
-    const selection: QuickPickItem | undefined = await showQuickPick(
-        [
-            {
-                label: VenvManagerStrings.quickCreate,
-                description: VenvManagerStrings.quickCreateDescription,
-                detail: l10n.t('Uses Python version {0} and installs workspace dependencies.', version),
-            },
-            {
-                label: VenvManagerStrings.customize,
-                description: VenvManagerStrings.customizeDescription,
-            },
-        ],
-        {
-            placeHolder: VenvManagerStrings.selectQuickOrCustomize,
-            ignoreFocusOut: true,
-        },
-    );
-
-    if (selection === undefined) {
-        return undefined;
-    } else if (selection.label === VenvManagerStrings.quickCreate) {
-        return false;
-    }
-    return true;
-}
-
-async function createWithProgress(
+export async function createWithProgress(
     nativeFinder: NativePythonFinder,
     api: PythonEnvironmentApi,
     log: LogOutputChannel,
@@ -433,66 +405,7 @@ export async function createPythonVenv(
     venvRoot: Uri,
     options: { showQuickAndCustomOptions: boolean; additionalPackages?: string[] },
 ): Promise<CreateEnvironmentResult | undefined> {
-    const sortedEnvs = ensureGlobalEnv(basePythons, log);
-
-    let customize: boolean | undefined = true;
-    if (options.showQuickAndCustomOptions) {
-        customize = await createWithCustomization(sortedEnvs[0].version);
-    }
-
-    if (customize === undefined) {
-        return;
-    } else if (customize === false) {
-        return quickCreateVenv(nativeFinder, api, log, manager, sortedEnvs[0], venvRoot, options.additionalPackages);
-    } else {
-        sendTelemetryEvent(EventNames.VENV_CREATION, undefined, { creationType: 'custom' });
-    }
-    const project = api.getPythonProject(venvRoot);
-
-    const basePython = await pickEnvironmentFrom(sortedEnvs);
-    if (!basePython || !basePython.execInfo) {
-        log.error('No base python selected, cannot create virtual environment.');
-        return {
-            envCreationErr: 'No base python selected, cannot create virtual environment.',
-        };
-    }
-
-    const name = await showInputBox({
-        prompt: VenvManagerStrings.venvName,
-        value: '.venv',
-        ignoreFocusOut: true,
-        validateInput: async (value) => {
-            if (!value) {
-                return VenvManagerStrings.venvNameErrorEmpty;
-            }
-            if (await fsapi.pathExists(path.join(venvRoot.fsPath, value))) {
-                return VenvManagerStrings.venvNameErrorExists;
-            }
-        },
-    });
-    if (!name) {
-        log.error('No name entered, cannot create virtual environment.');
-        return {
-            envCreationErr: 'No name entered, cannot create virtual environment.',
-        };
-    }
-
-    const envPath = path.join(venvRoot.fsPath, name);
-
-    const packages = await getWorkspacePackagesToInstall(
-        api,
-        { showSkipOption: true, install: [] },
-        project ? [project] : undefined,
-        undefined,
-        log,
-    );
-    const allPackages = [];
-    allPackages.push(...(packages?.install ?? []), ...(options.additionalPackages ?? []));
-
-    return await createWithProgress(nativeFinder, api, log, manager, basePython, venvRoot, envPath, {
-        install: allPackages,
-        uninstall: [],
-    });
+    return createStepBasedVenvFlow(nativeFinder, api, log, manager, basePythons, venvRoot, options);
 }
 
 export async function removeVenv(environment: PythonEnvironment, log: LogOutputChannel): Promise<boolean> {
