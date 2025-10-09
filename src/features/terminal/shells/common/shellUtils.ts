@@ -135,17 +135,22 @@ export function isWsl(): boolean {
 
 export async function getShellIntegrationEnabledCache(): Promise<boolean> {
     const persistentState = await getGlobalPersistentState();
-    // Check VS Code setting for shell integration using inspect (all scopes)
     const shellIntegrationInspect =
         getConfiguration('terminal.integrated').inspect<boolean>('shellIntegration.enabled');
 
     let shellIntegrationEnabled = true;
     if (shellIntegrationInspect) {
-        // Priority: workspaceFolder > workspace > global > default
+        // Priority: workspaceFolder > workspace > globalRemoteValue > globalLocalValue > global > default
+        const inspectValue = shellIntegrationInspect as Record<string, unknown>;
+
         if (shellIntegrationInspect.workspaceFolderValue !== undefined) {
             shellIntegrationEnabled = shellIntegrationInspect.workspaceFolderValue;
         } else if (shellIntegrationInspect.workspaceValue !== undefined) {
             shellIntegrationEnabled = shellIntegrationInspect.workspaceValue;
+        } else if ('globalRemoteValue' in shellIntegrationInspect && inspectValue.globalRemoteValue !== undefined) {
+            shellIntegrationEnabled = inspectValue.globalRemoteValue as boolean;
+        } else if ('globalLocalValue' in shellIntegrationInspect && inspectValue.globalLocalValue !== undefined) {
+            shellIntegrationEnabled = inspectValue.globalLocalValue as boolean;
         } else if (shellIntegrationInspect.globalValue !== undefined) {
             shellIntegrationEnabled = shellIntegrationInspect.globalValue;
         } else if (shellIntegrationInspect.defaultValue !== undefined) {
