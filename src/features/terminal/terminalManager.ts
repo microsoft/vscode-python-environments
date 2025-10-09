@@ -16,7 +16,7 @@ import { getConfiguration, onDidChangeConfiguration } from '../../common/workspa
 import { isActivatableEnvironment } from '../common/activation';
 import { identifyTerminalShell } from '../common/shellDetector';
 import { getPythonApi } from '../pythonApi';
-import { isWsl, shellIntegrationForActiveTerminal } from './shells/common/shellUtils';
+import { getShellIntegrationEnabledCache, isWsl, shellIntegrationForActiveTerminal } from './shells/common/shellUtils';
 import { ShellEnvsProvider, ShellSetupState, ShellStartupScriptProvider } from './shells/startupProvider';
 import { handleSettingUpShellProfile } from './shellStartupSetupHandlers';
 import {
@@ -137,6 +137,20 @@ export class TerminalManagerImpl implements TerminalManager {
                         this.shellSetup.clear();
                     }
                 }
+                if (e.affectsConfiguration('terminal.integrated.shellIntegration.enabled')) {
+                    traceInfo('Shell integration setting changed, invalidating cache');
+                    const updatedShellIntegrationSetting = await getShellIntegrationEnabledCache();
+                    if (!updatedShellIntegrationSetting) {
+                        const shells = new Set(
+                            terminals()
+                                .map((t) => identifyTerminalShell(t))
+                                .filter((t) => t !== 'unknown'),
+                        );
+                        if (shells.size > 0) {
+                            await this.handleSetupCheck(shells);
+                        }
+                    }
+                }
             }),
             onDidChangeWindowState((e) => {
                 this.hasFocus = e.focused;
@@ -152,27 +166,19 @@ export class TerminalManagerImpl implements TerminalManager {
             await Promise.all(
                 providers.map(async (p) => {
                     const state = await p.isSetup();
-                    const currentSetup = state === ShellSetupState.Setup;
-                    // Check if we already processed this shell and the state hasn't changed
-                    if (this.shellSetup.has(p.shellType)) {
-                        const cachedSetup = this.shellSetup.get(p.shellType);
-                        if (currentSetup === cachedSetup) {
-                            traceVerbose(`Shell profile for ${p.shellType} already checked, state unchanged.`);
-                            return;
-                        }
-                        traceVerbose(
-                            `Shell profile for ${p.shellType} state changed from ${cachedSetup} to ${currentSetup}, re-evaluating.`,
-                        );
-                    }
-                    traceVerbose(`Checking shell profile for ${p.shellType}.`);
+                    const shellIntegrationEnabled = await getShellIntegrationEnabledCache();
+                    traceVerbose(`Checking shell profile for ${p.shellType}, with state: ${state}`);
                     if (state === ShellSetupState.NotSetup) {
                         traceVerbose(
-                            `WSL detected: ${isWsl()}, Shell integration available: ${await shellIntegrationForActiveTerminal(
+                            `WSL detected: ${isWsl()}, Shell integration available from setting, or active terminal: ${shellIntegrationEnabled}, or ${await shellIntegrationForActiveTerminal(
                                 p.name,
                             )}`,
                         );
 
-                        if ((await shellIntegrationForActiveTerminal(p.name)) && !isWsl()) {
+                        if (
+                            (shellIntegrationEnabled || (await shellIntegrationForActiveTerminal(p.name))) &&
+                            !isWsl()
+                        ) {
                             // Shell integration available and NOT in WSL - skip setup
                             await p.teardownScripts();
                             this.shellSetup.set(p.shellType, true);
@@ -188,7 +194,10 @@ export class TerminalManagerImpl implements TerminalManager {
                             );
                         }
                     } else if (state === ShellSetupState.Setup) {
-                        if ((await shellIntegrationForActiveTerminal(p.name)) && !isWsl()) {
+                        if (
+                            (shellIntegrationEnabled || (await shellIntegrationForActiveTerminal(p.name))) &&
+                            !isWsl()
+                        ) {
                             await p.teardownScripts();
                             traceVerbose(
                                 `Shell integration available for ${p.shellType}, removed profile script in favor of shell integration.`,
