@@ -13,6 +13,7 @@ import { ShellConstants } from '../../../common/shellConstants';
 import { hasStartupCode, insertStartupCode, removeStartupCode } from '../common/editUtils';
 import {
     extractProfilePath,
+    getShellIntegrationEnabledCache,
     isWsl,
     PROFILE_TAG_END,
     PROFILE_TAG_START,
@@ -168,7 +169,9 @@ async function isPowerShellStartupSetup(shell: string, profile: string): Promise
 }
 
 async function setupPowerShellStartup(shell: string, profile: string): Promise<boolean> {
-    if ((await shellIntegrationForActiveTerminal(shell, profile)) && !isWsl()) {
+    const shellIntegrationEnabled = await getShellIntegrationEnabledCache();
+
+    if ((shellIntegrationEnabled || (await shellIntegrationForActiveTerminal(shell, profile))) && !isWsl()) {
         removePowerShellStartup(shell, profile, POWERSHELL_OLD_ENV_KEY);
         removePowerShellStartup(shell, profile, POWERSHELL_ENV_KEY);
         return true;
