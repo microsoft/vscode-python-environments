@@ -222,42 +222,10 @@ export class TerminalManagerImpl implements TerminalManager {
                 return;
             }
 
-            if (!(await getShellIntegrationEnabledCache())) {
-                // Shell integration is disabled - prompt for ALL shells
-                setImmediate(async () => {
-                    // Avoid blocking this setup on user interaction.
-                    await handleSettingUpShellProfile(shellsToSetup, (p, v) => this.shellSetup.set(p.shellType, v));
-                });
-                traceVerbose('Shell integration is not available, prompting for shell modifications');
-            } else {
-                // // Shell integration is enabled - only prompt for CMD shells
-                // // (CMD doesn't support shell integration well, so we still need profile modification)
-                // const cmdShellsToSetup = shellsToSetup.filter((p) => p.shellType === ShellConstants.CMD);
-                // const nonCmdShells = shellsToSetup.filter((p) => p.shellType !== ShellConstants.CMD);
-
-                // // Mark non-CMD shells as setup complete since they'll use shell integration
-                // nonCmdShells.forEach((p) => {
-                //     this.shellSetup.set(p.shellType, true);
-                //     traceVerbose(
-                //         `Shell integration is enabled for ${p.shellType}, marking as setup complete (will use shell integration instead of profile modification).`,
-                //     );
-                // });
-
-                // if (cmdShellsToSetup.length > 0) {
-                //     setImmediate(async () => {
-                //         await handleSettingUpShellProfile(cmdShellsToSetup, (p, v) =>
-                //             this.shellSetup.set(p.shellType, v),
-                //         );
-                //     });
-                // } else {
-                //     traceVerbose('Shell integration is enabled and no CMD shells need setup.');
-                // }
-                setImmediate(async () => {
-                    // Avoid blocking this setup on user interaction.
-                    await handleSettingUpShellProfile(shellsToSetup, (p, v) => this.shellSetup.set(p.shellType, v));
-                });
-                traceVerbose('Shell integration is available, prompt for shell modification if needed');
-            }
+            setImmediate(async () => {
+                // Avoid blocking this setup on user interaction.
+                await handleSettingUpShellProfile(shellsToSetup, (p, v) => this.shellSetup.set(p.shellType, v));
+            });
         }
     }
 
