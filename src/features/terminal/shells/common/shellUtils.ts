@@ -1,11 +1,15 @@
 import { PythonCommandRunConfiguration, PythonEnvironment } from '../../../../api';
 import { traceInfo } from '../../../../common/logging';
+import { getGlobalPersistentState } from '../../../../common/persistentState';
 import { sleep } from '../../../../common/utils/asyncUtils';
 import { isWindows } from '../../../../common/utils/platformUtils';
 import { activeTerminalShellIntegration } from '../../../../common/window.apis';
+import { getConfiguration } from '../../../../common/workspace.apis';
 import { ShellConstants } from '../../../common/shellConstants';
 import { quoteArgs } from '../../../execution/execUtils';
 import { SHELL_INTEGRATION_POLL_INTERVAL, SHELL_INTEGRATION_TIMEOUT } from '../../utils';
+
+export const SHELL_INTEGRATION_STATE_KEY = 'shellIntegration.enabled';
 
 function getCommandAsString(command: PythonCommandRunConfiguration[], shell: string, delimiter: string): string {
     const parts = [];
@@ -114,6 +118,11 @@ export async function shellIntegrationForActiveTerminal(name: string, profile?: 
         traceInfo(
             `SHELL: Shell integration is available on your active terminal, with name ${name} and profile ${profile}. Python activate scripts will be evaluated at shell integration level, except in WSL.`,
         );
+
+        // Update persistent storage to reflect that shell integration is available
+        const persistentState = await getGlobalPersistentState();
+        await persistentState.set(SHELL_INTEGRATION_STATE_KEY, true);
+
         return true;
     }
     return false;
@@ -122,4 +131,28 @@ export async function shellIntegrationForActiveTerminal(name: string, profile?: 
 export function isWsl(): boolean {
     // WSL sets these environment variables
     return !!(process.env.WSL_DISTRO_NAME || process.env.WSL_INTEROP || process.env.WSLENV);
+}
+
+export async function getShellIntegrationEnabledCache(): Promise<boolean> {
+    const persistentState = await getGlobalPersistentState();
+    // Check VS Code setting for shell integration using inspect (all scopes)
+    const shellIntegrationInspect =
+        getConfiguration('terminal.integrated').inspect<boolean>('shellIntegration.enabled');
+
+    let shellIntegrationEnabled = true;
+    if (shellIntegrationInspect) {
+        // Priority: workspaceFolder > workspace > global > default
+        if (shellIntegrationInspect.workspaceFolderValue !== undefined) {
+            shellIntegrationEnabled = shellIntegrationInspect.workspaceFolderValue;
+        } else if (shellIntegrationInspect.workspaceValue !== undefined) {
+            shellIntegrationEnabled = shellIntegrationInspect.workspaceValue;
+        } else if (shellIntegrationInspect.globalValue !== undefined) {
+            shellIntegrationEnabled = shellIntegrationInspect.globalValue;
+        } else if (shellIntegrationInspect.defaultValue !== undefined) {
+            shellIntegrationEnabled = shellIntegrationInspect.defaultValue;
+        }
+    }
+
+    await persistentState.set(SHELL_INTEGRATION_STATE_KEY, shellIntegrationEnabled);
+    return shellIntegrationEnabled;
 }
