@@ -5,7 +5,7 @@ import which from 'which';
 import { traceError, traceInfo, traceVerbose } from '../../../../common/logging';
 import { ShellConstants } from '../../../common/shellConstants';
 import { hasStartupCode, insertStartupCode, removeStartupCode } from '../common/editUtils';
-import { shellIntegrationForActiveTerminal } from '../common/shellUtils';
+import { isWsl, shellIntegrationForActiveTerminal } from '../common/shellUtils';
 import { ShellScriptEditState, ShellSetupState, ShellStartupScriptProvider } from '../startupProvider';
 import { BASH_ENV_KEY, BASH_OLD_ENV_KEY, BASH_SCRIPT_VERSION, ZSH_ENV_KEY, ZSH_OLD_ENV_KEY } from './bashConstants';
 
@@ -61,16 +61,14 @@ function getActivationContent(key: string): string {
 async function isStartupSetup(profile: string, key: string): Promise<ShellSetupState> {
     if (await fs.pathExists(profile)) {
         const content = await fs.readFile(profile, 'utf8');
-        return hasStartupCode(content, regionStart, regionEnd, [key])
-            ? ShellSetupState.Setup
-            : ShellSetupState.NotSetup;
-    } else {
-        return ShellSetupState.NotSetup;
+        if (hasStartupCode(content, regionStart, regionEnd, [key])) {
+            return ShellSetupState.Setup;
+        }
     }
+    return ShellSetupState.NotSetup;
 }
-
 async function setupStartup(profile: string, key: string, name: string): Promise<boolean> {
-    if (shellIntegrationForActiveTerminal(name, profile)) {
+    if (shellIntegrationForActiveTerminal(name, profile) && !isWsl()) {
         removeStartup(profile, key);
         return true;
     }

@@ -16,7 +16,7 @@ import { getConfiguration, onDidChangeConfiguration } from '../../common/workspa
 import { isActivatableEnvironment } from '../common/activation';
 import { identifyTerminalShell } from '../common/shellDetector';
 import { getPythonApi } from '../pythonApi';
-import { shellIntegrationForActiveTerminal } from './shells/common/shellUtils';
+import { isWsl, shellIntegrationForActiveTerminal } from './shells/common/shellUtils';
 import { ShellEnvsProvider, ShellSetupState, ShellStartupScriptProvider } from './shells/startupProvider';
 import { handleSettingUpShellProfile } from './shellStartupSetupHandlers';
 import {
@@ -129,7 +129,9 @@ export class TerminalManagerImpl implements TerminalManager {
                             await this.handleSetupCheck(shells);
                         }
                     } else {
-                        traceVerbose(`Auto activation type changed to ${actType}`);
+                        traceVerbose(`Auto activation type changed to ${actType}, we are cleaning up shell startup setup`);
+                         // Teardown scripts when switching away from shell startup activation
+                        await Promise.all(this.startupScriptProviders.map((p) => p.teardownScripts()));
                         this.shellSetup.clear();
                     }
                 }
@@ -143,32 +145,47 @@ export class TerminalManagerImpl implements TerminalManager {
     private async handleSetupCheck(shellType: string | Set<string>): Promise<void> {
         const shellTypes = typeof shellType === 'string' ? new Set([shellType]) : shellType;
         const providers = this.startupScriptProviders.filter((p) => shellTypes.has(p.shellType));
-        if (providers.length > 0) {
+        if (providers.length > 0) {      
             const shellsToSetup: ShellStartupScriptProvider[] = [];
             await Promise.all(
                 providers.map(async (p) => {
+                    const state = await p.isSetup();
+                    const currentSetup = (state === ShellSetupState.Setup);
+                    // Check if we already processed this shell and the state hasn't changed
                     if (this.shellSetup.has(p.shellType)) {
-                        traceVerbose(`Shell profile for ${p.shellType} already checked.`);
-                        return;
+                        const cachedSetup = this.shellSetup.get(p.shellType);
+                        if (currentSetup === cachedSetup) {
+                            traceVerbose(`Shell profile for ${p.shellType} already checked, state unchanged.`);
+                            return;
+                        }
+                        traceVerbose(`Shell profile for ${p.shellType} state changed from ${cachedSetup} to ${currentSetup}, re-evaluating.`);
                     }
                     traceVerbose(`Checking shell profile for ${p.shellType}.`);
-                    const state = await p.isSetup();
                     if (state === ShellSetupState.NotSetup) {
-                        // Check if shell integration is available before marking for setup
-                        if (shellIntegrationForActiveTerminal(p.name)) {
+                        traceVerbose(`WSL detected: ${isWsl()}, Shell integration available: ${shellIntegrationForActiveTerminal(p.name)}`);
+
+                        if (shellIntegrationForActiveTerminal(p.name) && !isWsl()) {
+                            // Shell integration available and NOT in WSL - skip setup
+                            await p.teardownScripts();
                             this.shellSetup.set(p.shellType, true);
                             traceVerbose(
-                                `Shell integration available for ${p.shellType}, skipping prompt, and profile modification.`,
+                                `Shell integration available for ${p.shellType} (not WSL), skipping prompt, and profile modification.`,
                             );
                         } else {
-                            // No shell integration, mark for setup
+                            // WSL (regardless of integration) OR no shell integration - needs setup
                             this.shellSetup.set(p.shellType, false);
                             shellsToSetup.push(p);
                             traceVerbose(
-                                `Shell integration is NOT avaoiable. Shell profile for ${p.shellType} is not setup.`,
+                                `Shell integration is NOT available. Shell profile for ${p.shellType} is not setup.`,
                             );
                         }
                     } else if (state === ShellSetupState.Setup) {
+                        if (shellIntegrationForActiveTerminal(p.name) && !isWsl()) {
+                            await p.teardownScripts();
+                            traceVerbose(
+                                `Shell integration available for ${p.shellType}, removed profile script in favor of shell integration.`,
+                            );
+                        }
                         this.shellSetup.set(p.shellType, true);
                         traceVerbose(`Shell profile for ${p.shellType} is setup.`);
                     } else if (state === ShellSetupState.NotInstalled) {
@@ -228,6 +245,7 @@ export class TerminalManagerImpl implements TerminalManager {
         let actType = getAutoActivationType();
         const shellType = identifyTerminalShell(terminal);
         if (actType === ACT_TYPE_SHELL) {
+            await this.handleSetupCheck(shellType);
             actType = await this.getEffectiveActivationType(shellType);
         }
 
