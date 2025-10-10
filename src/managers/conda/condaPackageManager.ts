@@ -1,10 +1,13 @@
 import {
     CancellationError,
+    CancellationToken,
+    CancellationTokenSource,
     Disposable,
     Event,
     EventEmitter,
     LogOutputChannel,
     MarkdownString,
+    Progress,
     ProgressLocation,
 } from 'vscode';
 import {
@@ -70,31 +73,48 @@ export class CondaPackageManager implements PackageManager, Disposable {
             install: toInstall,
             uninstall: toUninstall,
         };
-        await withProgress(
-            {
-                location: ProgressLocation.Notification,
-                title: CondaStrings.condaInstallingPackages,
-                cancellable: true,
-            },
-            async (_progress, token) => {
-                try {
-                    const before = this.packages.get(environment.envId.id) ?? [];
-                    const after = await managePackages(environment, manageOptions, this.api, this, token, this.log);
-                    const changes = getChanges(before, after);
-                    this.packages.set(environment.envId.id, after);
-                    this._onDidChangePackages.fire({ environment: environment, manager: this, changes });
-                } catch (e) {
-                    if (e instanceof CancellationError) {
-                        throw e;
-                    }
 
-                    this.log.error('Error installing packages', e);
-                    setImmediate(async () => {
-                        await showErrorMessageWithLogs(CondaStrings.condaInstallError, this.log);
-                    });
+        const executeManage = async (
+            _progress: Progress<{ message?: string; increment?: number }> | undefined,
+            token: CancellationToken,
+        ) => {
+            try {
+                const before = this.packages.get(environment.envId.id) ?? [];
+                const after = await managePackages(environment, manageOptions, this.api, this, token, this.log);
+                const changes = getChanges(before, after);
+                this.packages.set(environment.envId.id, after);
+                this._onDidChangePackages.fire({ environment: environment, manager: this, changes });
+            } catch (e) {
+                if (e instanceof CancellationError) {
+                    throw e;
                 }
-            },
-        );
+
+                this.log.error('Error installing packages', e);
+                setImmediate(async () => {
+                    await showErrorMessageWithLogs(CondaStrings.condaInstallError, this.log);
+                });
+            }
+        };
+
+        if (options.suppressProgress) {
+            // When suppressProgress is true, execute without showing a separate progress notification
+            // Create a cancellation token source since conda's managePackages requires one
+            const tokenSource = new CancellationTokenSource();
+            try {
+                await executeManage(undefined, tokenSource.token);
+            } finally {
+                tokenSource.dispose();
+            }
+        } else {
+            await withProgress(
+                {
+                    location: ProgressLocation.Notification,
+                    title: CondaStrings.condaInstallingPackages,
+                    cancellable: true,
+                },
+                executeManage,
+            );
+        }
     }
 
     async refresh(environment: PythonEnvironment): Promise<void> {

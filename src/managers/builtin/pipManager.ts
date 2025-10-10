@@ -1,9 +1,11 @@
 import {
     CancellationError,
+    CancellationToken,
     Event,
     EventEmitter,
     LogOutputChannel,
     MarkdownString,
+    Progress,
     ProgressLocation,
     ThemeIcon,
     window,
@@ -77,34 +79,45 @@ export class PipPackageManager implements PackageManager, Disposable {
             install: toInstall,
             uninstall: toUninstall,
         };
-        await window.withProgress(
-            {
-                location: ProgressLocation.Notification,
-                title: 'Installing packages',
-                cancellable: true,
-            },
-            async (_progress, token) => {
-                try {
-                    const before = this.packages.get(environment.envId.id) ?? [];
-                    const after = await managePackages(environment, manageOptions, this.api, this, token);
-                    const changes = getChanges(before, after);
-                    this.packages.set(environment.envId.id, after);
-                    this._onDidChangePackages.fire({ environment, manager: this, changes });
-                } catch (e) {
-                    if (e instanceof CancellationError) {
-                        throw e;
-                    }
-                    this.log.error('Error managing packages', e);
-                    setImmediate(async () => {
-                        const result = await window.showErrorMessage('Error managing packages', 'View Output');
-                        if (result === 'View Output') {
-                            this.log.show();
-                        }
-                    });
+
+        const executeManage = async (
+            _progress: Progress<{ message?: string; increment?: number }> | undefined,
+            token: CancellationToken | undefined,
+        ) => {
+            try {
+                const before = this.packages.get(environment.envId.id) ?? [];
+                const after = await managePackages(environment, manageOptions, this.api, this, token);
+                const changes = getChanges(before, after);
+                this.packages.set(environment.envId.id, after);
+                this._onDidChangePackages.fire({ environment, manager: this, changes });
+            } catch (e) {
+                if (e instanceof CancellationError) {
                     throw e;
                 }
-            },
-        );
+                this.log.error('Error managing packages', e);
+                setImmediate(async () => {
+                    const result = await window.showErrorMessage('Error managing packages', 'View Output');
+                    if (result === 'View Output') {
+                        this.log.show();
+                    }
+                });
+                throw e;
+            }
+        };
+
+        if (options.suppressProgress) {
+            // When suppressProgress is true, execute without showing a separate progress notification
+            await executeManage(undefined, undefined);
+        } else {
+            await window.withProgress(
+                {
+                    location: ProgressLocation.Notification,
+                    title: 'Installing packages',
+                    cancellable: true,
+                },
+                executeManage,
+            );
+        }
     }
 
     async refresh(environment: PythonEnvironment): Promise<void> {

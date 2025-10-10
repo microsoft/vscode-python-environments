@@ -287,7 +287,7 @@ export async function createWithProgress(
                 basePython.version,
             ),
         },
-        async () => {
+        async (progress) => {
             const result: CreateEnvironmentResult = {};
             try {
                 const useUv = await isUvInstalled(log);
@@ -319,10 +319,13 @@ export async function createWithProgress(
                 // install packages
                 if (packages && (packages.install.length > 0 || packages.uninstall.length > 0)) {
                     try {
+                        // Update progress message to indicate package installation
+                        progress.report({ message: l10n.t('Installing packages...') });
                         await api.managePackages(env, {
                             upgrade: false,
                             install: packages?.install,
                             uninstall: packages?.uninstall ?? [],
+                            suppressProgress: true,
                         });
                     } catch (e) {
                         // error occurred while installing packages
