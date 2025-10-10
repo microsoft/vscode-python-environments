@@ -214,4 +214,41 @@ suite('Pip Utils - getProjectInstallable', () => {
         const progressOptions = withProgressStub.firstCall.args[0] as ProgressOptions;
         assert.strictEqual(progressOptions.cancellable, true, 'Progress should be cancellable');
     });
+
+    test('should handle cancellation during file search', async () => {
+        // Arrange: Create a cancellation token that is already cancelled
+        const cancelledToken: CancellationToken = {
+            isCancellationRequested: true,
+            onCancellationRequested: () => ({ dispose: () => {} }),
+        };
+
+        // Mock withProgress to immediately call the callback with the cancelled token
+        withProgressStub.callsFake(
+            async (
+                _options: ProgressOptions,
+                callback: (
+                    progress: Progress<{ message?: string; increment?: number }>,
+                    token: CancellationToken,
+                ) => Thenable<unknown>,
+            ) => {
+                return await callback({} as Progress<{ message?: string; increment?: number }>, cancelledToken);
+            },
+        );
+
+        // Mock findFiles to check that token is passed
+        findFilesStub.callsFake((_pattern: string, _exclude: string, _maxResults: number, token: CancellationToken) => {
+            // Verify the cancellation token is passed to findFiles
+            assert.strictEqual(token, cancelledToken, 'Cancellation token should be passed to findFiles');
+            return Promise.resolve([]);
+        });
+
+        // Act: Call getProjectInstallable
+        const workspacePath = Uri.file('/test/path/root').fsPath;
+        const projects = [{ name: 'workspace', uri: Uri.file(workspacePath) }];
+        await getProjectInstallable(mockApi as PythonEnvironmentApi, projects);
+
+        // Assert: Verify findFiles was called with the cancellation token
+        assert.ok(findFilesStub.called, 'findFiles should be called');
+        assert.strictEqual(findFilesStub.callCount, 4, 'Should call findFiles 4 times for different patterns');
+    });
 });
