@@ -212,6 +212,11 @@ async function _runConda(
         deferred.reject(new CancellationError());
     });
 
+    proc.on('error', (err) => {
+        log?.error(`Error spawning conda: ${err}`);
+        deferred.reject(new Error(`Error spawning conda: ${err.message}`));
+    });
+
     let stdout = '';
     let stderr = '';
     proc.stdout?.on('data', (data) => {

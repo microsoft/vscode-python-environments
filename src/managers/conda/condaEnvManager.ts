@@ -191,6 +191,9 @@ export class CondaEnvManager implements EnvironmentManager, Disposable {
             return result;
         } catch (error) {
             this.log.error('Failed to create conda environment:', error);
+            showErrorMessage(
+                l10n.t('Failed to create conda environment: {0}', error instanceof Error ? error.message : String(error)),
+            );
             return undefined;
         }
     }
