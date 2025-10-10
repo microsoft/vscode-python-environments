@@ -38,6 +38,11 @@ export async function runUV(
             reject(new CancellationError());
         });
 
+        proc.on('error', (err) => {
+            log?.error(`Error spawning uv: ${err}`);
+            reject(new Error(`Error spawning uv: ${err.message}`));
+        });
+
         let builder = '';
         proc.stdout?.on('data', (data) => {
             const s = data.toString('utf-8');
@@ -72,6 +77,12 @@ export async function runPython(
             proc.kill();
             reject(new CancellationError());
         });
+
+        proc.on('error', (err) => {
+            log?.error(`Error spawning python: ${err}`);
+            reject(new Error(`Error spawning python: ${err.message}`));
+        });
+
         let builder = '';
         proc.stdout?.on('data', (data) => {
             const s = data.toString('utf-8');
