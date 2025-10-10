@@ -199,4 +199,19 @@ suite('Pip Utils - getProjectInstallable', () => {
         assert.ok(firstResult.uri, 'Should have a URI');
         assert.ok(firstResult.uri.fsPath.startsWith(workspacePath), 'Should be in workspace directory');
     });
+
+    test('should show cancellable progress notification', async () => {
+        // Arrange: Mock findFiles to return empty results
+        findFilesStub.resolves([]);
+
+        // Act: Call getProjectInstallable
+        const workspacePath = Uri.file('/test/path/root').fsPath;
+        const projects = [{ name: 'workspace', uri: Uri.file(workspacePath) }];
+        await getProjectInstallable(mockApi as PythonEnvironmentApi, projects);
+
+        // Assert: Verify withProgress was called with cancellable option
+        assert.ok(withProgressStub.calledOnce, 'Should call withProgress once');
+        const progressOptions = withProgressStub.firstCall.args[0] as ProgressOptions;
+        assert.strictEqual(progressOptions.cancellable, true, 'Progress should be cancellable');
+    });
 });
