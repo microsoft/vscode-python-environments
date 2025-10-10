@@ -129,7 +129,7 @@ async function selectWorkspaceOrCommon(
                 return await selectFromCommonPackagesToInstall(common, installed, undefined, { showBackButton });
             } else if (selected.label === PackageManagement.skipPackageInstallation) {
                 traceInfo('Package Installer: user selected skip package installation');
-                return undefined;
+                return { install: [], uninstall: [] } satisfies PipPackages;
             } else {
                 return undefined;
             }
