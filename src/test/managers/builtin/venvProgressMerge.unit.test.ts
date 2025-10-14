@@ -1,17 +1,26 @@
 import assert from 'assert';
 import * as sinon from 'sinon';
-import { CancellationToken, LogOutputChannel, Progress, Uri } from 'vscode';
-import { EnvironmentManager, PythonEnvironment } from '../../../api';
+import { CancellationToken, LogOutputChannel, Progress, ProgressLocation, Uri } from 'vscode';
+import { EnvironmentManager, PythonEnvironment, PythonEnvironmentApi } from '../../../api';
 import * as winapi from '../../../common/window.apis';
 import { createWithProgress } from '../../../managers/builtin/venvUtils';
 
 suite('Venv Progress Merge Tests', () => {
     let mockWithProgress: sinon.SinonStub;
     let mockManagePackages: sinon.SinonStub;
-    let mockNativeFinder: any;
-    let mockApi: any;
-    let mockLog: any;
-    let mockManager: any;
+    let mockNativeFinder: {
+        resolve: sinon.SinonStub;
+        refresh: sinon.SinonStub;
+        dispose: sinon.SinonStub;
+    };
+    // Minimal mock that only implements the methods we need for this test
+    // Using type assertion to satisfy TypeScript since we only need createPythonEnvironmentItem and managePackages
+    let mockApi: {
+        createPythonEnvironmentItem: sinon.SinonStub;
+        managePackages: sinon.SinonStub;
+    };
+    let mockLog: LogOutputChannel;
+    let mockManager: EnvironmentManager;
     let mockBasePython: PythonEnvironment;
     let progressReportStub: sinon.SinonStub;
 
@@ -19,16 +28,18 @@ suite('Venv Progress Merge Tests', () => {
         // Stub withProgress to capture the progress callback
         progressReportStub = sinon.stub();
         mockWithProgress = sinon.stub(winapi, 'withProgress');
-        mockWithProgress.callsFake(async (_options: any, callback: Function) => {
-            const mockProgress: Progress<{ message?: string; increment?: number }> = {
-                report: progressReportStub,
-            };
-            const mockToken: CancellationToken = {
-                isCancellationRequested: false,
-                onCancellationRequested: sinon.stub(),
-            };
-            return await callback(mockProgress, mockToken);
-        });
+        mockWithProgress.callsFake(
+            async (_options: { location: ProgressLocation; title: string }, callback: Function) => {
+                const mockProgress: Progress<{ message?: string; increment?: number }> = {
+                    report: progressReportStub,
+                };
+                const mockToken: CancellationToken = {
+                    isCancellationRequested: false,
+                    onCancellationRequested: sinon.stub(),
+                };
+                return await callback(mockProgress, mockToken);
+            },
+        );
 
         // Create minimal mocks
         mockNativeFinder = {
@@ -38,6 +49,8 @@ suite('Venv Progress Merge Tests', () => {
                 prefix: '/test/venv',
                 kind: 'venv',
             }),
+            refresh: sinon.stub().resolves([]),
+            dispose: sinon.stub(),
         };
         mockApi = {
             createPythonEnvironmentItem: sinon.stub().returns({
@@ -81,10 +94,10 @@ suite('Venv Progress Merge Tests', () => {
         sinon.stub(helpers, 'runPython').resolves();
 
         await createWithProgress(
-            mockNativeFinder as any,
-            mockApi as any,
-            mockLog as any,
-            mockManager as any,
+            mockNativeFinder,
+            mockApi as unknown as PythonEnvironmentApi,
+            mockLog,
+            mockManager,
             mockBasePython,
             Uri.file('/test'),
             '/test/venv',
@@ -111,10 +124,10 @@ suite('Venv Progress Merge Tests', () => {
         sinon.stub(helpers, 'runPython').resolves();
 
         await createWithProgress(
-            mockNativeFinder as any,
-            mockApi as any,
-            mockLog as any,
-            mockManager as any,
+            mockNativeFinder,
+            mockApi as unknown as PythonEnvironmentApi,
+            mockLog,
+            mockManager,
             mockBasePython,
             Uri.file('/test'),
             '/test/venv',
@@ -142,10 +155,10 @@ suite('Venv Progress Merge Tests', () => {
         sinon.stub(helpers, 'runPython').resolves();
 
         await createWithProgress(
-            mockNativeFinder as any,
-            mockApi as any,
-            mockLog as any,
-            mockManager as any,
+            mockNativeFinder,
+            mockApi as unknown as PythonEnvironmentApi,
+            mockLog,
+            mockManager,
             mockBasePython,
             Uri.file('/test'),
             '/test/venv',
