@@ -47,9 +47,9 @@ export async function clearPipenvCache(): Promise<void> {
     pipenvPath = undefined;
 }
 
-function getPipenvPathFromSettings(): Uri[] {
+function getPipenvPathFromSettings(): string | undefined {
     const pipenvPath = getSettingWorkspaceScope<string>('python', 'pipenvPath');
-    return pipenvPath ? [Uri.file(pipenvPath)] : [];
+    return pipenvPath ? pipenvPath : undefined;
 }
 
 export async function getPipenv(native?: NativePythonFinder): Promise<string | undefined> {
@@ -61,6 +61,14 @@ export async function getPipenv(native?: NativePythonFinder): Promise<string | u
     pipenvPath = await state.get<string>(PIPENV_PATH_KEY);
     if (pipenvPath) {
         traceInfo(`Using pipenv from persistent state: ${pipenvPath}`);
+        return pipenvPath;
+    }
+
+    // try to get from settings
+    const settingPath = getPipenvPathFromSettings();
+    if (settingPath) {
+        pipenvPath = settingPath;
+        traceInfo(`Using pipenv from settings: ${settingPath}`);
         return pipenvPath;
     }
 
@@ -147,8 +155,8 @@ export async function refreshPipenv(
 ): Promise<PythonEnvironment[]> {
     traceInfo('Refreshing pipenv environments');
 
-    const searchUris = getPipenvPathFromSettings();
-    const data = await nativeFinder.refresh(hardRefresh, searchUris.length > 0 ? searchUris : undefined);
+    const searchPath = getPipenvPathFromSettings();
+    const data = await nativeFinder.refresh(hardRefresh, searchPath ? [Uri.file(searchPath)] : undefined);
 
     let pipenv = await getPipenv();
 
