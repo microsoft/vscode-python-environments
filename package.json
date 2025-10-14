@@ -127,6 +127,12 @@
                     "items": {
                         "type": "string"
                     }
+                },
+                "python-envs.alwaysUseUv": {
+                    "type": "boolean",
+                    "description": "%python-envs.alwaysUseUv.description%",
+                    "default": true,
+                    "scope": "machine"
                 }
             }
         },

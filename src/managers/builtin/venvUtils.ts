@@ -25,7 +25,7 @@ import {
     NativePythonFinder,
 } from '../common/nativePythonFinder';
 import { getShellActivationCommands, shortVersion, sortEnvironments } from '../common/utils';
-import { isUvInstalled, runPython, runUV } from './helpers';
+import { shouldUseUv, runPython, runUV } from './helpers';
 import { getProjectInstallable, PipPackages } from './pipUtils';
 import { resolveSystemPythonEnvironmentPath } from './utils';
 import { createStepBasedVenvFlow } from './venvStepBasedFlow';
@@ -176,7 +176,7 @@ export async function findVirtualEnvironments(
     const envs = data
         .filter((e) => isNativeEnvInfo(e))
         .map((e) => e as NativeEnvInfo)
-        .filter((e) => e.kind === NativePythonEnvironmentKind.venv);
+        .filter((e) => e.kind === NativePythonEnvironmentKind.venv || e.kind === NativePythonEnvironmentKind.venvUv);
 
     for (const e of envs) {
         if (!(e.prefix && e.executable && e.version)) {
@@ -290,7 +290,7 @@ export async function createWithProgress(
         async () => {
             const result: CreateEnvironmentResult = {};
             try {
-                const useUv = await isUvInstalled(log);
+                const useUv = await shouldUseUv(undefined, log);
                 // env creation
                 if (basePython.execInfo?.run.executable) {
                     if (useUv) {
@@ -459,7 +459,7 @@ export async function resolveVenvPythonEnvironmentPath(
 ): Promise<PythonEnvironment | undefined> {
     const resolved = await nativeFinder.resolve(fsPath);
 
-    if (resolved.kind === NativePythonEnvironmentKind.venv) {
+    if (resolved.kind === NativePythonEnvironmentKind.venv || resolved.kind === NativePythonEnvironmentKind.venvUv) {
         const envInfo = await getPythonInfo(resolved);
         return api.createPythonEnvironmentItem(envInfo, manager);
     }

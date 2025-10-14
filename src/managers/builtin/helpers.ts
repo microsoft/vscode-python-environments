@@ -3,6 +3,8 @@ import { CancellationError, CancellationToken, LogOutputChannel } from 'vscode';
 import { createDeferred } from '../../common/utils/deferred';
 import { sendTelemetryEvent } from '../../common/telemetry/sender';
 import { EventNames } from '../../common/telemetry/constants';
+import { getConfiguration } from '../../common/workspace.apis';
+import { NativePythonEnvironmentKind } from '../common/nativePythonFinder';
 
 const available = createDeferred<boolean>();
 export async function isUvInstalled(log?: LogOutputChannel): Promise<boolean> {
@@ -23,6 +25,35 @@ export async function isUvInstalled(log?: LogOutputChannel): Promise<boolean> {
     });
     return available.promise;
 }
+
+/**
+ * Determines if uv should be used for managing a virtual environment.
+ * @param envKind - The kind of environment (Venv, VenvUv, etc.)
+ * @param log - Optional log output channel
+ * @returns True if uv should be used, false otherwise
+ */
+export async function shouldUseUv(
+    envKind?: NativePythonEnvironmentKind,
+    log?: LogOutputChannel,
+): Promise<boolean> {
+    // If the environment is explicitly a VenvUv type, always use uv
+    if (envKind === NativePythonEnvironmentKind.venvUv) {
+        return await isUvInstalled(log);
+    }
+
+    // Check the alwaysUseUv setting
+    const config = getConfiguration('python-envs');
+    const alwaysUseUv = config.get<boolean>('alwaysUseUv', true);
+
+    // If alwaysUseUv is true and uv is installed, use it
+    if (alwaysUseUv) {
+        return await isUvInstalled(log);
+    }
+
+    // Otherwise, only use uv for VenvUv environments (already handled above)
+    return false;
+}
+
 
 export async function runUV(
     args: string[],
