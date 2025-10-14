@@ -25,7 +25,7 @@ import {
     NativePythonFinder,
 } from '../common/nativePythonFinder';
 import { getShellActivationCommands, shortVersion, sortEnvironments } from '../common/utils';
-import { shouldUseUv, runPython, runUV } from './helpers';
+import { runPython, runUV, shouldUseUv } from './helpers';
 import { getProjectInstallable, PipPackages } from './pipUtils';
 import { resolveSystemPythonEnvironmentPath } from './utils';
 import { createStepBasedVenvFlow } from './venvStepBasedFlow';
@@ -157,6 +157,7 @@ async function getPythonInfo(env: NativeEnvInfo): Promise<PythonEnvironmentInfo>
                 shellActivation,
                 shellDeactivation,
             },
+            group: env.kind === NativePythonEnvironmentKind.venvUv ? 'uv' : 'venv',
         };
     } else {
         throw new Error(`Invalid python info: ${JSON.stringify(env)}`);
@@ -290,7 +291,7 @@ export async function createWithProgress(
         async () => {
             const result: CreateEnvironmentResult = {};
             try {
-                const useUv = await shouldUseUv(undefined, log);
+                const useUv = await shouldUseUv(basePython.group, log);
                 // env creation
                 if (basePython.execInfo?.run.executable) {
                     if (useUv) {

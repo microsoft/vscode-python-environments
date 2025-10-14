@@ -132,7 +132,7 @@
                     "type": "boolean",
                     "description": "%python-envs.alwaysUseUv.description%",
                     "default": true,
-                    "scope": "machine"
+                    "scope": "resource"
                 }
             }
         },

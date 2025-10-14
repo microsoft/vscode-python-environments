@@ -1,10 +1,10 @@
 import * as ch from 'child_process';
 import { CancellationError, CancellationToken, LogOutputChannel } from 'vscode';
-import { createDeferred } from '../../common/utils/deferred';
-import { sendTelemetryEvent } from '../../common/telemetry/sender';
+import { EnvironmentGroupInfo } from '../../api';
 import { EventNames } from '../../common/telemetry/constants';
+import { sendTelemetryEvent } from '../../common/telemetry/sender';
+import { createDeferred } from '../../common/utils/deferred';
 import { getConfiguration } from '../../common/workspace.apis';
-import { NativePythonEnvironmentKind } from '../common/nativePythonFinder';
 
 const available = createDeferred<boolean>();
 export async function isUvInstalled(log?: LogOutputChannel): Promise<boolean> {
@@ -28,32 +28,25 @@ export async function isUvInstalled(log?: LogOutputChannel): Promise<boolean> {
 
 /**
  * Determines if uv should be used for managing a virtual environment.
- * @param envKind - The kind of environment (Venv, VenvUv, etc.)
- * @param log - Optional log output channel
- * @returns True if uv should be used, false otherwise
+ * @param group - Optional environment group name (string) or EnvironmentGroupInfo object. If 'uv' or group.name is 'uv', uv will be used if available.
+ * @param log - Optional log output channel for logging operations
+ * @returns True if uv should be used, false otherwise. For 'uv' environments, returns true if uv is installed. For other environments, checks the 'python-envs.alwaysUseUv' setting and uv availability.
  */
-export async function shouldUseUv(
-    envKind?: NativePythonEnvironmentKind,
-    log?: LogOutputChannel,
-): Promise<boolean> {
-    // If the environment is explicitly a VenvUv type, always use uv
-    if (envKind === NativePythonEnvironmentKind.venvUv) {
+export async function shouldUseUv(group?: string | EnvironmentGroupInfo, log?: LogOutputChannel): Promise<boolean> {
+    if (group === 'uv' || (typeof group === 'object' && group.name === 'uv')) {
+        // Always use uv for VenvUv environments
         return await isUvInstalled(log);
     }
 
-    // Check the alwaysUseUv setting
+    // For other environments, check the user setting
     const config = getConfiguration('python-envs');
     const alwaysUseUv = config.get<boolean>('alwaysUseUv', true);
 
-    // If alwaysUseUv is true and uv is installed, use it
     if (alwaysUseUv) {
         return await isUvInstalled(log);
     }
-
-    // Otherwise, only use uv for VenvUv environments (already handled above)
     return false;
 }
-
 
 export async function runUV(
     args: string[],
