@@ -19,75 +19,109 @@ suite('venvUtils UV Environment Tracking', () => {
     let getWorkspacePersistentStateStub: sinon.SinonStub;
 
     setup(() => {
+        // Create minimal mock state with only required methods
         mockState = {
             get: sinon.stub(),
             set: sinon.stub(),
             clear: sinon.stub(),
         };
         getWorkspacePersistentStateStub = sinon.stub(persistentState, 'getWorkspacePersistentState');
-        getWorkspacePersistentStateStub.returns(Promise.resolve(mockState));
+        getWorkspacePersistentStateStub.resolves(mockState);
     });
 
     teardown(() => {
         sinon.restore();
     });
 
-    test('getUvEnvironments should return empty array when no environments stored', async () => {
+    test('should return empty array when no UV environments have been stored', async () => {
+        // Mock - No stored environments
         mockState.get.withArgs(UV_ENVS_KEY).resolves(undefined);
 
+        // Run
         const result = await getUvEnvironments();
-        assert.deepStrictEqual(result, []);
+
+        // Assert - Should return empty array for fresh state
+        assert.deepStrictEqual(result, [], 'Should return empty array when no environments stored');
     });
 
-    test('getUvEnvironments should return stored environments', async () => {
-        const expectedEnvs = ['/path/to/env1', '/path/to/env2'];
-        mockState.get.withArgs(UV_ENVS_KEY).resolves(expectedEnvs);
+    test('should return previously stored UV environments', async () => {
+        // Mock - Existing stored environments
+        const storedEnvs = ['/path/to/env1', '/path/to/env2'];
+        mockState.get.withArgs(UV_ENVS_KEY).resolves(storedEnvs);
 
+        // Run
         const result = await getUvEnvironments();
-        assert.deepStrictEqual(result, expectedEnvs);
+
+        // Assert - Should return stored environments
+        assert.deepStrictEqual(result, storedEnvs, 'Should return all stored UV environments');
     });
 
-    test('addUvEnvironment should add new environment to list', async () => {
+    test('should add new environment to tracking list', async () => {
+        // Mock - Existing environment list
         const existingEnvs = ['/path/to/env1'];
         const newEnvPath = '/path/to/env2';
         mockState.get.withArgs(UV_ENVS_KEY).resolves(existingEnvs);
 
+        // Run
         await addUvEnvironment(newEnvPath);
 
-        assert.ok(mockState.set.calledWith(UV_ENVS_KEY, ['/path/to/env1', '/path/to/env2']));
+        // Assert - Should store updated list with new environment
+        const expectedList = ['/path/to/env1', '/path/to/env2'];
+        assert.ok(mockState.set.calledWith(UV_ENVS_KEY, expectedList), 'Should add new environment to existing list');
     });
 
-    test('addUvEnvironment should not add duplicate environment', async () => {
+    test('should ignore duplicate environment additions', async () => {
+        // Mock - Environment already exists in list
         const existingEnvs = ['/path/to/env1', '/path/to/env2'];
         const duplicateEnvPath = '/path/to/env1';
         mockState.get.withArgs(UV_ENVS_KEY).resolves(existingEnvs);
 
+        // Run
         await addUvEnvironment(duplicateEnvPath);
 
-        assert.ok(mockState.set.notCalled);
+        // Assert - Should not modify state for duplicates
+        assert.ok(mockState.set.notCalled, 'Should not update storage when adding duplicate environment');
     });
 
-    test('removeUvEnvironment should remove environment from list', async () => {
+    test('should remove specified environment from tracking list', async () => {
+        // Mock - List with multiple environments
         const existingEnvs = ['/path/to/env1', '/path/to/env2'];
         const envToRemove = '/path/to/env1';
         mockState.get.withArgs(UV_ENVS_KEY).resolves(existingEnvs);
 
+        // Run
         await removeUvEnvironment(envToRemove);
 
-        assert.ok(mockState.set.calledWith(UV_ENVS_KEY, ['/path/to/env2']));
+        // Assert - Should store filtered list without removed environment
+        const expectedList = ['/path/to/env2'];
+        assert.ok(
+            mockState.set.calledWith(UV_ENVS_KEY, expectedList),
+            'Should remove specified environment from tracking list',
+        );
     });
 
-    test('clearUvEnvironments should set empty array', async () => {
+    test('should clear all tracked UV environments', async () => {
+        // Mock - (no setup needed for clear operation)
+
+        // Run
         await clearUvEnvironments();
 
-        assert.ok(mockState.set.calledWith(UV_ENVS_KEY, []));
+        // Assert - Should reset to empty list
+        assert.ok(mockState.set.calledWith(UV_ENVS_KEY, []), 'Should clear all UV environments from tracking');
     });
 
-    test('clearVenvCache should clear UV environments along with other caches', async () => {
+    test('should include UV environments when clearing venv cache', async () => {
+        // Mock - (no setup needed for clear operation)
+
+        // Run
         await clearVenvCache();
 
-        // Check that clear was called with the right keys including UV_ENVS_KEY
+        // Assert - Should clear UV environments as part of cache clearing
+        assert.ok(mockState.clear.called, 'Should call clear on persistent state');
         const clearArgs = mockState.clear.getCall(0).args[0];
-        assert.ok(clearArgs.includes(UV_ENVS_KEY));
+        assert.ok(
+            Array.isArray(clearArgs) && clearArgs.includes(UV_ENVS_KEY),
+            'Should include UV environments key in cache clearing',
+        );
     });
 });
