@@ -4,6 +4,7 @@ import { EventNames } from '../../common/telemetry/constants';
 import { sendTelemetryEvent } from '../../common/telemetry/sender';
 import { createDeferred } from '../../common/utils/deferred';
 import { getConfiguration } from '../../common/workspace.apis';
+import { getUvEnvironments } from './uvEnvironments';
 
 const available = createDeferred<boolean>();
 export async function isUvInstalled(log?: LogOutputChannel): Promise<boolean> {
@@ -27,14 +28,17 @@ export async function isUvInstalled(log?: LogOutputChannel): Promise<boolean> {
 
 /**
  * Determines if uv should be used for managing a virtual environment.
- * @param description - Optional environment description string. If 'uv', uv will be used if available.
  * @param log - Optional log output channel for logging operations
- * @returns True if uv should be used, false otherwise. For 'uv' environments, returns true if uv is installed. For other environments, checks the 'python-envs.alwaysUseUv' setting and uv availability.
+ * @param envPath - Optional environment path to check against UV environments list
+ * @returns True if uv should be used, false otherwise. For UV environments, returns true if uv is installed. For other environments, checks the 'python-envs.alwaysUseUv' setting and uv availability.
  */
-export async function shouldUseUv(description?: string, log?: LogOutputChannel): Promise<boolean> {
-    if (description === 'uv') {
-        // Always use uv for VenvUv environments
-        return await isUvInstalled(log);
+export async function shouldUseUv(log?: LogOutputChannel, envPath?: string): Promise<boolean> {
+    if (envPath) {
+        // always use uv if the given environment is stored as a uv env
+        const uvEnvs = await getUvEnvironments();
+        if (uvEnvs.includes(envPath)) {
+            return await isUvInstalled(log);
+        }
     }
 
     // For other environments, check the user setting

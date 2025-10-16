@@ -139,7 +139,8 @@ export async function refreshPythons(
 }
 
 async function refreshPipPackagesRaw(environment: PythonEnvironment, log?: LogOutputChannel): Promise<string> {
-    const useUv = await shouldUseUv(environment.description, log);
+    // Use environmentPath directly for consistency with UV environment tracking
+    const useUv = await shouldUseUv(log, environment.environmentPath.fsPath);
     if (useUv) {
         return await runUV(['pip', 'list', '--python', environment.execInfo.run.executable], undefined, log);
     }
@@ -202,7 +203,8 @@ export async function managePackages(
         throw new Error('Python 2.* is not supported (deprecated)');
     }
 
-    const useUv = await shouldUseUv(environment.description, manager.log);
+    // Use environmentPath directly for consistency with UV environment tracking
+    const useUv = await shouldUseUv(manager.log, environment.environmentPath.fsPath);
     const uninstallArgs = ['pip', 'uninstall'];
     if (options.uninstall && options.uninstall.length > 0) {
         if (useUv) {

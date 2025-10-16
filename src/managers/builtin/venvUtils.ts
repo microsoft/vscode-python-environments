@@ -28,6 +28,7 @@ import { getShellActivationCommands, shortVersion, sortEnvironments } from '../c
 import { runPython, runUV, shouldUseUv } from './helpers';
 import { getProjectInstallable, PipPackages } from './pipUtils';
 import { resolveSystemPythonEnvironmentPath } from './utils';
+import { addUvEnvironment, removeUvEnvironment, UV_ENVS_KEY } from './uvEnvironments';
 import { createStepBasedVenvFlow } from './venvStepBasedFlow';
 
 export const VENV_WORKSPACE_KEY = `${ENVS_EXTENSION_ID}:venv:WORKSPACE_SELECTED`;
@@ -54,7 +55,7 @@ export interface CreateEnvironmentResult {
 }
 
 export async function clearVenvCache(): Promise<void> {
-    const keys = [VENV_WORKSPACE_KEY, VENV_GLOBAL_KEY];
+    const keys = [VENV_WORKSPACE_KEY, VENV_GLOBAL_KEY, UV_ENVS_KEY];
     const state = await getWorkspacePersistentState();
     await state.clear(keys);
 }
@@ -191,6 +192,11 @@ export async function findVirtualEnvironments(
         const env = api.createPythonEnvironmentItem(await getPythonInfo(e), manager);
         collection.push(env);
         log.info(`Found venv environment: ${env.name}`);
+
+        // Track UV environments using environmentPath for consistency
+        if (e.kind === NativePythonEnvironmentKind.venvUv) {
+            await addUvEnvironment(env.environmentPath.fsPath);
+        }
     }
     return collection;
 }
@@ -294,7 +300,7 @@ export async function createWithProgress(
         async () => {
             const result: CreateEnvironmentResult = {};
             try {
-                const useUv = await shouldUseUv(basePython.description, log);
+                const useUv = await shouldUseUv(log, basePython.environmentPath.fsPath);
                 // env creation
                 if (basePython.execInfo?.run.executable) {
                     if (useUv) {
@@ -319,6 +325,10 @@ export async function createWithProgress(
                 // handle admin of new env
                 const resolved = await nativeFinder.resolve(pythonPath);
                 const env = api.createPythonEnvironmentItem(await getPythonInfo(resolved), manager);
+
+                if (useUv && resolved.kind === NativePythonEnvironmentKind.venvUv) {
+                    await addUvEnvironment(env.environmentPath.fsPath);
+                }
 
                 // install packages
                 if (packages && (packages.install.length > 0 || packages.uninstall.length > 0)) {
@@ -439,6 +449,7 @@ export async function removeVenv(environment: PythonEnvironment, log: LogOutputC
             async () => {
                 try {
                     await fsapi.remove(envPath);
+                    await removeUvEnvironment(environment.environmentPath.fsPath);
                     return true;
                 } catch (e) {
                     log.error(`Failed to remove virtual environment: ${e}`);
@@ -465,6 +476,7 @@ export async function resolveVenvPythonEnvironmentPath(
 
     if (resolved.kind === NativePythonEnvironmentKind.venv || resolved.kind === NativePythonEnvironmentKind.venvUv) {
         const envInfo = await getPythonInfo(resolved);
+        // can't decide on if I need anything here....
         return api.createPythonEnvironmentItem(envInfo, manager);
     }
 
