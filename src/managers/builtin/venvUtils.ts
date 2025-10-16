@@ -131,6 +131,10 @@ async function getPythonInfo(env: NativeEnvInfo): Promise<PythonEnvironmentInfo>
         const venvName = env.name ?? getName(env.executable);
         const sv = shortVersion(env.version);
         const name = `${venvName} (${sv})`;
+        let description = undefined;
+        if (env.kind === NativePythonEnvironmentKind.venvUv) {
+            description = l10n.t('uv');
+        }
 
         const binDir = path.dirname(env.executable);
 
@@ -142,7 +146,7 @@ async function getPythonInfo(env: NativeEnvInfo): Promise<PythonEnvironmentInfo>
             shortDisplayName: `${sv} (${venvName})`,
             displayPath: env.executable,
             version: env.version,
-            description: undefined,
+            description: description,
             tooltip: env.executable,
             environmentPath: Uri.file(env.executable),
             iconPath: new ThemeIcon('python'),
@@ -157,7 +161,6 @@ async function getPythonInfo(env: NativeEnvInfo): Promise<PythonEnvironmentInfo>
                 shellActivation,
                 shellDeactivation,
             },
-            group: env.kind === NativePythonEnvironmentKind.venvUv ? 'uv' : 'venv',
         };
     } else {
         throw new Error(`Invalid python info: ${JSON.stringify(env)}`);
@@ -291,7 +294,7 @@ export async function createWithProgress(
         async () => {
             const result: CreateEnvironmentResult = {};
             try {
-                const useUv = await shouldUseUv(basePython.group, log);
+                const useUv = await shouldUseUv(basePython.description, log);
                 // env creation
                 if (basePython.execInfo?.run.executable) {
                     if (useUv) {

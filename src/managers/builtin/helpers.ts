@@ -1,6 +1,5 @@
 import * as ch from 'child_process';
 import { CancellationError, CancellationToken, LogOutputChannel } from 'vscode';
-import { EnvironmentGroupInfo } from '../../api';
 import { EventNames } from '../../common/telemetry/constants';
 import { sendTelemetryEvent } from '../../common/telemetry/sender';
 import { createDeferred } from '../../common/utils/deferred';
@@ -28,12 +27,12 @@ export async function isUvInstalled(log?: LogOutputChannel): Promise<boolean> {
 
 /**
  * Determines if uv should be used for managing a virtual environment.
- * @param group - Optional environment group name (string) or EnvironmentGroupInfo object. If 'uv' or group.name is 'uv', uv will be used if available.
+ * @param description - Optional environment description string. If 'uv', uv will be used if available.
  * @param log - Optional log output channel for logging operations
  * @returns True if uv should be used, false otherwise. For 'uv' environments, returns true if uv is installed. For other environments, checks the 'python-envs.alwaysUseUv' setting and uv availability.
  */
-export async function shouldUseUv(group?: string | EnvironmentGroupInfo, log?: LogOutputChannel): Promise<boolean> {
-    if (group === 'uv' || (typeof group === 'object' && group.name === 'uv')) {
+export async function shouldUseUv(description?: string, log?: LogOutputChannel): Promise<boolean> {
+    if (description === 'uv') {
         // Always use uv for VenvUv environments
         return await isUvInstalled(log);
     }
