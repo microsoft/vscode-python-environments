@@ -40,7 +40,11 @@ suite('TerminalEnvVarInjector Basic Tests', () => {
         };
 
         // Setup environment variable collection to return scoped collection
-        envVarCollection.setup((x) => x.getScoped(typeMoq.It.isAny())).returns(() => mockScopedCollection as any);
+        envVarCollection
+            .setup((x) => x.getScoped(typeMoq.It.isAny()))
+            .returns(
+                () => mockScopedCollection as unknown as ReturnType<GlobalEnvironmentVariableCollection['getScoped']>,
+            );
         envVarCollection.setup((x) => x.clear()).returns(() => {});
 
         // Setup minimal mocks for event subscriptions
