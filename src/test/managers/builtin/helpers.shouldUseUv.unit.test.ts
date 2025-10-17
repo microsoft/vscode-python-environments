@@ -1,10 +1,12 @@
 import assert from 'assert';
 import * as sinon from 'sinon';
 import { LogOutputChannel } from 'vscode';
+import * as childProcessApis from '../../../common/childProcess.apis';
 import * as persistentState from '../../../common/persistentState';
 import * as workspaceApis from '../../../common/workspace.apis';
 import { resetUvInstallationCache, shouldUseUv } from '../../../managers/builtin/helpers';
 import * as uvEnvironments from '../../../managers/builtin/uvEnvironments';
+import { MockChildProcess } from '../../mocks/mockChildProcess';
 
 interface MockWorkspaceConfig {
     get: sinon.SinonStub;
@@ -19,6 +21,7 @@ suite('Helpers - shouldUseUv', () => {
     let getWorkspacePersistentStateStub: sinon.SinonStub;
     let mockPersistentState: { get: sinon.SinonStub; set: sinon.SinonStub; clear: sinon.SinonStub };
     let getUvEnvironmentsStub: sinon.SinonStub;
+    let spawnStub: sinon.SinonStub;
 
     setup(() => {
         // Reset UV installation cache before each test to ensure clean state
@@ -63,6 +66,9 @@ suite('Helpers - shouldUseUv', () => {
             logLevel: 1,
             onDidChangeLogLevel: sinon.stub() as LogOutputChannel['onDidChangeLogLevel'],
         } as unknown as LogOutputChannel;
+
+        // Stub childProcess.apis spawnProcess
+        spawnStub = sinon.stub(childProcessApis, 'spawnProcess');
     });
 
     teardown(() => {
@@ -83,8 +89,20 @@ suite('Helpers - shouldUseUv', () => {
 
         getUvEnvironmentsStub.resolves([]);
 
-        // Run
-        const result = await shouldUseUv(mockLog);
+        // Arrange - Create mock process that simulates successful uv --version
+        const mockProcess = new MockChildProcess('uv', ['--version']);
+        spawnStub.withArgs('uv', ['--version']).returns(mockProcess);
+
+        // Run - Call function and set up mock events in parallel
+        const resultPromise = shouldUseUv(mockLog);
+
+        // Simulate successful uv --version command
+        setTimeout(() => {
+            mockProcess.stdout?.emit('data', 'uv 0.1.0\n');
+            mockProcess.emit('exit', 0, null);
+        }, 10);
+
+        const result = await resultPromise;
 
         // Assert - Should return true when setting is true and UV is installed
         assert.strictEqual(result, true);
@@ -108,8 +126,20 @@ suite('Helpers - shouldUseUv', () => {
         getUvEnvironmentsStub.resolves([uvEnvPath]);
         mockConfig.get.withArgs('alwaysUseUv', true).returns(false);
 
-        // Run
-        const result = await shouldUseUv(mockLog, uvEnvPath);
+        // Arrange - Create mock process that simulates successful uv --version
+        const mockProcess = new MockChildProcess('uv', ['--version']);
+        spawnStub.withArgs('uv', ['--version']).returns(mockProcess);
+
+        // Run - Call function and set up mock events in parallel
+        const resultPromise = shouldUseUv(mockLog, uvEnvPath);
+
+        // Simulate successful uv --version command
+        setTimeout(() => {
+            mockProcess.stdout?.emit('data', 'uv 0.1.0\n');
+            mockProcess.emit('exit', 0, null);
+        }, 10);
+
+        const result = await resultPromise;
 
         // Assert - Should return true for UV environments when UV is installed
         assert.strictEqual(result, true);
@@ -134,8 +164,20 @@ suite('Helpers - shouldUseUv', () => {
         mockConfig.get.withArgs('alwaysUseUv', true).returns(true);
         getUvEnvironmentsStub.resolves([]);
 
-        // Run
-        const result = await shouldUseUv(mockLog, nonUvEnvPath);
+        // Arrange - Create mock process that simulates successful uv --version
+        const mockProcess = new MockChildProcess('uv', ['--version']);
+        spawnStub.withArgs('uv', ['--version']).returns(mockProcess);
+
+        // Run - Call function and set up mock events in parallel
+        const resultPromise = shouldUseUv(mockLog, nonUvEnvPath);
+
+        // Simulate successful uv --version command
+        setTimeout(() => {
+            mockProcess.stdout?.emit('data', 'uv 0.1.0\n');
+            mockProcess.emit('exit', 0, null);
+        }, 10);
+
+        const result = await resultPromise;
 
         // Assert - Should return true when alwaysUseUv is true and UV is installed
         assert.strictEqual(result, true);
@@ -146,8 +188,20 @@ suite('Helpers - shouldUseUv', () => {
         mockConfig.get.withArgs('alwaysUseUv', true).returns(true);
         getUvEnvironmentsStub.resolves([]);
 
-        // Run
-        const result = await shouldUseUv(mockLog);
+        // Arrange - Create mock process that simulates successful uv --version
+        const mockProcess = new MockChildProcess('uv', ['--version']);
+        spawnStub.withArgs('uv', ['--version']).returns(mockProcess);
+
+        // Run - Call function and set up mock events in parallel
+        const resultPromise = shouldUseUv(mockLog);
+
+        // Simulate successful uv --version command
+        setTimeout(() => {
+            mockProcess.stdout?.emit('data', 'uv 0.1.0\n');
+            mockProcess.emit('exit', 0, null);
+        }, 10);
+
+        const result = await resultPromise;
 
         // Assert - Should return true with default setting when UV is installed
         assert.strictEqual(result, true);
