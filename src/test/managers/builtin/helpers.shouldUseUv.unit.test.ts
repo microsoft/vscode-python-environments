@@ -7,9 +7,15 @@ import * as helpers from '../../../managers/builtin/helpers';
 import { shouldUseUv } from '../../../managers/builtin/helpers';
 import * as uvEnvironments from '../../../managers/builtin/uvEnvironments';
 
+interface MockWorkspaceConfig {
+    get: sinon.SinonStub;
+    inspect: sinon.SinonStub;
+    update: sinon.SinonStub;
+}
+
 suite('Helpers - shouldUseUv', () => {
-    let getConfigurationStub: sinon.SinonStub;
-    let mockConfig: { get: sinon.SinonStub };
+    let mockGetConfiguration: sinon.SinonStub;
+    let mockConfig: MockWorkspaceConfig;
     let mockLog: LogOutputChannel;
     let getWorkspacePersistentStateStub: sinon.SinonStub;
     let mockPersistentState: { get: sinon.SinonStub; set: sinon.SinonStub; clear: sinon.SinonStub };
@@ -20,11 +26,13 @@ suite('Helpers - shouldUseUv', () => {
         // Reset UV installation cache before each test to ensure clean state
         helpers.resetUvInstallationCache();
 
-        getConfigurationStub = sinon.stub(workspaceApis, 'getConfiguration');
+        mockGetConfiguration = sinon.stub(workspaceApis, 'getConfiguration');
         mockConfig = {
             get: sinon.stub(),
+            inspect: sinon.stub(),
+            update: sinon.stub(),
         };
-        getConfigurationStub.withArgs('python-envs').returns(mockConfig);
+        mockGetConfiguration.withArgs('python-envs').returns(mockConfig);
 
         // Mock persistent state
         getWorkspacePersistentStateStub = sinon.stub(persistentState, 'getWorkspacePersistentState');
@@ -67,6 +75,7 @@ suite('Helpers - shouldUseUv', () => {
     test('should return true when alwaysUseUv is true and UV is installed', async () => {
         // Mock - alwaysUseUv is true and UV is installed
         mockConfig.get.withArgs('alwaysUseUv', true).returns(true);
+        mockConfig.get.withArgs('alwaysUseUv').returns(true);
         isUvInstalledStub.resolves(true);
         getUvEnvironmentsStub.resolves([]);
 
