@@ -79,6 +79,7 @@ suite('Helpers - shouldUseUv', () => {
             globalLocalValue: true,
             globalValue: true,
         };
+        
         mockConfig.get.withArgs('alwaysUseUv', true).returns(true);
         mockConfig.get.withArgs('alwaysUseUv').returns(true);
         mockConfig.inspect.withArgs('alwaysUseUv').returns(mockInspectResult);
