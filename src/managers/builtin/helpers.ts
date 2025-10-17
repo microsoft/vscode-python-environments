@@ -44,6 +44,9 @@ export async function shouldUseUv(log?: LogOutputChannel, envPath?: string): Pro
     if (envPath) {
         // always use uv if the given environment is stored as a uv env
         const uvEnvs = await getUvEnvironments();
+        console.log(`UV Environments: ${uvEnvs.join(', ')}`);
+        console.log(`Checking if envPath ${envPath} is in UV environments`);
+        console.log(`isUVinstalled function: ${isUvInstalled(log)}`);
         if (uvEnvs.includes(envPath)) {
             return await isUvInstalled(log);
         }
