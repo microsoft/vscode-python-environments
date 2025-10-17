@@ -16,7 +16,9 @@ export function resetUvInstallationCache(): void {
 }
 
 export async function isUvInstalled(log?: LogOutputChannel): Promise<boolean> {
+    console.log('into isUvInstalled function');
     if (available.completed) {
+        console.log('UV installation status already determined');
         return available.promise;
     }
     log?.info(`Running: uv --version`);
@@ -61,6 +63,7 @@ export async function shouldUseUv(log?: LogOutputChannel, envPath?: string): Pro
     console.log(config.inspect<boolean>('alwaysUseUv')?.globalValue);
 
     if (alwaysUseUv) {
+        console.log(`alwaysUseUv is true, checking if UV is installed`);
         return await isUvInstalled(log);
     }
     return false;

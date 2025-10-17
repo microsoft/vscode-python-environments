@@ -4,7 +4,6 @@ import { LogOutputChannel } from 'vscode';
 import * as persistentState from '../../../common/persistentState';
 import * as workspaceApis from '../../../common/workspace.apis';
 import * as helpers from '../../../managers/builtin/helpers';
-import { shouldUseUv } from '../../../managers/builtin/helpers';
 import * as uvEnvironments from '../../../managers/builtin/uvEnvironments';
 
 interface MockWorkspaceConfig {
@@ -79,7 +78,7 @@ suite('Helpers - shouldUseUv', () => {
             globalLocalValue: true,
             globalValue: true,
         };
-        
+
         mockConfig.get.withArgs('alwaysUseUv', true).returns(true);
         mockConfig.get.withArgs('alwaysUseUv').returns(true);
         mockConfig.inspect.withArgs('alwaysUseUv').returns(mockInspectResult);
@@ -87,7 +86,7 @@ suite('Helpers - shouldUseUv', () => {
         getUvEnvironmentsStub.resolves([]);
 
         // Run
-        const result = await shouldUseUv(mockLog);
+        const result = await helpers.shouldUseUv(mockLog);
 
         // Assert - Should return true when setting is true and UV is installed
         assert.strictEqual(result, true);
@@ -99,7 +98,7 @@ suite('Helpers - shouldUseUv', () => {
         getUvEnvironmentsStub.resolves([]);
 
         // Run
-        const result = await shouldUseUv(mockLog);
+        const result = await helpers.shouldUseUv(mockLog);
 
         // Assert - Should not use UV when setting is false
         assert.strictEqual(result, false);
@@ -113,7 +112,7 @@ suite('Helpers - shouldUseUv', () => {
         mockConfig.get.withArgs('alwaysUseUv', true).returns(false);
 
         // Run
-        const result = await shouldUseUv(mockLog, uvEnvPath);
+        const result = await helpers.shouldUseUv(mockLog, uvEnvPath);
 
         // Assert - Should return true for UV environments when UV is installed
         assert.strictEqual(result, true);
@@ -126,7 +125,7 @@ suite('Helpers - shouldUseUv', () => {
         getUvEnvironmentsStub.resolves([]);
 
         // Run
-        const result = await shouldUseUv(mockLog, nonUvEnvPath);
+        const result = await helpers.shouldUseUv(mockLog, nonUvEnvPath);
 
         // Assert - Should not use UV for non-UV environments when setting is false
         assert.strictEqual(result, false);
@@ -140,7 +139,7 @@ suite('Helpers - shouldUseUv', () => {
         getUvEnvironmentsStub.resolves([]);
 
         // Run
-        const result = await shouldUseUv(mockLog, nonUvEnvPath);
+        const result = await helpers.shouldUseUv(mockLog, nonUvEnvPath);
 
         // Assert - Should return true when alwaysUseUv is true and UV is installed
         assert.strictEqual(result, true);
