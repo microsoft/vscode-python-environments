@@ -53,6 +53,9 @@ export async function shouldUseUv(log?: LogOutputChannel, envPath?: string): Pro
     const config = getConfiguration('python-envs');
     const alwaysUseUv = config.get<boolean>('alwaysUseUv', true);
 
+    console.log(`alwaysUseUv setting is ${alwaysUseUv}`);
+    console.log(config.inspect<boolean>('alwaysUseUv')?.globalValue);
+
     if (alwaysUseUv) {
         return await isUvInstalled(log);
     }

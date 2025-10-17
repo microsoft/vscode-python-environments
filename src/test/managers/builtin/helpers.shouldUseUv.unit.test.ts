@@ -76,6 +76,7 @@ suite('Helpers - shouldUseUv', () => {
         // Mock - alwaysUseUv is true and UV is installed
         mockConfig.get.withArgs('alwaysUseUv', true).returns(true);
         mockConfig.get.withArgs('alwaysUseUv').returns(true);
+        mockConfig.inspect.withArgs('alwaysUseUv').returns({ globalValue: true });
         isUvInstalledStub.resolves(true);
         getUvEnvironmentsStub.resolves([]);
 
