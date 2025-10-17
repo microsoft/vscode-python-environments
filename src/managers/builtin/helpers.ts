@@ -54,6 +54,7 @@ export async function shouldUseUv(log?: LogOutputChannel, envPath?: string): Pro
     const alwaysUseUv = config.get<boolean>('alwaysUseUv', true);
 
     console.log(`alwaysUseUv setting is ${alwaysUseUv}`);
+    console.log(config.inspect<boolean>('alwaysUseUv'));
     console.log(config.inspect<boolean>('alwaysUseUv')?.globalValue);
 
     if (alwaysUseUv) {

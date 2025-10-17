@@ -74,9 +74,14 @@ suite('Helpers - shouldUseUv', () => {
 
     test('should return true when alwaysUseUv is true and UV is installed', async () => {
         // Mock - alwaysUseUv is true and UV is installed
+        const mockInspectResult = {
+            globalRemoteValue: true,
+            globalLocalValue: true,
+            globalValue: true,
+        };
         mockConfig.get.withArgs('alwaysUseUv', true).returns(true);
         mockConfig.get.withArgs('alwaysUseUv').returns(true);
-        mockConfig.inspect.withArgs('alwaysUseUv').returns({ globalValue: true });
+        mockConfig.inspect.withArgs('alwaysUseUv').returns(mockInspectResult);
         isUvInstalledStub.resolves(true);
         getUvEnvironmentsStub.resolves([]);
 
