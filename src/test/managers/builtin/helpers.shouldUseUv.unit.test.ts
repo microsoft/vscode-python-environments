@@ -3,7 +3,7 @@ import * as sinon from 'sinon';
 import { LogOutputChannel } from 'vscode';
 import * as persistentState from '../../../common/persistentState';
 import * as workspaceApis from '../../../common/workspace.apis';
-import * as helpers from '../../../managers/builtin/helpers';
+import { resetUvInstallationCache, shouldUseUv } from '../../../managers/builtin/helpers';
 import * as uvEnvironments from '../../../managers/builtin/uvEnvironments';
 
 interface MockWorkspaceConfig {
@@ -18,12 +18,11 @@ suite('Helpers - shouldUseUv', () => {
     let mockLog: LogOutputChannel;
     let getWorkspacePersistentStateStub: sinon.SinonStub;
     let mockPersistentState: { get: sinon.SinonStub; set: sinon.SinonStub; clear: sinon.SinonStub };
-    let isUvInstalledStub: sinon.SinonStub;
     let getUvEnvironmentsStub: sinon.SinonStub;
 
     setup(() => {
         // Reset UV installation cache before each test to ensure clean state
-        helpers.resetUvInstallationCache();
+        resetUvInstallationCache();
 
         mockGetConfiguration = sinon.stub(workspaceApis, 'getConfiguration');
         mockConfig = {
@@ -43,7 +42,6 @@ suite('Helpers - shouldUseUv', () => {
         getWorkspacePersistentStateStub.returns(Promise.resolve(mockPersistentState));
 
         // Mock UV-related functions
-        isUvInstalledStub = sinon.stub(helpers, 'isUvInstalled');
         getUvEnvironmentsStub = sinon.stub(uvEnvironments, 'getUvEnvironments');
 
         // No default behaviors set - each test configures what it needs
@@ -82,11 +80,11 @@ suite('Helpers - shouldUseUv', () => {
         mockConfig.get.withArgs('alwaysUseUv', true).returns(true);
         mockConfig.get.withArgs('alwaysUseUv').returns(true);
         mockConfig.inspect.withArgs('alwaysUseUv').returns(mockInspectResult);
-        isUvInstalledStub.resolves(true);
+
         getUvEnvironmentsStub.resolves([]);
 
         // Run
-        const result = await helpers.shouldUseUv(mockLog);
+        const result = await shouldUseUv(mockLog);
 
         // Assert - Should return true when setting is true and UV is installed
         assert.strictEqual(result, true);
@@ -98,7 +96,7 @@ suite('Helpers - shouldUseUv', () => {
         getUvEnvironmentsStub.resolves([]);
 
         // Run
-        const result = await helpers.shouldUseUv(mockLog);
+        const result = await shouldUseUv(mockLog);
 
         // Assert - Should not use UV when setting is false
         assert.strictEqual(result, false);
@@ -108,11 +106,10 @@ suite('Helpers - shouldUseUv', () => {
         // Mock - UV environments list with test path and UV is installed
         const uvEnvPath = '/path/to/uv/env';
         getUvEnvironmentsStub.resolves([uvEnvPath]);
-        isUvInstalledStub.resolves(true);
         mockConfig.get.withArgs('alwaysUseUv', true).returns(false);
 
         // Run
-        const result = await helpers.shouldUseUv(mockLog, uvEnvPath);
+        const result = await shouldUseUv(mockLog, uvEnvPath);
 
         // Assert - Should return true for UV environments when UV is installed
         assert.strictEqual(result, true);
@@ -125,7 +122,7 @@ suite('Helpers - shouldUseUv', () => {
         getUvEnvironmentsStub.resolves([]);
 
         // Run
-        const result = await helpers.shouldUseUv(mockLog, nonUvEnvPath);
+        const result = await shouldUseUv(mockLog, nonUvEnvPath);
 
         // Assert - Should not use UV for non-UV environments when setting is false
         assert.strictEqual(result, false);
@@ -135,11 +132,10 @@ suite('Helpers - shouldUseUv', () => {
         // Mock - Non-UV environment, alwaysUseUv is true, UV is installed
         const nonUvEnvPath = '/path/to/regular/env';
         mockConfig.get.withArgs('alwaysUseUv', true).returns(true);
-        isUvInstalledStub.resolves(true);
         getUvEnvironmentsStub.resolves([]);
 
         // Run
-        const result = await helpers.shouldUseUv(mockLog, nonUvEnvPath);
+        const result = await shouldUseUv(mockLog, nonUvEnvPath);
 
         // Assert - Should return true when alwaysUseUv is true and UV is installed
         assert.strictEqual(result, true);
@@ -148,11 +144,10 @@ suite('Helpers - shouldUseUv', () => {
     test('should use default value true when alwaysUseUv setting is not configured', async () => {
         // Mock - Setting not configured, should use default of true, UV is installed
         mockConfig.get.withArgs('alwaysUseUv', true).returns(true);
-        isUvInstalledStub.resolves(true);
         getUvEnvironmentsStub.resolves([]);
 
         // Run
-        const result = await helpers.shouldUseUv(mockLog);
+        const result = await shouldUseUv(mockLog);
 
         // Assert - Should return true with default setting when UV is installed
         assert.strictEqual(result, true);
@@ -164,7 +159,7 @@ suite('Helpers - shouldUseUv', () => {
         getUvEnvironmentsStub.resolves([]);
 
         // Run
-        const result = await helpers.shouldUseUv(mockLog);
+        const result = await shouldUseUv(mockLog);
 
         // Assert - Should not use UV when setting is false
         assert.strictEqual(result, false);
