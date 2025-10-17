@@ -152,7 +152,7 @@ suite('Helpers - shouldUseUv', () => {
         getUvEnvironmentsStub.resolves([]);
 
         // Run
-        const result = await shouldUseUv(mockLog);
+        const result = await helpers.shouldUseUv(mockLog);
 
         // Assert - Should return true with default setting when UV is installed
         assert.strictEqual(result, true);
@@ -164,7 +164,7 @@ suite('Helpers - shouldUseUv', () => {
         getUvEnvironmentsStub.resolves([]);
 
         // Run
-        const result = await shouldUseUv(mockLog);
+        const result = await helpers.shouldUseUv(mockLog);
 
         // Assert - Should not use UV when setting is false
         assert.strictEqual(result, false);
