@@ -21,7 +21,7 @@ suite('Helpers - shouldUseUv', () => {
         mockConfig = {
             get: sinon.stub(),
         };
-        getConfigurationStub.returns(mockConfig);
+        getConfigurationStub.withArgs('python-envs').returns(mockConfig);
 
         // Mock persistent state
         getWorkspacePersistentStateStub = sinon.stub(persistentState, 'getWorkspacePersistentState');
