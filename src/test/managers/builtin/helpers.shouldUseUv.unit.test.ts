@@ -17,6 +17,9 @@ suite('Helpers - shouldUseUv', () => {
     let getUvEnvironmentsStub: sinon.SinonStub;
 
     setup(() => {
+        // Reset UV installation cache before each test to ensure clean state
+        helpers.resetUvInstallationCache();
+
         getConfigurationStub = sinon.stub(workspaceApis, 'getConfiguration');
         mockConfig = {
             get: sinon.stub(),

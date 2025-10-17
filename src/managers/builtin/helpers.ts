@@ -6,7 +6,15 @@ import { createDeferred } from '../../common/utils/deferred';
 import { getConfiguration } from '../../common/workspace.apis';
 import { getUvEnvironments } from './uvEnvironments';
 
-const available = createDeferred<boolean>();
+let available = createDeferred<boolean>();
+
+/**
+ * Reset the UV installation cache.
+ */
+export function resetUvInstallationCache(): void {
+    available = createDeferred<boolean>();
+}
+
 export async function isUvInstalled(log?: LogOutputChannel): Promise<boolean> {
     if (available.completed) {
         return available.promise;
