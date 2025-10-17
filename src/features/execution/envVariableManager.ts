@@ -37,11 +37,11 @@ export class PythonEnvVariableManager implements EnvVarManager {
     }
 
     async getEnvironmentVariables(
-        uri: Uri,
+        uri: Uri | undefined,
         overrides?: ({ [key: string]: string | undefined } | Uri)[],
         baseEnvVar?: { [key: string]: string | undefined },
     ): Promise<{ [key: string]: string | undefined }> {
-        const project = this.pm.get(uri);
+        const project = uri ? this.pm.get(uri) : undefined;
 
         const base = baseEnvVar || { ...process.env };
         let env = base;
