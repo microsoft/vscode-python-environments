@@ -70,10 +70,22 @@ async function isStartupSetup(profile: string, key: string): Promise<ShellSetupS
 }
 async function setupStartup(profile: string, key: string, name: string): Promise<boolean> {
     const shellIntegrationEnabled = await getShellIntegrationEnabledCache();
-    if ((shellIntegrationEnabled || (await shellIntegrationForActiveTerminal(name, profile))) && !isWsl()) {
+    // shellIntegrationEnabled should not be checked here, consider a shell setup where it's
+    // incompatible with our shell integration. `terminal.integrated.shellIntegration.enabled` sets
+    // whether we try to inject the script, not whether it will work. `.attemptToInject` would be a
+    // more accurate name for this.
+    //
+    // Doing it this way would handle these cases:
+    // - Inject failed (.shellIntegration won't be there)
+    // - Inject failed, but it was installed manually (.shelIntegration will be there)
+    if (await shellIntegrationForActiveTerminal(name, profile) && !isWsl()) {
         removeStartup(profile, key);
         return true;
     }
+
+    // We may have activated here, but not have command detection. Eg. shell integration injects,
+    // env activates, p10k disables our shell integration; we have activated, but don't know in the
+    // extension.
     const activationContent = getActivationContent(key);
     try {
         if (await fs.pathExists(profile)) {
@@ -89,6 +101,8 @@ async function setupStartup(profile: string, key: string, name: string): Promise
             await fs.writeFile(profile, insertStartupCode('', regionStart, regionEnd, activationContent));
             traceInfo(`SHELL: Created new ${name} profile at: ${profile}\n${activationContent}`);
         }
+
+        // If this fails for the first time, do we need a notification here telling the user to restart the terminal?
 
         return true;
     } catch (err) {

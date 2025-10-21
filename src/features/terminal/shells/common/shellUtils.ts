@@ -108,6 +108,17 @@ export async function shellIntegrationForActiveTerminal(name: string, profile?: 
     let hasShellIntegration = activeTerminalShellIntegration();
     let timeout = 0;
 
+    // Should use onDidChangeTerminalShellIntegration event instead of polling
+    // const result = Promise.race([
+    //   // Make sure event listener is disposed
+    //   new Promise(r => window.onDidChangeTerminalShellIntegration(() => r))),
+    //   // Note that you might not know when terminal started up, but this should be (fromNewTimeoutSetting - terminalOpened)
+    //   // It's important that the time the terminal is laucnhed is recorded and used, otherwise you might end up waiting 5s*2 if called twice
+    //   // terminalOpened = onDidOpenTerminal event time, or extension startup time (as it was already there)
+    //   timeout(fromNewTimeoutSetting)
+    // ]);
+    // // check result
+    // 500ms isn't long enough
     while (!hasShellIntegration && timeout < SHELL_INTEGRATION_TIMEOUT) {
         await sleep(SHELL_INTEGRATION_POLL_INTERVAL);
         timeout += SHELL_INTEGRATION_POLL_INTERVAL;
@@ -134,7 +145,11 @@ export function isWsl(): boolean {
 }
 
 export async function getShellIntegrationEnabledCache(): Promise<boolean> {
-    const persistentState = await getGlobalPersistentState();
+    // Cache doesn't do anything?
+    // const persistentState = await getGlobalPersistentState();
+    // if (persistentState.get(SHELL_INTEGRATION_STATE_KEY)) {
+    //     return
+    // }
     const shellIntegrationInspect =
         getConfiguration('terminal.integrated').inspect<boolean>('shellIntegration.enabled');
 
@@ -158,6 +173,6 @@ export async function getShellIntegrationEnabledCache(): Promise<boolean> {
         }
     }
 
-    await persistentState.set(SHELL_INTEGRATION_STATE_KEY, shellIntegrationEnabled);
+    // await persistentState.set(SHELL_INTEGRATION_STATE_KEY, shellIntegrationEnabled);
     return shellIntegrationEnabled;
 }

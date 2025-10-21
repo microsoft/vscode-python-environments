@@ -175,6 +175,7 @@ export class TerminalManagerImpl implements TerminalManager {
                             )}`,
                         );
 
+                        // TODO: This needs the same treatment as in setupStartup (bashStartup.ts)
                         if (
                             (shellIntegrationEnabled || (await shellIntegrationForActiveTerminal(p.name))) &&
                             !isWsl()
