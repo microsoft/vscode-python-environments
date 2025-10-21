@@ -1,5 +1,6 @@
 import {
     CancellationError,
+    Disposable,
     Event,
     EventEmitter,
     LogOutputChannel,
@@ -8,7 +9,6 @@ import {
     ThemeIcon,
     window,
 } from 'vscode';
-import { Disposable } from 'vscode-jsonrpc';
 import {
     DidChangePackagesEventArgs,
     IconPath,

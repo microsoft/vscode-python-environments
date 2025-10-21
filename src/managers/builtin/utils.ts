@@ -149,7 +149,7 @@ async function refreshPipPackagesRaw(environment: PythonEnvironment, log?: LogOu
     } catch (ex) {
         log?.error('Error running pip list', ex);
         log?.info(
-            'Installation attempted using pip, action can be done with uv if installed and setting `alwaysUseUv` is enabled.',
+            'Package list retrieval attempted using pip, action can be done with uv if installed and setting `alwaysUseUv` is enabled.',
         );
         throw ex;
     }

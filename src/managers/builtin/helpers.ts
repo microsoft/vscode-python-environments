@@ -16,9 +16,7 @@ export function resetUvInstallationCache(): void {
 }
 
 export async function isUvInstalled(log?: LogOutputChannel): Promise<boolean> {
-    console.log('into isUvInstalled function');
     if (available.completed) {
-        console.log('UV installation status already determined');
         return available.promise;
     }
     log?.info(`Running: uv --version`);
@@ -46,9 +44,6 @@ export async function shouldUseUv(log?: LogOutputChannel, envPath?: string): Pro
     if (envPath) {
         // always use uv if the given environment is stored as a uv env
         const uvEnvs = await getUvEnvironments();
-        console.log(`UV Environments: ${uvEnvs.join(', ')}`);
-        console.log(`Checking if envPath ${envPath} is in UV environments`);
-        console.log(`isUVinstalled function: ${isUvInstalled(log)}`);
         if (uvEnvs.includes(envPath)) {
             return await isUvInstalled(log);
         }
@@ -58,12 +53,7 @@ export async function shouldUseUv(log?: LogOutputChannel, envPath?: string): Pro
     const config = getConfiguration('python-envs');
     const alwaysUseUv = config.get<boolean>('alwaysUseUv', true);
 
-    console.log(`alwaysUseUv setting is ${alwaysUseUv}`);
-    console.log(config.inspect<boolean>('alwaysUseUv'));
-    console.log(config.inspect<boolean>('alwaysUseUv')?.globalValue);
-
     if (alwaysUseUv) {
-        console.log(`alwaysUseUv is true, checking if UV is installed`);
         return await isUvInstalled(log);
     }
     return false;

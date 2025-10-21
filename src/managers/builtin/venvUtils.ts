@@ -476,7 +476,6 @@ export async function resolveVenvPythonEnvironmentPath(
 
     if (resolved.kind === NativePythonEnvironmentKind.venv || resolved.kind === NativePythonEnvironmentKind.venvUv) {
         const envInfo = await getPythonInfo(resolved);
-        // can't decide on if I need anything here....
         return api.createPythonEnvironmentItem(envInfo, manager);
     }
 
