@@ -309,18 +309,8 @@ export class TerminalManagerImpl implements TerminalManager {
         // https://github.com/microsoft/vscode-python-environments/issues/172
         // const name = options.name ?? `Python: ${environment.displayName}`;
         const newTerminal = createTerminal({
-            name: options.name,
-            shellPath: options.shellPath,
-            shellArgs: options.shellArgs,
-            cwd: options.cwd,
+            ...options,
             env: envVars,
-            strictEnv: options.strictEnv,
-            message: options.message,
-            iconPath: options.iconPath,
-            hideFromUser: options.hideFromUser,
-            color: options.color,
-            location: options.location,
-            isTransient: options.isTransient,
         });
 
         if (autoActType === ACT_TYPE_COMMAND) {
