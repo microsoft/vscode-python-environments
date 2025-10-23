@@ -178,6 +178,7 @@ export async function getProjectInstallable(
         {
             location: ProgressLocation.Notification,
             title: VenvManagerStrings.searchingDependencies,
+            cancellable: true,
         },
         async (_progress, token) => {
             const results: Uri[] = (
