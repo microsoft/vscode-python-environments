@@ -1,7 +1,7 @@
 import * as path from 'path';
-import { Disposable, Terminal, TerminalOptions, Uri, window } from 'vscode';
+import { Disposable, Terminal, TerminalOptions, Uri } from 'vscode';
 import { PythonEnvironment, PythonProject, PythonProjectEnvironmentApi, PythonProjectGetterApi } from '../../api';
-import { onDidChangeTerminalShellIntegration } from '../../common/window.apis';
+import { onDidChangeTerminalShellIntegration, onDidWriteTerminalData } from '../../common/window.apis';
 import { getConfiguration, getWorkspaceFolders } from '../../common/workspace.apis';
 
 export const SHELL_INTEGRATION_TIMEOUT = 500; // 0.5 seconds
@@ -46,7 +46,7 @@ export async function waitForShellIntegration(terminal: Terminal): Promise<boole
             new Promise<boolean>((resolve) => {
                 let dataSoFar = '';
                 disposables.push(
-                    window.onDidWriteTerminalData((e) => {
+                    onDidWriteTerminalData((e) => {
                         if (e.terminal === terminal) {
                             dataSoFar += e.data;
                             const lines = dataSoFar.split(/\r?\n/);
