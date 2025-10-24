@@ -1,19 +1,115 @@
 import * as path from 'path';
-import { Terminal, TerminalOptions, Uri } from 'vscode';
+import { Terminal, TerminalOptions, Uri, window } from 'vscode';
 import { PythonEnvironment, PythonProject, PythonProjectEnvironmentApi, PythonProjectGetterApi } from '../../api';
-import { sleep } from '../../common/utils/asyncUtils';
 import { getConfiguration, getWorkspaceFolders } from '../../common/workspace.apis';
 
 export const SHELL_INTEGRATION_TIMEOUT = 500; // 0.5 seconds
 export const SHELL_INTEGRATION_POLL_INTERVAL = 20; // 0.02 seconds
 
+/**
+ * This function races three conditions:
+ * 1. Timeout based on VS Code's terminal.integrated.shellIntegration.timeout setting
+ * 2. Shell integration becoming available (window.onDidChangeTerminalShellIntegration event)
+ * 3. Detection of common prompt patterns in terminal output
+ */
 export async function waitForShellIntegration(terminal: Terminal): Promise<boolean> {
-    let timeout = 0;
-    while (!terminal.shellIntegration && timeout < SHELL_INTEGRATION_TIMEOUT) {
-        await sleep(SHELL_INTEGRATION_POLL_INTERVAL);
-        timeout += SHELL_INTEGRATION_POLL_INTERVAL;
+    if (terminal.shellIntegration) {
+        return true;
     }
-    return terminal.shellIntegration !== undefined;
+
+    const config = getConfiguration('terminal.integrated');
+    const timeoutValue = config.get<number | undefined>('shellIntegration.timeout');
+    const timeoutMs = timeoutValue === undefined || -1 ? 5000 : timeoutValue;
+
+    const disposables: { dispose(): void }[] = [];
+
+    try {
+        const result = await Promise.race([
+            // // Condition 1: Shell integration timeout setting
+            // new Promise<boolean>((resolve) => {
+            //     setTimeout(() => resolve(false), timeoutMs);
+            // }),
+
+            // // Condition 2: Shell integration becomes available
+            // new Promise<boolean>((resolve) => {
+            //     disposables.push(
+            //         onDidChangeTerminalShellIntegration((e) => {
+            //             if (e.terminal === terminal) {
+            //                 resolve(true);
+            //             }
+            //         }),
+            //     );
+            // }),
+
+            // Condition 3: Detect prompt patterns in terminal output
+            new Promise<boolean>((resolve) => {
+                let dataSoFar = '';
+                disposables.push(
+                    window.onDidWriteTerminalData((e) => {
+                        if (e.terminal === terminal) {
+                            dataSoFar += e.data;
+                            // TODO: Double check the regex.
+                            const lines = dataSoFar.split(/\r?\n/);
+                            const lastNonEmptyLine = lines.filter((line) => line.trim().length > 0).pop();
+
+                            if (lastNonEmptyLine && detectsCommonPromptPattern(lastNonEmptyLine)) {
+                                resolve(false);
+                            }
+                        }
+                    }),
+                );
+            }),
+        ]);
+
+        return result;
+    } finally {
+        disposables.forEach((d) => d.dispose());
+    }
+}
+
+/**
+ * Detects if the given text content appears to end with a common prompt pattern.
+ *
+ * @param cursorLine The line to check for prompt patterns
+ * @returns boolean indicating if a prompt pattern was detected
+ */
+function detectsCommonPromptPattern(cursorLine: string): boolean {
+    // PowerShell prompt: PS C:\> or similar patterns
+    if (/PS\s+[A-Z]:\\.*>\s*$/.test(cursorLine)) {
+        return true;
+    }
+
+    // Command Prompt: C:\path>
+    if (/^[A-Z]:\\.*>\s*$/.test(cursorLine)) {
+        return true;
+    }
+
+    // Bash-style prompts ending with $
+    if (/\$\s*$/.test(cursorLine)) {
+        return true;
+    }
+
+    // Root prompts ending with #
+    if (/#\s*$/.test(cursorLine)) {
+        return true;
+    }
+
+    // Python REPL prompt
+    if (/^>>>\s*$/.test(cursorLine)) {
+        return true;
+    }
+
+    // Custom prompts ending with the starship character (\u276f)
+    if (/\u276f\s*$/.test(cursorLine)) {
+        return true;
+    }
+
+    // Generic prompts ending with common prompt characters
+    if (/[>%]\s*$/.test(cursorLine)) {
+        return true;
+    }
+
+    return false;
 }
 
 export function isTaskTerminal(terminal: Terminal): boolean {
