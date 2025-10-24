@@ -10,7 +10,7 @@ export const SHELL_INTEGRATION_TIMEOUT = 500; // 0.5 seconds
 export const SHELL_INTEGRATION_POLL_INTERVAL = 20; // 0.02 seconds
 
 /**
- * This function races three conditions:
+ * Three conditions in a Promise.race:
  * 1. Timeout based on VS Code's terminal.integrated.shellIntegration.timeout setting
  * 2. Shell integration becoming available (window.onDidChangeTerminalShellIntegration event)
  * 3. Detection of common prompt patterns in terminal output
