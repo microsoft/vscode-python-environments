@@ -69,38 +69,39 @@ export async function waitForShellIntegration(terminal: Terminal): Promise<boole
 
 // Detects if the given text content appears to end with a common prompt pattern.
 function detectsCommonPromptPattern(terminalData: string): boolean {
+    const sanitizedTerminalData = removeAnsiEscapeCodes(terminalData);
     // PowerShell prompt: PS C:\> or similar patterns
-    if (/PS\s+[A-Z]:\\.*>\s*/.test(terminalData)) {
+    if (/PS\s+[A-Z]:\\.*>\s*$/.test(sanitizedTerminalData)) {
         return true;
     }
 
     // Command Prompt: C:\path>
-    if (/^[A-Z]:\\.*>\s*/.test(terminalData)) {
+    if (/^[A-Z]:\\.*>\s*$/.test(sanitizedTerminalData)) {
         return true;
     }
 
     // Bash-style prompts ending with $
-    if (/\$\s*/.test(terminalData)) {
+    if (/\$\s*$/.test(sanitizedTerminalData)) {
         return true;
     }
 
     // Root prompts ending with #
-    if (/#\s*/.test(terminalData)) {
+    if (/#\s*$/.test(sanitizedTerminalData)) {
         return true;
     }
 
     // Python REPL prompt
-    if (/^>>>\s*/.test(terminalData)) {
+    if (/^>>>\s*$/.test(sanitizedTerminalData)) {
         return true;
     }
 
     // Custom prompts ending with the starship character (\u276f)
-    if (/\u276f\s*/.test(terminalData)) {
+    if (/\u276f\s*$/.test(sanitizedTerminalData)) {
         return true;
     }
 
     // Generic prompts ending with common prompt characters
-    if (/[>%]\s*/.test(terminalData)) {
+    if (/[>%]\s*$/.test(sanitizedTerminalData)) {
         return true;
     }
 
@@ -261,4 +262,29 @@ export async function getAllDistinctProjectEnvironments(
     }
 
     return envs.length > 0 ? envs : undefined;
+}
+
+// Defacto standard: https://invisible-island.net/xterm/ctlseqs/ctlseqs.html
+const CSI_SEQUENCE = /(?:\x1b\[|\x9b)[=?>!]?[\d;:]*["$#'* ]?[a-zA-Z@^`{}|~]/;
+const OSC_SEQUENCE = /(?:\x1b\]|\x9d).*?(?:\x1b\\|\x07|\x9c)/;
+const ESC_SEQUENCE = /\x1b(?:[ #%\(\)\*\+\-\.\/]?[a-zA-Z0-9\|}~@])/;
+const CONTROL_SEQUENCES = new RegExp(
+    '(?:' + [CSI_SEQUENCE.source, OSC_SEQUENCE.source, ESC_SEQUENCE.source].join('|') + ')',
+    'g',
+);
+
+/**
+ * Strips ANSI escape sequences from a string.
+ * @param str The dastringa stringo strip the ANSI escape sequences from.
+ *
+ * @example
+ * removeAnsiEscapeCodes('\u001b[31mHello, World!\u001b[0m');
+ * // 'Hello, World!'
+ */
+export function removeAnsiEscapeCodes(str: string): string {
+    if (str) {
+        str = str.replace(CONTROL_SEQUENCES, '');
+    }
+
+    return str;
 }
