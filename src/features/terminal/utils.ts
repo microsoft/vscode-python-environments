@@ -69,6 +69,10 @@ export async function waitForShellIntegration(terminal: Terminal): Promise<boole
 
 // Detects if the given text content appears to end with a common prompt pattern.
 function detectsCommonPromptPattern(terminalData: string): boolean {
+    if (terminalData.trim().length === 0) {
+        return false;
+    }
+
     const sanitizedTerminalData = removeAnsiEscapeCodes(terminalData);
     // PowerShell prompt: PS C:\> or similar patterns
     if (/PS\s+[A-Z]:\\.*>\s*$/.test(sanitizedTerminalData)) {
