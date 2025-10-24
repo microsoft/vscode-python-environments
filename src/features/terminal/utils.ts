@@ -1,6 +1,7 @@
 import * as path from 'path';
 import { Disposable, Terminal, TerminalOptions, Uri } from 'vscode';
 import { PythonEnvironment, PythonProject, PythonProjectEnvironmentApi, PythonProjectGetterApi } from '../../api';
+import { timeout } from '../../common/utils/asyncUtils';
 import { onDidChangeTerminalShellIntegration, onDidWriteTerminalData } from '../../common/window.apis';
 import { getConfiguration, getWorkspaceFolders } from '../../common/workspace.apis';
 
@@ -27,9 +28,7 @@ export async function waitForShellIntegration(terminal: Terminal): Promise<boole
     try {
         const result = await Promise.race([
             // Condition 1: Shell integration timeout setting
-            new Promise<boolean>((resolve) => {
-                setTimeout(() => resolve(false), timeoutMs);
-            }),
+            timeout(timeoutMs).then(() => false),
 
             // Condition 2: Shell integration becomes available
             new Promise<boolean>((resolve) => {
