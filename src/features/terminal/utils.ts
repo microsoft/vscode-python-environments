@@ -49,9 +49,7 @@ export async function waitForShellIntegration(terminal: Terminal): Promise<boole
                     onDidWriteTerminalData((e) => {
                         if (e.terminal === terminal) {
                             dataSoFar += e.data;
-                            const lines = dataSoFar.split(/\r?\n/);
-                            const lastNonEmptyLine = lines.filter((line) => line.trim().length > 0).pop();
-                            if (lastNonEmptyLine && detectsCommonPromptPattern(lastNonEmptyLine)) {
+                            if (dataSoFar && detectsCommonPromptPattern(dataSoFar)) {
                                 resolve(false);
                             }
                         }
@@ -66,45 +64,40 @@ export async function waitForShellIntegration(terminal: Terminal): Promise<boole
     }
 }
 
-/**
- * Detects if the given text content appears to end with a common prompt pattern.
- *
- * @param cursorLine The line to check for prompt patterns
- * @returns boolean indicating if a prompt pattern was detected
- */
+// Detects if the given text content appears to end with a common prompt pattern.
 function detectsCommonPromptPattern(cursorLine: string): boolean {
     // PowerShell prompt: PS C:\> or similar patterns
-    if (/PS\s+[A-Z]:\\.*>\s*$/.test(cursorLine)) {
+    if (/PS\s+[A-Z]:\\.*>\s*/.test(cursorLine)) {
         return true;
     }
 
     // Command Prompt: C:\path>
-    if (/^[A-Z]:\\.*>\s*$/.test(cursorLine)) {
+    if (/^[A-Z]:\\.*>\s*/.test(cursorLine)) {
         return true;
     }
 
     // Bash-style prompts ending with $
-    if (/\$\s*$/.test(cursorLine)) {
+    if (/\$\s*/.test(cursorLine)) {
         return true;
     }
 
     // Root prompts ending with #
-    if (/#\s*$/.test(cursorLine)) {
+    if (/#\s*/.test(cursorLine)) {
         return true;
     }
 
     // Python REPL prompt
-    if (/^>>>\s*$/.test(cursorLine)) {
+    if (/^>>>\s*/.test(cursorLine)) {
         return true;
     }
 
     // Custom prompts ending with the starship character (\u276f)
-    if (/\u276f\s*$/.test(cursorLine)) {
+    if (/\u276f\s*/.test(cursorLine)) {
         return true;
     }
 
     // Generic prompts ending with common prompt characters
-    if (/[>%]\s*$/.test(cursorLine)) {
+    if (/[>%]\s*/.test(cursorLine)) {
         return true;
     }
 
