@@ -64,39 +64,39 @@ export async function waitForShellIntegration(terminal: Terminal): Promise<boole
 }
 
 // Detects if the given text content appears to end with a common prompt pattern.
-function detectsCommonPromptPattern(cursorLine: string): boolean {
+function detectsCommonPromptPattern(terminalData: string): boolean {
     // PowerShell prompt: PS C:\> or similar patterns
-    if (/PS\s+[A-Z]:\\.*>\s*/.test(cursorLine)) {
+    if (/PS\s+[A-Z]:\\.*>\s*/.test(terminalData)) {
         return true;
     }
 
     // Command Prompt: C:\path>
-    if (/^[A-Z]:\\.*>\s*/.test(cursorLine)) {
+    if (/^[A-Z]:\\.*>\s*/.test(terminalData)) {
         return true;
     }
 
     // Bash-style prompts ending with $
-    if (/\$\s*/.test(cursorLine)) {
+    if (/\$\s*/.test(terminalData)) {
         return true;
     }
 
     // Root prompts ending with #
-    if (/#\s*/.test(cursorLine)) {
+    if (/#\s*/.test(terminalData)) {
         return true;
     }
 
     // Python REPL prompt
-    if (/^>>>\s*/.test(cursorLine)) {
+    if (/^>>>\s*/.test(terminalData)) {
         return true;
     }
 
     // Custom prompts ending with the starship character (\u276f)
-    if (/\u276f\s*/.test(cursorLine)) {
+    if (/\u276f\s*/.test(terminalData)) {
         return true;
     }
 
     // Generic prompts ending with common prompt characters
-    if (/[>%]\s*/.test(cursorLine)) {
+    if (/[>%]\s*/.test(terminalData)) {
         return true;
     }
 
