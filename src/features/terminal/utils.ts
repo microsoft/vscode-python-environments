@@ -1,6 +1,7 @@
 import * as path from 'path';
-import { Terminal, TerminalOptions, Uri, window } from 'vscode';
+import { Disposable, Terminal, TerminalOptions, Uri, window } from 'vscode';
 import { PythonEnvironment, PythonProject, PythonProjectEnvironmentApi, PythonProjectGetterApi } from '../../api';
+import { onDidChangeTerminalShellIntegration } from '../../common/window.apis';
 import { getConfiguration, getWorkspaceFolders } from '../../common/workspace.apis';
 
 export const SHELL_INTEGRATION_TIMEOUT = 500; // 0.5 seconds
@@ -21,25 +22,25 @@ export async function waitForShellIntegration(terminal: Terminal): Promise<boole
     const timeoutValue = config.get<number | undefined>('shellIntegration.timeout');
     const timeoutMs = timeoutValue === undefined || -1 ? 5000 : timeoutValue;
 
-    const disposables: { dispose(): void }[] = [];
+    const disposables: Disposable[] = [];
 
     try {
         const result = await Promise.race([
-            // // Condition 1: Shell integration timeout setting
-            // new Promise<boolean>((resolve) => {
-            //     setTimeout(() => resolve(false), timeoutMs);
-            // }),
+            // Condition 1: Shell integration timeout setting
+            new Promise<boolean>((resolve) => {
+                setTimeout(() => resolve(false), timeoutMs);
+            }),
 
-            // // Condition 2: Shell integration becomes available
-            // new Promise<boolean>((resolve) => {
-            //     disposables.push(
-            //         onDidChangeTerminalShellIntegration((e) => {
-            //             if (e.terminal === terminal) {
-            //                 resolve(true);
-            //             }
-            //         }),
-            //     );
-            // }),
+            // Condition 2: Shell integration becomes available
+            new Promise<boolean>((resolve) => {
+                disposables.push(
+                    onDidChangeTerminalShellIntegration((e) => {
+                        if (e.terminal === terminal) {
+                            resolve(true);
+                        }
+                    }),
+                );
+            }),
 
             // Condition 3: Detect prompt patterns in terminal output
             new Promise<boolean>((resolve) => {
@@ -48,10 +49,8 @@ export async function waitForShellIntegration(terminal: Terminal): Promise<boole
                     window.onDidWriteTerminalData((e) => {
                         if (e.terminal === terminal) {
                             dataSoFar += e.data;
-                            // TODO: Double check the regex.
                             const lines = dataSoFar.split(/\r?\n/);
                             const lastNonEmptyLine = lines.filter((line) => line.trim().length > 0).pop();
-
                             if (lastNonEmptyLine && detectsCommonPromptPattern(lastNonEmptyLine)) {
                                 resolve(false);
                             }
