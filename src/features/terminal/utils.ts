@@ -2,6 +2,7 @@ import * as path from 'path';
 import { Disposable, Terminal, TerminalOptions, Uri } from 'vscode';
 import { PythonEnvironment, PythonProject, PythonProjectEnvironmentApi, PythonProjectGetterApi } from '../../api';
 import { timeout } from '../../common/utils/asyncUtils';
+import { createSimpleDebounce } from '../../common/utils/debounce';
 import { onDidChangeTerminalShellIntegration, onDidWriteTerminalData } from '../../common/window.apis';
 import { getConfiguration, getWorkspaceFolders } from '../../common/workspace.apis';
 
@@ -44,13 +45,16 @@ export async function waitForShellIntegration(terminal: Terminal): Promise<boole
             // Condition 3: Detect prompt patterns in terminal output
             new Promise<boolean>((resolve) => {
                 let dataSoFar = '';
+                const debounced = createSimpleDebounce(50, () => {
+                    if (dataSoFar && detectsCommonPromptPattern(dataSoFar)) {
+                        resolve(false);
+                    }
+                });
                 disposables.push(
                     onDidWriteTerminalData((e) => {
                         if (e.terminal === terminal) {
                             dataSoFar += e.data;
-                            if (dataSoFar && detectsCommonPromptPattern(dataSoFar)) {
-                                resolve(false);
-                            }
+                            debounced.trigger();
                         }
                     }),
                 );
