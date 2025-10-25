@@ -1,20 +1,11 @@
-import { Disposable } from 'vscode';
-
-export interface SimpleDebounce extends Disposable {
+export interface SimpleDebounce {
     trigger(): void;
 }
 
-class SimpleDebounceImpl extends Disposable {
+class SimpleDebounceImpl {
     private timeout: NodeJS.Timeout | undefined;
 
-    constructor(private readonly ms: number, private readonly callback: () => void) {
-        super(() => {
-            if (this.timeout) {
-                clearTimeout(this.timeout);
-                this.timeout = undefined;
-            }
-        });
-    }
+    constructor(private readonly ms: number, private readonly callback: () => void) {}
 
     public trigger() {
         if (this.timeout) {
@@ -23,12 +14,6 @@ class SimpleDebounceImpl extends Disposable {
         this.timeout = setTimeout(() => {
             this.callback();
         }, this.ms);
-    }
-
-    public dispose() {
-        if (this.timeout) {
-            clearTimeout(this.timeout);
-        }
     }
 }
 
