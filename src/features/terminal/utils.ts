@@ -44,7 +44,7 @@ export async function waitForShellIntegration(terminal: Terminal): Promise<boole
 
             // Condition 3: Detect prompt patterns in terminal output
             new Promise<boolean>((resolve) => {
-                const dataEvents: string = [];
+                const dataEvents: string[] = [];
                 const debounced = createSimpleDebounce(50, () => {
                     if (dataEvents && detectsCommonPromptPattern(dataEvents.join(''))) {
                         resolve(false);
