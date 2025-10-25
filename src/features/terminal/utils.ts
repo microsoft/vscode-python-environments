@@ -1,5 +1,5 @@
 import * as path from 'path';
-import { Disposable, Terminal, TerminalOptions, Uri } from 'vscode';
+import { Disposable, env, Terminal, TerminalOptions, Uri } from 'vscode';
 import { PythonEnvironment, PythonProject, PythonProjectEnvironmentApi, PythonProjectGetterApi } from '../../api';
 import { timeout } from '../../common/utils/asyncUtils';
 import { createSimpleDebounce } from '../../common/utils/debounce';
@@ -21,8 +21,15 @@ export async function waitForShellIntegration(terminal: Terminal): Promise<boole
     }
 
     const config = getConfiguration('terminal.integrated');
+    const shellIntegrationEnabled = config.get<boolean>('shellIntegration.enabled', true);
     const timeoutValue = config.get<number | undefined>('shellIntegration.timeout');
-    const timeoutMs = timeoutValue === undefined || -1 ? 5000 : timeoutValue;
+    const isRemote = env.remoteName !== undefined;
+    let timeoutMs: number;
+    if (typeof timeoutValue !== 'number' || timeoutValue < 0) {
+        timeoutMs = shellIntegrationEnabled ? 5000 : isRemote ? 3000 : 2000;
+    } else {
+        timeoutMs = Math.max(timeoutValue, 500);
+    }
 
     const disposables: Disposable[] = [];
 
