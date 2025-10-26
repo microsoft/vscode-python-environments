@@ -170,6 +170,41 @@ export class PythonProjectManagerImpl implements PythonProjectManager {
         this._onDidChangeProjects.fire(Array.from(this._projects.values()));
     }
 
+    /**
+     * Update a project by removing the old one and adding a new one with updated properties.
+     * @param existingUri The URI of the project to update.
+     * @param newName The new name for the project (optional, defaults to old name).
+     * @param newUri The new URI for the project (optional, defaults to old URI).
+     * @param newOptions New options for the project (optional, merged with old options).
+     */
+    async modifyProject(
+        existingUri: Uri,
+        newName?: string,
+        newUri?: Uri,
+        newOptions?: { description?: string; tooltip?: string | MarkdownString; iconPath?: IconPath },
+    ): Promise<void> {
+        const project = this.get(existingUri);
+        if (!project) {
+            return;
+        }
+
+        // Remove the old project
+        this.remove(project);
+
+        // Prepare new values
+        const name = newName ?? project.name;
+        const uri = newUri ?? project.uri;
+        const options = {
+            description: newOptions?.description ?? project.description,
+            tooltip: newOptions?.tooltip ?? project.tooltip,
+            iconPath: newOptions?.iconPath ?? (project as PythonProjectsImpl).iconPath,
+        };
+
+        // Create and add the new project
+        const updatedProject = this.create(name, uri, options);
+        await this.add(updatedProject);
+    }
+
     getProjects(uris?: Uri[]): ReadonlyArray<PythonProject> {
         if (uris === undefined) {
             return Array.from(this._projects.values());
