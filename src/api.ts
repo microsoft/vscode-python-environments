@@ -739,6 +739,13 @@ export type PackageManagementOptions =
            * Show option to skip package installation or uninstallation.
            */
           showSkipOption?: boolean;
+
+          /**
+           * Suppress showing a progress notification when managing packages.
+           * Used when package management is part of a larger operation with its own progress notification.
+           */
+          suppressProgress?: boolean;
+
           /**
            * The list of packages to install.
            */
@@ -759,6 +766,13 @@ export type PackageManagementOptions =
            * Show option to skip package installation or uninstallation.
            */
           showSkipOption?: boolean;
+
+          /**
+           * Suppress showing a progress notification when managing packages.
+           * Used when package management is part of a larger operation with its own progress notification.
+           */
+          suppressProgress?: boolean;
+
           /**
            * The list of packages to install.
            */
