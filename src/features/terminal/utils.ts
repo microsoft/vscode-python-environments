@@ -57,6 +57,7 @@ export async function waitForShellIntegration(terminal: Terminal): Promise<boole
                         resolve(false);
                     }
                 });
+                disposables.push(debounced);
                 disposables.push(
                     onDidWriteTerminalData((e) => {
                         if (e.terminal === terminal) {
