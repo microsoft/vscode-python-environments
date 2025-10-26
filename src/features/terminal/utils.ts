@@ -1,19 +1,123 @@
 import * as path from 'path';
-import { Terminal, TerminalOptions, Uri } from 'vscode';
+import { Disposable, env, Terminal, TerminalOptions, Uri } from 'vscode';
 import { PythonEnvironment, PythonProject, PythonProjectEnvironmentApi, PythonProjectGetterApi } from '../../api';
-import { sleep } from '../../common/utils/asyncUtils';
+import { timeout } from '../../common/utils/asyncUtils';
+import { createSimpleDebounce } from '../../common/utils/debounce';
+import { onDidChangeTerminalShellIntegration, onDidWriteTerminalData } from '../../common/window.apis';
 import { getConfiguration, getWorkspaceFolders } from '../../common/workspace.apis';
 
 export const SHELL_INTEGRATION_TIMEOUT = 500; // 0.5 seconds
 export const SHELL_INTEGRATION_POLL_INTERVAL = 20; // 0.02 seconds
 
+/**
+ * Three conditions in a Promise.race:
+ * 1. Timeout based on VS Code's terminal.integrated.shellIntegration.timeout setting
+ * 2. Shell integration becoming available (window.onDidChangeTerminalShellIntegration event)
+ * 3. Detection of common prompt patterns in terminal output
+ */
 export async function waitForShellIntegration(terminal: Terminal): Promise<boolean> {
-    let timeout = 0;
-    while (!terminal.shellIntegration && timeout < SHELL_INTEGRATION_TIMEOUT) {
-        await sleep(SHELL_INTEGRATION_POLL_INTERVAL);
-        timeout += SHELL_INTEGRATION_POLL_INTERVAL;
+    if (terminal.shellIntegration) {
+        return true;
     }
-    return terminal.shellIntegration !== undefined;
+
+    const config = getConfiguration('terminal.integrated');
+    const shellIntegrationEnabled = config.get<boolean>('shellIntegration.enabled', true);
+    const timeoutValue = config.get<number | undefined>('shellIntegration.timeout');
+    const isRemote = env.remoteName !== undefined;
+    let timeoutMs: number;
+    if (typeof timeoutValue !== 'number' || timeoutValue < 0) {
+        timeoutMs = shellIntegrationEnabled ? 5000 : isRemote ? 3000 : 2000;
+    } else {
+        timeoutMs = Math.max(timeoutValue, 500);
+    }
+
+    const disposables: Disposable[] = [];
+
+    try {
+        const result = await Promise.race([
+            // Condition 1: Shell integration timeout setting
+            timeout(timeoutMs).then(() => false),
+
+            // Condition 2: Shell integration becomes available
+            new Promise<boolean>((resolve) => {
+                disposables.push(
+                    onDidChangeTerminalShellIntegration((e) => {
+                        if (e.terminal === terminal) {
+                            resolve(true);
+                        }
+                    }),
+                );
+            }),
+
+            // Condition 3: Detect prompt patterns in terminal output
+            new Promise<boolean>((resolve) => {
+                const dataEvents: string[] = [];
+                const debounced = createSimpleDebounce(50, () => {
+                    if (dataEvents && detectsCommonPromptPattern(dataEvents.join(''))) {
+                        resolve(false);
+                    }
+                });
+                disposables.push(debounced);
+                disposables.push(
+                    onDidWriteTerminalData((e) => {
+                        if (e.terminal === terminal) {
+                            dataEvents.push(e.data);
+                            debounced.trigger();
+                        }
+                    }),
+                );
+            }),
+        ]);
+
+        return result;
+    } finally {
+        disposables.forEach((d) => d.dispose());
+    }
+}
+
+// Detects if the given text content appears to end with a common prompt pattern.
+function detectsCommonPromptPattern(terminalData: string): boolean {
+    if (terminalData.trim().length === 0) {
+        return false;
+    }
+
+    const sanitizedTerminalData = removeAnsiEscapeCodes(terminalData);
+    // PowerShell prompt: PS C:\> or similar patterns
+    if (/PS\s+[A-Z]:\\.*>\s*$/.test(sanitizedTerminalData)) {
+        return true;
+    }
+
+    // Command Prompt: C:\path>
+    if (/^[A-Z]:\\.*>\s*$/.test(sanitizedTerminalData)) {
+        return true;
+    }
+
+    // Bash-style prompts ending with $
+    if (/\$\s*$/.test(sanitizedTerminalData)) {
+        return true;
+    }
+
+    // Root prompts ending with #
+    if (/#\s*$/.test(sanitizedTerminalData)) {
+        return true;
+    }
+
+    // Python REPL prompt
+    if (/^>>>\s*$/.test(sanitizedTerminalData)) {
+        return true;
+    }
+
+    // Custom prompts ending with the starship character (\u276f)
+    if (/\u276f\s*$/.test(sanitizedTerminalData)) {
+        return true;
+    }
+
+    // Generic prompts ending with common prompt characters
+    if (/[>%]\s*$/.test(sanitizedTerminalData)) {
+        return true;
+    }
+
+    return false;
 }
 
 export function isTaskTerminal(terminal: Terminal): boolean {
@@ -170,4 +274,29 @@ export async function getAllDistinctProjectEnvironments(
     }
 
     return envs.length > 0 ? envs : undefined;
+}
+
+// Defacto standard: https://invisible-island.net/xterm/ctlseqs/ctlseqs.html
+const CSI_SEQUENCE = /(?:\x1b\[|\x9b)[=?>!]?[\d;:]*["$#'* ]?[a-zA-Z@^`{}|~]/;
+const OSC_SEQUENCE = /(?:\x1b\]|\x9d).*?(?:\x1b\\|\x07|\x9c)/;
+const ESC_SEQUENCE = /\x1b(?:[ #%\(\)\*\+\-\.\/]?[a-zA-Z0-9\|}~@])/;
+const CONTROL_SEQUENCES = new RegExp(
+    '(?:' + [CSI_SEQUENCE.source, OSC_SEQUENCE.source, ESC_SEQUENCE.source].join('|') + ')',
+    'g',
+);
+
+/**
+ * Strips ANSI escape sequences from a string.
+ * @param str The dastringa stringo strip the ANSI escape sequences from.
+ *
+ * @example
+ * removeAnsiEscapeCodes('\u001b[31mHello, World!\u001b[0m');
+ * // 'Hello, World!'
+ */
+export function removeAnsiEscapeCodes(str: string): string {
+    if (str) {
+        str = str.replace(CONTROL_SEQUENCES, '');
+    }
+
+    return str;
 }

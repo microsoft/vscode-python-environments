@@ -49,6 +49,14 @@ export function onDidChangeTerminalShellIntegration(
     return window.onDidChangeTerminalShellIntegration(listener, thisArgs, disposables);
 }
 
+export function onDidWriteTerminalData(
+    listener: (e: { readonly terminal: Terminal; readonly data: string }) => any,
+    thisArgs?: any,
+    disposables?: Disposable[],
+): Disposable {
+    return window.onDidWriteTerminalData(listener, thisArgs, disposables);
+}
+
 export function showOpenDialog(options?: OpenDialogOptions): Thenable<Uri[] | undefined> {
     return window.showOpenDialog(options);
 }

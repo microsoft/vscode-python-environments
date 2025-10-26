@@ -13,6 +13,14 @@ export function noop() {
     // do nothing
 }
 
+/**
+ * In **contrast** to just checking `typeof` this will return `false` for `NaN`.
+ * @returns whether the provided parameter is a JavaScript Number or not.
+ */
+export function isNumber(obj: unknown): obj is number {
+    return typeof obj === 'number' && !isNaN(obj);
+}
+
 export function shortVersion(version: string): string {
     const pattern = /(\d)\.(\d+)(?:\.(\d+)?)?/gm;
     const match = pattern.exec(version);
