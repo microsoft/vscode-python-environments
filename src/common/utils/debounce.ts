@@ -20,7 +20,6 @@ class SimpleDebounceImpl implements SimpleDebounce {
     public dispose(): void {
         if (this.timeout) {
             clearTimeout(this.timeout);
-            this.timeout = undefined;
         }
     }
 }
