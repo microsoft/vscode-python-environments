@@ -1,7 +1,7 @@
 import { PythonCommandRunConfiguration, PythonEnvironment } from '../../../../api';
 import { traceInfo } from '../../../../common/logging';
 import { getGlobalPersistentState } from '../../../../common/persistentState';
-import { sleep } from '../../../../common/utils/asyncUtils';
+import { timeout } from '../../../../common/utils/asyncUtils';
 import { isWindows } from '../../../../common/utils/platformUtils';
 import { activeTerminalShellIntegration } from '../../../../common/window.apis';
 import { getConfiguration } from '../../../../common/workspace.apis';
@@ -106,11 +106,11 @@ export function extractProfilePath(content: string): string | undefined {
 
 export async function shellIntegrationForActiveTerminal(name: string, profile?: string): Promise<boolean> {
     let hasShellIntegration = activeTerminalShellIntegration();
-    let timeout = 0;
+    let timeOutstamp = 0;
 
-    while (!hasShellIntegration && timeout < SHELL_INTEGRATION_TIMEOUT) {
-        await sleep(SHELL_INTEGRATION_POLL_INTERVAL);
-        timeout += SHELL_INTEGRATION_POLL_INTERVAL;
+    while (!hasShellIntegration && timeOutstamp < SHELL_INTEGRATION_TIMEOUT) {
+        await timeout(SHELL_INTEGRATION_POLL_INTERVAL);
+        timeOutstamp += SHELL_INTEGRATION_POLL_INTERVAL;
         hasShellIntegration = activeTerminalShellIntegration();
     }
 
