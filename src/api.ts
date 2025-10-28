@@ -1237,12 +1237,13 @@ export interface PythonEnvironmentVariablesApi {
      * 3. `.env` file at the root of the python project.
      * 4. `overrides` in the order provided.
      *
-     * @param uri The URI of the project, workspace or a file in a for which environment variables are required.
+     * @param uri The URI of the project, workspace or a file in a for which environment variables are required.If not provided,
+     * it fetches the environment variables for the global scope.
      * @param overrides Additional environment variables to override the defaults.
      * @param baseEnvVar The base environment variables that should be used as a starting point.
      */
     getEnvironmentVariables(
-        uri: Uri,
+        uri: Uri | undefined,
         overrides?: ({ [key: string]: string | undefined } | Uri)[],
         baseEnvVar?: { [key: string]: string | undefined },
     ): Promise<{ [key: string]: string | undefined }>;
