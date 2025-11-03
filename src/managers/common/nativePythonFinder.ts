@@ -69,6 +69,7 @@ export enum NativePythonEnvironmentKind {
     linuxGlobal = 'LinuxGlobal',
     macXCode = 'MacXCode',
     venv = 'Venv',
+    venvUv = 'Uv',
     virtualEnv = 'VirtualEnv',
     virtualEnvWrapper = 'VirtualEnvWrapper',
     windowsStore = 'WindowsStore',

@@ -1,5 +1,6 @@
 import {
     CancellationError,
+    Disposable,
     Event,
     EventEmitter,
     LogOutputChannel,
@@ -18,10 +19,9 @@ import {
     PythonEnvironment,
     PythonEnvironmentApi,
 } from '../../api';
-import { managePackages, refreshPackages } from './utils';
-import { Disposable } from 'vscode-jsonrpc';
-import { VenvManager } from './venvManager';
 import { getWorkspacePackagesToInstall } from './pipUtils';
+import { managePackages, refreshPackages } from './utils';
+import { VenvManager } from './venvManager';
 
 function getChanges(before: Package[], after: Package[]): { kind: PackageChangeKind; pkg: Package }[] {
     const changes: { kind: PackageChangeKind; pkg: Package }[] = [];

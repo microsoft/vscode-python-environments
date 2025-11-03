@@ -18,7 +18,7 @@ import {
     NativePythonFinder,
 } from '../common/nativePythonFinder';
 import { shortVersion, sortEnvironments } from '../common/utils';
-import { isUvInstalled, runPython, runUV } from './helpers';
+import { runPython, runUV, shouldUseUv } from './helpers';
 import { parsePipList, PipPackage } from './pipListUtils';
 
 function asPackageQuickPickItem(name: string, version?: string): QuickPickItem {
@@ -139,11 +139,20 @@ export async function refreshPythons(
 }
 
 async function refreshPipPackagesRaw(environment: PythonEnvironment, log?: LogOutputChannel): Promise<string> {
-    const useUv = await isUvInstalled();
+    // Use environmentPath directly for consistency with UV environment tracking
+    const useUv = await shouldUseUv(log, environment.environmentPath.fsPath);
     if (useUv) {
         return await runUV(['pip', 'list', '--python', environment.execInfo.run.executable], undefined, log);
     }
-    return await runPython(environment.execInfo.run.executable, ['-m', 'pip', 'list'], undefined, log);
+    try {
+        return await runPython(environment.execInfo.run.executable, ['-m', 'pip', 'list'], undefined, log);
+    } catch (ex) {
+        log?.error('Error running pip list', ex);
+        log?.info(
+            'Package list retrieval attempted using pip, action can be done with uv if installed and setting `alwaysUseUv` is enabled.',
+        );
+        throw ex;
+    }
 }
 
 export async function refreshPipPackages(
@@ -194,7 +203,8 @@ export async function managePackages(
         throw new Error('Python 2.* is not supported (deprecated)');
     }
 
-    const useUv = await isUvInstalled();
+    // Use environmentPath directly for consistency with UV environment tracking
+    const useUv = await shouldUseUv(manager.log, environment.environmentPath.fsPath);
     const uninstallArgs = ['pip', 'uninstall'];
     if (options.uninstall && options.uninstall.length > 0) {
         if (useUv) {

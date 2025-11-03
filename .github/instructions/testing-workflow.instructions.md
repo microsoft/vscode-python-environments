@@ -537,6 +537,22 @@ envConfig.inspect
 -   ❌ Tests that don't clean up mocks properly
 -   ❌ Overly complex test setup that's hard to understand
 
+## 🔄 Reviewing and Improving Existing Tests
+
+### Quick Review Process
+
+1. **Read test files** - Check structure and mock setup
+2. **Run tests** - Establish baseline functionality
+3. **Apply improvements** - Use patterns below
+4. **Verify** - Ensure tests still pass
+
+### Common Fixes
+
+-   Over-complex mocks → Minimal mocks with only needed methods
+-   Brittle assertions → Behavior-focused with error messages
+-   Vague test names → Clear scenario descriptions
+-   Missing structure → Mock → Run → Assert pattern
+
 ## 🧠 Agent Learnings
 
 -   Always use dynamic path construction with Node.js `path` module when testing functions that resolve paths against workspace folders to ensure cross-platform compatibility (1)
@@ -551,3 +567,7 @@ envConfig.inspect
 -   When a targeted test run yields 0 tests, first verify the compiled JS exists under `out/test` (rootDir is `src`); absence almost always means the test file sits outside `src` or compilation hasn't run yet (1)
 -   When unit tests fail with VS Code API errors like `TypeError: X is not a constructor` or `Cannot read properties of undefined (reading 'Y')`, check if VS Code APIs are properly mocked in `/src/test/unittests.ts` - add missing Task-related APIs (`Task`, `TaskScope`, `ShellExecution`, `TaskRevealKind`, `TaskPanelKind`) and namespace mocks (`tasks`) following the existing pattern of `mockedVSCode.X = vscodeMocks.vscMockExtHostedTypes.X` (1)
 -   Create minimal mock objects with only required methods and use TypeScript type assertions (e.g., mockApi as PythonEnvironmentApi) to satisfy interface requirements instead of implementing all interface methods when only specific methods are needed for the test (1)
+-   When reviewing existing tests, focus on behavior rather than implementation details in test names and assertions - transform "should return X when Y" into "should [expected behavior] when [scenario context]" (1)
+-   Simplify mock setup by only mocking methods actually used in tests and use `as unknown as Type` for TypeScript compatibility (1)
+-   When testing async functions that use child processes, call the function first to get a promise, then use setTimeout to emit mock events, then await the promise - this ensures proper timing of mock setup versus function execution (1)
+-   Cannot stub internal function calls within the same module after import - stub external dependencies instead (e.g., stub `childProcessApis.spawnProcess` rather than trying to stub `helpers.isUvInstalled` when testing `helpers.shouldUseUv`) because intra-module calls use direct references, not module exports (1)
