@@ -5,6 +5,9 @@ import { normalizePath } from './common/utils/pathUtils';
 import { isWindows } from './common/utils/platformUtils';
 import { createTerminal, showInputBoxWithButtons } from './common/window.apis';
 import { getConfiguration } from './common/workspace.apis';
+import { ShellConstants } from './features/common/shellConstants';
+import { identifyTerminalShell } from './features/common/shellDetector';
+import { quoteArgs } from './features/execution/execUtils';
 import { getAutoActivationType } from './features/terminal/utils';
 import { EnvironmentManagers, PythonProjectManager } from './internal.api';
 import { getNativePythonToolsPath, NativeEnvInfo, NativePythonFinder } from './managers/common/nativePythonFinder';
@@ -182,7 +185,19 @@ export async function runPetInTerminalImpl(): Promise<void> {
         terminal.show();
 
         // Run pet find --verbose
-        terminal.sendText(`"${petPath}" find --verbose`, true);
+        const shellType = identifyTerminalShell(terminal);
+        const executable = petPath;
+        const args = ['find', '--verbose'];
+        if (terminal.shellIntegration) {
+            // use shell integration if available
+            terminal.shellIntegration.executeCommand(executable, args);
+        } else {
+            let text = quoteArgs([executable, ...args]).join(' ');
+            if (shellType === ShellConstants.PWSH && !text.startsWith('&')) {
+                text = `& ${text}`;
+            }
+            terminal.sendText(text, true);
+        }
         traceInfo(`Running PET find command: ${petPath} find --verbose`);
     } else if (selectedOption.label === 'Resolve Environment...') {
         try {
@@ -209,7 +224,18 @@ export async function runPetInTerminalImpl(): Promise<void> {
                 terminal.show();
 
                 // Run pet resolve with the provided path
-                terminal.sendText(`"${petPath}" resolve "${inputPath.trim()}"`, true);
+                const shellType = identifyTerminalShell(terminal);
+                const executable = petPath;
+                const args = ['resolve', inputPath.trim()];
+                if (terminal.shellIntegration) {
+                    terminal.shellIntegration.executeCommand(executable, args);
+                } else {
+                    let text = quoteArgs([executable, ...args]).join(' ');
+                    if (shellType === ShellConstants.PWSH && !text.startsWith('&')) {
+                        text = `& ${text}`;
+                    }
+                    terminal.sendText(text, true);
+                }
                 traceInfo(`Running PET resolve command: ${petPath} resolve "${inputPath.trim()}"`);
             }
         } catch (ex) {
