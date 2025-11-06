@@ -4,6 +4,7 @@ import { Disposable, EventEmitter, ProgressLocation, Terminal, TerminalOptions, 
 import { PythonEnvironment, PythonEnvironmentApi, PythonProject, PythonTerminalCreateOptions } from '../../api';
 import { ActivationStrings } from '../../common/localize';
 import { traceInfo, traceVerbose } from '../../common/logging';
+import { onDidStartTaskProcess } from '../../common/tasks.apis';
 import {
     createTerminal,
     onDidChangeWindowState,
@@ -68,6 +69,7 @@ export interface TerminalManager
 export class TerminalManagerImpl implements TerminalManager {
     private disposables: Disposable[] = [];
     private skipActivationOnOpen = new Set<Terminal>();
+    private taskProcessIds = new Set<number>();
     private shellSetup: Map<string, boolean> = new Map<string, boolean>();
 
     private onTerminalOpenedEmitter = new EventEmitter<Terminal>();
@@ -96,10 +98,22 @@ export class TerminalManagerImpl implements TerminalManager {
             onDidCloseTerminal((t: Terminal) => {
                 this.onTerminalClosedEmitter.fire(t);
             }),
+            onDidStartTaskProcess((tp) => {
+                this.taskProcessIds.add(tp.processId);
+                traceVerbose(`Task process started with PID: ${tp.processId}`);
+            }),
             this.onTerminalOpened(async (t) => {
                 if (this.skipActivationOnOpen.has(t) || (t.creationOptions as TerminalOptions)?.hideFromUser) {
                     return;
                 }
+                // Wait briefly to allow onDidStartTaskProcess to fire
+                await new Promise((resolve) => setTimeout(resolve, 1000));
+                const terminalProcessId = await t.processId;
+                if (terminalProcessId && this.taskProcessIds.has(terminalProcessId)) {
+                    traceVerbose(`Skipping activation for task terminal with PID: ${terminalProcessId}`);
+                    return;
+                }
+
                 let env = this.ta.getEnvironment(t);
                 if (!env) {
                     const api = await getPythonApi();
@@ -109,8 +123,13 @@ export class TerminalManagerImpl implements TerminalManager {
                     await this.autoActivateOnTerminalOpen(t, env);
                 }
             }),
-            this.onTerminalClosed((t) => {
+            this.onTerminalClosed(async (t) => {
                 this.skipActivationOnOpen.delete(t);
+                const terminalProcessId = await t.processId;
+                if (terminalProcessId && this.taskProcessIds.has(terminalProcessId)) {
+                    this.taskProcessIds.delete(terminalProcessId);
+                    traceVerbose(`Removed task process ID ${terminalProcessId} for closed terminal`);
+                }
             }),
             this.ta.onDidChangeTerminalActivationState((e) => {
                 this.onDidChangeTerminalActivationStateEmitter.fire(e);
