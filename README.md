@@ -1,4 +1,4 @@
-# Python Environments (preview)
+# Python Environments (view 2)
 
 > **Note:** The Python Environments icon may no longer appear in the Activity Bar due to the ongoing rollout of the Python Environments extension. To restore the extension, add `"python.useEnvironmentsExtension": true` to your User settings. This setting is temporarily necessary until the rollout is complete!
 
