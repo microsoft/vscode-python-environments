@@ -55,7 +55,7 @@ When implementing tests as an AI agent, choose between two main types:
 
 ### Primary Tool: `runTests`
 
-Use the `runTests` tool to execute tests programmatically:
+Use the `runTests` tool to execute tests programmatically rather than terminal commands for better integration and result parsing:
 
 ```typescript
 // Run specific test files
@@ -80,7 +80,7 @@ await runTests({
 
 ### Compilation Requirements
 
-Before running tests, ensure compilation:
+Before running tests, ensure compilation. Always start compilation with `npm run watch-tests` before test execution to ensure TypeScript files are built. Recompile after making import/export changes before running tests, as stubs won't work if they're applied to old compiled JavaScript that doesn't have the updated imports:
 
 ```typescript
 // Start watch mode for auto-compilation
@@ -100,7 +100,7 @@ await run_in_terminal({
 
 ### Alternative: Terminal Execution
 
-For targeted test runs when `runTests` tool is unavailable:
+For targeted test runs when `runTests` tool is unavailable. Note: When a targeted test run yields 0 tests, first verify the compiled JS exists under `out/test` (rootDir is `src`); absence almost always means the test file sits outside `src` or compilation hasn't run yet:
 
 ```typescript
 // Run specific test suite
@@ -144,6 +144,8 @@ if (error.includes('AssertionError')) {
 ```
 
 ### Systematic Failure Analysis
+
+Fix test issues iteratively - run tests, analyze failures, apply fixes, repeat until passing. When unit tests fail with VS Code API errors like `TypeError: X is not a constructor` or `Cannot read properties of undefined (reading 'Y')`, check if VS Code APIs are properly mocked in `/src/test/unittests.ts` - add missing APIs following the existing pattern.
 
 ```typescript
 interface TestFailureAnalysis {
@@ -234,6 +236,8 @@ import * as sinon from 'sinon';
 import * as workspaceApis from '../../common/workspace.apis'; // Wrapper functions
 
 // Stub wrapper functions, not VS Code APIs directly
+// Always mock wrapper functions (e.g., workspaceApis.getConfiguration()) instead of
+// VS Code APIs directly to avoid stubbing issues
 const mockGetConfiguration = sinon.stub(workspaceApis, 'getConfiguration');
 ```
 
@@ -372,6 +376,8 @@ interface MockWorkspaceConfig {
 
 ### Mock Setup Strategy
 
+Create minimal mock objects with only required methods and use TypeScript type assertions (e.g., `mockApi as PythonEnvironmentApi`) to satisfy interface requirements instead of implementing all interface methods when only specific methods are needed for the test. Simplify mock setup by only mocking methods actually used in tests and use `as unknown as Type` for TypeScript compatibility.
+
 ```typescript
 suite('Function Integration Tests', () => {
     // 1. Declare all mocks
@@ -397,6 +403,8 @@ suite('Function Integration Tests', () => {
         mockGetWorkspaceFolders.returns(undefined);
 
         // 5. Create mock configuration objects
+        // When fixing mock environment creation, use null to truly omit
+        // properties rather than undefined
         pythonConfig = {
             get: sinon.stub(),
             inspect: sinon.stub(),
@@ -447,6 +455,7 @@ const result = await getAllExtraSearchPaths();
     assert.deepStrictEqual(actual, expected, 'Should contain exactly the expected paths');
 
     // Verify side effects
+    // Use sinon.match() patterns for resilient assertions that don't break on minor output changes
     assert(mockTraceLog.calledWith(sinon.match(/completion/i)), 'Should log completion');
 });
 ```
@@ -490,6 +499,15 @@ envConfig.inspect
     .returns({
         globalValue: ['/migrated/paths'],
     });
+
+// Testing async functions with child processes:
+// Call the function first to get a promise, then use setTimeout to emit mock events,
+// then await the promise - this ensures proper timing of mock setup versus function execution
+
+// Cannot stub internal function calls within the same module after import - stub external
+// dependencies instead (e.g., stub childProcessApis.spawnProcess rather than trying to stub
+// helpers.isUvInstalled when testing helpers.shouldUseUv) because intra-module calls use
+// direct references, not module exports
 ```
 
 ## 🧪 Step 7: Test Categories and Patterns
@@ -499,6 +517,7 @@ envConfig.inspect
 -   Test different setting combinations
 -   Test setting precedence (workspace > user > default)
 -   Test configuration errors and recovery
+-   Always use dynamic path construction with Node.js `path` module when testing functions that resolve paths against workspace folders to ensure cross-platform compatibility
 
 ### Data Flow Tests
 
@@ -543,31 +562,15 @@ envConfig.inspect
 
 1. **Read test files** - Check structure and mock setup
 2. **Run tests** - Establish baseline functionality
-3. **Apply improvements** - Use patterns below
+3. **Apply improvements** - Use patterns below. When reviewing existing tests, focus on behavior rather than implementation details in test names and assertions
 4. **Verify** - Ensure tests still pass
 
 ### Common Fixes
 
 -   Over-complex mocks → Minimal mocks with only needed methods
 -   Brittle assertions → Behavior-focused with error messages
--   Vague test names → Clear scenario descriptions
+-   Vague test names → Clear scenario descriptions (transform "should return X when Y" into "should [expected behavior] when [scenario context]")
 -   Missing structure → Mock → Run → Assert pattern
+-   Untestable Node.js APIs → Create proxy abstraction functions (use function overloads to preserve intelligent typing while making functions mockable)
 
 ## 🧠 Agent Learnings
-
--   Always use dynamic path construction with Node.js `path` module when testing functions that resolve paths against workspace folders to ensure cross-platform compatibility (1)
--   Use `runTests` tool for programmatic test execution rather than terminal commands for better integration and result parsing (1)
--   Mock wrapper functions (e.g., `workspaceApis.getConfiguration()`) instead of VS Code APIs directly to avoid stubbing issues (2)
--   Start compilation with `npm run watch-tests` before test execution to ensure TypeScript files are built (1)
--   Use `sinon.match()` patterns for resilient assertions that don't break on minor output changes (2)
--   Fix test issues iteratively - run tests, analyze failures, apply fixes, repeat until passing (1)
--   When fixing mock environment creation, use `null` to truly omit properties rather than `undefined` (1)
--   Always recompile TypeScript after making import/export changes before running tests, as stubs won't work if they're applied to old compiled JavaScript that doesn't have the updated imports (2)
--   Create proxy abstraction functions for Node.js APIs like `cp.spawn` to enable clean testing - use function overloads to preserve Node.js's intelligent typing while making the functions mockable (1)
--   When a targeted test run yields 0 tests, first verify the compiled JS exists under `out/test` (rootDir is `src`); absence almost always means the test file sits outside `src` or compilation hasn't run yet (1)
--   When unit tests fail with VS Code API errors like `TypeError: X is not a constructor` or `Cannot read properties of undefined (reading 'Y')`, check if VS Code APIs are properly mocked in `/src/test/unittests.ts` - add missing Task-related APIs (`Task`, `TaskScope`, `ShellExecution`, `TaskRevealKind`, `TaskPanelKind`) and namespace mocks (`tasks`) following the existing pattern of `mockedVSCode.X = vscodeMocks.vscMockExtHostedTypes.X` (1)
--   Create minimal mock objects with only required methods and use TypeScript type assertions (e.g., mockApi as PythonEnvironmentApi) to satisfy interface requirements instead of implementing all interface methods when only specific methods are needed for the test (1)
--   When reviewing existing tests, focus on behavior rather than implementation details in test names and assertions - transform "should return X when Y" into "should [expected behavior] when [scenario context]" (1)
--   Simplify mock setup by only mocking methods actually used in tests and use `as unknown as Type` for TypeScript compatibility (1)
--   When testing async functions that use child processes, call the function first to get a promise, then use setTimeout to emit mock events, then await the promise - this ensures proper timing of mock setup versus function execution (1)
--   Cannot stub internal function calls within the same module after import - stub external dependencies instead (e.g., stub `childProcessApis.spawnProcess` rather than trying to stub `helpers.isUvInstalled` when testing `helpers.shouldUseUv`) because intra-module calls use direct references, not module exports (1)
