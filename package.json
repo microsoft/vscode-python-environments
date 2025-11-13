@@ -6,7 +6,7 @@
     "publisher": "ms-python",
     "preview": true,
     "engines": {
-        "vscode": "^1.104.0-20250815"
+        "vscode": "^1.106.0"
     },
     "categories": [
         "Other"
