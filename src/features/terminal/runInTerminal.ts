@@ -5,6 +5,7 @@ import { onDidEndTerminalShellExecution } from '../../common/window.apis';
 import { ShellConstants } from '../common/shellConstants';
 import { identifyTerminalShell } from '../common/shellDetector';
 import { quoteArgs } from '../execution/execUtils';
+import { normalizeShellPath } from './shells/common/shellUtils';
 
 export async function runInTerminal(
     environment: PythonEnvironment,
@@ -19,6 +20,11 @@ export async function runInTerminal(
     const args = environment.execInfo?.activatedRun?.args ?? environment.execInfo?.run.args ?? [];
     const allArgs = [...args, ...(options.args ?? [])];
     const shellType = identifyTerminalShell(terminal);
+
+    // Normalize executable path for Git Bash on Windows
+    if (shellType === ShellConstants.GITBASH) {
+        executable = normalizeShellPath(executable, shellType);
+    }
     if (terminal.shellIntegration) {
         let execution: TerminalShellExecution | undefined;
         const deferred = createDeferred<void>();
