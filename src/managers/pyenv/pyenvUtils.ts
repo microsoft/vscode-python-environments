@@ -98,14 +98,21 @@ export async function setPyenvForWorkspaces(fsPath: string[], envPath: string | 
 
 export async function getPyenv(native?: NativePythonFinder): Promise<string | undefined> {
     if (pyenvPath) {
-        return pyenvPath;
+        if (await fs.exists(untildify(pyenvPath))) {
+            return untildify(pyenvPath);
+        }
+        pyenvPath = undefined;
     }
 
     const state = await getWorkspacePersistentState();
-    pyenvPath = await state.get<string>(PYENV_PATH_KEY);
-    if (pyenvPath) {
-        traceInfo(`Using pyenv from persistent state: ${pyenvPath}`);
-        return untildify(pyenvPath);
+    const storedPath = await state.get<string>(PYENV_PATH_KEY);
+    if (storedPath) {
+        if (await fs.exists(untildify(storedPath))) {
+            pyenvPath = storedPath;
+            traceInfo(`Using pyenv from persistent state: ${pyenvPath}`);
+            return untildify(pyenvPath);
+        }
+        await state.set(PYENV_PATH_KEY, undefined);
     }
 
     const pyenvBin = isWindows() ? 'pyenv.exe' : 'pyenv';
