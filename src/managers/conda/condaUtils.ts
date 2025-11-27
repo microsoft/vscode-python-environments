@@ -28,7 +28,7 @@ import {
 import { ENVS_EXTENSION_ID, EXTENSION_ROOT_DIR } from '../../common/constants';
 import { showErrorMessageWithLogs } from '../../common/errors/utils';
 import { Common, CondaStrings, PackageManagement, Pickers } from '../../common/localize';
-import { traceInfo, traceVerbose } from '../../common/logging';
+import { traceError, traceInfo, traceVerbose, traceWarn } from '../../common/logging';
 import { getWorkspacePersistentState } from '../../common/persistentState';
 import { pickProject } from '../../common/pickers/projects';
 import { StopWatch } from '../../common/stopWatch';
@@ -273,9 +273,17 @@ export async function getPrefixes(): Promise<string[]> {
         return prefixes;
     }
 
-    const data = await getCondaInfo();
-    prefixes = data['envs_dirs'] as string[];
-    await state.set(CONDA_PREFIXES_KEY, prefixes);
+    try {
+        const data = await getCondaInfo();
+        prefixes = Array.isArray(data['envs_dirs']) ? (data['envs_dirs'] as string[]) : [];
+        if (prefixes.length === 0) {
+            traceWarn('Conda info returned no environment directories (envs_dirs)');
+        }
+        await state.set(CONDA_PREFIXES_KEY, prefixes);
+    } catch (error) {
+        traceError('Failed to get conda environment prefixes', error);
+        prefixes = [];
+    }
     return prefixes;
 }
 
@@ -297,6 +305,9 @@ export async function getVersion(root: string): Promise<string> {
 }
 
 function isPrefixOf(roots: string[], e: string): boolean {
+    if (!roots || !Array.isArray(roots)) {
+        return false;
+    }
     const t = path.normalize(e);
     for (let r of roots.map((r) => path.normalize(r))) {
         if (t.startsWith(r)) {
