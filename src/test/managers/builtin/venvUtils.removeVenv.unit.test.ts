@@ -2,10 +2,6 @@ import * as assert from 'assert';
 import * as os from 'os';
 import * as path from 'path';
 
-// We need to test the helper functions that are now part of venvUtils
-// Since they are not exported, we'll test the behavior through removeVenv
-// For unit testing the validation logic, we can re-implement the pure logic tests here
-
 suite('venvUtils Path Validation', () => {
     suite('isDriveRoot behavior', () => {
         test('should identify Windows drive roots correctly', function () {
@@ -14,9 +10,6 @@ suite('venvUtils Path Validation', () => {
                 return;
             }
 
-            // Test cases that represent drive roots
-            // Note: path.normalize('C:') returns 'C:.' on Windows, so we exclude bare 'C:'
-            // The actual drive roots we care about are 'C:\' style paths
             const driveRoots = ['C:\\', 'D:\\', 'c:\\', 'C:/'];
 
             for (const root of driveRoots) {
@@ -100,10 +93,8 @@ suite('venvUtils Path Validation', () => {
 
     suite('Path normalization in removeVenv', () => {
         test('should normalize path separators before checking python.exe suffix', () => {
-            // This test verifies that paths with mixed separators are handled correctly
             const pythonPath = os.platform() === 'win32' ? 'python.exe' : 'python';
 
-            // Example of a path that might have mixed separators on Windows
             const mixedPath =
                 os.platform() === 'win32' ? 'C:/Users/test/.venv/Scripts/python.exe' : '/home/user/.venv/bin/python';
 
@@ -112,7 +103,6 @@ suite('venvUtils Path Validation', () => {
 
             assert.strictEqual(endsWithPython, true, 'Normalized path should end with python executable');
 
-            // Verify the resulting env path after going up two directories
             const envPath = path.dirname(path.dirname(normalizedPath));
             const expectedEnvPath =
                 os.platform() === 'win32' ? path.normalize('C:/Users/test/.venv') : '/home/user/.venv';
@@ -123,7 +113,6 @@ suite('venvUtils Path Validation', () => {
         test('should correctly derive venv path from python executable path', () => {
             const pythonPath = os.platform() === 'win32' ? 'python.exe' : 'python';
 
-            // Simulate what removeVenv does
             const testPaths =
                 os.platform() === 'win32'
                     ? [
@@ -151,7 +140,6 @@ suite('venvUtils removeVenv validation integration', () => {
 
         const expectedCfgPath = path.join(testEnvPath, 'pyvenv.cfg');
 
-        // Just verify the path is constructed correctly
         assert.strictEqual(
             expectedCfgPath,
             os.platform() === 'win32' ? 'C:\\Users\\test\\.venv\\pyvenv.cfg' : '/home/user/.venv/pyvenv.cfg',
