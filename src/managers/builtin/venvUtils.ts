@@ -422,12 +422,87 @@ export async function createPythonVenv(
     return createStepBasedVenvFlow(nativeFinder, api, log, manager, basePythons, venvRoot, options);
 }
 
+/**
+ * Checks if a path is a drive root (e.g., "C:\" on Windows or "/" on Unix).
+ */
+function isDriveRoot(fsPath: string): boolean {
+    const normalized = path.normalize(fsPath);
+    if (os.platform() === 'win32') {
+        // Windows drive root: "C:\" or "C:"
+        return /^[a-zA-Z]:[\\/]?$/.test(normalized);
+    }
+    // Unix root
+    return normalized === '/';
+}
+
+/**
+ * Checks if a path has a minimum number of directory components to be considered safe.
+ * This helps prevent accidental deletion of high-level directories.
+ */
+function hasMinimumPathDepth(fsPath: string, minDepth: number = 2): boolean {
+    const normalized = path.normalize(fsPath);
+    const parts = normalized.split(path.sep).filter((p) => p.length > 0 && p !== '.');
+
+    if (os.platform() === 'win32') {
+        // On Windows, the drive letter counts as one component
+        // e.g., "C:\folder" has parts ["C:", "folder"] -> depth 2
+        return parts.length >= minDepth;
+    }
+    // On Unix, "/home/user" has parts ["home", "user"] -> depth 2
+    return parts.length >= minDepth;
+}
+
+/**
+ * Validates that a path appears to be a virtual environment by checking for pyvenv.cfg.
+ */
+async function isValidVenvPath(fsPath: string): Promise<boolean> {
+    try {
+        const pyvenvCfgPath = path.join(fsPath, 'pyvenv.cfg');
+        return await fsapi.pathExists(pyvenvCfgPath);
+    } catch {
+        return false;
+    }
+}
+
+/**
+ * Validates that a path is safe to remove as a virtual environment.
+ * Returns an error message if unsafe, or undefined if safe.
+ */
+async function validateVenvRemovalPath(envPath: string, log: LogOutputChannel): Promise<string | undefined> {
+    // Check if it's a drive root
+    if (isDriveRoot(envPath)) {
+        log.error(`Refusing to remove drive root: ${envPath}`);
+        return VenvManagerStrings.venvRemoveUnsafePath;
+    }
+
+    // Check minimum path depth (at least 2 components to be safe)
+    if (!hasMinimumPathDepth(envPath, 2)) {
+        log.error(`Refusing to remove path with insufficient depth: ${envPath}`);
+        return VenvManagerStrings.venvRemoveUnsafePath;
+    }
+
+    // Check if it's actually a venv (has pyvenv.cfg)
+    if (!(await isValidVenvPath(envPath))) {
+        log.error(`Path does not appear to be a valid venv (no pyvenv.cfg): ${envPath}`);
+        return VenvManagerStrings.venvRemoveInvalidPath;
+    }
+
+    return undefined;
+}
+
 export async function removeVenv(environment: PythonEnvironment, log: LogOutputChannel): Promise<boolean> {
     const pythonPath = os.platform() === 'win32' ? 'python.exe' : 'python';
 
-    const envPath = environment.environmentPath.fsPath.endsWith(pythonPath)
-        ? path.dirname(path.dirname(environment.environmentPath.fsPath))
-        : environment.environmentPath.fsPath;
+    // Normalize path separators before checking endsWith
+    const envFsPath = path.normalize(environment.environmentPath.fsPath);
+    const envPath = envFsPath.endsWith(pythonPath) ? path.dirname(path.dirname(envFsPath)) : envFsPath;
+
+    // Safety validation before proceeding
+    const validationError = await validateVenvRemovalPath(envPath, log);
+    if (validationError) {
+        showErrorMessage(validationError);
+        return false;
+    }
 
     // Normalize path for UI display - ensure forward slashes on Windows
     const displayPath = normalizePath(envPath);
