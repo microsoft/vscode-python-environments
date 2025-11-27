@@ -422,12 +422,63 @@ export async function createPythonVenv(
     return createStepBasedVenvFlow(nativeFinder, api, log, manager, basePythons, venvRoot, options);
 }
 
+function isDriveRoot(fsPath: string): boolean {
+    const normalized = path.normalize(fsPath);
+    if (os.platform() === 'win32') {
+        return /^[a-zA-Z]:[\\/]?$/.test(normalized);
+    }
+    return normalized === '/';
+}
+
+function hasMinimumPathDepth(fsPath: string, minDepth: number = 2): boolean {
+    const normalized = path.normalize(fsPath);
+    const parts = normalized.split(path.sep).filter((p) => p.length > 0 && p !== '.');
+
+    if (os.platform() === 'win32') {
+        return parts.length >= minDepth;
+    }
+    return parts.length >= minDepth;
+}
+
+async function isValidVenvPath(fsPath: string): Promise<boolean> {
+    try {
+        const pyvenvCfgPath = path.join(fsPath, 'pyvenv.cfg');
+        return await fsapi.pathExists(pyvenvCfgPath);
+    } catch {
+        return false;
+    }
+}
+
+async function validateVenvRemovalPath(envPath: string, log: LogOutputChannel): Promise<string | undefined> {
+    if (isDriveRoot(envPath)) {
+        log.error(`Refusing to remove drive root: ${envPath}`);
+        return VenvManagerStrings.venvRemoveUnsafePath;
+    }
+
+    if (!hasMinimumPathDepth(envPath, 2)) {
+        log.error(`Refusing to remove path with insufficient depth: ${envPath}`);
+        return VenvManagerStrings.venvRemoveUnsafePath;
+    }
+
+    if (!(await isValidVenvPath(envPath))) {
+        log.error(`Path does not appear to be a valid venv (no pyvenv.cfg): ${envPath}`);
+        return VenvManagerStrings.venvRemoveInvalidPath;
+    }
+
+    return undefined;
+}
+
 export async function removeVenv(environment: PythonEnvironment, log: LogOutputChannel): Promise<boolean> {
     const pythonPath = os.platform() === 'win32' ? 'python.exe' : 'python';
 
-    const envPath = environment.environmentPath.fsPath.endsWith(pythonPath)
-        ? path.dirname(path.dirname(environment.environmentPath.fsPath))
-        : environment.environmentPath.fsPath;
+    const envFsPath = path.normalize(environment.environmentPath.fsPath);
+    const envPath = envFsPath.endsWith(pythonPath) ? path.dirname(path.dirname(envFsPath)) : envFsPath;
+
+    const validationError = await validateVenvRemovalPath(envPath, log);
+    if (validationError) {
+        showErrorMessage(validationError);
+        return false;
+    }
 
     // Normalize path for UI display - ensure forward slashes on Windows
     const displayPath = normalizePath(envPath);
