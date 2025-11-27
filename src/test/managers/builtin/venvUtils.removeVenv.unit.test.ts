@@ -15,12 +15,18 @@ suite('venvUtils Path Validation', () => {
             }
 
             // Test cases that represent drive roots
-            const driveRoots = ['C:\\', 'D:\\', 'c:\\', 'C:/', 'C:'];
+            // Note: path.normalize('C:') returns 'C:.' on Windows, so we exclude bare 'C:'
+            // The actual drive roots we care about are 'C:\' style paths
+            const driveRoots = ['C:\\', 'D:\\', 'c:\\', 'C:/'];
 
             for (const root of driveRoots) {
                 const normalized = path.normalize(root);
                 const isDrive = /^[a-zA-Z]:[\\/]?$/.test(normalized);
-                assert.strictEqual(isDrive, true, `${root} should be identified as drive root`);
+                assert.strictEqual(
+                    isDrive,
+                    true,
+                    `${root} (normalized: ${normalized}) should be identified as drive root`,
+                );
             }
         });
 
