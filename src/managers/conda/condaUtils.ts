@@ -275,8 +275,8 @@ export async function getPrefixes(): Promise<string[]> {
 
     try {
         const data = await getCondaInfo();
-        prefixes = (data['envs_dirs'] as string[]) || [];
-        if (!prefixes || prefixes.length === 0) {
+        prefixes = Array.isArray(data['envs_dirs']) ? (data['envs_dirs'] as string[]) : [];
+        if (prefixes.length === 0) {
             traceWarn('Conda info returned no environment directories (envs_dirs)');
         }
         await state.set(CONDA_PREFIXES_KEY, prefixes);
