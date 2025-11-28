@@ -282,7 +282,7 @@
                 "command": "python-envs.copyEnvPathCopied",
                 "title": "%python-envs.copyEnvPathCopied.title%",
                 "category": "Python Envs",
-                "icon": "$(check)"
+                "icon": "$(clippy)"
             },
             {
                 "command": "python-envs.copyProjectPath",
@@ -294,7 +294,7 @@
                 "command": "python-envs.copyProjectPathCopied",
                 "title": "%python-envs.copyProjectPathCopied.title%",
                 "category": "Python Envs",
-                "icon": "$(check)"
+                "icon": "$(clippy)"
             },
             {
                 "command": "python-envs.terminal.revertStartupScriptChanges",
