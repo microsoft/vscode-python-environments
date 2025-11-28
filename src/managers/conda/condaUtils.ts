@@ -43,7 +43,7 @@ import {
 } from '../../common/window.apis';
 import { getConfiguration } from '../../common/workspace.apis';
 import { ShellConstants } from '../../features/common/shellConstants';
-import { quoteArgs } from '../../features/execution/execUtils';
+import { quoteArgs, quoteStringIfNecessary } from '../../features/execution/execUtils';
 import {
     isNativeEnvInfo,
     NativeEnvInfo,
@@ -203,9 +203,10 @@ async function _runConda(
 ): Promise<string> {
     const deferred = createDeferred<string>();
     args = quoteArgs(args);
+    const quotedConda = quoteStringIfNecessary(conda);
     const timer = new StopWatch();
-    deferred.promise.finally(() => traceInfo(`Ran conda in ${timer.elapsedTime}: ${conda} ${args.join(' ')}`));
-    const proc = ch.spawn(conda, args, { shell: true });
+    deferred.promise.finally(() => traceInfo(`Ran conda in ${timer.elapsedTime}: ${quotedConda} ${args.join(' ')}`));
+    const proc = ch.spawn(quotedConda, args, { shell: true });
 
     token?.onCancellationRequested(() => {
         proc.kill();
