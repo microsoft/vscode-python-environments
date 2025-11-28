@@ -1,5 +1,7 @@
 import { Disposable, Event, EventEmitter, ProviderResult, TreeDataProvider, TreeItem, TreeView, window } from 'vscode';
 import { DidChangeEnvironmentEventArgs, EnvironmentGroupInfo, PythonEnvironment } from '../../api';
+import { ProjectViews } from '../../common/localize';
+import { createSimpleDebounce } from '../../common/utils/debounce';
 import {
     DidChangeEnvironmentManagerEventArgs,
     DidChangePackageManagerEventArgs,
@@ -9,18 +11,19 @@ import {
     InternalEnvironmentManager,
     InternalPackageManager,
 } from '../../internal.api';
+import { TemporaryStateManager } from './temporaryStateManager';
 import {
-    EnvTreeItem,
+    EnvInfoTreeItem,
     EnvManagerTreeItem,
-    PythonEnvTreeItem,
-    PackageTreeItem,
+    EnvTreeItem,
     EnvTreeItemKind,
     NoPythonEnvTreeItem,
-    EnvInfoTreeItem,
+    PackageTreeItem,
+    PythonEnvTreeItem,
     PythonGroupEnvTreeItem,
 } from './treeViewItems';
-import { createSimpleDebounce } from '../../common/utils/debounce';
-import { ProjectViews } from '../../common/localize';
+
+const COPIED_STATE = 'copied';
 
 export class EnvManagerView implements TreeDataProvider<EnvTreeItem>, Disposable {
     private treeView: TreeView<EnvTreeItem>;
@@ -32,7 +35,7 @@ export class EnvManagerView implements TreeDataProvider<EnvTreeItem>, Disposable
     private selected: Map<string, string> = new Map();
     private disposables: Disposable[] = [];
 
-    public constructor(public providers: EnvironmentManagers) {
+    public constructor(public providers: EnvironmentManagers, private stateManager: TemporaryStateManager) {
         this.treeView = window.createTreeView<EnvTreeItem>('env-managers', {
             treeDataProvider: this,
         });
@@ -59,6 +62,15 @@ export class EnvManagerView implements TreeDataProvider<EnvTreeItem>, Disposable
                 this.onDidChangePackageManager(p);
             }),
         );
+
+        this.disposables.push(
+            this.stateManager.onDidChangeState(({ itemId }) => {
+                const view = this.revealMap.get(itemId);
+                if (view) {
+                    this.fireDataChanged(view);
+                }
+            }),
+        );
     }
 
     dispose() {
@@ -77,6 +89,17 @@ export class EnvManagerView implements TreeDataProvider<EnvTreeItem>, Disposable
     onDidChangeTreeData: Event<void | EnvTreeItem | EnvTreeItem[] | null | undefined> = this.treeDataChanged.event;
 
     getTreeItem(element: EnvTreeItem): TreeItem | Thenable<TreeItem> {
+        if (element.kind === EnvTreeItemKind.environment && element instanceof PythonEnvTreeItem) {
+            const itemId = element.environment.envId.id;
+            const currentContext = element.treeItem.contextValue ?? '';
+            if (this.stateManager?.hasState(itemId, COPIED_STATE)) {
+                if (!currentContext.includes(COPIED_STATE)) {
+                    element.treeItem.contextValue = currentContext + COPIED_STATE + ';';
+                }
+            } else if (currentContext.includes(COPIED_STATE)) {
+                element.treeItem.contextValue = currentContext.replace(COPIED_STATE + ';', '');
+            }
+        }
         return element.treeItem;
     }
 
@@ -202,7 +225,7 @@ export class EnvManagerView implements TreeDataProvider<EnvTreeItem>, Disposable
 
     private onDidChangePackages(args: InternalDidChangePackagesEventArgs) {
         const view = Array.from(this.revealMap.values()).find(
-            (v) => v.environment.envId.id === args.environment.envId.id
+            (v) => v.environment.envId.id === args.environment.envId.id,
         );
         if (view) {
             this.fireDataChanged(view);

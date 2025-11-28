@@ -273,10 +273,22 @@
                 "icon": "$(copy)"
             },
             {
+                "command": "python-envs.copyEnvPathCopied",
+                "title": "%python-envs.copyEnvPathCopied.title%",
+                "category": "Python Envs",
+                "icon": "$(check)"
+            },
+            {
                 "command": "python-envs.copyProjectPath",
                 "title": "%python-envs.copyProjectPath.title%",
                 "category": "Python Envs",
                 "icon": "$(copy)"
+            },
+            {
+                "command": "python-envs.copyProjectPathCopied",
+                "title": "%python-envs.copyProjectPathCopied.title%",
+                "category": "Python Envs",
+                "icon": "$(check)"
             },
             {
                 "command": "python-envs.terminal.revertStartupScriptChanges",
@@ -382,7 +394,15 @@
                     "when": "false"
                 },
                 {
+                    "command": "python-envs.copyEnvPathCopied",
+                    "when": "false"
+                },
+                {
                     "command": "python-envs.copyProjectPath",
+                    "when": "false"
+                },
+                {
+                    "command": "python-envs.copyProjectPathCopied",
                     "when": "false"
                 },
                 {
@@ -438,7 +458,12 @@
                 {
                     "command": "python-envs.copyEnvPath",
                     "group": "inline",
-                    "when": "view == env-managers && viewItem =~ /.*pythonEnvironment.*/"
+                    "when": "view == env-managers && viewItem =~ /.*pythonEnvironment.*/ && viewItem =~ /^((?!copied).)*$/"
+                },
+                {
+                    "command": "python-envs.copyEnvPathCopied",
+                    "group": "inline",
+                    "when": "view == env-managers && viewItem =~ /.*pythonEnvironment.*/ && viewItem =~ /.*copied.*/"
                 },
                 {
                     "command": "python-envs.uninstallPackage",
@@ -448,7 +473,12 @@
                 {
                     "command": "python-envs.copyEnvPath",
                     "group": "inline",
-                    "when": "view == python-projects && viewItem == python-env"
+                    "when": "view == python-projects && viewItem =~ /python-env/ && viewItem =~ /^((?!copied).)*$/"
+                },
+                {
+                    "command": "python-envs.copyEnvPathCopied",
+                    "group": "inline",
+                    "when": "view == python-projects && viewItem =~ /python-env/ && viewItem =~ /.*copied.*/"
                 },
                 {
                     "command": "python-envs.remove",
@@ -471,7 +501,12 @@
                 {
                     "command": "python-envs.copyProjectPath",
                     "group": "inline",
-                    "when": "view == python-projects && viewItem =~ /.*python-workspace.*/"
+                    "when": "view == python-projects && viewItem =~ /.*python-workspace.*/ && viewItem =~ /^((?!copied).)*$/"
+                },
+                {
+                    "command": "python-envs.copyProjectPathCopied",
+                    "group": "inline",
+                    "when": "view == python-projects && viewItem =~ /.*python-workspace.*/ && viewItem =~ /.*copied.*/"
                 },
                 {
                     "command": "python-envs.revealProjectInExplorer",
