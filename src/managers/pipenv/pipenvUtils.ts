@@ -1,5 +1,6 @@
 // Utility functions for Pipenv environment management
 
+import * as fs from 'fs-extra';
 import * as path from 'path';
 import { Uri } from 'vscode';
 import which from 'which';
@@ -13,6 +14,7 @@ import {
 import { ENVS_EXTENSION_ID } from '../../common/constants';
 import { traceError, traceInfo } from '../../common/logging';
 import { getWorkspacePersistentState } from '../../common/persistentState';
+import { untildify } from '../../common/utils/pathUtils';
 import { getSettingWorkspaceScope } from '../../features/settings/settingHelpers';
 import {
     isNativeEnvInfo,
