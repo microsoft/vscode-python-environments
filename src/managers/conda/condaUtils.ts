@@ -1077,31 +1077,57 @@ export async function deleteCondaEnvironment(environment: PythonEnvironment, log
     );
 }
 
+/**
+ * JSON structure returned by `conda list --json`
+ */
+interface CondaPackageJson {
+    name: string;
+    version: string;
+    build_string?: string;
+    channel?: string;
+}
+
+/**
+ * Refreshes the list of packages installed in a conda environment.
+ * Uses `conda list -p <prefix> --json` for reliable parsing.
+ *
+ * @param environment The Python environment to get packages for
+ * @param api The Python environment API
+ * @param manager The package manager instance
+ * @returns Promise resolving to an array of Package objects
+ */
 export async function refreshPackages(
     environment: PythonEnvironment,
     api: PythonEnvironmentApi,
     manager: PackageManager,
 ): Promise<Package[]> {
-    let args = ['list', '-p', environment.environmentPath.fsPath];
+    const args = ['list', '-p', environment.environmentPath.fsPath, '--json'];
     const data = await runCondaExecutable(args);
-    const content = data.split(/\r?\n/).filter((l) => !l.startsWith('#'));
+
+    let condaPackages: CondaPackageJson[];
+    try {
+        condaPackages = JSON.parse(data) as CondaPackageJson[];
+    } catch (e) {
+        traceError(`Failed to parse conda list JSON output: ${data}`, e);
+        return [];
+    }
+
     const packages: Package[] = [];
-    content.forEach((l) => {
-        const parts = l.split(' ').filter((p) => p.length > 0);
-        if (parts.length >= 3) {
+    for (const condaPkg of condaPackages) {
+        if (condaPkg.name && condaPkg.version) {
             const pkg = api.createPackageItem(
                 {
-                    name: parts[0],
-                    displayName: parts[0],
-                    version: parts[1],
-                    description: parts[1],
+                    name: condaPkg.name,
+                    displayName: condaPkg.name,
+                    version: condaPkg.version,
+                    description: condaPkg.version,
                 },
                 environment,
                 manager,
             );
             packages.push(pkg);
         }
-    });
+    }
     return packages;
 }
 
