@@ -65,7 +65,8 @@ import { EnvManagerView } from './features/views/envManagersView';
 import { ProjectView } from './features/views/projectView';
 import { PythonStatusBarImpl } from './features/views/pythonStatusBar';
 import { updateViewsAndStatus } from './features/views/revealHandler';
-import { ProjectItem } from './features/views/treeViewItems';
+import { TemporaryStateManager } from './features/views/temporaryStateManager';
+import { ProjectItem, PythonEnvTreeItem } from './features/views/treeViewItems';
 import {
     collectEnvironmentInfo,
     getEnvManagerAndPackageManagerConfigLevels,
@@ -146,10 +147,14 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
     setPythonApi(envManagers, projectManager, projectCreators, terminalManager, envVarManager);
     const api = await getPythonApi();
     const sysPythonManager = createDeferred<SysPythonManager>();
-    const managerView = new EnvManagerView(envManagers);
+
+    const temporaryStateManager = new TemporaryStateManager();
+    context.subscriptions.push(temporaryStateManager);
+
+    const managerView = new EnvManagerView(envManagers, temporaryStateManager);
     context.subscriptions.push(managerView);
 
-    const workspaceView = new ProjectView(envManagers, projectManager);
+    const workspaceView = new ProjectView(envManagers, projectManager, temporaryStateManager);
     context.subscriptions.push(workspaceView);
     workspaceView.initialize();
 
@@ -224,6 +229,12 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
         }),
         commands.registerCommand('python-envs.setEnv', async (item) => {
             await setEnvironmentCommand(item, envManagers, projectManager);
+            if (item instanceof PythonEnvTreeItem) {
+                temporaryStateManager.setState(item.environment.envId.id, 'selected');
+            }
+        }),
+        commands.registerCommand('python-envs.setEnvSelected', async () => {
+            // No-op: This command is just for showing the feedback icon
         }),
         commands.registerCommand('python-envs.setEnvManager', async () => {
             await setEnvManagerCommand(envManagers, projectManager);
@@ -283,9 +294,21 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
         }),
         commands.registerCommand('python-envs.copyEnvPath', async (item) => {
             await copyPathToClipboard(item);
+            if (item?.environment?.envId) {
+                temporaryStateManager.setState(item.environment.envId.id, 'copied');
+            }
+        }),
+        commands.registerCommand('python-envs.copyEnvPathCopied', () => {
+            // No-op: provides the checkmark icon
         }),
         commands.registerCommand('python-envs.copyProjectPath', async (item) => {
             await copyPathToClipboard(item);
+            if (item?.project?.uri) {
+                temporaryStateManager.setState(item.project.uri.fsPath, 'copied');
+            }
+        }),
+        commands.registerCommand('python-envs.copyProjectPathCopied', () => {
+            // No-op: provides the checkmark icon
         }),
         commands.registerCommand('python-envs.revealProjectInExplorer', async (item) => {
             await revealProjectInExplorer(item);
