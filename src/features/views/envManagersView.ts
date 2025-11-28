@@ -25,6 +25,7 @@ import {
 
 const COPIED_STATE = 'copied';
 const SELECTED_STATE = 'selected';
+const ENV_STATE_KEYS = [COPIED_STATE, SELECTED_STATE];
 
 export class EnvManagerView implements TreeDataProvider<EnvTreeItem>, Disposable {
     private treeView: TreeView<EnvTreeItem>;
@@ -92,27 +93,12 @@ export class EnvManagerView implements TreeDataProvider<EnvTreeItem>, Disposable
     getTreeItem(element: EnvTreeItem): TreeItem | Thenable<TreeItem> {
         if (element.kind === EnvTreeItemKind.environment && element instanceof PythonEnvTreeItem) {
             const itemId = element.environment.envId.id;
-            let currentContext = element.treeItem.contextValue ?? '';
-
-            // Handle copied state
-            if (this.stateManager.hasState(itemId, COPIED_STATE)) {
-                if (!currentContext.includes(COPIED_STATE)) {
-                    currentContext = currentContext + COPIED_STATE + ';';
-                }
-            } else if (currentContext.includes(COPIED_STATE)) {
-                currentContext = currentContext.replace(COPIED_STATE + ';', '');
-            }
-
-            // Handle selected state
-            if (this.stateManager.hasState(itemId, SELECTED_STATE)) {
-                if (!currentContext.includes(SELECTED_STATE)) {
-                    currentContext = currentContext + SELECTED_STATE + ';';
-                }
-            } else if (currentContext.includes(SELECTED_STATE)) {
-                currentContext = currentContext.replace(SELECTED_STATE + ';', '');
-            }
-
-            element.treeItem.contextValue = currentContext;
+            const currentContext = element.treeItem.contextValue ?? '';
+            element.treeItem.contextValue = this.stateManager.updateContextValue(
+                itemId,
+                currentContext,
+                ENV_STATE_KEYS,
+            );
         }
         return element.treeItem;
     }

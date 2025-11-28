@@ -65,6 +65,34 @@ export class TemporaryStateManager implements Disposable {
         return this.activeItems.get(itemId)?.has(stateKey) ?? false;
     }
 
+    /**
+     * Updates a contextValue string by adding or removing state keys based on current state.
+     * @param itemId The item ID to check states for
+     * @param currentContext The current contextValue string
+     * @param stateKeys The state keys to check and update
+     * @param separator The separator to use when adding states (default: ';')
+     * @returns The updated contextValue string
+     */
+    public updateContextValue(
+        itemId: string,
+        currentContext: string,
+        stateKeys: string[],
+        separator: string = ';',
+    ): string {
+        let result = currentContext;
+        for (const stateKey of stateKeys) {
+            const stateWithSeparator = separator + stateKey;
+            if (this.hasState(itemId, stateKey)) {
+                if (!result.includes(stateKey)) {
+                    result = result + stateWithSeparator;
+                }
+            } else if (result.includes(stateKey)) {
+                result = result.replace(stateWithSeparator, '');
+            }
+        }
+        return result;
+    }
+
     public dispose(): void {
         this.timeouts.forEach((timeout) => clearTimeout(timeout));
         this.timeouts.clear();

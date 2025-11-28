@@ -71,4 +71,36 @@ suite('TemporaryStateManager', () => {
         manager.setState('item-2', 'selected');
         manager.dispose();
     });
+
+    suite('updateContextValue', () => {
+        test('adds state key when state is set', () => {
+            manager.setState('item-1', 'copied');
+            const result = manager.updateContextValue('item-1', 'pythonEnvironment', ['copied']);
+            assert.strictEqual(result, 'pythonEnvironment;copied');
+        });
+
+        test('removes state key when state is not set', () => {
+            const result = manager.updateContextValue('item-1', 'pythonEnvironment;copied', ['copied']);
+            assert.strictEqual(result, 'pythonEnvironment');
+        });
+
+        test('handles multiple state keys', () => {
+            manager.setState('item-1', 'copied');
+            manager.setState('item-1', 'selected');
+            const result = manager.updateContextValue('item-1', 'pythonEnvironment', ['copied', 'selected']);
+            assert.strictEqual(result, 'pythonEnvironment;copied;selected');
+        });
+
+        test('only adds states that are set', () => {
+            manager.setState('item-1', 'selected');
+            const result = manager.updateContextValue('item-1', 'pythonEnvironment', ['copied', 'selected']);
+            assert.strictEqual(result, 'pythonEnvironment;selected');
+        });
+
+        test('does not duplicate existing state', () => {
+            manager.setState('item-1', 'copied');
+            const result = manager.updateContextValue('item-1', 'pythonEnvironment;copied', ['copied']);
+            assert.strictEqual(result, 'pythonEnvironment;copied');
+        });
+    });
 });

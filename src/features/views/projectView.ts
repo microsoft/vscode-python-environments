@@ -28,6 +28,7 @@ import {
 
 const COPIED_STATE = 'copied';
 const SELECTED_STATE = 'selected';
+const ENV_STATE_KEYS = [COPIED_STATE, SELECTED_STATE];
 
 export class ProjectView implements TreeDataProvider<ProjectTreeItem> {
     private treeView: TreeView<ProjectTreeItem>;
@@ -146,36 +147,17 @@ export class ProjectView implements TreeDataProvider<ProjectTreeItem> {
         if (element.kind === ProjectTreeItemKind.project && element instanceof ProjectItem) {
             const itemId = element.project.uri.fsPath;
             const currentContext = element.treeItem.contextValue ?? '';
-            if (this.stateManager.hasState(itemId, COPIED_STATE)) {
-                if (!currentContext.includes(COPIED_STATE)) {
-                    element.treeItem.contextValue = currentContext + ';' + COPIED_STATE;
-                }
-            } else if (currentContext.includes(COPIED_STATE)) {
-                element.treeItem.contextValue = currentContext.replace(';' + COPIED_STATE, '');
-            }
+            element.treeItem.contextValue = this.stateManager.updateContextValue(itemId, currentContext, [
+                COPIED_STATE,
+            ]);
         } else if (element.kind === ProjectTreeItemKind.environment && element instanceof ProjectEnvironment) {
             const itemId = element.environment.envId.id;
-            let currentContext = element.treeItem.contextValue ?? '';
-
-            // Handle copied state
-            if (this.stateManager.hasState(itemId, COPIED_STATE)) {
-                if (!currentContext.includes(COPIED_STATE)) {
-                    currentContext = currentContext + ';' + COPIED_STATE;
-                }
-            } else if (currentContext.includes(COPIED_STATE)) {
-                currentContext = currentContext.replace(';' + COPIED_STATE, '');
-            }
-
-            // Handle selected state
-            if (this.stateManager.hasState(itemId, SELECTED_STATE)) {
-                if (!currentContext.includes(SELECTED_STATE)) {
-                    currentContext = currentContext + ';' + SELECTED_STATE;
-                }
-            } else if (currentContext.includes(SELECTED_STATE)) {
-                currentContext = currentContext.replace(';' + SELECTED_STATE, '');
-            }
-
-            element.treeItem.contextValue = currentContext;
+            const currentContext = element.treeItem.contextValue ?? '';
+            element.treeItem.contextValue = this.stateManager.updateContextValue(
+                itemId,
+                currentContext,
+                ENV_STATE_KEYS,
+            );
         }
         return element.treeItem;
     }
