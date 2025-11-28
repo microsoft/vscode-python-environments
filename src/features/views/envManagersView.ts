@@ -11,7 +11,7 @@ import {
     InternalEnvironmentManager,
     InternalPackageManager,
 } from '../../internal.api';
-import { TemporaryStateManager } from './temporaryStateManager';
+import { ITemporaryStateManager } from './temporaryStateManager';
 import {
     EnvInfoTreeItem,
     EnvManagerTreeItem,
@@ -37,7 +37,7 @@ export class EnvManagerView implements TreeDataProvider<EnvTreeItem>, Disposable
     private selected: Map<string, string> = new Map();
     private disposables: Disposable[] = [];
 
-    public constructor(public providers: EnvironmentManagers, private stateManager: TemporaryStateManager) {
+    public constructor(public providers: EnvironmentManagers, private stateManager: ITemporaryStateManager) {
         this.treeView = window.createTreeView<EnvTreeItem>('env-managers', {
             treeDataProvider: this,
         });

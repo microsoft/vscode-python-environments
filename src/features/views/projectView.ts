@@ -14,7 +14,7 @@ import { ProjectViews } from '../../common/localize';
 import { createSimpleDebounce } from '../../common/utils/debounce';
 import { onDidChangeConfiguration } from '../../common/workspace.apis';
 import { EnvironmentManagers, PythonProjectManager } from '../../internal.api';
-import { TemporaryStateManager } from './temporaryStateManager';
+import { ITemporaryStateManager } from './temporaryStateManager';
 import {
     GlobalProjectItem,
     NoProjectEnvironment,
@@ -43,7 +43,7 @@ export class ProjectView implements TreeDataProvider<ProjectTreeItem> {
     public constructor(
         private envManagers: EnvironmentManagers,
         private projectManager: PythonProjectManager,
-        private stateManager: TemporaryStateManager,
+        private stateManager: ITemporaryStateManager,
     ) {
         this.treeView = window.createTreeView<ProjectTreeItem>('python-projects', {
             treeDataProvider: this,

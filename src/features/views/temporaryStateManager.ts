@@ -3,11 +3,22 @@ import { Disposable, Event, EventEmitter } from 'vscode';
 const DEFAULT_TIMEOUT_MS = 2000;
 
 /**
+ * Interface for managing temporary state on tree items.
+ */
+export interface ITemporaryStateManager {
+    readonly onDidChangeState: Event<{ itemId: string; stateKey: string }>;
+    setState(itemId: string, stateKey: string): void;
+    clearState(itemId: string, stateKey: string): void;
+    hasState(itemId: string, stateKey: string): boolean;
+    updateContextValue(itemId: string, currentContext: string, stateKeys: string[], separator?: string): string;
+}
+
+/**
  * Manages temporary state for tree items that auto-clears after a timeout.
  * Useful for visual feedback like showing a checkmark after copying,
  * or highlighting a recently selected environment.
  */
-export class TemporaryStateManager implements Disposable {
+export class TemporaryStateManager implements ITemporaryStateManager, Disposable {
     private activeItems: Map<string, Set<string>> = new Map();
     private timeouts: Map<string, NodeJS.Timeout> = new Map();
     private readonly _onDidChangeState = new EventEmitter<{ itemId: string; stateKey: string }>();
