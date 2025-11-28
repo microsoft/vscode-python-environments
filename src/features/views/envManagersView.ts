@@ -24,6 +24,7 @@ import {
 } from './treeViewItems';
 
 const COPIED_STATE = 'copied';
+const SELECTED_STATE = 'selected';
 
 export class EnvManagerView implements TreeDataProvider<EnvTreeItem>, Disposable {
     private treeView: TreeView<EnvTreeItem>;
@@ -91,14 +92,27 @@ export class EnvManagerView implements TreeDataProvider<EnvTreeItem>, Disposable
     getTreeItem(element: EnvTreeItem): TreeItem | Thenable<TreeItem> {
         if (element.kind === EnvTreeItemKind.environment && element instanceof PythonEnvTreeItem) {
             const itemId = element.environment.envId.id;
-            const currentContext = element.treeItem.contextValue ?? '';
-            if (this.stateManager?.hasState(itemId, COPIED_STATE)) {
+            let currentContext = element.treeItem.contextValue ?? '';
+
+            // Handle copied state
+            if (this.stateManager.hasState(itemId, COPIED_STATE)) {
                 if (!currentContext.includes(COPIED_STATE)) {
-                    element.treeItem.contextValue = currentContext + COPIED_STATE + ';';
+                    currentContext = currentContext + COPIED_STATE + ';';
                 }
             } else if (currentContext.includes(COPIED_STATE)) {
-                element.treeItem.contextValue = currentContext.replace(COPIED_STATE + ';', '');
+                currentContext = currentContext.replace(COPIED_STATE + ';', '');
             }
+
+            // Handle selected state
+            if (this.stateManager.hasState(itemId, SELECTED_STATE)) {
+                if (!currentContext.includes(SELECTED_STATE)) {
+                    currentContext = currentContext + SELECTED_STATE + ';';
+                }
+            } else if (currentContext.includes(SELECTED_STATE)) {
+                currentContext = currentContext.replace(SELECTED_STATE + ';', '');
+            }
+
+            element.treeItem.contextValue = currentContext;
         }
         return element.treeItem;
     }

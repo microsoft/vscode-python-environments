@@ -194,6 +194,12 @@
                 "icon": "$(check)"
             },
             {
+                "command": "python-envs.setEnvSelected",
+                "title": "%python-envs.setEnvSelected.title%",
+                "category": "Python",
+                "icon": "$(pass-filled)"
+            },
+            {
                 "command": "python-envs.remove",
                 "title": "%python-envs.remove.title%",
                 "category": "Python",
@@ -334,6 +340,10 @@
                     "when": "false"
                 },
                 {
+                    "command": "python-envs.setEnvSelected",
+                    "when": "false"
+                },
+                {
                     "command": "python-envs.remove",
                     "when": "false"
                 },
@@ -439,7 +449,12 @@
                 {
                     "command": "python-envs.setEnv",
                     "group": "inline",
-                    "when": "view == env-managers && viewItem =~ /.*pythonEnvironment.*/"
+                    "when": "view == env-managers && viewItem =~ /.*pythonEnvironment.*/ && viewItem =~ /^((?!selected).)*$/"
+                },
+                {
+                    "command": "python-envs.setEnvSelected",
+                    "group": "inline",
+                    "when": "view == env-managers && viewItem =~ /.*pythonEnvironment.*/ && viewItem =~ /.*selected.*/"
                 },
                 {
                     "command": "python-envs.createTerminal",

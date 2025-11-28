@@ -66,7 +66,7 @@ import { ProjectView } from './features/views/projectView';
 import { PythonStatusBarImpl } from './features/views/pythonStatusBar';
 import { updateViewsAndStatus } from './features/views/revealHandler';
 import { TemporaryStateManager } from './features/views/temporaryStateManager';
-import { ProjectItem } from './features/views/treeViewItems';
+import { ProjectItem, PythonEnvTreeItem } from './features/views/treeViewItems';
 import {
     collectEnvironmentInfo,
     getEnvManagerAndPackageManagerConfigLevels,
@@ -229,6 +229,12 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
         }),
         commands.registerCommand('python-envs.setEnv', async (item) => {
             await setEnvironmentCommand(item, envManagers, projectManager);
+            if (item instanceof PythonEnvTreeItem) {
+                temporaryStateManager.setState(item.environment.envId.id, 'selected');
+            }
+        }),
+        commands.registerCommand('python-envs.setEnvSelected', async () => {
+            // No-op: This command is just for showing the feedback icon
         }),
         commands.registerCommand('python-envs.setEnvManager', async () => {
             await setEnvManagerCommand(envManagers, projectManager);
