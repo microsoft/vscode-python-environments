@@ -22,8 +22,8 @@ suite('Environment Variable Utils Tests', () => {
 
         test('should delete keys when value is undefined', () => {
             const base = { FOO: 'foo_value' };
-            const other = { KEY: undefined };
-            const result = mergeEnvVariables(base, other as { [key: string]: string | undefined });
+            const other: { [key: string]: string | undefined } = { KEY: undefined };
+            const result = mergeEnvVariables(base, other);
             assert.strictEqual(result.KEY, undefined);
             assert.strictEqual(Object.prototype.hasOwnProperty.call(result, 'KEY'), false);
         });
@@ -143,11 +143,13 @@ suite('Environment Variable Utils Tests', () => {
         });
 
         test('should handle multiple lines with comments', async () => {
-            const envContent = `# Config file
-FOO=bar  # first var
-BAZ=qux  # second var
-# Another comment
-TEST=value`;
+            const envContent = [
+                '# Config file',
+                'FOO=bar  # first var',
+                'BAZ=qux  # second var',
+                '# Another comment',
+                'TEST=value',
+            ].join('\n');
             mockReadFile.resolves(Buffer.from(envContent));
 
             const result = await parseEnvFile(Uri.file('/path/to/.env'));
