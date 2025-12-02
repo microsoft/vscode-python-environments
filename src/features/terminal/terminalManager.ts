@@ -177,7 +177,8 @@ export class TerminalManagerImpl implements TerminalManager {
 
                         if (
                             (shellIntegrationEnabled || (await shellIntegrationForActiveTerminal(p.name))) &&
-                            !isWsl()
+                            !isWsl() &&
+                            p.shellType !== 'cmd'
                         ) {
                             // Shell integration available and NOT in WSL - skip setup
                             await p.teardownScripts();
@@ -196,7 +197,8 @@ export class TerminalManagerImpl implements TerminalManager {
                     } else if (state === ShellSetupState.Setup) {
                         if (
                             (shellIntegrationEnabled || (await shellIntegrationForActiveTerminal(p.name))) &&
-                            !isWsl()
+                            !isWsl() &&
+                            p.shellType !== 'cmd'
                         ) {
                             await p.teardownScripts();
                             traceVerbose(

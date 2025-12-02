@@ -208,12 +208,12 @@ async function setupCmdStartup(cmdFiles: CmdFilePaths, key: string): Promise<boo
         const existingAutoRun = await getExistingAutoRun();
 
         // Step 3: Create or update the main batch file
+        const mainBatchContent = getMainBatchFileContent(cmdFiles.regStartupFile);
         if (await fs.pathExists(cmdFiles.mainBatchFile)) {
             const content = await fs.readFile(cmdFiles.mainBatchFile, 'utf8');
             if (hasStartupCode(content, regionStart, regionEnd, [cmdFiles.startupName])) {
                 traceInfo(`SHELL: CMD main batch file at ${cmdFiles.mainBatchFile} already contains our startup file`);
             } else {
-                const mainBatchContent = getMainBatchFileContent(cmdFiles.regStartupFile);
                 await fs.writeFile(
                     cmdFiles.mainBatchFile,
                     insertStartupCode(content, regionStart, regionEnd, mainBatchContent),
@@ -222,6 +222,13 @@ async function setupCmdStartup(cmdFiles: CmdFilePaths, key: string): Promise<boo
                     `SHELL: Updated existing main batch file at: ${cmdFiles.mainBatchFile}\r\n${mainBatchContent}`,
                 );
             }
+        } else {
+            // Create new main batch file
+            await fs.writeFile(
+                cmdFiles.mainBatchFile,
+                insertStartupCode(getHeader(), regionStart, regionEnd, mainBatchContent),
+            );
+            traceInfo(`SHELL: Created new main batch file at: ${cmdFiles.mainBatchFile}\r\n${mainBatchContent}`);
         }
 
         // Step 4: Setup registry AutoRun to call our main batch file
