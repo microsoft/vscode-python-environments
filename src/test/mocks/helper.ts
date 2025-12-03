@@ -1,15 +1,41 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 // Copyright (c) Microsoft Corporation. All rights reserved.
 // Licensed under the MIT License.
+import * as sinon from 'sinon';
 import { Readable } from 'stream';
 import * as TypeMoq from 'typemoq';
 import * as common from 'typemoq/Common/_all';
+import { LogOutputChannel } from 'vscode';
 
 export class FakeReadableStream extends Readable {
     _read(_size: unknown): void | null {
         // custom reading logic here
         this.push(null); // end the stream
     }
+}
+
+/**
+ * Creates a mock LogOutputChannel for testing.
+ * @returns A mock LogOutputChannel with stubbed methods
+ */
+export function createMockLogOutputChannel(): LogOutputChannel {
+    return {
+        info: sinon.stub(),
+        error: sinon.stub(),
+        warn: sinon.stub(),
+        append: sinon.stub(),
+        debug: sinon.stub(),
+        trace: sinon.stub(),
+        show: sinon.stub(),
+        hide: sinon.stub(),
+        dispose: sinon.stub(),
+        clear: sinon.stub(),
+        replace: sinon.stub(),
+        appendLine: sinon.stub(),
+        name: 'test-log',
+        logLevel: 1,
+        onDidChangeLogLevel: sinon.stub() as LogOutputChannel['onDidChangeLogLevel'],
+    } as unknown as LogOutputChannel;
 }
 
 /**
