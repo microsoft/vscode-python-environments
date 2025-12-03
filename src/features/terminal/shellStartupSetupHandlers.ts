@@ -55,6 +55,10 @@ export async function handleSettingUpShellProfile(
             });
             providers.forEach((provider) => callback(provider, false));
         }
+    } else {
+        traceInfo(`User declined shell profile setup for ${shells}, switching to command activation`);
+        await Promise.all(providers.map((provider) => provider.teardownScripts()));
+        await setAutoActivationType(ACT_TYPE_COMMAND);
     }
 }
 

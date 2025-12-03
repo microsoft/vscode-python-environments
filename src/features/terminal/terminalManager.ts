@@ -16,7 +16,12 @@ import { getConfiguration, onDidChangeConfiguration } from '../../common/workspa
 import { isActivatableEnvironment } from '../common/activation';
 import { identifyTerminalShell } from '../common/shellDetector';
 import { getPythonApi } from '../pythonApi';
-import { getShellIntegrationEnabledCache, isWsl, shellIntegrationForActiveTerminal } from './shells/common/shellUtils';
+import {
+    getShellIntegrationEnabledCache,
+    isWsl,
+    shellIntegrationForActiveTerminal,
+    shouldUseProfileActivation,
+} from './shells/common/shellUtils';
 import { ShellEnvsProvider, ShellSetupState, ShellStartupScriptProvider } from './shells/startupProvider';
 import { handleSettingUpShellProfile } from './shellStartupSetupHandlers';
 import {
@@ -166,19 +171,20 @@ export class TerminalManagerImpl implements TerminalManager {
             await Promise.all(
                 providers.map(async (p) => {
                     const state = await p.isSetup();
-                    const shellIntegrationEnabled = await getShellIntegrationEnabledCache();
+                    const shellIntegrationEnabledSetting = await getShellIntegrationEnabledCache();
+                    const shellIntegrationActiveTerminal = await shellIntegrationForActiveTerminal(p.name);
+                    const shellIntegrationLikelyAvailable =
+                        shellIntegrationEnabledSetting || shellIntegrationActiveTerminal;
                     traceVerbose(`Checking shell profile for ${p.shellType}, with state: ${state}`);
+
                     if (state === ShellSetupState.NotSetup) {
                         traceVerbose(
-                            `WSL detected: ${isWsl()}, Shell integration available from setting, or active terminal: ${shellIntegrationEnabled}, or ${await shellIntegrationForActiveTerminal(
+                            `WSL detected: ${isWsl()}, Shell integration available from setting, or active terminal: ${shellIntegrationEnabledSetting}, or ${await shellIntegrationForActiveTerminal(
                                 p.name,
                             )}`,
                         );
 
-                        if (
-                            (shellIntegrationEnabled || (await shellIntegrationForActiveTerminal(p.name))) &&
-                            !isWsl()
-                        ) {
+                        if (shellIntegrationLikelyAvailable && !shouldUseProfileActivation(p.shellType)) {
                             // Shell integration available and NOT in WSL - skip setup
                             await p.teardownScripts();
                             this.shellSetup.set(p.shellType, true);
@@ -194,10 +200,7 @@ export class TerminalManagerImpl implements TerminalManager {
                             );
                         }
                     } else if (state === ShellSetupState.Setup) {
-                        if (
-                            (shellIntegrationEnabled || (await shellIntegrationForActiveTerminal(p.name))) &&
-                            !isWsl()
-                        ) {
+                        if (shellIntegrationLikelyAvailable && !shouldUseProfileActivation(p.shellType)) {
                             await p.teardownScripts();
                             traceVerbose(
                                 `Shell integration available for ${p.shellType}, removed profile script in favor of shell integration.`,

@@ -161,3 +161,23 @@ export async function getShellIntegrationEnabledCache(): Promise<boolean> {
     await persistentState.set(SHELL_INTEGRATION_STATE_KEY, shellIntegrationEnabled);
     return shellIntegrationEnabled;
 }
+
+// Shells that support shell integration way of environment activation.
+// CMD is not listed here, but we still want to support activation via profile modification.
+export const shellIntegrationSupportedShells = [
+    ShellConstants.PWSH,
+    ShellConstants.BASH,
+    ShellConstants.GITBASH,
+    ShellConstants.FISH,
+    ShellConstants.ZSH,
+];
+
+/**
+ * Determines whether profile-based activation should be used instead of shell integration.
+ * Profile activation is preferred when:
+ * - Running in WSL
+ * - The shell type doesn't support shell integration (e.g., cmd)
+ */
+export function shouldUseProfileActivation(shellType: string): boolean {
+    return isWsl() || !shellIntegrationSupportedShells.includes(shellType);
+}
