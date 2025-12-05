@@ -1,6 +1,6 @@
 ## Requirements
 
-1. `node` >= 20.18.1
+1. `node` >= 22.21.1
 2. `npm` >= 10.9.0
 3. `yo` >= 5.0.0 (installed via `npm install -g yo`)
 4. `generator-code` >= 1.11.4 (installed via `npm install -g generator-code`)
