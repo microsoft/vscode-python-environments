@@ -1212,6 +1212,31 @@ export interface PythonExecutionApi
         PythonBackgroundRunApi {}
 
 /**
+ * Enum representing the scope for environment variables.
+ */
+export enum EnvironmentVariableScope {
+    /**
+     * Core environment variables required for Python process execution 
+     * (e.g., PATH, PYTHONPATH, PYTHONHOME). These are essential for 
+     * running Python subprocesses and scripts.
+     */
+    Process = 1,
+
+    /**
+     * User-defined environment variables from .env files that should be 
+     * injected into terminals. These are additional variables meant for
+     * development environment customization.
+     */
+    Terminal = 2,
+
+    /**
+     * Combines both Process and Terminal scopes to get all environment
+     * variables.
+     */
+    All = Process | Terminal
+}
+
+/**
  * Event arguments for when the monitored `.env` files or any other sources change.
  */
 export interface DidChangeEnvironmentVariablesEventArgs {
@@ -1241,11 +1266,13 @@ export interface PythonEnvironmentVariablesApi {
      * it fetches the environment variables for the global scope.
      * @param overrides Additional environment variables to override the defaults.
      * @param baseEnvVar The base environment variables that should be used as a starting point.
+     * @param scope The scope of environment variables to return. Defaults to All (both Process and Terminal variables).
      */
     getEnvironmentVariables(
         uri: Uri | undefined,
         overrides?: ({ [key: string]: string | undefined } | Uri)[],
         baseEnvVar?: { [key: string]: string | undefined },
+        scope?: EnvironmentVariableScope,
     ): Promise<{ [key: string]: string | undefined }>;
 
     /**
