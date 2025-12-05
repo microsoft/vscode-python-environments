@@ -68,6 +68,7 @@ export enum NativePythonEnvironmentKind {
     macCommandLineTools = 'MacCommandLineTools',
     linuxGlobal = 'LinuxGlobal',
     macXCode = 'MacXCode',
+    uvWorkspace = 'UvWorkspace',
     venv = 'Venv',
     venvUv = 'Uv',
     virtualEnv = 'VirtualEnv',
