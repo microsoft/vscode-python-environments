@@ -1,6 +1,5 @@
 import { PythonCommandRunConfiguration, PythonEnvironment } from '../../../../api';
 import { traceInfo } from '../../../../common/logging';
-import { getGlobalPersistentState } from '../../../../common/persistentState';
 import { timeout } from '../../../../common/utils/asyncUtils';
 import { isWindows } from '../../../../common/utils/platformUtils';
 import { activeTerminalShellIntegration } from '../../../../common/window.apis';
@@ -8,8 +7,6 @@ import { getConfiguration } from '../../../../common/workspace.apis';
 import { ShellConstants } from '../../../common/shellConstants';
 import { quoteArgs } from '../../../execution/execUtils';
 import { SHELL_INTEGRATION_POLL_INTERVAL, SHELL_INTEGRATION_TIMEOUT } from '../../utils';
-
-export const SHELL_INTEGRATION_STATE_KEY = 'shellIntegration.enabled';
 
 function getCommandAsString(command: PythonCommandRunConfiguration[], shell: string, delimiter: string): string {
     const parts = [];
@@ -119,10 +116,6 @@ export async function shellIntegrationForActiveTerminal(name: string, profile?: 
             `SHELL: Shell integration is available on your active terminal, with name ${name} and profile ${profile}. Python activate scripts will be evaluated at shell integration level, except in WSL.`,
         );
 
-        // Update persistent storage to reflect that shell integration is available
-        const persistentState = await getGlobalPersistentState();
-        await persistentState.set(SHELL_INTEGRATION_STATE_KEY, true);
-
         return true;
     }
     return false;
@@ -134,7 +127,6 @@ export function isWsl(): boolean {
 }
 
 export async function getShellIntegrationEnabledCache(): Promise<boolean> {
-    const persistentState = await getGlobalPersistentState();
     const shellIntegrationInspect =
         getConfiguration('terminal.integrated').inspect<boolean>('shellIntegration.enabled');
 
@@ -158,7 +150,6 @@ export async function getShellIntegrationEnabledCache(): Promise<boolean> {
         }
     }
 
-    await persistentState.set(SHELL_INTEGRATION_STATE_KEY, shellIntegrationEnabled);
     return shellIntegrationEnabled;
 }
 
