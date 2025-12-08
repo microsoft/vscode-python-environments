@@ -514,22 +514,16 @@ export async function createTerminalCommand(
     api: PythonEnvironmentApi,
     tm: TerminalManager,
 ): Promise<Terminal | undefined> {
-    if (context === undefined) {
-        const pw = await pickProject(api.getPythonProjects());
+    if (context === undefined || context instanceof Uri) {
+        // For undefined context or Uri context, check for multiroot and prompt if needed
+        const projects = api.getPythonProjects();
+        const pw = await pickProject(projects);
         if (pw) {
             const env = await api.getEnvironment(pw.uri);
             const cwd = await findParentIfFile(pw.uri.fsPath);
             if (env) {
                 return await tm.create(env, { cwd });
             }
-        }
-    } else if (context instanceof Uri) {
-        const uri = context as Uri;
-        const env = await api.getEnvironment(uri);
-        const pw = api.getPythonProject(uri);
-        if (env && pw) {
-            const cwd = await findParentIfFile(pw.uri.fsPath);
-            return await tm.create(env, { cwd });
         }
     } else if (context instanceof ProjectItem) {
         const view = context as ProjectItem;
