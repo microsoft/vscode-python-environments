@@ -2,11 +2,11 @@
     "name": "vscode-python-envs",
     "displayName": "Python Environments",
     "description": "Provides a unified python environment experience",
-    "version": "1.12.0",
+    "version": "1.15.0",
     "publisher": "ms-python",
     "preview": true,
     "engines": {
-        "vscode": "^1.104.0-20250815"
+        "vscode": "^1.106.0"
     },
     "categories": [
         "Other"

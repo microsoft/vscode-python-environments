@@ -94,6 +94,10 @@ export namespace VenvManagerStrings {
 
     export const venvRemoving = l10n.t('Removing virtual environment');
     export const venvRemoveFailed = l10n.t('Failed to remove virtual environment');
+    export const venvRemoveInvalidPath = l10n.t(
+        'Cannot remove: path does not appear to be a valid virtual environment',
+    );
+    export const venvRemoveUnsafePath = l10n.t('Cannot remove: path appears to be a system or root directory');
 
     export const installEditable = l10n.t('Install project as editable');
     export const searchingDependencies = l10n.t('Searching for dependencies');

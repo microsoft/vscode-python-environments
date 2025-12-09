@@ -135,6 +135,8 @@ async function getPythonInfo(env: NativeEnvInfo): Promise<PythonEnvironmentInfo>
         let description = undefined;
         if (env.kind === NativePythonEnvironmentKind.venvUv) {
             description = l10n.t('uv');
+        } else if (env.kind === NativePythonEnvironmentKind.uvWorkspace) {
+            description = l10n.t('uv workspace');
         }
 
         const binDir = path.dirname(env.executable);
@@ -181,7 +183,12 @@ export async function findVirtualEnvironments(
     const envs = data
         .filter((e) => isNativeEnvInfo(e))
         .map((e) => e as NativeEnvInfo)
-        .filter((e) => e.kind === NativePythonEnvironmentKind.venv || e.kind === NativePythonEnvironmentKind.venvUv);
+        .filter(
+            (e) =>
+                e.kind === NativePythonEnvironmentKind.venv ||
+                e.kind === NativePythonEnvironmentKind.venvUv ||
+                e.kind === NativePythonEnvironmentKind.uvWorkspace,
+        );
 
     for (const e of envs) {
         if (!(e.prefix && e.executable && e.version)) {
@@ -194,7 +201,7 @@ export async function findVirtualEnvironments(
         log.info(`Found venv environment: ${env.name}`);
 
         // Track UV environments using environmentPath for consistency
-        if (e.kind === NativePythonEnvironmentKind.venvUv) {
+        if (e.kind === NativePythonEnvironmentKind.venvUv || e.kind === NativePythonEnvironmentKind.uvWorkspace) {
             await addUvEnvironment(env.environmentPath.fsPath);
         }
     }
@@ -326,7 +333,11 @@ export async function createWithProgress(
                 const resolved = await nativeFinder.resolve(pythonPath);
                 const env = api.createPythonEnvironmentItem(await getPythonInfo(resolved), manager);
 
-                if (useUv && resolved.kind === NativePythonEnvironmentKind.venvUv) {
+                if (
+                    useUv &&
+                    (resolved.kind === NativePythonEnvironmentKind.venvUv ||
+                        resolved.kind === NativePythonEnvironmentKind.uvWorkspace)
+                ) {
                     await addUvEnvironment(env.environmentPath.fsPath);
                 }
 
@@ -422,12 +433,63 @@ export async function createPythonVenv(
     return createStepBasedVenvFlow(nativeFinder, api, log, manager, basePythons, venvRoot, options);
 }
 
+function isDriveRoot(fsPath: string): boolean {
+    const normalized = path.normalize(fsPath);
+    if (os.platform() === 'win32') {
+        return /^[a-zA-Z]:[\\/]?$/.test(normalized);
+    }
+    return normalized === '/';
+}
+
+function hasMinimumPathDepth(fsPath: string, minDepth: number = 2): boolean {
+    const normalized = path.normalize(fsPath);
+    const parts = normalized.split(path.sep).filter((p) => p.length > 0 && p !== '.');
+
+    if (os.platform() === 'win32') {
+        return parts.length >= minDepth;
+    }
+    return parts.length >= minDepth;
+}
+
+async function isValidVenvPath(fsPath: string): Promise<boolean> {
+    try {
+        const pyvenvCfgPath = path.join(fsPath, 'pyvenv.cfg');
+        return await fsapi.pathExists(pyvenvCfgPath);
+    } catch {
+        return false;
+    }
+}
+
+async function validateVenvRemovalPath(envPath: string, log: LogOutputChannel): Promise<string | undefined> {
+    if (isDriveRoot(envPath)) {
+        log.error(`Refusing to remove drive root: ${envPath}`);
+        return VenvManagerStrings.venvRemoveUnsafePath;
+    }
+
+    if (!hasMinimumPathDepth(envPath, 2)) {
+        log.error(`Refusing to remove path with insufficient depth: ${envPath}`);
+        return VenvManagerStrings.venvRemoveUnsafePath;
+    }
+
+    if (!(await isValidVenvPath(envPath))) {
+        log.error(`Path does not appear to be a valid venv (no pyvenv.cfg): ${envPath}`);
+        return VenvManagerStrings.venvRemoveInvalidPath;
+    }
+
+    return undefined;
+}
+
 export async function removeVenv(environment: PythonEnvironment, log: LogOutputChannel): Promise<boolean> {
     const pythonPath = os.platform() === 'win32' ? 'python.exe' : 'python';
 
-    const envPath = environment.environmentPath.fsPath.endsWith(pythonPath)
-        ? path.dirname(path.dirname(environment.environmentPath.fsPath))
-        : environment.environmentPath.fsPath;
+    const envFsPath = path.normalize(environment.environmentPath.fsPath);
+    const envPath = envFsPath.endsWith(pythonPath) ? path.dirname(path.dirname(envFsPath)) : envFsPath;
+
+    const validationError = await validateVenvRemovalPath(envPath, log);
+    if (validationError) {
+        showErrorMessage(validationError);
+        return false;
+    }
 
     // Normalize path for UI display - ensure forward slashes on Windows
     const displayPath = normalizePath(envPath);
@@ -474,7 +536,11 @@ export async function resolveVenvPythonEnvironmentPath(
 ): Promise<PythonEnvironment | undefined> {
     const resolved = await nativeFinder.resolve(fsPath);
 
-    if (resolved.kind === NativePythonEnvironmentKind.venv || resolved.kind === NativePythonEnvironmentKind.venvUv) {
+    if (
+        resolved.kind === NativePythonEnvironmentKind.venv ||
+        resolved.kind === NativePythonEnvironmentKind.venvUv ||
+        resolved.kind === NativePythonEnvironmentKind.uvWorkspace
+    ) {
         const envInfo = await getPythonInfo(resolved);
         return api.createPythonEnvironmentItem(envInfo, manager);
     }

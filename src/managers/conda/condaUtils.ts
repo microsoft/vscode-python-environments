@@ -28,7 +28,7 @@ import {
 import { ENVS_EXTENSION_ID, EXTENSION_ROOT_DIR } from '../../common/constants';
 import { showErrorMessageWithLogs } from '../../common/errors/utils';
 import { Common, CondaStrings, PackageManagement, Pickers } from '../../common/localize';
-import { traceInfo, traceVerbose } from '../../common/logging';
+import { traceError, traceInfo, traceVerbose, traceWarn } from '../../common/logging';
 import { getWorkspacePersistentState } from '../../common/persistentState';
 import { pickProject } from '../../common/pickers/projects';
 import { StopWatch } from '../../common/stopWatch';
@@ -43,7 +43,7 @@ import {
 } from '../../common/window.apis';
 import { getConfiguration } from '../../common/workspace.apis';
 import { ShellConstants } from '../../features/common/shellConstants';
-import { quoteArgs } from '../../features/execution/execUtils';
+import { quoteArgs, quoteStringIfNecessary } from '../../features/execution/execUtils';
 import {
     isNativeEnvInfo,
     NativeEnvInfo,
@@ -203,9 +203,10 @@ async function _runConda(
 ): Promise<string> {
     const deferred = createDeferred<string>();
     args = quoteArgs(args);
+    const quotedConda = quoteStringIfNecessary(conda);
     const timer = new StopWatch();
-    deferred.promise.finally(() => traceInfo(`Ran conda in ${timer.elapsedTime}: ${conda} ${args.join(' ')}`));
-    const proc = ch.spawn(conda, args, { shell: true });
+    deferred.promise.finally(() => traceInfo(`Ran conda in ${timer.elapsedTime}: ${quotedConda} ${args.join(' ')}`));
+    const proc = ch.spawn(quotedConda, args, { shell: true });
 
     token?.onCancellationRequested(() => {
         proc.kill();
@@ -273,9 +274,17 @@ export async function getPrefixes(): Promise<string[]> {
         return prefixes;
     }
 
-    const data = await getCondaInfo();
-    prefixes = data['envs_dirs'] as string[];
-    await state.set(CONDA_PREFIXES_KEY, prefixes);
+    try {
+        const data = await getCondaInfo();
+        prefixes = Array.isArray(data['envs_dirs']) ? (data['envs_dirs'] as string[]) : [];
+        if (prefixes.length === 0) {
+            traceWarn('Conda info returned no environment directories (envs_dirs)');
+        }
+        await state.set(CONDA_PREFIXES_KEY, prefixes);
+    } catch (error) {
+        traceError('Failed to get conda environment prefixes', error);
+        prefixes = [];
+    }
     return prefixes;
 }
 
@@ -297,6 +306,9 @@ export async function getVersion(root: string): Promise<string> {
 }
 
 function isPrefixOf(roots: string[], e: string): boolean {
+    if (!roots || !Array.isArray(roots)) {
+        return false;
+    }
     const t = path.normalize(e);
     for (let r of roots.map((r) => path.normalize(r))) {
         if (t.startsWith(r)) {
