@@ -1,12 +1,13 @@
 import * as assert from 'assert';
-import * as typeMoq from 'typemoq';
 import * as sinon from 'sinon';
-import { EnvironmentManagers, InternalEnvironmentManager, PythonProjectManager } from '../../internal.api';
-import * as projectApi from '../../common/pickers/projects';
-import * as managerApi from '../../common/pickers/managers';
-import { PythonEnvironment, PythonProject } from '../../api';
-import { createAnyEnvironmentCommand } from '../../features/envCommands';
+import * as typeMoq from 'typemoq';
 import { Uri } from 'vscode';
+import { PythonEnvironment, PythonProject } from '../../api';
+import * as managerApi from '../../common/pickers/managers';
+import * as projectApi from '../../common/pickers/projects';
+import { createAnyEnvironmentCommand } from '../../features/envCommands';
+import { EnvironmentManagers, InternalEnvironmentManager, PythonProjectManager } from '../../internal.api';
+import { setupNonThenable } from '../mocks/helper';
 
 suite('Create Any Environment Command Tests', () => {
     let em: typeMoq.IMock<EnvironmentManagers>;
@@ -37,8 +38,7 @@ suite('Create Any Environment Command Tests', () => {
 
         env = typeMoq.Mock.ofType<PythonEnvironment>();
         env.setup((e) => e.envId).returns(() => ({ id: 'env1', managerId: 'test' }));
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        env.setup((e: any) => e.then).returns(() => undefined);
+        setupNonThenable(env);
 
         em = typeMoq.Mock.ofType<EnvironmentManagers>();
         em.setup((e) => e.managers).returns(() => [manager.object]);
