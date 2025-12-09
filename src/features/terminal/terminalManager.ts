@@ -17,7 +17,7 @@ import { isActivatableEnvironment } from '../common/activation';
 import { identifyTerminalShell } from '../common/shellDetector';
 import { getPythonApi } from '../pythonApi';
 import {
-    getShellIntegrationEnabledCache,
+    getShellIntegrationEnabledSetting,
     isWsl,
     shellIntegrationForActiveTerminal,
     shouldUseProfileActivation,
@@ -144,7 +144,7 @@ export class TerminalManagerImpl implements TerminalManager {
                 }
                 if (e.affectsConfiguration('terminal.integrated.shellIntegration.enabled')) {
                     traceInfo('Shell integration setting changed, invalidating cache');
-                    const updatedShellIntegrationSetting = await getShellIntegrationEnabledCache();
+                    const updatedShellIntegrationSetting = await getShellIntegrationEnabledSetting();
                     if (!updatedShellIntegrationSetting) {
                         const shells = new Set(
                             terminals()
@@ -171,7 +171,7 @@ export class TerminalManagerImpl implements TerminalManager {
             await Promise.all(
                 providers.map(async (p) => {
                     const state = await p.isSetup();
-                    const shellIntegrationEnabledSetting = await getShellIntegrationEnabledCache();
+                    const shellIntegrationEnabledSetting = await getShellIntegrationEnabledSetting();
                     const shellIntegrationActiveTerminal = await shellIntegrationForActiveTerminal(p.name);
                     const shellIntegrationLikelyAvailable =
                         shellIntegrationEnabledSetting || shellIntegrationActiveTerminal;

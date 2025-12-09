@@ -6,7 +6,7 @@ import which from 'which';
 import { traceError, traceInfo, traceVerbose } from '../../../../common/logging';
 import { ShellConstants } from '../../../common/shellConstants';
 import { hasStartupCode, insertStartupCode, removeStartupCode } from '../common/editUtils';
-import { getShellIntegrationEnabledCache, isWsl, shellIntegrationForActiveTerminal } from '../common/shellUtils';
+import { getShellIntegrationEnabledSetting, isWsl, shellIntegrationForActiveTerminal } from '../common/shellUtils';
 import { ShellScriptEditState, ShellSetupState, ShellStartupScriptProvider } from '../startupProvider';
 import { FISH_ENV_KEY, FISH_OLD_ENV_KEY, FISH_SCRIPT_VERSION } from './fishConstants';
 
@@ -58,7 +58,7 @@ async function isStartupSetup(profilePath: string, key: string): Promise<boolean
 
 async function setupStartup(profilePath: string, key: string): Promise<boolean> {
     try {
-        const shellIntegrationEnabled = await getShellIntegrationEnabledCache();
+        const shellIntegrationEnabled = await getShellIntegrationEnabledSetting();
         if ((shellIntegrationEnabled || (await shellIntegrationForActiveTerminal('fish', profilePath))) && !isWsl()) {
             removeFishStartup(profilePath, key);
             return true;

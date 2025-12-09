@@ -126,7 +126,7 @@ export function isWsl(): boolean {
     return !!(process.env.WSL_DISTRO_NAME || process.env.WSL_INTEROP || process.env.WSLENV);
 }
 
-export async function getShellIntegrationEnabledCache(): Promise<boolean> {
+export async function getShellIntegrationEnabledSetting(): Promise<boolean> {
     const shellIntegrationInspect =
         getConfiguration('terminal.integrated').inspect<boolean>('shellIntegration.enabled');
 
