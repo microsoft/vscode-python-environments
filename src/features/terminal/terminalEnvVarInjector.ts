@@ -258,9 +258,7 @@ export class TerminalEnvVarInjector implements Disposable {
     dispose(): void {
         traceVerbose('TerminalEnvVarInjector: Disposing');
         this.disposables.forEach((disposable) => {
-            if (disposable) {
-                disposable.dispose();
-            }
+            disposable.dispose();
         });
         this.disposables = [];
 
