@@ -581,3 +581,5 @@ envConfig.inspect
 -   Use `as unknown as TargetType` for type casting instead of `as any` to maintain type safety and avoid 'any' violations
 -   If tests frequently need private access consider that maybe methods should be protected, or public test utilities should exist for testing (1)
 -   When making systematic changes across many similar locations, fix one instance completely first to validate the approach before applying the pattern everywhere (1)
+-   Always recompile tests after making changes before running them, especially when changing imports or type definitions (1)
+-   When using paths as Map keys for tracking, you MUST use Uri.fsPath consistently throughout the test - mixing hardcoded strings with Uri.fsPath causes key mismatches on Windows (1)

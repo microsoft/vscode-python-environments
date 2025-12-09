@@ -257,6 +257,7 @@ suite('TerminalEnvVarInjector - Core Functionality', () => {
     suite('clearWorkspaceVariables', () => {
         setup(() => {
             injector = new TerminalEnvVarInjector(envVarCollection.object, envVarManager.object);
+            testableInjector = injector as unknown as TerminalEnvVarInjectorTestable;
         });
 
         test('should only delete tracked variables', () => {
@@ -265,7 +266,7 @@ suite('TerminalEnvVarInjector - Core Functionality', () => {
                 MY_VAR: 'value',
                 ANOTHER_VAR: 'value2',
             };
-            testableInjector.applyEnvVarChanges(mockScopedCollection, envVars, '/test/workspace');
+            testableInjector.applyEnvVarChanges(mockScopedCollection, envVars, mockWorkspaceFolder.uri.fsPath);
 
             deleteStub.resetHistory();
 
@@ -281,7 +282,7 @@ suite('TerminalEnvVarInjector - Core Functionality', () => {
         test('should not delete non-tracked variables like BASH_ENV', () => {
             // Mock - Set up only one tracked variable
             const envVars = { MY_VAR: 'value' };
-            testableInjector.applyEnvVarChanges(mockScopedCollection, envVars, '/test/workspace');
+            testableInjector.applyEnvVarChanges(mockScopedCollection, envVars, mockWorkspaceFolder.uri.fsPath);
 
             // Simulate BASH_ENV being set by another manager (not tracked by us)
             getStub.withArgs('BASH_ENV').returns({ value: 'some_bash_command' });
