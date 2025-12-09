@@ -23,7 +23,7 @@ suite('TerminalEnvVarInjector - Integration Tests with Fixtures', () => {
         { replace: sinon.SinonStub; delete: sinon.SinonStub; clear: sinon.SinonStub; get: sinon.SinonStub }
     >;
 
-    const fixturesPath = path.join(__dirname, '..', 'fixtures', 'terminalEnvVarInjector');
+    const fixturesPath = path.join(__dirname, '..', '..', '..', 'src', 'test', 'fixtures', 'terminalEnvVarInjector');
 
     setup(async () => {
         // Create a unique temp directory for this test run

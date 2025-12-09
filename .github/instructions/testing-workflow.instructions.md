@@ -585,5 +585,5 @@ envConfig.inspect
 -   When using paths as Map keys for tracking, you MUST use Uri.fsPath consistently throughout the test - mixing hardcoded strings with Uri.fsPath causes key mismatches on Windows (1)
 -   Avoid accessing private members in tests using bracket notation or test interfaces - instead add explicit test helper methods or make methods `protected` rather than `private` for better encapsulation and less brittle tests (1)
 -   Check for redundant test coverage between unit and integration test files - integration tests should test end-to-end behavior while unit tests focus on internal logic and edge cases (1)
--   Replace hardcoded `setTimeout` delays with condition-based polling that waits for the actual expected state - this makes tests faster and more reliable across different CI environments (1)
--   Fixture files in `src/test/fixtures/` must be copied to `out/test/fixtures/` for compiled tests to access them - create a copy script or add to the build process (1)
+-   For async test timing, prefer event-driven or promise-based approaches over delays; when testing fire-and-forget event handlers with no completion signal, use condition-based polling (`waitForCondition`) instead of hardcoded `setTimeout` - faster and more reliable than arbitrary delays (1)
+-   When accessing fixture files in compiled tests, use `path.join(__dirname, '..', '..', '..', 'src', 'test', 'fixtures')` to read directly from source instead of copying to `out/` - `__dirname` points to the compiled location so navigate up and into `src/` (1)
