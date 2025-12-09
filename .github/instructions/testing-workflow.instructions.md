@@ -574,3 +574,10 @@ envConfig.inspect
 -   Untestable Node.js APIs → Create proxy abstraction functions (use function overloads to preserve intelligent typing while making functions mockable)
 
 ## 🧠 Agent Learnings
+
+-   VS Code file watchers only monitor workspace folders, not external temp directories (1)
+-   Use fixture-based testing with real files instead of mocking fs-extra, which has non-configurable property descriptors that prevent stubbing (1)
+-   Extension tests (.test.ts) should use real filesystem operations; unit tests (.unit.test.ts) should mock dependencies (1)
+-   Use `as unknown as TargetType` for type casting instead of `as any` to maintain type safety and avoid 'any' violations
+-   If tests frequently need private access consider that maybe methods should be protected, or public test utilities should exist for testing (1)
+-   When making systematic changes across many similar locations, fix one instance completely first to validate the approach before applying the pattern everywhere (1)

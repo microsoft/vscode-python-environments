@@ -5,8 +5,10 @@ import * as fse from 'fs-extra';
 import * as path from 'path';
 import {
     Disposable,
+    EnvironmentVariableCollection,
     EnvironmentVariableScope,
     GlobalEnvironmentVariableCollection,
+    Uri,
     window,
     workspace,
     WorkspaceFolder,
@@ -22,6 +24,13 @@ import { EnvVarManager } from '../execution/envVariableManager';
  */
 export class TerminalEnvVarInjector implements Disposable {
     private disposables: Disposable[] = [];
+
+    /**
+     * Track which environment variables we've set per workspace to properly handle
+     * variables that are removed/commented out in .env files.
+     * Key: workspace fsPath, Value: Set of env var keys we've set for that workspace
+     */
+    private readonly trackedEnvVars: Map<string, Set<string>> = new Map();
 
     constructor(
         private readonly envVarCollection: GlobalEnvironmentVariableCollection,
@@ -134,53 +143,112 @@ export class TerminalEnvVarInjector implements Disposable {
      */
     private async injectEnvironmentVariablesForWorkspace(workspaceFolder: WorkspaceFolder): Promise<void> {
         const workspaceUri = workspaceFolder.uri;
-        try {
-            const envVars = await this.envVarManager.getEnvironmentVariables(workspaceUri);
+        const workspaceKey = workspaceUri.fsPath;
 
-            // use scoped environment variable collection
+        try {
             const envVarScope = this.getEnvironmentVariableCollectionScoped({ workspaceFolder });
 
-            // Check if env file injection is enabled
-            const config = getConfiguration('python', workspaceUri);
-            const useEnvFile = config.get<boolean>('terminal.useEnvFile', false);
-            const envFilePath = config.get<string>('envFile');
-
-            if (!useEnvFile) {
-                traceVerbose(
-                    `TerminalEnvVarInjector: Env file injection disabled for workspace: ${workspaceUri.fsPath}`,
-                );
+            // Check if we should inject and get the env file path
+            const shouldInject = await this.shouldInjectEnvVars(workspaceUri, envVarScope, workspaceKey);
+            if (!shouldInject) {
                 return;
             }
 
-            // Track which .env file is being used for logging
-            const resolvedEnvFilePath: string | undefined = envFilePath
-                ? path.resolve(resolveVariables(envFilePath, workspaceUri))
-                : undefined;
-            const defaultEnvFilePath: string = path.join(workspaceUri.fsPath, '.env');
+            // Get environment variables from the .env file
+            const envVars = await this.envVarManager.getEnvironmentVariables(workspaceUri);
 
-            let activeEnvFilePath: string = resolvedEnvFilePath || defaultEnvFilePath;
-            if (activeEnvFilePath && (await fse.pathExists(activeEnvFilePath))) {
-                traceVerbose(`TerminalEnvVarInjector: Using env file: ${activeEnvFilePath}`);
-            } else {
-                traceVerbose(
-                    `TerminalEnvVarInjector: No .env file found for workspace: ${workspaceUri.fsPath}, not injecting environment variables.`,
-                );
-                return; // No .env file to inject
-            }
-
-            for (const [key, value] of Object.entries(envVars)) {
-                if (value === undefined) {
-                    // Remove the environment variable if the value is undefined
-                    envVarScope.delete(key);
-                } else {
-                    envVarScope.replace(key, value);
-                }
-            }
+            // Apply the environment variable changes
+            this.applyEnvVarChanges(envVarScope, envVars, workspaceKey);
         } catch (error) {
             traceError(
                 `TerminalEnvVarInjector: Error injecting environment variables for workspace ${workspaceUri.fsPath}:`,
                 error,
             );
+        }
+    }
+
+    /**
+     * Check if environment variables should be injected for the workspace.
+     * Returns true if injection should proceed, false otherwise.
+     */
+    private async shouldInjectEnvVars(
+        workspaceUri: Uri,
+        envVarScope: EnvironmentVariableCollection,
+        workspaceKey: string,
+    ): Promise<boolean> {
+        const config = getConfiguration('python', workspaceUri);
+        const useEnvFile = config.get<boolean>('terminal.useEnvFile', false);
+        const envFilePath = config.get<string>('envFile');
+
+        if (!useEnvFile) {
+            traceVerbose(`TerminalEnvVarInjector: Env file injection disabled for workspace: ${workspaceUri.fsPath}`);
+            this.cleanupTrackedVars(envVarScope, workspaceKey);
+            return false;
+        }
+
+        // Determine which .env file to use
+        const resolvedEnvFilePath: string | undefined = envFilePath
+            ? path.resolve(resolveVariables(envFilePath, workspaceUri))
+            : undefined;
+        const defaultEnvFilePath: string = path.join(workspaceUri.fsPath, '.env');
+        const activeEnvFilePath: string = resolvedEnvFilePath || defaultEnvFilePath;
+
+        if (activeEnvFilePath && (await fse.pathExists(activeEnvFilePath))) {
+            traceVerbose(`TerminalEnvVarInjector: Using env file: ${activeEnvFilePath}`);
+            return true;
+        } else {
+            traceVerbose(
+                `TerminalEnvVarInjector: No .env file found for workspace: ${workspaceUri.fsPath}, not injecting environment variables.`,
+            );
+            this.cleanupTrackedVars(envVarScope, workspaceKey);
+            return false;
+        }
+    }
+
+    /**
+     * Apply environment variable changes by comparing current and previous state.
+     */
+    private applyEnvVarChanges(
+        envVarScope: EnvironmentVariableCollection,
+        envVars: { [key: string]: string | undefined },
+        workspaceKey: string,
+    ): void {
+        const previousKeys = this.trackedEnvVars.get(workspaceKey) || new Set<string>();
+        const currentKeys = new Set<string>();
+
+        // Update/add current env vars from .env file
+        for (const [key, value] of Object.entries(envVars)) {
+            if (value === undefined || value === '') {
+                // Variable explicitly unset in .env (e.g., VAR=)
+                envVarScope.delete(key);
+            } else {
+                envVarScope.replace(key, value);
+                currentKeys.add(key);
+            }
+        }
+
+        // Delete keys that were previously set but are now gone from .env
+        for (const oldKey of previousKeys) {
+            if (!currentKeys.has(oldKey)) {
+                traceVerbose(
+                    `TerminalEnvVarInjector: Removing previously set env var '${oldKey}' from workspace ${workspaceKey}`,
+                );
+                envVarScope.delete(oldKey);
+            }
+        }
+
+        // Update our tracking for this workspace
+        this.trackedEnvVars.set(workspaceKey, currentKeys);
+    }
+
+    /**
+     * Clean up previously tracked environment variables for a workspace.
+     */
+    private cleanupTrackedVars(envVarScope: EnvironmentVariableCollection, workspaceKey: string): void {
+        const previousKeys = this.trackedEnvVars.get(workspaceKey);
+        if (previousKeys) {
+            previousKeys.forEach((key) => envVarScope.delete(key));
+            this.trackedEnvVars.delete(workspaceKey);
         }
     }
 
@@ -192,8 +260,20 @@ export class TerminalEnvVarInjector implements Disposable {
         this.disposables.forEach((disposable) => disposable.dispose());
         this.disposables = [];
 
-        // Clear all environment variables from the collection
-        this.envVarCollection.clear();
+        // Clear only the environment variables that we've set, preserving others (e.g., BASH_ENV)
+        for (const [workspaceKey, trackedKeys] of this.trackedEnvVars.entries()) {
+            try {
+                // Try to find the workspace folder for proper scoping
+                const workspaceFolder = workspace.workspaceFolders?.find((wf) => wf.uri.fsPath === workspaceKey);
+                if (workspaceFolder) {
+                    const scope = this.getEnvironmentVariableCollectionScoped({ workspaceFolder });
+                    trackedKeys.forEach((key) => scope.delete(key));
+                }
+            } catch (error) {
+                traceError(`Failed to clean up environment variables for workspace ${workspaceKey}:`, error);
+            }
+        }
+        this.trackedEnvVars.clear();
     }
 
     private getEnvironmentVariableCollectionScoped(scope: EnvironmentVariableScope = {}) {
@@ -205,9 +285,16 @@ export class TerminalEnvVarInjector implements Disposable {
      * Clear all environment variables for a workspace.
      */
     private clearWorkspaceVariables(workspaceFolder: WorkspaceFolder): void {
+        const workspaceKey = workspaceFolder.uri.fsPath;
         try {
             const scope = this.getEnvironmentVariableCollectionScoped({ workspaceFolder });
-            scope.clear();
+
+            // Only delete env vars that we've set, not ones set by other managers (e.g., BASH_ENV)
+            const trackedKeys = this.trackedEnvVars.get(workspaceKey);
+            if (trackedKeys) {
+                trackedKeys.forEach((key) => scope.delete(key));
+                this.trackedEnvVars.delete(workspaceKey);
+            }
         } catch (error) {
             traceError(`Failed to clear environment variables for workspace ${workspaceFolder.uri.fsPath}:`, error);
         }
