@@ -319,12 +319,12 @@ suite('TerminalEnvVarInjector - Integration Tests with Fixtures', () => {
                 uri: workspaceFolder.uri,
                 changeType: FileChangeType.Changed,
             });
-            await waitForCondition(() => stubs.delete.calledWith('BAR'));
+            await waitForCondition(() => stubs!.delete.calledWith('BAR'));
 
             // Assert - BAR should be deleted
-            assert.ok(stubs.delete.calledWith('BAR'), 'Should delete commented out BAR');
-            assert.ok(stubs.replace.calledWith('FOO', 'bar'), 'Should keep FOO');
-            assert.ok(stubs.replace.calledWith('BAZ', 'qux'), 'Should keep BAZ');
+            assert.ok(stubs!.delete.calledWith('BAR'), 'Should delete commented out BAR');
+            assert.ok(stubs!.replace.calledWith('FOO', 'bar'), 'Should keep FOO');
+            assert.ok(stubs!.replace.calledWith('BAZ', 'qux'), 'Should keep BAZ');
         });
 
         test('Scenario: Adding a new variable injects it', async () => {
@@ -348,6 +348,7 @@ suite('TerminalEnvVarInjector - Integration Tests with Fixtures', () => {
             let stubs = scopedCollectionStubs.get(workspaceDir);
             await waitForCondition(() => !!stubs && stubs!.replace.calledWith('FOO', 'bar'));
             stubs = scopedCollectionStubs.get(workspaceDir)!;
+            stubs = scopedCollectionStubs.get(workspaceDir)!;
 
             // Act - Add NEW_VAR to file
             await fs.appendFile(envFilePath, 'NEW_VAR=new_value\n');
@@ -358,11 +359,11 @@ suite('TerminalEnvVarInjector - Integration Tests with Fixtures', () => {
                 uri: workspaceFolder.uri,
                 changeType: FileChangeType.Changed,
             });
-            await waitForCondition(() => stubs.replace.calledWith('NEW_VAR', 'new_value'));
+            await waitForCondition(() => stubs!.replace.calledWith('NEW_VAR', 'new_value'));
 
             // Assert
-            assert.ok(stubs.replace.calledWith('NEW_VAR', 'new_value'), 'Should add NEW_VAR');
-            assert.ok(stubs.replace.calledWith('FOO', 'bar'), 'Should keep FOO');
+            assert.ok(stubs!.replace.calledWith('NEW_VAR', 'new_value'), 'Should add NEW_VAR');
+            assert.ok(stubs!.replace.calledWith('FOO', 'bar'), 'Should keep FOO');
         });
 
         test('Scenario: Unsetting a variable (VAR=) removes it', async () => {
@@ -386,6 +387,7 @@ suite('TerminalEnvVarInjector - Integration Tests with Fixtures', () => {
             let stubs = scopedCollectionStubs.get(workspaceDir);
             await waitForCondition(() => !!stubs && stubs!.replace.calledWith('TO_UNSET', 'value'));
             stubs = scopedCollectionStubs.get(workspaceDir)!;
+            stubs = scopedCollectionStubs.get(workspaceDir)!;
 
             assert.ok(stubs.replace.calledWith('TO_UNSET', 'value'), 'TO_UNSET should be initially set');
 
@@ -398,10 +400,10 @@ suite('TerminalEnvVarInjector - Integration Tests with Fixtures', () => {
                 uri: workspaceFolder.uri,
                 changeType: FileChangeType.Changed,
             });
-            await waitForCondition(() => stubs.delete.calledWith('TO_UNSET'));
+            await waitForCondition(() => stubs!.delete.calledWith('TO_UNSET'));
 
             // Assert
-            assert.ok(stubs.delete.calledWith('TO_UNSET'), 'Should delete unset variable');
+            assert.ok(stubs!.delete.calledWith('TO_UNSET'), 'Should delete unset variable');
         });
     });
 
