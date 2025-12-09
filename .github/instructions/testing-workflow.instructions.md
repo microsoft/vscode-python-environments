@@ -583,3 +583,7 @@ envConfig.inspect
 -   When making systematic changes across many similar locations, fix one instance completely first to validate the approach before applying the pattern everywhere (1)
 -   Always recompile tests after making changes before running them, especially when changing imports or type definitions (1)
 -   When using paths as Map keys for tracking, you MUST use Uri.fsPath consistently throughout the test - mixing hardcoded strings with Uri.fsPath causes key mismatches on Windows (1)
+-   Avoid accessing private members in tests using bracket notation or test interfaces - instead add explicit test helper methods or make methods `protected` rather than `private` for better encapsulation and less brittle tests (1)
+-   Check for redundant test coverage between unit and integration test files - integration tests should test end-to-end behavior while unit tests focus on internal logic and edge cases (1)
+-   Replace hardcoded `setTimeout` delays with condition-based polling that waits for the actual expected state - this makes tests faster and more reliable across different CI environments (1)
+-   Fixture files in `src/test/fixtures/` must be copied to `out/test/fixtures/` for compiled tests to access them - create a copy script or add to the build process (1)
