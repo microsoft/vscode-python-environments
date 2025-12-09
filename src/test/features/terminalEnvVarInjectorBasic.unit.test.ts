@@ -79,9 +79,9 @@ suite('TerminalEnvVarInjector - Core Functionality', () => {
         envVarCollection.setup((x) => x.getScoped(typeMoq.It.isAny())).returns(() => mockScopedCollection);
         envVarCollection.setup((x) => x.clear()).returns(() => {});
 
-        // Setup minimal mocks for event subscriptions - return a function matching Event signature
+        // Setup minimal mocks for event subscriptions - return disposable when handler is registered
         const mockDisposable: Disposable = { dispose: () => {} };
-        envVarManager.setup((m) => m.onDidChangeEnvironmentVariables).returns(() => () => mockDisposable);
+        envVarManager.setup((m) => m.onDidChangeEnvironmentVariables(typeMoq.It.isAny())).returns(() => mockDisposable);
     });
 
     teardown(() => {
@@ -316,18 +316,12 @@ suite('TerminalEnvVarInjector - Core Functionality', () => {
         });
 
         test('should register environment variable change event handler', () => {
-            // Arrange
-            let eventHandlerRegistered = false;
-            envVarManager.reset();
-            // Setup minimal mocks for event subscriptions - return a function matching Event signature
-            const mockDisposable: Disposable = { dispose: () => {} };
-            envVarManager.setup((m) => m.onDidChangeEnvironmentVariables).returns(() => () => mockDisposable);
-
+            // Arrange - Use the global setup's mock configuration
             // Act
             injector = new TerminalEnvVarInjector(envVarCollection.object, envVarManager.object);
 
-            // Assert
-            sinon.assert.match(eventHandlerRegistered, true);
+            // Assert - Verify that the mock's setup was used (handler was registered)
+            envVarManager.verify((m) => m.onDidChangeEnvironmentVariables(typeMoq.It.isAny()), typeMoq.Times.once());
         });
     });
 });

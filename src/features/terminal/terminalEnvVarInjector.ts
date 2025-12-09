@@ -257,7 +257,11 @@ export class TerminalEnvVarInjector implements Disposable {
      */
     dispose(): void {
         traceVerbose('TerminalEnvVarInjector: Disposing');
-        this.disposables.forEach((disposable) => disposable.dispose());
+        this.disposables.forEach((disposable) => {
+            if (disposable) {
+                disposable.dispose();
+            }
+        });
         this.disposables = [];
 
         // Clear only the environment variables that we've set, preserving others (e.g., BASH_ENV)
