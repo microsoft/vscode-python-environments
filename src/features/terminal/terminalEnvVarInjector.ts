@@ -30,7 +30,7 @@ export class TerminalEnvVarInjector implements Disposable {
      * variables that are removed/commented out in .env files.
      * Key: workspace fsPath, Value: Set of env var keys we've set for that workspace
      */
-    private readonly trackedEnvVars: Map<string, Set<string>> = new Map();
+    protected readonly trackedEnvVars: Map<string, Set<string>> = new Map();
 
     constructor(
         private readonly envVarCollection: GlobalEnvironmentVariableCollection,
@@ -208,7 +208,7 @@ export class TerminalEnvVarInjector implements Disposable {
     /**
      * Apply environment variable changes by comparing current and previous state.
      */
-    private applyEnvVarChanges(
+    protected applyEnvVarChanges(
         envVarScope: EnvironmentVariableCollection,
         envVars: { [key: string]: string | undefined },
         workspaceKey: string,
@@ -244,7 +244,7 @@ export class TerminalEnvVarInjector implements Disposable {
     /**
      * Clean up previously tracked environment variables for a workspace.
      */
-    private cleanupTrackedVars(envVarScope: EnvironmentVariableCollection, workspaceKey: string): void {
+    protected cleanupTrackedVars(envVarScope: EnvironmentVariableCollection, workspaceKey: string): void {
         const previousKeys = this.trackedEnvVars.get(workspaceKey);
         if (previousKeys) {
             previousKeys.forEach((key) => envVarScope.delete(key));
@@ -286,7 +286,7 @@ export class TerminalEnvVarInjector implements Disposable {
     /**
      * Clear all environment variables for a workspace.
      */
-    private clearWorkspaceVariables(workspaceFolder: WorkspaceFolder): void {
+    protected clearWorkspaceVariables(workspaceFolder: WorkspaceFolder): void {
         const workspaceKey = workspaceFolder.uri.fsPath;
         try {
             const scope = this.getEnvironmentVariableCollectionScoped({ workspaceFolder });
