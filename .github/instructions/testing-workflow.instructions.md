@@ -574,7 +574,6 @@ envConfig.inspect
 -   Untestable Node.js APIs → Create proxy abstraction functions (use function overloads to preserve intelligent typing while making functions mockable)
 
 ## 🧠 Agent Learnings
-
 -   VS Code file watchers only monitor workspace folders, not external temp directories (1)
 -   Use fixture-based testing with real files instead of mocking fs-extra, which has non-configurable property descriptors that prevent stubbing (1)
 -   Extension tests (.test.ts) should use real filesystem operations; unit tests (.unit.test.ts) should mock dependencies (1)
@@ -587,3 +586,5 @@ envConfig.inspect
 -   Check for redundant test coverage between unit and integration test files - integration tests should test end-to-end behavior while unit tests focus on internal logic and edge cases (1)
 -   For async test timing, prefer event-driven or promise-based approaches over delays; when testing fire-and-forget event handlers with no completion signal, use condition-based polling (`waitForCondition`) instead of hardcoded `setTimeout` - faster and more reliable than arbitrary delays (1)
 -   When accessing fixture files in compiled tests, use `path.join(__dirname, '..', '..', '..', 'src', 'test', 'fixtures')` to read directly from source instead of copying to `out/` - `__dirname` points to the compiled location so navigate up and into `src/` (1)
+-   Avoid testing exact error messages or log output - assert only that errors are thrown or rejection occurs to prevent brittle tests (1)
+-   Create shared mock helpers (e.g., `createMockLogOutputChannel()`) instead of duplicating mock setup across multiple test files (1)
