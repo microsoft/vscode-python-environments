@@ -5,12 +5,12 @@ import * as path from 'path';
 import { promisify } from 'util';
 import which from 'which';
 import { traceError, traceInfo, traceVerbose } from '../../../../common/logging';
+import { StopWatch } from '../../../../common/stopWatch';
 import { isWindows } from '../../../../common/utils/platformUtils';
 import { ShellConstants } from '../../../common/shellConstants';
 import { hasStartupCode, insertStartupCode, removeStartupCode } from '../common/editUtils';
 import { ShellScriptEditState, ShellSetupState, ShellStartupScriptProvider } from '../startupProvider';
 import { CMD_ENV_KEY, CMD_SCRIPT_VERSION } from './cmdConstants';
-import { StopWatch } from '../../../../common/stopWatch';
 
 function execCommand(command: string) {
     const timer = new StopWatch();
@@ -222,6 +222,13 @@ async function setupCmdStartup(cmdFiles: CmdFilePaths, key: string): Promise<boo
                     `SHELL: Updated existing main batch file at: ${cmdFiles.mainBatchFile}\r\n${mainBatchContent}`,
                 );
             }
+        } else {
+            const mainBatchContent = getMainBatchFileContent(cmdFiles.regStartupFile);
+            await fs.writeFile(
+                cmdFiles.mainBatchFile,
+                insertStartupCode(getHeader(), regionStart, regionEnd, mainBatchContent),
+            );
+            traceInfo(`SHELL: Created new main batch file at: ${cmdFiles.mainBatchFile}\r\n${mainBatchContent}`);
         }
 
         // Step 4: Setup registry AutoRun to call our main batch file

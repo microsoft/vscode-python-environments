@@ -135,6 +135,8 @@ async function getPythonInfo(env: NativeEnvInfo): Promise<PythonEnvironmentInfo>
         let description = undefined;
         if (env.kind === NativePythonEnvironmentKind.venvUv) {
             description = l10n.t('uv');
+        } else if (env.kind === NativePythonEnvironmentKind.uvWorkspace) {
+            description = l10n.t('uv workspace');
         }
 
         const binDir = path.dirname(env.executable);
@@ -181,7 +183,12 @@ export async function findVirtualEnvironments(
     const envs = data
         .filter((e) => isNativeEnvInfo(e))
         .map((e) => e as NativeEnvInfo)
-        .filter((e) => e.kind === NativePythonEnvironmentKind.venv || e.kind === NativePythonEnvironmentKind.venvUv);
+        .filter(
+            (e) =>
+                e.kind === NativePythonEnvironmentKind.venv ||
+                e.kind === NativePythonEnvironmentKind.venvUv ||
+                e.kind === NativePythonEnvironmentKind.uvWorkspace,
+        );
 
     for (const e of envs) {
         if (!(e.prefix && e.executable && e.version)) {
@@ -194,7 +201,7 @@ export async function findVirtualEnvironments(
         log.info(`Found venv environment: ${env.name}`);
 
         // Track UV environments using environmentPath for consistency
-        if (e.kind === NativePythonEnvironmentKind.venvUv) {
+        if (e.kind === NativePythonEnvironmentKind.venvUv || e.kind === NativePythonEnvironmentKind.uvWorkspace) {
             await addUvEnvironment(env.environmentPath.fsPath);
         }
     }
@@ -326,7 +333,11 @@ export async function createWithProgress(
                 const resolved = await nativeFinder.resolve(pythonPath);
                 const env = api.createPythonEnvironmentItem(await getPythonInfo(resolved), manager);
 
-                if (useUv && resolved.kind === NativePythonEnvironmentKind.venvUv) {
+                if (
+                    useUv &&
+                    (resolved.kind === NativePythonEnvironmentKind.venvUv ||
+                        resolved.kind === NativePythonEnvironmentKind.uvWorkspace)
+                ) {
                     await addUvEnvironment(env.environmentPath.fsPath);
                 }
 
@@ -525,7 +536,11 @@ export async function resolveVenvPythonEnvironmentPath(
 ): Promise<PythonEnvironment | undefined> {
     const resolved = await nativeFinder.resolve(fsPath);
 
-    if (resolved.kind === NativePythonEnvironmentKind.venv || resolved.kind === NativePythonEnvironmentKind.venvUv) {
+    if (
+        resolved.kind === NativePythonEnvironmentKind.venv ||
+        resolved.kind === NativePythonEnvironmentKind.venvUv ||
+        resolved.kind === NativePythonEnvironmentKind.uvWorkspace
+    ) {
         const envInfo = await getPythonInfo(resolved);
         return api.createPythonEnvironmentItem(envInfo, manager);
     }

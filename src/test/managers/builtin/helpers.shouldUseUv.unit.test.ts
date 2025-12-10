@@ -6,6 +6,7 @@ import * as persistentState from '../../../common/persistentState';
 import * as workspaceApis from '../../../common/workspace.apis';
 import { resetUvInstallationCache, shouldUseUv } from '../../../managers/builtin/helpers';
 import * as uvEnvironments from '../../../managers/builtin/uvEnvironments';
+import { createMockLogOutputChannel } from '../../mocks/helper';
 import { MockChildProcess } from '../../mocks/mockChildProcess';
 
 interface MockWorkspaceConfig {
@@ -47,25 +48,7 @@ suite('Helpers - shouldUseUv', () => {
         // Mock UV-related functions
         getUvEnvironmentsStub = sinon.stub(uvEnvironments, 'getUvEnvironments');
 
-        // No default behaviors set - each test configures what it needs
-        // Create a more complete mock for LogOutputChannel
-        mockLog = {
-            info: sinon.stub(),
-            error: sinon.stub(),
-            warn: sinon.stub(),
-            append: sinon.stub(),
-            debug: sinon.stub(),
-            trace: sinon.stub(),
-            show: sinon.stub(),
-            hide: sinon.stub(),
-            dispose: sinon.stub(),
-            clear: sinon.stub(),
-            replace: sinon.stub(),
-            appendLine: sinon.stub(),
-            name: 'test-log',
-            logLevel: 1,
-            onDidChangeLogLevel: sinon.stub() as LogOutputChannel['onDidChangeLogLevel'],
-        } as unknown as LogOutputChannel;
+        mockLog = createMockLogOutputChannel();
 
         // Stub childProcess.apis spawnProcess
         spawnStub = sinon.stub(childProcessApis, 'spawnProcess');

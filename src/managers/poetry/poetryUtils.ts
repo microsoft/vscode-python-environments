@@ -8,7 +8,6 @@ import { traceError, traceInfo } from '../../common/logging';
 import { getWorkspacePersistentState } from '../../common/persistentState';
 import { getUserHomeDir, untildify } from '../../common/utils/pathUtils';
 import { isWindows } from '../../common/utils/platformUtils';
-import { getConfiguration } from '../../common/workspace.apis';
 import {
     isNativeEnvInfo,
     NativeEnvInfo,
@@ -40,12 +39,6 @@ export async function clearPoetryCache(): Promise<void> {
     // Reset in-memory cache
     poetryPath = undefined;
     poetryVirtualenvsPath = undefined;
-}
-
-function getPoetryPathFromSettings(): string | undefined {
-    const config = getConfiguration('python');
-    const value = config.get<string>('poetryPath');
-    return value && typeof value === 'string' ? untildify(value) : value;
 }
 
 async function setPoetry(poetry: string): Promise<void> {
@@ -127,17 +120,6 @@ export async function getPoetry(native?: NativePythonFinder): Promise<string | u
             return untildify(poetryPath);
         }
         await state.set(POETRY_PATH_KEY, undefined);
-    }
-
-    // try to get from settings
-    const settingPath = getPoetryPathFromSettings();
-    if (settingPath) {
-        if (await fs.exists(untildify(settingPath))) {
-            poetryPath = settingPath;
-            traceInfo(`Using poetry from settings: ${settingPath}`);
-            return untildify(poetryPath);
-        }
-        traceInfo(`Poetry path from settings does not exist: ${settingPath}`);
     }
 
     // Check in standard PATH locations
@@ -317,9 +299,7 @@ export async function refreshPoetry(
     manager: EnvironmentManager,
 ): Promise<PythonEnvironment[]> {
     traceInfo('Refreshing poetry environments');
-
-    const searchPath = getPoetryPathFromSettings();
-    const data = await nativeFinder.refresh(hardRefresh, searchPath ? [Uri.file(searchPath)] : undefined);
+    const data = await nativeFinder.refresh(hardRefresh);
 
     let poetry = await getPoetry();
 
