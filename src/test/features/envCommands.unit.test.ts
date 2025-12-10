@@ -1,14 +1,14 @@
 import * as assert from 'assert';
-import * as typeMoq from 'typemoq';
 import * as sinon from 'sinon';
-import { EnvironmentManagers, InternalEnvironmentManager, PythonProjectManager } from '../../internal.api';
-import * as projectApi from '../../common/pickers/projects';
-import * as managerApi from '../../common/pickers/managers';
-import { PythonEnvironment, PythonEnvironmentApi, PythonProject } from '../../api';
-import { createAnyEnvironmentCommand, createTerminalCommand } from '../../features/envCommands';
+import * as typeMoq from 'typemoq';
 import { Terminal, Uri } from 'vscode';
+import { PythonEnvironment, PythonEnvironmentApi, PythonProject } from '../../api';
+import * as managerApi from '../../common/pickers/managers';
+import * as projectApi from '../../common/pickers/projects';
+import { createAnyEnvironmentCommand, createTerminalCommand } from '../../features/envCommands';
 import { TerminalManager } from '../../features/terminal/terminalManager';
-import * as fs from 'fs-extra';
+import { EnvironmentManagers, InternalEnvironmentManager, PythonProjectManager } from '../../internal.api';
+import { setupNonThenable } from '../mocks/helper';
 
 suite('Create Any Environment Command Tests', () => {
     let em: typeMoq.IMock<EnvironmentManagers>;
@@ -39,8 +39,7 @@ suite('Create Any Environment Command Tests', () => {
 
         env = typeMoq.Mock.ofType<PythonEnvironment>();
         env.setup((e) => e.envId).returns(() => ({ id: 'env1', managerId: 'test' }));
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        env.setup((e: any) => e.then).returns(() => undefined);
+        setupNonThenable(env);
 
         em = typeMoq.Mock.ofType<EnvironmentManagers>();
         em.setup((e) => e.managers).returns(() => [manager.object]);
@@ -184,33 +183,27 @@ suite('Create Terminal Command Tests', () => {
     let env: typeMoq.IMock<PythonEnvironment>;
     let terminal: typeMoq.IMock<Terminal>;
     let pickProjectStub: sinon.SinonStub;
-    let fsStatStub: sinon.SinonStub;
     let project1: PythonProject = {
-        uri: Uri.file('/workspace/folder1'),
+        uri: Uri.file('/tmp'),
         name: 'folder1',
     };
     let project2: PythonProject = {
-        uri: Uri.file('/workspace/folder2'),
+        uri: Uri.file('/home'),
         name: 'folder2',
     };
 
     setup(() => {
         env = typeMoq.Mock.ofType<PythonEnvironment>();
         env.setup((e) => e.envId).returns(() => ({ id: 'env1', managerId: 'test' }));
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        env.setup((e: any) => e.then).returns(() => undefined);
+        setupNonThenable(env);
 
         terminal = typeMoq.Mock.ofType<Terminal>();
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        terminal.setup((t: any) => t.then).returns(() => undefined);
+        setupNonThenable(terminal);
 
         api = typeMoq.Mock.ofType<PythonEnvironmentApi>();
         tm = typeMoq.Mock.ofType<TerminalManager>();
 
         pickProjectStub = sinon.stub(projectApi, 'pickProject');
-        // Stub fs.stat to return a directory stats object to avoid file system access
-        fsStatStub = sinon.stub(fs, 'stat');
-        fsStatStub.resolves({ isFile: () => false, isDirectory: () => true } as any);
     });
 
     teardown(() => {

@@ -518,12 +518,14 @@ export async function createTerminalCommand(
         // For undefined context or Uri context, check for multiroot and prompt if needed
         const projects = api.getPythonProjects();
         const pw = await pickProject(projects);
-        if (pw) {
-            const env = await api.getEnvironment(pw.uri);
-            const cwd = await findParentIfFile(pw.uri.fsPath);
-            if (env) {
-                return await tm.create(env, { cwd });
-            }
+        if (!pw) {
+            // User cancelled project selection
+            return undefined;
+        }
+        const env = await api.getEnvironment(pw.uri);
+        const cwd = await findParentIfFile(pw.uri.fsPath);
+        if (env) {
+            return await tm.create(env, { cwd });
         }
     } else if (context instanceof ProjectItem) {
         const view = context as ProjectItem;
