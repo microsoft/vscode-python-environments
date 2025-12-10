@@ -3,7 +3,7 @@
 
 import assert from 'node:assert';
 import * as sinon from 'sinon';
-import { Uri } from 'vscode';
+import { QuickPickItem, Uri } from 'vscode';
 import { PythonEnvironment } from '../../api';
 import { InternalEnvironmentManager } from '../../internal.api';
 import { Interpreter } from '../../common/localize';
@@ -50,8 +50,8 @@ suite('Environment Picker - No Python Warning', () => {
         };
 
         // Capture what items are shown in the quick pick
-        let capturedItems: any[] = [];
-        showQuickPickWithButtonsStub.callsFake((items: any[]) => {
+        let capturedItems: readonly QuickPickItem[] = [];
+        showQuickPickWithButtonsStub.callsFake((items: readonly QuickPickItem[]) => {
             capturedItems = items;
             return Promise.resolve(undefined);
         });
@@ -82,8 +82,8 @@ suite('Environment Picker - No Python Warning', () => {
         };
 
         // Capture what items are shown in the quick pick
-        let capturedItems: any[] = [];
-        showQuickPickWithButtonsStub.callsFake((items: any[]) => {
+        let capturedItems: readonly QuickPickItem[] = [];
+        showQuickPickWithButtonsStub.callsFake((items: readonly QuickPickItem[]) => {
             capturedItems = items;
             return Promise.resolve(undefined);
         });
@@ -112,13 +112,13 @@ suite('Environment Picker - No Python Warning', () => {
         };
 
         // Capture what items are shown in the quick pick
-        let capturedItems: any[] = [];
-        showQuickPickWithButtonsStub.callsFake((items: any[]) => {
+        let capturedItems: readonly QuickPickItem[] = [];
+        showQuickPickWithButtonsStub.callsFake((items: readonly QuickPickItem[]) => {
             capturedItems = items;
             return Promise.resolve(undefined);
         });
 
-        await pickEnvironment([otherManager as any], [], { projects: [] });
+        await pickEnvironment([otherManager as unknown as InternalEnvironmentManager], [], { projects: [] });
 
         // Assert - warning item should be shown when system manager is not found
         const warningItem = capturedItems.find((item) => item.label === Interpreter.noPythonInstalled);
