@@ -78,17 +78,19 @@ async function getCommonPackages(): Promise<Installable[]> {
 }
 
 async function selectWorkspaceOrCommon(
-    installable: Installable[],
+    api: PythonEnvironmentApi,
+    projects: PythonProject[] | undefined,
+    hasWorkspaceDeps: boolean,
     common: Installable[],
     showSkipOption: boolean,
     installed: string[],
 ): Promise<PipPackages | undefined> {
-    if (installable.length === 0 && common.length === 0) {
+    if (!hasWorkspaceDeps && common.length === 0) {
         return undefined;
     }
 
     const items: QuickPickItem[] = [];
-    if (installable.length > 0) {
+    if (hasWorkspaceDeps) {
         items.push({
             label: PackageManagement.workspaceDependencies,
             description: PackageManagement.workspaceDependenciesDescription,
@@ -124,6 +126,12 @@ async function selectWorkspaceOrCommon(
     if (selected && !Array.isArray(selected)) {
         try {
             if (selected.label === PackageManagement.workspaceDependencies) {
+                // Lazy load: only search for dependencies when user selects this option
+                const installable = await getProjectInstallable(api, projects);
+                if (installable.length === 0) {
+                    // No dependencies found, return to picker
+                    return selectWorkspaceOrCommon(api, projects, hasWorkspaceDeps, common, showSkipOption, installed);
+                }
                 return await selectFromInstallableToInstall(installable, undefined, { showBackButton });
             } else if (selected.label === PackageManagement.searchCommonPackages) {
                 return await selectFromCommonPackagesToInstall(common, installed, undefined, { showBackButton });
@@ -136,7 +144,7 @@ async function selectWorkspaceOrCommon(
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
         } catch (ex: any) {
             if (ex === QuickInputButtons.Back) {
-                return selectWorkspaceOrCommon(installable, common, showSkipOption, installed);
+                return selectWorkspaceOrCommon(api, projects, hasWorkspaceDeps, common, showSkipOption, installed);
             }
         }
     }
@@ -155,14 +163,36 @@ export async function getWorkspacePackagesToInstall(
     environment?: PythonEnvironment,
     log?: LogOutputChannel,
 ): Promise<PipPackages | undefined> {
-    const installable = (await getProjectInstallable(api, project)) ?? [];
+    // Quick check if any dependency files exist (don't load/parse them yet)
+    const hasWorkspaceDeps = await hasProjectDependencies(project);
     let common = await getCommonPackages();
     let installed: string[] | undefined;
     if (environment) {
         installed = (await refreshPipPackages(environment, log, { showProgress: true }))?.map((pkg) => pkg.name);
         common = mergePackages(common, installed ?? []);
     }
-    return selectWorkspaceOrCommon(installable, common, !!options.showSkipOption, installed ?? []);
+    return selectWorkspaceOrCommon(api, project, hasWorkspaceDeps, common, !!options.showSkipOption, installed ?? []);
+}
+
+/**
+ * Quickly check if any project dependency files exist.
+ * This is a fast check that doesn't parse files, used to determine whether to show the option.
+ */
+export async function hasProjectDependencies(projects?: PythonProject[]): Promise<boolean> {
+    if (!projects || projects.length === 0) {
+        return false;
+    }
+    const exclude = '**/{.venv*,.git,.nox,.tox,.conda,site-packages,__pypackages__}/**';
+
+    // Quick check: just see if ANY files exist (maxResults=1 for performance)
+    const results = await Promise.all([
+        findFiles('**/*requirements*.txt', exclude, 1),
+        findFiles('*requirements*.txt', exclude, 1),
+        findFiles('**/requirements/*.txt', exclude, 1),
+        findFiles('**/pyproject.toml', exclude, 1),
+    ]);
+
+    return results.some((uris) => uris.length > 0);
 }
 
 export async function getProjectInstallable(

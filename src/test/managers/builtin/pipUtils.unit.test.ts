@@ -5,7 +5,7 @@ import { CancellationToken, Progress, ProgressOptions, Uri } from 'vscode';
 import { PythonEnvironmentApi, PythonProject } from '../../../api';
 import * as winapi from '../../../common/window.apis';
 import * as wapi from '../../../common/workspace.apis';
-import { getProjectInstallable } from '../../../managers/builtin/pipUtils';
+import { getProjectInstallable, hasProjectDependencies } from '../../../managers/builtin/pipUtils';
 
 suite('Pip Utils - getProjectInstallable', () => {
     let findFilesStub: sinon.SinonStub;
@@ -216,13 +216,15 @@ suite('Pip Utils - getProjectInstallable', () => {
     });
 
     test('should handle cancellation during file search', async () => {
-        // Arrange: Create a cancellation token that is already cancelled
+        // ARRANGE: Simulate a scenario where the user cancels the operation
+        // Step 1: Create a pre-cancelled token to simulate user clicking "Cancel" button
         const cancelledToken: CancellationToken = {
             isCancellationRequested: true,
             onCancellationRequested: () => ({ dispose: () => {} }),
         };
 
-        // Mock withProgress to immediately call the callback with the cancelled token
+        // Step 2: Override withProgress stub to pass the cancelled token to the search callback
+        // This simulates the progress dialog being cancelled and the token being propagated
         withProgressStub.callsFake(
             async (
                 _options: ProgressOptions,
@@ -231,24 +233,149 @@ suite('Pip Utils - getProjectInstallable', () => {
                     token: CancellationToken,
                 ) => Thenable<unknown>,
             ) => {
+                // Execute the callback with the cancelled token (simulating cancellation during the operation)
                 return await callback({} as Progress<{ message?: string; increment?: number }>, cancelledToken);
             },
         );
 
-        // Mock findFiles to check that token is passed
+        // Step 3: Mock findFiles to verify the cancelled token is properly passed through
+        // This ensures cancellation propagates from withProgress -> getProjectInstallable -> findFiles
         findFilesStub.callsFake((_pattern: string, _exclude: string, _maxResults: number, token: CancellationToken) => {
-            // Verify the cancellation token is passed to findFiles
+            // VERIFY: The same cancellation token should be passed to each findFiles call
             assert.strictEqual(token, cancelledToken, 'Cancellation token should be passed to findFiles');
             return Promise.resolve([]);
         });
 
-        // Act: Call getProjectInstallable
+        // ACT: Call the function under test
         const workspacePath = Uri.file('/test/path/root').fsPath;
         const projects = [{ name: 'workspace', uri: Uri.file(workspacePath) }];
         await getProjectInstallable(mockApi as PythonEnvironmentApi, projects);
 
-        // Assert: Verify findFiles was called with the cancellation token
+        // ASSERT: Verify the cancellation token was passed to all file search operations
+        // Even though cancelled, the function should attempt all searches (they'll just return empty quickly)
         assert.ok(findFilesStub.called, 'findFiles should be called');
+        // getProjectInstallable searches for dependencies using 4 different file patterns
         assert.strictEqual(findFilesStub.callCount, 4, 'Should call findFiles 4 times for different patterns');
+    });
+});
+
+suite('Pip Utils - hasProjectDependencies', () => {
+    let findFilesStub: sinon.SinonStub;
+
+    setup(() => {
+        findFilesStub = sinon.stub(wapi, 'findFiles');
+    });
+
+    teardown(() => {
+        sinon.restore();
+    });
+
+    test('should return true when requirements.txt exists', async () => {
+        // Arrange: Mock findFiles to return a requirements file
+        findFilesStub.callsFake((pattern: string, _exclude: string, maxResults?: number) => {
+            // Verify maxResults=1 is used for performance (quick check)
+            assert.strictEqual(maxResults, 1, 'Should use maxResults=1 for quick check');
+
+            if (pattern === '*requirements*.txt') {
+                return Promise.resolve([Uri.file('/test/path/root/requirements.txt')]);
+            }
+            return Promise.resolve([]);
+        });
+
+        // Act
+        const projects = [{ name: 'workspace', uri: Uri.file('/test/path/root') }];
+        const result = await hasProjectDependencies(projects);
+
+        // Assert
+        assert.strictEqual(result, true, 'Should return true when requirements files exist');
+    });
+
+    test('should return true when pyproject.toml exists', async () => {
+        // Arrange: Mock findFiles to return pyproject.toml
+        findFilesStub.callsFake((pattern: string, _exclude: string, maxResults?: number) => {
+            assert.strictEqual(maxResults, 1, 'Should use maxResults=1 for quick check');
+
+            if (pattern === '**/pyproject.toml') {
+                return Promise.resolve([Uri.file('/test/path/root/pyproject.toml')]);
+            }
+            return Promise.resolve([]);
+        });
+
+        // Act
+        const projects = [{ name: 'workspace', uri: Uri.file('/test/path/root') }];
+        const result = await hasProjectDependencies(projects);
+
+        // Assert
+        assert.strictEqual(result, true, 'Should return true when pyproject.toml exists');
+    });
+
+    test('should return false when no dependency files exist', async () => {
+        // Arrange: Mock findFiles to return empty arrays
+        findFilesStub.resolves([]);
+
+        // Act
+        const projects = [{ name: 'workspace', uri: Uri.file('/test/path/root') }];
+        const result = await hasProjectDependencies(projects);
+
+        // Assert
+        assert.strictEqual(result, false, 'Should return false when no dependency files exist');
+        // Verify all 4 patterns were checked
+        assert.strictEqual(findFilesStub.callCount, 4, 'Should check all 4 file patterns');
+    });
+
+    test('should return false when no projects provided', async () => {
+        // Act
+        const result = await hasProjectDependencies(undefined);
+
+        // Assert
+        assert.strictEqual(result, false, 'Should return false when no projects provided');
+        assert.ok(!findFilesStub.called, 'Should not call findFiles when no projects');
+    });
+
+    test('should return false when empty projects array provided', async () => {
+        // Act
+        const result = await hasProjectDependencies([]);
+
+        // Assert
+        assert.strictEqual(result, false, 'Should return false when empty projects array');
+        assert.ok(!findFilesStub.called, 'Should not call findFiles when projects array is empty');
+    });
+
+    test('should use maxResults=1 for all patterns for performance', async () => {
+        // Arrange: Track all maxResults values
+        const maxResultsUsed: (number | undefined)[] = [];
+        findFilesStub.callsFake((_pattern: string, _exclude: string, maxResults?: number) => {
+            maxResultsUsed.push(maxResults);
+            return Promise.resolve([]);
+        });
+
+        // Act
+        const projects = [{ name: 'workspace', uri: Uri.file('/test/path/root') }];
+        await hasProjectDependencies(projects);
+
+        // Assert: All calls should use maxResults=1 for performance
+        assert.strictEqual(maxResultsUsed.length, 4, 'Should make 4 findFiles calls');
+        maxResultsUsed.forEach((value, index) => {
+            assert.strictEqual(value, 1, `Call ${index + 1} should use maxResults=1`);
+        });
+    });
+
+    test('should short-circuit when first pattern finds a file', async () => {
+        // Arrange: First pattern returns a result
+        findFilesStub.callsFake((pattern: string) => {
+            if (pattern === '**/*requirements*.txt') {
+                return Promise.resolve([Uri.file('/test/path/root/dev-requirements.txt')]);
+            }
+            return Promise.resolve([]);
+        });
+
+        // Act
+        const projects = [{ name: 'workspace', uri: Uri.file('/test/path/root') }];
+        const result = await hasProjectDependencies(projects);
+
+        // Assert: Should still return true even though only first pattern matched
+        assert.strictEqual(result, true, 'Should return true when any pattern finds files');
+        // Note: All 4 patterns are checked in parallel with Promise.all, so all 4 calls happen
+        assert.strictEqual(findFilesStub.callCount, 4, 'All patterns checked in parallel');
     });
 });

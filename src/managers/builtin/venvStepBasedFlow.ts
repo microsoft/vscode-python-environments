@@ -203,6 +203,8 @@ async function enterEnvironmentName(state: VenvCreationState): Promise<StepFunct
 
         // Handle cancellation (Escape key or dialog close)
         if (!name) {
+            // Mark that the user cancelled, preventing fallback package selection
+            state.packageSelectionCompleted = false;
             return null; // Exit the flow without creating an environment
         }
 

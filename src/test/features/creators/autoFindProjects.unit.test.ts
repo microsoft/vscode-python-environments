@@ -1,15 +1,15 @@
+import assert from 'assert';
 import * as path from 'path';
 import * as sinon from 'sinon';
 import * as typmoq from 'typemoq';
-import * as wapi from '../../../common/workspace.apis';
-import * as winapi from '../../../common/window.apis';
-import { PythonProjectManager } from '../../../internal.api';
-import { createDeferred } from '../../../common/utils/deferred';
-import { AutoFindProjects } from '../../../features/creators/autoFindProjects';
-import assert from 'assert';
 import { Uri } from 'vscode';
 import { PythonProject } from '../../../api';
 import { sleep } from '../../../common/utils/asyncUtils';
+import { createDeferred } from '../../../common/utils/deferred';
+import * as winapi from '../../../common/window.apis';
+import * as wapi from '../../../common/workspace.apis';
+import { AutoFindProjects } from '../../../features/creators/autoFindProjects';
+import { PythonProjectManager } from '../../../internal.api';
 
 suite('Auto Find Project tests', () => {
     let findFilesStub: sinon.SinonStub;
