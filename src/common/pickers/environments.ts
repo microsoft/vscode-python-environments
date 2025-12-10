@@ -130,6 +130,9 @@ async function pickEnvironmentImpl(
                 triggeredLocation: 'pickEnv',
             });
             return createEnvironment(managers, projectEnvManagers, options);
+        } else if (selected.label === Interpreter.noPythonInstalled) {
+            // User clicked on the warning item - do nothing, just return undefined
+            return undefined;
         }
         return (selected as { result: PythonEnvironment })?.result;
     }
@@ -141,6 +144,11 @@ export async function pickEnvironment(
     projectEnvManagers: InternalEnvironmentManager[],
     options: EnvironmentPickOptions,
 ): Promise<PythonEnvironment | undefined> {
+    // Check if Python is installed by looking for the system manager and its environments
+    const systemManager = managers.find((m) => m.name === 'system');
+    const systemPythons = systemManager ? await systemManager.getEnvironments('all') : [];
+    const hasPython = systemPythons.length > 0;
+
     const items: (QuickPickItem | (QuickPickItem & { result: PythonEnvironment }))[] = [
         {
             label: Interpreter.browsePath,
@@ -150,11 +158,22 @@ export async function pickEnvironment(
             label: '',
             kind: QuickPickItemKind.Separator,
         },
-        {
+    ];
+
+    // Only show "Create Virtual Environment" if Python is installed
+    if (hasPython) {
+        items.push({
             label: Interpreter.createVirtualEnvironment,
             iconPath: new ThemeIcon('add'),
-        },
-    ];
+        });
+    } else {
+        // Show warning that Python is not detected
+        items.push({
+            label: Interpreter.noPythonInstalled,
+            description: Interpreter.noPythonInstalledDescription,
+            iconPath: new ThemeIcon('warning'),
+        });
+    }
 
     if (options?.recommended) {
         const pathDescription = options.recommended.displayPath;
