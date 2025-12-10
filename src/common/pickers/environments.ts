@@ -145,7 +145,8 @@ export async function pickEnvironment(
     options: EnvironmentPickOptions,
 ): Promise<PythonEnvironment | undefined> {
     // Check if Python is installed by looking for the system manager and its environments
-    const systemManager = managers.find((m) => m.name === 'system');
+    // System manager ID is 'ms-python.python:system' which manages global Python installations
+    const systemManager = managers.find((m) => m.id === 'ms-python.python:system');
     const systemPythons = systemManager ? await systemManager.getEnvironments('all') : [];
     const hasPython = systemPythons.length > 0;
 

@@ -44,6 +44,7 @@ suite('Environment Picker - No Python Warning', () => {
     test('should show warning when no Python is installed', async () => {
         // Mock - system manager with no environments
         mockSystemManager = {
+            id: 'ms-python.python:system',
             name: 'system',
             displayName: 'Global',
             getEnvironments: sinon.stub().resolves([]),
@@ -76,6 +77,7 @@ suite('Environment Picker - No Python Warning', () => {
         // Mock - system manager with one Python environment
         const pythonEnv = createMockEnvironment('/usr/bin/python3');
         mockSystemManager = {
+            id: 'ms-python.python:system',
             name: 'system',
             displayName: 'Global',
             getEnvironments: sinon.stub().resolves([pythonEnv]),
@@ -106,6 +108,7 @@ suite('Environment Picker - No Python Warning', () => {
     test('should handle missing system manager gracefully', async () => {
         // Mock - no system manager in the list
         const otherManager = {
+            id: 'ms-python.python:conda',
             name: 'conda',
             displayName: 'Conda',
             getEnvironments: sinon.stub().resolves([]),
