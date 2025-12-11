@@ -64,6 +64,16 @@ export namespace Pickers {
         export const selectProject = l10n.t('Select a project, folder or script');
         export const selectProjects = l10n.t('Select one or more projects, folders or scripts');
     }
+
+    export namespace pyProject {
+        export const validationError = l10n.t('Invalid pyproject.toml');
+        export const validationErrorAction = l10n.t(
+            'The pyproject.toml file has formatting errors. What would you like to do?',
+        );
+        export const openFile = l10n.t('Open pyproject.toml');
+        export const continueAnyway = l10n.t('Continue Anyway');
+        export const cancel = l10n.t('Cancel');
+    }
 }
 
 export namespace ProjectViews {

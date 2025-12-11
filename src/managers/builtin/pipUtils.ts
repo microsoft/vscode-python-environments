@@ -1,7 +1,7 @@
 import * as tomljs from '@iarna/toml';
 import * as fse from 'fs-extra';
 import * as path from 'path';
-import { l10n, LogOutputChannel, ProgressLocation, QuickInputButtons, QuickPickItem, Uri } from 'vscode';
+import { l10n, LogOutputChannel, ProgressLocation, QuickInputButtons, QuickPickItem, Uri, window } from 'vscode';
 import { PackageManagementOptions, PythonEnvironment, PythonEnvironmentApi, PythonProject } from '../../api';
 import { EXTENSION_ROOT_DIR } from '../../common/constants';
 import { PackageManagement, Pickers, VenvManagerStrings } from '../../common/localize';
@@ -160,11 +160,12 @@ async function getCommonPackages(): Promise<Installable[]> {
 }
 
 async function selectWorkspaceOrCommon(
-    installable: Installable[],
+    installableResult: ProjectInstallableResult,
     common: Installable[],
     showSkipOption: boolean,
     installed: string[],
 ): Promise<PipPackages | undefined> {
+    const installable = installableResult.installables;
     if (installable.length === 0 && common.length === 0) {
         return undefined;
     }
@@ -206,7 +207,20 @@ async function selectWorkspaceOrCommon(
     if (selected && !Array.isArray(selected)) {
         try {
             if (selected.label === PackageManagement.workspaceDependencies) {
-                return await selectFromInstallableToInstall(installable, undefined, { showBackButton });
+                const selectedInstallables = await selectFromInstallableToInstall(installable, undefined, {
+                    showBackButton,
+                });
+
+                const validationError = installableResult.validationError;
+                const shouldProceed = await shouldProceedAfterPyprojectValidation(
+                    validationError,
+                    selectedInstallables?.install ?? [],
+                );
+                if (!shouldProceed) {
+                    return undefined;
+                }
+
+                return selectedInstallables;
             } else if (selected.label === PackageManagement.searchCommonPackages) {
                 return await selectFromCommonPackagesToInstall(common, installed, undefined, { showBackButton });
             } else if (selected.label === PackageManagement.skipPackageInstallation) {
@@ -218,7 +232,7 @@ async function selectWorkspaceOrCommon(
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
         } catch (ex: any) {
             if (ex === QuickInputButtons.Back) {
-                return selectWorkspaceOrCommon(installable, common, showSkipOption, installed);
+                return selectWorkspaceOrCommon(installableResult, common, showSkipOption, installed);
             }
         }
     }
@@ -239,17 +253,19 @@ export interface ProjectInstallableResult {
     /**
      * Validation error information if pyproject.toml validation failed
      */
-    validationError?: {
-        /**
-         * Human-readable error message describing the validation issue
-         */
-        message: string;
+    validationError?: ValidationError;
+}
 
-        /**
-         * URI to the pyproject.toml file that has the validation error
-         */
-        fileUri: Uri;
-    };
+export interface ValidationError {
+    /**
+     * Human-readable error message describing the validation issue
+     */
+    message: string;
+
+    /**
+     * URI to the pyproject.toml file that has the validation error
+     */
+    fileUri: Uri;
 }
 
 export async function getWorkspacePackagesToInstall(
@@ -259,15 +275,14 @@ export async function getWorkspacePackagesToInstall(
     environment?: PythonEnvironment,
     log?: LogOutputChannel,
 ): Promise<PipPackages | undefined> {
-    const result = await getProjectInstallable(api, project);
-    const installable = result.installables;
+    const installableResult = await getProjectInstallable(api, project);
     let common = await getCommonPackages();
     let installed: string[] | undefined;
     if (environment) {
         installed = (await refreshPipPackages(environment, log, { showProgress: true }))?.map((pkg) => pkg.name);
         common = mergePackages(common, installed ?? []);
     }
-    return selectWorkspaceOrCommon(installable, common, !!options.showSkipOption, installed ?? []);
+    return selectWorkspaceOrCommon(installableResult, common, !!options.showSkipOption, installed ?? []);
 }
 
 export async function getProjectInstallable(
@@ -343,6 +358,45 @@ export async function getProjectInstallable(
         installables: installable,
         validationError,
     };
+}
+
+export async function shouldProceedAfterPyprojectValidation(
+    validationError: ValidationError | undefined,
+    install: string[],
+): Promise<boolean> {
+    // 1. If no validation error or no installables selected, proceed
+    if (!validationError || install.length === 0) {
+        return true;
+    }
+
+    const selectedTomlInstallables = install.some((arg, index, arr) => arg === '-e' && index + 1 < arr.length);
+    if (!selectedTomlInstallables) {
+        // 2. If no toml installables selected, proceed
+        return true;
+    }
+
+    // 3. Otherwise, show error message and ask user what to do
+    const openButton = { title: Pickers.pyProject.openFile };
+    const continueButton = { title: Pickers.pyProject.continueAnyway };
+    const cancelButton = { title: Pickers.pyProject.cancel, isCloseAffordance: true };
+
+    const selection = await window.showErrorMessage(
+        validationError.message,
+        { modal: true },
+        openButton,
+        continueButton,
+        cancelButton,
+    );
+
+    if (selection === continueButton) {
+        return true;
+    }
+
+    if (selection === openButton) {
+        await window.showTextDocument(validationError.fileUri);
+    }
+
+    return false;
 }
 
 export function isPipInstallCommand(command: string): boolean {
