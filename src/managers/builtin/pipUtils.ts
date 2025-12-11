@@ -1,7 +1,7 @@
 import * as tomljs from '@iarna/toml';
 import * as fse from 'fs-extra';
 import * as path from 'path';
-import { LogOutputChannel, ProgressLocation, QuickInputButtons, QuickPickItem, Uri } from 'vscode';
+import { l10n, LogOutputChannel, ProgressLocation, QuickInputButtons, QuickPickItem, Uri } from 'vscode';
 import { PackageManagementOptions, PythonEnvironment, PythonEnvironmentApi, PythonProject } from '../../api';
 import { EXTENSION_ROOT_DIR } from '../../common/constants';
 import { PackageManagement, Pickers, VenvManagerStrings } from '../../common/localize';
@@ -12,6 +12,88 @@ import { selectFromCommonPackagesToInstall, selectFromInstallableToInstall } fro
 import { Installable } from '../common/types';
 import { mergePackages } from '../common/utils';
 import { refreshPipPackages } from './utils';
+
+/**
+ * Validates pyproject.toml fields according to PEP 508, PEP 440, PEP 621, PEP 517/518
+ * Returns error message if invalid, undefined if valid
+ */
+function validatePyprojectToml(toml: tomljs.JsonMap, filePath: string): string | undefined {
+    // 1. Validate package name (PEP 508)
+    if (toml.project && (toml.project as tomljs.JsonMap).name) {
+        const name = (toml.project as tomljs.JsonMap).name as string;
+        // PEP 508 regex: must start and end with a letter or digit, can contain -_.
+        const nameRegex = /^([a-zA-Z0-9]|[a-zA-Z0-9][a-zA-Z0-9._-]*[a-zA-Z0-9])$/;
+        if (!nameRegex.test(name)) {
+            return l10n.t(
+                'Invalid package name "{0}" in {1}. Package names must start and end with a letter or digit and may only contain -, _, ., and alphanumeric characters. No spaces allowed. See PEP 508: https://peps.python.org/pep-0508/',
+                name,
+                path.basename(filePath),
+            );
+        }
+    }
+
+    // 2. Validate version format (PEP 440)
+    if (toml.project && (toml.project as tomljs.JsonMap).version) {
+        const version = (toml.project as tomljs.JsonMap).version as string;
+        // PEP 440 simplified regex
+        const versionRegex =
+            /^([1-9][0-9]*!)?(0|[1-9][0-9]*)(\.(0|[1-9][0-9]*))*((a|b|rc)(0|[1-9][0-9]*))?(\.post(0|[1-9][0-9]*))?(\.dev(0|[1-9][0-9]*))?$/;
+        if (!versionRegex.test(version)) {
+            return l10n.t(
+                'Invalid version "{0}" in {1}. Versions must follow PEP 440 format (e.g., "1.0.0", "2.1a3"). See https://peps.python.org/pep-0440/',
+                version,
+                path.basename(filePath),
+            );
+        }
+    }
+
+    // 3. Validate required fields (PEP 621)
+    if (toml.project) {
+        const project = toml.project as tomljs.JsonMap;
+        if (!project.name) {
+            return l10n.t(
+                'Missing required field "name" in [project] section of {0}. See PEP 621: https://peps.python.org/pep-0621/',
+                path.basename(filePath),
+            );
+        }
+    }
+
+    // 4. Validate build system (PEP 517/518)
+    if (toml['build-system']) {
+        const buildSystem = toml['build-system'] as tomljs.JsonMap;
+        if (!buildSystem.requires) {
+            return l10n.t(
+                'Missing required field "requires" in [build-system] section of {0}. See PEP 517: https://peps.python.org/pep-0517/',
+                path.basename(filePath),
+            );
+        }
+        if (!buildSystem['build-backend']) {
+            return l10n.t(
+                'Missing required field "build-backend" in [build-system] section of {0}. See PEP 518: https://peps.python.org/pep-0518/',
+                path.basename(filePath),
+            );
+        }
+    }
+
+    // 5. Validate dependencies format (PEP 508)
+    if (toml.project && (toml.project as tomljs.JsonMap).dependencies) {
+        const deps = (toml.project as tomljs.JsonMap).dependencies as string[];
+        if (Array.isArray(deps)) {
+            for (const dep of deps) {
+                // Basic check for common mistakes
+                if (dep.includes('  ') || /\s{2,}/.test(dep)) {
+                    return l10n.t(
+                        'Invalid dependency "{0}" in {1}. Contains extra whitespace. See PEP 508: https://peps.python.org/pep-0508/',
+                        dep,
+                        path.basename(filePath),
+                    );
+                }
+            }
+        }
+    }
+
+    return undefined; // No errors
+}
 
 async function tomlParse(fsPath: string, log?: LogOutputChannel): Promise<tomljs.JsonMap> {
     try {
@@ -148,6 +230,28 @@ export interface PipPackages {
     uninstall: string[];
 }
 
+export interface ProjectInstallableResult {
+    /**
+     * List of installable packages from requirements.txt and pyproject.toml files
+     */
+    installables: Installable[];
+
+    /**
+     * Validation error information if pyproject.toml validation failed
+     */
+    validationError?: {
+        /**
+         * Human-readable error message describing the validation issue
+         */
+        message: string;
+
+        /**
+         * URI to the pyproject.toml file that has the validation error
+         */
+        fileUri: Uri;
+    };
+}
+
 export async function getWorkspacePackagesToInstall(
     api: PythonEnvironmentApi,
     options: PackageManagementOptions,
@@ -155,7 +259,8 @@ export async function getWorkspacePackagesToInstall(
     environment?: PythonEnvironment,
     log?: LogOutputChannel,
 ): Promise<PipPackages | undefined> {
-    const installable = (await getProjectInstallable(api, project)) ?? [];
+    const result = await getProjectInstallable(api, project);
+    const installable = result.installables;
     let common = await getCommonPackages();
     let installed: string[] | undefined;
     if (environment) {
@@ -168,12 +273,14 @@ export async function getWorkspacePackagesToInstall(
 export async function getProjectInstallable(
     api: PythonEnvironmentApi,
     projects?: PythonProject[],
-): Promise<Installable[]> {
+): Promise<ProjectInstallableResult> {
     if (!projects) {
-        return [];
+        return { installables: [] };
     }
     const exclude = '**/{.venv*,.git,.nox,.tox,.conda,site-packages,__pypackages__}/**';
     const installable: Installable[] = [];
+    let validationError: { message: string; fileUri: Uri } | undefined;
+
     await withProgress(
         {
             location: ProgressLocation.Notification,
@@ -204,6 +311,18 @@ export async function getProjectInstallable(
                 filtered.map(async (uri) => {
                     if (uri.fsPath.endsWith('.toml')) {
                         const toml = await tomlParse(uri.fsPath);
+
+                        // Validate pyproject.toml and capture first error only
+                        if (!validationError) {
+                            const error = validatePyprojectToml(toml, uri.fsPath);
+                            if (error) {
+                                validationError = {
+                                    message: error,
+                                    fileUri: uri,
+                                };
+                            }
+                        }
+
                         installable.push(...getTomlInstallable(toml, uri));
                     } else {
                         const name = path.basename(uri.fsPath);
@@ -219,7 +338,11 @@ export async function getProjectInstallable(
             );
         },
     );
-    return installable;
+
+    return {
+        installables: installable,
+        validationError,
+    };
 }
 
 export function isPipInstallCommand(command: string): boolean {

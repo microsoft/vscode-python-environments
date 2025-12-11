@@ -74,7 +74,7 @@ suite('Pip Utils - getProjectInstallable', () => {
         // Act: Call getProjectInstallable
         const workspacePath = Uri.file('/test/path/root').fsPath;
         const projects = [{ name: 'workspace', uri: Uri.file(workspacePath) }];
-        const result = await getProjectInstallable(mockApi as PythonEnvironmentApi, projects);
+        const result = (await getProjectInstallable(mockApi as PythonEnvironmentApi, projects)).installables;
 
         // Assert: Should find all three requirements files
         assert.strictEqual(result.length, 3, 'Should find three requirements files');
@@ -119,7 +119,7 @@ suite('Pip Utils - getProjectInstallable', () => {
         // Act: Call getProjectInstallable
         const workspacePath = Uri.file('/test/path/root').fsPath;
         const projects = [{ name: 'workspace', uri: Uri.file(workspacePath) }];
-        const result = await getProjectInstallable(mockApi as PythonEnvironmentApi, projects);
+        const result = (await getProjectInstallable(mockApi as PythonEnvironmentApi, projects)).installables;
 
         // Assert: Should deduplicate and only have 2 unique files
         assert.strictEqual(result.length, 2, 'Should deduplicate and have 2 unique files');
@@ -149,7 +149,7 @@ suite('Pip Utils - getProjectInstallable', () => {
         // Act: Call getProjectInstallable
         const workspacePath = Uri.file('/test/path/root').fsPath;
         const projects = [{ name: 'workspace', uri: Uri.file(workspacePath) }];
-        const result = await getProjectInstallable(mockApi as PythonEnvironmentApi, projects);
+        const result = (await getProjectInstallable(mockApi as PythonEnvironmentApi, projects)).installables;
 
         // Assert: Should find all files
         assert.strictEqual(result.length, 3, 'Should find three files');
@@ -164,7 +164,7 @@ suite('Pip Utils - getProjectInstallable', () => {
 
     test('should return empty array when no projects provided', async () => {
         // Act: Call with no projects
-        const result = await getProjectInstallable(mockApi as PythonEnvironmentApi, undefined);
+        const result = (await getProjectInstallable(mockApi as PythonEnvironmentApi, undefined)).installables;
 
         // Assert: Should return empty array
         assert.strictEqual(result.length, 0, 'Should return empty array');
@@ -189,7 +189,7 @@ suite('Pip Utils - getProjectInstallable', () => {
         // Act: Call with only workspace project
         const workspacePath = Uri.file('/test/path/root').fsPath;
         const projects = [{ name: 'workspace', uri: Uri.file(workspacePath) }];
-        const result = await getProjectInstallable(mockApi as PythonEnvironmentApi, projects);
+        const result = (await getProjectInstallable(mockApi as PythonEnvironmentApi, projects)).installables;
 
         // Assert: Should only include files from workspace
         assert.strictEqual(result.length, 1, 'Should only include files from project directory');

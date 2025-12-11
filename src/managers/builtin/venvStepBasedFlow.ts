@@ -335,7 +335,8 @@ export async function createStepBasedVenvFlow(
 
             // Get workspace dependencies to install
             const project = api.getPythonProject(venvRoot);
-            const installables = await getProjectInstallable(api, project ? [project] : undefined);
+            const result = await getProjectInstallable(api, project ? [project] : undefined);
+            const installables = result.installables;
             const allPackages = [];
             allPackages.push(...(installables?.flatMap((i) => i.args ?? []) ?? []));
             if (options.additionalPackages) {
