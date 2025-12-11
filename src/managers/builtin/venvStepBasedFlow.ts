@@ -7,7 +7,7 @@ import { EventNames } from '../../common/telemetry/constants';
 import { sendTelemetryEvent } from '../../common/telemetry/sender';
 import { showInputBoxWithButtons, showQuickPickWithButtons } from '../../common/window.apis';
 import { NativePythonFinder } from '../common/nativePythonFinder';
-import { getWorkspacePackagesToInstall, PipPackages } from './pipUtils';
+import { getProjectInstallable, getWorkspacePackagesToInstall, PipPackages } from './pipUtils';
 import { CreateEnvironmentResult, createWithProgress, ensureGlobalEnv } from './venvUtils';
 
 /**
@@ -332,8 +332,17 @@ export async function createStepBasedVenvFlow(
             sendTelemetryEvent(EventNames.VENV_CREATION, undefined, { creationType: 'quick' });
             // Use the default .venv name for quick create
             const quickEnvPath = path.join(venvRoot.fsPath, '.venv');
+
+            // Get workspace dependencies to install
+            const project = api.getPythonProject(venvRoot);
+            const installables = await getProjectInstallable(api, project ? [project] : undefined);
+            const allPackages = [];
+            allPackages.push(...(installables?.flatMap((i) => i.args ?? []) ?? []));
+            if (options.additionalPackages) {
+                allPackages.push(...options.additionalPackages);
+            }
             return await createWithProgress(nativeFinder, api, log, manager, state.basePython, venvRoot, quickEnvPath, {
-                install: options.additionalPackages || [],
+                install: allPackages,
                 uninstall: [],
             });
         }
