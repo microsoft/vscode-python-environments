@@ -380,13 +380,7 @@ export async function shouldProceedAfterPyprojectValidation(
     const continueButton = { title: Pickers.pyProject.continueAnyway };
     const cancelButton = { title: Pickers.pyProject.cancel, isCloseAffordance: true };
 
-    const selection = await window.showErrorMessage(
-        validationError.message,
-        { modal: true },
-        openButton,
-        continueButton,
-        cancelButton,
-    );
+    const selection = await window.showErrorMessage(validationError.message, openButton, continueButton, cancelButton);
 
     if (selection === continueButton) {
         return true;
