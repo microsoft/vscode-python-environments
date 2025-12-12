@@ -26,8 +26,11 @@ export function validatePyprojectToml(toml: tomljs.JsonMap): string | undefined 
     }
 
     // 2. Validate version format (PEP 440)
-    if (toml.project && (toml.project as tomljs.JsonMap).version) {
+    if (toml.project && 'version' in (toml.project as tomljs.JsonMap)) {
         const version = (toml.project as tomljs.JsonMap).version as string;
+        if (version.length === 0) {
+            return l10n.t('Version cannot be empty in pyproject.toml.');
+        }
         // PEP 440 version regex.  Versions must follow PEP 440 format (e.g., "1.0.0", "2.1a3").
         // See https://peps.python.org/pep-0440/
         // This regex is adapted from the official python 'packaging' library:
