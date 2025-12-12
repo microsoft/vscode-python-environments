@@ -13,7 +13,7 @@ import { Installable } from '../common/types';
 import { mergePackages } from '../common/utils';
 import { refreshPipPackages } from './utils';
 
-function validatePyprojectToml(toml: tomljs.JsonMap): string | undefined {
+export function validatePyprojectToml(toml: tomljs.JsonMap): string | undefined {
     // 1. Validate package name (PEP 508)
     if (toml.project && (toml.project as tomljs.JsonMap).name) {
         const name = (toml.project as tomljs.JsonMap).name as string;
