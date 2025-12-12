@@ -42,7 +42,7 @@ export function validatePyprojectToml(toml: tomljs.JsonMap): string | undefined 
         }
     }
 
-    // 3. Validate required fields (PEP 621)
+    // 3. Validate required "name" field in [project] section (PEP 621)
     if (toml.project) {
         const project = toml.project as tomljs.JsonMap;
         // See PEP 621: https://peps.python.org/pep-0621/
@@ -51,7 +51,7 @@ export function validatePyprojectToml(toml: tomljs.JsonMap): string | undefined 
         }
     }
 
-    // 4. Validate build system (PEP 518)
+    // 4. Validate required "requires" field in [build-system] section (PEP 518)
     if (toml['build-system']) {
         const buildSystem = toml['build-system'] as tomljs.JsonMap;
         // See PEP 518: https://peps.python.org/pep-0518/
@@ -214,7 +214,7 @@ export interface PipPackages {
 
 export interface ProjectInstallableResult {
     /**
-     * List of installable packages from requirements.txt and pyproject.toml files
+     * List of installable packages from pyproject.toml file
      */
     installables: Installable[];
 
@@ -295,7 +295,7 @@ export async function getProjectInstallable(
                     if (uri.fsPath.endsWith('.toml')) {
                         const toml = await tomlParse(uri.fsPath);
 
-                        // Validate pyproject.toml and capture first error only
+                        // Validate pyproject.toml
                         if (!validationError) {
                             const error = validatePyprojectToml(toml);
                             if (error) {
