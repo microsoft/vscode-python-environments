@@ -13,86 +13,49 @@ import { Installable } from '../common/types';
 import { mergePackages } from '../common/utils';
 import { refreshPipPackages } from './utils';
 
-/**
- * Validates pyproject.toml fields according to PEP 508, PEP 440, PEP 621, PEP 517/518
- * Returns error message if invalid, undefined if valid
- */
-function validatePyprojectToml(toml: tomljs.JsonMap, filePath: string): string | undefined {
+function validatePyprojectToml(toml: tomljs.JsonMap): string | undefined {
     // 1. Validate package name (PEP 508)
     if (toml.project && (toml.project as tomljs.JsonMap).name) {
         const name = (toml.project as tomljs.JsonMap).name as string;
-        // PEP 508 regex: must start and end with a letter or digit, can contain -_.
+        // PEP 508 regex: must start and end with a letter or digit, can contain -_., and alphanumeric characters. No spaces allowed.
+        // See https://peps.python.org/pep-0508/
         const nameRegex = /^([a-zA-Z0-9]|[a-zA-Z0-9][a-zA-Z0-9._-]*[a-zA-Z0-9])$/;
         if (!nameRegex.test(name)) {
-            return l10n.t(
-                'Invalid package name "{0}" in {1}. Package names must start and end with a letter or digit and may only contain -, _, ., and alphanumeric characters. No spaces allowed. See PEP 508: https://peps.python.org/pep-0508/',
-                name,
-                path.basename(filePath),
-            );
+            return l10n.t('Invalid package name "{0}" in pyproject.toml.', name);
         }
     }
 
     // 2. Validate version format (PEP 440)
     if (toml.project && (toml.project as tomljs.JsonMap).version) {
         const version = (toml.project as tomljs.JsonMap).version as string;
-        // PEP 440 simplified regex
+        // PEP 440 version regex.  Versions must follow PEP 440 format (e.g., "1.0.0", "2.1a3").
+        // See https://peps.python.org/pep-0440/
         const versionRegex =
-            /^([1-9][0-9]*!)?(0|[1-9][0-9]*)(\.(0|[1-9][0-9]*))*((a|b|rc)(0|[1-9][0-9]*))?(\.post(0|[1-9][0-9]*))?(\.dev(0|[1-9][0-9]*))?$/;
+            /^([0-9]+!)?(0|[1-9][0-9]*)(\.(0|[1-9][0-9]*))*((a|b|c|rc)([0-9]+)?)?(\.post([0-9]+)?)?(\.dev([0-9]+)?)?(\+[a-zA-Z0-9._-]+)?$/;
         if (!versionRegex.test(version)) {
-            return l10n.t(
-                'Invalid version "{0}" in {1}. Versions must follow PEP 440 format (e.g., "1.0.0", "2.1a3"). See https://peps.python.org/pep-0440/',
-                version,
-                path.basename(filePath),
-            );
+            return l10n.t('Invalid version "{0}" in pyproject.toml.', version);
         }
     }
 
     // 3. Validate required fields (PEP 621)
     if (toml.project) {
         const project = toml.project as tomljs.JsonMap;
+        // See PEP 621: https://peps.python.org/pep-0621/
         if (!project.name) {
-            return l10n.t(
-                'Missing required field "name" in [project] section of {0}. See PEP 621: https://peps.python.org/pep-0621/',
-                path.basename(filePath),
-            );
+            return l10n.t('Missing required field "name" in [project] section of pyproject.toml.');
         }
     }
 
-    // 4. Validate build system (PEP 517/518)
+    // 4. Validate build system (PEP 518)
     if (toml['build-system']) {
         const buildSystem = toml['build-system'] as tomljs.JsonMap;
+        // See PEP 518: https://peps.python.org/pep-0518/
         if (!buildSystem.requires) {
-            return l10n.t(
-                'Missing required field "requires" in [build-system] section of {0}. See PEP 517: https://peps.python.org/pep-0517/',
-                path.basename(filePath),
-            );
-        }
-        if (!buildSystem['build-backend']) {
-            return l10n.t(
-                'Missing required field "build-backend" in [build-system] section of {0}. See PEP 518: https://peps.python.org/pep-0518/',
-                path.basename(filePath),
-            );
+            return l10n.t('Missing required field "requires" in [build-system] section of pyproject.toml.');
         }
     }
 
-    // 5. Validate dependencies format (PEP 508)
-    if (toml.project && (toml.project as tomljs.JsonMap).dependencies) {
-        const deps = (toml.project as tomljs.JsonMap).dependencies as string[];
-        if (Array.isArray(deps)) {
-            for (const dep of deps) {
-                // Basic check for common mistakes
-                if (dep.includes('  ') || /\s{2,}/.test(dep)) {
-                    return l10n.t(
-                        'Invalid dependency "{0}" in {1}. Contains extra whitespace. See PEP 508: https://peps.python.org/pep-0508/',
-                        dep,
-                        path.basename(filePath),
-                    );
-                }
-            }
-        }
-    }
-
-    return undefined; // No errors
+    return undefined;
 }
 
 async function tomlParse(fsPath: string, log?: LogOutputChannel): Promise<tomljs.JsonMap> {
@@ -329,7 +292,7 @@ export async function getProjectInstallable(
 
                         // Validate pyproject.toml and capture first error only
                         if (!validationError) {
-                            const error = validatePyprojectToml(toml, uri.fsPath);
+                            const error = validatePyprojectToml(toml);
                             if (error) {
                                 validationError = {
                                     message: error,
@@ -380,7 +343,12 @@ export async function shouldProceedAfterPyprojectValidation(
     const continueButton = { title: Pickers.pyProject.continueAnyway };
     const cancelButton = { title: Pickers.pyProject.cancel, isCloseAffordance: true };
 
-    const selection = await window.showErrorMessage(validationError.message, openButton, continueButton, cancelButton);
+    const selection = await window.showErrorMessage(
+        validationError.message + Pickers.pyProject.validationErrorAction,
+        openButton,
+        continueButton,
+        cancelButton,
+    );
 
     if (selection === continueButton) {
         return true;
