@@ -1,7 +1,7 @@
-import * as tomljs from '@iarna/toml';
 import assert from 'assert';
 import { Uri } from 'vscode';
 import {
+    PyprojectToml,
     shouldProceedAfterPyprojectValidation,
     validatePyprojectToml,
     ValidationError,
@@ -72,168 +72,166 @@ suite('pipUtils - validatePyproject', () => {
         });
     });
 
-    function verifyValidationError(toml: tomljs.JsonMap, expectedError: string | undefined) {
+    function verifyValidationError(toml: PyprojectToml, expectedError: string | undefined) {
         const ActualError = validatePyprojectToml(toml);
         assert.strictEqual(ActualError, expectedError);
     }
 
     suite('validatePyprojectToml - Package Name Validation (PEP 508)', () => {
         test('should accept valid single-character package name', () => {
-            const toml: tomljs.JsonMap = {
-                project: { name: 'a' } as tomljs.JsonMap,
+            const toml: PyprojectToml = {
+                project: { name: 'a' },
             };
             verifyValidationError(toml, undefined);
         });
 
         test('should accept valid package name with letters and numbers', () => {
-            const toml: tomljs.JsonMap = {
-                project: { name: 'mypackage123' } as tomljs.JsonMap,
+            const toml: PyprojectToml = {
+                project: { name: 'mypackage123' },
             };
             verifyValidationError(toml, undefined);
         });
 
         test('should accept valid package name with hyphens', () => {
-            const toml: tomljs.JsonMap = {
-                project: { name: 'my-package' } as tomljs.JsonMap,
+            const toml: PyprojectToml = {
+                project: { name: 'my-package' },
             };
             verifyValidationError(toml, undefined);
         });
 
         test('should accept valid package name with underscores', () => {
-            const toml: tomljs.JsonMap = {
-                project: { name: 'my_package' } as tomljs.JsonMap,
+            const toml: PyprojectToml = {
+                project: { name: 'my_package' },
             };
             verifyValidationError(toml, undefined);
         });
 
         test('should accept valid package name with dots', () => {
-            const toml: tomljs.JsonMap = {
-                project: { name: 'my.package' } as tomljs.JsonMap,
+            const toml: PyprojectToml = {
+                project: { name: 'my.package' },
             };
             verifyValidationError(toml, undefined);
         });
 
         test('should accept valid package name with mixed separators', () => {
-            const toml: tomljs.JsonMap = {
-                project: { name: 'my-package_name.v2' } as tomljs.JsonMap,
+            const toml: PyprojectToml = {
+                project: { name: 'my-package_name.v2' },
             };
             verifyValidationError(toml, undefined);
         });
 
         test('should accept complex valid package name', () => {
-            const toml: tomljs.JsonMap = {
-                project: { name: 'Django-REST-framework' } as tomljs.JsonMap,
+            const toml: PyprojectToml = {
+                project: { name: 'Django-REST-framework' },
             };
             verifyValidationError(toml, undefined);
         });
 
         test('should reject package name with spaces', () => {
-            const toml: tomljs.JsonMap = {
-                project: { name: 'my package' } as tomljs.JsonMap,
+            const toml: PyprojectToml = {
+                project: { name: 'my package' },
             };
             verifyValidationError(toml, 'Invalid package name "my package" in pyproject.toml.');
         });
 
         test('should reject package name starting with hyphen', () => {
-            const toml: tomljs.JsonMap = {
-                project: { name: '-mypackage' } as tomljs.JsonMap,
+            const toml: PyprojectToml = {
+                project: { name: '-mypackage' },
             };
             verifyValidationError(toml, 'Invalid package name "-mypackage" in pyproject.toml.');
         });
 
         test('should reject package name ending with hyphen', () => {
-            const toml: tomljs.JsonMap = {
-                project: { name: 'mypackage-' } as tomljs.JsonMap,
+            const toml: PyprojectToml = {
+                project: { name: 'mypackage-' },
             };
             verifyValidationError(toml, 'Invalid package name "mypackage-" in pyproject.toml.');
         });
 
         test('should reject package name starting with dot', () => {
-            const toml: tomljs.JsonMap = {
-                project: { name: '.mypackage' } as tomljs.JsonMap,
+            const toml: PyprojectToml = {
+                project: { name: '.mypackage' },
             };
             verifyValidationError(toml, 'Invalid package name ".mypackage" in pyproject.toml.');
         });
 
         test('should reject package name ending with dot', () => {
-            const toml: tomljs.JsonMap = {
-                project: { name: 'mypackage.' } as tomljs.JsonMap,
+            const toml: PyprojectToml = {
+                project: { name: 'mypackage.' },
             };
             verifyValidationError(toml, 'Invalid package name "mypackage." in pyproject.toml.');
         });
 
         test('should reject package name starting with underscore', () => {
-            const toml: tomljs.JsonMap = {
-                project: { name: '_mypackage' } as tomljs.JsonMap,
+            const toml: PyprojectToml = {
+                project: { name: '_mypackage' },
             };
             verifyValidationError(toml, 'Invalid package name "_mypackage" in pyproject.toml.');
         });
 
         test('should reject package name ending with underscore', () => {
-            const toml: tomljs.JsonMap = {
-                project: { name: 'mypackage_' } as tomljs.JsonMap,
+            const toml: PyprojectToml = {
+                project: { name: 'mypackage_' },
             };
             verifyValidationError(toml, 'Invalid package name "mypackage_" in pyproject.toml.');
         });
 
         test('should reject package name with special characters', () => {
-            const toml: tomljs.JsonMap = {
-                project: { name: 'my@package' } as tomljs.JsonMap,
+            const toml: PyprojectToml = {
+                project: { name: 'my@package' },
             };
             verifyValidationError(toml, 'Invalid package name "my@package" in pyproject.toml.');
         });
 
         test('should reject package name with only separator', () => {
-            const toml: tomljs.JsonMap = {
-                project: { name: '-' } as tomljs.JsonMap,
+            const toml: PyprojectToml = {
+                project: { name: '-' },
             };
             verifyValidationError(toml, 'Invalid package name "-" in pyproject.toml.');
         });
 
         test('should accept when no project section exists', () => {
-            const toml: tomljs.JsonMap = {};
+            const toml: PyprojectToml = {};
             verifyValidationError(toml, undefined);
         });
     });
 
     suite('validatePyprojectToml - Required Fields (PEP 621)', () => {
         test('should accept valid project with name', () => {
-            const toml: tomljs.JsonMap = {
-                project: { name: 'test' } as tomljs.JsonMap,
+            const toml: PyprojectToml = {
+                project: { name: 'test' },
             };
             verifyValidationError(toml, undefined);
         });
 
         test('should reject project without name field', () => {
-            const toml: tomljs.JsonMap = {
-                project: { version: '1.0.0' } as tomljs.JsonMap,
+            const toml: PyprojectToml = {
+                project: { version: '1.0.0' },
             };
             verifyValidationError(toml, 'Missing required field "name" in [project] section of pyproject.toml.');
         });
 
         test('should accept when no project section exists', () => {
-            const toml: tomljs.JsonMap = {};
+            const toml: PyprojectToml = {};
             verifyValidationError(toml, undefined);
         });
     });
 
     suite('validatePyprojectToml - Build System (PEP 518)', () => {
         test('should accept valid build-system with requires', () => {
-            const toml: tomljs.JsonMap = {
-                project: { name: 'test' } as tomljs.JsonMap,
+            const toml: PyprojectToml = {
+                project: { name: 'test' },
                 'build-system': {
                     requires: ['setuptools', 'wheel'],
-                } as tomljs.JsonMap,
+                },
             };
             verifyValidationError(toml, undefined);
         });
 
         test('should reject build-system without requires field', () => {
-            const toml: tomljs.JsonMap = {
-                project: { name: 'test' } as tomljs.JsonMap,
-                'build-system': {
-                    'build-backend': 'setuptools.build_meta',
-                } as tomljs.JsonMap,
+            const toml: PyprojectToml = {
+                project: { name: 'test' },
+                'build-system': {},
             };
             verifyValidationError(
                 toml,
@@ -242,8 +240,8 @@ suite('pipUtils - validatePyproject', () => {
         });
 
         test('should accept when no build-system section exists', () => {
-            const toml: tomljs.JsonMap = {
-                project: { name: 'test' } as tomljs.JsonMap,
+            const toml: PyprojectToml = {
+                project: { name: 'test' },
             };
             verifyValidationError(toml, undefined);
         });
@@ -256,9 +254,9 @@ suite('pipUtils - validatePyproject', () => {
             description: string;
         }
 
-        function createVersionToml(version: string): tomljs.JsonMap {
+        function createVersionToml(version: string): PyprojectToml {
             return {
-                project: { name: 'test', version } as tomljs.JsonMap,
+                project: { name: 'test', version },
             };
         }
 
@@ -459,14 +457,14 @@ suite('pipUtils - validatePyproject', () => {
 
         // Edge cases
         test('should accept when no version field exists', () => {
-            const toml: tomljs.JsonMap = {
-                project: { name: 'test' } as tomljs.JsonMap,
+            const toml: PyprojectToml = {
+                project: { name: 'test' },
             };
             verifyValidationError(toml, undefined);
         });
 
         test('should accept when no project section exists', () => {
-            const toml: tomljs.JsonMap = {};
+            const toml: PyprojectToml = {};
             verifyValidationError(toml, undefined);
         });
     });

@@ -13,21 +13,46 @@ import { Installable } from '../common/types';
 import { mergePackages } from '../common/utils';
 import { refreshPipPackages } from './utils';
 
-export function validatePyprojectToml(toml: tomljs.JsonMap): string | undefined {
-    // 1. Validate package name (PEP 508)
-    if (toml.project && (toml.project as tomljs.JsonMap).name) {
-        const name = (toml.project as tomljs.JsonMap).name as string;
-        // PEP 508 regex: must start and end with a letter or digit, can contain -_., and alphanumeric characters. No spaces allowed.
-        // See https://peps.python.org/pep-0508/
-        const nameRegex = /^([a-zA-Z0-9]|[a-zA-Z0-9][a-zA-Z0-9._-]*[a-zA-Z0-9])$/;
-        if (!nameRegex.test(name)) {
-            return l10n.t('Invalid package name "{0}" in pyproject.toml.', name);
-        }
+export interface PyprojectToml {
+    project?: {
+        name?: string;
+        version?: string;
+    };
+    'build-system'?: {
+        requires?: unknown;
+    };
+}
+export function validatePyprojectToml(toml: PyprojectToml): string | undefined {
+    // 1. Validate required "requires" field in [build-system] section (PEP 518)
+    const buildSystem = toml['build-system'];
+    if (buildSystem && !buildSystem.requires) {
+        // See PEP 518: https://peps.python.org/pep-0518/
+        return l10n.t('Missing required field "requires" in [build-system] section of pyproject.toml.');
     }
 
-    // 2. Validate version format (PEP 440)
-    if (toml.project && 'version' in (toml.project as tomljs.JsonMap)) {
-        const version = (toml.project as tomljs.JsonMap).version as string;
+    const project = toml.project;
+    if (!project) {
+        return undefined;
+    }
+
+    const name = project.name;
+    // 2. Validate required "name" field in [project] section (PEP 621)
+    // See PEP 621: https://peps.python.org/pep-0621/
+    if (!name) {
+        return l10n.t('Missing required field "name" in [project] section of pyproject.toml.');
+    }
+
+    // 3. Validate package name (PEP 508)
+    // PEP 508 regex: must start and end with a letter or digit, can contain -_., and alphanumeric characters. No spaces allowed.
+    // See https://peps.python.org/pep-0508/
+    const nameRegex = /^([a-zA-Z0-9]|[a-zA-Z0-9][a-zA-Z0-9._-]*[a-zA-Z0-9])$/;
+    if (!nameRegex.test(name)) {
+        return l10n.t('Invalid package name "{0}" in pyproject.toml.', name);
+    }
+
+    // 4. Validate version format (PEP 440)
+    const version = project.version;
+    if (version !== undefined) {
         if (version.length === 0) {
             return l10n.t('Version cannot be empty in pyproject.toml.');
         }
@@ -39,24 +64,6 @@ export function validatePyprojectToml(toml: tomljs.JsonMap): string | undefined 
             /^v?([0-9]+!)?([0-9]+(?:\.[0-9]+)*)(?:[-_.]?(a|b|c|rc|alpha|beta|pre|preview)[-_.]?([0-9]+)?)?(?:(?:-([0-9]+))|(?:[-_.]?(post|rev|r)[-_.]?([0-9]+)?))?(?:[-_.]?(dev)[-_.]?([0-9]+)?)?(?:\+([a-z0-9]+(?:[-_.][a-z0-9]+)*))?$/i;
         if (!versionRegex.test(version)) {
             return l10n.t('Invalid version "{0}" in pyproject.toml.', version);
-        }
-    }
-
-    // 3. Validate required "name" field in [project] section (PEP 621)
-    if (toml.project) {
-        const project = toml.project as tomljs.JsonMap;
-        // See PEP 621: https://peps.python.org/pep-0621/
-        if (!project.name) {
-            return l10n.t('Missing required field "name" in [project] section of pyproject.toml.');
-        }
-    }
-
-    // 4. Validate required "requires" field in [build-system] section (PEP 518)
-    if (toml['build-system']) {
-        const buildSystem = toml['build-system'] as tomljs.JsonMap;
-        // See PEP 518: https://peps.python.org/pep-0518/
-        if (!buildSystem.requires) {
-            return l10n.t('Missing required field "requires" in [build-system] section of pyproject.toml.');
         }
     }
 
