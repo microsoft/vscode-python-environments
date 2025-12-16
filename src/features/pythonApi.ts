@@ -49,6 +49,8 @@ import { runInBackground } from './execution/runInBackground';
 import { EnvVarManager } from './execution/envVariableManager';
 import { checkUri } from '../common/utils/pathUtils';
 import { waitForAllEnvManagers, waitForEnvManager, waitForEnvManagerId } from './common/managerReady';
+import { activeTextEditor } from '../common/window.apis';
+import { getWorkspaceFolders } from '../common/workspace.apis';
 
 class PythonEnvironmentApiImpl implements PythonEnvironmentApi {
     private readonly _onDidChangeEnvironments = new EventEmitter<DidChangeEnvironmentsEventArgs>();
@@ -214,7 +216,24 @@ class PythonEnvironmentApiImpl implements PythonEnvironmentApi {
         return this.envManagers.setEnvironment(currentScope, environment);
     }
     async getEnvironment(scope: GetEnvironmentScope): Promise<PythonEnvironment | undefined> {
-        const currentScope = checkUri(scope) as GetEnvironmentScope;
+        let currentScope = checkUri(scope) as GetEnvironmentScope;
+        
+        // When scope is undefined, try to determine the appropriate scope from context
+        if (currentScope === undefined) {
+            // First, check if there's an active text editor with a valid document
+            const activeDoc = activeTextEditor()?.document;
+            if (activeDoc && !activeDoc.isUntitled && activeDoc.uri.scheme === 'file') {
+                currentScope = activeDoc.uri;
+            } else {
+                // If no active editor, check if there's a single workspace folder
+                const workspaceFolders = getWorkspaceFolders();
+                if (workspaceFolders && workspaceFolders.length === 1) {
+                    currentScope = workspaceFolders[0].uri;
+                }
+                // Otherwise currentScope remains undefined, which will return the global environment
+            }
+        }
+        
         await waitForEnvManager(currentScope ? [currentScope] : undefined);
         return this.envManagers.getEnvironment(currentScope);
     }
