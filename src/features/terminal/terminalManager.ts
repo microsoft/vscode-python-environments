@@ -137,7 +137,6 @@ export class TerminalManagerImpl implements TerminalManager {
                         traceVerbose(
                             `Auto activation type changed to ${actType}, not tearing down shell startup scripts on activation type switch; scripts are only removed via explicit revert.`,
                         );
-                        this.shellSetup.clear();
                     }
                 }
             }),
