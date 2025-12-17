@@ -185,27 +185,22 @@ export class TerminalManagerImpl implements TerminalManager {
                         );
 
                         if (shellIntegrationLikelyAvailable && !shouldUseProfileActivation(p.shellType)) {
-                            // Shell integration available and NOT in WSL - skip setup
-                            await p.teardownScripts();
+                            // Shell integration available and NOT in WSL - skip setup.
+                            // NOTE: We intentionally do NOT teardown scripts here. If the user stays in
+                            // shellStartup mode, be less aggressive about clearing profile modifications.
                             this.shellSetup.set(p.shellType, true);
                             traceVerbose(
-                                `Shell integration available for ${p.shellType} (not WSL), skipping prompt, and profile modification.`,
+                                `Shell integration likely available. Skipping setup of shell profile for ${p.shellType}.`,
                             );
                         } else {
-                            // WSL (regardless of integration) OR no shell integration - needs setup
+                            // WSL (regardless of integration) OR no/disabled shell integration - needs setup
                             this.shellSetup.set(p.shellType, false);
                             shellsToSetup.push(p);
                             traceVerbose(
-                                `Shell integration is NOT available. Shell profile for ${p.shellType} is not setup.`,
+                                `Shell integration is NOT available or disabled. Shell profile for ${p.shellType} is not setup.`,
                             );
                         }
                     } else if (state === ShellSetupState.Setup) {
-                        if (shellIntegrationLikelyAvailable && !shouldUseProfileActivation(p.shellType)) {
-                            await p.teardownScripts();
-                            traceVerbose(
-                                `Shell integration available for ${p.shellType}, removed profile script in favor of shell integration.`,
-                            );
-                        }
                         this.shellSetup.set(p.shellType, true);
                         traceVerbose(`Shell profile for ${p.shellType} is setup.`);
                     } else if (state === ShellSetupState.NotInstalled) {
