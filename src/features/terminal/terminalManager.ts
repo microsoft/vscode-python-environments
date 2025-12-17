@@ -142,20 +142,6 @@ export class TerminalManagerImpl implements TerminalManager {
                         this.shellSetup.clear();
                     }
                 }
-                if (e.affectsConfiguration('terminal.integrated.shellIntegration.enabled')) {
-                    traceInfo('Shell integration setting changed, invalidating cache');
-                    const updatedShellIntegrationSetting = await getShellIntegrationEnabledCache();
-                    if (!updatedShellIntegrationSetting) {
-                        const shells = new Set(
-                            terminals()
-                                .map((t) => identifyTerminalShell(t))
-                                .filter((t) => t !== 'unknown'),
-                        );
-                        if (shells.size > 0) {
-                            await this.handleSetupCheck(shells);
-                        }
-                    }
-                }
             }),
             onDidChangeWindowState((e) => {
                 this.hasFocus = e.focused;
