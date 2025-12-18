@@ -26,7 +26,7 @@ import {
 } from '../common/nativePythonFinder';
 import { getShellActivationCommands, shortVersion, sortEnvironments } from '../common/utils';
 import { runPython, runUV, shouldUseUv } from './helpers';
-import { getProjectInstallable, PipPackages } from './pipUtils';
+import { getProjectInstallable, PipPackages, shouldProceedAfterPyprojectValidation } from './pipUtils';
 import { resolveSystemPythonEnvironmentPath } from './utils';
 import { addUvEnvironment, removeUvEnvironment, UV_ENVS_KEY } from './uvEnvironments';
 import { createStepBasedVenvFlow } from './venvStepBasedFlow';
@@ -396,11 +396,18 @@ export async function quickCreateVenv(
     const project = api.getPythonProject(venvRoot);
 
     sendTelemetryEvent(EventNames.VENV_CREATION, undefined, { creationType: 'quick' });
-    const installables = await getProjectInstallable(api, project ? [project] : undefined);
+    const result = await getProjectInstallable(api, project ? [project] : undefined);
+    const installables = result.installables;
     const allPackages = [];
     allPackages.push(...(installables?.flatMap((i) => i.args ?? []) ?? []));
     if (additionalPackages) {
         allPackages.push(...additionalPackages);
+    }
+
+    const validationError = result.validationError;
+    const shouldProceed = await shouldProceedAfterPyprojectValidation(validationError, allPackages);
+    if (!shouldProceed) {
+        return undefined;
     }
 
     // Check if .venv already exists

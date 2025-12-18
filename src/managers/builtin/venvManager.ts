@@ -232,9 +232,7 @@ export class VenvManager implements EnvironmentManager {
                 }
             } else if (result?.envCreationErr) {
                 // Show error message to user when environment creation failed
-                showErrorMessage(
-                    l10n.t('Failed to create virtual environment: {0}', result.envCreationErr),
-                );
+                showErrorMessage(l10n.t('Failed to create virtual environment: {0}', result.envCreationErr));
             }
             return result?.environment ?? undefined;
         } finally {
