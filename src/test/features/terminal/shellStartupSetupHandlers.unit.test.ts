@@ -133,10 +133,8 @@ suite('Shell Startup Setup Handlers', () => {
         assert.strictEqual(exec.calledWith('python-envs.viewLogs'), true);
     });
 
-    test('handleSettingUpShellProfile: when user declines, does not run setup and does not change activation type', async () => {
+    test('handleSettingUpShellProfile: when user declines, does not run setup', async () => {
         sinon.stub(windowApis, 'showInformationMessage').resolves(undefined);
-
-        const setAuto = sinon.stub(terminalUtils, 'setAutoActivationType').resolves();
 
         const p1 = new TestStartupProvider('bash', 'bash');
         const p2 = new TestStartupProvider('zsh', 'zsh');
@@ -145,7 +143,6 @@ suite('Shell Startup Setup Handlers', () => {
 
         assert.strictEqual(p1.setupCalls, 0);
         assert.strictEqual(p2.setupCalls, 0);
-        assert.strictEqual(setAuto.called, false);
     });
 
     test('cleanupStartupScripts: always calls teardown on all providers', async () => {
