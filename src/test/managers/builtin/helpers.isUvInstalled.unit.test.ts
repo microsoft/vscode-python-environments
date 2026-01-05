@@ -5,6 +5,7 @@ import * as childProcessApis from '../../../common/childProcess.apis';
 import { EventNames } from '../../../common/telemetry/constants';
 import * as telemetrySender from '../../../common/telemetry/sender';
 import { isUvInstalled, resetUvInstallationCache } from '../../../managers/builtin/helpers';
+import { createMockLogOutputChannel } from '../../mocks/helper';
 import { MockChildProcess } from '../../mocks/mockChildProcess';
 
 suite('Helpers - isUvInstalled', () => {
@@ -16,24 +17,7 @@ suite('Helpers - isUvInstalled', () => {
         // Reset UV installation cache before each test to ensure clean state
         resetUvInstallationCache();
 
-        // Create a mock for LogOutputChannel
-        mockLog = {
-            info: sinon.stub(),
-            error: sinon.stub(),
-            warn: sinon.stub(),
-            append: sinon.stub(),
-            debug: sinon.stub(),
-            trace: sinon.stub(),
-            show: sinon.stub(),
-            hide: sinon.stub(),
-            dispose: sinon.stub(),
-            clear: sinon.stub(),
-            replace: sinon.stub(),
-            appendLine: sinon.stub(),
-            name: 'test-log',
-            logLevel: 1,
-            onDidChangeLogLevel: sinon.stub() as LogOutputChannel['onDidChangeLogLevel'],
-        } as unknown as LogOutputChannel;
+        mockLog = createMockLogOutputChannel();
 
         // Stub childProcess.apis spawnProcess
         spawnStub = sinon.stub(childProcessApis, 'spawnProcess');

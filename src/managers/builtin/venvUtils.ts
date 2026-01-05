@@ -26,7 +26,7 @@ import {
 } from '../common/nativePythonFinder';
 import { getShellActivationCommands, shortVersion, sortEnvironments } from '../common/utils';
 import { runPython, runUV, shouldUseUv } from './helpers';
-import { getProjectInstallable, PipPackages } from './pipUtils';
+import { getProjectInstallable, PipPackages, shouldProceedAfterPyprojectValidation } from './pipUtils';
 import { resolveSystemPythonEnvironmentPath } from './utils';
 import { addUvEnvironment, removeUvEnvironment, UV_ENVS_KEY } from './uvEnvironments';
 import { createStepBasedVenvFlow } from './venvStepBasedFlow';
@@ -135,6 +135,8 @@ async function getPythonInfo(env: NativeEnvInfo): Promise<PythonEnvironmentInfo>
         let description = undefined;
         if (env.kind === NativePythonEnvironmentKind.venvUv) {
             description = l10n.t('uv');
+        } else if (env.kind === NativePythonEnvironmentKind.uvWorkspace) {
+            description = l10n.t('uv workspace');
         }
 
         const binDir = path.dirname(env.executable);
@@ -181,7 +183,12 @@ export async function findVirtualEnvironments(
     const envs = data
         .filter((e) => isNativeEnvInfo(e))
         .map((e) => e as NativeEnvInfo)
-        .filter((e) => e.kind === NativePythonEnvironmentKind.venv || e.kind === NativePythonEnvironmentKind.venvUv);
+        .filter(
+            (e) =>
+                e.kind === NativePythonEnvironmentKind.venv ||
+                e.kind === NativePythonEnvironmentKind.venvUv ||
+                e.kind === NativePythonEnvironmentKind.uvWorkspace,
+        );
 
     for (const e of envs) {
         if (!(e.prefix && e.executable && e.version)) {
@@ -194,7 +201,7 @@ export async function findVirtualEnvironments(
         log.info(`Found venv environment: ${env.name}`);
 
         // Track UV environments using environmentPath for consistency
-        if (e.kind === NativePythonEnvironmentKind.venvUv) {
+        if (e.kind === NativePythonEnvironmentKind.venvUv || e.kind === NativePythonEnvironmentKind.uvWorkspace) {
             await addUvEnvironment(env.environmentPath.fsPath);
         }
     }
@@ -326,7 +333,11 @@ export async function createWithProgress(
                 const resolved = await nativeFinder.resolve(pythonPath);
                 const env = api.createPythonEnvironmentItem(await getPythonInfo(resolved), manager);
 
-                if (useUv && resolved.kind === NativePythonEnvironmentKind.venvUv) {
+                if (
+                    useUv &&
+                    (resolved.kind === NativePythonEnvironmentKind.venvUv ||
+                        resolved.kind === NativePythonEnvironmentKind.uvWorkspace)
+                ) {
                     await addUvEnvironment(env.environmentPath.fsPath);
                 }
 
@@ -385,11 +396,18 @@ export async function quickCreateVenv(
     const project = api.getPythonProject(venvRoot);
 
     sendTelemetryEvent(EventNames.VENV_CREATION, undefined, { creationType: 'quick' });
-    const installables = await getProjectInstallable(api, project ? [project] : undefined);
+    const result = await getProjectInstallable(api, project ? [project] : undefined);
+    const installables = result.installables;
     const allPackages = [];
     allPackages.push(...(installables?.flatMap((i) => i.args ?? []) ?? []));
     if (additionalPackages) {
         allPackages.push(...additionalPackages);
+    }
+
+    const validationError = result.validationError;
+    const shouldProceed = await shouldProceedAfterPyprojectValidation(validationError, allPackages);
+    if (!shouldProceed) {
+        return undefined;
     }
 
     // Check if .venv already exists
@@ -525,7 +543,11 @@ export async function resolveVenvPythonEnvironmentPath(
 ): Promise<PythonEnvironment | undefined> {
     const resolved = await nativeFinder.resolve(fsPath);
 
-    if (resolved.kind === NativePythonEnvironmentKind.venv || resolved.kind === NativePythonEnvironmentKind.venvUv) {
+    if (
+        resolved.kind === NativePythonEnvironmentKind.venv ||
+        resolved.kind === NativePythonEnvironmentKind.venvUv ||
+        resolved.kind === NativePythonEnvironmentKind.uvWorkspace
+    ) {
         const envInfo = await getPythonInfo(resolved);
         return api.createPythonEnvironmentItem(envInfo, manager);
     }
