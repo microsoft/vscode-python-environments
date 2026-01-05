@@ -99,20 +99,27 @@ export async function setPoetryForWorkspaces(fsPath: string[], envPath: string |
 
 export async function getPoetry(native?: NativePythonFinder): Promise<string | undefined> {
     if (poetryPath) {
-        return poetryPath;
+        if (await fs.exists(untildify(poetryPath))) {
+            return untildify(poetryPath);
+        }
+        poetryPath = undefined;
     }
 
     const state = await getWorkspacePersistentState();
-    poetryPath = await state.get<string>(POETRY_PATH_KEY);
-    if (poetryPath) {
-        traceInfo(`Using poetry from persistent state: ${poetryPath}`);
-        // Also retrieve the virtualenvs path if we haven't already
-        if (!poetryVirtualenvsPath) {
-            getPoetryVirtualenvsPath(untildify(poetryPath)).catch((e) =>
-                traceError(`Error getting Poetry virtualenvs path: ${e}`),
-            );
+    const storedPath = await state.get<string>(POETRY_PATH_KEY);
+    if (storedPath) {
+        if (await fs.exists(untildify(storedPath))) {
+            poetryPath = storedPath;
+            traceInfo(`Using poetry from persistent state: ${poetryPath}`);
+            // Also retrieve the virtualenvs path if we haven't already
+            if (!poetryVirtualenvsPath) {
+                getPoetryVirtualenvsPath(untildify(poetryPath)).catch((e) =>
+                    traceError(`Error getting Poetry virtualenvs path: ${e}`),
+                );
+            }
+            return untildify(poetryPath);
         }
-        return untildify(poetryPath);
+        await state.set(POETRY_PATH_KEY, undefined);
     }
 
     // Check in standard PATH locations

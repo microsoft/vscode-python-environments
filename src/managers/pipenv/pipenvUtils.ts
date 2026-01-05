@@ -1,5 +1,6 @@
 // Utility functions for Pipenv environment management
 
+import * as fs from 'fs-extra';
 import * as path from 'path';
 import { Uri } from 'vscode';
 import which from 'which';
@@ -13,6 +14,7 @@ import {
 import { ENVS_EXTENSION_ID } from '../../common/constants';
 import { traceError, traceInfo } from '../../common/logging';
 import { getWorkspacePersistentState } from '../../common/persistentState';
+import { untildify } from '../../common/utils/pathUtils';
 import { getSettingWorkspaceScope } from '../../features/settings/settingHelpers';
 import {
     isNativeEnvInfo,
@@ -54,22 +56,32 @@ function getPipenvPathFromSettings(): string | undefined {
 
 export async function getPipenv(native?: NativePythonFinder): Promise<string | undefined> {
     if (pipenvPath) {
-        return pipenvPath;
+        if (await fs.exists(untildify(pipenvPath))) {
+            return untildify(pipenvPath);
+        }
+        pipenvPath = undefined;
     }
 
     const state = await getWorkspacePersistentState();
-    pipenvPath = await state.get<string>(PIPENV_PATH_KEY);
-    if (pipenvPath) {
-        traceInfo(`Using pipenv from persistent state: ${pipenvPath}`);
-        return pipenvPath;
+    const storedPath = await state.get<string>(PIPENV_PATH_KEY);
+    if (storedPath) {
+        if (await fs.exists(untildify(storedPath))) {
+            pipenvPath = storedPath;
+            traceInfo(`Using pipenv from persistent state: ${pipenvPath}`);
+            return untildify(pipenvPath);
+        }
+        await state.set(PIPENV_PATH_KEY, undefined);
     }
 
     // try to get from settings
     const settingPath = getPipenvPathFromSettings();
     if (settingPath) {
-        pipenvPath = settingPath;
-        traceInfo(`Using pipenv from settings: ${settingPath}`);
-        return pipenvPath;
+        if (await fs.exists(untildify(settingPath))) {
+            pipenvPath = settingPath;
+            traceInfo(`Using pipenv from settings: ${settingPath}`);
+            return untildify(pipenvPath);
+        }
+        traceInfo(`Pipenv path from settings does not exist: ${settingPath}`);
     }
 
     // Try to find pipenv in PATH
