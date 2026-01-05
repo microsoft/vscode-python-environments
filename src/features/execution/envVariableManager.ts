@@ -77,6 +77,13 @@ export class PythonEnvVariableManager implements EnvVarManager {
 
     onDidChangeEnvironmentVariables: Event<DidChangeEnvironmentVariablesEventArgs>;
 
+    /**
+     * @internal For testing only - manually trigger environment variable change event
+     */
+    triggerEnvironmentVariableChange(event: DidChangeEnvironmentVariablesEventArgs): void {
+        this._onDidChangeEnvironmentVariables.fire(event);
+    }
+
     dispose(): void {
         this.disposables.forEach((disposable) => disposable.dispose());
     }
