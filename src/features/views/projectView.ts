@@ -14,6 +14,7 @@ import { ProjectViews } from '../../common/localize';
 import { createSimpleDebounce } from '../../common/utils/debounce';
 import { onDidChangeConfiguration } from '../../common/workspace.apis';
 import { EnvironmentManagers, PythonProjectManager } from '../../internal.api';
+import { ITemporaryStateManager } from './temporaryStateManager';
 import {
     GlobalProjectItem,
     NoProjectEnvironment,
@@ -25,6 +26,10 @@ import {
     ProjectTreeItemKind,
 } from './treeViewItems';
 
+const COPIED_STATE = 'copied';
+const SELECTED_STATE = 'selected';
+const ENV_STATE_KEYS = [COPIED_STATE, SELECTED_STATE];
+
 export class ProjectView implements TreeDataProvider<ProjectTreeItem> {
     private treeView: TreeView<ProjectTreeItem>;
     private _treeDataChanged: EventEmitter<ProjectTreeItem | ProjectTreeItem[] | null | undefined> = new EventEmitter<
@@ -35,7 +40,11 @@ export class ProjectView implements TreeDataProvider<ProjectTreeItem> {
     private packageRoots: Map<string, ProjectEnvironment> = new Map();
     private disposables: Disposable[] = [];
     private debouncedUpdateProject = createSimpleDebounce(500, () => this.updateProject());
-    public constructor(private envManagers: EnvironmentManagers, private projectManager: PythonProjectManager) {
+    public constructor(
+        private envManagers: EnvironmentManagers,
+        private projectManager: PythonProjectManager,
+        private stateManager: ITemporaryStateManager,
+    ) {
         this.treeView = window.createTreeView<ProjectTreeItem>('python-projects', {
             treeDataProvider: this,
         });
@@ -66,6 +75,20 @@ export class ProjectView implements TreeDataProvider<ProjectTreeItem> {
                     e.affectsConfiguration('python-envs.defaultPackageManager')
                 ) {
                     this.debouncedUpdateProject.trigger();
+                }
+            }),
+        );
+
+        this.disposables.push(
+            this.stateManager.onDidChangeState(({ itemId }) => {
+                const projectView = this.projectViews.get(itemId);
+                if (projectView) {
+                    this._treeDataChanged.fire(projectView);
+                    return;
+                }
+                const envView = Array.from(this.revealMap.values()).find((v) => v.environment.envId.id === itemId);
+                if (envView) {
+                    this._treeDataChanged.fire(envView);
                 }
             }),
         );
@@ -121,6 +144,21 @@ export class ProjectView implements TreeDataProvider<ProjectTreeItem> {
         this._treeDataChanged.event;
 
     getTreeItem(element: ProjectTreeItem): TreeItem | Thenable<TreeItem> {
+        if (element.kind === ProjectTreeItemKind.project && element instanceof ProjectItem) {
+            const itemId = element.project.uri.fsPath;
+            const currentContext = element.treeItem.contextValue ?? '';
+            element.treeItem.contextValue = this.stateManager.updateContextValue(itemId, currentContext, [
+                COPIED_STATE,
+            ]);
+        } else if (element.kind === ProjectTreeItemKind.environment && element instanceof ProjectEnvironment) {
+            const itemId = element.environment.envId.id;
+            const currentContext = element.treeItem.contextValue ?? '';
+            element.treeItem.contextValue = this.stateManager.updateContextValue(
+                itemId,
+                currentContext,
+                ENV_STATE_KEYS,
+            );
+        }
         return element.treeItem;
     }
 
