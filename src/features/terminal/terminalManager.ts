@@ -268,6 +268,12 @@ export class TerminalManagerImpl implements TerminalManager {
             traceInfo(
                 `"python-envs.terminal.autoActivationType" is set to "${actType}", terminal should be activated by shell startup script`,
             );
+            // If the shell is already set up (shellSetup.get(...) === true) then we can safely mark it activated so
+            // that the UI button shows the correct Deactivate option.
+            let isSetup = this.shellSetup.get(shellType);
+            if (isSetup && isActivatableEnvironment(environment) && !this.isActivated(terminal, environment)) {
+                this.ta.updateActivationState(terminal, environment, true);
+            }
         }
     }
 
