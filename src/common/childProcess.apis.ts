@@ -24,5 +24,10 @@ export function spawnProcess(
     args: string[],
     options?: cp.SpawnOptions,
 ): cp.ChildProcess | cp.ChildProcessWithoutNullStreams {
-    return cp.spawn(command, args, options ?? {});
+    // Set PYTHONUTF8=1; user-provided PYTHONUTF8 values take precedence.
+    const env = {
+        PYTHONUTF8: '1',
+        ...(options?.env ?? process.env),
+    };
+    return cp.spawn(command, args, { ...options, env });
 }

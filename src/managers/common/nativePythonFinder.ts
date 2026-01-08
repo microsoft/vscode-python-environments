@@ -1,10 +1,10 @@
-import * as ch from 'child_process';
 import * as fs from 'fs-extra';
 import * as path from 'path';
 import { PassThrough } from 'stream';
 import { Disposable, ExtensionContext, LogOutputChannel, Uri } from 'vscode';
 import * as rpc from 'vscode-jsonrpc/node';
 import { PythonProjectApi } from '../../api';
+import { spawnProcess } from '../../common/childProcess.apis';
 import { ENVS_EXTENSION_ID, PYTHON_EXTENSION_ID } from '../../common/constants';
 import { getExtension } from '../../common/extension.apis';
 import { traceError, traceLog, traceVerbose, traceWarn } from '../../common/logging';
@@ -213,7 +213,7 @@ class NativePythonFinderImpl implements NativePythonFinder {
         const writable = new PassThrough();
         const disposables: Disposable[] = [];
         try {
-            const proc = ch.spawn(this.toolPath, ['server'], { env: process.env });
+            const proc = spawnProcess(this.toolPath, ['server'], { env: process.env, stdio: 'pipe' });
             proc.stdout.pipe(readable, { end: false });
             proc.stderr.on('data', (data) => this.outputChannel.error(`[pet] ${data.toString()}`));
             writable.pipe(proc.stdin, { end: false });

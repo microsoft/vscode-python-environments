@@ -1,4 +1,3 @@
-import * as ch from 'child_process';
 import * as fse from 'fs-extra';
 import * as os from 'os';
 import * as path from 'path';
@@ -25,6 +24,7 @@ import {
     PythonEnvironmentInfo,
     PythonProject,
 } from '../../api';
+import { spawnProcess } from '../../common/childProcess.apis';
 import { ENVS_EXTENSION_ID, EXTENSION_ROOT_DIR } from '../../common/constants';
 import { showErrorMessageWithLogs } from '../../common/errors/utils';
 import { Common, CondaStrings, PackageManagement, Pickers } from '../../common/localize';
@@ -206,7 +206,7 @@ async function _runConda(
     const quotedConda = quoteStringIfNecessary(conda);
     const timer = new StopWatch();
     deferred.promise.finally(() => traceInfo(`Ran conda in ${timer.elapsedTime}: ${quotedConda} ${args.join(' ')}`));
-    const proc = ch.spawn(quotedConda, args, { shell: true });
+    const proc = spawnProcess(quotedConda, args, { shell: true });
 
     token?.onCancellationRequested(() => {
         proc.kill();
