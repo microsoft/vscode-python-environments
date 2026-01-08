@@ -1,4 +1,3 @@
-import * as ch from 'child_process';
 import * as fsapi from 'fs-extra';
 import * as path from 'path';
 import {
@@ -22,6 +21,7 @@ import {
     PythonEnvironment,
     PythonEnvironmentApi,
 } from '../../api';
+import { spawnProcess } from '../../common/childProcess.apis';
 import { showErrorMessage, showInputBox, withProgress } from '../../common/window.apis';
 import { PoetryManager } from './poetryManager';
 import { getPoetry } from './poetryUtils';
@@ -271,7 +271,7 @@ export async function runPoetry(
     log?.info(`Running: ${poetry} ${args.join(' ')}`);
 
     return new Promise<string>((resolve, reject) => {
-        const proc = ch.spawn(poetry, args, { cwd });
+        const proc = spawnProcess(poetry, args, { cwd });
         token?.onCancellationRequested(() => {
             proc.kill();
             reject(new CancellationError());
