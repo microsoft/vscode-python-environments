@@ -10,7 +10,7 @@ export const SHELL_INTEGRATION_TIMEOUT = 500; // 0.5 seconds
 export const SHELL_INTEGRATION_POLL_INTERVAL = 20; // 0.02 seconds
 
 /**
- * Use`terminal.integrated.shellIntegration.timeout` setting if available.
+ * Use `terminal.integrated.shellIntegration.timeout` setting if available.
  * Falls back to defaults based on shell integration enabled state and remote environment.
  */
 export function getShellIntegrationTimeout(): number {
