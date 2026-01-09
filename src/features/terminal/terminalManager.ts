@@ -150,6 +150,9 @@ export class TerminalManagerImpl implements TerminalManager {
             await Promise.all(
                 providers.map(async (p) => {
                     const state = await p.isSetup();
+                    // TODO: Consider removing setting check as it won't be as accurate to check
+                    // whether injection actually succeeded.
+                    // Perhaps use caching instead to avoid waiting.
                     const shellIntegrationEnabledSetting = await getShellIntegrationEnabledCache();
                     const shellIntegrationActiveTerminal = await waitForShellIntegration(activeTerminal());
                     const shellIntegrationLikelyAvailable =
