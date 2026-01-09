@@ -25,6 +25,10 @@ export namespace Interpreter {
     export const statusBarSelect = l10n.t('Select Interpreter');
     export const browsePath = l10n.t('Browse...');
     export const createVirtualEnvironment = l10n.t('Create Virtual Environment...');
+    export const noPythonInstalled = l10n.t('No Python Detected');
+    export const noPythonInstalledDescription = l10n.t(
+        'Python is not installed or not detected on your system. Please install Python to create environments.',
+    );
 }
 
 export namespace PackageManagement {
