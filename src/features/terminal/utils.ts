@@ -30,7 +30,10 @@ export function getShellIntegrationTimeout(): number {
  * 2. Shell integration becoming available (window.onDidChangeTerminalShellIntegration event)
  * 3. Detection of common prompt patterns in terminal output
  */
-export async function waitForShellIntegration(terminal: Terminal): Promise<boolean> {
+export async function waitForShellIntegration(terminal?: Terminal): Promise<boolean> {
+    if (!terminal) {
+        return false;
+    }
     if (terminal.shellIntegration) {
         return true;
     }

@@ -6,6 +6,7 @@ import { ShellConstants } from '../common/shellConstants';
 import { identifyTerminalShell } from '../common/shellDetector';
 import { quoteArgs } from '../execution/execUtils';
 import { normalizeShellPath } from './shells/common/shellUtils';
+import { traceLog } from '../../common/logging';
 
 export async function runInTerminal(
     environment: PythonEnvironment,
@@ -47,6 +48,7 @@ export async function runInTerminal(
             executable = `& ${executable}`;
         }
         execution = terminal.shellIntegration.executeCommand(executable, allArgs);
+        traceLog(`runInTerminal: executeCommand ${executable} ${allArgs.join(' ')}`);
         await deferred.promise;
     } else {
         let text = quoteArgs([executable, ...allArgs]).join(' ');
@@ -55,5 +57,6 @@ export async function runInTerminal(
             text = `& ${text}`;
         }
         terminal.sendText(`${text}\n`);
+        traceLog(`runInTerminal: sendText ${text}`);
     }
 }

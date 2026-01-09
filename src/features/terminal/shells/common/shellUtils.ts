@@ -1,12 +1,8 @@
 import { PythonCommandRunConfiguration, PythonEnvironment } from '../../../../api';
-import { traceInfo } from '../../../../common/logging';
-import { timeout } from '../../../../common/utils/asyncUtils';
 import { isWindows } from '../../../../common/utils/platformUtils';
-import { activeTerminalShellIntegration } from '../../../../common/window.apis';
 import { getConfiguration } from '../../../../common/workspace.apis';
 import { ShellConstants } from '../../../common/shellConstants';
 import { quoteArgs } from '../../../execution/execUtils';
-import { SHELL_INTEGRATION_POLL_INTERVAL, SHELL_INTEGRATION_TIMEOUT } from '../../utils';
 
 function getCommandAsString(command: PythonCommandRunConfiguration[], shell: string, delimiter: string): string {
     const parts = [];
@@ -99,26 +95,6 @@ export function extractProfilePath(content: string): string | undefined {
         return extractedPath;
     }
     return undefined;
-}
-
-export async function shellIntegrationForActiveTerminal(name: string, profile?: string): Promise<boolean> {
-    let hasShellIntegration = activeTerminalShellIntegration();
-    let timeOutstamp = 0;
-
-    while (!hasShellIntegration && timeOutstamp < SHELL_INTEGRATION_TIMEOUT) {
-        await timeout(SHELL_INTEGRATION_POLL_INTERVAL);
-        timeOutstamp += SHELL_INTEGRATION_POLL_INTERVAL;
-        hasShellIntegration = activeTerminalShellIntegration();
-    }
-
-    if (hasShellIntegration) {
-        traceInfo(
-            `SHELL: Shell integration is available on your active terminal, with name ${name} and profile ${profile}. Python activate scripts will be evaluated at shell integration level, except in WSL.`,
-        );
-
-        return true;
-    }
-    return false;
 }
 
 export function isWsl(): boolean {

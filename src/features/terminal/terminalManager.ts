@@ -5,6 +5,7 @@ import { PythonEnvironment, PythonEnvironmentApi, PythonProject, PythonTerminalC
 import { ActivationStrings } from '../../common/localize';
 import { traceInfo, traceVerbose } from '../../common/logging';
 import {
+    activeTerminal,
     createTerminal,
     onDidChangeWindowState,
     onDidCloseTerminal,
@@ -16,12 +17,7 @@ import { getConfiguration, onDidChangeConfiguration } from '../../common/workspa
 import { isActivatableEnvironment } from '../common/activation';
 import { identifyTerminalShell } from '../common/shellDetector';
 import { getPythonApi } from '../pythonApi';
-import {
-    getShellIntegrationEnabledCache,
-    isWsl,
-    shellIntegrationForActiveTerminal,
-    shouldUseProfileActivation,
-} from './shells/common/shellUtils';
+import { getShellIntegrationEnabledCache, isWsl, shouldUseProfileActivation } from './shells/common/shellUtils';
 import { ShellEnvsProvider, ShellSetupState, ShellStartupScriptProvider } from './shells/startupProvider';
 import { handleSettingUpShellProfile } from './shellStartupSetupHandlers';
 import {
@@ -154,17 +150,18 @@ export class TerminalManagerImpl implements TerminalManager {
             await Promise.all(
                 providers.map(async (p) => {
                     const state = await p.isSetup();
+                    // TODO: Consider removing setting check as it won't be as accurate to check
+                    // whether injection actually succeeded.
+                    // Perhaps use caching instead to avoid waiting.
                     const shellIntegrationEnabledSetting = await getShellIntegrationEnabledCache();
-                    const shellIntegrationActiveTerminal = await shellIntegrationForActiveTerminal(p.name);
+                    const shellIntegrationActiveTerminal = await waitForShellIntegration(activeTerminal());
                     const shellIntegrationLikelyAvailable =
                         shellIntegrationEnabledSetting || shellIntegrationActiveTerminal;
                     traceVerbose(`Checking shell profile for ${p.shellType}, with state: ${state}`);
 
                     if (state === ShellSetupState.NotSetup) {
                         traceVerbose(
-                            `WSL detected: ${isWsl()}, Shell integration available from setting, or active terminal: ${shellIntegrationEnabledSetting}, or ${await shellIntegrationForActiveTerminal(
-                                p.name,
-                            )}`,
+                            `WSL detected: ${isWsl()}, Shell integration available from setting, or active terminal: ${shellIntegrationEnabledSetting}, or ${shellIntegrationActiveTerminal}`,
                         );
 
                         if (shellIntegrationLikelyAvailable && !shouldUseProfileActivation(p.shellType)) {
