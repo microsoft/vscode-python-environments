@@ -11,7 +11,7 @@ import { PythonEnvironment } from '../../api';
 import { traceError, traceInfo, traceVerbose } from '../../common/logging';
 import { onDidEndTerminalShellExecution, onDidStartTerminalShellExecution } from '../../common/window.apis';
 import { getActivationCommand, getDeactivationCommand } from '../common/activation';
-import { isTaskTerminal } from './utils';
+import { getShellIntegrationTimeout, isTaskTerminal } from './utils';
 
 export interface DidChangeTerminalActivationStateEvent {
     terminal: Terminal;
@@ -252,12 +252,13 @@ export class TerminalActivationImpl implements TerminalActivationInternal {
     ): Promise<boolean> {
         const execution = shellIntegration.executeCommand(command);
         const disposables: Disposable[] = [];
+        const timeoutMs = getShellIntegrationTimeout();
 
         const promise = new Promise<void>((resolve) => {
             const timer = setTimeout(() => {
                 traceError(`Shell execution timed out: ${command}`);
                 resolve();
-            }, 2000);
+            }, timeoutMs);
 
             disposables.push(
                 new Disposable(() => clearTimeout(timer)),

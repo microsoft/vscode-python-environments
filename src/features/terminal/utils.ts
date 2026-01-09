@@ -10,6 +10,21 @@ export const SHELL_INTEGRATION_TIMEOUT = 500; // 0.5 seconds
 export const SHELL_INTEGRATION_POLL_INTERVAL = 20; // 0.02 seconds
 
 /**
+ * Use`terminal.integrated.shellIntegration.timeout` setting if available.
+ * Falls back to defaults based on shell integration enabled state and remote environment.
+ */
+export function getShellIntegrationTimeout(): number {
+    const config = getConfiguration('terminal.integrated');
+    const timeoutValue = config.get<number | undefined>('shellIntegration.timeout');
+    if (typeof timeoutValue !== 'number' || timeoutValue < 0) {
+        const shellIntegrationEnabled = config.get<boolean>('shellIntegration.enabled', true);
+        const isRemote = env.remoteName !== undefined;
+        return shellIntegrationEnabled ? 5000 : isRemote ? 3000 : 2000;
+    }
+    return Math.max(timeoutValue, 500);
+}
+
+/**
  * Three conditions in a Promise.race:
  * 1. Timeout based on VS Code's terminal.integrated.shellIntegration.timeout setting
  * 2. Shell integration becoming available (window.onDidChangeTerminalShellIntegration event)
@@ -20,16 +35,7 @@ export async function waitForShellIntegration(terminal: Terminal): Promise<boole
         return true;
     }
 
-    const config = getConfiguration('terminal.integrated');
-    const shellIntegrationEnabled = config.get<boolean>('shellIntegration.enabled', true);
-    const timeoutValue = config.get<number | undefined>('shellIntegration.timeout');
-    const isRemote = env.remoteName !== undefined;
-    let timeoutMs: number;
-    if (typeof timeoutValue !== 'number' || timeoutValue < 0) {
-        timeoutMs = shellIntegrationEnabled ? 5000 : isRemote ? 3000 : 2000;
-    } else {
-        timeoutMs = Math.max(timeoutValue, 500);
-    }
+    const timeoutMs = getShellIntegrationTimeout();
 
     const disposables: Disposable[] = [];
 
