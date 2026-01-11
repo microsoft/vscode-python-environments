@@ -49,6 +49,8 @@ import { runInBackground } from './execution/runInBackground';
 import { EnvVarManager } from './execution/envVariableManager';
 import { checkUri } from '../common/utils/pathUtils';
 import { waitForAllEnvManagers, waitForEnvManager, waitForEnvManagerId } from './common/managerReady';
+import { timeout } from '../common/utils/asyncUtils';
+import { isWindows } from '../common/utils/platformUtils';
 
 class PythonEnvironmentApiImpl implements PythonEnvironmentApi {
     private readonly _onDidChangeEnvironments = new EventEmitter<DidChangeEnvironmentsEventArgs>();
@@ -304,6 +306,12 @@ class PythonEnvironmentApiImpl implements PythonEnvironmentApi {
             options.cwd instanceof Uri ? options.cwd : Uri.file(options.cwd),
             environment,
         );
+        if (isWindows()) {
+            // Since we have extra polliing on Windows that could lead to race stale promptInputModel value,
+            // temporarily add small timeout to avoid ^C.
+            // TODO: Consider removing when we clean up polling with newer conpty: https://github.com/microsoft/vscode/issues/224488
+            await timeout(50);
+        }
         await runInTerminal(environment, terminal, options);
         return terminal;
     }
