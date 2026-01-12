@@ -7,7 +7,6 @@ import {
     Disposable,
     EnvironmentVariableScope,
     GlobalEnvironmentVariableCollection,
-    window,
     workspace,
     WorkspaceFolder,
 } from 'vscode';
@@ -17,6 +16,7 @@ import { getConfiguration, getWorkspaceFolder } from '../../common/workspace.api
 import { EnvVarManager } from '../execution/envVariableManager';
 import { getGlobalPersistentState } from '../../common/persistentState';
 import { Common } from '../../common/localize';
+import * as windowApis from '../../common/window.apis';
 
 /**
  * Manages injection of workspace-specific environment variables into VS Code terminals
@@ -199,7 +199,7 @@ export class TerminalEnvVarInjector implements Disposable {
             return;
         }
 
-        const result = await window.showInformationMessage(
+        const result = await windowApis.showInformationMessage(
             'An environment file is configured but terminal environment injection is disabled. Enable "python.terminal.useEnvFile" to use environment variables from .env files in terminals.',
             Common.dontShowAgain,
         );
