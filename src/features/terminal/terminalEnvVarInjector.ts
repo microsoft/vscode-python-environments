@@ -188,7 +188,7 @@ export class TerminalEnvVarInjector implements Disposable {
     }
 
     /**
-     * Show notification about environment file configuration with "Don't show again" option.
+     * Show notification about environment file configuration with "Don't Show Again" option.
      */
     private async showEnvFileNotification(): Promise<void> {
         const state = await getGlobalPersistentState();
