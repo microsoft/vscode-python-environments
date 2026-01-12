@@ -4,11 +4,12 @@
 import * as assert from 'node:assert';
 import * as sinon from 'sinon';
 import * as typeMoq from 'typemoq';
-import { GlobalEnvironmentVariableCollection, Uri, window, workspace } from 'vscode';
+import { GlobalEnvironmentVariableCollection, Uri, workspace } from 'vscode';
 import { EnvVarManager } from '../../features/execution/envVariableManager';
 import { TerminalEnvVarInjector } from '../../features/terminal/terminalEnvVarInjector';
 import * as persistentState from '../../common/persistentState';
 import * as workspaceApis from '../../common/workspace.apis';
+import * as windowApis from '../../common/window.apis';
 import { Common } from '../../common/localize';
 
 interface MockScopedCollection {
@@ -22,7 +23,6 @@ suite('TerminalEnvVarInjector Notification Tests', () => {
     let envVarManager: typeMoq.IMock<EnvVarManager>;
     let injector: TerminalEnvVarInjector;
     let mockScopedCollection: MockScopedCollection;
-    let mockGetGlobalPersistentState: sinon.SinonStub;
     let mockState: { get: sinon.SinonStub; set: sinon.SinonStub; clear: sinon.SinonStub };
     let mockGetConfiguration: sinon.SinonStub;
     let mockGetWorkspaceFolder: sinon.SinonStub;
@@ -63,23 +63,25 @@ suite('TerminalEnvVarInjector Notification Tests', () => {
             set: sinon.stub().resolves(),
             clear: sinon.stub().resolves(),
         };
-        mockGetGlobalPersistentState = sinon.stub(persistentState, 'getGlobalPersistentState').resolves(mockState);
+        sinon.stub(persistentState, 'getGlobalPersistentState').resolves(mockState);
 
         // Setup workspace API mocks
         mockGetConfiguration = sinon.stub(workspaceApis, 'getConfiguration');
         mockGetWorkspaceFolder = sinon.stub(workspaceApis, 'getWorkspaceFolder');
 
-        // Setup window.showInformationMessage mock
-        mockShowInformationMessage = sinon.stub(window, 'showInformationMessage').resolves(undefined);
+        // Setup showInformationMessage mock
+        mockShowInformationMessage = sinon.stub(windowApis, 'showInformationMessage').resolves(undefined);
 
-        // Setup environment variable change event handler
+        // Setup environment variable change event handler - will be overridden in tests
         envVarManager
             .setup((m) => m.onDidChangeEnvironmentVariables)
-            .returns((handler) => {
-                envVarChangeHandler = handler;
-                // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                return { dispose: () => {} } as any;
-            });
+            .returns(
+                () =>
+                    ({
+                        dispose: () => {},
+                        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                    } as any),
+            );
     });
 
     teardown(() => {
@@ -90,6 +92,27 @@ suite('TerminalEnvVarInjector Notification Tests', () => {
     test('should show notification when env file exists and useEnvFile is false (first time)', async () => {
         // Arrange - user has not dismissed the notification before
         mockState.get.resolves(false);
+
+        // Setup environment variable change handler to capture it
+        envVarManager.reset();
+        envVarCollection.reset();
+        
+        // Re-setup scoped collection after reset
+        envVarCollection
+            .setup((x) => x.getScoped(typeMoq.It.isAny()))
+            .returns(
+                () => mockScopedCollection as unknown as ReturnType<GlobalEnvironmentVariableCollection['getScoped']>,
+            );
+        envVarCollection.setup((x) => x.clear()).returns(() => {});
+        
+        // Setup event handler to capture it
+        envVarManager
+            .setup((m) => m.onDidChangeEnvironmentVariables)
+            .returns((handler) => {
+                envVarChangeHandler = handler;
+                // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                return { dispose: () => {} } as any;
+            });
 
         const mockConfig = {
             get: sinon.stub(),
@@ -109,9 +132,9 @@ suite('TerminalEnvVarInjector Notification Tests', () => {
         await new Promise((resolve) => setTimeout(resolve, 10)); // Allow async notification
 
         // Assert - notification should be shown
-        assert(mockShowInformationMessage.called, 'showInformationMessage should be called');
+        assert.ok(mockShowInformationMessage.called, 'showInformationMessage should be called');
         const notificationCall = mockShowInformationMessage.getCall(0);
-        assert(
+        assert.ok(
             notificationCall.args[0].includes('environment file is configured'),
             'Notification should mention environment file',
         );
@@ -125,6 +148,16 @@ suite('TerminalEnvVarInjector Notification Tests', () => {
     test('should not show notification when user has clicked "Don\'t Show Again"', async () => {
         // Arrange - user has previously dismissed the notification
         mockState.get.resolves(true);
+
+        // Setup environment variable change handler to capture it
+        envVarManager.reset();
+        envVarManager
+            .setup((m) => m.onDidChangeEnvironmentVariables)
+            .returns((handler) => {
+                envVarChangeHandler = handler;
+                // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                return { dispose: () => {} } as any;
+            });
 
         const mockConfig = {
             get: sinon.stub(),
@@ -144,13 +177,23 @@ suite('TerminalEnvVarInjector Notification Tests', () => {
         await new Promise((resolve) => setTimeout(resolve, 10)); // Allow async notification
 
         // Assert - notification should NOT be shown
-        assert(!mockShowInformationMessage.called, 'showInformationMessage should not be called');
+        assert.ok(!mockShowInformationMessage.called, 'showInformationMessage should not be called');
     });
 
     test('should store preference when user clicks "Don\'t Show Again"', async () => {
         // Arrange - user clicks the "Don't Show Again" button
         mockState.get.resolves(false);
         mockShowInformationMessage.resolves(Common.dontShowAgain);
+
+        // Setup environment variable change handler to capture it
+        envVarManager.reset();
+        envVarManager
+            .setup((m) => m.onDidChangeEnvironmentVariables)
+            .returns((handler) => {
+                envVarChangeHandler = handler;
+                // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                return { dispose: () => {} } as any;
+            });
 
         const mockConfig = {
             get: sinon.stub(),
@@ -170,7 +213,7 @@ suite('TerminalEnvVarInjector Notification Tests', () => {
         await new Promise((resolve) => setTimeout(resolve, 50)); // Allow async notification and state update
 
         // Assert - state should be set to true
-        assert(mockState.set.called, 'state.set should be called');
+        assert.ok(mockState.set.called, 'state.set should be called');
         const setCall = mockState.set.getCall(0);
         assert.strictEqual(setCall.args[0], 'dontShowEnvFileNotification', 'Should use correct state key');
         assert.strictEqual(setCall.args[1], true, 'Should set state to true');
@@ -179,6 +222,16 @@ suite('TerminalEnvVarInjector Notification Tests', () => {
     test('should not show notification when useEnvFile is true', async () => {
         // Arrange - useEnvFile is enabled
         mockState.get.resolves(false);
+
+        // Setup environment variable change handler to capture it
+        envVarManager.reset();
+        envVarManager
+            .setup((m) => m.onDidChangeEnvironmentVariables)
+            .returns((handler) => {
+                envVarChangeHandler = handler;
+                // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                return { dispose: () => {} } as any;
+            });
 
         const mockConfig = {
             get: sinon.stub(),
@@ -198,12 +251,22 @@ suite('TerminalEnvVarInjector Notification Tests', () => {
         await new Promise((resolve) => setTimeout(resolve, 10)); // Allow async notification
 
         // Assert - notification should NOT be shown
-        assert(!mockShowInformationMessage.called, 'showInformationMessage should not be called');
+        assert.ok(!mockShowInformationMessage.called, 'showInformationMessage should not be called');
     });
 
     test('should not show notification when envFile is not configured', async () => {
         // Arrange - no envFile configured
         mockState.get.resolves(false);
+
+        // Setup environment variable change handler to capture it
+        envVarManager.reset();
+        envVarManager
+            .setup((m) => m.onDidChangeEnvironmentVariables)
+            .returns((handler) => {
+                envVarChangeHandler = handler;
+                // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                return { dispose: () => {} } as any;
+            });
 
         const mockConfig = {
             get: sinon.stub(),
@@ -223,6 +286,6 @@ suite('TerminalEnvVarInjector Notification Tests', () => {
         await new Promise((resolve) => setTimeout(resolve, 10)); // Allow async notification
 
         // Assert - notification should NOT be shown
-        assert(!mockShowInformationMessage.called, 'showInformationMessage should not be called');
+        assert.ok(!mockShowInformationMessage.called, 'showInformationMessage should not be called');
     });
 });
