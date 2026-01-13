@@ -4,19 +4,20 @@
 import * as fse from 'fs-extra';
 import * as path from 'path';
 import {
+    commands,
     Disposable,
     EnvironmentVariableScope,
     GlobalEnvironmentVariableCollection,
     workspace,
     WorkspaceFolder,
 } from 'vscode';
+import { Common } from '../../common/localize';
 import { traceError, traceVerbose } from '../../common/logging';
+import { getGlobalPersistentState } from '../../common/persistentState';
 import { resolveVariables } from '../../common/utils/internalVariables';
+import * as windowApis from '../../common/window.apis';
 import { getConfiguration, getWorkspaceFolder } from '../../common/workspace.apis';
 import { EnvVarManager } from '../execution/envVariableManager';
-import { getGlobalPersistentState } from '../../common/persistentState';
-import { Common } from '../../common/localize';
-import * as windowApis from '../../common/window.apis';
 
 /**
  * Manages injection of workspace-specific environment variables into VS Code terminals
@@ -192,7 +193,10 @@ export class TerminalEnvVarInjector implements Disposable {
      */
     private async showEnvFileNotification(): Promise<void> {
         const state = await getGlobalPersistentState();
-        const dontShowAgain = await state.get<boolean>(TerminalEnvVarInjector.DONT_SHOW_ENV_FILE_NOTIFICATION_KEY, false);
+        const dontShowAgain = await state.get<boolean>(
+            TerminalEnvVarInjector.DONT_SHOW_ENV_FILE_NOTIFICATION_KEY,
+            false,
+        );
 
         if (dontShowAgain) {
             traceVerbose('TerminalEnvVarInjector: Env file notification suppressed by user preference');
@@ -201,10 +205,14 @@ export class TerminalEnvVarInjector implements Disposable {
 
         const result = await windowApis.showInformationMessage(
             'An environment file is configured but terminal environment injection is disabled. Enable "python.terminal.useEnvFile" to use environment variables from .env files in terminals.',
+            Common.openSettings,
             Common.dontShowAgain,
         );
 
-        if (result === Common.dontShowAgain) {
+        if (result === Common.openSettings) {
+            await commands.executeCommand('workbench.action.openSettings', 'python.terminal.useEnvFile');
+            traceVerbose('TerminalEnvVarInjector: User opened settings for useEnvFile');
+        } else if (result === Common.dontShowAgain) {
             await state.set(TerminalEnvVarInjector.DONT_SHOW_ENV_FILE_NOTIFICATION_KEY, true);
             traceVerbose('TerminalEnvVarInjector: User chose to not show env file notification again');
         }
