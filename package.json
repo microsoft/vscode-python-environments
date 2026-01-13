@@ -113,7 +113,7 @@
                 },
                 "python-env.globalSearchPaths": {
                     "type": "array",
-                    "description": "%python-env.globalSearchPaths.description%",
+                    "markdownDescription": "%python-env.globalSearchPaths.description%",
                     "default": [],
                     "scope": "machine",
                     "items": {
