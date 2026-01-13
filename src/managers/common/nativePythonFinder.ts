@@ -162,6 +162,11 @@ class NativePythonFinderImpl implements NativePythonFinder {
             traceVerbose('Finder - from cache environments', key);
         }
         const result = await this.pool.addToQueue(options);
+        // Validate result from worker pool
+        if (!result || !Array.isArray(result)) {
+            this.outputChannel.warn(`[pet] Worker pool returned invalid result type: ${typeof result}`);
+            return [];
+        }
         this.cache.set(key, result);
         return result;
     }
@@ -169,7 +174,12 @@ class NativePythonFinderImpl implements NativePythonFinder {
     private async handleSoftRefresh(options?: NativePythonEnvironmentKind | Uri[]): Promise<NativeInfo[]> {
         const key = this.getKey(options);
         const cacheResult = this.cache.get(key);
-        if (!cacheResult) {
+        // Validate cache integrity - if cached value is not a valid array, do a hard refresh
+        if (!cacheResult || !Array.isArray(cacheResult)) {
+            if (cacheResult !== undefined) {
+                this.outputChannel.warn(`[pet] Cache contained invalid data type: ${typeof cacheResult}`);
+                this.cache.delete(key);
+            }
             return this.handleHardRefresh(options);
         }
 
