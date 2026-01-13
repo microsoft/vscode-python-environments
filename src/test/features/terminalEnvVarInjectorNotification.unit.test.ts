@@ -4,7 +4,8 @@
 import * as assert from 'node:assert';
 import * as sinon from 'sinon';
 import * as typeMoq from 'typemoq';
-import { commands, GlobalEnvironmentVariableCollection, Uri, workspace } from 'vscode';
+import { GlobalEnvironmentVariableCollection, Uri, workspace } from 'vscode';
+import * as commandApi from '../../common/command.api';
 import { Common } from '../../common/localize';
 import * as persistentState from '../../common/persistentState';
 import * as windowApis from '../../common/window.apis';
@@ -74,7 +75,7 @@ suite('TerminalEnvVarInjector Notification Tests', () => {
         mockShowInformationMessage = sinon.stub(windowApis, 'showInformationMessage').resolves(undefined);
 
         // Setup executeCommand mock
-        mockExecuteCommand = sinon.stub(commands, 'executeCommand').resolves();
+        mockExecuteCommand = sinon.stub(commandApi, 'executeCommand').resolves();
 
         // Setup environment variable change event handler - will be overridden in tests
         envVarManager
