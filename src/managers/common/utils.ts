@@ -176,9 +176,6 @@ export async function getShellActivationCommands(binDir: string): Promise<{
     if (await fs.pathExists(path.join(binDir, 'activate.csh'))) {
         shellActivation.set(ShellConstants.CSH, [{ executable: 'source', args: [path.join(binDir, `activate.csh`)] }]);
         shellDeactivation.set(ShellConstants.CSH, [{ executable: 'deactivate' }]);
-
-        shellActivation.set(ShellConstants.FISH, [{ executable: 'source', args: [path.join(binDir, `activate.csh`)] }]);
-        shellDeactivation.set(ShellConstants.FISH, [{ executable: 'deactivate' }]);
     }
 
     if (await fs.pathExists(path.join(binDir, 'activate.fish'))) {
