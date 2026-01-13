@@ -4,13 +4,13 @@
 import * as fse from 'fs-extra';
 import * as path from 'path';
 import {
-    commands,
     Disposable,
     EnvironmentVariableScope,
     GlobalEnvironmentVariableCollection,
     workspace,
     WorkspaceFolder,
 } from 'vscode';
+import { executeCommand } from '../../common/command.api';
 import { Common } from '../../common/localize';
 import { traceError, traceVerbose } from '../../common/logging';
 import { getGlobalPersistentState } from '../../common/persistentState';
@@ -210,7 +210,7 @@ export class TerminalEnvVarInjector implements Disposable {
         );
 
         if (result === Common.openSettings) {
-            await commands.executeCommand('workbench.action.openSettings', 'python.terminal.useEnvFile');
+            await executeCommand('workbench.action.openSettings', 'python.terminal.useEnvFile');
             traceVerbose('TerminalEnvVarInjector: User opened settings for useEnvFile');
         } else if (result === Common.dontShowAgain) {
             await state.set(TerminalEnvVarInjector.DONT_SHOW_ENV_FILE_NOTIFICATION_KEY, true);

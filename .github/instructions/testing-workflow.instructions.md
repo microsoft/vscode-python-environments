@@ -235,9 +235,25 @@ interface FunctionAnalysis {
 import * as sinon from 'sinon';
 import * as workspaceApis from '../../common/workspace.apis'; // Wrapper functions
 
-// Stub wrapper functions, not VS Code APIs directly
-// Always mock wrapper functions (e.g., workspaceApis.getConfiguration()) instead of
-// VS Code APIs directly to avoid stubbing issues
+// ❌ WRONG - stubbing raw VS Code modules causes errors
+import { commands } from 'vscode';
+const mockExecuteCommand = sinon.stub(commands, 'executeCommand').resolves();
+// Error: TypeError: Cannot stub non-existent property executeCommand
+
+// ✅ CORRECT - stub the wrapper function from common API layer
+import * as commandApi from '../../common/command.api';
+const mockExecuteCommand = sinon.stub(commandApi, 'executeCommand').resolves();
+
+// CRITICAL: Always check the implementation's imports first
+// If the code uses wrapper functions like these, stub the wrapper:
+// - commandApi.executeCommand() → stub commandApi.executeCommand
+// - workspaceApis.getConfiguration() → stub workspaceApis.getConfiguration
+// - windowApis.showInformationMessage() → stub windowApis.showInformationMessage
+// - workspaceApis.getWorkspaceFolder() → stub workspaceApis.getWorkspaceFolder
+//
+// Why? Raw VS Code modules aren't exported in the test environment, causing
+// "Cannot stub non-existent property" errors when trying to stub them directly.
+
 const mockGetConfiguration = sinon.stub(workspaceApis, 'getConfiguration');
 ```
 
@@ -574,6 +590,7 @@ envConfig.inspect
 -   Untestable Node.js APIs → Create proxy abstraction functions (use function overloads to preserve intelligent typing while making functions mockable)
 
 ## 🧠 Agent Learnings
+
 -   Avoid testing exact error messages or log output - assert only that errors are thrown or rejection occurs to prevent brittle tests (1)
 -   Create shared mock helpers (e.g., `createMockLogOutputChannel()`) instead of duplicating mock setup across multiple test files (1)
-
+-   When stubbing VS Code API functions in unit tests, always check the implementation imports first - if the code uses wrapper functions (like `commandApi.executeCommand()`, `workspaceApis.getConfiguration()`, `windowApis.showInformationMessage()`), stub the wrapper function instead of the raw VS Code module. Stubbing raw VS Code modules (e.g., `sinon.stub(commands, 'executeCommand')`) causes "Cannot stub non-existent property" errors because those modules aren't exported in the test environment (2)
