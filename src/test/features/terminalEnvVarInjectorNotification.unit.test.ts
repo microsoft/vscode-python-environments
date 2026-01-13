@@ -4,13 +4,13 @@
 import * as assert from 'node:assert';
 import * as sinon from 'sinon';
 import * as typeMoq from 'typemoq';
-import { GlobalEnvironmentVariableCollection, Uri, workspace } from 'vscode';
+import { commands, GlobalEnvironmentVariableCollection, Uri, workspace } from 'vscode';
+import { Common } from '../../common/localize';
+import * as persistentState from '../../common/persistentState';
+import * as windowApis from '../../common/window.apis';
+import * as workspaceApis from '../../common/workspace.apis';
 import { EnvVarManager } from '../../features/execution/envVariableManager';
 import { TerminalEnvVarInjector } from '../../features/terminal/terminalEnvVarInjector';
-import * as persistentState from '../../common/persistentState';
-import * as workspaceApis from '../../common/workspace.apis';
-import * as windowApis from '../../common/window.apis';
-import { Common } from '../../common/localize';
 
 interface MockScopedCollection {
     clear: sinon.SinonStub;
@@ -27,6 +27,7 @@ suite('TerminalEnvVarInjector Notification Tests', () => {
     let mockGetConfiguration: sinon.SinonStub;
     let mockGetWorkspaceFolder: sinon.SinonStub;
     let mockShowInformationMessage: sinon.SinonStub;
+    let mockExecuteCommand: sinon.SinonStub;
     let envVarChangeHandler: (args: { uri?: Uri; changeType?: number }) => void;
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     let workspaceFoldersStub: any;
@@ -72,6 +73,9 @@ suite('TerminalEnvVarInjector Notification Tests', () => {
         // Setup showInformationMessage mock
         mockShowInformationMessage = sinon.stub(windowApis, 'showInformationMessage').resolves(undefined);
 
+        // Setup executeCommand mock
+        mockExecuteCommand = sinon.stub(commands, 'executeCommand').resolves();
+
         // Setup environment variable change event handler - will be overridden in tests
         envVarManager
             .setup((m) => m.onDidChangeEnvironmentVariables)
@@ -96,7 +100,7 @@ suite('TerminalEnvVarInjector Notification Tests', () => {
         // Setup environment variable change handler to capture it
         envVarManager.reset();
         envVarCollection.reset();
-        
+
         // Re-setup scoped collection after reset
         envVarCollection
             .setup((x) => x.getScoped(typeMoq.It.isAny()))
@@ -104,7 +108,7 @@ suite('TerminalEnvVarInjector Notification Tests', () => {
                 () => mockScopedCollection as unknown as ReturnType<GlobalEnvironmentVariableCollection['getScoped']>,
             );
         envVarCollection.setup((x) => x.clear()).returns(() => {});
-        
+
         // Setup event handler to capture it
         envVarManager
             .setup((m) => m.onDidChangeEnvironmentVariables)
@@ -131,7 +135,7 @@ suite('TerminalEnvVarInjector Notification Tests', () => {
         envVarChangeHandler({ uri: testUri });
         await new Promise((resolve) => setTimeout(resolve, 10)); // Allow async notification
 
-        // Assert - notification should be shown
+        // Assert - notification should be shown with both buttons
         assert.ok(mockShowInformationMessage.called, 'showInformationMessage should be called');
         const notificationCall = mockShowInformationMessage.getCall(0);
         assert.ok(
@@ -140,6 +144,11 @@ suite('TerminalEnvVarInjector Notification Tests', () => {
         );
         assert.strictEqual(
             notificationCall.args[1],
+            Common.openSettings,
+            'Notification should have "Open Settings" button',
+        );
+        assert.strictEqual(
+            notificationCall.args[2],
             Common.dontShowAgain,
             'Notification should have "Don\'t Show Again" button',
         );
@@ -217,6 +226,47 @@ suite('TerminalEnvVarInjector Notification Tests', () => {
         const setCall = mockState.set.getCall(0);
         assert.strictEqual(setCall.args[0], 'dontShowEnvFileNotification', 'Should use correct state key');
         assert.strictEqual(setCall.args[1], true, 'Should set state to true');
+    });
+
+    test('should open settings when user clicks "Open Settings" button', async () => {
+        // Arrange - user clicks the "Open Settings" button
+        mockState.get.resolves(false);
+        mockShowInformationMessage.resolves(Common.openSettings);
+
+        // Setup environment variable change handler to capture it
+        envVarManager.reset();
+        envVarManager
+            .setup((m) => m.onDidChangeEnvironmentVariables)
+            .returns((handler) => {
+                envVarChangeHandler = handler;
+                // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                return { dispose: () => {} } as any;
+            });
+
+        const mockConfig = {
+            get: sinon.stub(),
+        };
+        mockConfig.get.withArgs('terminal.useEnvFile', false).returns(false);
+        mockConfig.get.withArgs('envFile').returns('.env');
+        mockGetConfiguration.returns(mockConfig);
+
+        const testUri = Uri.file('/workspace');
+        mockGetWorkspaceFolder.returns({ uri: testUri });
+
+        // Act - create injector and trigger env var change
+        injector = new TerminalEnvVarInjector(envVarCollection.object, envVarManager.object);
+        await new Promise((resolve) => setTimeout(resolve, 10)); // Allow async initialization
+
+        envVarChangeHandler({ uri: testUri });
+        await new Promise((resolve) => setTimeout(resolve, 50)); // Allow async notification and command execution
+
+        // Assert - executeCommand should be called to open settings
+        assert.ok(mockExecuteCommand.called, 'executeCommand should be called');
+        const commandCall = mockExecuteCommand.getCall(0);
+        assert.strictEqual(commandCall.args[0], 'workbench.action.openSettings', 'Should open settings');
+        assert.strictEqual(commandCall.args[1], 'python.terminal.useEnvFile', 'Should open useEnvFile setting');
+        // State should NOT be set when clicking "Open Settings"
+        assert.ok(!mockState.set.called, 'state.set should not be called when opening settings');
     });
 
     test('should not show notification when useEnvFile is true', async () => {
