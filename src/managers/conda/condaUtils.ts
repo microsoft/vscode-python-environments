@@ -256,10 +256,38 @@ export async function runCondaExecutable(
     return await _runConda(conda, args, log, token);
 }
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-async function getCondaInfo(): Promise<any> {
+interface CondaInfo {
+    envs_dirs: string[];
+}
+
+/**
+ * Runs `conda info --envs --json` and parses the result.
+ * Validates the JSON response structure at the parsing boundary.
+ * @returns Validated CondaInfo object
+ * @throws Error if conda command fails or returns invalid JSON structure
+ */
+async function getCondaInfo(): Promise<CondaInfo> {
     const raw = await runConda(['info', '--envs', '--json']);
-    return JSON.parse(raw);
+    const parsed = JSON.parse(raw);
+
+    // Validate at the JSON→TypeScript boundary
+    if (!parsed || typeof parsed !== 'object') {
+        traceWarn(`conda info returned invalid data: ${typeof parsed}`);
+        throw new Error(`conda info returned invalid data type: ${typeof parsed}`);
+    }
+
+    const envsDirs = parsed['envs_dirs'];
+    if (envsDirs === undefined || envsDirs === null) {
+        traceWarn('conda info envs_dirs is undefined/null');
+        return { envs_dirs: [] };
+    }
+    if (!Array.isArray(envsDirs)) {
+        traceWarn(`conda info envs_dirs is not an array (type: ${typeof envsDirs})`);
+        return { envs_dirs: [] };
+    }
+
+    traceVerbose(`conda info returned ${envsDirs.length} environment directories`);
+    return { envs_dirs: envsDirs };
 }
 
 let prefixes: string[] | undefined;
@@ -269,17 +297,15 @@ export async function getPrefixes(): Promise<string[]> {
     }
 
     const state = await getWorkspacePersistentState();
-    prefixes = await state.get<string[]>(CONDA_PREFIXES_KEY);
-    if (prefixes) {
+    const storedPrefixes = await state.get<string[]>(CONDA_PREFIXES_KEY);
+    if (storedPrefixes && Array.isArray(storedPrefixes)) {
+        prefixes = storedPrefixes;
         return prefixes;
     }
 
     try {
         const data = await getCondaInfo();
-        prefixes = Array.isArray(data['envs_dirs']) ? (data['envs_dirs'] as string[]) : [];
-        if (prefixes.length === 0) {
-            traceWarn('Conda info returned no environment directories (envs_dirs)');
-        }
+        prefixes = data.envs_dirs;
         await state.set(CONDA_PREFIXES_KEY, prefixes);
     } catch (error) {
         traceError('Failed to get conda environment prefixes', error);
@@ -624,6 +650,11 @@ async function nativeToPythonEnv(
     conda: string,
     condaPrefixes: string[],
 ): Promise<PythonEnvironment | undefined> {
+    // Defensive check: Validate NativeEnvInfo object
+    if (!e) {
+        traceWarn('nativeToPythonEnv received null/undefined NativeEnvInfo');
+        return undefined;
+    }
     if (!(e.prefix && e.executable && e.version)) {
         let name = e.name;
         const environment = api.createPythonEnvironmentItem(
@@ -687,13 +718,31 @@ export async function refreshCondaEnvs(
     log: LogOutputChannel,
     manager: EnvironmentManager,
 ): Promise<PythonEnvironment[]> {
-    log.info('Refreshing conda environments');
-    const data = await nativeFinder.refresh(hardRefresh);
+    log.info(`Refreshing conda environments (hardRefresh=${hardRefresh})`);
+
+    let data: (NativeEnvInfo | NativeEnvManagerInfo)[];
+    try {
+        data = await nativeFinder.refresh(hardRefresh);
+    } catch (error) {
+        traceError('Failed to refresh native finder for conda environments', error);
+        log.error(`Failed to refresh native finder: ${error instanceof Error ? error.message : String(error)}`);
+        return [];
+    }
+
+    // Ensure data is a valid array before proceeding
+    if (!data || !Array.isArray(data)) {
+        traceWarn(`Native finder returned invalid data: ${typeof data}, expected array`);
+        log.warn(`Native finder returned invalid data type: ${typeof data}`);
+        return [];
+    }
+
+    traceVerbose(`Native finder returned ${data.length} items for conda refresh`);
 
     let conda: string | undefined = undefined;
     try {
         conda = await getConda();
-    } catch {
+    } catch (error) {
+        traceVerbose(`getConda() failed, will try to find conda from native data: ${error}`);
         conda = undefined;
     }
     if (conda === undefined) {
@@ -701,6 +750,13 @@ export async function refreshCondaEnvs(
             .filter((e) => !isNativeEnvInfo(e))
             .map((e) => e as NativeEnvManagerInfo)
             .filter((e) => e.tool.toLowerCase() === 'conda');
+
+        if (managers.length === 0) {
+            traceWarn('No conda manager found in native finder data');
+            log.warn('No conda manager found in native finder data');
+            return [];
+        }
+
         conda = managers[0].executable;
         await setConda(conda);
     }
@@ -717,9 +773,21 @@ export async function refreshCondaEnvs(
 
         await Promise.all(
             envs.map(async (e) => {
-                const environment = await nativeToPythonEnv(e, api, manager, log, condaPath, condaPrefixes);
-                if (environment) {
-                    collection.push(environment);
+                try {
+                    const environment = await nativeToPythonEnv(e, api, manager, log, condaPath, condaPrefixes);
+                    if (environment) {
+                        collection.push(environment);
+                    }
+                } catch (error) {
+                    traceError(
+                        `Failed to convert native env to Python environment: ${e.prefix ?? e.executable}`,
+                        error,
+                    );
+                    log.error(
+                        `Failed to process conda environment ${e.prefix ?? e.executable}: ${
+                            error instanceof Error ? error.message : String(error)
+                        }`,
+                    );
                 }
             }),
         );
