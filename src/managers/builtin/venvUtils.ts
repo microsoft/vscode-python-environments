@@ -187,7 +187,9 @@ export async function findVirtualEnvironments(
             (e) =>
                 e.kind === NativePythonEnvironmentKind.venv ||
                 e.kind === NativePythonEnvironmentKind.venvUv ||
-                e.kind === NativePythonEnvironmentKind.uvWorkspace,
+                e.kind === NativePythonEnvironmentKind.uvWorkspace ||
+                e.kind === NativePythonEnvironmentKind.virtualEnv ||
+                e.kind === NativePythonEnvironmentKind.virtualEnvWrapper,
         );
 
     for (const e of envs) {
