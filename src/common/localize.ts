@@ -15,6 +15,8 @@ export namespace Common {
     export const ok = l10n.t('Ok');
     export const quickCreate = l10n.t('Quick Create');
     export const installPython = l10n.t('Install Python');
+    export const dontShowAgain = l10n.t("Don't Show Again");
+    export const openSettings = l10n.t('Open Settings');
 }
 
 export namespace WorkbenchStrings {
