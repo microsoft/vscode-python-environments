@@ -1,7 +1,6 @@
 import { ExtensionContext, extensions, QuickInputButtons, Uri, window, workspace } from 'vscode';
 import { PythonEnvironment, PythonEnvironmentApi } from './api';
 import { traceError, traceInfo, traceWarn } from './common/logging';
-import { normalizePath } from './common/utils/pathUtils';
 import { isWindows } from './common/utils/platformUtils';
 import { createTerminal, showInputBoxWithButtons } from './common/window.apis';
 import { getConfiguration } from './common/workspace.apis';
@@ -271,10 +270,6 @@ export async function resolveDefaultInterpreter(
         try {
             const resolved: NativeEnvInfo = await nativeFinder.resolve(userSetdefaultInterpreter);
             if (resolved && resolved.executable) {
-                if (normalizePath(resolved.executable) === normalizePath(userSetdefaultInterpreter)) {
-                    // no action required, the path is already correct
-                    return;
-                }
                 const resolvedEnv = await api.resolveEnvironment(Uri.file(resolved.executable));
                 traceInfo(`[resolveDefaultInterpreter] API resolved environment: ${JSON.stringify(resolvedEnv)}`);
 
@@ -294,7 +289,7 @@ export async function resolveDefaultInterpreter(
                         version: resolved.version ?? '',
                         displayPath: userSetdefaultInterpreter ?? '',
                         environmentPath: userSetdefaultInterpreter ? Uri.file(userSetdefaultInterpreter) : Uri.file(''),
-                        sysPrefix: resolved.arch ?? '',
+                        sysPrefix: resolved.prefix ?? '',
                         execInfo: {
                             run: {
                                 executable: userSetdefaultInterpreter ?? '',
