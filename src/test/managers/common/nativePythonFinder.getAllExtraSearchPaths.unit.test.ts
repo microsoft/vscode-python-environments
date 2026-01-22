@@ -78,7 +78,7 @@ suite('getAllExtraSearchPaths Integration Tests', () => {
             if (section === 'python') {
                 return pythonConfig;
             }
-            if (section === 'python-env') {
+            if (section === 'python-envs') {
                 return envConfig;
             }
             throw new Error(`Unexpected configuration section: ${section}`);
