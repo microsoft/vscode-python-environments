@@ -42,7 +42,7 @@ export function isDefaultEnvManagerBroken(): boolean {
 }
 
 export function getDefaultEnvManagerSetting(wm: PythonProjectManager, scope?: Uri): string {
-    const config = workspace.getConfiguration('python-envs', scope);
+    const config = getConfiguration('python-envs', scope);
     const settings = getSettings(wm, config, scope);
     if (settings && settings.envManager.length > 0) {
         return settings.envManager;
@@ -69,7 +69,7 @@ export function getDefaultPkgManagerSetting(
     scope?: ConfigurationScope | null,
     defaultId?: string,
 ): string {
-    const config = workspace.getConfiguration('python-envs', scope);
+    const config = getConfiguration('python-envs', scope);
 
     const settings = getSettings(wm, config, scope);
     if (settings && settings.packageManager.length > 0) {
@@ -127,7 +127,7 @@ export async function setAllManagerSettings(edits: EditAllManagerSettings[]): Pr
     const promises: Thenable<void>[] = [];
 
     workspaces.forEach((es, w) => {
-        const config = workspace.getConfiguration('python-envs', w);
+        const config = getConfiguration('python-envs', w);
         const overrides = config.get<PythonProjectSettings[]>('pythonProjects', []);
         const projectsInspect = config.inspect<PythonProjectSettings[]>('pythonProjects');
         const existingProjectsSetting =
@@ -192,7 +192,7 @@ export async function setAllManagerSettings(edits: EditAllManagerSettings[]): Pr
         }
     });
 
-    const config = workspace.getConfiguration('python-envs', undefined);
+    const config = getConfiguration('python-envs', undefined);
     edits
         .filter((e) => !e.project)
         .forEach((e) => {
@@ -253,7 +253,7 @@ export async function setEnvironmentManager(edits: EditEnvManagerSettings[]): Pr
     const promises: Thenable<void>[] = [];
 
     workspaces.forEach((es, w) => {
-        const config = workspace.getConfiguration('python-envs', w.uri);
+        const config = getConfiguration('python-envs', w.uri);
         const overrides = config.get<PythonProjectSettings[]>('pythonProjects', []);
         const projectsInspect = config.inspect<PythonProjectSettings[]>('pythonProjects');
         const existingProjectsSetting = projectsInspect?.workspaceValue ?? undefined;
@@ -285,7 +285,7 @@ export async function setEnvironmentManager(edits: EditEnvManagerSettings[]): Pr
         }
     });
 
-    const config = workspace.getConfiguration('python-envs', undefined);
+    const config = getConfiguration('python-envs', undefined);
     edits
         .filter((e) => !e.project)
         .forEach((e) => {
@@ -337,7 +337,7 @@ export async function setPackageManager(edits: EditPackageManagerSettings[]): Pr
     const promises: Thenable<void>[] = [];
 
     workspaces.forEach((es, w) => {
-        const config = workspace.getConfiguration('python-envs', w.uri);
+        const config = getConfiguration('python-envs', w.uri);
         const overrides = config.get<PythonProjectSettings[]>('pythonProjects', []);
         const projectsInspect = config.inspect<PythonProjectSettings[]>('pythonProjects');
         const existingProjectsSetting = projectsInspect?.workspaceValue ?? undefined;
@@ -374,7 +374,7 @@ export async function setPackageManager(edits: EditPackageManagerSettings[]): Pr
         }
     });
 
-    const config = workspace.getConfiguration('python-envs', undefined);
+    const config = getConfiguration('python-envs', undefined);
     edits
         .filter((e) => !e.project)
         .forEach((e) => {
@@ -403,7 +403,7 @@ export interface EditProjectSettings {
 export async function addPythonProjectSetting(edits: EditProjectSettings[]): Promise<void> {
     const noWorkspace: EditProjectSettings[] = [];
     const workspaces = new Map<WorkspaceFolder, EditProjectSettings[]>();
-    const globalConfig = workspace.getConfiguration('python-envs', undefined);
+    const globalConfig = getConfiguration('python-envs', undefined);
     const envManager = globalConfig.get<string>('defaultEnvManager', DEFAULT_ENV_MANAGER_ID);
     const pkgManager = globalConfig.get<string>('defaultPackageManager', DEFAULT_PACKAGE_MANAGER_ID);
 
@@ -424,7 +424,7 @@ export async function addPythonProjectSetting(edits: EditProjectSettings[]): Pro
 
     const promises: Thenable<void>[] = [];
     workspaces.forEach((es, w) => {
-        const config = workspace.getConfiguration('python-envs', w.uri);
+        const config = getConfiguration('python-envs', w.uri);
         const overrides = config.get<PythonProjectSettings[]>('pythonProjects', []);
         es.forEach((e) => {
             if (isMultiroot) {
@@ -472,7 +472,7 @@ export async function removePythonProjectSetting(edits: EditProjectSettings[]): 
 
     const promises: Thenable<void>[] = [];
     workspaces.forEach((es, w) => {
-        const config = workspace.getConfiguration('python-envs', w.uri);
+        const config = getConfiguration('python-envs', w.uri);
         const overrides = config.get<PythonProjectSettings[]>('pythonProjects', []);
         es.forEach((e) => {
             const pwPath = path.normalize(e.project.uri.fsPath);
