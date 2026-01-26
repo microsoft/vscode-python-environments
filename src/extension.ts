@@ -7,7 +7,7 @@ import { clearPersistentState, setPersistentState } from './common/persistentSta
 import { newProjectSelection } from './common/pickers/managers';
 import { StopWatch } from './common/stopWatch';
 import { EventNames } from './common/telemetry/constants';
-import { sendManagerSelectionTelemetry } from './common/telemetry/helpers';
+import { sendManagerSelectionTelemetry, sendProjectStructureTelemetry } from './common/telemetry/helpers';
 import { sendTelemetryEvent } from './common/telemetry/sender';
 import { createDeferred } from './common/utils/deferred';
 
@@ -465,6 +465,7 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
         sendTelemetryEvent(EventNames.EXTENSION_MANAGER_REGISTRATION_DURATION, start.elapsedTime);
         await terminalManager.initialize(api);
         sendManagerSelectionTelemetry(projectManager);
+        await sendProjectStructureTelemetry(projectManager, envManagers);
     });
 
     sendTelemetryEvent(EventNames.EXTENSION_ACTIVATION_DURATION, start.elapsedTime);

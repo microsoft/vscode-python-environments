@@ -19,6 +19,14 @@ export enum EventNames {
      * - triggeredLocation: string (where the create command is called from)
      */
     CREATE_ENVIRONMENT = 'CREATE_ENVIRONMENT',
+    /**
+     * Telemetry event for project structure metrics at extension startup.
+     * Properties:
+     * - totalProjectCount: number (total number of projects)
+     * - uniqueInterpreterCount: number (count of distinct interpreter paths)
+     * - projectUnderRoot: number (count of projects nested under workspace roots)
+     */
+    PROJECT_STRUCTURE = 'PROJECT_STRUCTURE',
 }
 
 // Map all events to their properties
@@ -119,5 +127,18 @@ export interface IEventNamePropertyMapping {
     [EventNames.CREATE_ENVIRONMENT]: {
         manager: string;
         triggeredLocation: string;
+    };
+
+    /* __GDPR__
+        "project_structure": {
+            "totalProjectCount": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "owner": "eleanorjboyd" },
+            "uniqueInterpreterCount": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "owner": "eleanorjboyd" },
+            "projectUnderRoot": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "owner": "eleanorjboyd" }
+        }
+    */
+    [EventNames.PROJECT_STRUCTURE]: {
+        totalProjectCount: number;
+        uniqueInterpreterCount: number;
+        projectUnderRoot: number;
     };
 }
