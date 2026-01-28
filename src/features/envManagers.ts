@@ -292,6 +292,7 @@ export class PythonEnvironmentManagers implements EnvironmentManagers {
                         project,
                         envManager: manager.id,
                         packageManager: packageManager.id,
+                        forceWrite: true,
                     },
                 ]);
             }
@@ -336,6 +337,7 @@ export class PythonEnvironmentManagers implements EnvironmentManagers {
                             project: this.pm.get(uri),
                             envManager: manager.id,
                             packageManager: manager.preferredPackageManagerId,
+                            forceWrite: true,
                         });
                     }
 
@@ -355,6 +357,7 @@ export class PythonEnvironmentManagers implements EnvironmentManagers {
                         project: undefined,
                         envManager: manager.id,
                         packageManager: manager.preferredPackageManagerId,
+                        forceWrite: true,
                     });
                 }
 
