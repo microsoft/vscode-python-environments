@@ -341,7 +341,7 @@ export async function setEnvManagerCommand(em: EnvironmentManagers, wm: PythonPr
     if (projects && projects.length > 0) {
         const manager = await pickEnvironmentManager(em.managers);
         if (manager) {
-            await setEnvironmentManager(projects.map((p) => ({ project: p, envManager: manager })));
+            await setEnvironmentManager(projects.map((p) => ({ project: p, envManager: manager, forceWrite: true })));
         }
     }
 }
@@ -351,7 +351,7 @@ export async function setPackageManagerCommand(em: EnvironmentManagers, wm: Pyth
     if (projects && projects.length > 0) {
         const manager = await pickPackageManager(em.packageManagers);
         if (manager) {
-            await setPackageManager(projects.map((p) => ({ project: p, packageManager: manager })));
+            await setPackageManager(projects.map((p) => ({ project: p, packageManager: manager, forceWrite: true })));
         }
     }
 }
