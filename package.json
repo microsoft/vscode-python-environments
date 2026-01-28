@@ -111,18 +111,18 @@
                     "default": false,
                     "scope": "resource"
                 },
-                "python-env.globalSearchPaths": {
+                "python-envs.globalSearchPaths": {
                     "type": "array",
-                    "markdownDescription": "%python-env.globalSearchPaths.description%",
+                    "markdownDescription": "%python-envs.globalSearchPaths.description%",
                     "default": [],
                     "scope": "machine",
                     "items": {
                         "type": "string"
                     }
                 },
-                "python-env.workspaceSearchPaths": {
+                "python-envs.workspaceSearchPaths": {
                     "type": "array",
-                    "description": "%python-env.workspaceSearchPaths.description%",
+                    "description": "%python-envs.workspaceSearchPaths.description%",
                     "default": [],
                     "scope": "resource",
                     "items": {
