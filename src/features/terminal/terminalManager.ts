@@ -306,6 +306,11 @@ export class TerminalManagerImpl implements TerminalManager {
             // We add it to skip activation on open to prevent double activation.
             // We can activate it ourselves since we are creating it.
             this.skipActivationOnOpen.add(newTerminal);
+
+            // Show terminal before activation so users can see the activation happening, requested script running.
+            // Necessary for scenarios such as when terminal is awaiting user input, etc.
+            newTerminal.show();
+
             await this.autoActivateOnTerminalOpen(newTerminal, environment);
         }
 
