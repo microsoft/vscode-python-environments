@@ -3,65 +3,94 @@
 
 import * as assert from 'assert';
 import * as sinon from 'sinon';
-import { EventEmitter, Progress, Terminal, TerminalOptions } from 'vscode';
+import { Disposable, Event, EventEmitter, Progress, Terminal, TerminalOptions, Uri } from 'vscode';
 import { PythonEnvironment } from '../../../api';
 import * as windowApis from '../../../common/window.apis';
 import * as workspaceApis from '../../../common/workspace.apis';
-import { TerminalActivationInternal } from '../../../features/terminal/terminalActivationState';
-import { TerminalManagerImpl } from '../../../features/terminal/terminalManager';
+import * as activationUtils from '../../../features/common/activation';
 import {
     ShellEnvsProvider,
     ShellStartupScriptProvider,
 } from '../../../features/terminal/shells/startupProvider';
+import {
+    DidChangeTerminalActivationStateEvent,
+    TerminalActivationInternal,
+} from '../../../features/terminal/terminalActivationState';
+import { TerminalManagerImpl } from '../../../features/terminal/terminalManager';
 import * as terminalUtils from '../../../features/terminal/utils';
-import * as activationUtils from '../../../features/common/activation';
+
+/**
+ * Test implementation of TerminalActivationInternal that tracks method calls.
+ */
+class TestTerminalActivation implements TerminalActivationInternal {
+    public callOrder: string[] = [];
+    public activateCalls = 0;
+    public deactivateCalls = 0;
+
+    private onDidChangeEmitter = new EventEmitter<DidChangeTerminalActivationStateEvent>();
+    public onDidChangeTerminalActivationState: Event<DidChangeTerminalActivationStateEvent> =
+        this.onDidChangeEmitter.event;
+
+    isActivated(_terminal: Terminal, _environment?: PythonEnvironment): boolean {
+        return false;
+    }
+
+    async activate(_terminal: Terminal, _environment: PythonEnvironment): Promise<void> {
+        this.activateCalls += 1;
+        this.callOrder.push('activate');
+    }
+
+    async deactivate(_terminal: Terminal): Promise<void> {
+        this.deactivateCalls += 1;
+    }
+
+    getEnvironment(_terminal: Terminal): PythonEnvironment | undefined {
+        return undefined;
+    }
+
+    updateActivationState(_terminal: Terminal, _environment: PythonEnvironment, _activated: boolean): void {
+        // Not used in these tests
+    }
+
+    dispose(): void {
+        this.onDidChangeEmitter.dispose();
+    }
+}
 
 suite('TerminalManager - create()', () => {
-    let terminalActivation: TerminalActivationInternal;
+    let terminalActivation: TestTerminalActivation;
     let mockGetAutoActivationType: sinon.SinonStub;
     let terminalManager: TerminalManagerImpl;
-
-    // Tracking variables for show() and activate() call order
-    let callOrder: string[];
     let mockTerminal: Partial<Terminal> & { show: sinon.SinonStub };
 
-    const createMockEnvironment = (): PythonEnvironment =>
-        ({
-            envId: { id: 'test-env-id', managerId: 'test-manager' },
-            environmentPath: { fsPath: '/path/to/python' },
-            displayName: 'Test Environment',
-            execInfo: {
-                activation: { executable: 'source', args: ['/path/to/activate'] },
-            },
-        } as unknown as PythonEnvironment);
+    const createMockEnvironment = (): PythonEnvironment => ({
+        envId: { id: 'test-env-id', managerId: 'test-manager' },
+        name: 'Test Environment',
+        displayName: 'Test Environment',
+        shortDisplayName: 'TestEnv',
+        displayPath: '/path/to/env',
+        version: '3.9.0',
+        environmentPath: Uri.file('/path/to/python'),
+        sysPrefix: '/path/to/env',
+        execInfo: {
+            run: { executable: '/path/to/python' },
+            activation: [{ executable: '/path/to/activate' }],
+        },
+    });
 
     setup(() => {
-        callOrder = [];
+        terminalActivation = new TestTerminalActivation();
 
-        // Create mock terminal with tracking
+        // Create mock terminal with tracking - shares callOrder with terminalActivation
         mockTerminal = {
             name: 'Test Terminal',
             creationOptions: {} as TerminalOptions,
             shellIntegration: undefined,
             show: sinon.stub().callsFake(() => {
-                callOrder.push('show');
+                terminalActivation.callOrder.push('show');
             }),
             sendText: sinon.stub(),
         };
-
-        // Mock terminal activation using unknown cast for simpler typing
-        const onDidChangeEmitter = new EventEmitter<unknown>();
-        terminalActivation = {
-            isActivated: sinon.stub().returns(false),
-            activate: sinon.stub().callsFake(async () => {
-                callOrder.push('activate');
-            }),
-            deactivate: sinon.stub().resolves(),
-            getEnvironment: sinon.stub().returns(undefined),
-            updateActivationState: sinon.stub(),
-            onDidChangeTerminalActivationState: onDidChangeEmitter.event,
-            dispose: sinon.stub(),
-        } as unknown as TerminalActivationInternal;
 
         // Stub terminalUtils
         mockGetAutoActivationType = sinon.stub(terminalUtils, 'getAutoActivationType');
@@ -71,10 +100,10 @@ suite('TerminalManager - create()', () => {
         sinon.stub(activationUtils, 'isActivatableEnvironment').returns(true);
 
         // Stub window APIs
-        sinon.stub(windowApis, 'createTerminal').returns(mockTerminal as unknown as Terminal);
-        sinon.stub(windowApis, 'onDidOpenTerminal').returns({ dispose: sinon.stub() });
-        sinon.stub(windowApis, 'onDidCloseTerminal').returns({ dispose: sinon.stub() });
-        sinon.stub(windowApis, 'onDidChangeWindowState').returns({ dispose: sinon.stub() });
+        sinon.stub(windowApis, 'createTerminal').returns(mockTerminal as Terminal);
+        sinon.stub(windowApis, 'onDidOpenTerminal').returns(new Disposable(() => {}));
+        sinon.stub(windowApis, 'onDidCloseTerminal').returns(new Disposable(() => {}));
+        sinon.stub(windowApis, 'onDidChangeWindowState').returns(new Disposable(() => {}));
         sinon.stub(windowApis, 'terminals').returns([]);
 
         // Stub withProgress to execute the callback directly
@@ -82,27 +111,24 @@ suite('TerminalManager - create()', () => {
             const mockProgress: Progress<{ message?: string; increment?: number }> = { report: () => {} };
             const mockCancellationToken = {
                 isCancellationRequested: false,
-                onCancellationRequested: () => ({ dispose: () => {} }),
+                onCancellationRequested: () => new Disposable(() => {}),
             };
             return task(mockProgress, mockCancellationToken as never);
         });
 
         // Stub workspace APIs
-        sinon.stub(workspaceApis, 'onDidChangeConfiguration').returns({ dispose: sinon.stub() });
+        sinon.stub(workspaceApis, 'onDidChangeConfiguration').returns(new Disposable(() => {}));
     });
 
     teardown(() => {
         sinon.restore();
+        terminalActivation.dispose();
     });
 
     function createTerminalManager(): TerminalManagerImpl {
         const emptyEnvProviders: ShellEnvsProvider[] = [];
         const emptyScriptProviders: ShellStartupScriptProvider[] = [];
-        return new TerminalManagerImpl(
-            terminalActivation as TerminalActivationInternal,
-            emptyEnvProviders,
-            emptyScriptProviders,
-        );
+        return new TerminalManagerImpl(terminalActivation, emptyEnvProviders, emptyScriptProviders);
     }
 
     // Regression test for https://github.com/microsoft/vscode-python-environments/issues/640
@@ -118,6 +144,7 @@ suite('TerminalManager - create()', () => {
         await terminalManager.create(env, { cwd: '/workspace' });
 
         // Assert - show() must be called before activate() so terminal is visible during activation
+        const { callOrder } = terminalActivation;
         assert.ok(callOrder.includes('show'), 'Terminal show() should be called');
         assert.ok(callOrder.includes('activate'), 'Terminal activate() should be called');
         const showIndex = callOrder.indexOf('show');
@@ -140,6 +167,7 @@ suite('TerminalManager - create()', () => {
         await terminalManager.create(env, { cwd: '/workspace' });
 
         // Assert - no blocking activation means caller (runInTerminal) will show terminal
+        const { callOrder } = terminalActivation;
         assert.strictEqual(callOrder.includes('show'), false, 'show() deferred to caller');
         assert.strictEqual(callOrder.includes('activate'), false, 'No command activation for shell startup mode');
     });
@@ -154,6 +182,7 @@ suite('TerminalManager - create()', () => {
         await terminalManager.create(env, { cwd: '/workspace' });
 
         // Assert - no activation means caller (runInTerminal) will show terminal
+        const { callOrder } = terminalActivation;
         assert.strictEqual(callOrder.includes('show'), false, 'show() deferred to caller');
         assert.strictEqual(callOrder.includes('activate'), false, 'Activation disabled');
     });
@@ -168,12 +197,9 @@ suite('TerminalManager - create()', () => {
         const terminal = await terminalManager.create(env, { cwd: '/workspace', disableActivation: true });
 
         // Assert - terminal returned without any activation logic
+        const { callOrder } = terminalActivation;
         assert.ok(terminal, 'Terminal should be returned');
         assert.strictEqual(callOrder.includes('show'), false, 'No show() when activation skipped');
-        assert.strictEqual(
-            (terminalActivation.activate as sinon.SinonStub).called,
-            false,
-            'No activate() when disableActivation is true',
-        );
+        assert.strictEqual(terminalActivation.activateCalls, 0, 'No activate() when disableActivation is true');
     });
 });
