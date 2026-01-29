@@ -8,6 +8,7 @@ import { PythonEnvironment } from '../../../api';
 import * as windowApis from '../../../common/window.apis';
 import * as workspaceApis from '../../../common/workspace.apis';
 import * as activationUtils from '../../../features/common/activation';
+import * as shellDetector from '../../../features/common/shellDetector';
 import {
     ShellEnvsProvider,
     ShellStartupScriptProvider,
@@ -94,6 +95,7 @@ suite('TerminalManager - create()', () => {
         mockGetAutoActivationType = sinon.stub(terminalUtils, 'getAutoActivationType');
         sinon.stub(terminalUtils, 'waitForShellIntegration').resolves(false);
         sinon.stub(activationUtils, 'isActivatableEnvironment').returns(true);
+        sinon.stub(shellDetector, 'identifyTerminalShell').returns('bash');
 
         sinon.stub(windowApis, 'createTerminal').returns(mockTerminal as Terminal);
         sinon.stub(windowApis, 'onDidOpenTerminal').returns(new Disposable(() => {}));
