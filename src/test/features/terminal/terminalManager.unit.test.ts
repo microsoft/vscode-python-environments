@@ -127,15 +127,12 @@ suite('TerminalManager - create()', () => {
     // With ACT_TYPE_COMMAND, create() awaits activation which blocks returning the terminal.
     // Without showing the terminal early, users wouldn't see it until activation completes (2-5 seconds).
     test('ACT_TYPE_COMMAND: shows terminal before awaiting activation to prevent hidden terminal during activation', async () => {
-        // Mock
         mockGetAutoActivationType.returns(terminalUtils.ACT_TYPE_COMMAND);
         terminalManager = createTerminalManager();
-
-        // Run
         const env = createMockEnvironment();
+
         await terminalManager.create(env, { cwd: '/workspace' });
 
-        // Assert - show() must be called before activate() so terminal is visible during activation
         const { callOrder } = terminalActivation;
         assert.ok(callOrder.includes('show'), 'Terminal show() should be called');
         assert.ok(callOrder.includes('activate'), 'Terminal activate() should be called');
@@ -150,45 +147,36 @@ suite('TerminalManager - create()', () => {
     // With ACT_TYPE_SHELL/OFF, create() returns immediately without blocking.
     // The caller (runInTerminal) handles showing the terminal, so create() shouldn't call show().
     test('ACT_TYPE_SHELL: does not call show() since create() returns immediately and caller handles visibility', async () => {
-        // Mock
         mockGetAutoActivationType.returns(terminalUtils.ACT_TYPE_SHELL);
         terminalManager = createTerminalManager();
-
-        // Run
         const env = createMockEnvironment();
+
         await terminalManager.create(env, { cwd: '/workspace' });
 
-        // Assert - no blocking activation means caller (runInTerminal) will show terminal
         const { callOrder } = terminalActivation;
         assert.strictEqual(callOrder.includes('show'), false, 'show() deferred to caller');
         assert.strictEqual(callOrder.includes('activate'), false, 'No command activation for shell startup mode');
     });
 
     test('ACT_TYPE_OFF: does not call show() since create() returns immediately and caller handles visibility', async () => {
-        // Mock
         mockGetAutoActivationType.returns(terminalUtils.ACT_TYPE_OFF);
         terminalManager = createTerminalManager();
-
-        // Run
         const env = createMockEnvironment();
+
         await terminalManager.create(env, { cwd: '/workspace' });
 
-        // Assert - no activation means caller (runInTerminal) will show terminal
         const { callOrder } = terminalActivation;
         assert.strictEqual(callOrder.includes('show'), false, 'show() deferred to caller');
         assert.strictEqual(callOrder.includes('activate'), false, 'Activation disabled');
     });
 
     test('disableActivation option: skips both show() and activation, returns terminal immediately', async () => {
-        // Mock
         mockGetAutoActivationType.returns(terminalUtils.ACT_TYPE_COMMAND);
         terminalManager = createTerminalManager();
-
-        // Run
         const env = createMockEnvironment();
+
         const terminal = await terminalManager.create(env, { cwd: '/workspace', disableActivation: true });
 
-        // Assert - terminal returned without any activation logic
         const { callOrder } = terminalActivation;
         assert.ok(terminal, 'Terminal should be returned');
         assert.strictEqual(callOrder.includes('show'), false, 'No show() when activation skipped');
