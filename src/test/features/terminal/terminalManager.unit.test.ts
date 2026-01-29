@@ -81,7 +81,6 @@ suite('TerminalManager - create()', () => {
     setup(() => {
         terminalActivation = new TestTerminalActivation();
 
-        // Create mock terminal with tracking - shares callOrder with terminalActivation
         mockTerminal = {
             name: 'Test Terminal',
             creationOptions: {} as TerminalOptions,
@@ -92,21 +91,15 @@ suite('TerminalManager - create()', () => {
             sendText: sinon.stub(),
         };
 
-        // Stub terminalUtils
         mockGetAutoActivationType = sinon.stub(terminalUtils, 'getAutoActivationType');
         sinon.stub(terminalUtils, 'waitForShellIntegration').resolves(false);
-
-        // Stub isActivatableEnvironment to return true
         sinon.stub(activationUtils, 'isActivatableEnvironment').returns(true);
 
-        // Stub window APIs
         sinon.stub(windowApis, 'createTerminal').returns(mockTerminal as Terminal);
         sinon.stub(windowApis, 'onDidOpenTerminal').returns(new Disposable(() => {}));
         sinon.stub(windowApis, 'onDidCloseTerminal').returns(new Disposable(() => {}));
         sinon.stub(windowApis, 'onDidChangeWindowState').returns(new Disposable(() => {}));
         sinon.stub(windowApis, 'terminals').returns([]);
-
-        // Stub withProgress to execute the callback directly
         sinon.stub(windowApis, 'withProgress').callsFake(async (_options, task) => {
             const mockProgress: Progress<{ message?: string; increment?: number }> = { report: () => {} };
             const mockCancellationToken = {
@@ -116,7 +109,6 @@ suite('TerminalManager - create()', () => {
             return task(mockProgress, mockCancellationToken as never);
         });
 
-        // Stub workspace APIs
         sinon.stub(workspaceApis, 'onDidChangeConfiguration').returns(new Disposable(() => {}));
     });
 
