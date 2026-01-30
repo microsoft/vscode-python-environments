@@ -149,6 +149,8 @@ export class TerminalEnvVarInjector implements Disposable {
                 traceVerbose(
                     `TerminalEnvVarInjector: Env file injection disabled for workspace: ${workspaceUri.fsPath}`,
                 );
+                // Clear any previously set variables when injection is disabled
+                envVarScope.clear();
                 return;
             }
 
@@ -165,14 +167,18 @@ export class TerminalEnvVarInjector implements Disposable {
                 traceVerbose(
                     `TerminalEnvVarInjector: No .env file found for workspace: ${workspaceUri.fsPath}, not injecting environment variables.`,
                 );
-                return; // No .env file to inject
+                // Clear any previously set variables when no .env file exists
+                envVarScope.clear();
+                return;
             }
 
+            // Clear all previously set variables before re-injecting.
+            // This ensures that when variables are commented out or removed from .env,
+            // they are properly removed from the terminal environment.
+            envVarScope.clear();
+
             for (const [key, value] of Object.entries(envVars)) {
-                if (value === undefined) {
-                    // Remove the environment variable if the value is undefined
-                    envVarScope.delete(key);
-                } else {
+                if (value !== undefined) {
                     envVarScope.replace(key, value);
                 }
             }
