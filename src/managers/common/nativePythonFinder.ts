@@ -455,7 +455,7 @@ export async function getAllExtraSearchPaths(): Promise<string[]> {
  */
 function getGlobalSearchPaths(): string[] {
     try {
-        const envConfig = getConfiguration('python-env');
+        const envConfig = getConfiguration('python-envs');
         const inspection = envConfig.inspect<string[]>('globalSearchPaths');
 
         const globalPaths = inspection?.globalValue || [];
@@ -471,12 +471,12 @@ function getGlobalSearchPaths(): string[] {
  */
 function getWorkspaceSearchPaths(): string[] {
     try {
-        const envConfig = getConfiguration('python-env');
+        const envConfig = getConfiguration('python-envs');
         const inspection = envConfig.inspect<string[]>('workspaceSearchPaths');
 
         if (inspection?.globalValue) {
             traceError(
-                'Error: python-env.workspaceSearchPaths is set at the user/global level, but this setting can only be set at the workspace or workspace folder level.',
+                'Error: python-envs.workspaceSearchPaths is set at the user/global level, but this setting can only be set at the workspace or workspace folder level.',
             );
         }
 
