@@ -55,7 +55,7 @@ suite('TerminalEnvVarInjector Basic Tests', () => {
                     ({
                         dispose: () => {},
                         // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                    }) as any,
+                    } as any),
             );
     });
 
