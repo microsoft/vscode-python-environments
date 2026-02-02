@@ -1,12 +1,13 @@
 import * as assert from 'assert';
-import * as typeMoq from 'typemoq';
 import * as sinon from 'sinon';
-import { EnvironmentManagers, InternalEnvironmentManager, PythonProjectManager } from '../../internal.api';
-import * as projectApi from '../../common/pickers/projects';
-import * as managerApi from '../../common/pickers/managers';
-import { PythonEnvironment, PythonProject } from '../../api';
-import { createAnyEnvironmentCommand } from '../../features/envCommands';
+import * as typeMoq from 'typemoq';
 import { Uri } from 'vscode';
+import { PythonEnvironment, PythonProject } from '../../api';
+import * as managerApi from '../../common/pickers/managers';
+import * as projectApi from '../../common/pickers/projects';
+import { createAnyEnvironmentCommand } from '../../features/envCommands';
+import { EnvironmentManagers, InternalEnvironmentManager, PythonProjectManager } from '../../internal.api';
+import { setupNonThenable } from '../mocks/helper';
 
 suite('Create Any Environment Command Tests', () => {
     let em: typeMoq.IMock<EnvironmentManagers>;
@@ -37,8 +38,7 @@ suite('Create Any Environment Command Tests', () => {
 
         env = typeMoq.Mock.ofType<PythonEnvironment>();
         env.setup((e) => e.envId).returns(() => ({ id: 'env1', managerId: 'test' }));
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        env.setup((e: any) => e.then).returns(() => undefined);
+        setupNonThenable(env);
 
         em = typeMoq.Mock.ofType<EnvironmentManagers>();
         em.setup((e) => e.managers).returns(() => [manager.object]);
@@ -55,7 +55,7 @@ suite('Create Any Environment Command Tests', () => {
     });
 
     test('Create global venv (no-workspace): no-select', async () => {
-        pm.setup((p) => p.getProjects()).returns(() => []);
+        pm.setup((p) => p.getProjects(typeMoq.It.isAny())).returns(() => []);
         manager
             .setup((m) => m.create('global', typeMoq.It.isAny()))
             .returns(() => Promise.resolve(env.object))
@@ -73,7 +73,7 @@ suite('Create Any Environment Command Tests', () => {
     });
 
     test('Create global venv (no-workspace): select', async () => {
-        pm.setup((p) => p.getProjects()).returns(() => []);
+        pm.setup((p) => p.getProjects(typeMoq.It.isAny())).returns(() => []);
         manager
             .setup((m) => m.create('global', typeMoq.It.isAny()))
             .returns(() => Promise.resolve(env.object))
@@ -91,7 +91,7 @@ suite('Create Any Environment Command Tests', () => {
     });
 
     test('Create workspace venv: no-select', async () => {
-        pm.setup((p) => p.getProjects()).returns(() => [project]);
+        pm.setup((p) => p.getProjects(typeMoq.It.isAny())).returns(() => [project]);
         manager
             .setup((m) => m.create([project.uri], typeMoq.It.isAny()))
             .returns(() => Promise.resolve(env.object))
@@ -111,7 +111,7 @@ suite('Create Any Environment Command Tests', () => {
     });
 
     test('Create workspace venv: select', async () => {
-        pm.setup((p) => p.getProjects()).returns(() => [project]);
+        pm.setup((p) => p.getProjects(typeMoq.It.isAny())).returns(() => [project]);
         manager
             .setup((m) => m.create([project.uri], typeMoq.It.isAny()))
             .returns(() => Promise.resolve(env.object))
@@ -132,7 +132,7 @@ suite('Create Any Environment Command Tests', () => {
     });
 
     test('Create multi-workspace venv: select all', async () => {
-        pm.setup((p) => p.getProjects()).returns(() => [project, project2, project3]);
+        pm.setup((p) => p.getProjects(typeMoq.It.isAny())).returns(() => [project, project2, project3]);
         manager
             .setup((m) => m.create([project.uri, project2.uri, project3.uri], typeMoq.It.isAny()))
             .returns(() => Promise.resolve(env.object))
@@ -155,7 +155,7 @@ suite('Create Any Environment Command Tests', () => {
     });
 
     test('Create multi-workspace venv: select some', async () => {
-        pm.setup((p) => p.getProjects()).returns(() => [project, project2, project3]);
+        pm.setup((p) => p.getProjects(typeMoq.It.isAny())).returns(() => [project, project2, project3]);
         manager
             .setup((m) => m.create([project.uri, project3.uri], typeMoq.It.isAny()))
             .returns(() => Promise.resolve(env.object))

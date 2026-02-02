@@ -1,3 +1,4 @@
+import * as fs from 'fs-extra';
 import * as path from 'path';
 import { Disposable, EventEmitter, l10n, LogOutputChannel, MarkdownString, ProgressLocation, Uri } from 'vscode';
 import {
@@ -19,9 +20,11 @@ import {
     SetEnvironmentScope,
 } from '../../api';
 import { CondaStrings } from '../../common/localize';
+import { traceError } from '../../common/logging';
 import { createDeferred, Deferred } from '../../common/utils/deferred';
 import { showErrorMessage, withProgress } from '../../common/window.apis';
 import { NativePythonFinder } from '../common/nativePythonFinder';
+import { CondaSourcingStatus } from './condaSourcingUtils';
 import {
     checkForNoPythonCondaEnvironment,
     clearCondaCache,
@@ -50,6 +53,8 @@ export class CondaEnvManager implements EnvironmentManager, Disposable {
     private readonly _onDidChangeEnvironments = new EventEmitter<DidChangeEnvironmentsEventArgs>();
     public readonly onDidChangeEnvironments = this._onDidChangeEnvironments.event;
 
+    public sourcingInformation: CondaSourcingStatus | undefined;
+
     constructor(
         private readonly nativeFinder: NativePythonFinder,
         private readonly api: PythonEnvironmentApi,
@@ -58,14 +63,13 @@ export class CondaEnvManager implements EnvironmentManager, Disposable {
         this.name = 'conda';
         this.displayName = 'Conda';
         this.preferredPackageManagerId = 'ms-python.python:conda';
-        this.description = undefined;
         this.tooltip = new MarkdownString(CondaStrings.condaManager, true);
     }
 
     name: string;
     displayName: string;
-    preferredPackageManagerId: string = 'ms-python.python:conda';
-    description: string | undefined;
+    preferredPackageManagerId: string;
+    description?: string;
     tooltip: string | MarkdownString;
     iconPath?: IconPath;
 
@@ -168,11 +172,28 @@ export class CondaEnvManager implements EnvironmentManager, Disposable {
             }
             if (result) {
                 this.addEnvironment(result);
+
+                // If the environment is inside the workspace, add a .gitignore file
+                try {
+                    const projectUris = this.api.getPythonProjects().map((p) => p.uri.fsPath);
+                    const envPath = result.environmentPath?.fsPath;
+                    if (envPath && projectUris.some((root) => envPath.startsWith(root))) {
+                        const gitignorePath = path.join(envPath, '.gitignore');
+                        await fs.writeFile(gitignorePath, '*\n', { flag: 'w' });
+                    }
+                } catch (err) {
+                    traceError(
+                        `Failed to create .gitignore in conda env: ${err instanceof Error ? err.message : String(err)}`,
+                    );
+                }
             }
 
             return result;
         } catch (error) {
             this.log.error('Failed to create conda environment:', error);
+            showErrorMessage(
+                l10n.t('Failed to create conda environment: {0}', error instanceof Error ? error.message : String(error)),
+            );
             return undefined;
         }
     }

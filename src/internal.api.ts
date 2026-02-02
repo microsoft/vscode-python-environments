@@ -1,35 +1,35 @@
 import { CancellationError, Disposable, Event, LogOutputChannel, MarkdownString, Uri } from 'vscode';
 import {
-    PythonEnvironment,
-    EnvironmentManager,
-    PackageManager,
-    Package,
-    IconPath,
+    CreateEnvironmentOptions,
+    CreateEnvironmentScope,
     DidChangeEnvironmentEventArgs,
     DidChangeEnvironmentsEventArgs,
     DidChangePackagesEventArgs,
-    PythonProject,
-    RefreshEnvironmentsScope,
-    GetEnvironmentsScope,
-    CreateEnvironmentScope,
-    SetEnvironmentScope,
+    EnvironmentGroupInfo,
+    EnvironmentManager,
     GetEnvironmentScope,
-    PythonEnvironmentId,
-    PythonEnvironmentExecutionInfo,
-    PythonEnvironmentInfo,
+    GetEnvironmentsScope,
+    IconPath,
+    Package,
     PackageChangeKind,
     PackageId,
     PackageInfo,
-    PythonProjectCreator,
-    ResolveEnvironmentContext,
     PackageManagementOptions,
-    EnvironmentGroupInfo,
+    PackageManager,
+    PythonEnvironment,
+    PythonEnvironmentExecutionInfo,
+    PythonEnvironmentId,
+    PythonEnvironmentInfo,
+    PythonProject,
+    PythonProjectCreator,
     QuickCreateConfig,
-    CreateEnvironmentOptions,
+    RefreshEnvironmentsScope,
+    ResolveEnvironmentContext,
+    SetEnvironmentScope,
 } from './api';
 import { CreateEnvironmentNotSupported, RemoveEnvironmentNotSupported } from './common/errors/NotSupportedError';
-import { sendTelemetryEvent } from './common/telemetry/sender';
 import { EventNames } from './common/telemetry/constants';
+import { sendTelemetryEvent } from './common/telemetry/sender';
 
 export type EnvironmentManagerScope = undefined | string | Uri | PythonEnvironment;
 export type PackageManagerScope = undefined | string | Uri | PythonEnvironment | Package;
@@ -111,6 +111,7 @@ export interface EnvironmentManagers extends Disposable {
 
     setEnvironment(scope: SetEnvironmentScope, environment?: PythonEnvironment): Promise<void>;
     setEnvironments(scope: Uri[] | string, environment?: PythonEnvironment): Promise<void>;
+    setEnvironmentsIfUnset(scope: Uri[] | string, environment?: PythonEnvironment): Promise<void>;
     getEnvironment(scope: GetEnvironmentScope): Promise<PythonEnvironment | undefined>;
 
     getProjectEnvManagers(uris: Uri[]): InternalEnvironmentManager[];
@@ -295,6 +296,7 @@ export interface PythonProjectSettings {
     path: string;
     envManager: string;
     packageManager: string;
+    workspace?: string;
 }
 
 export class PythonEnvironmentImpl implements PythonEnvironment {

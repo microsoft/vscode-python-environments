@@ -1,20 +1,20 @@
 import * as fs from 'fs-extra';
 import * as path from 'path';
+import { PassThrough } from 'stream';
+import { Disposable, ExtensionContext, LogOutputChannel, Uri } from 'vscode';
 import * as rpc from 'vscode-jsonrpc/node';
-import * as ch from 'child_process';
+import { PythonProjectApi } from '../../api';
+import { spawnProcess } from '../../common/childProcess.apis';
 import { ENVS_EXTENSION_ID, PYTHON_EXTENSION_ID } from '../../common/constants';
 import { getExtension } from '../../common/extension.apis';
-import { noop } from './utils';
-import { Disposable, ExtensionContext, LogOutputChannel, Uri } from 'vscode';
-import { PassThrough } from 'stream';
-import { PythonProjectApi } from '../../api';
-import { getConfiguration } from '../../common/workspace.apis';
-import { createRunningWorkerPool, WorkerPool } from '../../common/utils/workerPool';
-import { traceVerbose } from '../../common/logging';
+import { traceError, traceLog, traceVerbose, traceWarn } from '../../common/logging';
+import { untildify, untildifyArray } from '../../common/utils/pathUtils';
 import { isWindows } from '../../common/utils/platformUtils';
-import { getUserHomeDir, untildify } from '../../common/utils/pathUtils';
+import { createRunningWorkerPool, WorkerPool } from '../../common/utils/workerPool';
+import { getConfiguration, getWorkspaceFolders } from '../../common/workspace.apis';
+import { noop } from './utils';
 
-async function getNativePythonToolsPath(): Promise<string> {
+export async function getNativePythonToolsPath(): Promise<string> {
     const envsExt = getExtension(ENVS_EXTENSION_ID);
     if (envsExt) {
         const petPath = path.join(envsExt.extensionPath, 'python-env-tools', 'bin', isWindows() ? 'pet.exe' : 'pet');
@@ -68,7 +68,9 @@ export enum NativePythonEnvironmentKind {
     macCommandLineTools = 'MacCommandLineTools',
     linuxGlobal = 'LinuxGlobal',
     macXCode = 'MacXCode',
+    uvWorkspace = 'UvWorkspace',
     venv = 'Venv',
+    venvUv = 'Uv',
     virtualEnv = 'VirtualEnv',
     virtualEnvWrapper = 'VirtualEnvWrapper',
     windowsStore = 'WindowsStore',
@@ -106,6 +108,7 @@ class NativePythonFinderImpl implements NativePythonFinder {
     private readonly connection: rpc.MessageConnection;
     private readonly pool: WorkerPool<NativePythonEnvironmentKind | Uri[] | undefined, NativeInfo[]>;
     private cache: Map<string, NativeInfo[]> = new Map();
+    private readonly startDisposables: Disposable[] = [];
 
     constructor(
         private readonly outputChannel: LogOutputChannel,
@@ -160,6 +163,11 @@ class NativePythonFinderImpl implements NativePythonFinder {
             traceVerbose('Finder - from cache environments', key);
         }
         const result = await this.pool.addToQueue(options);
+        // Validate result from worker pool
+        if (!result || !Array.isArray(result)) {
+            this.outputChannel.warn(`[pet] Worker pool returned invalid result type: ${typeof result}`);
+            return [];
+        }
         this.cache.set(key, result);
         return result;
     }
@@ -167,7 +175,12 @@ class NativePythonFinderImpl implements NativePythonFinder {
     private async handleSoftRefresh(options?: NativePythonEnvironmentKind | Uri[]): Promise<NativeInfo[]> {
         const key = this.getKey(options);
         const cacheResult = this.cache.get(key);
-        if (!cacheResult) {
+        // Validate cache integrity - if cached value is not a valid array, do a hard refresh
+        if (!cacheResult || !Array.isArray(cacheResult)) {
+            if (cacheResult !== undefined) {
+                this.outputChannel.warn(`[pet] Cache contained invalid data type: ${typeof cacheResult}`);
+                this.cache.delete(key);
+            }
             return this.handleHardRefresh(options);
         }
 
@@ -180,84 +193,92 @@ class NativePythonFinderImpl implements NativePythonFinder {
     }
 
     public dispose() {
+        this.pool.stop();
+        this.startDisposables.forEach((d) => d.dispose());
         this.connection.dispose();
     }
 
     private getRefreshOptions(options?: NativePythonEnvironmentKind | Uri[]): RefreshOptions | undefined {
+        // settings on where else to search
+        const venvFolders = getPythonSettingAndUntildify<string[]>('venvFolders') ?? [];
         if (options) {
             if (typeof options === 'string') {
+                // kind
                 return { searchKind: options };
             }
             if (Array.isArray(options)) {
-                return { searchPaths: options.map((item) => item.fsPath) };
+                const uriSearchPaths = options.map((item) => item.fsPath);
+                uriSearchPaths.push(...venvFolders);
+                return { searchPaths: uriSearchPaths };
             }
         }
+        // return undefined to use configured defaults (for nativeFinder refresh)
         return undefined;
     }
 
     private start(): rpc.MessageConnection {
-        this.outputChannel.info(`Starting Python Locator ${this.toolPath} server`);
+        this.outputChannel.info(`[pet] Starting Python Locator ${this.toolPath} server`);
 
         // jsonrpc package cannot handle messages coming through too quickly.
         // Lets handle the messages and close the stream only when
         // we have got the exit event.
         const readable = new PassThrough();
         const writable = new PassThrough();
-        const disposables: Disposable[] = [];
         try {
-            const proc = ch.spawn(this.toolPath, ['server'], { env: process.env });
+            const proc = spawnProcess(this.toolPath, ['server'], { env: process.env, stdio: 'pipe' });
             proc.stdout.pipe(readable, { end: false });
-            proc.stderr.on('data', (data) => this.outputChannel.error(data.toString()));
+            proc.stderr.on('data', (data) => this.outputChannel.error(`[pet] ${data.toString()}`));
             writable.pipe(proc.stdin, { end: false });
 
-            disposables.push({
+            this.startDisposables.push({
                 dispose: () => {
                     try {
                         if (proc.exitCode === null) {
                             proc.kill();
                         }
                     } catch (ex) {
-                        this.outputChannel.error('Error disposing finder', ex);
+                        this.outputChannel.error('[pet] Error disposing finder', ex);
                     }
                 },
             });
         } catch (ex) {
-            this.outputChannel.error(`Error starting Python Finder ${this.toolPath} server`, ex);
+            this.outputChannel.error(`[pet] Error starting Python Finder ${this.toolPath} server`, ex);
         }
         const connection = rpc.createMessageConnection(
             new rpc.StreamMessageReader(readable),
             new rpc.StreamMessageWriter(writable),
         );
-        disposables.push(
+        this.startDisposables.push(
             connection,
             new Disposable(() => {
                 readable.end();
                 writable.end();
             }),
             connection.onError((ex) => {
-                this.outputChannel.error('Connection Error:', ex);
+                this.outputChannel.error('[pet] Connection Error:', ex);
             }),
             connection.onNotification('log', (data: NativeLog) => {
+                const msg = `[pet] ${data.message}`;
                 switch (data.level) {
                     case 'info':
-                        this.outputChannel.info(data.message);
+                        this.outputChannel.info(msg);
                         break;
                     case 'warning':
-                        this.outputChannel.warn(data.message);
+                        this.outputChannel.warn(msg);
                         break;
                     case 'error':
-                        this.outputChannel.error(data.message);
+                        this.outputChannel.error(msg);
                         break;
                     case 'debug':
-                        this.outputChannel.debug(data.message);
+                        this.outputChannel.debug(msg);
                         break;
                     default:
-                        this.outputChannel.trace(data.message);
+                        this.outputChannel.trace(msg);
                 }
             }),
-            connection.onNotification('telemetry', (data) => this.outputChannel.info(`Telemetry: `, data)),
+            connection.onNotification('telemetry', (data) => this.outputChannel.info('[pet] Telemetry: ', data)),
             connection.onClose(() => {
-                disposables.forEach((d) => d.dispose());
+                this.startDisposables.forEach((d) => d.dispose());
             }),
         );
 
@@ -282,7 +303,9 @@ class NativePythonFinderImpl implements NativePythonFinder {
                                     executable: data.executable,
                                 })
                                 .then((environment: NativeEnvInfo) => {
-                                    this.outputChannel.info(`Resolved ${environment.executable}`);
+                                    this.outputChannel.info(
+                                        `Resolved environment during PET refresh: ${environment.executable}`,
+                                    );
                                     nativeInfo.push(environment);
                                 })
                                 .catch((ex) =>
@@ -301,7 +324,7 @@ class NativePythonFinderImpl implements NativePythonFinder {
             await this.connection.sendRequest<{ duration: number }>('refresh', refreshOptions);
             await Promise.all(unresolved);
         } catch (ex) {
-            this.outputChannel.error('Error refreshing', ex);
+            this.outputChannel.error('[pet] Error refreshing', ex);
             throw ex;
         } finally {
             disposables.forEach((d) => d.dispose());
@@ -317,23 +340,27 @@ class NativePythonFinderImpl implements NativePythonFinder {
      * Must be invoked when ever there are changes to any data related to the configuration details.
      */
     private async configure() {
+        // Get all extra search paths including legacy settings and new searchPaths
+        const extraSearchPaths = await getAllExtraSearchPaths();
+
         const options: ConfigurationOptions = {
             workspaceDirectories: this.api.getPythonProjects().map((item) => item.uri.fsPath),
-            // We do not want to mix this with `search_paths`
-            environmentDirectories: getCustomVirtualEnvDirs(),
+            environmentDirectories: extraSearchPaths,
             condaExecutable: getPythonSettingAndUntildify<string>('condaPath'),
             poetryExecutable: getPythonSettingAndUntildify<string>('poetryPath'),
             cacheDirectory: this.cacheDirectory?.fsPath,
         };
         // No need to send a configuration request, is there are no changes.
         if (JSON.stringify(options) === JSON.stringify(this.lastConfiguration || {})) {
+            this.outputChannel.debug('[pet] configure: No changes detected, skipping configuration update.');
             return;
         }
+        this.outputChannel.info('[pet] configure: Sending configuration update:', JSON.stringify(options));
         try {
             this.lastConfiguration = options;
             await this.connection.sendRequest('configure', options);
         } catch (ex) {
-            this.outputChannel.error('Configuration error', ex);
+            this.outputChannel.error('[pet] configure: Configuration error', ex);
         }
     }
 }
@@ -346,19 +373,18 @@ type ConfigurationOptions = {
     cacheDirectory?: string;
 };
 /**
- * Gets all custom virtual environment locations to look for environments.
+ * Gets all custom virtual environment locations to look for environments from the legacy python settings (venvPath, venvFolders).
  */
-function getCustomVirtualEnvDirs(): string[] {
+function getCustomVirtualEnvDirsLegacy(): string[] {
     const venvDirs: string[] = [];
     const venvPath = getPythonSettingAndUntildify<string>('venvPath');
     if (venvPath) {
         venvDirs.push(untildify(venvPath));
     }
     const venvFolders = getPythonSettingAndUntildify<string[]>('venvFolders') ?? [];
-    const homeDir = getUserHomeDir();
-    if (homeDir) {
-        venvFolders.map((item) => path.join(homeDir, item)).forEach((d) => venvDirs.push(d));
-    }
+    venvFolders.forEach((item) => {
+        venvDirs.push(item);
+    });
     return Array.from(new Set(venvDirs));
 }
 
@@ -368,6 +394,109 @@ function getPythonSettingAndUntildify<T>(name: string, scope?: Uri): T | undefin
         return value ? (untildify(value as string) as unknown as T) : undefined;
     }
     return value;
+}
+
+/**
+ * Gets all extra environment search paths from various configuration sources.
+ * Combines legacy python settings (with migration), globalSearchPaths, and workspaceSearchPaths.
+ * @returns Array of search directory paths
+ */
+export async function getAllExtraSearchPaths(): Promise<string[]> {
+    const searchDirectories: string[] = [];
+
+    // add legacy custom venv directories
+    const customVenvDirs = getCustomVirtualEnvDirsLegacy();
+    searchDirectories.push(...customVenvDirs);
+
+    // Get globalSearchPaths
+    const globalSearchPaths = getGlobalSearchPaths().filter((path) => path && path.trim() !== '');
+    searchDirectories.push(...globalSearchPaths);
+
+    // Get workspaceSearchPaths
+    const workspaceSearchPaths = getWorkspaceSearchPaths();
+
+    // Resolve relative paths against workspace folders
+    for (const searchPath of workspaceSearchPaths) {
+        if (!searchPath || searchPath.trim() === '') {
+            continue;
+        }
+
+        const trimmedPath = searchPath.trim();
+
+        if (path.isAbsolute(trimmedPath)) {
+            // Absolute path - use as is
+            searchDirectories.push(trimmedPath);
+        } else {
+            // Relative path - resolve against all workspace folders
+            const workspaceFolders = getWorkspaceFolders();
+            if (workspaceFolders) {
+                for (const workspaceFolder of workspaceFolders) {
+                    const resolvedPath = path.resolve(workspaceFolder.uri.fsPath, trimmedPath);
+                    searchDirectories.push(resolvedPath);
+                }
+            } else {
+                traceWarn('Warning: No workspace folders found for relative path:', trimmedPath);
+            }
+        }
+    }
+
+    // Remove duplicates and return
+    const uniquePaths = Array.from(new Set(searchDirectories));
+    traceLog(
+        'getAllExtraSearchPaths completed. Total unique search directories:',
+        uniquePaths.length,
+        'Paths:',
+        uniquePaths,
+    );
+    return uniquePaths;
+}
+
+/**
+ * Gets globalSearchPaths setting with proper validation.
+ * Only gets user-level (global) setting since this setting is application-scoped.
+ */
+function getGlobalSearchPaths(): string[] {
+    try {
+        const envConfig = getConfiguration('python-envs');
+        const inspection = envConfig.inspect<string[]>('globalSearchPaths');
+
+        const globalPaths = inspection?.globalValue || [];
+        return untildifyArray(globalPaths);
+    } catch (error) {
+        traceError('Error getting globalSearchPaths:', error);
+        return [];
+    }
+}
+
+/**
+ * Gets the most specific workspace-level setting available for workspaceSearchPaths.
+ */
+function getWorkspaceSearchPaths(): string[] {
+    try {
+        const envConfig = getConfiguration('python-envs');
+        const inspection = envConfig.inspect<string[]>('workspaceSearchPaths');
+
+        if (inspection?.globalValue) {
+            traceError(
+                'Error: python-envs.workspaceSearchPaths is set at the user/global level, but this setting can only be set at the workspace or workspace folder level.',
+            );
+        }
+
+        // For workspace settings, prefer workspaceFolder > workspace
+        if (inspection?.workspaceFolderValue) {
+            return inspection.workspaceFolderValue;
+        }
+
+        if (inspection?.workspaceValue) {
+            return inspection.workspaceValue;
+        }
+
+        // Default empty array (don't use global value for workspace settings)
+        return [];
+    } catch (error) {
+        traceError('Error getting workspaceSearchPaths:', error);
+        return [];
+    }
 }
 
 export function getCacheDirectory(context: ExtensionContext): Uri {

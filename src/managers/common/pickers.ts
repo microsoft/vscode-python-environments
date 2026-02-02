@@ -1,6 +1,6 @@
 import { QuickInputButtons, QuickPickItem, QuickPickItemButtonEvent, QuickPickItemKind, ThemeIcon, Uri } from 'vscode';
-import { Common, PackageManagement } from '../../common/localize';
 import { launchBrowser } from '../../common/env.apis';
+import { Common, PackageManagement } from '../../common/localize';
 import { showInputBoxWithButtons, showQuickPickWithButtons, showTextDocument } from '../../common/window.apis';
 import { Installable } from './types';
 
@@ -15,7 +15,7 @@ const OPEN_EDITOR_BUTTON = {
 };
 
 const EDIT_ARGUMENTS_BUTTON = {
-    iconPath: new ThemeIcon('pencil'),
+    iconPath: new ThemeIcon('add'),
     tooltip: PackageManagement.editArguments,
 };
 
@@ -169,11 +169,12 @@ export async function selectFromCommonPackagesToInstall(
     if (selected && Array.isArray(selected)) {
         if (selected.find((s) => s.label === PackageManagement.enterPackageNames)) {
             const filtered = selected.filter((s) => s.label !== PackageManagement.enterPackageNames);
-            const filler = filtered.map((s) => s.id).join(' ');
             try {
-                const selections = await enterPackageManually(filler);
+                const selections = await enterPackageManually();
                 if (selections) {
-                    return selectionsToResult(selections, installed);
+                    const selectedResult: PackagesPickerResult = selectionsToResult(selections, installed);
+                    // only return the install part, since this button is only for adding to existing selection
+                    return { install: selectedResult.install, uninstall: [] };
                 }
                 return undefined;
             } catch (ex) {

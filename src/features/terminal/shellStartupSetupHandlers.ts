@@ -11,9 +11,10 @@ export async function handleSettingUpShellProfile(
     callback: (provider: ShellStartupScriptProvider, result: boolean) => void,
 ): Promise<void> {
     const shells = providers.map((p) => p.shellType).join(', ');
+    // Only show prompt when shell integration is not available, or disabled.
     const response = await showInformationMessage(
         l10n.t(
-            'To use "{0}" activation, the shell profiles need to be set up. Do you want to set it up now?',
+            'To enable "{0}" activation, your shell profile(s) may need to be updated to include the necessary startup scripts. Would you like to proceed with these changes?',
             ACT_TYPE_SHELL,
         ),
         { modal: true, detail: l10n.t('Shells: {0}', shells) },
@@ -54,6 +55,10 @@ export async function handleSettingUpShellProfile(
             });
             providers.forEach((provider) => callback(provider, false));
         }
+    } else {
+        traceInfo(`User declined shell profile setup for ${shells}, switching to command activation`);
+        await Promise.all(providers.map((provider) => provider.teardownScripts()));
+        await setAutoActivationType(ACT_TYPE_COMMAND);
     }
 }
 

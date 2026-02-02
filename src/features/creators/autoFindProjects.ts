@@ -54,10 +54,12 @@ export class AutoFindProjects implements PythonProjectCreator {
     public readonly displayName = ProjectCreatorString.autoFindProjects;
     public readonly description = ProjectCreatorString.autoFindProjectsDescription;
 
+    supportsQuickCreate = true;
+
     constructor(private readonly pm: PythonProjectManager) {}
 
     async create(_options?: PythonProjectCreatorOptions): Promise<PythonProject | PythonProject[] | undefined> {
-        const files = await findFiles('**/{pyproject.toml,setup.py}');
+        const files = await findFiles('**/{pyproject.toml,setup.py}', '**/.venv/**');
         if (!files || files.length === 0) {
             setImmediate(() => {
                 showErrorMessage('No projects found');
@@ -81,9 +83,17 @@ export class AutoFindProjects implements PythonProjectCreator {
 
         if (filtered.length === 0) {
             // No new projects found that are not already in the project manager
-            traceInfo('All discovered projects are already registered in the project manager');
+            traceInfo(
+                `All selected resources are already registered in the project manager: ${files
+                    .map((uri) => uri.fsPath)
+                    .join(', ')}`,
+            );
             setImmediate(() => {
-                showWarningMessage('No new projects found');
+                if (files.length === 1) {
+                    showWarningMessage(`${files[0].fsPath} already exists as project.`);
+                } else {
+                    showWarningMessage('Selected resources already exist as projects.');
+                }
             });
             return;
         }

@@ -1,5 +1,15 @@
+import * as fs from 'fs/promises';
 import * as path from 'path';
-import { EventEmitter, l10n, LogOutputChannel, MarkdownString, ProgressLocation, ThemeIcon, Uri } from 'vscode';
+import {
+    commands,
+    EventEmitter,
+    l10n,
+    LogOutputChannel,
+    MarkdownString,
+    ProgressLocation,
+    ThemeIcon,
+    Uri,
+} from 'vscode';
 import {
     CreateEnvironmentOptions,
     CreateEnvironmentScope,
@@ -20,12 +30,15 @@ import {
 } from '../../api';
 import { PYTHON_EXTENSION_ID } from '../../common/constants';
 import { VenvManagerStrings } from '../../common/localize';
+import { traceError, traceWarn } from '../../common/logging';
 import { createDeferred, Deferred } from '../../common/utils/deferred';
 import { showErrorMessage, withProgress } from '../../common/window.apis';
+import { findParentIfFile } from '../../features/envCommands';
 import { NativePythonFinder } from '../common/nativePythonFinder';
 import { getLatest, shortVersion, sortEnvironments } from '../common/utils';
 import {
     clearVenvCache,
+    CreateEnvironmentResult,
     createPythonVenv,
     findVirtualEnvironments,
     getDefaultGlobalVenvLocation,
@@ -90,11 +103,13 @@ export class VenvManager implements EnvironmentManager {
         }
     }
 
+    /**
+     * Returns configuration for quick create in the workspace root, undefined if no suitable Python 3 version is found.
+     */
     quickCreateConfig(): QuickCreateConfig | undefined {
         if (!this.globalEnv || !this.globalEnv.version.startsWith('3.')) {
             return undefined;
         }
-
         return {
             description: l10n.t('Create a virtual environment in workspace root'),
             detail: l10n.t(
@@ -125,12 +140,28 @@ export class VenvManager implements EnvironmentManager {
                 return;
             }
 
-            const venvRoot: Uri = uri;
+            const venvRoot: Uri = Uri.file(await findParentIfFile(uri.fsPath));
+
             const globals = await this.baseManager.getEnvironments('global');
-            let environment: PythonEnvironment | undefined = undefined;
+            let result: CreateEnvironmentResult | undefined = undefined;
             if (options?.quickCreate) {
+                // error on missing information
+                if (!this.globalEnv) {
+                    this.log.error('No base python found');
+                    showErrorMessage(VenvManagerStrings.venvErrorNoBasePython);
+                    throw new Error('No base python found');
+                }
+                if (!this.globalEnv.version.startsWith('3.')) {
+                    this.log.error('Did not find any base python 3.*');
+                    globals.forEach((e, i) => {
+                        this.log.error(`${i}: ${e.version} : ${e.environmentPath.fsPath}`);
+                    });
+                    showErrorMessage(VenvManagerStrings.venvErrorNoPython3);
+                    throw new Error('Did not find any base python 3.*');
+                }
                 if (this.globalEnv && this.globalEnv.version.startsWith('3.')) {
-                    environment = await quickCreateVenv(
+                    // quick create given correct information
+                    result = await quickCreateVenv(
                         this.nativeFinder,
                         this.api,
                         this.log,
@@ -139,39 +170,87 @@ export class VenvManager implements EnvironmentManager {
                         venvRoot,
                         options?.additionalPackages,
                     );
-                } else if (!this.globalEnv) {
-                    this.log.error('No base python found');
-                    showErrorMessage(VenvManagerStrings.venvErrorNoBasePython);
-                    throw new Error('No base python found');
-                } else if (!this.globalEnv.version.startsWith('3.')) {
-                    this.log.error('Did not find any base python 3.*');
-                    globals.forEach((e, i) => {
-                        this.log.error(`${i}: ${e.version} : ${e.environmentPath.fsPath}`);
-                    });
-                    showErrorMessage(VenvManagerStrings.venvErrorNoPython3);
-                    throw new Error('Did not find any base python 3.*');
                 }
             } else {
-                environment = await createPythonVenv(this.nativeFinder, this.api, this.log, this, globals, venvRoot, {
-                    // If quickCreate is not set that means the user triggered this method from
-                    // environment manager View, by selecting the venv manager.
+                // If quickCreate is not set that means the user triggered this method from
+                // environment manager View, by selecting the venv manager.
+                result = await createPythonVenv(this.nativeFinder, this.api, this.log, this, globals, venvRoot, {
                     showQuickAndCustomOptions: options?.quickCreate === undefined,
                 });
             }
-            if (environment) {
+
+            if (result?.environment) {
+                const environment = result.environment;
+
                 this.addEnvironment(environment, true);
+
+                // Add .gitignore to the .venv folder
+                try {
+                    // determine if env path is python binary or environment folder
+                    let envPath = environment.environmentPath.fsPath;
+                    try {
+                        const stat = await fs.stat(envPath);
+                        if (!stat.isDirectory()) {
+                            // If the env path is a file (likely the python binary), use parent-parent as the env path
+                            // following format of .venv/bin/python or .venv\Scripts\python.exe
+                            envPath = Uri.file(path.dirname(path.dirname(envPath))).fsPath;
+                        }
+                    } catch (err) {
+                        // If stat fails, fallback to original envPath
+                        traceWarn(
+                            `Failed to stat environment path: ${envPath}. Error: ${
+                                err instanceof Error ? err.message : String(err)
+                            }, continuing to attempt to create .gitignore.`,
+                        );
+                    }
+                    const gitignorePath = path.join(envPath, '.gitignore');
+                    await fs.writeFile(gitignorePath, '*\n', { flag: 'w' });
+                } catch (err) {
+                    traceError(
+                        `Failed to create .gitignore in venv: ${
+                            err instanceof Error ? err.message : String(err)
+                        }, continuing.`,
+                    );
+                }
+
+                // Open the parent folder of the venv in the current window immediately after creation
+                const envParent = environment.sysPrefix;
+                try {
+                    await commands.executeCommand('revealInExplorer', Uri.file(envParent));
+                } catch (error) {
+                    showErrorMessage(
+                        l10n.t(
+                            'Failed to reveal venv parent folder in VS Code Explorer: but venv was still created in {0}',
+                            envParent,
+                        ),
+                    );
+                    traceError(
+                        `Failed to reveal venv parent folder in VS Code Explorer: ${
+                            error instanceof Error ? error.message : String(error)
+                        }`,
+                    );
+                }
+            } else if (result?.envCreationErr) {
+                // Show error message to user when environment creation failed
+                showErrorMessage(l10n.t('Failed to create virtual environment: {0}', result.envCreationErr));
             }
-            return environment;
+            return result?.environment ?? undefined;
         } finally {
             this.skipWatcherRefresh = false;
         }
     }
 
+    /**
+     * Removes the specified Python environment, updates internal collections, and fires change events as needed.
+     */
     async remove(environment: PythonEnvironment): Promise<void> {
         try {
             this.skipWatcherRefresh = true;
 
-            await removeVenv(environment, this.log);
+            const isRemoved = await removeVenv(environment, this.log);
+            if (!isRemoved) {
+                return;
+            }
             this.updateCollection(environment);
             this._onDidChangeEnvironments.fire([{ environment, kind: EnvironmentChangeKind.remove }]);
 
@@ -241,7 +320,7 @@ export class VenvManager implements EnvironmentManager {
                     this.api,
                     this.log,
                     this,
-                    scope ? [scope] : this.api.getPythonProjects().map((p) => p.uri),
+                    scope ? [scope] : undefined,
                 );
                 await this.loadEnvMap();
 
@@ -417,6 +496,9 @@ export class VenvManager implements EnvironmentManager {
         await this.loadGlobalEnv(globals);
     }
 
+    /**
+     * Loads and sets the global Python environment from the provided list, resolving if necessary. O(g) where g = globals.length
+     */
     private async loadGlobalEnv(globals: PythonEnvironment[]) {
         this.globalEnv = undefined;
 
@@ -449,6 +531,9 @@ export class VenvManager implements EnvironmentManager {
         }
     }
 
+    /**
+     * Loads and maps Python environments to their corresponding project paths in the workspace. about  O(p × e) where p = projects.len and e = environments.len
+     */
     private async loadEnvMap() {
         const globals = await this.baseManager.getEnvironments('global');
         await this.loadGlobalEnv(globals);
@@ -456,23 +541,18 @@ export class VenvManager implements EnvironmentManager {
         this.fsPathToEnv.clear();
 
         const sorted = sortEnvironments(this.collection);
-        const paths = this.api.getPythonProjects().map((p) => path.normalize(p.uri.fsPath));
+        const projectPaths = this.api.getPythonProjects().map((p) => path.normalize(p.uri.fsPath));
         const events: (() => void)[] = [];
-        for (const p of paths) {
+        // Iterates through all workspace projects
+        for (const p of projectPaths) {
             const env = await getVenvForWorkspace(p);
-
             if (env) {
-                const found = this.findEnvironmentByPath(env, sorted) ?? this.findEnvironmentByPath(env, globals);
-                const previous = this.fsPathToEnv.get(p);
+                // from env path find PythonEnvironment object in the collection.
+                let foundEnv = this.findEnvironmentByPath(env, sorted) ?? this.findEnvironmentByPath(env, globals);
+                const previousEnv = this.fsPathToEnv.get(p);
                 const pw = this.api.getPythonProject(Uri.file(p));
-                if (found) {
-                    this.fsPathToEnv.set(p, found);
-                    if (pw && previous?.envId.id !== found.envId.id) {
-                        events.push(() =>
-                            this._onDidChangeEnvironment.fire({ uri: pw.uri, old: undefined, new: found }),
-                        );
-                    }
-                } else {
+                if (!foundEnv) {
+                    // attempt to resolve
                     const resolved = await resolveVenvPythonEnvironmentPath(
                         env,
                         this.nativeFinder,
@@ -481,32 +561,29 @@ export class VenvManager implements EnvironmentManager {
                         this.baseManager,
                     );
                     if (resolved) {
-                        // If resolved add it to the collection
-                        this.fsPathToEnv.set(p, resolved);
+                        // If resolved; add it to the venvManager collection
                         this.addEnvironment(resolved, false);
-                        if (pw && previous?.envId.id !== resolved.envId.id) {
-                            events.push(() =>
-                                this._onDidChangeEnvironment.fire({ uri: pw.uri, old: undefined, new: resolved }),
-                            );
-                        }
+                        foundEnv = resolved;
                     } else {
                         this.log.error(`Failed to resolve python environment: ${env}`);
+                        return;
                     }
                 }
+                // Given found env, add it to the map and fire the event if needed.
+                this.fsPathToEnv.set(p, foundEnv);
+                if (pw && previousEnv?.envId.id !== foundEnv.envId.id) {
+                    events.push(() =>
+                        this._onDidChangeEnvironment.fire({ uri: pw.uri, old: undefined, new: foundEnv }),
+                    );
+                }
             } else {
-                // There is NO selected venv, then try and choose the venv that is in the workspace.
-                if (sorted.length === 1) {
-                    this.fsPathToEnv.set(p, sorted[0]);
-                } else {
-                    // These are sorted by version and by path length. The assumption is that the user would want to pick
-                    // latest version and the one that is closest to the workspace.
-                    const found = sorted.find((e) => {
-                        const t = this.api.getPythonProject(e.environmentPath)?.uri.fsPath;
-                        return t && path.normalize(t) === p;
-                    });
-                    if (found) {
-                        this.fsPathToEnv.set(p, found);
-                    }
+                // Search through all known environments (e) and check if any are associated with the current project path. If so, add that environment and path in the map.
+                const found = sorted.find((e) => {
+                    const t = this.api.getPythonProject(e.environmentPath)?.uri.fsPath;
+                    return t && path.normalize(t) === p;
+                });
+                if (found) {
+                    this.fsPathToEnv.set(p, found);
                 }
             }
         }
@@ -514,6 +591,9 @@ export class VenvManager implements EnvironmentManager {
         events.forEach((e) => e());
     }
 
+    /**
+     * Finds a PythonEnvironment in the given collection (or all environments) that matches the provided file system path. O(e) where e = environments.len
+     */
     private findEnvironmentByPath(fsPath: string, collection?: PythonEnvironment[]): PythonEnvironment | undefined {
         const normalized = path.normalize(fsPath);
         const envs = collection ?? this.collection;
@@ -523,6 +603,10 @@ export class VenvManager implements EnvironmentManager {
         });
     }
 
+    /**
+     * Returns all Python projects associated with the given environment.
+     * O(p), where p is project.len
+     */
     public getProjectsByEnvironment(environment: PythonEnvironment): PythonProject[] {
         const projects: PythonProject[] = [];
         this.fsPathToEnv.forEach((env, fsPath) => {

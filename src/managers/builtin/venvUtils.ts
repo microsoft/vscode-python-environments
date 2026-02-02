@@ -1,47 +1,61 @@
-import { l10n, LogOutputChannel, ProgressLocation, QuickPickItem, QuickPickItemKind, ThemeIcon, Uri } from 'vscode';
-import {
-    EnvironmentManager,
-    PythonCommandRunConfiguration,
-    PythonEnvironment,
-    PythonEnvironmentApi,
-    PythonEnvironmentInfo,
-} from '../../api';
-import * as path from 'path';
-import * as os from 'os';
 import * as fsapi from 'fs-extra';
-import { resolveSystemPythonEnvironmentPath } from './utils';
+import * as os from 'os';
+import * as path from 'path';
+import { l10n, LogOutputChannel, ProgressLocation, QuickPickItem, QuickPickItemKind, ThemeIcon, Uri } from 'vscode';
+import { EnvironmentManager, PythonEnvironment, PythonEnvironmentApi, PythonEnvironmentInfo } from '../../api';
 import { ENVS_EXTENSION_ID } from '../../common/constants';
+import { Common, VenvManagerStrings } from '../../common/localize';
+import { traceInfo } from '../../common/logging';
+import { getWorkspacePersistentState } from '../../common/persistentState';
+import { EventNames } from '../../common/telemetry/constants';
+import { sendTelemetryEvent } from '../../common/telemetry/sender';
+import { normalizePath } from '../../common/utils/pathUtils';
+import {
+    showErrorMessage,
+    showOpenDialog,
+    showQuickPick,
+    showWarningMessage,
+    withProgress,
+} from '../../common/window.apis';
+import { getConfiguration } from '../../common/workspace.apis';
 import {
     isNativeEnvInfo,
     NativeEnvInfo,
     NativePythonEnvironmentKind,
     NativePythonFinder,
 } from '../common/nativePythonFinder';
-import { getWorkspacePersistentState } from '../../common/persistentState';
-import { shortVersion, sortEnvironments } from '../common/utils';
-import { getConfiguration } from '../../common/workspace.apis';
-import { pickEnvironmentFrom } from '../../common/pickers/environments';
-import {
-    showQuickPick,
-    withProgress,
-    showWarningMessage,
-    showInputBox,
-    showOpenDialog,
-    showErrorMessage,
-} from '../../common/window.apis';
-import { Common, VenvManagerStrings } from '../../common/localize';
-import { isUvInstalled, runUV, runPython } from './helpers';
-import { getProjectInstallable, getWorkspacePackagesToInstall, PipPackages } from './pipUtils';
-import { isWindows } from '../../common/utils/platformUtils';
-import { sendTelemetryEvent } from '../../common/telemetry/sender';
-import { EventNames } from '../../common/telemetry/constants';
-import { ShellConstants } from '../../features/common/shellConstants';
+import { getShellActivationCommands, shortVersion, sortEnvironments } from '../common/utils';
+import { runPython, runUV, shouldUseUv } from './helpers';
+import { getProjectInstallable, PipPackages, shouldProceedAfterPyprojectValidation } from './pipUtils';
+import { resolveSystemPythonEnvironmentPath } from './utils';
+import { addUvEnvironment, removeUvEnvironment, UV_ENVS_KEY } from './uvEnvironments';
+import { createStepBasedVenvFlow } from './venvStepBasedFlow';
 
 export const VENV_WORKSPACE_KEY = `${ENVS_EXTENSION_ID}:venv:WORKSPACE_SELECTED`;
 export const VENV_GLOBAL_KEY = `${ENVS_EXTENSION_ID}:venv:GLOBAL_SELECTED`;
 
+/**
+ * Result of environment creation operation.
+ */
+export interface CreateEnvironmentResult {
+    /**
+     * The created environment, if successful.
+     */
+    environment?: PythonEnvironment;
+
+    /*
+     * Exists if error occurred during environment creation and includes error explanation.
+     */
+    envCreationErr?: string;
+
+    /*
+     * Exists if error occurred while installing packages and includes error description.
+     */
+    pkgInstallationErr?: string;
+}
+
 export async function clearVenvCache(): Promise<void> {
-    const keys = [VENV_WORKSPACE_KEY, VENV_GLOBAL_KEY];
+    const keys = [VENV_WORKSPACE_KEY, VENV_GLOBAL_KEY, UV_ENVS_KEY];
     const state = await getWorkspacePersistentState();
     await state.clear(keys);
 }
@@ -113,93 +127,21 @@ function getName(binPath: string): string {
     return path.basename(dir1);
 }
 
-function pathForGitBash(binPath: string): string {
-    return isWindows() ? binPath.replace(/\\/g, '/').replace(/^([a-zA-Z]):/, '/$1') : binPath;
-}
-
 async function getPythonInfo(env: NativeEnvInfo): Promise<PythonEnvironmentInfo> {
     if (env.executable && env.version && env.prefix) {
         const venvName = env.name ?? getName(env.executable);
         const sv = shortVersion(env.version);
         const name = `${venvName} (${sv})`;
+        let description = undefined;
+        if (env.kind === NativePythonEnvironmentKind.venvUv) {
+            description = l10n.t('uv');
+        } else if (env.kind === NativePythonEnvironmentKind.uvWorkspace) {
+            description = l10n.t('uv workspace');
+        }
 
         const binDir = path.dirname(env.executable);
 
-        const shellActivation: Map<string, PythonCommandRunConfiguration[]> = new Map();
-        const shellDeactivation: Map<string, PythonCommandRunConfiguration[]> = new Map();
-
-        if (isWindows()) {
-            shellActivation.set('unknown', [{ executable: path.join(binDir, `activate`) }]);
-            shellDeactivation.set('unknown', [{ executable: path.join(binDir, `deactivate`) }]);
-        } else {
-            shellActivation.set('unknown', [{ executable: 'source', args: [path.join(binDir, `activate`)] }]);
-            shellDeactivation.set('unknown', [{ executable: 'deactivate' }]);
-        }
-
-        if (await fsapi.pathExists(path.join(binDir, 'activate'))) {
-            shellActivation.set(ShellConstants.SH, [{ executable: 'source', args: [path.join(binDir, `activate`)] }]);
-            shellDeactivation.set(ShellConstants.SH, [{ executable: 'deactivate' }]);
-
-            shellActivation.set(ShellConstants.BASH, [{ executable: 'source', args: [path.join(binDir, `activate`)] }]);
-            shellDeactivation.set(ShellConstants.BASH, [{ executable: 'deactivate' }]);
-
-            shellActivation.set(ShellConstants.GITBASH, [
-                { executable: 'source', args: [pathForGitBash(path.join(binDir, `activate`))] },
-            ]);
-            shellDeactivation.set(ShellConstants.GITBASH, [{ executable: 'deactivate' }]);
-
-            shellActivation.set(ShellConstants.ZSH, [{ executable: 'source', args: [path.join(binDir, `activate`)] }]);
-            shellDeactivation.set(ShellConstants.ZSH, [{ executable: 'deactivate' }]);
-
-            shellActivation.set(ShellConstants.KSH, [{ executable: '.', args: [path.join(binDir, `activate`)] }]);
-            shellDeactivation.set(ShellConstants.KSH, [{ executable: 'deactivate' }]);
-        }
-
-        if (await fsapi.pathExists(path.join(binDir, 'Activate.ps1'))) {
-            shellActivation.set(ShellConstants.PWSH, [{ executable: '&', args: [path.join(binDir, `Activate.ps1`)] }]);
-            shellDeactivation.set(ShellConstants.PWSH, [{ executable: 'deactivate' }]);
-        } else if (await fsapi.pathExists(path.join(binDir, 'activate.ps1'))) {
-            shellActivation.set(ShellConstants.PWSH, [{ executable: '&', args: [path.join(binDir, `activate.ps1`)] }]);
-            shellDeactivation.set(ShellConstants.PWSH, [{ executable: 'deactivate' }]);
-        }
-
-        if (await fsapi.pathExists(path.join(binDir, 'activate.bat'))) {
-            shellActivation.set(ShellConstants.CMD, [{ executable: path.join(binDir, `activate.bat`) }]);
-            shellDeactivation.set(ShellConstants.CMD, [{ executable: path.join(binDir, `deactivate.bat`) }]);
-        }
-
-        if (await fsapi.pathExists(path.join(binDir, 'activate.csh'))) {
-            shellActivation.set(ShellConstants.CSH, [
-                { executable: 'source', args: [path.join(binDir, `activate.csh`)] },
-            ]);
-            shellDeactivation.set(ShellConstants.CSH, [{ executable: 'deactivate' }]);
-
-            shellActivation.set(ShellConstants.FISH, [
-                { executable: 'source', args: [path.join(binDir, `activate.csh`)] },
-            ]);
-            shellDeactivation.set(ShellConstants.FISH, [{ executable: 'deactivate' }]);
-        }
-
-        if (await fsapi.pathExists(path.join(binDir, 'activate.fish'))) {
-            shellActivation.set(ShellConstants.FISH, [
-                { executable: 'source', args: [path.join(binDir, `activate.fish`)] },
-            ]);
-            shellDeactivation.set(ShellConstants.FISH, [{ executable: 'deactivate' }]);
-        }
-
-        if (await fsapi.pathExists(path.join(binDir, 'activate.xsh'))) {
-            shellActivation.set(ShellConstants.XONSH, [
-                { executable: 'source', args: [path.join(binDir, `activate.xsh`)] },
-            ]);
-            shellDeactivation.set(ShellConstants.XONSH, [{ executable: 'deactivate' }]);
-        }
-
-        if (await fsapi.pathExists(path.join(binDir, 'activate.nu'))) {
-            shellActivation.set(ShellConstants.NU, [
-                { executable: 'overlay', args: ['use', path.join(binDir, 'activate.nu')] },
-            ]);
-            shellDeactivation.set(ShellConstants.NU, [{ executable: 'overlay', args: ['hide', 'activate'] }]);
-        }
+        const { shellActivation, shellDeactivation } = await getShellActivationCommands(binDir);
 
         return {
             name: name,
@@ -207,7 +149,7 @@ async function getPythonInfo(env: NativeEnvInfo): Promise<PythonEnvironmentInfo>
             shortDisplayName: `${sv} (${venvName})`,
             displayPath: env.executable,
             version: env.version,
-            description: undefined,
+            description: description,
             tooltip: env.executable,
             environmentPath: Uri.file(env.executable),
             iconPath: new ThemeIcon('python'),
@@ -241,17 +183,29 @@ export async function findVirtualEnvironments(
     const envs = data
         .filter((e) => isNativeEnvInfo(e))
         .map((e) => e as NativeEnvInfo)
-        .filter((e) => e.kind === NativePythonEnvironmentKind.venv);
+        .filter(
+            (e) =>
+                e.kind === NativePythonEnvironmentKind.venv ||
+                e.kind === NativePythonEnvironmentKind.venvUv ||
+                e.kind === NativePythonEnvironmentKind.uvWorkspace ||
+                e.kind === NativePythonEnvironmentKind.virtualEnv ||
+                e.kind === NativePythonEnvironmentKind.virtualEnvWrapper,
+        );
 
     for (const e of envs) {
         if (!(e.prefix && e.executable && e.version)) {
-            log.warn(`Invalid conda environment: ${JSON.stringify(e)}`);
+            log.warn(`Invalid venv environment: ${JSON.stringify(e)}`);
             continue;
         }
 
         const env = api.createPythonEnvironmentItem(await getPythonInfo(e), manager);
         collection.push(env);
         log.info(`Found venv environment: ${env.name}`);
+
+        // Track UV environments using environmentPath for consistency
+        if (e.kind === NativePythonEnvironmentKind.venvUv || e.kind === NativePythonEnvironmentKind.uvWorkspace) {
+            await addUvEnvironment(env.environmentPath.fsPath);
+        }
     }
     return collection;
 }
@@ -330,34 +284,7 @@ export async function getGlobalVenvLocation(): Promise<Uri | undefined> {
     return undefined;
 }
 
-async function createWithCustomization(version: string): Promise<boolean | undefined> {
-    const selection: QuickPickItem | undefined = await showQuickPick(
-        [
-            {
-                label: VenvManagerStrings.quickCreate,
-                description: VenvManagerStrings.quickCreateDescription,
-                detail: l10n.t('Uses Python version {0} and installs workspace dependencies.', version),
-            },
-            {
-                label: VenvManagerStrings.customize,
-                description: VenvManagerStrings.customizeDescription,
-            },
-        ],
-        {
-            placeHolder: VenvManagerStrings.selectQuickOrCustomize,
-            ignoreFocusOut: true,
-        },
-    );
-
-    if (selection === undefined) {
-        return undefined;
-    } else if (selection.label === VenvManagerStrings.quickCreate) {
-        return false;
-    }
-    return true;
-}
-
-async function createWithProgress(
+export async function createWithProgress(
     nativeFinder: NativePythonFinder,
     api: PythonEnvironmentApi,
     log: LogOutputChannel,
@@ -366,18 +293,24 @@ async function createWithProgress(
     venvRoot: Uri,
     envPath: string,
     packages?: PipPackages,
-) {
+): Promise<CreateEnvironmentResult | undefined> {
     const pythonPath =
         os.platform() === 'win32' ? path.join(envPath, 'Scripts', 'python.exe') : path.join(envPath, 'bin', 'python');
 
     return await withProgress(
         {
             location: ProgressLocation.Notification,
-            title: VenvManagerStrings.venvCreating,
+            title: l10n.t(
+                'Creating virtual environment named {0} using python version {1}.',
+                path.basename(envPath),
+                basePython.version,
+            ),
         },
         async () => {
+            const result: CreateEnvironmentResult = {};
             try {
-                const useUv = await isUvInstalled(log);
+                const useUv = await shouldUseUv(log, basePython.environmentPath.fsPath);
+                // env creation
                 if (basePython.execInfo?.run.executable) {
                     if (useUv) {
                         await runUV(
@@ -394,31 +327,46 @@ async function createWithProgress(
                         );
                     }
                     if (!(await fsapi.pathExists(pythonPath))) {
-                        log.error('no python executable found in virtual environment');
                         throw new Error('no python executable found in virtual environment');
                     }
                 }
 
+                // handle admin of new env
                 const resolved = await nativeFinder.resolve(pythonPath);
                 const env = api.createPythonEnvironmentItem(await getPythonInfo(resolved), manager);
-                if (packages && (packages.install.length > 0 || packages.uninstall.length > 0)) {
-                    await api.managePackages(env, {
-                        upgrade: false,
-                        install: packages?.install,
-                        uninstall: packages?.uninstall ?? [],
-                    });
+
+                if (
+                    useUv &&
+                    (resolved.kind === NativePythonEnvironmentKind.venvUv ||
+                        resolved.kind === NativePythonEnvironmentKind.uvWorkspace)
+                ) {
+                    await addUvEnvironment(env.environmentPath.fsPath);
                 }
-                return env;
+
+                // install packages
+                if (packages && (packages.install.length > 0 || packages.uninstall.length > 0)) {
+                    try {
+                        await api.managePackages(env, {
+                            upgrade: false,
+                            install: packages?.install,
+                            uninstall: packages?.uninstall ?? [],
+                        });
+                    } catch (e) {
+                        // error occurred while installing packages
+                        result.pkgInstallationErr = e instanceof Error ? e.message : String(e);
+                    }
+                }
+                result.environment = env;
             } catch (e) {
                 log.error(`Failed to create virtual environment: ${e}`);
-                showErrorMessage(VenvManagerStrings.venvCreateFailed);
-                return;
+                result.envCreationErr = `Failed to create virtual environment: ${e}`;
             }
+            return result;
         },
     );
 }
 
-function ensureGlobalEnv(basePythons: PythonEnvironment[], log: LogOutputChannel): PythonEnvironment[] {
+export function ensureGlobalEnv(basePythons: PythonEnvironment[], log: LogOutputChannel): PythonEnvironment[] {
     if (basePythons.length === 0) {
         log.error('No base python found');
         showErrorMessage(VenvManagerStrings.venvErrorNoBasePython);
@@ -446,26 +394,40 @@ export async function quickCreateVenv(
     baseEnv: PythonEnvironment,
     venvRoot: Uri,
     additionalPackages?: string[],
-): Promise<PythonEnvironment | undefined> {
+): Promise<CreateEnvironmentResult | undefined> {
     const project = api.getPythonProject(venvRoot);
 
     sendTelemetryEvent(EventNames.VENV_CREATION, undefined, { creationType: 'quick' });
-    const installables = await getProjectInstallable(api, project ? [project] : undefined);
+    const result = await getProjectInstallable(api, project ? [project] : undefined);
+    const installables = result.installables;
     const allPackages = [];
     allPackages.push(...(installables?.flatMap((i) => i.args ?? []) ?? []));
     if (additionalPackages) {
         allPackages.push(...additionalPackages);
     }
-    return await createWithProgress(
-        nativeFinder,
-        api,
-        log,
-        manager,
-        baseEnv,
-        venvRoot,
-        path.join(venvRoot.fsPath, '.venv'),
-        { install: allPackages, uninstall: [] },
-    );
+
+    const validationError = result.validationError;
+    const shouldProceed = await shouldProceedAfterPyprojectValidation(validationError, allPackages);
+    if (!shouldProceed) {
+        return undefined;
+    }
+
+    // Check if .venv already exists
+    let venvPath = path.join(venvRoot.fsPath, '.venv');
+    if (await fsapi.pathExists(venvPath)) {
+        // increment to create a unique name, e.g. .venv-1
+        let i = 1;
+        while (await fsapi.pathExists(`${venvPath}-${i}`)) {
+            i++;
+        }
+        venvPath = `${venvPath}-${i}`;
+    }
+
+    // createWithProgress handles building CreateEnvironmentResult and adding err msgs
+    return await createWithProgress(nativeFinder, api, log, manager, baseEnv, venvRoot, venvPath, {
+        install: allPackages,
+        uninstall: [],
+    });
 }
 
 export async function createPythonVenv(
@@ -476,90 +438,73 @@ export async function createPythonVenv(
     basePythons: PythonEnvironment[],
     venvRoot: Uri,
     options: { showQuickAndCustomOptions: boolean; additionalPackages?: string[] },
-): Promise<PythonEnvironment | undefined> {
-    const sortedEnvs = ensureGlobalEnv(basePythons, log);
-    const project = api.getPythonProject(venvRoot);
+): Promise<CreateEnvironmentResult | undefined> {
+    return createStepBasedVenvFlow(nativeFinder, api, log, manager, basePythons, venvRoot, options);
+}
 
-    let customize: boolean | undefined = true;
-    if (options.showQuickAndCustomOptions) {
-        customize = await createWithCustomization(sortedEnvs[0].version);
+function isDriveRoot(fsPath: string): boolean {
+    const normalized = path.normalize(fsPath);
+    if (os.platform() === 'win32') {
+        return /^[a-zA-Z]:[\\/]?$/.test(normalized);
+    }
+    return normalized === '/';
+}
+
+function hasMinimumPathDepth(fsPath: string, minDepth: number = 2): boolean {
+    const normalized = path.normalize(fsPath);
+    const parts = normalized.split(path.sep).filter((p) => p.length > 0 && p !== '.');
+
+    if (os.platform() === 'win32') {
+        return parts.length >= minDepth;
+    }
+    return parts.length >= minDepth;
+}
+
+async function isValidVenvPath(fsPath: string): Promise<boolean> {
+    try {
+        const pyvenvCfgPath = path.join(fsPath, 'pyvenv.cfg');
+        return await fsapi.pathExists(pyvenvCfgPath);
+    } catch {
+        return false;
+    }
+}
+
+async function validateVenvRemovalPath(envPath: string, log: LogOutputChannel): Promise<string | undefined> {
+    if (isDriveRoot(envPath)) {
+        log.error(`Refusing to remove drive root: ${envPath}`);
+        return VenvManagerStrings.venvRemoveUnsafePath;
     }
 
-    if (customize === undefined) {
-        return;
-    } else if (customize === false) {
-        sendTelemetryEvent(EventNames.VENV_CREATION, undefined, { creationType: 'quick' });
-        const installables = await getProjectInstallable(api, project ? [project] : undefined);
-        const allPackages = [];
-        allPackages.push(...(installables?.flatMap((i) => i.args ?? []) ?? []));
-        if (options.additionalPackages) {
-            allPackages.push(...options.additionalPackages);
-        }
-        return await createWithProgress(
-            nativeFinder,
-            api,
-            log,
-            manager,
-            sortedEnvs[0],
-            venvRoot,
-            path.join(venvRoot.fsPath, '.venv'),
-            { install: allPackages, uninstall: [] },
-        );
-    } else {
-        sendTelemetryEvent(EventNames.VENV_CREATION, undefined, { creationType: 'custom' });
+    if (!hasMinimumPathDepth(envPath, 2)) {
+        log.error(`Refusing to remove path with insufficient depth: ${envPath}`);
+        return VenvManagerStrings.venvRemoveUnsafePath;
     }
 
-    const basePython = await pickEnvironmentFrom(sortedEnvs);
-    if (!basePython || !basePython.execInfo) {
-        log.error('No base python selected, cannot create virtual environment.');
-        return;
+    if (!(await isValidVenvPath(envPath))) {
+        log.error(`Path does not appear to be a valid venv (no pyvenv.cfg): ${envPath}`);
+        return VenvManagerStrings.venvRemoveInvalidPath;
     }
 
-    const name = await showInputBox({
-        prompt: VenvManagerStrings.venvName,
-        value: '.venv',
-        ignoreFocusOut: true,
-        validateInput: async (value) => {
-            if (!value) {
-                return VenvManagerStrings.venvNameErrorEmpty;
-            }
-            if (await fsapi.pathExists(path.join(venvRoot.fsPath, value))) {
-                return VenvManagerStrings.venvNameErrorExists;
-            }
-        },
-    });
-    if (!name) {
-        log.error('No name entered, cannot create virtual environment.');
-        return;
-    }
-
-    const envPath = path.join(venvRoot.fsPath, name);
-
-    const packages = await getWorkspacePackagesToInstall(
-        api,
-        { showSkipOption: true, install: [] },
-        project ? [project] : undefined,
-        undefined,
-        log,
-    );
-    const allPackages = [];
-    allPackages.push(...(packages?.install ?? []), ...(options.additionalPackages ?? []));
-
-    return await createWithProgress(nativeFinder, api, log, manager, basePython, venvRoot, envPath, {
-        install: allPackages,
-        uninstall: [],
-    });
+    return undefined;
 }
 
 export async function removeVenv(environment: PythonEnvironment, log: LogOutputChannel): Promise<boolean> {
     const pythonPath = os.platform() === 'win32' ? 'python.exe' : 'python';
 
-    const envPath = environment.environmentPath.fsPath.endsWith(pythonPath)
-        ? path.dirname(path.dirname(environment.environmentPath.fsPath))
-        : environment.environmentPath.fsPath;
+    const envFsPath = path.normalize(environment.environmentPath.fsPath);
+    const envPath = envFsPath.endsWith(pythonPath) ? path.dirname(path.dirname(envFsPath)) : envFsPath;
+
+    const validationError = await validateVenvRemovalPath(envPath, log);
+    if (validationError) {
+        showErrorMessage(validationError);
+        return false;
+    }
+
+    // Normalize path for UI display - ensure forward slashes on Windows
+    const displayPath = normalizePath(envPath);
 
     const confirm = await showWarningMessage(
-        l10n.t('Are you sure you want to remove {0}?', envPath),
+        l10n.t('Are you sure you want to remove {0}?', displayPath),
         {
             modal: true,
         },
@@ -567,7 +512,7 @@ export async function removeVenv(environment: PythonEnvironment, log: LogOutputC
         { title: Common.no, isCloseAffordance: true },
     );
     if (confirm?.title === Common.yes) {
-        await withProgress(
+        const result = await withProgress(
             {
                 location: ProgressLocation.Notification,
                 title: VenvManagerStrings.venvRemoving,
@@ -575,6 +520,7 @@ export async function removeVenv(environment: PythonEnvironment, log: LogOutputC
             async () => {
                 try {
                     await fsapi.remove(envPath);
+                    await removeUvEnvironment(environment.environmentPath.fsPath);
                     return true;
                 } catch (e) {
                     log.error(`Failed to remove virtual environment: ${e}`);
@@ -583,8 +529,10 @@ export async function removeVenv(environment: PythonEnvironment, log: LogOutputC
                 }
             },
         );
+        return result;
     }
 
+    traceInfo(`User cancelled removal of virtual environment: ${displayPath}`);
     return false;
 }
 
@@ -597,7 +545,11 @@ export async function resolveVenvPythonEnvironmentPath(
 ): Promise<PythonEnvironment | undefined> {
     const resolved = await nativeFinder.resolve(fsPath);
 
-    if (resolved.kind === NativePythonEnvironmentKind.venv) {
+    if (
+        resolved.kind === NativePythonEnvironmentKind.venv ||
+        resolved.kind === NativePythonEnvironmentKind.venvUv ||
+        resolved.kind === NativePythonEnvironmentKind.uvWorkspace
+    ) {
         const envInfo = await getPythonInfo(resolved);
         return api.createPythonEnvironmentItem(envInfo, manager);
     }

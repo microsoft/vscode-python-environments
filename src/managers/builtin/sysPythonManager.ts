@@ -15,19 +15,19 @@ import {
     ResolveEnvironmentContext,
     SetEnvironmentScope,
 } from '../../api';
-import { refreshPythons, resolveSystemPythonEnvironmentPath } from './utils';
-import { NativePythonFinder } from '../common/nativePythonFinder';
-import { createDeferred, Deferred } from '../../common/utils/deferred';
-import { getLatest } from '../common/utils';
 import { SysManagerStrings } from '../../common/localize';
+import { createDeferred, Deferred } from '../../common/utils/deferred';
+import { NativePythonFinder } from '../common/nativePythonFinder';
+import { getLatest } from '../common/utils';
 import {
-    setSystemEnvForWorkspace,
-    setSystemEnvForGlobal,
     clearSystemEnvCache,
     getSystemEnvForGlobal,
     getSystemEnvForWorkspace,
+    setSystemEnvForGlobal,
+    setSystemEnvForWorkspace,
     setSystemEnvForWorkspaces,
 } from './cache';
+import { refreshPythons, resolveSystemPythonEnvironmentPath } from './utils';
 
 export class SysPythonManager implements EnvironmentManager {
     private collection: PythonEnvironment[] = [];
@@ -86,6 +86,7 @@ export class SysPythonManager implements EnvironmentManager {
             async () => {
                 const discard = this.collection.map((c) => c);
 
+                // hit here is fine...
                 this.collection = await refreshPythons(hardRefresh, this.nativeFinder, this.api, this.log, this);
                 await this.loadEnvMap();
 
@@ -204,7 +205,13 @@ export class SysPythonManager implements EnvironmentManager {
             // For all other env types we need to ensure that the environment is of the type managed by the manager.
             // But System is a exception, this is the last resort for resolving. So we don't need to check.
             // We will just add it and treat it as a non-activatable environment.
-            this.collection.push(resolved);
+            const exists = this.collection.some(
+                (e) => e.environmentPath.toString() === resolved.environmentPath.toString(),
+            );
+            if (!exists) {
+                // only add it if it is not already in the collection to avoid duplicates
+                this.collection.push(resolved);
+            }
             this._onDidChangeEnvironments.fire([{ environment: resolved, kind: EnvironmentChangeKind.add }]);
         }
 
@@ -216,7 +223,7 @@ export class SysPythonManager implements EnvironmentManager {
     }
 
     private findEnvironmentByPath(fsPath: string): PythonEnvironment | undefined {
-        const normalized = path.normalize(fsPath);
+        const normalized = path.normalize(fsPath); // /opt/homebrew/bin/python3.12
         return this.collection.find((e) => {
             const n = path.normalize(e.environmentPath.fsPath);
             return n === normalized || path.dirname(n) === normalized || path.dirname(path.dirname(n)) === normalized;

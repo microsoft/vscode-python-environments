@@ -11,26 +11,42 @@ export enum EventNames {
     VENV_CREATION = 'VENV.CREATION',
 
     PACKAGE_MANAGEMENT = 'PACKAGE_MANAGEMENT',
+    ADD_PROJECT = 'ADD_PROJECT',
+    /**
+     * Telemetry event for when a Python environment is created via command.
+     * Properties:
+     * - manager: string (the id of the environment manager used, or 'none')
+     * - triggeredLocation: string (where the create command is called from)
+     */
+    CREATE_ENVIRONMENT = 'CREATE_ENVIRONMENT',
+    /**
+     * Telemetry event for project structure metrics at extension startup.
+     * Properties:
+     * - totalProjectCount: number (total number of projects)
+     * - uniqueInterpreterCount: number (count of distinct interpreter paths)
+     * - projectUnderRoot: number (count of projects nested under workspace roots)
+     */
+    PROJECT_STRUCTURE = 'PROJECT_STRUCTURE',
 }
 
 // Map all events to their properties
 export interface IEventNamePropertyMapping {
     /* __GDPR__
        "extension.activation_duration": {
-           "duration" : { "classification": "SystemMetaData", "purpose": "FeatureInsight", "owner": "karthiknadig" }
+           "duration" : { "classification": "SystemMetaData", "purpose": "FeatureInsight", "owner": "eleanorjboyd" }
        }
     */
     [EventNames.EXTENSION_ACTIVATION_DURATION]: never | undefined;
     /* __GDPR__
        "extension.manager_registration_duration": {
-           "duration" : { "classification": "SystemMetaData", "purpose": "FeatureInsight", "owner": "karthiknadig" }
+           "duration" : { "classification": "SystemMetaData", "purpose": "FeatureInsight", "owner": "eleanorjboyd" }
        }
     */
     [EventNames.EXTENSION_MANAGER_REGISTRATION_DURATION]: never | undefined;
 
     /* __GDPR__
         "environment_manager.registered": {
-            "managerId" : { "classification": "SystemMetaData", "purpose": "FeatureInsight", "owner": "karthiknadig" }
+            "managerId" : { "classification": "SystemMetaData", "purpose": "FeatureInsight", "owner": "eleanorjboyd" }
         }
     */
     [EventNames.ENVIRONMENT_MANAGER_REGISTERED]: {
@@ -39,7 +55,7 @@ export interface IEventNamePropertyMapping {
 
     /* __GDPR__
         "package_manager.registered": {
-            "managerId" : { "classification": "SystemMetaData", "purpose": "FeatureInsight", "owner": "karthiknadig" }
+            "managerId" : { "classification": "SystemMetaData", "purpose": "FeatureInsight", "owner": "eleanorjboyd" }
         }
     */
     [EventNames.PACKAGE_MANAGER_REGISTERED]: {
@@ -48,7 +64,7 @@ export interface IEventNamePropertyMapping {
 
     /* __GDPR__
         "environment_manager.selected": {
-            "managerId" : { "classification": "SystemMetaData", "purpose": "FeatureInsight", "owner": "karthiknadig" }
+            "managerId" : { "classification": "SystemMetaData", "purpose": "FeatureInsight", "owner": "eleanorjboyd" }
         }
     */
     [EventNames.ENVIRONMENT_MANAGER_SELECTED]: {
@@ -57,7 +73,7 @@ export interface IEventNamePropertyMapping {
 
     /* __GDPR__
         "package_manager.selected": {
-            "managerId" : { "classification": "SystemMetaData", "purpose": "FeatureInsight", "owner": "karthiknadig" }
+            "managerId" : { "classification": "SystemMetaData", "purpose": "FeatureInsight", "owner": "eleanorjboyd" }
         }
     */
     [EventNames.PACKAGE_MANAGER_SELECTED]: {
@@ -65,11 +81,11 @@ export interface IEventNamePropertyMapping {
     };
 
     /* __GDPR__
-        "venv.using_uv": {"owner": "karthiknadig" }
+        "venv.using_uv": {"owner": "eleanorjboyd" }
     */
     [EventNames.VENV_USING_UV]: never | undefined /* __GDPR__
         "venv.creation": {
-            "creationType": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "owner": "karthiknadig" }
+            "creationType": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "owner": "eleanorjboyd" }
         }
     */;
     [EventNames.VENV_CREATION]: {
@@ -77,13 +93,52 @@ export interface IEventNamePropertyMapping {
     };
 
     /* __GDPR__
-        "package.install": {
-            "managerId": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "owner": "karthiknadig" },
-            "result": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "owner": "karthiknadig" }
+        "package_management": {
+            "managerId": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "owner": "eleanorjboyd" },
+            "result": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "owner": "eleanorjboyd" }
         }
     */
     [EventNames.PACKAGE_MANAGEMENT]: {
         managerId: string;
         result: 'success' | 'error' | 'cancelled';
+    };
+
+    /* __GDPR__
+        "add_project": {
+            "template": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "owner": "eleanorjboyd" },
+            "quickCreate": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "owner": "eleanorjboyd" },
+            "totalProjectCount": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "owner": "eleanorjboyd" },
+            "triggeredLocation": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "owner": "eleanorjboyd" }
+        }
+    */
+    [EventNames.ADD_PROJECT]: {
+        template: string;
+        quickCreate: boolean;
+        totalProjectCount: number;
+        triggeredLocation: 'templateCreate' | 'add' | 'addGivenResource';
+    };
+
+    /* __GDPR__
+        "create_environment": {
+            "manager": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "owner": "eleanorjboyd" },
+            "triggeredLocation": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "owner": "eleanorjboyd" }
+        }
+    */
+    [EventNames.CREATE_ENVIRONMENT]: {
+        manager: string;
+        triggeredLocation: string;
+    };
+
+    /* __GDPR__
+        "project_structure": {
+            "totalProjectCount": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "owner": "eleanorjboyd" },
+            "uniqueInterpreterCount": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "owner": "eleanorjboyd" },
+            "projectUnderRoot": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "owner": "eleanorjboyd" }
+        }
+    */
+    [EventNames.PROJECT_STRUCTURE]: {
+        totalProjectCount: number;
+        uniqueInterpreterCount: number;
+        projectUnderRoot: number;
     };
 }

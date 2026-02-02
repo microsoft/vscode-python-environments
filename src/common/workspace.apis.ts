@@ -22,6 +22,10 @@ export function getWorkspaceFolders(): readonly WorkspaceFolder[] | undefined {
     return workspace.workspaceFolders;
 }
 
+export function getWorkspaceFile(): Uri | undefined {
+    return workspace.workspaceFile;
+}
+
 export function getConfiguration(section?: string, scope?: ConfigurationScope | null): WorkspaceConfiguration {
     return workspace.getConfiguration(section, scope);
 }

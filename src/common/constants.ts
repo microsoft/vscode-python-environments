@@ -2,6 +2,7 @@ import * as path from 'path';
 
 export const ENVS_EXTENSION_ID = 'ms-python.vscode-python-envs';
 export const PYTHON_EXTENSION_ID = 'ms-python.python';
+export const JUPYTER_EXTENSION_ID = 'ms-toolsai.jupyter';
 export const EXTENSION_ROOT_DIR = path.dirname(__dirname);
 
 export const DEFAULT_PACKAGE_MANAGER_ID = 'ms-python.python:pip';
@@ -25,3 +26,6 @@ export const KNOWN_FILES = [
 ];
 
 export const KNOWN_TEMPLATE_ENDINGS = ['.j2', '.jinja2'];
+
+export const NEW_PROJECT_TEMPLATES_FOLDER = path.join(EXTENSION_ROOT_DIR, 'files', 'templates');
+export const NotebookCellScheme = 'vscode-notebook-cell';

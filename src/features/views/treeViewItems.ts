@@ -1,9 +1,9 @@
-import { TreeItem, TreeItemCollapsibleState, MarkdownString, Command, ThemeIcon } from 'vscode';
-import { InternalEnvironmentManager, InternalPackageManager } from '../../internal.api';
-import { PythonEnvironment, IconPath, Package, PythonProject, EnvironmentGroupInfo } from '../../api';
-import { removable } from './utils';
-import { isActivatableEnvironment } from '../common/activation';
+import { Command, MarkdownString, ThemeIcon, TreeItem, TreeItemCollapsibleState } from 'vscode';
+import { EnvironmentGroupInfo, IconPath, Package, PythonEnvironment, PythonProject } from '../../api';
 import { EnvViewStrings } from '../../common/localize';
+import { InternalEnvironmentManager, InternalPackageManager } from '../../internal.api';
+import { isActivatableEnvironment } from '../common/activation';
+import { removable } from './utils';
 
 export enum EnvTreeItemKind {
     manager = 'python-env-manager',
@@ -11,8 +11,6 @@ export enum EnvTreeItemKind {
     environmentGroup = 'python-env-group',
     noEnvironment = 'python-no-env',
     package = 'python-package',
-    packageRoot = 'python-package-root',
-    packageRootInfo = 'python-package-root-info',
     managerInfo = 'python-env-manager-info',
     environmentInfo = 'python-env-info',
     packageInfo = 'python-package-info',
@@ -128,28 +126,12 @@ export class NoPythonEnvTreeItem implements EnvTreeItem {
     }
 }
 
-export class PackageRootTreeItem implements EnvTreeItem {
-    public readonly kind = EnvTreeItemKind.packageRoot;
-    public readonly treeItem: TreeItem;
-    constructor(
-        public readonly parent: PythonEnvTreeItem,
-        public readonly manager: InternalPackageManager,
-        public readonly environment: PythonEnvironment,
-    ) {
-        const item = new TreeItem('Packages', TreeItemCollapsibleState.Collapsed);
-        item.contextValue = 'python-package-root';
-        item.description = manager.displayName;
-        item.tooltip = 'Packages installed in this environment';
-        this.treeItem = item;
-    }
-}
-
 export class PackageTreeItem implements EnvTreeItem {
     public readonly kind = EnvTreeItemKind.package;
     public readonly treeItem: TreeItem;
     constructor(
         public readonly pkg: Package,
-        public readonly parent: PackageRootTreeItem,
+        public readonly parent: PythonEnvTreeItem,
         public readonly manager: InternalPackageManager,
     ) {
         const item = new TreeItem(pkg.displayName);
@@ -183,10 +165,10 @@ export class EnvInfoTreeItem implements EnvTreeItem {
 }
 
 export class PackageRootInfoTreeItem implements EnvTreeItem {
-    public readonly kind = EnvTreeItemKind.packageRootInfo;
+    public readonly kind = EnvTreeItemKind.packageInfo;
     public readonly treeItem: TreeItem;
     constructor(
-        public readonly parent: PackageRootTreeItem,
+        public readonly parent: PythonEnvTreeItem,
         name: string,
         description?: string,
         tooltip?: string | MarkdownString,
@@ -209,7 +191,6 @@ export enum ProjectTreeItemKind {
     none = 'project-no-environment',
     environmentInfo = 'environment-info',
     package = 'project-package',
-    packageRoot = 'project-package-root',
     packageRootInfo = 'project-package-root-info',
 }
 
@@ -232,7 +213,6 @@ export class ProjectItem implements ProjectTreeItem {
         item.description = this.project.description;
         item.tooltip = this.project.tooltip;
         item.resourceUri = project.uri.fsPath.endsWith('.py') ? this.project.uri : undefined;
-        item.iconPath = this.project.iconPath ?? (project.uri.fsPath.endsWith('.py') ? ThemeIcon.File : undefined);
         this.treeItem = item;
     }
 
@@ -252,7 +232,6 @@ export class GlobalProjectItem implements ProjectTreeItem {
         item.contextValue = 'python-workspace';
         item.description = 'Global Python environment';
         item.tooltip = 'Global Python environment';
-        item.iconPath = new ThemeIcon('globe');
         this.treeItem = item;
     }
 }
@@ -303,24 +282,6 @@ export class NoProjectEnvironment implements ProjectTreeItem {
             title: 'Set Environment',
             arguments: this.project ? [this.project.uri] : undefined,
         };
-        this.treeItem = item;
-    }
-}
-
-export class ProjectPackageRootTreeItem implements ProjectTreeItem {
-    public readonly kind = ProjectTreeItemKind.packageRoot;
-    public readonly id: string;
-    public readonly treeItem: TreeItem;
-    constructor(
-        public readonly parent: ProjectEnvironment,
-        public readonly manager: InternalPackageManager,
-        public readonly environment: PythonEnvironment,
-    ) {
-        const item = new TreeItem('Packages', TreeItemCollapsibleState.Collapsed);
-        this.id = `${this.parent.id}>>>packages`;
-        item.contextValue = 'python-package-root';
-        item.description = manager.displayName;
-        item.tooltip = 'Packages installed in this environment';
         this.treeItem = item;
     }
 }
@@ -382,7 +343,7 @@ export class ProjectPackage implements ProjectTreeItem {
     public readonly id: string;
     public readonly treeItem: TreeItem;
     constructor(
-        public readonly parent: ProjectPackageRootTreeItem,
+        public readonly parent: ProjectEnvironment,
         public readonly pkg: Package,
         public readonly manager: InternalPackageManager,
     ) {
@@ -395,7 +356,7 @@ export class ProjectPackage implements ProjectTreeItem {
         this.treeItem = item;
     }
 
-    static getId(projectEnv: ProjectPackageRootTreeItem, pkg: Package): string {
+    static getId(projectEnv: ProjectEnvironment, pkg: Package): string {
         return `${projectEnv.id}>>>${pkg.pkgId}`;
     }
 }
@@ -405,7 +366,7 @@ export class ProjectPackageRootInfoTreeItem implements ProjectTreeItem {
     public readonly id: string;
     public readonly treeItem: TreeItem;
     constructor(
-        public readonly parent: ProjectPackageRootTreeItem,
+        public readonly parent: ProjectEnvironment,
         name: string,
         description?: string,
         tooltip?: string | MarkdownString,
@@ -421,7 +382,7 @@ export class ProjectPackageRootInfoTreeItem implements ProjectTreeItem {
         this.treeItem.iconPath = iconPath;
         this.treeItem.command = command;
     }
-    static getId(projectEnv: ProjectPackageRootTreeItem, name: string): string {
+    static getId(projectEnv: ProjectEnvironment, name: string): string {
         return `${projectEnv.id}>>>${name}`;
     }
 }

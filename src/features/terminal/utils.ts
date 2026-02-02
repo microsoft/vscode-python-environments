@@ -1,19 +1,132 @@
 import * as path from 'path';
-import { Terminal, TerminalOptions, Uri } from 'vscode';
+import { Disposable, env, Terminal, TerminalOptions, Uri } from 'vscode';
 import { PythonEnvironment, PythonProject, PythonProjectEnvironmentApi, PythonProjectGetterApi } from '../../api';
-import { sleep } from '../../common/utils/asyncUtils';
+import { timeout } from '../../common/utils/asyncUtils';
+import { createSimpleDebounce } from '../../common/utils/debounce';
+import { onDidChangeTerminalShellIntegration, onDidWriteTerminalData } from '../../common/window.apis';
 import { getConfiguration, getWorkspaceFolders } from '../../common/workspace.apis';
 
-const SHELL_INTEGRATION_TIMEOUT = 500; // 0.5 seconds
-const SHELL_INTEGRATION_POLL_INTERVAL = 20; // 0.02 seconds
+export const SHELL_INTEGRATION_TIMEOUT = 500; // 0.5 seconds
+export const SHELL_INTEGRATION_POLL_INTERVAL = 20; // 0.02 seconds
 
-export async function waitForShellIntegration(terminal: Terminal): Promise<boolean> {
-    let timeout = 0;
-    while (!terminal.shellIntegration && timeout < SHELL_INTEGRATION_TIMEOUT) {
-        await sleep(SHELL_INTEGRATION_POLL_INTERVAL);
-        timeout += SHELL_INTEGRATION_POLL_INTERVAL;
+/**
+ * Use `terminal.integrated.shellIntegration.timeout` setting if available.
+ * Falls back to defaults based on shell integration enabled state and remote environment.
+ */
+export function getShellIntegrationTimeout(): number {
+    const config = getConfiguration('terminal.integrated');
+    const timeoutValue = config.get<number | undefined>('shellIntegration.timeout');
+    if (typeof timeoutValue !== 'number' || timeoutValue < 0) {
+        const shellIntegrationEnabled = config.get<boolean>('shellIntegration.enabled', true);
+        const isRemote = env.remoteName !== undefined;
+        return shellIntegrationEnabled ? 5000 : isRemote ? 3000 : 2000;
     }
-    return terminal.shellIntegration !== undefined;
+    return Math.max(timeoutValue, 500);
+}
+
+/**
+ * Three conditions in a Promise.race:
+ * 1. Timeout based on VS Code's terminal.integrated.shellIntegration.timeout setting
+ * 2. Shell integration becoming available (window.onDidChangeTerminalShellIntegration event)
+ * 3. Detection of common prompt patterns in terminal output
+ */
+export async function waitForShellIntegration(terminal?: Terminal): Promise<boolean> {
+    if (!terminal) {
+        return false;
+    }
+    if (terminal.shellIntegration) {
+        return true;
+    }
+
+    const timeoutMs = getShellIntegrationTimeout();
+
+    const disposables: Disposable[] = [];
+
+    try {
+        const result = await Promise.race([
+            // Condition 1: Shell integration timeout setting
+            timeout(timeoutMs).then(() => false),
+
+            // Condition 2: Shell integration becomes available
+            new Promise<boolean>((resolve) => {
+                disposables.push(
+                    onDidChangeTerminalShellIntegration((e) => {
+                        if (e.terminal === terminal) {
+                            resolve(true);
+                        }
+                    }),
+                );
+            }),
+
+            // Condition 3: Detect prompt patterns in terminal output
+            new Promise<boolean>((resolve) => {
+                const dataEvents: string[] = [];
+                const debounced = createSimpleDebounce(50, () => {
+                    if (dataEvents && detectsCommonPromptPattern(dataEvents.join(''))) {
+                        resolve(false);
+                    }
+                });
+                disposables.push(debounced);
+                disposables.push(
+                    onDidWriteTerminalData((e) => {
+                        if (e.terminal === terminal) {
+                            dataEvents.push(e.data);
+                            debounced.trigger();
+                        }
+                    }),
+                );
+            }),
+        ]);
+
+        return result;
+    } finally {
+        disposables.forEach((d) => d.dispose());
+    }
+}
+
+// Detects if the given text content appears to end with a common prompt pattern.
+function detectsCommonPromptPattern(terminalData: string): boolean {
+    if (terminalData.trim().length === 0) {
+        return false;
+    }
+
+    const sanitizedTerminalData = removeAnsiEscapeCodes(terminalData);
+    // PowerShell prompt: PS C:\> or similar patterns
+    if (/PS\s+[A-Z]:\\.*>\s*$/.test(sanitizedTerminalData)) {
+        return true;
+    }
+
+    // Command Prompt: C:\path>
+    if (/^[A-Z]:\\.*>\s*$/.test(sanitizedTerminalData)) {
+        return true;
+    }
+
+    // Bash-style prompts ending with $
+    if (/\$\s*$/.test(sanitizedTerminalData)) {
+        return true;
+    }
+
+    // Root prompts ending with #
+    if (/#\s*$/.test(sanitizedTerminalData)) {
+        return true;
+    }
+
+    // Python REPL prompt
+    if (/^>>>\s*$/.test(sanitizedTerminalData)) {
+        return true;
+    }
+
+    // Custom prompts ending with the starship character (\u276f)
+    if (/\u276f\s*$/.test(sanitizedTerminalData)) {
+        return true;
+    }
+
+    // Generic prompts ending with common prompt characters
+    if (/[>%]\s*$/.test(sanitizedTerminalData)) {
+        return true;
+    }
+
+    return false;
 }
 
 export function isTaskTerminal(terminal: Terminal): boolean {
@@ -94,12 +207,54 @@ export const ACT_TYPE_SHELL = 'shellStartup';
 export const ACT_TYPE_COMMAND = 'command';
 export const ACT_TYPE_OFF = 'off';
 export type AutoActivationType = 'off' | 'command' | 'shellStartup';
+/**
+ * Determines the auto-activation type for Python environments in terminals.
+ *
+ * The following types are supported:
+ * - 'shellStartup': Environment is activated via shell startup scripts
+ * - 'command': Environment is activated via explicit command
+ * - 'off': Auto-activation is disabled
+ *
+ * Priority order:
+ * 1. python-envs.terminal.autoActivationType
+ *    a. globalRemoteValue
+ *    b. globalLocalValue
+ *    c. globalValue
+ * 2. python.terminal.activateEnvironment setting (if false, returns 'off' & sets autoActivationType to 'off')
+ * 3. Default to 'command' if no setting is found
+ *
+ * @returns {AutoActivationType} The determined auto-activation type
+ */
 export function getAutoActivationType(): AutoActivationType {
-    // 'startup' auto-activation means terminal is activated via shell startup scripts.
-    // 'command' auto-activation means terminal is activated via a command.
-    // 'off' means no auto-activation.
-    const config = getConfiguration('python-envs');
-    return config.get<AutoActivationType>('terminal.autoActivationType', 'command');
+    const pyEnvsConfig = getConfiguration('python-envs');
+    const pyEnvsActivationType = pyEnvsConfig.inspect<AutoActivationType>('terminal.autoActivationType');
+
+    if (pyEnvsActivationType) {
+        // Priority order: globalRemoteValue > globalLocalValue > globalValue
+        const activationType = pyEnvsActivationType as Record<string, unknown>;
+
+        if ('globalRemoteValue' in pyEnvsActivationType && activationType.globalRemoteValue !== undefined) {
+            return activationType.globalRemoteValue as AutoActivationType;
+        }
+        if ('globalLocalValue' in pyEnvsActivationType && activationType.globalLocalValue !== undefined) {
+            return activationType.globalLocalValue as AutoActivationType;
+        }
+        if (pyEnvsActivationType.globalValue !== undefined) {
+            return pyEnvsActivationType.globalValue;
+        }
+    }
+
+    // If none of the python-envs settings are defined, check the legacy python setting
+    const pythonConfig = getConfiguration('python');
+    const pythonActivateSetting = pythonConfig.get<boolean | undefined>('terminal.activateEnvironment', undefined);
+    if (pythonActivateSetting === false) {
+        // Set autoActivationType to 'off' if python.terminal.activateEnvironment is false
+        pyEnvsConfig.update('terminal.autoActivationType', ACT_TYPE_OFF);
+        return ACT_TYPE_OFF;
+    }
+
+    // Default to 'command' if no settings are found or if pythonActivateSetting is true/undefined
+    return ACT_TYPE_COMMAND;
 }
 
 export async function setAutoActivationType(value: AutoActivationType): Promise<void> {
@@ -128,4 +283,29 @@ export async function getAllDistinctProjectEnvironments(
     }
 
     return envs.length > 0 ? envs : undefined;
+}
+
+// Defacto standard: https://invisible-island.net/xterm/ctlseqs/ctlseqs.html
+const CSI_SEQUENCE = /(?:\x1b\[|\x9b)[=?>!]?[\d;:]*["$#'* ]?[a-zA-Z@^`{}|~]/;
+const OSC_SEQUENCE = /(?:\x1b\]|\x9d).*?(?:\x1b\\|\x07|\x9c)/;
+const ESC_SEQUENCE = /\x1b(?:[ #%\(\)\*\+\-\.\/]?[a-zA-Z0-9\|}~@])/;
+const CONTROL_SEQUENCES = new RegExp(
+    '(?:' + [CSI_SEQUENCE.source, OSC_SEQUENCE.source, ESC_SEQUENCE.source].join('|') + ')',
+    'g',
+);
+
+/**
+ * Strips ANSI escape sequences from a string.
+ * @param str The dastringa stringo strip the ANSI escape sequences from.
+ *
+ * @example
+ * removeAnsiEscapeCodes('\u001b[31mHello, World!\u001b[0m');
+ * // 'Hello, World!'
+ */
+export function removeAnsiEscapeCodes(str: string): string {
+    if (str) {
+        str = str.replace(CONTROL_SEQUENCES, '');
+    }
+
+    return str;
 }

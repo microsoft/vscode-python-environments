@@ -34,10 +34,10 @@ export namespace PackageManagement {
     export const commonPackages = l10n.t('Common Packages');
     export const selectPackagesToInstall = l10n.t('Select packages to install');
     export const enterPackageNames = l10n.t('Enter package names');
-    export const searchCommonPackages = l10n.t('Search common `PyPI` packages');
-    export const searchCommonPackagesDescription = l10n.t('Search and Install common `PyPI` packages');
-    export const workspaceDependencies = l10n.t('Install workspace dependencies');
-    export const workspaceDependenciesDescription = l10n.t('Install dependencies found in the current workspace.');
+    export const searchCommonPackages = l10n.t('Search `PyPI` packages');
+    export const searchCommonPackagesDescription = l10n.t('Search and install popular `PyPI` packages');
+    export const workspaceDependencies = l10n.t('Install project dependencies');
+    export const workspaceDependenciesDescription = l10n.t('Install packages found in dependency files.');
     export const selectPackagesToUninstall = l10n.t('Select packages to uninstall');
     export const enterPackagesPlaceHolder = l10n.t('Enter package names separated by space');
     export const editArguments = l10n.t('Edit arguments');
@@ -63,6 +63,13 @@ export namespace Pickers {
     export namespace Project {
         export const selectProject = l10n.t('Select a project, folder or script');
         export const selectProjects = l10n.t('Select one or more projects, folders or scripts');
+    }
+
+    export namespace pyProject {
+        export const validationErrorAction = l10n.t(' What would you like to do?');
+        export const openFile = l10n.t('Open pyproject.toml');
+        export const continueAnyway = l10n.t('Continue Anyway');
+        export const cancel = l10n.t('Cancel');
     }
 }
 
@@ -90,12 +97,14 @@ export namespace VenvManagerStrings {
     export const venvName = l10n.t('Enter a name for the virtual environment');
     export const venvNameErrorEmpty = l10n.t('Name cannot be empty');
     export const venvNameErrorExists = l10n.t('A folder with the same name already exists');
-
-    export const venvCreating = l10n.t('Creating virtual environment');
     export const venvCreateFailed = l10n.t('Failed to create virtual environment');
 
     export const venvRemoving = l10n.t('Removing virtual environment');
     export const venvRemoveFailed = l10n.t('Failed to remove virtual environment');
+    export const venvRemoveInvalidPath = l10n.t(
+        'Cannot remove: path does not appear to be a valid virtual environment',
+    );
+    export const venvRemoveUnsafePath = l10n.t('Cannot remove: path appears to be a system or root directory');
 
     export const installEditable = l10n.t('Install project as editable');
     export const searchingDependencies = l10n.t('Searching for dependencies');
@@ -152,6 +161,24 @@ export namespace CondaStrings {
     );
 }
 
+export namespace PyenvStrings {
+    export const pyenvManager = l10n.t('Manages Pyenv Python versions');
+    export const pyenvDiscovering = l10n.t('Discovering Pyenv Python versions');
+    export const pyenvRefreshing = l10n.t('Refreshing Pyenv Python versions');
+}
+
+export namespace PipenvStrings {
+    export const pipenvManager = l10n.t('Manages Pipenv environments');
+    export const pipenvDiscovering = l10n.t('Discovering Pipenv environments');
+    export const pipenvRefreshing = l10n.t('Refreshing Pipenv environments');
+}
+
+export namespace PoetryStrings {
+    export const poetryManager = l10n.t('Manages Poetry environments');
+    export const poetryDiscovering = l10n.t('Discovering Poetry environments');
+    export const poetryRefreshing = l10n.t('Refreshing Poetry environments');
+}
+
 export namespace ProjectCreatorString {
     export const addExistingProjects = l10n.t('Add Existing Projects');
     export const autoFindProjects = l10n.t('Auto Find Projects');
@@ -166,7 +193,7 @@ export namespace ProjectCreatorString {
 
 export namespace EnvViewStrings {
     export const selectedGlobalTooltip = l10n.t('This environment is selected for non-workspace files');
-    export const selectedWorkspaceTooltip = l10n.t('This environment is selected for workspace files');
+    export const selectedWorkspaceTooltip = l10n.t('This environment is selected for project files');
 }
 
 export namespace ActivationStrings {

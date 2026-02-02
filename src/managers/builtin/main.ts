@@ -1,24 +1,22 @@
 import { Disposable, LogOutputChannel } from 'vscode';
 import { PythonEnvironmentApi } from '../../api';
-import { SysPythonManager } from './sysPythonManager';
-import { PipPackageManager } from './pipManager';
-import { VenvManager } from './venvManager';
-import { getPythonApi } from '../../features/pythonApi';
-import { NativePythonFinder } from '../common/nativePythonFinder';
-import { UvProjectCreator } from './uvProjectCreator';
-import { isUvInstalled } from './helpers';
-import { createFileSystemWatcher, onDidDeleteFiles } from '../../common/workspace.apis';
 import { createSimpleDebounce } from '../../common/utils/debounce';
 import { onDidEndTerminalShellExecution } from '../../common/window.apis';
+import { createFileSystemWatcher, onDidDeleteFiles } from '../../common/workspace.apis';
+import { getPythonApi } from '../../features/pythonApi';
+import { NativePythonFinder } from '../common/nativePythonFinder';
+import { PipPackageManager } from './pipManager';
 import { isPipInstallCommand } from './pipUtils';
+import { SysPythonManager } from './sysPythonManager';
+import { VenvManager } from './venvManager';
 
 export async function registerSystemPythonFeatures(
     nativeFinder: NativePythonFinder,
     disposables: Disposable[],
     log: LogOutputChannel,
+    envManager: SysPythonManager,
 ): Promise<void> {
     const api: PythonEnvironmentApi = await getPythonApi();
-    const envManager = new SysPythonManager(nativeFinder, api, log);
     const venvManager = new VenvManager(nativeFinder, api, envManager, log);
     const pkgManager = new PipPackageManager(api, log, venvManager);
 
@@ -31,7 +29,7 @@ export async function registerSystemPythonFeatures(
     const venvDebouncedRefresh = createSimpleDebounce(500, () => {
         venvManager.watcherRefresh();
     });
-    const watcher = createFileSystemWatcher('{**/pyenv.cfg,**/bin/python,**/python.exe}', false, true, false);
+    const watcher = createFileSystemWatcher('{**/activate}', false, true, false);
     disposables.push(
         watcher,
         watcher.onDidCreate(() => {
@@ -56,10 +54,4 @@ export async function registerSystemPythonFeatures(
             }
         }),
     );
-
-    setImmediate(async () => {
-        if (await isUvInstalled(log)) {
-            disposables.push(api.registerPythonProjectCreator(new UvProjectCreator(api, log)));
-        }
-    });
 }

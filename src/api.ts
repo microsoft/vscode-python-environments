@@ -379,7 +379,7 @@ export interface EnvironmentManager {
     quickCreateConfig?(): QuickCreateConfig | undefined;
 
     /**
-     * Creates a new Python environment within the specified scope.
+     * Creates a new Python environment within the specified scope. Create should support adding a .gitignore file if it creates a folder within the workspace. If a manager does not support environment creation, do not implement this method; the UI disables "create" options when `this.manager.create === undefined`.
      * @param scope - The scope within which to create the environment.
      * @param options - Optional parameters for creating the Python environment.
      * @returns A promise that resolves to the created Python environment, or undefined if creation failed.
@@ -650,11 +650,6 @@ export interface PythonProject {
      * The tooltip for the Python project, which can be a string or a Markdown string.
      */
     readonly tooltip?: string | MarkdownString;
-
-    /**
-     * The icon path for the Python project, which can be a string, Uri, or an object with light and dark theme paths.
-     */
-    readonly iconPath?: IconPath;
 }
 
 /**
@@ -700,11 +695,6 @@ export interface PythonProjectCreator {
      * The tooltip for the Python project creator, which can be a string or a Markdown string.
      */
     readonly tooltip?: string | MarkdownString;
-
-    /**
-     * The icon path for the Python project creator, which can be a string, Uri, or an object with light and dark theme paths.
-     */
-    readonly iconPath?: IconPath;
 
     /**
      * Creates a new Python project(s) or, if files are not a project, returns Uri(s) to the created files.
@@ -1233,7 +1223,7 @@ export interface DidChangeEnvironmentVariablesEventArgs {
     /**
      * The type of change that occurred.
      */
-    changeTye: FileChangeType;
+    changeType: FileChangeType;
 }
 
 export interface PythonEnvironmentVariablesApi {
@@ -1247,12 +1237,13 @@ export interface PythonEnvironmentVariablesApi {
      * 3. `.env` file at the root of the python project.
      * 4. `overrides` in the order provided.
      *
-     * @param uri The URI of the project, workspace or a file in a for which environment variables are required.
+     * @param uri The URI of the project, workspace or a file in a for which environment variables are required.If not provided,
+     * it fetches the environment variables for the global scope.
      * @param overrides Additional environment variables to override the defaults.
      * @param baseEnvVar The base environment variables that should be used as a starting point.
      */
     getEnvironmentVariables(
-        uri: Uri,
+        uri: Uri | undefined,
         overrides?: ({ [key: string]: string | undefined } | Uri)[],
         baseEnvVar?: { [key: string]: string | undefined },
     ): Promise<{ [key: string]: string | undefined }>;

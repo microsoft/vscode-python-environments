@@ -49,6 +49,14 @@ export function onDidChangeTerminalShellIntegration(
     return window.onDidChangeTerminalShellIntegration(listener, thisArgs, disposables);
 }
 
+export function onDidWriteTerminalData(
+    listener: (e: { readonly terminal: Terminal; readonly data: string }) => any,
+    thisArgs?: any,
+    disposables?: Disposable[],
+): Disposable {
+    return window.onDidWriteTerminalData(listener, thisArgs, disposables);
+}
+
 export function showOpenDialog(options?: OpenDialogOptions): Thenable<Uri[] | undefined> {
     return window.showOpenDialog(options);
 }
@@ -59,6 +67,10 @@ export function terminals(): readonly Terminal[] {
 
 export function activeTerminal(): Terminal | undefined {
     return window.activeTerminal;
+}
+
+export function activeTerminalShellIntegration() {
+    return window.activeTerminal?.shellIntegration;
 }
 
 export function activeTextEditor(): TextEditor | undefined {
@@ -255,8 +267,17 @@ export async function showInputBoxWithButtons(
                 inputBox.hide();
             }
         }),
-        inputBox.onDidAccept(() => {
+        inputBox.onDidAccept(async () => {
             if (!deferred.completed) {
+                let isValid = true;
+                if (options?.validateInput) {
+                    const validation = await options.validateInput(inputBox.value);
+                    isValid = validation === null || validation === undefined;
+                    if (!isValid) {
+                        inputBox.validationMessage = typeof validation === 'string' ? validation : 'Invalid input';
+                        return; // Do not resolve, keep the input box open
+                    }
+                }
                 deferred.resolve(inputBox.value);
                 inputBox.hide();
             }

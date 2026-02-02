@@ -1,5 +1,6 @@
 import { PythonCommandRunConfiguration, PythonEnvironment } from '../../../../api';
 import { isWindows } from '../../../../common/utils/platformUtils';
+import { getConfiguration } from '../../../../common/workspace.apis';
 import { ShellConstants } from '../../../common/shellConstants';
 import { quoteArgs } from '../../../execution/execUtils';
 
@@ -10,6 +11,9 @@ function getCommandAsString(command: PythonCommandRunConfiguration[], shell: str
         parts.push(quoteArgs([normalizeShellPath(cmd.executable, shell), ...args]).join(' '));
     }
     if (shell === ShellConstants.PWSH) {
+        if (parts.length === 1) {
+            return parts[0];
+        }
         return parts.map((p) => `(${p})`).join(` ${delimiter} `);
     }
     return parts.join(` ${delimiter} `);
@@ -91,4 +95,56 @@ export function extractProfilePath(content: string): string | undefined {
         return extractedPath;
     }
     return undefined;
+}
+
+export function isWsl(): boolean {
+    // WSL sets these environment variables
+    return !!(process.env.WSL_DISTRO_NAME || process.env.WSL_INTEROP || process.env.WSLENV);
+}
+
+export async function getShellIntegrationEnabledCache(): Promise<boolean> {
+    const shellIntegrationInspect =
+        getConfiguration('terminal.integrated').inspect<boolean>('shellIntegration.enabled');
+
+    let shellIntegrationEnabled = true;
+    if (shellIntegrationInspect) {
+        // Priority: workspaceFolder > workspace > globalRemoteValue > globalLocalValue > global > default
+        const inspectValue = shellIntegrationInspect as Record<string, unknown>;
+
+        if (shellIntegrationInspect.workspaceFolderValue !== undefined) {
+            shellIntegrationEnabled = shellIntegrationInspect.workspaceFolderValue;
+        } else if (shellIntegrationInspect.workspaceValue !== undefined) {
+            shellIntegrationEnabled = shellIntegrationInspect.workspaceValue;
+        } else if ('globalRemoteValue' in shellIntegrationInspect && inspectValue.globalRemoteValue !== undefined) {
+            shellIntegrationEnabled = inspectValue.globalRemoteValue as boolean;
+        } else if ('globalLocalValue' in shellIntegrationInspect && inspectValue.globalLocalValue !== undefined) {
+            shellIntegrationEnabled = inspectValue.globalLocalValue as boolean;
+        } else if (shellIntegrationInspect.globalValue !== undefined) {
+            shellIntegrationEnabled = shellIntegrationInspect.globalValue;
+        } else if (shellIntegrationInspect.defaultValue !== undefined) {
+            shellIntegrationEnabled = shellIntegrationInspect.defaultValue;
+        }
+    }
+
+    return shellIntegrationEnabled;
+}
+
+// Shells that support shell integration way of environment activation.
+// CMD is not listed here, but we still want to support activation via profile modification.
+export const shellIntegrationSupportedShells = [
+    ShellConstants.PWSH,
+    ShellConstants.BASH,
+    ShellConstants.GITBASH,
+    ShellConstants.FISH,
+    ShellConstants.ZSH,
+];
+
+/**
+ * Determines whether profile-based activation should be used instead of shell integration.
+ * Profile activation is preferred when:
+ * - Running in WSL
+ * - The shell type doesn't support shell integration (e.g., cmd)
+ */
+export function shouldUseProfileActivation(shellType: string): boolean {
+    return isWsl() || !shellIntegrationSupportedShells.includes(shellType);
 }

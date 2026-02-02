@@ -1,12 +1,14 @@
-import { Uri, ThemeIcon, QuickPickItem, QuickPickItemKind, ProgressLocation, QuickInputButtons } from 'vscode';
-import { IconPath, PythonEnvironment, PythonProject } from '../../api';
+import { ProgressLocation, QuickInputButtons, QuickPickItem, QuickPickItemKind, ThemeIcon, Uri } from 'vscode';
+import { CreateEnvironmentOptions, IconPath, PythonEnvironment, PythonProject } from '../../api';
 import { InternalEnvironmentManager } from '../../internal.api';
 import { Common, Interpreter, Pickers } from '../localize';
-import { showQuickPickWithButtons, showQuickPick, showOpenDialog, withProgress } from '../window.apis';
 import { traceError } from '../logging';
-import { pickEnvironmentManager } from './managers';
-import { handlePythonPath } from '../utils/pythonPath';
+import { EventNames } from '../telemetry/constants';
+import { sendTelemetryEvent } from '../telemetry/sender';
 import { isWindows } from '../utils/platformUtils';
+import { handlePythonPath } from '../utils/pythonPath';
+import { showOpenDialog, showQuickPick, showQuickPickWithButtons, withProgress } from '../window.apis';
+import { pickEnvironmentManager } from './managers';
 
 type QuickPickIcon =
     | Uri
@@ -77,12 +79,24 @@ async function createEnvironment(
         projectEnvManagers.filter((m) => m.supportsCreate),
     );
 
-    const manager = managers.find((m) => m.id === managerId);
+    let manager: InternalEnvironmentManager | undefined;
+    let createOptions: CreateEnvironmentOptions | undefined = undefined;
+    if (managerId?.includes(`QuickCreate#`)) {
+        manager = managers.find((m) => m.id === managerId.split('#')[1]);
+        createOptions = {
+            projects: projectEnvManagers.map((m) => m),
+            quickCreate: true,
+        } as CreateEnvironmentOptions;
+    } else {
+        manager = managers.find((m) => m.id === managerId);
+    }
+
     if (manager) {
         try {
+            // add telemetry here
             const env = await manager.create(
                 options.projects.map((p) => p.uri),
-                undefined,
+                createOptions,
             );
             return env;
         } catch (ex) {
@@ -111,6 +125,10 @@ async function pickEnvironmentImpl(
         if (selected.label === Interpreter.browsePath) {
             return browseForPython(managers, projectEnvManagers);
         } else if (selected.label === Interpreter.createVirtualEnvironment) {
+            sendTelemetryEvent(EventNames.CREATE_ENVIRONMENT, undefined, {
+                manager: 'none',
+                triggeredLocation: 'pickEnv',
+            });
             return createEnvironment(managers, projectEnvManagers, options);
         }
         return (selected as { result: PythonEnvironment })?.result;
@@ -139,6 +157,12 @@ export async function pickEnvironment(
     ];
 
     if (options?.recommended) {
+        const pathDescription = options.recommended.displayPath;
+        const description =
+            options.recommended.description && options.recommended.description.trim()
+                ? `${options.recommended.description} (${pathDescription})`
+                : pathDescription;
+
         items.push(
             {
                 label: Common.recommended,
@@ -146,7 +170,7 @@ export async function pickEnvironment(
             },
             {
                 label: options.recommended.displayName,
-                description: options.recommended.description,
+                description: description,
                 result: options.recommended,
                 iconPath: getIconPath(options.recommended.iconPath),
             },
@@ -161,9 +185,13 @@ export async function pickEnvironment(
         const envs = await manager.getEnvironments('all');
         items.push(
             ...envs.map((e) => {
+                const pathDescription = e.displayPath;
+                const description =
+                    e.description && e.description.trim() ? `${e.description} (${pathDescription})` : pathDescription;
+
                 return {
                     label: e.displayName ?? e.name,
-                    description: e.description,
+                    description: description,
                     result: e,
                     manager: manager,
                     iconPath: getIconPath(e.iconPath),
@@ -176,12 +204,18 @@ export async function pickEnvironment(
 }
 
 export async function pickEnvironmentFrom(environments: PythonEnvironment[]): Promise<PythonEnvironment | undefined> {
-    const items = environments.map((e) => ({
-        label: e.displayName ?? e.name,
-        description: e.description,
-        e: e,
-        iconPath: getIconPath(e.iconPath),
-    }));
+    const items = environments.map((e) => {
+        const pathDescription = e.displayPath;
+        const description =
+            e.description && e.description.trim() ? `${e.description} (${pathDescription})` : pathDescription;
+
+        return {
+            label: e.displayName ?? e.name,
+            description: description,
+            e: e,
+            iconPath: getIconPath(e.iconPath),
+        };
+    });
     const selected = await showQuickPick(items, {
         placeHolder: Pickers.Environments.selectEnvironment,
         ignoreFocusOut: true,

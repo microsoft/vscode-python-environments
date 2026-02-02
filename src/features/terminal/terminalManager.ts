@@ -5,6 +5,7 @@ import { PythonEnvironment, PythonEnvironmentApi, PythonProject, PythonTerminalC
 import { ActivationStrings } from '../../common/localize';
 import { traceInfo, traceVerbose } from '../../common/logging';
 import {
+    activeTerminal,
     createTerminal,
     onDidChangeWindowState,
     onDidCloseTerminal,
@@ -16,6 +17,7 @@ import { getConfiguration, onDidChangeConfiguration } from '../../common/workspa
 import { isActivatableEnvironment } from '../common/activation';
 import { identifyTerminalShell } from '../common/shellDetector';
 import { getPythonApi } from '../pythonApi';
+import { getShellIntegrationEnabledCache, isWsl, shouldUseProfileActivation } from './shells/common/shellUtils';
 import { ShellEnvsProvider, ShellSetupState, ShellStartupScriptProvider } from './shells/startupProvider';
 import { handleSettingUpShellProfile } from './shellStartupSetupHandlers';
 import {
@@ -128,8 +130,9 @@ export class TerminalManagerImpl implements TerminalManager {
                             await this.handleSetupCheck(shells);
                         }
                     } else {
-                        traceVerbose(`Auto activation type changed to ${actType}`);
-                        this.shellSetup.clear();
+                        traceVerbose(
+                            `Auto activation type changed to ${actType}, not tearing down shell startup scripts on activation type switch; scripts are only removed via explicit revert.`,
+                        );
                     }
                 }
             }),
@@ -146,16 +149,37 @@ export class TerminalManagerImpl implements TerminalManager {
             const shellsToSetup: ShellStartupScriptProvider[] = [];
             await Promise.all(
                 providers.map(async (p) => {
-                    if (this.shellSetup.has(p.shellType)) {
-                        traceVerbose(`Shell profile for ${p.shellType} already checked.`);
-                        return;
-                    }
-                    traceVerbose(`Checking shell profile for ${p.shellType}.`);
                     const state = await p.isSetup();
+                    // TODO: Consider removing setting check as it won't be as accurate to check
+                    // whether injection actually succeeded.
+                    // Perhaps use caching instead to avoid waiting.
+                    const shellIntegrationEnabledSetting = await getShellIntegrationEnabledCache();
+                    const shellIntegrationActiveTerminal = await waitForShellIntegration(activeTerminal());
+                    const shellIntegrationLikelyAvailable =
+                        shellIntegrationEnabledSetting || shellIntegrationActiveTerminal;
+                    traceVerbose(`Checking shell profile for ${p.shellType}, with state: ${state}`);
+
                     if (state === ShellSetupState.NotSetup) {
-                        this.shellSetup.set(p.shellType, false);
-                        shellsToSetup.push(p);
-                        traceVerbose(`Shell profile for ${p.shellType} is not setup.`);
+                        traceVerbose(
+                            `WSL detected: ${isWsl()}, Shell integration available from setting, or active terminal: ${shellIntegrationEnabledSetting}, or ${shellIntegrationActiveTerminal}`,
+                        );
+
+                        if (shellIntegrationLikelyAvailable && !shouldUseProfileActivation(p.shellType)) {
+                            // Shell integration available and NOT in WSL - skip setup.
+                            // NOTE: We intentionally do NOT teardown scripts here. If the user stays in
+                            // shellStartup mode, be less aggressive about clearing profile modifications.
+                            this.shellSetup.set(p.shellType, true);
+                            traceVerbose(
+                                `Shell integration likely available. Skipping setup of shell profile for ${p.shellType}.`,
+                            );
+                        } else {
+                            // WSL (regardless of integration) OR no/disabled shell integration - needs setup
+                            this.shellSetup.set(p.shellType, false);
+                            shellsToSetup.push(p);
+                            traceVerbose(
+                                `Shell integration is NOT available or disabled. Shell profile for ${p.shellType} is not setup.`,
+                            );
+                        }
                     } else if (state === ShellSetupState.Setup) {
                         this.shellSetup.set(p.shellType, true);
                         traceVerbose(`Shell profile for ${p.shellType} is setup.`);
@@ -216,6 +240,7 @@ export class TerminalManagerImpl implements TerminalManager {
         let actType = getAutoActivationType();
         const shellType = identifyTerminalShell(terminal);
         if (actType === ACT_TYPE_SHELL) {
+            await this.handleSetupCheck(shellType);
             actType = await this.getEffectiveActivationType(shellType);
         }
 
@@ -240,6 +265,12 @@ export class TerminalManagerImpl implements TerminalManager {
             traceInfo(
                 `"python-envs.terminal.autoActivationType" is set to "${actType}", terminal should be activated by shell startup script`,
             );
+            // If the shell is already set up (shellSetup.get(...) === true) then we can safely mark it activated so
+            // that the UI button shows the correct Deactivate option.
+            let isSetup = this.shellSetup.get(shellType);
+            if (isSetup && isActivatableEnvironment(environment) && !this.isActivated(terminal, environment)) {
+                this.ta.updateActivationState(terminal, environment, true);
+            }
         }
     }
 
@@ -262,18 +293,8 @@ export class TerminalManagerImpl implements TerminalManager {
         // https://github.com/microsoft/vscode-python-environments/issues/172
         // const name = options.name ?? `Python: ${environment.displayName}`;
         const newTerminal = createTerminal({
-            name: options.name,
-            shellPath: options.shellPath,
-            shellArgs: options.shellArgs,
-            cwd: options.cwd,
+            ...options,
             env: envVars,
-            strictEnv: options.strictEnv,
-            message: options.message,
-            iconPath: options.iconPath,
-            hideFromUser: options.hideFromUser,
-            color: options.color,
-            location: options.location,
-            isTransient: options.isTransient,
         });
 
         if (autoActType === ACT_TYPE_COMMAND) {
@@ -285,6 +306,11 @@ export class TerminalManagerImpl implements TerminalManager {
             // We add it to skip activation on open to prevent double activation.
             // We can activate it ourselves since we are creating it.
             this.skipActivationOnOpen.add(newTerminal);
+
+            // Show terminal before activation so users can see the activation happening, requested script running.
+            // Necessary for scenarios such as when terminal is awaiting user input, etc.
+            newTerminal.show();
+
             await this.autoActivateOnTerminalOpen(newTerminal, environment);
         }
 

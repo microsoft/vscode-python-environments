@@ -7,10 +7,11 @@ import {
     WorkspaceConfiguration,
     WorkspaceFolder,
 } from 'vscode';
-import { PythonProjectManager, PythonProjectSettings } from '../../internal.api';
-import { traceError, traceInfo } from '../../common/logging';
 import { PythonProject } from '../../api';
 import { DEFAULT_ENV_MANAGER_ID, DEFAULT_PACKAGE_MANAGER_ID } from '../../common/constants';
+import { traceError, traceInfo, traceWarn } from '../../common/logging';
+import { getConfiguration, getWorkspaceFile, getWorkspaceFolders } from '../../common/workspace.apis';
+import { PythonProjectManager, PythonProjectSettings } from '../../internal.api';
 
 function getSettings(
     wm: PythonProjectManager,
@@ -30,17 +31,34 @@ function getSettings(
     return undefined;
 }
 
+let DEFAULT_ENV_MANAGER_BROKEN = false;
+let hasShownDefaultEnvManagerBrokenWarn = false;
+
+export function setDefaultEnvManagerBroken(broken: boolean) {
+    DEFAULT_ENV_MANAGER_BROKEN = broken;
+}
+export function isDefaultEnvManagerBroken(): boolean {
+    return DEFAULT_ENV_MANAGER_BROKEN;
+}
+
 export function getDefaultEnvManagerSetting(wm: PythonProjectManager, scope?: Uri): string {
-    const config = workspace.getConfiguration('python-envs', scope);
+    const config = getConfiguration('python-envs', scope);
     const settings = getSettings(wm, config, scope);
     if (settings && settings.envManager.length > 0) {
         return settings.envManager;
     }
-
+    // Only show the warning once per session
+    if (isDefaultEnvManagerBroken()) {
+        if (!hasShownDefaultEnvManagerBrokenWarn) {
+            traceWarn(`Default environment manager is broken, using system default: ${DEFAULT_ENV_MANAGER_ID}`);
+            hasShownDefaultEnvManagerBrokenWarn = true;
+        }
+        return DEFAULT_ENV_MANAGER_ID;
+    }
     const defaultManager = config.get<string>('defaultEnvManager');
     if (defaultManager === undefined || defaultManager === null || defaultManager === '') {
         traceError('No default environment manager set. Check setting python-envs.defaultEnvManager');
-        traceInfo(`Using system default package manager: ${DEFAULT_ENV_MANAGER_ID}`);
+        traceWarn(`Using system default package manager: ${DEFAULT_ENV_MANAGER_ID}`);
         return DEFAULT_ENV_MANAGER_ID;
     }
     return defaultManager;
@@ -51,7 +69,7 @@ export function getDefaultPkgManagerSetting(
     scope?: ConfigurationScope | null,
     defaultId?: string,
 ): string {
-    const config = workspace.getConfiguration('python-envs', scope);
+    const config = getConfiguration('python-envs', scope);
 
     const settings = getSettings(wm, config, scope);
     if (settings && settings.packageManager.length > 0) {
@@ -105,39 +123,96 @@ export async function setAllManagerSettings(edits: EditAllManagerSettings[]): Pr
         }
     });
 
+    const workspaceFile = getWorkspaceFile();
     const promises: Thenable<void>[] = [];
 
     workspaces.forEach((es, w) => {
-        const config = workspace.getConfiguration('python-envs', w);
+        const config = getConfiguration('python-envs', w);
         const overrides = config.get<PythonProjectSettings[]>('pythonProjects', []);
+        const projectsInspect = config.inspect<PythonProjectSettings[]>('pythonProjects');
+        const existingProjectsSetting =
+            projectsInspect?.workspaceFolderValue ?? projectsInspect?.workspaceValue ?? undefined;
+        const originalOverridesLength = overrides.length;
+
         es.forEach((e) => {
             const pwPath = path.normalize(e.project.uri.fsPath);
             const index = overrides.findIndex((s) => path.resolve(w.uri.fsPath, s.path) === pwPath);
             if (index >= 0) {
                 overrides[index].envManager = e.envManager;
                 overrides[index].packageManager = e.packageManager;
+            } else if (workspaceFile) {
+                overrides.push({
+                    path: path.relative(w.uri.fsPath, pwPath).replace(/\\/g, '/'),
+                    envManager: e.envManager,
+                    packageManager: e.packageManager,
+                });
             } else {
-                if (config.get('defaultEnvManager') !== e.envManager) {
+                // Only write settings if:
+                // 1. There's already an explicit setting (we're updating it), OR
+                // 2. The new value is not the implicit fallback (system manager is the fallback)
+                const isSystemManager = e.envManager === 'ms-python.python:system';
+                const envManagerInspect = config.inspect<string>('defaultEnvManager');
+                const hasExplicitEnvManager =
+                    envManagerInspect?.workspaceFolderValue !== undefined ||
+                    envManagerInspect?.workspaceValue !== undefined;
+
+                // Write if changing an existing setting, OR if setting to non-system manager
+                if ((hasExplicitEnvManager || !isSystemManager) && config.get('defaultEnvManager') !== e.envManager) {
                     promises.push(config.update('defaultEnvManager', e.envManager, ConfigurationTarget.Workspace));
                 }
-                if (config.get('defaultPackageManager') !== e.packageManager) {
+
+                const pkgManagerInspect = config.inspect<string>('defaultPackageManager');
+                const hasExplicitPkgManager =
+                    pkgManagerInspect?.workspaceFolderValue !== undefined ||
+                    pkgManagerInspect?.workspaceValue !== undefined;
+                // For package manager, write if there's an explicit setting OR if env manager is being written
+                if (
+                    (hasExplicitPkgManager || !isSystemManager) &&
+                    config.get('defaultPackageManager') !== e.packageManager
+                ) {
                     promises.push(
                         config.update('defaultPackageManager', e.packageManager, ConfigurationTarget.Workspace),
                     );
                 }
             }
         });
-        promises.push(config.update('pythonProjects', overrides, ConfigurationTarget.Workspace));
+
+        // Only write pythonProjects if:
+        // 1. There was already an explicit setting  OR
+        // 2. adding new project entries
+        const shouldWriteProjects = existingProjectsSetting !== undefined || overrides.length > originalOverridesLength;
+        if (shouldWriteProjects) {
+            promises.push(
+                config.update(
+                    'pythonProjects',
+                    overrides,
+                    workspaceFile ? ConfigurationTarget.WorkspaceFolder : ConfigurationTarget.Workspace,
+                ),
+            );
+        }
     });
 
-    const config = workspace.getConfiguration('python-envs', undefined);
+    const config = getConfiguration('python-envs', undefined);
     edits
         .filter((e) => !e.project)
         .forEach((e) => {
-            if (config.get('defaultEnvManager') !== e.envManager) {
+            // Only write global settings if:
+            // 1. There's already an explicit global setting (we're updating it), OR
+            // 2. The new value is not the implicit fallback (system manager)
+            const isSystemManager = e.envManager === 'ms-python.python:system';
+            const envManagerInspect = config.inspect<string>('defaultEnvManager');
+            const hasExplicitGlobalEnvManager = envManagerInspect?.globalValue !== undefined;
+
+            if ((hasExplicitGlobalEnvManager || !isSystemManager) && config.get('defaultEnvManager') !== e.envManager) {
                 promises.push(config.update('defaultEnvManager', e.envManager, ConfigurationTarget.Global));
             }
-            if (config.get('defaultPackageManager') !== e.packageManager) {
+
+            const pkgManagerInspect = config.inspect<string>('defaultPackageManager');
+            const hasExplicitGlobalPkgManager = pkgManagerInspect?.globalValue !== undefined;
+            if (
+                (hasExplicitGlobalPkgManager || !isSystemManager) &&
+                config.get('defaultPackageManager') !== e.packageManager
+            ) {
                 promises.push(config.update('defaultPackageManager', e.packageManager, ConfigurationTarget.Global));
             }
         });
@@ -178,25 +253,47 @@ export async function setEnvironmentManager(edits: EditEnvManagerSettings[]): Pr
     const promises: Thenable<void>[] = [];
 
     workspaces.forEach((es, w) => {
-        const config = workspace.getConfiguration('python-envs', w.uri);
+        const config = getConfiguration('python-envs', w.uri);
         const overrides = config.get<PythonProjectSettings[]>('pythonProjects', []);
+        const projectsInspect = config.inspect<PythonProjectSettings[]>('pythonProjects');
+        const existingProjectsSetting = projectsInspect?.workspaceValue ?? undefined;
+        const originalOverridesLength = overrides.length;
+        let projectsModified = false;
+
         es.forEach((e) => {
             const pwPath = path.normalize(e.project.uri.fsPath);
             const index = overrides.findIndex((s) => path.resolve(w.uri.fsPath, s.path) === pwPath);
             if (index >= 0) {
                 overrides[index].envManager = e.envManager;
-            } else if (config.get('defaultEnvManager') !== e.envManager) {
-                promises.push(config.update('defaultEnvManager', e.envManager, ConfigurationTarget.Workspace));
+                projectsModified = true;
+            } else {
+                // Only write settings if updating existing OR setting non-system manager
+                const isSystemManager = e.envManager === 'ms-python.python:system';
+                const envManagerInspect = config.inspect<string>('defaultEnvManager');
+                const hasExplicitEnvManager = envManagerInspect?.workspaceValue !== undefined;
+                if ((hasExplicitEnvManager || !isSystemManager) && config.get('defaultEnvManager') !== e.envManager) {
+                    promises.push(config.update('defaultEnvManager', e.envManager, ConfigurationTarget.Workspace));
+                }
             }
         });
-        promises.push(config.update('pythonProjects', overrides, ConfigurationTarget.Workspace));
+
+        // Only write pythonProjects if there was an explicit setting or we modified entries
+        const shouldWriteProjects =
+            existingProjectsSetting !== undefined || overrides.length > originalOverridesLength || projectsModified;
+        if (shouldWriteProjects) {
+            promises.push(config.update('pythonProjects', overrides, ConfigurationTarget.Workspace));
+        }
     });
 
-    const config = workspace.getConfiguration('python-envs', undefined);
+    const config = getConfiguration('python-envs', undefined);
     edits
         .filter((e) => !e.project)
         .forEach((e) => {
-            if (config.get('defaultEnvManager') !== e.envManager) {
+            // Only write global settings if updating existing OR setting non-system manager
+            const isSystemManager = e.envManager === 'ms-python.python:system';
+            const envManagerInspect = config.inspect<string>('defaultEnvManager');
+            const hasExplicitGlobalEnvManager = envManagerInspect?.globalValue !== undefined;
+            if ((hasExplicitGlobalEnvManager || !isSystemManager) && config.get('defaultEnvManager') !== e.envManager) {
                 promises.push(config.update('defaultEnvManager', e.envManager, ConfigurationTarget.Global));
             }
         });
@@ -240,25 +337,55 @@ export async function setPackageManager(edits: EditPackageManagerSettings[]): Pr
     const promises: Thenable<void>[] = [];
 
     workspaces.forEach((es, w) => {
-        const config = workspace.getConfiguration('python-envs', w.uri);
+        const config = getConfiguration('python-envs', w.uri);
         const overrides = config.get<PythonProjectSettings[]>('pythonProjects', []);
+        const projectsInspect = config.inspect<PythonProjectSettings[]>('pythonProjects');
+        const existingProjectsSetting = projectsInspect?.workspaceValue ?? undefined;
+        const originalOverridesLength = overrides.length;
+        let projectsModified = false;
+
         es.forEach((e) => {
             const pwPath = path.normalize(e.project.uri.fsPath);
             const index = overrides.findIndex((s) => path.resolve(w.uri.fsPath, s.path) === pwPath);
             if (index >= 0) {
                 overrides[index].packageManager = e.packageManager;
-            } else if (config.get('defaultPackageManager') !== e.packageManager) {
-                promises.push(config.update('defaultPackageManager', e.packageManager, ConfigurationTarget.Workspace));
+                projectsModified = true;
+            } else {
+                // Only write settings if updating existing OR setting non-default package manager
+                const isPipManager = e.packageManager === 'ms-python.python:pip';
+                const pkgManagerInspect = config.inspect<string>('defaultPackageManager');
+                const hasExplicitPkgManager = pkgManagerInspect?.workspaceValue !== undefined;
+                if (
+                    (hasExplicitPkgManager || !isPipManager) &&
+                    config.get('defaultPackageManager') !== e.packageManager
+                ) {
+                    promises.push(
+                        config.update('defaultPackageManager', e.packageManager, ConfigurationTarget.Workspace),
+                    );
+                }
             }
         });
-        promises.push(config.update('pythonProjects', overrides, ConfigurationTarget.Workspace));
+
+        // Only write pythonProjects if there was an explicit setting or we modified entries
+        const shouldWriteProjects =
+            existingProjectsSetting !== undefined || overrides.length > originalOverridesLength || projectsModified;
+        if (shouldWriteProjects) {
+            promises.push(config.update('pythonProjects', overrides, ConfigurationTarget.Workspace));
+        }
     });
 
-    const config = workspace.getConfiguration('python-envs', undefined);
+    const config = getConfiguration('python-envs', undefined);
     edits
         .filter((e) => !e.project)
         .forEach((e) => {
-            if (config.get('defaultPackageManager') !== e.packageManager) {
+            // Only write global settings if updating existing OR setting non-default package manager
+            const isPipManager = e.packageManager === 'ms-python.python:pip';
+            const pkgManagerInspect = config.inspect<string>('defaultPackageManager');
+            const hasExplicitGlobalPkgManager = pkgManagerInspect?.globalValue !== undefined;
+            if (
+                (hasExplicitGlobalPkgManager || !isPipManager) &&
+                config.get('defaultPackageManager') !== e.packageManager
+            ) {
                 promises.push(config.update('defaultPackageManager', e.packageManager, ConfigurationTarget.Global));
             }
         });
@@ -270,12 +397,13 @@ export interface EditProjectSettings {
     project: PythonProject;
     envManager?: string;
     packageManager?: string;
+    workspace?: string;
 }
 
 export async function addPythonProjectSetting(edits: EditProjectSettings[]): Promise<void> {
     const noWorkspace: EditProjectSettings[] = [];
     const workspaces = new Map<WorkspaceFolder, EditProjectSettings[]>();
-    const globalConfig = workspace.getConfiguration('python-envs', undefined);
+    const globalConfig = getConfiguration('python-envs', undefined);
     const envManager = globalConfig.get<string>('defaultEnvManager', DEFAULT_ENV_MANAGER_ID);
     const pkgManager = globalConfig.get<string>('defaultPackageManager', DEFAULT_PACKAGE_MANAGER_ID);
 
@@ -292,13 +420,23 @@ export async function addPythonProjectSetting(edits: EditProjectSettings[]): Pro
         traceError(`Unable to find workspace for ${e.project.uri.fsPath}`);
     });
 
+    const isMultiroot = (getWorkspaceFolders() ?? []).length > 1;
+
     const promises: Thenable<void>[] = [];
     workspaces.forEach((es, w) => {
-        const config = workspace.getConfiguration('python-envs', w.uri);
+        const config = getConfiguration('python-envs', w.uri);
         const overrides = config.get<PythonProjectSettings[]>('pythonProjects', []);
         es.forEach((e) => {
+            if (isMultiroot) {
+            }
             const pwPath = path.normalize(e.project.uri.fsPath);
-            const index = overrides.findIndex((s) => path.resolve(w.uri.fsPath, s.path) === pwPath);
+            const index = overrides.findIndex((s) => {
+                if (s.workspace) {
+                    // If the workspace is set, check workspace and path in existing overrides
+                    return s.workspace === w.name && path.resolve(w.uri.fsPath, s.path) === pwPath;
+                }
+                return path.resolve(w.uri.fsPath, s.path) === pwPath;
+            });
             if (index >= 0) {
                 overrides[index].envManager = e.envManager ?? envManager;
                 overrides[index].packageManager = e.packageManager ?? pkgManager;
@@ -307,6 +445,7 @@ export async function addPythonProjectSetting(edits: EditProjectSettings[]): Pro
                     path: path.relative(w.uri.fsPath, pwPath).replace(/\\/g, '/'),
                     envManager,
                     packageManager: pkgManager,
+                    workspace: isMultiroot ? w.name : undefined,
                 });
             }
         });
@@ -333,7 +472,7 @@ export async function removePythonProjectSetting(edits: EditProjectSettings[]): 
 
     const promises: Thenable<void>[] = [];
     workspaces.forEach((es, w) => {
-        const config = workspace.getConfiguration('python-envs', w.uri);
+        const config = getConfiguration('python-envs', w.uri);
         const overrides = config.get<PythonProjectSettings[]>('pythonProjects', []);
         es.forEach((e) => {
             const pwPath = path.normalize(e.project.uri.fsPath);
@@ -349,4 +488,78 @@ export async function removePythonProjectSetting(edits: EditProjectSettings[]): 
         }
     });
     await Promise.all(promises);
+}
+
+/**
+ * Gets user-configured setting for window-scoped settings.
+ * Priority order: globalRemoteValue > globalLocalValue > globalValue
+ * @param section - The configuration section (e.g., 'python-envs')
+ * @param key - The configuration key (e.g., 'terminal.autoActivationType')
+ * @returns The user-configured value or undefined if not set by user
+ */
+export function getSettingWindowScope<T>(section: string, key: string): T | undefined {
+    const config = getConfiguration(section);
+    const inspect = config.inspect<T>(key);
+    if (!inspect) {
+        return undefined;
+    }
+
+    const inspectRecord = inspect as Record<string, unknown>;
+    if ('globalRemoteValue' in inspect && inspectRecord.globalRemoteValue !== undefined) {
+        return inspectRecord.globalRemoteValue as T;
+    }
+    if ('globalLocalValue' in inspect && inspectRecord.globalLocalValue !== undefined) {
+        return inspectRecord.globalLocalValue as T;
+    }
+    if (inspect.globalValue !== undefined) {
+        return inspect.globalValue;
+    }
+    return undefined;
+}
+
+/**
+ * Gets user-configured setting for workspace-scoped settings.
+ * Priority order: workspaceFolderValue > workspaceValue > globalValue
+ * @param section - The configuration section (e.g., 'python')
+ * @param key - The configuration key (e.g., 'pipenvPath')
+ * @param scope - Optional URI scope for workspace folder-specific settings
+ * @returns The user-configured value or undefined if not set by user
+ */
+export function getSettingWorkspaceScope<T>(section: string, key: string, scope?: Uri): T | undefined {
+    const config = getConfiguration(section, scope);
+    const inspect = config.inspect<T>(key);
+    if (!inspect) {
+        return undefined;
+    }
+
+    if (inspect.workspaceFolderValue !== undefined) {
+        return inspect.workspaceFolderValue;
+    }
+    if (inspect.workspaceValue !== undefined) {
+        return inspect.workspaceValue;
+    }
+    if (inspect.globalValue !== undefined) {
+        return inspect.globalValue;
+    }
+    return undefined;
+}
+
+/**
+ * Gets user-configured setting for user-scoped settings.
+ * Only checks globalValue (ignores defaultValue).
+ * @param section - The configuration section (e.g., 'python')
+ * @param key - The configuration key (e.g., 'pipenvPath')
+ * @returns The user-configured value or undefined if not set by user
+ */
+export function getSettingUserScope<T>(section: string, key: string): T | undefined {
+    const config = getConfiguration(section);
+    const inspect = config.inspect<T>(key);
+    if (!inspect) {
+        return undefined;
+    }
+
+    if (inspect.globalValue !== undefined) {
+        return inspect.globalValue;
+    }
+    return undefined;
 }

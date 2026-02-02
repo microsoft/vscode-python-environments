@@ -1,8 +1,11 @@
-import { QuickInputButtons, TaskExecution, TaskRevealKind, Terminal, Uri } from 'vscode';
+import * as fs from 'fs-extra';
+import * as path from 'path';
+import { commands, QuickInputButtons, TaskExecution, TaskRevealKind, Terminal, Uri, workspace } from 'vscode';
 import {
     CreateEnvironmentOptions,
     PythonEnvironment,
     PythonEnvironmentApi,
+    PythonProject,
     PythonProjectCreator,
     PythonProjectCreatorOptions,
 } from '../api';
@@ -19,10 +22,14 @@ import { removePythonProjectSetting, setEnvironmentManager, setPackageManager } 
 import { clipboardWriteText } from '../common/env.apis';
 import {} from '../common/errors/utils';
 import { pickEnvironment } from '../common/pickers/environments';
-import { pickCreator, pickEnvironmentManager, pickPackageManager } from '../common/pickers/managers';
+import {
+    pickCreator,
+    pickEnvironmentManager,
+    pickPackageManager,
+    pickWorkspaceFolder,
+} from '../common/pickers/managers';
 import { pickProject, pickProjectMany } from '../common/pickers/projects';
-import { activeTextEditor, showErrorMessage } from '../common/window.apis';
-import { quoteArgs } from './execution/execUtils';
+import { activeTextEditor, showErrorMessage, showInformationMessage } from '../common/window.apis';
 import { runAsTask } from './execution/runAsTask';
 import { runInTerminal } from './terminal/runInTerminal';
 import { TerminalManager } from './terminal/terminalManager';
@@ -30,12 +37,10 @@ import {
     EnvManagerTreeItem,
     EnvTreeItemKind,
     GlobalProjectItem,
-    PackageRootTreeItem,
     PackageTreeItem,
     ProjectEnvironment,
     ProjectItem,
     ProjectPackage,
-    ProjectPackageRootTreeItem,
     PythonEnvTreeItem,
 } from './views/treeViewItems';
 
@@ -48,20 +53,31 @@ export async function refreshManagerCommand(context: unknown): Promise<void> {
     }
 }
 
-export async function refreshPackagesCommand(context: unknown) {
-    if (context instanceof ProjectPackageRootTreeItem) {
-        const view = context as ProjectPackageRootTreeItem;
-        const manager = view.manager;
-        await manager.refresh(view.environment);
-    } else if (context instanceof PackageRootTreeItem) {
-        const view = context as PackageRootTreeItem;
-        const manager = view.manager;
-        await manager.refresh(view.environment);
+export async function refreshPackagesCommand(context: unknown, managers?: EnvironmentManagers): Promise<void> {
+    if (context instanceof ProjectEnvironment) {
+        const view = context as ProjectEnvironment;
+        if (managers) {
+            const pkgManager = managers.getPackageManager(view.parent.project.uri);
+            if (pkgManager) {
+                await pkgManager.refresh(view.environment);
+            }
+        }
+    } else if (context instanceof PythonEnvTreeItem) {
+        const view = context as PythonEnvTreeItem;
+        const envManager =
+            view.parent.kind === EnvTreeItemKind.environmentGroup ? view.parent.parent.manager : view.parent.manager;
+        const pkgManager = managers?.getPackageManager(envManager.preferredPackageManagerId);
+        if (pkgManager) {
+            await pkgManager.refresh(view.environment);
+        }
     } else {
         traceVerbose(`Invalid context for refresh command: ${context}`);
     }
 }
 
+/**
+ * Creates a Python environment using the manager implied by the context (no user prompt).
+ */
 export async function createEnvironmentCommand(
     context: unknown,
     em: EnvironmentManagers,
@@ -82,7 +98,7 @@ export async function createEnvironmentCommand(
                 const scope = selected.length === 0 ? 'global' : selected.map((p) => p.uri);
                 const env = await manager.create(scope, undefined);
                 if (env) {
-                    await em.setEnvironments(scope, env);
+                    await em.setEnvironmentsIfUnset(scope, env);
                 }
                 return env;
             } else {
@@ -102,13 +118,20 @@ export async function createEnvironmentCommand(
     }
 }
 
+/**
+ * Prompts the user to pick the environment manager and project(s) for environment creation.
+ */
 export async function createAnyEnvironmentCommand(
     em: EnvironmentManagers,
     pm: PythonProjectManager,
-    options?: CreateEnvironmentOptions & { selectEnvironment?: boolean; showBackButton?: boolean },
+    options?: CreateEnvironmentOptions & {
+        selectEnvironment?: boolean;
+        showBackButton?: boolean;
+        uri?: Uri;
+    },
 ): Promise<PythonEnvironment | undefined> {
     const select = options?.selectEnvironment;
-    const projects = pm.getProjects();
+    const projects = pm.getProjects(options?.uri ? [options?.uri] : undefined);
     if (projects.length === 0) {
         const managerId = await pickEnvironmentManager(em.managers.filter((m) => m.supportsCreate));
         const manager = em.managers.find((m) => m.id === managerId);
@@ -192,7 +215,7 @@ export async function removeEnvironmentCommand(context: unknown, managers: Envir
 export async function handlePackageUninstall(context: unknown, em: EnvironmentManagers) {
     if (context instanceof PackageTreeItem || context instanceof ProjectPackage) {
         const moduleName = context.pkg.name;
-        const environment = context.parent.environment;
+        const environment = context instanceof ProjectPackage ? context.parent.environment : context.parent.environment;
         const packageManager = em.getPackageManager(environment);
         await packageManager?.manage(environment, { uninstall: [moduleName], install: [] });
         return;
@@ -212,8 +235,8 @@ export async function setEnvironmentCommand(
             if (projects.length > 0) {
                 const selected = await pickProjectMany(projects);
                 if (selected && selected.length > 0) {
-                    const uris = selected.map((p) => p.uri);
-                    await em.setEnvironments(uris, view.environment);
+                    // Check if the selected environment is already the current one for each project
+                    await setEnvironmentForProjects(selected, context.environment, em);
                 }
             } else {
                 await em.setEnvironments('global', view.environment);
@@ -271,41 +294,46 @@ export async function setEnvironmentCommand(
         });
 
         if (selected) {
-            await em.setEnvironments(uris, selected);
+            // Use the same logic for checking already set environments
+            await setEnvironmentForProjects(projects, selected, em);
         }
     } else {
         traceError(`Invalid context for setting environment command: ${context}`);
         showErrorMessage('Invalid context for setting environment');
     }
 }
-
-export async function resetEnvironmentCommand(
-    context: unknown,
+/**
+ * Sets the environment for the given projects, showing a warning for those already set.
+ * @param selectedProjects Array of  PythonProject selected by user
+ * @param environment The environment to set for the projects
+ * @param em The EnvironmentManagers instance
+ */
+async function setEnvironmentForProjects(
+    selectedProjects: PythonProject[],
+    environment: PythonEnvironment,
     em: EnvironmentManagers,
-    wm: PythonProjectManager,
-): Promise<void> {
-    if (context instanceof ProjectItem) {
-        const view = context as ProjectItem;
-        return resetEnvironmentCommand(view.project.uri, em, wm);
-    } else if (context instanceof Uri) {
-        const uri = context as Uri;
-        const manager = em.getEnvironmentManager(uri);
-        if (manager) {
-            manager.set(uri, undefined);
-        } else {
-            showErrorMessage(`No environment manager found for: ${uri.fsPath}`);
-            traceError(`No environment manager found for ${uri.fsPath}`);
+) {
+    let alreadySet: PythonProject[] = [];
+    for (const p of selectedProjects) {
+        const currentEnv = await em.getEnvironment(p.uri);
+        if (currentEnv?.envId.id === environment.envId.id) {
+            alreadySet.push(p);
         }
-        return;
-    } else if (context === undefined) {
-        const pw = await pickProject(wm.getProjects());
-        if (pw) {
-            return resetEnvironmentCommand(pw.uri, em, wm);
-        }
+    }
+    if (alreadySet.length > 0) {
+        const env = alreadySet.length > 1 ? 'environments' : 'environment';
+        showInformationMessage(
+            `"${environment.name}" is already selected as the ${env} for: ${alreadySet
+                .map((p) => `"${p.name}"`)
+                .join(', ')}`,
+        );
+    }
+    const toSet: PythonProject[] = selectedProjects.filter((p) => !alreadySet.includes(p));
+    const uris = toSet.map((p) => p.uri);
+    if (uris.length === 0) {
         return;
     }
-    traceError(`Invalid context for unset environment command: ${context}`);
-    showErrorMessage('Invalid context for unset environment');
+    await em.setEnvironments(uris, environment);
 }
 
 export async function setEnvManagerCommand(em: EnvironmentManagers, wm: PythonProjectManager): Promise<void> {
@@ -347,8 +375,17 @@ export async function addPythonProjectCommand(
     pc: ProjectCreators,
 ): Promise<void> {
     if (wm.getProjects().length === 0) {
-        showErrorMessage('Please open a folder/project before adding a workspace');
-        return;
+        const r = await showErrorMessage(
+            'Please open a folder/project to create a Python project.',
+            {
+                modal: true,
+            },
+            'Open Folder',
+        );
+        if (r === 'Open Folder') {
+            await commands.executeCommand('vscode.openFolder');
+            return;
+        }
     }
     if (resource instanceof Array) {
         for (const r of resource) {
@@ -369,15 +406,54 @@ export async function addPythonProjectCommand(
             name: resource.fsPath,
             rootUri: resource,
         };
+
+        // When a URI is provided (right-click in explorer), directly use the existingProjects creator
+        const existingProjectsCreator = pc.getProjectCreators().find((c) => c.name === 'existingProjects');
+        if (existingProjectsCreator) {
+            try {
+                if (existingProjectsCreator.supportsQuickCreate) {
+                    options = {
+                        ...options,
+                        quickCreate: true,
+                    };
+                }
+                await existingProjectsCreator.create(options);
+                // trigger refresh to populate environments within the new project
+                await Promise.all(em.managers.map((m) => m.refresh(options?.rootUri)));
+                return;
+            } catch (ex) {
+                if (ex === QuickInputButtons.Back) {
+                    return addPythonProjectCommand(resource, wm, em, pc);
+                }
+                throw ex;
+            }
+        }
     }
 
+    // If not a URI or existingProjectsCreator not found, fall back to picker
     const creator: PythonProjectCreator | undefined = await pickCreator(pc.getProjectCreators());
     if (!creator) {
         return;
     }
 
+    // if multiroot, prompt the user to select which workspace to create the project in
+    const workspaceFolders = workspace.workspaceFolders;
+    if (!resource && workspaceFolders && workspaceFolders.length > 1) {
+        try {
+            const workspace = await pickWorkspaceFolder(true);
+            resource = workspace?.uri;
+        } catch (ex) {
+            if (ex === QuickInputButtons.Back) {
+                return addPythonProjectCommand(resource, wm, em, pc);
+            }
+            throw ex;
+        }
+    }
+
     try {
         await creator.create(options);
+        // trigger refresh to populate environments within the new project
+        await Promise.all(em.managers.map((m) => m.refresh(options?.rootUri)));
     } catch (ex) {
         if (ex === QuickInputButtons.Back) {
             return addPythonProjectCommand(resource, wm, em, pc);
@@ -442,8 +518,9 @@ export async function createTerminalCommand(
         const pw = await pickProject(api.getPythonProjects());
         if (pw) {
             const env = await api.getEnvironment(pw.uri);
+            const cwd = await findParentIfFile(pw.uri.fsPath);
             if (env) {
-                return await tm.create(env, { cwd: pw.uri });
+                return await tm.create(env, { cwd });
             }
         }
     } else if (context instanceof Uri) {
@@ -451,13 +528,15 @@ export async function createTerminalCommand(
         const env = await api.getEnvironment(uri);
         const pw = api.getPythonProject(uri);
         if (env && pw) {
-            return await tm.create(env, { cwd: pw.uri });
+            const cwd = await findParentIfFile(pw.uri.fsPath);
+            return await tm.create(env, { cwd });
         }
     } else if (context instanceof ProjectItem) {
         const view = context as ProjectItem;
         const env = await api.getEnvironment(view.project.uri);
+        const cwd = await findParentIfFile(view.project.uri.fsPath);
         if (env) {
-            const terminal = await tm.create(env, { cwd: view.project.uri });
+            const terminal = await tm.create(env, { cwd });
             terminal.show();
             return terminal;
         }
@@ -472,11 +551,21 @@ export async function createTerminalCommand(
         const view = context as PythonEnvTreeItem;
         const pw = await pickProject(api.getPythonProjects());
         if (pw) {
-            const terminal = await tm.create(view.environment, { cwd: pw.uri });
+            const cwd = await findParentIfFile(pw.uri.fsPath);
+            const terminal = await tm.create(view.environment, { cwd });
             terminal.show();
             return terminal;
         }
     }
+}
+
+export async function findParentIfFile(cwd: string): Promise<string> {
+    const stat = await fs.stat(cwd);
+    if (stat.isFile()) {
+        // If the project is a file, use the directory of the file as the cwd
+        return path.dirname(cwd);
+    }
+    return cwd;
 }
 
 export async function runInTerminalCommand(
@@ -489,8 +578,10 @@ export async function runInTerminalCommand(
         const project = api.getPythonProject(uri);
         const environment = await api.getEnvironment(uri);
         if (environment && project) {
-            const terminal = await tm.getProjectTerminal(project, environment);
-            await runInTerminal(environment, terminal, {
+            const resolvedEnv = await api.resolveEnvironment(environment.environmentPath);
+            const envFinal = resolvedEnv ?? environment;
+            const terminal = await tm.getProjectTerminal(project, envFinal);
+            await runInTerminal(envFinal, terminal, {
                 cwd: project.uri,
                 args: [item.fsPath],
                 show: true,
@@ -509,9 +600,12 @@ export async function runInDedicatedTerminalCommand(
         const uri = item as Uri;
         const project = api.getPythonProject(uri);
         const environment = await api.getEnvironment(uri);
+
         if (environment && project) {
-            const terminal = await tm.getDedicatedTerminal(item, project, environment);
-            await runInTerminal(environment, terminal, {
+            const resolvedEnv = await api.resolveEnvironment(environment.environmentPath);
+            const envFinal = resolvedEnv ?? environment;
+            const terminal = await tm.getDedicatedTerminal(item, project, envFinal);
+            await runInTerminal(envFinal, terminal, {
                 cwd: project.uri,
                 args: [item.fsPath],
                 show: true,
@@ -527,8 +621,10 @@ export async function runAsTaskCommand(item: unknown, api: PythonEnvironmentApi)
         const project = api.getPythonProject(uri);
         const environment = await api.getEnvironment(uri);
         if (environment) {
+            const resolvedEnv = await api.resolveEnvironment(environment.environmentPath);
+            const envFinal = resolvedEnv ?? environment;
             return await runAsTask(
-                environment,
+                envFinal,
                 {
                     project,
                     args: [item.fsPath],
@@ -552,11 +648,20 @@ export async function copyPathToClipboard(item: unknown): Promise<void> {
         await clipboardWriteText(projectPath);
         traceInfo(`Copied project path to clipboard: ${projectPath}`);
     } else if (item instanceof ProjectEnvironment || item instanceof PythonEnvTreeItem) {
-        const run = item.environment.execInfo.activatedRun ?? item.environment.execInfo.run;
-        const envPath = quoteArgs([run.executable, ...(run.args ?? [])]).join(' ');
+        const run = item.environment.execInfo.run;
+        const envPath = run.executable;
         await clipboardWriteText(envPath);
         traceInfo(`Copied environment path to clipboard: ${envPath}`);
     } else {
         traceVerbose(`Invalid context for copy path to clipboard: ${item}`);
+    }
+}
+
+export async function revealProjectInExplorer(item: unknown): Promise<void> {
+    if (item instanceof ProjectItem) {
+        const projectUri = item.project.uri;
+        await commands.executeCommand('revealInExplorer', projectUri);
+    } else {
+        traceVerbose(`Invalid context for reveal project in explorer: ${item}`);
     }
 }
