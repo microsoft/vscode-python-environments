@@ -22,6 +22,8 @@ import { EnvVarManager } from '../execution/envVariableManager';
  */
 export class TerminalEnvVarInjector implements Disposable {
     private disposables: Disposable[] = [];
+    // Track which .env variables we've set for each workspace to avoid clearing shell activation variables
+    private envVarKeys: Map<string, Set<string>> = new Map();
 
     constructor(
         private readonly envVarCollection: GlobalEnvironmentVariableCollection,
@@ -134,6 +136,8 @@ export class TerminalEnvVarInjector implements Disposable {
      */
     private async injectEnvironmentVariablesForWorkspace(workspaceFolder: WorkspaceFolder): Promise<void> {
         const workspaceUri = workspaceFolder.uri;
+        const workspaceKey = workspaceUri.fsPath;
+
         try {
             const envVars = await this.envVarManager.getEnvironmentVariables(workspaceUri);
 
@@ -149,8 +153,8 @@ export class TerminalEnvVarInjector implements Disposable {
                 traceVerbose(
                     `TerminalEnvVarInjector: Env file injection disabled for workspace: ${workspaceUri.fsPath}`,
                 );
-                // Clear any previously set variables when injection is disabled
-                envVarScope.clear();
+                // Clear only the .env variables we previously set, not shell activation variables
+                this.clearTrackedEnvVariables(envVarScope, workspaceKey);
                 return;
             }
 
@@ -167,21 +171,35 @@ export class TerminalEnvVarInjector implements Disposable {
                 traceVerbose(
                     `TerminalEnvVarInjector: No .env file found for workspace: ${workspaceUri.fsPath}, not injecting environment variables.`,
                 );
-                // Clear any previously set variables when no .env file exists
-                envVarScope.clear();
+                // Clear only the .env variables we previously set, not shell activation variables
+                this.clearTrackedEnvVariables(envVarScope, workspaceKey);
                 return;
             }
 
-            // Clear all previously set variables before re-injecting.
-            // This ensures that when variables are commented out or removed from .env,
-            // they are properly removed from the terminal environment.
-            envVarScope.clear();
+            // Get previously tracked keys for this workspace
+            const previousKeys = this.envVarKeys.get(workspaceKey) || new Set<string>();
+            const currentKeys = new Set<string>();
 
+            // Delete variables that were previously set but are no longer in the .env file.
+            // This ensures that when variables are commented out or removed from .env,
+            // they are properly removed from the terminal environment without affecting
+            // shell activation variables set by ShellStartupActivationVariablesManager.
+            for (const key of previousKeys) {
+                if (!(key in envVars)) {
+                    envVarScope.delete(key);
+                }
+            }
+
+            // Set/update current variables
             for (const [key, value] of Object.entries(envVars)) {
                 if (value !== undefined) {
                     envVarScope.replace(key, value);
+                    currentKeys.add(key);
                 }
             }
+
+            // Update tracking with current keys
+            this.envVarKeys.set(workspaceKey, currentKeys);
         } catch (error) {
             traceError(
                 `TerminalEnvVarInjector: Error injecting environment variables for workspace ${workspaceUri.fsPath}:`,
@@ -216,6 +234,22 @@ export class TerminalEnvVarInjector implements Disposable {
             scope.clear();
         } catch (error) {
             traceError(`Failed to clear environment variables for workspace ${workspaceFolder.uri.fsPath}:`, error);
+        }
+    }
+
+    /**
+     * Clear only the .env variables we've tracked, not shell activation variables.
+     */
+    private clearTrackedEnvVariables(
+        envVarScope: ReturnType<GlobalEnvironmentVariableCollection['getScoped']>,
+        workspaceKey: string,
+    ): void {
+        const trackedKeys = this.envVarKeys.get(workspaceKey);
+        if (trackedKeys) {
+            for (const key of trackedKeys) {
+                envVarScope.delete(key);
+            }
+            this.envVarKeys.delete(workspaceKey);
         }
     }
 }
