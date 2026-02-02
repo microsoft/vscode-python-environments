@@ -108,6 +108,7 @@ class NativePythonFinderImpl implements NativePythonFinder {
     private readonly connection: rpc.MessageConnection;
     private readonly pool: WorkerPool<NativePythonEnvironmentKind | Uri[] | undefined, NativeInfo[]>;
     private cache: Map<string, NativeInfo[]> = new Map();
+    private readonly startDisposables: Disposable[] = [];
 
     constructor(
         private readonly outputChannel: LogOutputChannel,
@@ -192,6 +193,8 @@ class NativePythonFinderImpl implements NativePythonFinder {
     }
 
     public dispose() {
+        this.pool.stop();
+        this.startDisposables.forEach((d) => d.dispose());
         this.connection.dispose();
     }
 
@@ -221,14 +224,13 @@ class NativePythonFinderImpl implements NativePythonFinder {
         // we have got the exit event.
         const readable = new PassThrough();
         const writable = new PassThrough();
-        const disposables: Disposable[] = [];
         try {
             const proc = spawnProcess(this.toolPath, ['server'], { env: process.env, stdio: 'pipe' });
             proc.stdout.pipe(readable, { end: false });
             proc.stderr.on('data', (data) => this.outputChannel.error(`[pet] ${data.toString()}`));
             writable.pipe(proc.stdin, { end: false });
 
-            disposables.push({
+            this.startDisposables.push({
                 dispose: () => {
                     try {
                         if (proc.exitCode === null) {
@@ -246,7 +248,7 @@ class NativePythonFinderImpl implements NativePythonFinder {
             new rpc.StreamMessageReader(readable),
             new rpc.StreamMessageWriter(writable),
         );
-        disposables.push(
+        this.startDisposables.push(
             connection,
             new Disposable(() => {
                 readable.end();
@@ -276,7 +278,7 @@ class NativePythonFinderImpl implements NativePythonFinder {
             }),
             connection.onNotification('telemetry', (data) => this.outputChannel.info('[pet] Telemetry: ', data)),
             connection.onClose(() => {
-                disposables.forEach((d) => d.dispose());
+                this.startDisposables.forEach((d) => d.dispose());
             }),
         );
 
