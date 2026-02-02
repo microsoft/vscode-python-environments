@@ -1,6 +1,6 @@
 
 # Python Environments API
-The following helps describe the technical design of the Python Environments Extension for use mainly by contributing extension authors. This extension is the entry point which will surface the entire environment management experience for Python in VS Code and its modularity should allow for individual tools / libraries to implement these methods for their tool making them usable in VS Code.
+The following guide describes the technical design of the Python Environments Extension. Its intended use is mainly for contributing extension authors. This extension is the entry point which will surface the entire environment management experience for Python in VS Code and its modularity should allow for individual tools / libraries to implement these methods for their tool making them usable in VS Code.
 
 
 **Table of Contents**
@@ -21,7 +21,7 @@ The following helps describe the technical design of the Python Environments Ext
 
 
 ## Functionalities of Extension & its API
-The python environment extension has four main functionalities: 
+The Python Environments extension has four main functionalities: 
 - getting / setting environments (including the packages found in them)
 - terminal activation
 - code execution
@@ -37,16 +37,16 @@ The python environment extension has four main functionalities:
 
 ## Objects in Extension API
 The core components are as follows:
-- `PythonEnvironment`: a python environment
+- `PythonEnvironment`: a python environment (created using `createPythonEnvironmentItem`)
     - Has unique id and correlates to a `EnvironmentManager` 
     - Contains `PythonEnvironmentExecutionInfo`
 - `EnvironmentManager`: an object which manages `PythonEnvironment`
-    - registered by an extension in form with id `<publisher-id>.<extension-id>:<manager-name>`
+    - registered by an extension in form with id `<publisher-id>.<extension-id>:<manager-name>` (id is generated internally by extension)
     - acts on an environment (get, set, etc)  `PythonEnvironment`
     - one `EnvironmentManager` can create many `PythonEnvironment` objects
 - `PackageManagementOptions`: actions relating to, and specifying packages
 - `PackageManager`: an object which manages packages
-    - registered by an extension in form with id `<publisher-id>.<extension-id>:<manager-name>`
+    - registered by an extension in form with id `<publisher-id>.<extension-id>:<manager-name>` (Id is generated internally by the extension)
     - performs actions for packages using `PackageManagementOptions`
 
 
@@ -56,7 +56,7 @@ Generally in the extension, the PackageManagers and EnvironmentManagers handle t
 
 ### Workspace and Environments
 The relationship between **workspaces** and **environments** in the extension can be any of the following configurations:
-| workspace | environment | description | example |
+| Workspace | Environment | Description | Example |
 | -------- | ------- | -------- | ------- |
 | 1 | 1 | single workspace, single environment | simplest, think Django app in a workspace |
 | 1 | n | single workspace, multiple environments | one workspace with a client and server which have diff envs OR monorepo with multiple environments |
@@ -90,8 +90,10 @@ A `PackageManager` provides a variety of action which can be taken on an environ
 
 | EnvironmentManager | PackageManager |
 | -------- | ------- |
-| venv | pip | 
+| venv | pip/uv | 
 | conda | conda |
+| pyenv | pip/uv |
+| poetry | poetry |
 
 
 Note two things in the table, a given python tool like conda can be both a `EnvironmentManager` and a `PackageManager`. Secondly an `EnvironmentManager`'s preferred `PackageManager` is an opinionated selection made by the manager's author but can be overruled in specific package actions (ie install packageA using into envA using packageManager X). For the default `EnvironmentManager` (venv) the default `PackageManager` is `pip`.
