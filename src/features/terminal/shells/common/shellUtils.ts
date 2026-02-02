@@ -4,6 +4,14 @@ import { getConfiguration } from '../../../../common/workspace.apis';
 import { ShellConstants } from '../../../common/shellConstants';
 import { quoteArgs } from '../../../execution/execUtils';
 
+/**
+ * Shells that support a leading space to prevent command from being saved in history.
+ * - Bash: When HISTCONTROL contains 'ignorespace' or 'ignoreboth'
+ * - Zsh: When setopt HIST_IGNORE_SPACE is enabled
+ * - Git Bash: Uses bash under the hood, same behavior as Bash
+ */
+export const shellsWithLeadingSpaceHistorySupport = [ShellConstants.BASH, ShellConstants.ZSH, ShellConstants.GITBASH];
+
 function getCommandAsString(command: PythonCommandRunConfiguration[], shell: string, delimiter: string): string {
     const parts = [];
     for (const cmd of command) {
@@ -20,13 +28,17 @@ function getCommandAsString(command: PythonCommandRunConfiguration[], shell: str
 }
 
 export function getShellCommandAsString(shell: string, command: PythonCommandRunConfiguration[]): string {
+    let commandStr: string;
     switch (shell) {
         case ShellConstants.PWSH:
-            return getCommandAsString(command, shell, ';');
+            commandStr = getCommandAsString(command, shell, ';');
+            break;
         case ShellConstants.NU:
-            return getCommandAsString(command, shell, ';');
+            commandStr = getCommandAsString(command, shell, ';');
+            break;
         case ShellConstants.FISH:
-            return getCommandAsString(command, shell, '; and');
+            commandStr = getCommandAsString(command, shell, '; and');
+            break;
         case ShellConstants.BASH:
         case ShellConstants.SH:
         case ShellConstants.ZSH:
@@ -34,8 +46,17 @@ export function getShellCommandAsString(shell: string, command: PythonCommandRun
         case ShellConstants.CMD:
         case ShellConstants.GITBASH:
         default:
-            return getCommandAsString(command, shell, '&&');
+            commandStr = getCommandAsString(command, shell, '&&');
+            break;
     }
+
+    // Add a leading space for shells that support history ignore with leading space.
+    // This prevents the activation command from being saved in bash/zsh history
+    // when HISTCONTROL=ignorespace (bash) or setopt HIST_IGNORE_SPACE (zsh) is set.
+    if (shellsWithLeadingSpaceHistorySupport.includes(shell)) {
+        return ` ${commandStr}`;
+    }
+    return commandStr;
 }
 
 export function normalizeShellPath(filePath: string, shellType?: string): string {
