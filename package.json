@@ -146,6 +146,20 @@
                 "when": "config.python.useEnvironmentsExtension != false"
             },
             {
+                "command": "python-envs.addFolderToPythonPath",
+                "title": "%python-envs.addFolderToPythonPath.title%",
+                "category": "Python",
+                "icon": "$(new-folder)",
+                "when": "config.python.useEnvironmentsExtension != false"
+            },
+            {
+                "command": "python-envs.openPythonPathFile",
+                "title": "%python-envs.openPythonPathFile.title%",
+                "category": "Python",
+                "icon": "$(file-text)",
+                "when": "config.python.useEnvironmentsExtension != false"
+            },
+            {
                 "command": "python-envs.setPkgManager",
                 "title": "%python-envs.setPkgManager.title%",
                 "category": "Python",
@@ -324,6 +338,10 @@
         "menus": {
             "commandPalette": [
                 {
+                    "command": "python-envs.addFolderToPythonPath",
+                    "when": "config.python.useEnvironmentsExtension != false"
+                },
+                {
                     "command": "python-envs.refreshAllManagers",
                     "when": "false"
                 },
@@ -466,6 +484,15 @@
                     "when": "view == env-managers && viewItem =~ /.*pythonEnvironment.*/"
                 },
                 {
+                    "command": "python-envs.addFolderToPythonPath",
+                    "group": "inline",
+                    "when": "view == env-managers && viewItem =~ /.*pythonEnvironment.*/"
+                },
+                {
+                    "command": "python-envs.openPythonPathFile",
+                    "when": "view == env-managers && viewItem =~ /.*pythonEnvironment.*/"
+                },
+                {
                     "command": "python-envs.packages",
                     "group": "inline",
                     "when": "view == env-managers && viewItem =~ /.*pythonEnvironment.*/"
@@ -570,6 +597,11 @@
                     "command": "python-envs.addPythonProjectGivenResource",
                     "group": "inline",
                     "when": "explorerViewletVisible && resourceExtname == .py"
+                },
+                {
+                    "command": "python-envs.addFolderToPythonPath",
+                    "group": "inline",
+                    "when": "explorerViewletVisible && explorerResourceIsFolder"
                 }
             ],
             "editor/title": [
