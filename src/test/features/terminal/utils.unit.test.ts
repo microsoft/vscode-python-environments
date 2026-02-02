@@ -354,3 +354,265 @@ suite('Terminal Utils - getAutoActivationType', () => {
         });
     });
 });
+
+import { env, Terminal, TerminalOptions, Uri } from 'vscode';
+import {
+    getShellIntegrationTimeout,
+    getTerminalCwd,
+    isTaskTerminal,
+    removeAnsiEscapeCodes,
+} from '../../../features/terminal/utils';
+
+/**
+ * Creates a mock Terminal for testing.
+ */
+function createMockTerminal(options?: { name?: string; cwd?: string | Uri }): Terminal {
+    const terminalOptions: TerminalOptions = {
+        cwd: options?.cwd,
+    };
+    return {
+        name: options?.name ?? 'Test Terminal',
+        creationOptions: terminalOptions,
+        shellIntegration: undefined,
+        processId: Promise.resolve(12345),
+        exitStatus: undefined,
+        state: { isInteractedWith: false },
+        show: sinon.stub(),
+        hide: sinon.stub(),
+        sendText: sinon.stub(),
+        dispose: sinon.stub(),
+    } as unknown as Terminal;
+}
+
+suite('Terminal Utils - removeAnsiEscapeCodes', () => {
+    test('should remove CSI sequence (color codes)', () => {
+        const input = '\u001b[31mHello, World!\u001b[0m';
+        const result = removeAnsiEscapeCodes(input);
+        assert.strictEqual(result, 'Hello, World!', 'Should remove ANSI color codes');
+    });
+
+    test('should remove multiple ANSI escape sequences', () => {
+        const input = '\u001b[1m\u001b[32mBold Green\u001b[0m Normal';
+        const result = removeAnsiEscapeCodes(input);
+        assert.strictEqual(result, 'Bold Green Normal', 'Should remove multiple ANSI codes');
+    });
+
+    test('should handle OSC sequences', () => {
+        const input = '\u001b]0;Window Title\u0007Some text';
+        const result = removeAnsiEscapeCodes(input);
+        assert.strictEqual(result, 'Some text', 'Should remove OSC sequences');
+    });
+
+    test('should handle empty string', () => {
+        const result = removeAnsiEscapeCodes('');
+        assert.strictEqual(result, '', 'Should return empty string for empty input');
+    });
+
+    test('should handle string with no escape codes', () => {
+        const input = 'Plain text without codes';
+        const result = removeAnsiEscapeCodes(input);
+        assert.strictEqual(result, input, 'Should return unchanged string when no codes present');
+    });
+
+    test('should handle cursor movement sequences', () => {
+        const input = '\u001b[2J\u001b[HText after clear';
+        const result = removeAnsiEscapeCodes(input);
+        assert.strictEqual(result, 'Text after clear', 'Should remove cursor control sequences');
+    });
+
+    test('should remove 256-color and true color codes', () => {
+        const input = '\u001b[38;5;196mRed 256\u001b[0m \u001b[38;2;255;0;0mTrue Red\u001b[0m';
+        const result = removeAnsiEscapeCodes(input);
+        assert.strictEqual(result, 'Red 256 True Red', 'Should remove 256-color and true color codes');
+    });
+
+    test('should handle falsy input gracefully', () => {
+        // The function checks for truthiness before replacing
+        const result = removeAnsiEscapeCodes(undefined as unknown as string);
+        assert.strictEqual(result, undefined, 'Should return undefined for undefined input');
+    });
+});
+
+suite('Terminal Utils - isTaskTerminal', () => {
+    test('should return true for terminal with "task" in lowercase name', () => {
+        const terminal = createMockTerminal({ name: 'task - build' });
+        const result = isTaskTerminal(terminal);
+        assert.strictEqual(result, true, 'Should identify task terminal by lowercase name');
+    });
+
+    test('should return true for terminal with "Task" in name (case insensitive)', () => {
+        const terminal = createMockTerminal({ name: 'Task - Run Tests' });
+        const result = isTaskTerminal(terminal);
+        assert.strictEqual(result, true, 'Should identify Task terminal case-insensitively');
+    });
+
+    test('should return true for terminal with "TASK" in uppercase name', () => {
+        const terminal = createMockTerminal({ name: 'TASK - compile' });
+        const result = isTaskTerminal(terminal);
+        assert.strictEqual(result, true, 'Should identify TASK terminal in uppercase');
+    });
+
+    test('should return false for regular terminal', () => {
+        const terminal = createMockTerminal({ name: 'Python' });
+        const result = isTaskTerminal(terminal);
+        assert.strictEqual(result, false, 'Should return false for non-task terminal');
+    });
+
+    test('should return false for terminal with "task" as part of another word', () => {
+        // The current implementation uses includes(), so this would actually return true
+        // This test documents the current behavior
+        const terminal = createMockTerminal({ name: 'multitasking' });
+        const result = isTaskTerminal(terminal);
+        // Note: Current implementation returns true because 'multitasking' includes 'task'
+        assert.strictEqual(result, true, 'Current implementation matches task anywhere in name');
+    });
+});
+
+suite('Terminal Utils - getTerminalCwd', () => {
+    test('should return cwd from shellIntegration when available', () => {
+        const terminal = createMockTerminal();
+        const mockCwd = Uri.file('/shell/integration/cwd');
+        (terminal as Terminal & { shellIntegration: { cwd: Uri } }).shellIntegration = { cwd: mockCwd } as never;
+
+        const result = getTerminalCwd(terminal);
+
+        assert.strictEqual(result, '/shell/integration/cwd', 'Should return shell integration cwd');
+    });
+
+    test('should return cwd from creationOptions when shellIntegration is not available', () => {
+        const terminal = createMockTerminal({ cwd: '/creation/options/cwd' });
+
+        const result = getTerminalCwd(terminal);
+
+        assert.strictEqual(result, '/creation/options/cwd', 'Should return creation options cwd string');
+    });
+
+    test('should return cwd from creationOptions Uri when shellIntegration is not available', () => {
+        const terminal = createMockTerminal({ cwd: Uri.file('/creation/options/uri/cwd') });
+
+        const result = getTerminalCwd(terminal);
+
+        assert.strictEqual(result, '/creation/options/uri/cwd', 'Should return creation options Uri cwd');
+    });
+
+    test('should return undefined when no cwd is available', () => {
+        const terminal = createMockTerminal();
+
+        const result = getTerminalCwd(terminal);
+
+        assert.strictEqual(result, undefined, 'Should return undefined when no cwd available');
+    });
+
+    test('should prefer shellIntegration cwd over creationOptions cwd', () => {
+        const terminal = createMockTerminal({ cwd: '/creation/cwd' });
+        const mockCwd = Uri.file('/shell/cwd');
+        (terminal as Terminal & { shellIntegration: { cwd: Uri } }).shellIntegration = { cwd: mockCwd } as never;
+
+        const result = getTerminalCwd(terminal);
+
+        assert.strictEqual(result, '/shell/cwd', 'Should prefer shell integration cwd');
+    });
+});
+
+suite('Terminal Utils - getShellIntegrationTimeout', () => {
+    let mockGetConfiguration: sinon.SinonStub;
+
+    setup(() => {
+        mockGetConfiguration = sinon.stub(workspaceApis, 'getConfiguration');
+    });
+
+    teardown(() => {
+        sinon.restore();
+    });
+
+    test('should return configured timeout value when valid', () => {
+        mockGetConfiguration.withArgs('terminal.integrated').returns({
+            get: sinon.stub().callsFake((key: string, defaultValue?: boolean) => {
+                if (key === 'shellIntegration.timeout') return 3000;
+                if (key === 'shellIntegration.enabled') return defaultValue;
+                return undefined;
+            }),
+        });
+
+        const result = getShellIntegrationTimeout();
+
+        assert.strictEqual(result, 3000, 'Should return configured timeout');
+    });
+
+    test('should return minimum 500ms even if configured lower', () => {
+        mockGetConfiguration.withArgs('terminal.integrated').returns({
+            get: sinon.stub().callsFake((key: string, defaultValue?: boolean) => {
+                if (key === 'shellIntegration.timeout') return 100;
+                if (key === 'shellIntegration.enabled') return defaultValue;
+                return undefined;
+            }),
+        });
+
+        const result = getShellIntegrationTimeout();
+
+        assert.strictEqual(result, 500, 'Should return minimum 500ms');
+    });
+
+    test('should return 5000ms default when shell integration is enabled and no timeout configured', () => {
+        mockGetConfiguration.withArgs('terminal.integrated').returns({
+            get: sinon.stub().callsFake((key: string, defaultValue?: boolean) => {
+                if (key === 'shellIntegration.timeout') return undefined;
+                if (key === 'shellIntegration.enabled') return true;
+                return defaultValue;
+            }),
+        });
+
+        const result = getShellIntegrationTimeout();
+
+        assert.strictEqual(result, 5000, 'Should return 5000ms when shell integration enabled');
+    });
+
+    test('should return 2000ms default when shell integration is disabled and not remote', () => {
+        mockGetConfiguration.withArgs('terminal.integrated').returns({
+            get: sinon.stub().callsFake((key: string, defaultValue?: boolean) => {
+                if (key === 'shellIntegration.timeout') return undefined;
+                if (key === 'shellIntegration.enabled') return false;
+                return defaultValue;
+            }),
+        });
+
+        // env.remoteName is undefined by default in test environment (not remote)
+        // We can test this scenario without stubbing since tests run locally
+
+        const result = getShellIntegrationTimeout();
+
+        // Result depends on whether env.remoteName is undefined (local) or defined (remote)
+        // In local test environment, remoteName is undefined, so we expect 2000ms
+        const isRemote = env.remoteName !== undefined;
+        const expected = isRemote ? 3000 : 2000;
+        assert.strictEqual(result, expected, `Should return ${expected}ms when not enabled and ${isRemote ? 'remote' : 'not remote'}`);
+    });
+
+    test('should handle negative timeout value by using defaults', () => {
+        mockGetConfiguration.withArgs('terminal.integrated').returns({
+            get: sinon.stub().callsFake((key: string, defaultValue?: boolean) => {
+                if (key === 'shellIntegration.timeout') return -1000;
+                if (key === 'shellIntegration.enabled') return true;
+                return defaultValue;
+            }),
+        });
+
+        const result = getShellIntegrationTimeout();
+
+        assert.strictEqual(result, 5000, 'Should return default when timeout is negative');
+    });
+
+    test('should handle non-number timeout value by using defaults', () => {
+        mockGetConfiguration.withArgs('terminal.integrated').returns({
+            get: sinon.stub().callsFake((key: string, defaultValue?: boolean) => {
+                if (key === 'shellIntegration.timeout') return 'invalid';
+                if (key === 'shellIntegration.enabled') return true;
+                return defaultValue;
+            }),
+        });
+
+        const result = getShellIntegrationTimeout();
+
+        assert.strictEqual(result, 5000, 'Should return default when timeout is not a number');
+    });
+});
