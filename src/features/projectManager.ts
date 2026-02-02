@@ -8,6 +8,8 @@ import {
     getWorkspaceFolders,
     onDidChangeConfiguration,
     onDidChangeWorkspaceFolders,
+    onDidDeleteFiles,
+    onDidRenameFiles,
 } from '../common/workspace.apis';
 import { PythonProjectManager, PythonProjectSettings, PythonProjectsImpl } from '../internal.api';
 import {
@@ -15,6 +17,8 @@ import {
     EditProjectSettings,
     getDefaultEnvManagerSetting,
     getDefaultPkgManagerSetting,
+    removePythonProjectSetting,
+    updatePythonProjectSettingPath,
 } from './settings/settingHelpers';
 
 type ProjectArray = PythonProject[];
@@ -45,7 +49,62 @@ export class PythonProjectManagerImpl implements PythonProjectManager {
                     this.updateDebounce.trigger();
                 }
             }),
+            onDidDeleteFiles((e) => {
+                this.handleDeletedFiles(e.files);
+            }),
+            onDidRenameFiles((e) => {
+                this.handleRenamedFiles(e.files);
+            }),
         );
+    }
+
+    /**
+     * Handles file deletion events. When a project folder is deleted,
+     * removes the project from the internal map and cleans up settings.
+     */
+    private async handleDeletedFiles(deletedUris: readonly Uri[]): Promise<void> {
+        const projectsToRemove: PythonProject[] = [];
+        const workspaces = getWorkspaceFolders() ?? [];
+
+        for (const uri of deletedUris) {
+            const project = this._projects.get(uri.toString());
+            if (project) {
+                // Skip workspace root folders - they're handled by onDidChangeWorkspaceFolders
+                const isWorkspaceRoot = workspaces.some((w) => w.uri.toString() === project.uri.toString());
+                if (!isWorkspaceRoot) {
+                    projectsToRemove.push(project);
+                }
+            }
+        }
+
+        if (projectsToRemove.length > 0) {
+            // Remove from internal map and fire change event
+            this.remove(projectsToRemove);
+            // Clean up settings
+            await removePythonProjectSetting(projectsToRemove.map((p) => ({ project: p })));
+        }
+    }
+
+    /**
+     * Handles file rename events. When a project folder is renamed/moved,
+     * updates the project path in settings.
+     */
+    private async handleRenamedFiles(renamedFiles: readonly { oldUri: Uri; newUri: Uri }[]): Promise<void> {
+        const workspaces = getWorkspaceFolders() ?? [];
+
+        for (const { oldUri, newUri } of renamedFiles) {
+            const project = this._projects.get(oldUri.toString());
+            if (project) {
+                // Skip workspace root folders - they're handled by onDidChangeWorkspaceFolders
+                const isWorkspaceRoot = workspaces.some((w) => w.uri.toString() === project.uri.toString());
+                if (!isWorkspaceRoot) {
+                    // Update settings with new path
+                    await updatePythonProjectSettingPath(oldUri, newUri);
+                    // Trigger update to refresh the in-memory projects
+                    this.updateDebounce.trigger();
+                }
+            }
+        }
     }
 
     /**

@@ -438,8 +438,9 @@ export async function addPythonProjectSetting(edits: EditProjectSettings[]): Pro
                 return path.resolve(w.uri.fsPath, s.path) === pwPath;
             });
             if (index >= 0) {
-                overrides[index].envManager = e.envManager ?? envManager;
-                overrides[index].packageManager = e.packageManager ?? pkgManager;
+                // Preserve existing manager settings if not explicitly provided
+                overrides[index].envManager = e.envManager ?? overrides[index].envManager;
+                overrides[index].packageManager = e.packageManager ?? overrides[index].packageManager;
             } else {
                 overrides.push({
                     path: path.relative(w.uri.fsPath, pwPath).replace(/\\/g, '/'),
@@ -488,6 +489,43 @@ export async function removePythonProjectSetting(edits: EditProjectSettings[]): 
         }
     });
     await Promise.all(promises);
+}
+
+/**
+ * Updates the path of a project in pythonProjects settings when a folder is renamed/moved.
+ * @param oldUri The original URI of the project folder
+ * @param newUri The new URI of the project folder after rename/move
+ */
+export async function updatePythonProjectSettingPath(oldUri: Uri, newUri: Uri): Promise<void> {
+    const workspaceFolders = getWorkspaceFolders() ?? [];
+
+    // Find the workspace folder that contains the old path
+    let targetWorkspace: WorkspaceFolder | undefined;
+    for (const w of workspaceFolders) {
+        const oldPath = path.normalize(oldUri.fsPath);
+        if (oldPath.startsWith(path.normalize(w.uri.fsPath))) {
+            targetWorkspace = w;
+            break;
+        }
+    }
+
+    if (!targetWorkspace) {
+        traceError(`Unable to find workspace for ${oldUri.fsPath}`);
+        return;
+    }
+
+    const config = getConfiguration('python-envs', targetWorkspace.uri);
+    const overrides = config.get<PythonProjectSettings[]>('pythonProjects', []);
+    const oldNormalizedPath = path.normalize(oldUri.fsPath);
+
+    const index = overrides.findIndex((s) => path.resolve(targetWorkspace!.uri.fsPath, s.path) === oldNormalizedPath);
+    if (index >= 0) {
+        // Update the path to the new location
+        const newRelativePath = path.relative(targetWorkspace.uri.fsPath, newUri.fsPath).replace(/\\/g, '/');
+        overrides[index].path = newRelativePath;
+        await config.update('pythonProjects', overrides, ConfigurationTarget.Workspace);
+        traceInfo(`Updated project path from ${oldUri.fsPath} to ${newUri.fsPath}`);
+    }
 }
 
 /**
