@@ -65,10 +65,10 @@ export async function handleSettingUpShellProfile(
 export async function cleanupStartupScripts(allProviders: ShellStartupScriptProvider[]): Promise<void> {
     await Promise.all(allProviders.map((provider) => provider.teardownScripts()));
     if (getAutoActivationType() === ACT_TYPE_SHELL) {
-        setAutoActivationType(ACT_TYPE_COMMAND);
         traceInfo(
             'Setting `python-envs.terminal.autoActivationType` to `command`, after removing shell startup scripts.',
         );
+        await setAutoActivationType(ACT_TYPE_COMMAND);
     }
     setImmediate(async () => await showInformationMessage(ActivationStrings.revertedShellStartupScripts));
 }
