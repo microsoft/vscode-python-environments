@@ -1,7 +1,8 @@
+import { ChildProcess } from 'child_process';
 import * as fs from 'fs-extra';
 import * as path from 'path';
 import { PassThrough } from 'stream';
-import { Disposable, ExtensionContext, LogOutputChannel, Uri } from 'vscode';
+import { CancellationTokenSource, Disposable, ExtensionContext, LogOutputChannel, Uri } from 'vscode';
 import * as rpc from 'vscode-jsonrpc/node';
 import { PythonProjectApi } from '../../api';
 import { spawnProcess } from '../../common/childProcess.apis';
@@ -13,6 +14,15 @@ import { isWindows } from '../../common/utils/platformUtils';
 import { createRunningWorkerPool, WorkerPool } from '../../common/utils/workerPool';
 import { getConfiguration, getWorkspaceFolders } from '../../common/workspace.apis';
 import { noop } from './utils';
+
+// Timeout constants for JSON-RPC requests (in milliseconds)
+const CONFIGURE_TIMEOUT_MS = 30_000; // 30 seconds for configuration
+const REFRESH_TIMEOUT_MS = 120_000; // 2 minutes for full refresh
+const RESOLVE_TIMEOUT_MS = 30_000; // 30 seconds for single resolve
+
+// Restart/recovery constants
+const MAX_RESTART_ATTEMPTS = 3;
+const RESTART_BACKOFF_BASE_MS = 1_000; // 1 second base, exponential: 1s, 2s, 4s
 
 export async function getNativePythonToolsPath(): Promise<string> {
     const envsExt = getExtension(ENVS_EXTENSION_ID);
@@ -104,11 +114,48 @@ interface RefreshOptions {
     searchPaths?: string[];
 }
 
+/**
+ * Wraps a JSON-RPC sendRequest call with a timeout.
+ * @param connection The JSON-RPC connection
+ * @param method The RPC method name
+ * @param params The parameters to send
+ * @param timeoutMs Timeout in milliseconds
+ * @returns The result of the request
+ * @throws Error if the request times out
+ */
+async function sendRequestWithTimeout<T>(
+    connection: rpc.MessageConnection,
+    method: string,
+    params: unknown,
+    timeoutMs: number,
+): Promise<T> {
+    const cts = new CancellationTokenSource();
+    const timeoutPromise = new Promise<never>((_, reject) => {
+        const timer = setTimeout(() => {
+            cts.cancel();
+            reject(new Error(`Request '${method}' timed out after ${timeoutMs}ms`));
+        }, timeoutMs);
+        // Clear timeout if the CancellationTokenSource is disposed
+        cts.token.onCancellationRequested(() => clearTimeout(timer));
+    });
+
+    try {
+        return await Promise.race([connection.sendRequest<T>(method, params, cts.token), timeoutPromise]);
+    } finally {
+        cts.dispose();
+    }
+}
+
 class NativePythonFinderImpl implements NativePythonFinder {
-    private readonly connection: rpc.MessageConnection;
+    private connection: rpc.MessageConnection;
     private readonly pool: WorkerPool<NativePythonEnvironmentKind | Uri[] | undefined, NativeInfo[]>;
     private cache: Map<string, NativeInfo[]> = new Map();
-    private readonly startDisposables: Disposable[] = [];
+    private startDisposables: Disposable[] = [];
+    private proc: ChildProcess | undefined;
+    private processExited: boolean = false;
+    private startFailed: boolean = false;
+    private restartAttempts: number = 0;
+    private isRestarting: boolean = false;
 
     constructor(
         private readonly outputChannel: LogOutputChannel,
@@ -125,13 +172,127 @@ class NativePythonFinderImpl implements NativePythonFinder {
     }
 
     public async resolve(executable: string): Promise<NativeEnvInfo> {
-        await this.configure();
-        const environment = await this.connection.sendRequest<NativeEnvInfo>('resolve', {
-            executable,
-        });
+        await this.ensureProcessRunning();
+        try {
+            await this.configure();
+            const environment = await sendRequestWithTimeout<NativeEnvInfo>(
+                this.connection,
+                'resolve',
+                { executable },
+                RESOLVE_TIMEOUT_MS,
+            );
 
-        this.outputChannel.info(`Resolved Python Environment ${environment.executable}`);
-        return environment;
+            this.outputChannel.info(`Resolved Python Environment ${environment.executable}`);
+            // Reset restart attempts on successful request
+            this.restartAttempts = 0;
+            return environment;
+        } catch (ex) {
+            // On timeout, kill the hung process so next request triggers restart
+            if (ex instanceof Error && ex.message.includes('timed out')) {
+                this.outputChannel.warn('[pet] Resolve request timed out, killing hung process for restart');
+                this.killProcess();
+                this.processExited = true;
+            }
+            throw ex;
+        }
+    }
+
+    /**
+     * Ensures the PET process is running. If it has exited or failed, attempts to restart
+     * with exponential backoff up to MAX_RESTART_ATTEMPTS times.
+     * @throws Error if the process cannot be started after all retry attempts
+     */
+    private async ensureProcessRunning(): Promise<void> {
+        // Process is running fine
+        if (!this.startFailed && !this.processExited) {
+            return;
+        }
+
+        // Already in the process of restarting (prevent recursive restarts)
+        if (this.isRestarting) {
+            throw new Error('Python Environment Tools (PET) is currently restarting. Please try again.');
+        }
+
+        // Check if we've exceeded max restart attempts
+        if (this.restartAttempts >= MAX_RESTART_ATTEMPTS) {
+            throw new Error(
+                `Python Environment Tools (PET) failed after ${MAX_RESTART_ATTEMPTS} restart attempts. ` +
+                    'Please reload the window or check the output channel for details. ' +
+                    'To debug, run "Python Environments: Run Python Environment Tool (PET) in Terminal" from the Command Palette.',
+            );
+        }
+
+        // Attempt restart with exponential backoff
+        await this.restart();
+    }
+
+    /**
+     * Kills the current PET process (if running) and starts a fresh one.
+     * Implements exponential backoff between restart attempts.
+     */
+    private async restart(): Promise<void> {
+        this.isRestarting = true;
+        this.restartAttempts++;
+
+        const backoffMs = RESTART_BACKOFF_BASE_MS * Math.pow(2, this.restartAttempts - 1);
+        this.outputChannel.warn(
+            `[pet] Restarting Python Environment Tools (attempt ${this.restartAttempts}/${MAX_RESTART_ATTEMPTS}, ` +
+                `waiting ${backoffMs}ms)`,
+        );
+
+        try {
+            // Kill existing process if still running
+            this.killProcess();
+
+            // Dispose existing connection and streams
+            this.startDisposables.forEach((d) => d.dispose());
+            this.startDisposables = [];
+
+            // Wait with exponential backoff before restarting
+            await new Promise((resolve) => setTimeout(resolve, backoffMs));
+
+            // Reset state flags
+            this.processExited = false;
+            this.startFailed = false;
+            this.lastConfiguration = undefined; // Force reconfiguration
+
+            // Start fresh
+            this.connection = this.start();
+
+            this.outputChannel.info('[pet] Python Environment Tools restarted successfully');
+
+            // Reset restart attempts on successful start (process didn't immediately fail)
+            // We'll reset this only after a successful request completes
+        } catch (ex) {
+            this.outputChannel.error('[pet] Failed to restart Python Environment Tools:', ex);
+            this.outputChannel.error(
+                '[pet] To debug, run "Python Environments: Run Python Environment Tool (PET) in Terminal" from the Command Palette.',
+            );
+            throw ex;
+        } finally {
+            this.isRestarting = false;
+        }
+    }
+
+    /**
+     * Attempts to kill the PET process. Used during restart and timeout recovery.
+     */
+    private killProcess(): void {
+        if (this.proc && this.proc.exitCode === null) {
+            try {
+                this.outputChannel.info('[pet] Killing hung/crashed PET process');
+                this.proc.kill('SIGTERM');
+                // Give it a moment to terminate gracefully, then force kill
+                setTimeout(() => {
+                    if (this.proc && this.proc.exitCode === null) {
+                        this.proc.kill('SIGKILL');
+                    }
+                }, 500);
+            } catch (ex) {
+                this.outputChannel.error('[pet] Error killing process:', ex);
+            }
+        }
+        this.proc = undefined;
     }
 
     public async refresh(hardRefresh: boolean, options?: NativePythonEnvironmentKind | Uri[]): Promise<NativeInfo[]> {
@@ -228,12 +389,35 @@ class NativePythonFinderImpl implements NativePythonFinder {
         // we have got the exit event.
         const readable = new PassThrough();
         const writable = new PassThrough();
-        try {
-            const proc = spawnProcess(this.toolPath, ['server'], { env: process.env, stdio: 'pipe' });
-            proc.stdout.pipe(readable, { end: false });
-            proc.stderr.on('data', (data) => this.outputChannel.error(`[pet] ${data.toString()}`));
-            writable.pipe(proc.stdin, { end: false });
 
+        try {
+            this.proc = spawnProcess(this.toolPath, ['server'], { env: process.env, stdio: 'pipe' });
+
+            if (!this.proc.stdout || !this.proc.stderr || !this.proc.stdin) {
+                throw new Error('Failed to create stdio streams for PET process');
+            }
+
+            this.proc.stdout.pipe(readable, { end: false });
+            this.proc.stderr.on('data', (data) => this.outputChannel.error(`[pet] ${data.toString()}`));
+            writable.pipe(this.proc.stdin, { end: false });
+
+            // Handle process exit - mark as exited so pending requests fail fast
+            this.proc.on('exit', (code, signal) => {
+                this.processExited = true;
+                if (code !== 0) {
+                    this.outputChannel.error(
+                        `[pet] Python Environment Tools exited unexpectedly with code ${code}, signal ${signal}`,
+                    );
+                }
+            });
+
+            // Handle process errors (e.g., ENOENT if executable not found)
+            this.proc.on('error', (err) => {
+                this.processExited = true;
+                this.outputChannel.error('[pet] Process error:', err);
+            });
+
+            const proc = this.proc;
             this.startDisposables.push({
                 dispose: () => {
                     try {
@@ -241,7 +425,7 @@ class NativePythonFinderImpl implements NativePythonFinder {
                             // Attempt graceful shutdown by closing stdin before killing
                             // This gives the process a chance to clean up
                             this.outputChannel.debug('[pet] Shutting down Python Locator server');
-                            proc.stdin.end();
+                            proc.stdin?.end();
                             // Give process a moment to exit gracefully, then force kill
                             setTimeout(() => {
                                 if (proc.exitCode === null) {
@@ -255,7 +439,14 @@ class NativePythonFinderImpl implements NativePythonFinder {
                 },
             });
         } catch (ex) {
+            // Mark start as failed so all subsequent requests fail immediately
+            this.startFailed = true;
             this.outputChannel.error(`[pet] Error starting Python Finder ${this.toolPath} server`, ex);
+            this.outputChannel.error(
+                '[pet] To debug, run "Python Environments: Run Python Environment Tool (PET) in Terminal" from the Command Palette.',
+            );
+            // Don't continue - throw so caller knows spawn failed
+            throw ex;
         }
         const connection = rpc.createMessageConnection(
             new rpc.StreamMessageReader(readable),
@@ -300,6 +491,7 @@ class NativePythonFinderImpl implements NativePythonFinder {
     }
 
     private async doRefresh(options?: NativePythonEnvironmentKind | Uri[]): Promise<NativeInfo[]> {
+        await this.ensureProcessRunning();
         const disposables: Disposable[] = [];
         const unresolved: Promise<void>[] = [];
         const nativeInfo: NativeInfo[] = [];
@@ -311,10 +503,12 @@ class NativePythonFinderImpl implements NativePythonFinder {
                     this.outputChannel.info(`Discovered env: ${data.executable || data.prefix}`);
                     if (data.executable && (!data.version || !data.prefix)) {
                         unresolved.push(
-                            this.connection
-                                .sendRequest<NativeEnvInfo>('resolve', {
-                                    executable: data.executable,
-                                })
+                            sendRequestWithTimeout<NativeEnvInfo>(
+                                this.connection,
+                                'resolve',
+                                { executable: data.executable },
+                                RESOLVE_TIMEOUT_MS,
+                            )
                                 .then((environment: NativeEnvInfo) => {
                                     this.outputChannel.info(
                                         `Resolved environment during PET refresh: ${environment.executable}`,
@@ -334,9 +528,23 @@ class NativePythonFinderImpl implements NativePythonFinder {
                     nativeInfo.push(data);
                 }),
             );
-            await this.connection.sendRequest<{ duration: number }>('refresh', refreshOptions);
+            await sendRequestWithTimeout<{ duration: number }>(
+                this.connection,
+                'refresh',
+                refreshOptions,
+                REFRESH_TIMEOUT_MS,
+            );
             await Promise.all(unresolved);
+
+            // Reset restart attempts on successful refresh
+            this.restartAttempts = 0;
         } catch (ex) {
+            // On timeout, kill the hung process so next request triggers restart
+            if (ex instanceof Error && ex.message.includes('timed out')) {
+                this.outputChannel.warn('[pet] Request timed out, killing hung process for restart');
+                this.killProcess();
+                this.processExited = true;
+            }
             this.outputChannel.error('[pet] Error refreshing', ex);
             throw ex;
         } finally {
@@ -371,9 +579,16 @@ class NativePythonFinderImpl implements NativePythonFinder {
         this.outputChannel.info('[pet] configure: Sending configuration update:', JSON.stringify(options));
         try {
             this.lastConfiguration = options;
-            await this.connection.sendRequest('configure', options);
+            await sendRequestWithTimeout(this.connection, 'configure', options, CONFIGURE_TIMEOUT_MS);
         } catch (ex) {
+            // On timeout, kill the hung process so next request triggers restart
+            if (ex instanceof Error && ex.message.includes('timed out')) {
+                this.outputChannel.warn('[pet] Configure request timed out, killing hung process for restart');
+                this.killProcess();
+                this.processExited = true;
+            }
             this.outputChannel.error('[pet] configure: Configuration error', ex);
+            throw ex;
         }
     }
 
