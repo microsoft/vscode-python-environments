@@ -217,7 +217,8 @@ class NativePythonFinderImpl implements NativePythonFinder {
         if (this.restartAttempts >= MAX_RESTART_ATTEMPTS) {
             throw new Error(
                 `Python Environment Tools (PET) failed after ${MAX_RESTART_ATTEMPTS} restart attempts. ` +
-                    'Please reload the window or check the output channel for details.',
+                    'Please reload the window or check the output channel for details. ' +
+                    'To debug, run "Python Environments: Run Python Environment Tool (PET) in Terminal" from the Command Palette.',
             );
         }
 
@@ -264,6 +265,9 @@ class NativePythonFinderImpl implements NativePythonFinder {
             // We'll reset this only after a successful request completes
         } catch (ex) {
             this.outputChannel.error('[pet] Failed to restart Python Environment Tools:', ex);
+            this.outputChannel.error(
+                '[pet] To debug, run "Python Environments: Run Python Environment Tool (PET) in Terminal" from the Command Palette.',
+            );
             throw ex;
         } finally {
             this.isRestarting = false;
@@ -438,6 +442,9 @@ class NativePythonFinderImpl implements NativePythonFinder {
             // Mark start as failed so all subsequent requests fail immediately
             this.startFailed = true;
             this.outputChannel.error(`[pet] Error starting Python Finder ${this.toolPath} server`, ex);
+            this.outputChannel.error(
+                '[pet] To debug, run "Python Environments: Run Python Environment Tool (PET) in Terminal" from the Command Palette.',
+            );
             // Don't continue - throw so caller knows spawn failed
             throw ex;
         }
