@@ -6,7 +6,7 @@
     "publisher": "ms-python",
     "preview": true,
     "engines": {
-        "vscode": "^1.106.0" // Need new engine after distro update
+        "vscode": "^1.109.0-20260204" 
     },
     "categories": [
         "Other"
