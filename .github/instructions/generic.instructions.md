@@ -30,3 +30,7 @@ Provide project context and coding guidelines that AI should follow when generat
 ## Documentation
 
 -   Add clear docstrings to public functions, describing their purpose, parameters, and behavior.
+
+## Learnings
+
+-   When using `getConfiguration().inspect()`, always pass a scope/Uri to `getConfiguration(section, scope)` — otherwise `workspaceFolderValue` will be `undefined` because VS Code doesn't know which folder to inspect (1)

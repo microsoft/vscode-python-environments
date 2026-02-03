@@ -10,6 +10,7 @@ import {
     PythonProject,
     SetEnvironmentScope,
 } from '../api';
+import { SYSTEM_MANAGER_ID } from '../common/constants';
 import {
     EnvironmentManagerAlreadyRegisteredError,
     PackageManagerAlreadyRegisteredError,
@@ -167,7 +168,12 @@ export class PythonEnvironmentManagers implements EnvironmentManagers {
 
     /**
      * Returns the environment manager for the given context.
-     * Uses the default from settings if context is undefined or a Uri; otherwise uses the id or environment's managerId passed in via context.
+     *
+     * Priority:
+     * 1. Use the default from settings (user-configured takes precedence)
+     * 2. If no user-configured setting, fall back to cached environment's manager
+     * 3. If context is a string (manager ID), return that manager directly
+     * 4. If context is a PythonEnvironment, return its manager
      */
     public getEnvironmentManager(context: EnvironmentManagerScope): InternalEnvironmentManager | undefined {
         if (this._environmentManagers.size === 0) {
@@ -176,12 +182,28 @@ export class PythonEnvironmentManagers implements EnvironmentManagers {
         }
 
         if (context === undefined || context instanceof Uri) {
-            // get default environment manager from setting
+            // First check settings - user-configured settings always take priority
             const defaultEnvManagerId = getDefaultEnvManagerSetting(this.pm, context);
-            if (defaultEnvManagerId === undefined) {
-                return undefined;
+            if (defaultEnvManagerId !== undefined) {
+                const settingsManager = this._environmentManagers.get(defaultEnvManagerId);
+                if (settingsManager) {
+                    return settingsManager;
+                }
             }
-            return this._environmentManagers.get(defaultEnvManagerId);
+
+            // Fall back to cached environment's manager if no settings
+            const project = context ? this.pm.get(context) : undefined;
+            const key = project ? project.uri.toString() : 'global';
+            const cachedEnv = this._previousEnvironments.get(key);
+            if (cachedEnv) {
+                const cachedManager = this._environmentManagers.get(cachedEnv.envId.managerId);
+                if (cachedManager) {
+                    traceVerbose(`[getEnvironmentManager] Using cached manager ${cachedManager.id} for scope ${key}`);
+                    return cachedManager;
+                }
+            }
+
+            return undefined;
         }
 
         if (typeof context === 'string') {
@@ -263,10 +285,20 @@ export class PythonEnvironmentManagers implements EnvironmentManagers {
     /**
      * Sets the environment for a single scope, scope of undefined checks 'global'.
      * If given an array of scopes, delegates to setEnvironments for batch setting.
+     *
+     * @param scope - The scope to set the environment for
+     * @param environment - The environment to set (optional)
+     * @param shouldPersistSettings - Whether to persist to settings.json (default: true).
+     *   Pass `false` when setting environments during initial selection/auto-discovery
+     *   to avoid writing to settings.json.
      */
-    public async setEnvironment(scope: SetEnvironmentScope, environment?: PythonEnvironment): Promise<void> {
+    public async setEnvironment(
+        scope: SetEnvironmentScope,
+        environment?: PythonEnvironment,
+        shouldPersistSettings: boolean = true,
+    ): Promise<void> {
         if (Array.isArray(scope)) {
-            return this.setEnvironments(scope, environment);
+            return this.setEnvironments(scope, environment, shouldPersistSettings);
         }
 
         const customScope = environment ? environment : scope;
@@ -284,7 +316,8 @@ export class PythonEnvironmentManagers implements EnvironmentManagers {
         await manager.set(scope, environment);
 
         const project = scope ? this.pm.get(scope) : undefined;
-        if (scope) {
+        // Only persist to settings when explicitly requested
+        if (shouldPersistSettings && scope) {
             const packageManager = this.getPackageManager(environment);
             if (project && packageManager) {
                 await setAllManagerSettings([
@@ -310,8 +343,18 @@ export class PythonEnvironmentManagers implements EnvironmentManagers {
     /**
      * Sets the given environment for the specified project URIs or globally.
      * If a list of URIs is provided, sets the environment for each project; if 'global', sets it as the global environment.
+     *
+     * @param scope - Array of URIs or 'global'
+     * @param environment - The environment to set (optional)
+     * @param shouldPersistSettings - Whether to persist to settings.json (default: true).
+     *   Pass `false` when setting environments during initial selection/auto-discovery
+     *   to avoid writing to settings.json.
      */
-    public async setEnvironments(scope: Uri[] | string, environment?: PythonEnvironment): Promise<void> {
+    public async setEnvironments(
+        scope: Uri[] | string,
+        environment?: PythonEnvironment,
+        shouldPersistSettings: boolean = true,
+    ): Promise<void> {
         if (environment) {
             const manager = this.managers.find((m) => m.id === environment.envId.managerId);
             if (!manager) {
@@ -320,7 +363,7 @@ export class PythonEnvironmentManagers implements EnvironmentManagers {
                         environment.environmentPath ? environment.environmentPath.fsPath : ''
                     }`,
                 );
-                traceError(this.managers.map((m) => m.id).join(', '));
+                traceError(`Available managers: ${this.managers.map((m) => m.id).join(', ')}`);
                 return;
             }
 
@@ -331,7 +374,8 @@ export class PythonEnvironmentManagers implements EnvironmentManagers {
                 promises.push(manager.set(scope, environment));
                 scope.forEach((uri) => {
                     const m = this.getEnvironmentManager(uri);
-                    if (manager.id !== m?.id) {
+                    // Always add settings when persisting, OR when manager differs
+                    if (shouldPersistSettings || manager.id !== m?.id) {
                         settings.push({
                             project: this.pm.get(uri),
                             envManager: manager.id,
@@ -350,7 +394,8 @@ export class PythonEnvironmentManagers implements EnvironmentManagers {
             } else if (typeof scope === 'string' && scope === 'global') {
                 const m = this.getEnvironmentManager(undefined);
                 promises.push(manager.set(undefined, environment));
-                if (manager.id !== m?.id) {
+                // Always add settings when persisting, OR when manager differs
+                if (shouldPersistSettings || manager.id !== m?.id) {
                     settings.push({
                         project: undefined,
                         envManager: manager.id,
@@ -365,7 +410,10 @@ export class PythonEnvironmentManagers implements EnvironmentManagers {
                 }
             }
             await Promise.all(promises);
-            await setAllManagerSettings(settings);
+            // Only persist to settings when explicitly requested
+            if (shouldPersistSettings) {
+                await setAllManagerSettings(settings);
+            }
             setImmediate(() => events.forEach((e) => this._onDidChangeEnvironmentFiltered.fire(e)));
         } else {
             const promises: Promise<void>[] = [];
@@ -427,19 +475,19 @@ export class PythonEnvironmentManagers implements EnvironmentManagers {
         if (typeof scope === 'string' && scope === 'global') {
             const current = await this.getEnvironment(undefined);
             if (!current) {
-                await this.setEnvironments('global', environment);
+                await this.setEnvironments('global', environment, true);
             }
         } else if (Array.isArray(scope)) {
             const urisToSet: Uri[] = [];
             for (const uri of scope) {
                 const current = await this.getEnvironment(uri);
-                if (!current || current.envId.managerId === 'ms-python.python:system') {
+                if (!current || current.envId.managerId === SYSTEM_MANAGER_ID) {
                     // If the current environment is not set or is the system environment, set the new environment.
                     urisToSet.push(uri);
                 }
             }
             if (urisToSet.length > 0) {
-                await this.setEnvironments(urisToSet, environment);
+                await this.setEnvironments(urisToSet, environment, true);
             }
         }
     }
@@ -464,6 +512,7 @@ export class PythonEnvironmentManagers implements EnvironmentManagers {
         // Always get the new first, then compare with the old. This has minor impact on the ordering of
         // events. But it ensures that we always get the latest environment at the time of this call.
         const newEnv = await manager.get(scope);
+
         const key = project ? project.uri.toString() : 'global';
         const oldEnv = this._previousEnvironments.get(key);
         if (oldEnv?.envId.id !== newEnv?.envId.id) {

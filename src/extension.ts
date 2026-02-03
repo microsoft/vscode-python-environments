@@ -45,6 +45,10 @@ import {
 } from './features/envCommands';
 import { PythonEnvironmentManagers } from './features/envManagers';
 import { EnvVarManager, PythonEnvVariableManager } from './features/execution/envVariableManager';
+import {
+    applyInitialEnvironmentSelection,
+    registerInterpreterSettingsChangeListener,
+} from './features/interpreterSelection';
 import { PythonProjectManagerImpl } from './features/projectManager';
 import { getPythonApi, setPythonApi } from './features/pythonApi';
 import { registerCompletionProvider } from './features/settings/settingCompletions';
@@ -67,12 +71,7 @@ import { PythonStatusBarImpl } from './features/views/pythonStatusBar';
 import { updateViewsAndStatus } from './features/views/revealHandler';
 import { TemporaryStateManager } from './features/views/temporaryStateManager';
 import { ProjectItem, PythonEnvTreeItem } from './features/views/treeViewItems';
-import {
-    collectEnvironmentInfo,
-    getEnvManagerAndPackageManagerConfigLevels,
-    resolveDefaultInterpreter,
-    runPetInTerminalImpl,
-} from './helpers';
+import { collectEnvironmentInfo, getEnvManagerAndPackageManagerConfigLevels, runPetInTerminalImpl } from './helpers';
 import { EnvironmentManagers, ProjectCreators, PythonProjectManager } from './internal.api';
 import { registerSystemPythonFeatures } from './managers/builtin/main';
 import { SysPythonManager } from './managers/builtin/sysPythonManager';
@@ -460,7 +459,12 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
             shellStartupVarsMgr.initialize(),
         ]);
 
-        await resolveDefaultInterpreter(nativeFinder, envManagers, api);
+        await applyInitialEnvironmentSelection(envManagers, projectManager, nativeFinder, api);
+
+        // Register listener for interpreter settings changes for interpreter re-selection
+        context.subscriptions.push(
+            registerInterpreterSettingsChangeListener(envManagers, projectManager, nativeFinder, api),
+        );
 
         sendTelemetryEvent(EventNames.EXTENSION_MANAGER_REGISTRATION_DURATION, start.elapsedTime);
         await terminalManager.initialize(api);

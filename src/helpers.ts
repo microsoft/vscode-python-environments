@@ -1,6 +1,6 @@
 import { ExtensionContext, extensions, QuickInputButtons, Uri, window, workspace } from 'vscode';
-import { PythonEnvironment, PythonEnvironmentApi } from './api';
-import { traceError, traceInfo, traceWarn } from './common/logging';
+import { PythonEnvironment } from './api';
+import { traceInfo } from './common/logging';
 import { isWindows } from './common/utils/platformUtils';
 import { createTerminal, showInputBoxWithButtons } from './common/window.apis';
 import { getConfiguration } from './common/workspace.apis';
@@ -9,7 +9,7 @@ import { identifyTerminalShell } from './features/common/shellDetector';
 import { quoteArgs } from './features/execution/execUtils';
 import { getAutoActivationType } from './features/terminal/utils';
 import { EnvironmentManagers, PythonProjectManager } from './internal.api';
-import { getNativePythonToolsPath, NativeEnvInfo, NativePythonFinder } from './managers/common/nativePythonFinder';
+import { getNativePythonToolsPath } from './managers/common/nativePythonFinder';
 
 /**
  * Collects relevant Python environment information for issue reporting
@@ -122,9 +122,12 @@ export function getEnvManagerAndPackageManagerConfigLevels() {
 /**
  * Returns the user-configured value for a configuration key if set at any level (workspace folder, workspace, or global),
  * otherwise returns undefined.
+ * @param section - The configuration section (e.g., 'python', 'python-envs')
+ * @param key - The configuration key within the section
+ * @param scope - Optional scope (Uri) to get workspace-folder-specific settings
  */
-export function getUserConfiguredSetting<T>(section: string, key: string): T | undefined {
-    const config = getConfiguration(section);
+export function getUserConfiguredSetting<T>(section: string, key: string, scope?: Uri): T | undefined {
+    const config = getConfiguration(section, scope);
     const inspect = config.inspect<T>(key);
     if (!inspect) {
         return undefined;
@@ -244,72 +247,6 @@ export async function runPetInTerminalImpl(): Promise<void> {
                 return;
             }
             throw ex; // Re-throw other errors
-        }
-    }
-}
-
-/**
- * Sets the default Python interpreter for the workspace if the user has not explicitly set 'defaultEnvManager'.
- * @param nativeFinder -  used to resolve interpreter paths.
- * @param envManagers - contains all registered managers.
- * @param api - The PythonEnvironmentApi for environment resolution and setting.
- */
-export async function resolveDefaultInterpreter(
-    nativeFinder: NativePythonFinder,
-    envManagers: EnvironmentManagers,
-    api: PythonEnvironmentApi,
-) {
-    const userSetdefaultInterpreter = getUserConfiguredSetting<string>('python', 'defaultInterpreterPath');
-    const userSetDefaultManager = getUserConfiguredSetting<string>('python-envs', 'defaultEnvManager');
-    traceInfo(
-        `[resolveDefaultInterpreter] User configured defaultInterpreterPath: ${userSetdefaultInterpreter} and defaultEnvManager: ${userSetDefaultManager}`,
-    );
-
-    // Only proceed if the user has explicitly set defaultInterpreterPath but nothing is saved for defaultEnvManager
-    if (userSetdefaultInterpreter && !userSetDefaultManager) {
-        try {
-            const resolved: NativeEnvInfo = await nativeFinder.resolve(userSetdefaultInterpreter);
-            if (resolved && resolved.executable) {
-                const resolvedEnv = await api.resolveEnvironment(Uri.file(resolved.executable));
-                traceInfo(`[resolveDefaultInterpreter] API resolved environment: ${JSON.stringify(resolvedEnv)}`);
-
-                let findEnvManager = envManagers.managers.find((m) => m.id === resolvedEnv?.envId.managerId);
-                if (!findEnvManager) {
-                    findEnvManager = envManagers.managers.find((m) => m.id === 'ms-python.python:system');
-                }
-                const randomString = Math.random().toString(36).substring(2, 15);
-                if (resolvedEnv) {
-                    const newEnv: PythonEnvironment = {
-                        envId: {
-                            id: `${userSetdefaultInterpreter}_${randomString}`,
-                            managerId: resolvedEnv?.envId.managerId ?? '',
-                        },
-                        name: 'defaultInterpreterPath: ' + (resolved.version ?? ''),
-                        displayName: 'defaultInterpreterPath: ' + (resolved.version ?? ''),
-                        version: resolved.version ?? '',
-                        displayPath: userSetdefaultInterpreter ?? '',
-                        environmentPath: userSetdefaultInterpreter ? Uri.file(userSetdefaultInterpreter) : Uri.file(''),
-                        sysPrefix: resolved.prefix ?? '',
-                        execInfo: {
-                            run: {
-                                executable: userSetdefaultInterpreter ?? '',
-                            },
-                        },
-                    };
-                    if (workspace.workspaceFolders?.[0] && findEnvManager) {
-                        traceInfo(
-                            `[resolveDefaultInterpreter] Setting environment for workspace: ${workspace.workspaceFolders[0].uri.fsPath}`,
-                        );
-                        await api.setEnvironment(workspace.workspaceFolders[0].uri, newEnv);
-                    }
-                }
-            } else {
-                traceWarn(
-                    `[resolveDefaultInterpreter] NativeFinder did not resolve an executable for path: ${userSetdefaultInterpreter}`,
-                );
-            }
-        } catch (err) {
-            traceError(`[resolveDefaultInterpreter] Error resolving default interpreter: ${err}`);
         }
     }
 }
