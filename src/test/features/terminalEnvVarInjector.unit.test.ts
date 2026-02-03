@@ -66,6 +66,9 @@ suite('TerminalEnvVarInjector', () => {
             configurable: true,
         });
 
+        // Mock workspace.onDidChangeConfiguration to return a proper disposable
+        sinon.stub(workspace, 'onDidChangeConfiguration').returns(new Disposable(() => {}));
+
         mockScopedCollection = {
             clear: sinon.stub(),
             replace: sinon.stub(),
