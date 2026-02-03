@@ -20,18 +20,35 @@ This guide covers the full testing lifecycle:
 
 **User Requests Testing:**
 
--   "Write tests for this function"
--   "Run the tests"
--   "Fix the failing tests"
--   "Test this code"
--   "Add test coverage"
+- "Write tests for this function"
+- "Run the tests"
+- "Fix the failing tests"
+- "Test this code"
+- "Add test coverage"
 
 **File Context Triggers:**
 
--   Working in `**/test/**` directories
--   Files ending in `.test.ts` or `.unit.test.ts`
--   Test failures or compilation errors
--   Coverage reports or test output analysis
+- Working in `**/test/**` directories
+- Files ending in `.test.ts` or `.unit.test.ts`
+- Test failures or compilation errors
+- Coverage reports or test output analysis
+
+## 🚨 CRITICAL: Common Mistakes (Read First!)
+
+These mistakes have occurred REPEATEDLY. Check this list BEFORE writing any test code:
+
+| Mistake                                        | Fix                                                                |
+| ---------------------------------------------- | ------------------------------------------------------------------ |
+| Hardcoded POSIX paths like `'/test/workspace'` | Use `'.'` for relative paths, `Uri.file(x).fsPath` for comparisons |
+| Stubbing `workspace.getConfiguration` directly | Stub the wrapper `workspaceApis.getConfiguration` instead          |
+| Stubbing `workspace.workspaceFolders` property | Stub wrapper function `workspaceApis.getWorkspaceFolders()`        |
+| Comparing `fsPath` to raw string               | Compare `fsPath` to `Uri.file(expected).fsPath`                    |
+
+**Pre-flight checklist before completing test work:**
+
+- [ ] All paths use `Uri.file().fsPath` (no hardcoded `/path/to/x`)
+- [ ] All VS Code API stubs use wrapper modules, not `vscode.*` directly
+- [ ] Tests pass on both Windows and POSIX
 
 ## Test Types
 
@@ -39,17 +56,17 @@ When implementing tests as an AI agent, choose between two main types:
 
 ### Unit Tests (`*.unit.test.ts`)
 
--   **Fast isolated testing** - Mock all external dependencies
--   **Use for**: Pure functions, business logic, data transformations
--   **Execute with**: `runTests` tool with specific file patterns
--   **Mock everything** - VS Code APIs automatically mocked via `/src/test/unittests.ts`
+- **Fast isolated testing** - Mock all external dependencies
+- **Use for**: Pure functions, business logic, data transformations
+- **Execute with**: `runTests` tool with specific file patterns
+- **Mock everything** - VS Code APIs automatically mocked via `/src/test/unittests.ts`
 
 ### Extension Tests (`*.test.ts`)
 
--   **Full VS Code integration** - Real environment with actual APIs
--   **Use for**: Command registration, UI interactions, extension lifecycle
--   **Execute with**: VS Code launch configurations or `runTests` tool
--   **Slower but comprehensive** - Tests complete user workflows
+- **Full VS Code integration** - Real environment with actual APIs
+- **Use for**: Command registration, UI interactions, extension lifecycle
+- **Execute with**: VS Code launch configurations or `runTests` tool
+- **Slower but comprehensive** - Tests complete user workflows
 
 ## 🤖 Agent Tool Usage for Test Execution
 
@@ -172,17 +189,17 @@ function analyzeFailure(failure: TestFailure): TestFailureAnalysis {
 
 **Choose Unit Tests (`*.unit.test.ts`) when analyzing:**
 
--   Functions with clear inputs/outputs and no VS Code API dependencies
--   Data transformation, parsing, or utility functions
--   Business logic that can be isolated with mocks
--   Error handling scenarios with predictable inputs
+- Functions with clear inputs/outputs and no VS Code API dependencies
+- Data transformation, parsing, or utility functions
+- Business logic that can be isolated with mocks
+- Error handling scenarios with predictable inputs
 
 **Choose Extension Tests (`*.test.ts`) when analyzing:**
 
--   Functions that register VS Code commands or use `vscode.*` APIs
--   UI components, tree views, or command palette interactions
--   File system operations requiring workspace context
--   Extension lifecycle events (activation, deactivation)
+- Functions that register VS Code commands or use `vscode.*` APIs
+- UI components, tree views, or command palette interactions
+- File system operations requiring workspace context
+- Extension lifecycle events (activation, deactivation)
 
 **Agent Implementation Pattern:**
 
@@ -300,22 +317,22 @@ function generateTestScenarios(analysis: FunctionAnalysis): TestScenario[] {
 
 #### Main Flows
 
--   ✅ **Happy path scenarios** - normal expected usage
--   ✅ **Alternative paths** - different configuration combinations
--   ✅ **Integration scenarios** - multiple features working together
+- ✅ **Happy path scenarios** - normal expected usage
+- ✅ **Alternative paths** - different configuration combinations
+- ✅ **Integration scenarios** - multiple features working together
 
 #### Edge Cases
 
--   🔸 **Boundary conditions** - empty inputs, missing data
--   🔸 **Error scenarios** - network failures, permission errors
--   🔸 **Data validation** - invalid inputs, type mismatches
+- 🔸 **Boundary conditions** - empty inputs, missing data
+- 🔸 **Error scenarios** - network failures, permission errors
+- 🔸 **Data validation** - invalid inputs, type mismatches
 
 #### Real-World Scenarios
 
--   ✅ **Fresh install** - clean slate
--   ✅ **Existing user** - migration scenarios
--   ✅ **Power user** - complex configurations
--   🔸 **Error recovery** - graceful degradation
+- ✅ **Fresh install** - clean slate
+- ✅ **Existing user** - migration scenarios
+- ✅ **Power user** - complex configurations
+- 🔸 **Error recovery** - graceful degradation
 
 ### Example Test Plan Structure
 
@@ -324,30 +341,30 @@ function generateTestScenarios(analysis: FunctionAnalysis): TestScenario[] {
 
 ### 1. Configuration Migration Tests
 
--   No legacy settings exist
--   Legacy settings already migrated
--   Fresh migration needed
--   Partial migration required
--   Migration failures
+- No legacy settings exist
+- Legacy settings already migrated
+- Fresh migration needed
+- Partial migration required
+- Migration failures
 
 ### 2. Configuration Source Tests
 
--   Global search paths
--   Workspace search paths
--   Settings precedence
--   Configuration errors
+- Global search paths
+- Workspace search paths
+- Settings precedence
+- Configuration errors
 
 ### 3. Path Resolution Tests
 
--   Absolute vs relative paths
--   Workspace folder resolution
--   Path validation and filtering
+- Absolute vs relative paths
+- Workspace folder resolution
+- Path validation and filtering
 
 ### 4. Integration Scenarios
 
--   Combined configurations
--   Deduplication logic
--   Error handling flows
+- Combined configurations
+- Deduplication logic
+- Error handling flows
 ```
 
 ## 🔧 Step 4: Set Up Your Test Infrastructure
@@ -514,47 +531,47 @@ envConfig.inspect
 
 ### Configuration Tests
 
--   Test different setting combinations
--   Test setting precedence (workspace > user > default)
--   Test configuration errors and recovery
--   Always use dynamic path construction with Node.js `path` module when testing functions that resolve paths against workspace folders to ensure cross-platform compatibility
+- Test different setting combinations
+- Test setting precedence (workspace > user > default)
+- Test configuration errors and recovery
+- Always use dynamic path construction with Node.js `path` module when testing functions that resolve paths against workspace folders to ensure cross-platform compatibility
 
 ### Data Flow Tests
 
--   Test how data moves through the system
--   Test transformations (path resolution, filtering)
--   Test state changes (migrations, updates)
+- Test how data moves through the system
+- Test transformations (path resolution, filtering)
+- Test state changes (migrations, updates)
 
 ### Error Handling Tests
 
--   Test graceful degradation
--   Test error logging
--   Test fallback behaviors
+- Test graceful degradation
+- Test error logging
+- Test fallback behaviors
 
 ### Integration Tests
 
--   Test multiple features together
--   Test real-world scenarios
--   Test edge case combinations
+- Test multiple features together
+- Test real-world scenarios
+- Test edge case combinations
 
 ## 📊 Step 8: Review and Refine
 
 ### Test Quality Checklist
 
--   [ ] **Clear naming** - test names describe the scenario and expected outcome
--   [ ] **Good coverage** - main flows, edge cases, error scenarios
--   [ ] **Resilient assertions** - won't break due to minor changes
--   [ ] **Readable structure** - follows Mock → Run → Assert pattern
--   [ ] **Isolated tests** - each test is independent
--   [ ] **Fast execution** - tests run quickly with proper mocking
+- [ ] **Clear naming** - test names describe the scenario and expected outcome
+- [ ] **Good coverage** - main flows, edge cases, error scenarios
+- [ ] **Resilient assertions** - won't break due to minor changes
+- [ ] **Readable structure** - follows Mock → Run → Assert pattern
+- [ ] **Isolated tests** - each test is independent
+- [ ] **Fast execution** - tests run quickly with proper mocking
 
 ### Common Anti-Patterns to Avoid
 
--   ❌ Testing implementation details instead of behavior
--   ❌ Brittle assertions that break on cosmetic changes
--   ❌ Order-dependent tests that fail due to processing changes
--   ❌ Tests that don't clean up mocks properly
--   ❌ Overly complex test setup that's hard to understand
+- ❌ Testing implementation details instead of behavior
+- ❌ Brittle assertions that break on cosmetic changes
+- ❌ Order-dependent tests that fail due to processing changes
+- ❌ Tests that don't clean up mocks properly
+- ❌ Overly complex test setup that's hard to understand
 
 ## 🔄 Reviewing and Improving Existing Tests
 
@@ -567,13 +584,17 @@ envConfig.inspect
 
 ### Common Fixes
 
--   Over-complex mocks → Minimal mocks with only needed methods
--   Brittle assertions → Behavior-focused with error messages
--   Vague test names → Clear scenario descriptions (transform "should return X when Y" into "should [expected behavior] when [scenario context]")
--   Missing structure → Mock → Run → Assert pattern
--   Untestable Node.js APIs → Create proxy abstraction functions (use function overloads to preserve intelligent typing while making functions mockable)
+- Over-complex mocks → Minimal mocks with only needed methods
+- Brittle assertions → Behavior-focused with error messages
+- Vague test names → Clear scenario descriptions (transform "should return X when Y" into "should [expected behavior] when [scenario context]")
+- Missing structure → Mock → Run → Assert pattern
+- Untestable Node.js APIs → Create proxy abstraction functions (use function overloads to preserve intelligent typing while making functions mockable)
 
 ## 🧠 Agent Learnings
--   Avoid testing exact error messages or log output - assert only that errors are thrown or rejection occurs to prevent brittle tests (1)
--   Create shared mock helpers (e.g., `createMockLogOutputChannel()`) instead of duplicating mock setup across multiple test files (1)
 
+- Avoid testing exact error messages or log output - assert only that errors are thrown or rejection occurs to prevent brittle tests (1)
+- Create shared mock helpers (e.g., `createMockLogOutputChannel()`) instead of duplicating mock setup across multiple test files (1)
+- Always compile tests (`npm run compile-tests`) before running them after adding new test cases - test counts will be wrong if running against stale compiled output (1)
+- Never create "documentation tests" that just `assert.ok(true)` — if mocking limitations prevent testing, either test a different layer that IS mockable, or skip the test entirely with a clear explanation (1)
+- **REPEATED**: When stubbing vscode APIs in tests via wrapper modules (e.g., `workspaceApis`), the production code must also use those wrappers — sinon cannot stub properties directly on the vscode namespace like `workspace.workspaceFolders`, so both production and test code must reference the same stubbable wrapper functions (3)
+- **REPEATED**: Use OS-agnostic path handling in tests: use `'.'` for relative paths in configs (NOT `/test/workspace`), compare `fsPath` to `Uri.file(expected).fsPath` (NOT raw strings). This breaks on Windows every time! (5)

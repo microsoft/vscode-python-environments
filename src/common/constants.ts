@@ -7,6 +7,8 @@ export const EXTENSION_ROOT_DIR = path.dirname(__dirname);
 
 export const DEFAULT_PACKAGE_MANAGER_ID = 'ms-python.python:pip';
 export const DEFAULT_ENV_MANAGER_ID = 'ms-python.python:venv';
+export const VENV_MANAGER_ID = 'ms-python.python:venv';
+export const SYSTEM_MANAGER_ID = 'ms-python.python:system';
 
 export const KNOWN_FILES = [
     'requirements.txt',

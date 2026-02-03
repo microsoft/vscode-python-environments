@@ -109,8 +109,28 @@ export interface EnvironmentManagers extends Disposable {
 
     clearCache(scope: EnvironmentManagerScope): Promise<void>;
 
-    setEnvironment(scope: SetEnvironmentScope, environment?: PythonEnvironment): Promise<void>;
-    setEnvironments(scope: Uri[] | string, environment?: PythonEnvironment): Promise<void>;
+    /**
+     * Sets the environment for a scope.
+     * @param scope - The scope to set the environment for
+     * @param environment - The environment to set (optional)
+     * @param shouldPersistSettings - Whether to persist to settings.json (default: true)
+     */
+    setEnvironment(
+        scope: SetEnvironmentScope,
+        environment?: PythonEnvironment,
+        shouldPersistSettings?: boolean,
+    ): Promise<void>;
+    /**
+     * Sets environments for multiple scopes.
+     * @param scope - Array of URIs or 'global'
+     * @param environment - The environment to set (optional)
+     * @param shouldPersistSettings - Whether to persist to settings.json (default: true)
+     */
+    setEnvironments(
+        scope: Uri[] | string,
+        environment?: PythonEnvironment,
+        shouldPersistSettings?: boolean,
+    ): Promise<void>;
     setEnvironmentsIfUnset(scope: Uri[] | string, environment?: PythonEnvironment): Promise<void>;
     getEnvironment(scope: GetEnvironmentScope): Promise<PythonEnvironment | undefined>;
 
@@ -118,7 +138,10 @@ export interface EnvironmentManagers extends Disposable {
 }
 
 export class InternalEnvironmentManager implements EnvironmentManager {
-    public constructor(public readonly id: string, private readonly manager: EnvironmentManager) {}
+    public constructor(
+        public readonly id: string,
+        private readonly manager: EnvironmentManager,
+    ) {}
 
     public get name(): string {
         return this.manager.name;
@@ -223,7 +246,10 @@ export class InternalEnvironmentManager implements EnvironmentManager {
 }
 
 export class InternalPackageManager implements PackageManager {
-    public constructor(public readonly id: string, private readonly manager: PackageManager) {}
+    public constructor(
+        public readonly id: string,
+        private readonly manager: PackageManager,
+    ) {}
 
     public get name(): string {
         return this.manager.name;
@@ -313,7 +339,10 @@ export class PythonEnvironmentImpl implements PythonEnvironment {
     public readonly sysPrefix: string;
     public readonly group?: string | EnvironmentGroupInfo;
 
-    constructor(public readonly envId: PythonEnvironmentId, info: PythonEnvironmentInfo) {
+    constructor(
+        public readonly envId: PythonEnvironmentId,
+        info: PythonEnvironmentInfo,
+    ) {
         this.name = info.name;
         this.displayName = info.displayName ?? this.name;
         this.shortDisplayName = info.shortDisplayName;
@@ -338,7 +367,10 @@ export class PythonPackageImpl implements Package {
     public readonly iconPath?: IconPath;
     public readonly uris?: readonly Uri[];
 
-    constructor(public readonly pkgId: PackageId, info: PackageInfo) {
+    constructor(
+        public readonly pkgId: PackageId,
+        info: PackageInfo,
+    ) {
         this.name = info.name;
         this.displayName = info.displayName ?? this.name;
         this.version = info.version;
