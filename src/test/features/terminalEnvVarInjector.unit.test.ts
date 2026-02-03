@@ -126,7 +126,7 @@ suite('TerminalEnvVarInjector', () => {
         });
     });
 
-    suite('useEnvFile=false (Issue #936)', () => {
+    suite('useEnvFile=false', () => {
         test('should NOT inject env vars when useEnvFile is false', async () => {
             getConfigurationStub.returns(createMockConfig({ useEnvFile: false }) as WorkspaceConfiguration);
             envVarManager
