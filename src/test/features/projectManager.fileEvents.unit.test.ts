@@ -9,6 +9,14 @@ import { PythonProjectsImpl } from '../../internal.api';
 import { MockWorkspaceConfiguration } from '../mocks/mockWorkspaceConfig';
 
 /**
+ * Returns a platform-appropriate workspace path for testing.
+ * On Windows, paths must include a drive letter to work correctly with path.resolve().
+ */
+function getTestWorkspacePath(): string {
+    return process.platform === 'win32' ? 'C:\\workspace' : '/workspace';
+}
+
+/**
  * Tests for project manager file event handling (delete/rename).
  *
  * Testing strategy:
@@ -28,7 +36,7 @@ suite('Project Manager File Event Handling', () => {
     let updatePythonProjectSettingPathStub: sinon.SinonStub;
     let clock: sinon.SinonFakeTimers;
 
-    const workspaceUri = Uri.file('/workspace');
+    const workspaceUri = Uri.file(getTestWorkspacePath());
     const workspaceFolder: WorkspaceFolder = {
         uri: workspaceUri,
         name: 'workspace',
@@ -105,7 +113,7 @@ suite('Project Manager File Event Handling', () => {
 
     suite('handleDeletedFiles', () => {
         test('should remove project and update settings when project folder is deleted', async () => {
-            const projectUri = Uri.file('/workspace/my-project');
+            const projectUri = Uri.file(`${getTestWorkspacePath()}/my-project`);
             const pm = new PythonProjectManagerImpl();
             pm.initialize();
 
@@ -176,7 +184,7 @@ suite('Project Manager File Event Handling', () => {
         });
 
         test('should not affect untracked folders', async () => {
-            const untrackedUri = Uri.file('/workspace/not-a-project');
+            const untrackedUri = Uri.file(`${getTestWorkspacePath()}/not-a-project`);
             const pm = new PythonProjectManagerImpl();
             pm.initialize();
 
@@ -198,8 +206,8 @@ suite('Project Manager File Event Handling', () => {
 
     suite('handleRenamedFiles', () => {
         test('should update project path in settings when project folder is renamed', async () => {
-            const oldUri = Uri.file('/workspace/old-name');
-            const newUri = Uri.file('/workspace/new-name');
+            const oldUri = Uri.file(`${getTestWorkspacePath()}/old-name`);
+            const newUri = Uri.file(`${getTestWorkspacePath()}/new-name`);
             const pm = new PythonProjectManagerImpl();
             pm.initialize();
 
@@ -236,7 +244,7 @@ suite('Project Manager File Event Handling', () => {
             const pm = new PythonProjectManagerImpl();
             pm.initialize();
 
-            const newUri = Uri.file('/new-workspace');
+            const newUri = Uri.file(process.platform === 'win32' ? 'C:\\new-workspace' : '/new-workspace');
 
             // Fire rename event for workspace root
             renameFilesEmitter.fire({ files: [{ oldUri: workspaceUri, newUri }] });
@@ -254,8 +262,8 @@ suite('Project Manager File Event Handling', () => {
         });
 
         test('should not affect untracked folder renames', async () => {
-            const oldUri = Uri.file('/workspace/untracked');
-            const newUri = Uri.file('/workspace/untracked-renamed');
+            const oldUri = Uri.file(`${getTestWorkspacePath()}/untracked`);
+            const newUri = Uri.file(`${getTestWorkspacePath()}/untracked-renamed`);
             const pm = new PythonProjectManagerImpl();
             pm.initialize();
 
@@ -287,7 +295,8 @@ suite('updatePythonProjectSettingPath', () => {
     });
 
     test('should update project path in pythonProjects setting', async () => {
-        const workspaceUri = Uri.file('/workspace');
+        const workspacePath = getTestWorkspacePath();
+        const workspaceUri = Uri.file(workspacePath);
         const workspaceFolder: WorkspaceFolder = {
             uri: workspaceUri,
             name: 'workspace',
@@ -315,8 +324,8 @@ suite('updatePythonProjectSettingPath', () => {
         };
         sinon.stub(workspaceApis, 'getConfiguration').returns(mockConfig);
 
-        const oldUri = Uri.file('/workspace/old-project');
-        const newUri = Uri.file('/workspace/new-project');
+        const oldUri = Uri.file(`${workspacePath}/old-project`);
+        const newUri = Uri.file(`${workspacePath}/new-project`);
 
         await settingHelpers.updatePythonProjectSettingPath(oldUri, newUri);
 
@@ -327,7 +336,8 @@ suite('updatePythonProjectSettingPath', () => {
     });
 
     test('should not update if project not found in settings', async () => {
-        const workspaceUri = Uri.file('/workspace');
+        const workspacePath = getTestWorkspacePath();
+        const workspaceUri = Uri.file(workspacePath);
         const workspaceFolder: WorkspaceFolder = {
             uri: workspaceUri,
             name: 'workspace',
@@ -355,8 +365,8 @@ suite('updatePythonProjectSettingPath', () => {
         };
         sinon.stub(workspaceApis, 'getConfiguration').returns(mockConfig);
 
-        const oldUri = Uri.file('/workspace/non-existent');
-        const newUri = Uri.file('/workspace/renamed');
+        const oldUri = Uri.file(`${workspacePath}/non-existent`);
+        const newUri = Uri.file(`${workspacePath}/renamed`);
 
         await settingHelpers.updatePythonProjectSettingPath(oldUri, newUri);
 
@@ -364,7 +374,8 @@ suite('updatePythonProjectSettingPath', () => {
     });
 
     test('should preserve envManager and packageManager when updating path', async () => {
-        const workspaceUri = Uri.file('/workspace');
+        const workspacePath = getTestWorkspacePath();
+        const workspaceUri = Uri.file(workspacePath);
         const workspaceFolder: WorkspaceFolder = {
             uri: workspaceUri,
             name: 'workspace',
@@ -392,8 +403,8 @@ suite('updatePythonProjectSettingPath', () => {
         };
         sinon.stub(workspaceApis, 'getConfiguration').returns(mockConfig);
 
-        const oldUri = Uri.file('/workspace/pyenv-project');
-        const newUri = Uri.file('/workspace/pyenv-project-renamed');
+        const oldUri = Uri.file(`${workspacePath}/pyenv-project`);
+        const newUri = Uri.file(`${workspacePath}/pyenv-project-renamed`);
 
         await settingHelpers.updatePythonProjectSettingPath(oldUri, newUri);
 
