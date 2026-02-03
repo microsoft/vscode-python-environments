@@ -594,7 +594,7 @@ envConfig.inspect
 
 - Avoid testing exact error messages or log output - assert only that errors are thrown or rejection occurs to prevent brittle tests (1)
 - Create shared mock helpers (e.g., `createMockLogOutputChannel()`) instead of duplicating mock setup across multiple test files (1)
+- Use `sinon.useFakeTimers()` with `clock.tickAsync()` instead of `await new Promise(resolve => setTimeout(resolve, ms))` for debounce/timeout handling - eliminates flakiness and speeds up tests significantly (1)
 - Always compile tests (`npm run compile-tests`) before running them after adding new test cases - test counts will be wrong if running against stale compiled output (1)
 - Never create "documentation tests" that just `assert.ok(true)` — if mocking limitations prevent testing, either test a different layer that IS mockable, or skip the test entirely with a clear explanation (1)
-- **REPEATED**: When stubbing vscode APIs in tests via wrapper modules (e.g., `workspaceApis`), the production code must also use those wrappers — sinon cannot stub properties directly on the vscode namespace like `workspace.workspaceFolders`, so both production and test code must reference the same stubbable wrapper functions (3)
-- **REPEATED**: Use OS-agnostic path handling in tests: use `'.'` for relative paths in configs (NOT `/test/workspace`), compare `fsPath` to `Uri.file(expected).fsPath` (NOT raw strings). This breaks on Windows every time! (5)
+- When stubbing vscode APIs in tests via wrapper modules (e.g., `workspaceApis`), the production code must also use those wrappers — sinon cannot stub properties directly on the vscode namespace like `workspace.workspaceFolders`, so both production and test code must reference the same stubbable wrapper functions (3)
