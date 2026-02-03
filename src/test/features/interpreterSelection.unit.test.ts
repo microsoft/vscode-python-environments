@@ -3,7 +3,7 @@
 
 import * as assert from 'assert';
 import * as sinon from 'sinon';
-import { ConfigurationChangeEvent, Uri, workspace, WorkspaceConfiguration, WorkspaceFolder } from 'vscode';
+import { ConfigurationChangeEvent, Uri, WorkspaceConfiguration, WorkspaceFolder } from 'vscode';
 import { PythonEnvironment, PythonEnvironmentApi, PythonProject } from '../../api';
 import * as workspaceApis from '../../common/workspace.apis';
 import {
@@ -119,7 +119,7 @@ suite('Interpreter Selection - Priority Chain', () => {
     suite('Priority 1: pythonProjects[]', () => {
         test('should use manager from pythonProjects[] when configured', async () => {
             // Setup: pythonProjects[] has a venv manager configured
-            sandbox.stub(workspace, 'getConfiguration').returns(
+            sandbox.stub(workspaceApis, 'getConfiguration').returns(
                 createMockConfig([
                     {
                         path: '/test/workspace',
@@ -131,7 +131,7 @@ suite('Interpreter Selection - Priority Chain', () => {
             const mockProject: Partial<PythonProject> = { uri: testUri, name: 'test' };
             mockProjectManager.get.returns(mockProject as PythonProject);
             const mockWorkspaceFolder: Partial<WorkspaceFolder> = { uri: testUri };
-            sandbox.stub(workspace, 'getWorkspaceFolder').returns(mockWorkspaceFolder as WorkspaceFolder);
+            sandbox.stub(workspaceApis, 'getWorkspaceFolder').returns(mockWorkspaceFolder as WorkspaceFolder);
             sandbox.stub(helpers, 'getUserConfiguredSetting').returns(undefined);
 
             const result = await resolveEnvironmentByPriority(
@@ -150,7 +150,7 @@ suite('Interpreter Selection - Priority Chain', () => {
     suite('Priority 2: User-configured defaultEnvManager', () => {
         test('should use user-configured defaultEnvManager when set', async () => {
             // Setup: No pythonProjects[], but user configured defaultEnvManager
-            sandbox.stub(workspace, 'getConfiguration').returns(createMockConfig([]) as WorkspaceConfiguration);
+            sandbox.stub(workspaceApis, 'getConfiguration').returns(createMockConfig([]) as WorkspaceConfiguration);
             sandbox.stub(helpers, 'getUserConfiguredSetting').callsFake((section: string, key: string) => {
                 if (section === 'python-envs' && key === 'defaultEnvManager') {
                     return 'ms-python.python:venv';
@@ -173,7 +173,7 @@ suite('Interpreter Selection - Priority Chain', () => {
         test('should skip to Priority 3 when defaultEnvManager is not user-configured (only fallback)', async () => {
             // Setup: No pythonProjects[], no user-configured defaultEnvManager (returns undefined)
             // But there IS a user-configured defaultInterpreterPath
-            sandbox.stub(workspace, 'getConfiguration').returns(createMockConfig([]) as WorkspaceConfiguration);
+            sandbox.stub(workspaceApis, 'getConfiguration').returns(createMockConfig([]) as WorkspaceConfiguration);
             sandbox.stub(helpers, 'getUserConfiguredSetting').callsFake((section: string, key: string) => {
                 if (section === 'python' && key === 'defaultInterpreterPath') {
                     return '/usr/bin/python3.11';
@@ -197,7 +197,7 @@ suite('Interpreter Selection - Priority Chain', () => {
 
     suite('Priority 3: python.defaultInterpreterPath', () => {
         test('should use defaultInterpreterPath when set and resolvable', async () => {
-            sandbox.stub(workspace, 'getConfiguration').returns(createMockConfig([]) as WorkspaceConfiguration);
+            sandbox.stub(workspaceApis, 'getConfiguration').returns(createMockConfig([]) as WorkspaceConfiguration);
             sandbox.stub(helpers, 'getUserConfiguredSetting').callsFake((section: string, key: string) => {
                 if (section === 'python' && key === 'defaultInterpreterPath') {
                     return '/usr/bin/python3.11';
@@ -221,7 +221,7 @@ suite('Interpreter Selection - Priority Chain', () => {
         });
 
         test('should fall through to Priority 4 when defaultInterpreterPath cannot be resolved', async () => {
-            sandbox.stub(workspace, 'getConfiguration').returns(createMockConfig([]) as WorkspaceConfiguration);
+            sandbox.stub(workspaceApis, 'getConfiguration').returns(createMockConfig([]) as WorkspaceConfiguration);
             sandbox.stub(helpers, 'getUserConfiguredSetting').callsFake((section: string, key: string) => {
                 if (section === 'python' && key === 'defaultInterpreterPath') {
                     return '/nonexistent/python';
@@ -248,7 +248,7 @@ suite('Interpreter Selection - Priority Chain', () => {
             const userPyenvPath = '/Users/test/.pyenv/versions/3.13.7/bin/python';
             const resolvedHomebrewPath = '/opt/homebrew/bin/python3';
 
-            sandbox.stub(workspace, 'getConfiguration').returns(createMockConfig([]) as WorkspaceConfiguration);
+            sandbox.stub(workspaceApis, 'getConfiguration').returns(createMockConfig([]) as WorkspaceConfiguration);
             sandbox.stub(helpers, 'getUserConfiguredSetting').callsFake((section: string, key: string) => {
                 if (section === 'python' && key === 'defaultInterpreterPath') {
                     return userPyenvPath;
@@ -309,7 +309,7 @@ suite('Interpreter Selection - Priority Chain', () => {
 
     suite('Priority 4: Auto-discovery', () => {
         test('should use local venv when found', async () => {
-            sandbox.stub(workspace, 'getConfiguration').returns(createMockConfig([]) as WorkspaceConfiguration);
+            sandbox.stub(workspaceApis, 'getConfiguration').returns(createMockConfig([]) as WorkspaceConfiguration);
             sandbox.stub(helpers, 'getUserConfiguredSetting').returns(undefined);
             mockVenvManager.get.resolves(mockVenvEnv);
 
@@ -327,7 +327,7 @@ suite('Interpreter Selection - Priority Chain', () => {
         });
 
         test('should fall back to system manager when no local venv', async () => {
-            sandbox.stub(workspace, 'getConfiguration').returns(createMockConfig([]) as WorkspaceConfiguration);
+            sandbox.stub(workspaceApis, 'getConfiguration').returns(createMockConfig([]) as WorkspaceConfiguration);
             sandbox.stub(helpers, 'getUserConfiguredSetting').returns(undefined);
             mockVenvManager.get.resolves(undefined); // No local venv
 
@@ -344,7 +344,7 @@ suite('Interpreter Selection - Priority Chain', () => {
         });
 
         test('should throw error when no managers are available', async () => {
-            sandbox.stub(workspace, 'getConfiguration').returns(createMockConfig([]) as WorkspaceConfiguration);
+            sandbox.stub(workspaceApis, 'getConfiguration').returns(createMockConfig([]) as WorkspaceConfiguration);
             sandbox.stub(helpers, 'getUserConfiguredSetting').returns(undefined);
 
             // Create mock with no managers
@@ -370,7 +370,7 @@ suite('Interpreter Selection - Priority Chain', () => {
 
     suite('Edge Cases', () => {
         test('should fall through when nativeFinder resolves but returns no executable', async () => {
-            sandbox.stub(workspace, 'getConfiguration').returns(createMockConfig([]) as WorkspaceConfiguration);
+            sandbox.stub(workspaceApis, 'getConfiguration').returns(createMockConfig([]) as WorkspaceConfiguration);
             sandbox.stub(helpers, 'getUserConfiguredSetting').callsFake((section: string, key: string) => {
                 if (section === 'python' && key === 'defaultInterpreterPath') {
                     return '/some/path/python';
@@ -394,7 +394,7 @@ suite('Interpreter Selection - Priority Chain', () => {
         });
 
         test('should fall through when api.resolveEnvironment returns undefined', async () => {
-            sandbox.stub(workspace, 'getConfiguration').returns(createMockConfig([]) as WorkspaceConfiguration);
+            sandbox.stub(workspaceApis, 'getConfiguration').returns(createMockConfig([]) as WorkspaceConfiguration);
             sandbox.stub(helpers, 'getUserConfiguredSetting').callsFake((section: string, key: string) => {
                 if (section === 'python' && key === 'defaultInterpreterPath') {
                     return '/usr/bin/python3.11';
@@ -418,7 +418,7 @@ suite('Interpreter Selection - Priority Chain', () => {
         });
 
         test('should use first available manager when venv and system managers not found', async () => {
-            sandbox.stub(workspace, 'getConfiguration').returns(createMockConfig([]) as WorkspaceConfiguration);
+            sandbox.stub(workspaceApis, 'getConfiguration').returns(createMockConfig([]) as WorkspaceConfiguration);
             sandbox.stub(helpers, 'getUserConfiguredSetting').returns(undefined);
 
             const mockCondaManager = {
@@ -526,8 +526,8 @@ suite('Interpreter Selection - applyInitialEnvironmentSelection', () => {
     });
 
     test('should call setEnvironment with shouldPersistSettings=false', async () => {
-        sandbox.stub(workspace, 'workspaceFolders').value([{ uri: testUri, name: 'test', index: 0 }]);
-        sandbox.stub(workspace, 'getConfiguration').returns(createMockConfig([]) as WorkspaceConfiguration);
+        sandbox.stub(workspaceApis, 'getWorkspaceFolders').returns([{ uri: testUri, name: 'test', index: 0 }]);
+        sandbox.stub(workspaceApis, 'getConfiguration').returns(createMockConfig([]) as WorkspaceConfiguration);
         sandbox.stub(helpers, 'getUserConfiguredSetting').returns(undefined);
 
         await applyInitialEnvironmentSelection(
@@ -546,11 +546,11 @@ suite('Interpreter Selection - applyInitialEnvironmentSelection', () => {
     test('should process all workspace folders', async () => {
         const uri1 = Uri.file('/workspace1');
         const uri2 = Uri.file('/workspace2');
-        sandbox.stub(workspace, 'workspaceFolders').value([
+        sandbox.stub(workspaceApis, 'getWorkspaceFolders').returns([
             { uri: uri1, name: 'workspace1', index: 0 },
             { uri: uri2, name: 'workspace2', index: 1 },
         ]);
-        sandbox.stub(workspace, 'getConfiguration').returns(createMockConfig([]) as WorkspaceConfiguration);
+        sandbox.stub(workspaceApis, 'getConfiguration').returns(createMockConfig([]) as WorkspaceConfiguration);
         sandbox.stub(helpers, 'getUserConfiguredSetting').returns(undefined);
 
         await applyInitialEnvironmentSelection(
@@ -565,8 +565,8 @@ suite('Interpreter Selection - applyInitialEnvironmentSelection', () => {
     });
 
     test('should also set global environment when no workspace folders', async () => {
-        sandbox.stub(workspace, 'workspaceFolders').value([]);
-        sandbox.stub(workspace, 'getConfiguration').returns(createMockConfig([]) as WorkspaceConfiguration);
+        sandbox.stub(workspaceApis, 'getWorkspaceFolders').returns([]);
+        sandbox.stub(workspaceApis, 'getConfiguration').returns(createMockConfig([]) as WorkspaceConfiguration);
         sandbox.stub(helpers, 'getUserConfiguredSetting').returns(undefined);
 
         await applyInitialEnvironmentSelection(
@@ -855,8 +855,8 @@ suite('Interpreter Selection - registerInterpreterSettingsChangeListener', () =>
             return { dispose: () => {} };
         });
 
-        sandbox.stub(workspace, 'workspaceFolders').value([{ uri: testUri, name: 'test', index: 0 }]);
-        sandbox.stub(workspace, 'getConfiguration').returns(createMockConfig([]) as WorkspaceConfiguration);
+        sandbox.stub(workspaceApis, 'getWorkspaceFolders').returns([{ uri: testUri, name: 'test', index: 0 }]);
+        sandbox.stub(workspaceApis, 'getConfiguration').returns(createMockConfig([]) as WorkspaceConfiguration);
         sandbox.stub(helpers, 'getUserConfiguredSetting').returns(undefined);
 
         // Register the listener
@@ -897,8 +897,8 @@ suite('Interpreter Selection - registerInterpreterSettingsChangeListener', () =>
             return { dispose: () => {} };
         });
 
-        sandbox.stub(workspace, 'workspaceFolders').value([{ uri: testUri, name: 'test', index: 0 }]);
-        sandbox.stub(workspace, 'getConfiguration').returns(createMockConfig([]) as WorkspaceConfiguration);
+        sandbox.stub(workspaceApis, 'getWorkspaceFolders').returns([{ uri: testUri, name: 'test', index: 0 }]);
+        sandbox.stub(workspaceApis, 'getConfiguration').returns(createMockConfig([]) as WorkspaceConfiguration);
         sandbox.stub(helpers, 'getUserConfiguredSetting').returns(undefined);
 
         const disposable = registerInterpreterSettingsChangeListener(
@@ -934,8 +934,8 @@ suite('Interpreter Selection - registerInterpreterSettingsChangeListener', () =>
             return { dispose: () => {} };
         });
 
-        sandbox.stub(workspace, 'workspaceFolders').value([{ uri: testUri, name: 'test', index: 0 }]);
-        sandbox.stub(workspace, 'getConfiguration').returns(createMockConfig([]) as WorkspaceConfiguration);
+        sandbox.stub(workspaceApis, 'getWorkspaceFolders').returns([{ uri: testUri, name: 'test', index: 0 }]);
+        sandbox.stub(workspaceApis, 'getConfiguration').returns(createMockConfig([]) as WorkspaceConfiguration);
         sandbox.stub(helpers, 'getUserConfiguredSetting').returns(undefined);
 
         const disposable = registerInterpreterSettingsChangeListener(
@@ -971,8 +971,8 @@ suite('Interpreter Selection - registerInterpreterSettingsChangeListener', () =>
             return { dispose: () => {} };
         });
 
-        sandbox.stub(workspace, 'workspaceFolders').value([{ uri: testUri, name: 'test', index: 0 }]);
-        sandbox.stub(workspace, 'getConfiguration').returns(createMockConfig([]) as WorkspaceConfiguration);
+        sandbox.stub(workspaceApis, 'getWorkspaceFolders').returns([{ uri: testUri, name: 'test', index: 0 }]);
+        sandbox.stub(workspaceApis, 'getConfiguration').returns(createMockConfig([]) as WorkspaceConfiguration);
         sandbox.stub(helpers, 'getUserConfiguredSetting').returns(undefined);
 
         const disposable = registerInterpreterSettingsChangeListener(
@@ -1093,7 +1093,7 @@ suite('Interpreter Selection - Settings over Cache Priority', () => {
     test('should use user-configured defaultEnvManager even when cache has different manager', async () => {
         // This test verifies settings take priority over cache
         // Setup: User has configured defaultEnvManager=conda, but cache has venv
-        sandbox.stub(workspace, 'getConfiguration').returns(createMockConfig([]) as WorkspaceConfiguration);
+        sandbox.stub(workspaceApis, 'getConfiguration').returns(createMockConfig([]) as WorkspaceConfiguration);
         sandbox.stub(helpers, 'getUserConfiguredSetting').callsFake((section: string, key: string) => {
             if (section === 'python-envs' && key === 'defaultEnvManager') {
                 return 'ms-python.python:conda'; // User wants conda
@@ -1117,7 +1117,7 @@ suite('Interpreter Selection - Settings over Cache Priority', () => {
 
     test('should use pythonProjects manager even when defaultEnvManager is set', async () => {
         // This test verifies pythonProjects[] has highest priority (Priority 1 over Priority 2)
-        sandbox.stub(workspace, 'getConfiguration').returns(
+        sandbox.stub(workspaceApis, 'getConfiguration').returns(
             createMockConfig([
                 {
                     path: '/test/workspace',
@@ -1129,7 +1129,7 @@ suite('Interpreter Selection - Settings over Cache Priority', () => {
         const mockProject: Partial<PythonProject> = { uri: testUri, name: 'test' };
         mockProjectManager.get.returns(mockProject as PythonProject);
         const mockWorkspaceFolder: Partial<WorkspaceFolder> = { uri: testUri };
-        sandbox.stub(workspace, 'getWorkspaceFolder').returns(mockWorkspaceFolder as WorkspaceFolder);
+        sandbox.stub(workspaceApis, 'getWorkspaceFolder').returns(mockWorkspaceFolder as WorkspaceFolder);
 
         sandbox.stub(helpers, 'getUserConfiguredSetting').callsFake((section: string, key: string) => {
             if (section === 'python-envs' && key === 'defaultEnvManager') {
@@ -1153,7 +1153,7 @@ suite('Interpreter Selection - Settings over Cache Priority', () => {
 
     test('should fall back to auto-discovery when no user settings configured', async () => {
         // When no settings are configured, cache from auto-discovery should be used
-        sandbox.stub(workspace, 'getConfiguration').returns(createMockConfig([]) as WorkspaceConfiguration);
+        sandbox.stub(workspaceApis, 'getConfiguration').returns(createMockConfig([]) as WorkspaceConfiguration);
         sandbox.stub(helpers, 'getUserConfiguredSetting').returns(undefined);
 
         const result = await resolveEnvironmentByPriority(
@@ -1259,11 +1259,11 @@ suite('Interpreter Selection - Multi-Root Workspace', () => {
 
     test('each folder should get its own local venv in multi-root workspace', async () => {
         // Setup: Two workspace folders, each with their own local venv
-        sandbox.stub(workspace, 'workspaceFolders').value([
+        sandbox.stub(workspaceApis, 'getWorkspaceFolders').returns([
             { uri: folder1Uri, name: 'folder1', index: 0 },
             { uri: folder2Uri, name: 'folder2', index: 1 },
         ]);
-        sandbox.stub(workspace, 'getConfiguration').returns(createMockConfig([]) as WorkspaceConfiguration);
+        sandbox.stub(workspaceApis, 'getConfiguration').returns(createMockConfig([]) as WorkspaceConfiguration);
         sandbox.stub(helpers, 'getUserConfiguredSetting').returns(undefined);
 
         // Venv manager returns different venvs for each folder
@@ -1310,11 +1310,11 @@ suite('Interpreter Selection - Multi-Root Workspace', () => {
 
     test('first folder venv should not be overwritten when second folder has no venv', async () => {
         // This tests the scenario in issue #1145 where the first folder's venv gets overwritten
-        sandbox.stub(workspace, 'workspaceFolders').value([
+        sandbox.stub(workspaceApis, 'getWorkspaceFolders').returns([
             { uri: folder1Uri, name: 'folder1', index: 0 },
             { uri: folder2Uri, name: 'folder2', index: 1 },
         ]);
-        sandbox.stub(workspace, 'getConfiguration').returns(createMockConfig([]) as WorkspaceConfiguration);
+        sandbox.stub(workspaceApis, 'getConfiguration').returns(createMockConfig([]) as WorkspaceConfiguration);
         sandbox.stub(helpers, 'getUserConfiguredSetting').returns(undefined);
 
         // First folder has a venv, second folder does not
@@ -1351,13 +1351,13 @@ suite('Interpreter Selection - Multi-Root Workspace', () => {
         const mockProject1: Partial<PythonProject> = { uri: folder1Uri, name: 'project1' };
         const mockProject2: Partial<PythonProject> = { uri: folder2Uri, name: 'project2' };
 
-        sandbox.stub(workspace, 'workspaceFolders').value([
+        sandbox.stub(workspaceApis, 'getWorkspaceFolders').returns([
             { uri: folder1Uri, name: 'folder1', index: 0 },
             { uri: folder2Uri, name: 'folder2', index: 1 },
         ]);
 
         // Different pythonProjects settings for each folder
-        sandbox.stub(workspace, 'getConfiguration').callsFake((_section?: string, scope?: unknown) => {
+        sandbox.stub(workspaceApis, 'getConfiguration').callsFake((_section?: string, scope?: unknown) => {
             const scopeUri = scope as Uri | undefined;
             if (scopeUri?.fsPath === folder1Uri.fsPath) {
                 return createMockConfig([
@@ -1382,7 +1382,7 @@ suite('Interpreter Selection - Multi-Root Workspace', () => {
             return undefined;
         });
 
-        sandbox.stub(workspace, 'getWorkspaceFolder').callsFake((uri: Uri) => {
+        sandbox.stub(workspaceApis, 'getWorkspaceFolder').callsFake((uri: Uri) => {
             if (uri.fsPath === folder1Uri.fsPath) {
                 return { uri: folder1Uri, name: 'folder1', index: 0 } as WorkspaceFolder;
             }

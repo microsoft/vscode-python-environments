@@ -2,12 +2,17 @@
 // Licensed under the MIT License.
 
 import * as path from 'path';
-import { commands, ConfigurationChangeEvent, Disposable, l10n, Uri, workspace } from 'vscode';
+import { commands, ConfigurationChangeEvent, Disposable, l10n, Uri } from 'vscode';
 import { PythonEnvironment, PythonEnvironmentApi } from '../api';
 import { SYSTEM_MANAGER_ID, VENV_MANAGER_ID } from '../common/constants';
 import { traceError, traceInfo, traceVerbose, traceWarn } from '../common/logging';
 import { showWarningMessage } from '../common/window.apis';
-import { getConfiguration, onDidChangeConfiguration } from '../common/workspace.apis';
+import {
+    getConfiguration,
+    getWorkspaceFolder,
+    getWorkspaceFolders,
+    onDidChangeConfiguration,
+} from '../common/workspace.apis';
 import { getUserConfiguredSetting } from '../helpers';
 import {
     EnvironmentManagers,
@@ -234,7 +239,7 @@ export async function applyInitialEnvironmentSelection(
     nativeFinder: NativePythonFinder,
     api: PythonEnvironmentApi,
 ): Promise<void> {
-    const folders = workspace.workspaceFolders ?? [];
+    const folders = getWorkspaceFolders() ?? [];
     traceInfo(
         `[interpreterSelection] Applying initial environment selection for ${folders.length} workspace folder(s)`,
     );
@@ -351,7 +356,7 @@ function getProjectSpecificEnvManager(projectManager: PythonProjectManager, scop
 
     if (overrides.length > 0) {
         const pw = projectManager.get(scope);
-        const w = workspace.getWorkspaceFolder(scope);
+        const w = getWorkspaceFolder(scope);
         if (pw && w) {
             const pwPath = path.normalize(pw.uri.fsPath);
             const matching = overrides.find((s) => path.resolve(w.uri.fsPath, s.path) === pwPath);
