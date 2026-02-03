@@ -122,7 +122,7 @@ suite('Interpreter Selection - Priority Chain', () => {
             sandbox.stub(workspaceApis, 'getConfiguration').returns(
                 createMockConfig([
                     {
-                        path: '/test/workspace',
+                        path: '.',
                         envManager: 'ms-python.python:venv',
                         packageManager: 'ms-python.python:pip',
                     },
@@ -301,7 +301,7 @@ suite('Interpreter Selection - Priority Chain', () => {
             );
             assert.strictEqual(
                 result.environment.environmentPath?.fsPath,
-                userPyenvPath,
+                Uri.file(userPyenvPath).fsPath,
                 'environmentPath should use user configured path',
             );
         });
@@ -1117,10 +1117,11 @@ suite('Interpreter Selection - Settings over Cache Priority', () => {
 
     test('should use pythonProjects manager even when defaultEnvManager is set', async () => {
         // This test verifies pythonProjects[] has highest priority (Priority 1 over Priority 2)
+        // Use '.' as relative path - path.resolve(workspaceFolder, '.') equals workspaceFolder
         sandbox.stub(workspaceApis, 'getConfiguration').returns(
             createMockConfig([
                 {
-                    path: '/test/workspace',
+                    path: '.',
                     envManager: 'ms-python.python:venv', // Project says venv
                     packageManager: 'ms-python.python:pip',
                 },
@@ -1357,16 +1358,15 @@ suite('Interpreter Selection - Multi-Root Workspace', () => {
         ]);
 
         // Different pythonProjects settings for each folder
+        // Use '.' as relative path - path.resolve(workspaceFolder, '.') equals workspaceFolder
         sandbox.stub(workspaceApis, 'getConfiguration').callsFake((_section?: string, scope?: unknown) => {
             const scopeUri = scope as Uri | undefined;
             if (scopeUri?.fsPath === folder1Uri.fsPath) {
-                return createMockConfig([
-                    { path: '/workspace/folder1', envManager: 'ms-python.python:venv' },
-                ]) as WorkspaceConfiguration;
+                return createMockConfig([{ path: '.', envManager: 'ms-python.python:venv' }]) as WorkspaceConfiguration;
             }
             if (scopeUri?.fsPath === folder2Uri.fsPath) {
                 return createMockConfig([
-                    { path: '/workspace/folder2', envManager: 'ms-python.python:system' },
+                    { path: '.', envManager: 'ms-python.python:system' },
                 ]) as WorkspaceConfiguration;
             }
             return createMockConfig([]) as WorkspaceConfiguration;
