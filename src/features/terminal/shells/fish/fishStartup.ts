@@ -19,10 +19,14 @@ async function isFishInstalled(): Promise<boolean> {
     }
 }
 
-async function getFishProfile(): Promise<string> {
-    const homeDir = os.homedir();
-    // Fish configuration is typically at ~/.config/fish/config.fish
-    const profilePath = path.join(homeDir, '.config', 'fish', 'config.fish');
+/**
+ * Resolve the Fish configuration profile path, honoring XDG_CONFIG_HOME when set.
+ */
+export async function getFishProfile(): Promise<string> {
+    const xdgConfigHome = process.env.XDG_CONFIG_HOME?.trim() ?? '';
+    const baseConfigDir = xdgConfigHome.length > 0 ? xdgConfigHome : path.join(os.homedir(), '.config');
+    // Fish configuration is typically at $XDG_CONFIG_HOME/fish/config.fish or ~/.config/fish/config.fish
+    const profilePath = path.join(baseConfigDir, 'fish', 'config.fish');
     traceInfo(`SHELL: fish profile found at: ${profilePath}`);
     return profilePath;
 }
