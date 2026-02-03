@@ -3,7 +3,7 @@ import * as os from 'os';
 import * as path from 'path';
 import * as sinon from 'sinon';
 
-import { getFishProfile } from '../../../../features/terminal/shells/fish/fishStartup';
+import { getFishProfile } from '../../../../../features/terminal/shells/fish/fishStartup';
 
 suite('Fish Startup', () => {
     let originalXdgConfigHome: string | undefined;
