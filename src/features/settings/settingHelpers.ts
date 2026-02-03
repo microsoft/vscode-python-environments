@@ -147,29 +147,10 @@ export async function setAllManagerSettings(edits: EditAllManagerSettings[]): Pr
                     packageManager: e.packageManager,
                 });
             } else {
-                // Only write settings if:
-                // 1. There's already an explicit setting (we're updating it), OR
-                // 2. The new value is not the implicit fallback (system manager is the fallback)
-                const isSystemManager = e.envManager === 'ms-python.python:system';
-                const envManagerInspect = config.inspect<string>('defaultEnvManager');
-                const hasExplicitEnvManager =
-                    envManagerInspect?.workspaceFolderValue !== undefined ||
-                    envManagerInspect?.workspaceValue !== undefined;
-
-                // Write if changing an existing setting, OR if setting to non-system manager
-                if ((hasExplicitEnvManager || !isSystemManager) && config.get('defaultEnvManager') !== e.envManager) {
+                if (config.get('defaultEnvManager') !== e.envManager) {
                     promises.push(config.update('defaultEnvManager', e.envManager, ConfigurationTarget.Workspace));
                 }
-
-                const pkgManagerInspect = config.inspect<string>('defaultPackageManager');
-                const hasExplicitPkgManager =
-                    pkgManagerInspect?.workspaceFolderValue !== undefined ||
-                    pkgManagerInspect?.workspaceValue !== undefined;
-                // For package manager, write if there's an explicit setting OR if env manager is being written
-                if (
-                    (hasExplicitPkgManager || !isSystemManager) &&
-                    config.get('defaultPackageManager') !== e.packageManager
-                ) {
+                if (config.get('defaultPackageManager') !== e.packageManager) {
                     promises.push(
                         config.update('defaultPackageManager', e.packageManager, ConfigurationTarget.Workspace),
                     );
@@ -196,23 +177,10 @@ export async function setAllManagerSettings(edits: EditAllManagerSettings[]): Pr
     edits
         .filter((e) => !e.project)
         .forEach((e) => {
-            // Only write global settings if:
-            // 1. There's already an explicit global setting (we're updating it), OR
-            // 2. The new value is not the implicit fallback (system manager)
-            const isSystemManager = e.envManager === 'ms-python.python:system';
-            const envManagerInspect = config.inspect<string>('defaultEnvManager');
-            const hasExplicitGlobalEnvManager = envManagerInspect?.globalValue !== undefined;
-
-            if ((hasExplicitGlobalEnvManager || !isSystemManager) && config.get('defaultEnvManager') !== e.envManager) {
+            if (config.get('defaultEnvManager') !== e.envManager) {
                 promises.push(config.update('defaultEnvManager', e.envManager, ConfigurationTarget.Global));
             }
-
-            const pkgManagerInspect = config.inspect<string>('defaultPackageManager');
-            const hasExplicitGlobalPkgManager = pkgManagerInspect?.globalValue !== undefined;
-            if (
-                (hasExplicitGlobalPkgManager || !isSystemManager) &&
-                config.get('defaultPackageManager') !== e.packageManager
-            ) {
+            if (config.get('defaultPackageManager') !== e.packageManager) {
                 promises.push(config.update('defaultPackageManager', e.packageManager, ConfigurationTarget.Global));
             }
         });
@@ -266,14 +234,8 @@ export async function setEnvironmentManager(edits: EditEnvManagerSettings[]): Pr
             if (index >= 0) {
                 overrides[index].envManager = e.envManager;
                 projectsModified = true;
-            } else {
-                // Only write settings if updating existing OR setting non-system manager
-                const isSystemManager = e.envManager === 'ms-python.python:system';
-                const envManagerInspect = config.inspect<string>('defaultEnvManager');
-                const hasExplicitEnvManager = envManagerInspect?.workspaceValue !== undefined;
-                if ((hasExplicitEnvManager || !isSystemManager) && config.get('defaultEnvManager') !== e.envManager) {
-                    promises.push(config.update('defaultEnvManager', e.envManager, ConfigurationTarget.Workspace));
-                }
+            } else if (config.get('defaultEnvManager') !== e.envManager) {
+                promises.push(config.update('defaultEnvManager', e.envManager, ConfigurationTarget.Workspace));
             }
         });
 
@@ -289,11 +251,7 @@ export async function setEnvironmentManager(edits: EditEnvManagerSettings[]): Pr
     edits
         .filter((e) => !e.project)
         .forEach((e) => {
-            // Only write global settings if updating existing OR setting non-system manager
-            const isSystemManager = e.envManager === 'ms-python.python:system';
-            const envManagerInspect = config.inspect<string>('defaultEnvManager');
-            const hasExplicitGlobalEnvManager = envManagerInspect?.globalValue !== undefined;
-            if ((hasExplicitGlobalEnvManager || !isSystemManager) && config.get('defaultEnvManager') !== e.envManager) {
+            if (config.get('defaultEnvManager') !== e.envManager) {
                 promises.push(config.update('defaultEnvManager', e.envManager, ConfigurationTarget.Global));
             }
         });
@@ -350,19 +308,8 @@ export async function setPackageManager(edits: EditPackageManagerSettings[]): Pr
             if (index >= 0) {
                 overrides[index].packageManager = e.packageManager;
                 projectsModified = true;
-            } else {
-                // Only write settings if updating existing OR setting non-default package manager
-                const isPipManager = e.packageManager === 'ms-python.python:pip';
-                const pkgManagerInspect = config.inspect<string>('defaultPackageManager');
-                const hasExplicitPkgManager = pkgManagerInspect?.workspaceValue !== undefined;
-                if (
-                    (hasExplicitPkgManager || !isPipManager) &&
-                    config.get('defaultPackageManager') !== e.packageManager
-                ) {
-                    promises.push(
-                        config.update('defaultPackageManager', e.packageManager, ConfigurationTarget.Workspace),
-                    );
-                }
+            } else if (config.get('defaultPackageManager') !== e.packageManager) {
+                promises.push(config.update('defaultPackageManager', e.packageManager, ConfigurationTarget.Workspace));
             }
         });
 
@@ -378,14 +325,7 @@ export async function setPackageManager(edits: EditPackageManagerSettings[]): Pr
     edits
         .filter((e) => !e.project)
         .forEach((e) => {
-            // Only write global settings if updating existing OR setting non-default package manager
-            const isPipManager = e.packageManager === 'ms-python.python:pip';
-            const pkgManagerInspect = config.inspect<string>('defaultPackageManager');
-            const hasExplicitGlobalPkgManager = pkgManagerInspect?.globalValue !== undefined;
-            if (
-                (hasExplicitGlobalPkgManager || !isPipManager) &&
-                config.get('defaultPackageManager') !== e.packageManager
-            ) {
+            if (config.get('defaultPackageManager') !== e.packageManager) {
                 promises.push(config.update('defaultPackageManager', e.packageManager, ConfigurationTarget.Global));
             }
         });

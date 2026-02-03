@@ -3,22 +3,22 @@ import * as assert from 'assert';
 import * as sinon from 'sinon';
 import { ConfigurationTarget } from 'vscode';
 import * as workspaceApis from '../../../common/workspace.apis';
-import { setAllManagerSettings, setEnvironmentManager, setPackageManager } from '../../../features/settings/settingHelpers';
+import {
+    setAllManagerSettings,
+    setEnvironmentManager,
+    setPackageManager,
+} from '../../../features/settings/settingHelpers';
 import { MockWorkspaceConfiguration } from '../../mocks/mockWorkspaceConfig';
 
 /**
- * These tests verify that settings are NOT written unnecessarily when:
- * 1. Setting the system manager (which is the implicit default/fallback)
- * 2. Setting pip package manager (the default)
- *
- * This prevents the bug where opening a non-Python repo with defaultInterpreterPath
- * set would write unwanted settings like "defaultEnvManager: system" to global settings.
+ * These tests verify that settings ARE written when the value changes,
+ * regardless of whether it's the default/system manager or not.
  *
  * Note: These tests focus on the global settings path (project=undefined) because
  * workspace-scoped tests would require mocking workspace.getWorkspaceFolder which
  * cannot be easily stubbed in unit tests.
  */
-suite('Setting Helpers - Avoid Unnecessary Settings Writes', () => {
+suite('Setting Helpers - Settings Write Behavior', () => {
     const SYSTEM_MANAGER_ID = 'ms-python.python:system';
     const VENV_MANAGER_ID = 'ms-python.python:venv';
     const PIP_MANAGER_ID = 'ms-python.python:pip';
@@ -40,6 +40,8 @@ suite('Setting Helpers - Avoid Unnecessary Settings Writes', () => {
     function createMockConfig(options: {
         defaultEnvManagerGlobalValue?: string;
         defaultPackageManagerGlobalValue?: string;
+        currentEnvManager?: string;
+        currentPkgManager?: string;
     }): MockWorkspaceConfiguration {
         const mockConfig = new MockWorkspaceConfiguration();
 
@@ -69,10 +71,10 @@ suite('Setting Helpers - Avoid Unnecessary Settings Writes', () => {
         // Override get to return effective values
         (mockConfig as any).get = <T>(key: string, defaultValue?: T): T | undefined => {
             if (key === 'defaultEnvManager') {
-                return (options.defaultEnvManagerGlobalValue ?? VENV_MANAGER_ID) as T;
+                return (options.currentEnvManager ?? options.defaultEnvManagerGlobalValue ?? VENV_MANAGER_ID) as T;
             }
             if (key === 'defaultPackageManager') {
-                return (options.defaultPackageManagerGlobalValue ?? PIP_MANAGER_ID) as T;
+                return (options.currentPkgManager ?? options.defaultPackageManagerGlobalValue ?? PIP_MANAGER_ID) as T;
             }
             return defaultValue;
         };
@@ -95,9 +97,9 @@ suite('Setting Helpers - Avoid Unnecessary Settings Writes', () => {
     }
 
     suite('setAllManagerSettings - Global Settings', () => {
-        test('should NOT write global defaultEnvManager when setting system manager with no existing setting', async () => {
+        test('should write global defaultEnvManager when value differs from current', async () => {
             const mockConfig = createMockConfig({
-                // No explicit global settings
+                currentEnvManager: VENV_MANAGER_ID,
             });
             sinon.stub(workspaceApis, 'getConfiguration').returns(mockConfig);
 
@@ -112,83 +114,20 @@ suite('Setting Helpers - Avoid Unnecessary Settings Writes', () => {
             const envManagerUpdates = updateCalls.filter(
                 (c) => c.key === 'defaultEnvManager' && c.target === ConfigurationTarget.Global,
             );
-            assert.strictEqual(
-                envManagerUpdates.length,
-                0,
-                'Should NOT write global defaultEnvManager when setting system manager with no existing setting',
-            );
-        });
-
-        test('should NOT write global defaultPackageManager when setting pip with no existing setting', async () => {
-            const mockConfig = createMockConfig({
-                // No explicit global settings
-            });
-            sinon.stub(workspaceApis, 'getConfiguration').returns(mockConfig);
-
-            await setAllManagerSettings([
-                {
-                    project: undefined, // Global scope
-                    envManager: SYSTEM_MANAGER_ID,
-                    packageManager: PIP_MANAGER_ID,
-                },
-            ]);
-
-            const pkgManagerUpdates = updateCalls.filter(
-                (c) => c.key === 'defaultPackageManager' && c.target === ConfigurationTarget.Global,
-            );
-            assert.strictEqual(
-                pkgManagerUpdates.length,
-                0,
-                'Should NOT write global defaultPackageManager when setting pip with no existing setting',
-            );
-        });
-
-        test('should write global defaultEnvManager when there is an existing global setting', async () => {
-            const mockConfig = createMockConfig({
-                defaultEnvManagerGlobalValue: VENV_MANAGER_ID, // Existing global setting
-                defaultPackageManagerGlobalValue: PIP_MANAGER_ID,
-            });
-            sinon.stub(workspaceApis, 'getConfiguration').returns(mockConfig);
-
-            await setAllManagerSettings([
-                {
-                    project: undefined,
-                    envManager: SYSTEM_MANAGER_ID,
-                    packageManager: PIP_MANAGER_ID,
-                },
-            ]);
-
-            const envManagerUpdates = updateCalls.filter(
-                (c) => c.key === 'defaultEnvManager' && c.target === ConfigurationTarget.Global,
-            );
-            assert.strictEqual(
-                envManagerUpdates.length,
-                1,
-                'Should write global defaultEnvManager when there is an existing global setting',
-            );
+            assert.strictEqual(envManagerUpdates.length, 1, 'Should write global defaultEnvManager when value differs');
             assert.strictEqual(envManagerUpdates[0].value, SYSTEM_MANAGER_ID);
         });
 
-        test('should write global defaultEnvManager when setting NON-system manager (venv) with no existing setting', async () => {
+        test('should NOT write global defaultEnvManager when value is same as current', async () => {
             const mockConfig = createMockConfig({
-                // No explicit global settings, but mock get to return system
+                currentEnvManager: SYSTEM_MANAGER_ID,
             });
-            // Override get to return system (so setting venv would be a change)
-            (mockConfig as any).get = <T>(key: string): T | undefined => {
-                if (key === 'defaultEnvManager') {
-                    return SYSTEM_MANAGER_ID as T;
-                }
-                if (key === 'defaultPackageManager') {
-                    return PIP_MANAGER_ID as T;
-                }
-                return undefined;
-            };
             sinon.stub(workspaceApis, 'getConfiguration').returns(mockConfig);
 
             await setAllManagerSettings([
                 {
                     project: undefined,
-                    envManager: VENV_MANAGER_ID, // Non-system manager
+                    envManager: SYSTEM_MANAGER_ID,
                     packageManager: PIP_MANAGER_ID,
                 },
             ]);
@@ -196,35 +135,21 @@ suite('Setting Helpers - Avoid Unnecessary Settings Writes', () => {
             const envManagerUpdates = updateCalls.filter(
                 (c) => c.key === 'defaultEnvManager' && c.target === ConfigurationTarget.Global,
             );
-            assert.strictEqual(
-                envManagerUpdates.length,
-                1,
-                'Should write global defaultEnvManager when setting venv (non-system) manager',
-            );
-            assert.strictEqual(envManagerUpdates[0].value, VENV_MANAGER_ID);
+            assert.strictEqual(envManagerUpdates.length, 0, 'Should NOT write when value is same as current');
         });
 
-        test('should write global defaultPackageManager when setting NON-pip manager (conda) with no existing setting', async () => {
+        test('should write global defaultPackageManager when value differs from current', async () => {
             const mockConfig = createMockConfig({
-                // No explicit global settings
+                currentEnvManager: VENV_MANAGER_ID,
+                currentPkgManager: PIP_MANAGER_ID,
             });
-            // Override get to return current pip value 
-            (mockConfig as any).get = <T>(key: string): T | undefined => {
-                if (key === 'defaultEnvManager') {
-                    return VENV_MANAGER_ID as T;
-                }
-                if (key === 'defaultPackageManager') {
-                    return PIP_MANAGER_ID as T;
-                }
-                return undefined;
-            };
             sinon.stub(workspaceApis, 'getConfiguration').returns(mockConfig);
 
             await setAllManagerSettings([
                 {
                     project: undefined,
-                    envManager: VENV_MANAGER_ID, // Non-system manager to trigger pkg manager write
-                    packageManager: CONDA_MANAGER_ID, // Non-pip manager
+                    envManager: VENV_MANAGER_ID,
+                    packageManager: CONDA_MANAGER_ID,
                 },
             ]);
 
@@ -234,16 +159,16 @@ suite('Setting Helpers - Avoid Unnecessary Settings Writes', () => {
             assert.strictEqual(
                 pkgManagerUpdates.length,
                 1,
-                'Should write global defaultPackageManager when setting non-pip manager',
+                'Should write global defaultPackageManager when value differs',
             );
             assert.strictEqual(pkgManagerUpdates[0].value, CONDA_MANAGER_ID);
         });
     });
 
     suite('setEnvironmentManager - Global Settings', () => {
-        test('should NOT write when setting system manager with no existing global setting', async () => {
+        test('should write when value differs from current', async () => {
             const mockConfig = createMockConfig({
-                // No existing settings
+                currentEnvManager: VENV_MANAGER_ID,
             });
             sinon.stub(workspaceApis, 'getConfiguration').returns(mockConfig);
 
@@ -257,16 +182,12 @@ suite('Setting Helpers - Avoid Unnecessary Settings Writes', () => {
             const envManagerUpdates = updateCalls.filter(
                 (c) => c.key === 'defaultEnvManager' && c.target === ConfigurationTarget.Global,
             );
-            assert.strictEqual(
-                envManagerUpdates.length,
-                0,
-                'Should NOT write global defaultEnvManager for system manager with no existing setting',
-            );
+            assert.strictEqual(envManagerUpdates.length, 1, 'Should write global defaultEnvManager when value differs');
         });
 
-        test('should write when there is an existing global setting', async () => {
+        test('should NOT write when value is same as current', async () => {
             const mockConfig = createMockConfig({
-                defaultEnvManagerGlobalValue: VENV_MANAGER_ID,
+                currentEnvManager: SYSTEM_MANAGER_ID,
             });
             sinon.stub(workspaceApis, 'getConfiguration').returns(mockConfig);
 
@@ -280,21 +201,21 @@ suite('Setting Helpers - Avoid Unnecessary Settings Writes', () => {
             const envManagerUpdates = updateCalls.filter(
                 (c) => c.key === 'defaultEnvManager' && c.target === ConfigurationTarget.Global,
             );
-            assert.strictEqual(envManagerUpdates.length, 1, 'Should write when updating existing global setting');
+            assert.strictEqual(envManagerUpdates.length, 0, 'Should NOT write when value is same');
         });
     });
 
     suite('setPackageManager - Global Settings', () => {
-        test('should NOT write when setting pip manager with no existing global setting', async () => {
+        test('should write when value differs from current', async () => {
             const mockConfig = createMockConfig({
-                // No existing settings
+                currentPkgManager: PIP_MANAGER_ID,
             });
             sinon.stub(workspaceApis, 'getConfiguration').returns(mockConfig);
 
             await setPackageManager([
                 {
                     project: undefined, // Global scope
-                    packageManager: PIP_MANAGER_ID,
+                    packageManager: CONDA_MANAGER_ID,
                 },
             ]);
 
@@ -303,14 +224,14 @@ suite('Setting Helpers - Avoid Unnecessary Settings Writes', () => {
             );
             assert.strictEqual(
                 pkgManagerUpdates.length,
-                0,
-                'Should NOT write global defaultPackageManager for pip manager with no existing setting',
+                1,
+                'Should write global defaultPackageManager when value differs',
             );
         });
 
-        test('should write when there is an existing global setting', async () => {
+        test('should NOT write when value is same as current', async () => {
             const mockConfig = createMockConfig({
-                defaultPackageManagerGlobalValue: CONDA_MANAGER_ID,
+                currentPkgManager: PIP_MANAGER_ID,
             });
             sinon.stub(workspaceApis, 'getConfiguration').returns(mockConfig);
 
@@ -324,8 +245,7 @@ suite('Setting Helpers - Avoid Unnecessary Settings Writes', () => {
             const pkgManagerUpdates = updateCalls.filter(
                 (c) => c.key === 'defaultPackageManager' && c.target === ConfigurationTarget.Global,
             );
-            assert.strictEqual(pkgManagerUpdates.length, 1, 'Should write when updating existing global setting');
+            assert.strictEqual(pkgManagerUpdates.length, 0, 'Should NOT write when value is same');
         });
     });
 });
-

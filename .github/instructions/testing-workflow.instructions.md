@@ -33,6 +33,23 @@ This guide covers the full testing lifecycle:
 - Test failures or compilation errors
 - Coverage reports or test output analysis
 
+## 🚨 CRITICAL: Common Mistakes (Read First!)
+
+These mistakes have occurred REPEATEDLY. Check this list BEFORE writing any test code:
+
+| Mistake                                        | Fix                                                                |
+| ---------------------------------------------- | ------------------------------------------------------------------ |
+| Hardcoded POSIX paths like `'/test/workspace'` | Use `'.'` for relative paths, `Uri.file(x).fsPath` for comparisons |
+| Stubbing `workspace.getConfiguration` directly | Stub the wrapper `workspaceApis.getConfiguration` instead          |
+| Stubbing `workspace.workspaceFolders` property | Stub wrapper function `workspaceApis.getWorkspaceFolders()`        |
+| Comparing `fsPath` to raw string               | Compare `fsPath` to `Uri.file(expected).fsPath`                    |
+
+**Pre-flight checklist before completing test work:**
+
+- [ ] All paths use `Uri.file().fsPath` (no hardcoded `/path/to/x`)
+- [ ] All VS Code API stubs use wrapper modules, not `vscode.*` directly
+- [ ] Tests pass on both Windows and POSIX
+
 ## Test Types
 
 When implementing tests as an AI agent, choose between two main types:
@@ -578,3 +595,6 @@ envConfig.inspect
 - Avoid testing exact error messages or log output - assert only that errors are thrown or rejection occurs to prevent brittle tests (1)
 - Create shared mock helpers (e.g., `createMockLogOutputChannel()`) instead of duplicating mock setup across multiple test files (1)
 - Use `sinon.useFakeTimers()` with `clock.tickAsync()` instead of `await new Promise(resolve => setTimeout(resolve, ms))` for debounce/timeout handling - eliminates flakiness and speeds up tests significantly (1)
+- Always compile tests (`npm run compile-tests`) before running them after adding new test cases - test counts will be wrong if running against stale compiled output (1)
+- Never create "documentation tests" that just `assert.ok(true)` — if mocking limitations prevent testing, either test a different layer that IS mockable, or skip the test entirely with a clear explanation (1)
+- When stubbing vscode APIs in tests via wrapper modules (e.g., `workspaceApis`), the production code must also use those wrappers — sinon cannot stub properties directly on the vscode namespace like `workspace.workspaceFolders`, so both production and test code must reference the same stubbable wrapper functions (3)
