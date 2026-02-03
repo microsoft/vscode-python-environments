@@ -6,14 +6,15 @@
     "publisher": "ms-python",
     "preview": true,
     "engines": {
-        "vscode": "^1.106.0"
+        "vscode": "^1.106.0" // Need new engine after distro update
     },
     "categories": [
         "Other"
     ],
     "enabledApiProposals": [
         "terminalShellEnv",
-        "terminalDataWriteEvent"
+        "terminalDataWriteEvent",
+        "taskExecutionTerminal"
     ],
     "capabilities": {
         "untrustedWorkspaces": {

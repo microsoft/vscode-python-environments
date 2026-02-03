@@ -1,5 +1,5 @@
 import * as path from 'path';
-import { Disposable, env, Terminal, TerminalOptions, Uri } from 'vscode';
+import { Disposable, env, tasks, Terminal, TerminalOptions, Uri } from 'vscode';
 import { PythonEnvironment, PythonProject, PythonProjectEnvironmentApi, PythonProjectGetterApi } from '../../api';
 import { timeout } from '../../common/utils/asyncUtils';
 import { createSimpleDebounce } from '../../common/utils/debounce';
@@ -129,8 +129,9 @@ function detectsCommonPromptPattern(terminalData: string): boolean {
 }
 
 export function isTaskTerminal(terminal: Terminal): boolean {
-    // TODO: Need API for core for this https://github.com/microsoft/vscode/issues/234440
-    return terminal.name.toLowerCase().includes('task');
+    // Use tasks.taskExecutions API to check if terminal is associated with a task
+    // See: https://github.com/microsoft/vscode/issues/234440
+    return tasks.taskExecutions.some((execution) => execution.terminal === terminal);
 }
 
 export function getTerminalCwd(terminal: Terminal): string | undefined {
