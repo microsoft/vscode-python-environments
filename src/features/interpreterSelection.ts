@@ -5,7 +5,7 @@ import * as path from 'path';
 import { commands, ConfigurationChangeEvent, Disposable, l10n, Uri, workspace } from 'vscode';
 import { PythonEnvironment, PythonEnvironmentApi } from '../api';
 import { SYSTEM_MANAGER_ID, VENV_MANAGER_ID } from '../common/constants';
-import { traceInfo, traceVerbose, traceWarn } from '../common/logging';
+import { traceError, traceInfo, traceVerbose, traceWarn } from '../common/logging';
 import { showWarningMessage } from '../common/window.apis';
 import { getConfiguration, onDidChangeConfiguration } from '../common/workspace.apis';
 import { getUserConfiguredSetting } from '../helpers';
@@ -59,9 +59,7 @@ async function resolvePriorityChainCore(
     api: PythonEnvironmentApi,
 ): Promise<{ result: PriorityChainResult; errors: SettingResolutionError[] }> {
     const errors: SettingResolutionError[] = [];
-    const logPrefix = scope ? `[resolveEnvironmentByPriority] ${scope.fsPath}` : '[resolveGlobalEnvironmentByPriority]';
-
-    traceVerbose(`${logPrefix} Starting priority chain resolution`);
+    const logPrefix = scope ? `[priorityChain] ${scope.fsPath}` : '[priorityChain:global]';
 
     // PRIORITY 1: Check pythonProjects[] for this workspace path (workspace scope only)
     if (scope && projectManager) {
@@ -78,7 +76,7 @@ async function resolvePriorityChainCore(
                 reason: `Environment manager '${projectManagerId}' is not registered`,
             };
             errors.push(error);
-            traceWarn(`${logPrefix} ${error.reason}`);
+            traceWarn(`${logPrefix} pythonProjects[] manager '${projectManagerId}' not found, trying next priority`);
         }
     }
 
@@ -96,7 +94,7 @@ async function resolvePriorityChainCore(
             reason: `Environment manager '${userConfiguredManager}' is not registered`,
         };
         errors.push(error);
-        traceWarn(`${logPrefix} ${error.reason}`);
+        traceWarn(`${logPrefix} defaultEnvManager '${userConfiguredManager}' not found, trying next priority`);
     }
 
     // PRIORITY 3: User-configured python.defaultInterpreterPath
@@ -113,11 +111,12 @@ async function resolvePriorityChainCore(
             reason: `Could not resolve interpreter path '${userInterpreterPath}'`,
         };
         errors.push(error);
-        traceWarn(`${logPrefix} ${error.reason}, falling through to auto-discovery`);
+        traceWarn(
+            `${logPrefix} defaultInterpreterPath '${userInterpreterPath}' unresolvable, falling back to auto-discovery`,
+        );
     }
 
-    // PRIORITY 4: Auto-discovery
-    traceVerbose(`${logPrefix} Priority 4: Falling through to auto-discovery`);
+    // PRIORITY 4: Auto-discovery (no user-configured settings matched)
     const autoDiscoverResult = await autoDiscoverEnvironment(scope, envManagers);
     return { result: autoDiscoverResult, errors };
 }
@@ -186,11 +185,10 @@ async function autoDiscoverEnvironment(
             try {
                 const localEnv = await venvManager.get(scope);
                 if (localEnv) {
-                    traceVerbose(`[autoDiscover] Priority 4: Auto-discovered local venv: ${localEnv.displayName}`);
                     return { manager: venvManager, environment: localEnv, source: 'autoDiscovery' };
                 }
             } catch (err) {
-                traceWarn(`[autoDiscover] Error checking venv manager: ${err}`);
+                traceError(`[autoDiscover] Failed to check venv manager: ${err}`);
             }
         }
     }
@@ -198,14 +196,13 @@ async function autoDiscoverEnvironment(
     // Fall back to system manager
     const systemManager = envManagers.getEnvironmentManager(SYSTEM_MANAGER_ID);
     if (systemManager) {
-        traceVerbose('[autoDiscover] Priority 4: Using system Python (fallback)');
         return { manager: systemManager, source: 'autoDiscovery' };
     }
 
     // Last resort: use any available manager
     const anyManager = envManagers.managers[0];
     if (anyManager) {
-        traceVerbose(`[autoDiscover] Priority 4: No venv or system manager, using first available: ${anyManager.id}`);
+        traceWarn(`[autoDiscover] No venv or system manager available, using fallback manager: ${anyManager.id}`);
         return { manager: anyManager, source: 'autoDiscovery' };
     }
 
@@ -238,7 +235,9 @@ export async function applyInitialEnvironmentSelection(
     api: PythonEnvironmentApi,
 ): Promise<void> {
     const folders = workspace.workspaceFolders ?? [];
-    traceVerbose(`[applyInitialEnvironmentSelection] Starting - ${folders.length} workspace folder(s)`);
+    traceInfo(
+        `[interpreterSelection] Applying initial environment selection for ${folders.length} workspace folder(s)`,
+    );
 
     const allErrors: SettingResolutionError[] = [];
 
@@ -259,12 +258,11 @@ export async function applyInitialEnvironmentSelection(
             // Cache only — NO settings.json write (shouldPersistSettings = false)
             await envManagers.setEnvironment(folder.uri, env, false);
 
-            traceVerbose(
-                `[applyInitialEnvironmentSelection] Set environment for ${folder.uri.fsPath}: ` +
-                    `manager=${result.manager.id}, source=${result.source}, env=${env?.displayName ?? 'none'}`,
+            traceInfo(
+                `[interpreterSelection] ${folder.name}: ${env?.displayName ?? 'none'} (source: ${result.source})`,
             );
         } catch (err) {
-            traceWarn(`[applyInitialEnvironmentSelection] Error setting environment for ${folder.uri.fsPath}: ${err}`);
+            traceError(`[interpreterSelection] Failed to set environment for ${folder.uri.fsPath}: ${err}`);
         }
     }
 
@@ -280,12 +278,9 @@ export async function applyInitialEnvironmentSelection(
         // Cache only — NO settings.json write (shouldPersistSettings = false)
         await envManagers.setEnvironments('global', env, false);
 
-        traceVerbose(
-            `[applyInitialEnvironmentSelection] Set global environment: ` +
-                `manager=${result.manager.id}, source=${result.source}, env=${env?.displayName ?? 'none'}`,
-        );
+        traceInfo(`[interpreterSelection] global: ${env?.displayName ?? 'none'} (source: ${result.source})`);
     } catch (err) {
-        traceWarn(`[applyInitialEnvironmentSelection] Error setting global environment: ${err}`);
+        traceError(`[interpreterSelection] Failed to set global environment: ${err}`);
     }
 
     // Notify user if any settings could not be applied
@@ -409,11 +404,17 @@ async function tryResolveInterpreterPath(
                         },
                     },
                 };
+                traceVerbose(
+                    `[tryResolveInterpreterPath] Resolved '${interpreterPath}' to ${resolved.executable} (${resolved.version})`,
+                );
                 return { manager, environment: newEnv, source: 'defaultInterpreterPath' };
             }
         }
+        traceVerbose(
+            `[tryResolveInterpreterPath] Could not resolve '${interpreterPath}' - no executable or manager found`,
+        );
     } catch (err) {
-        traceWarn(`[tryResolveInterpreterPath] Error resolving interpreter path: ${err}`);
+        traceVerbose(`[tryResolveInterpreterPath] Resolution failed for '${interpreterPath}': ${err}`);
     }
     return undefined;
 }

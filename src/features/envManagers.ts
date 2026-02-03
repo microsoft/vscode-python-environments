@@ -191,14 +191,13 @@ export class PythonEnvironmentManagers implements EnvironmentManagers {
                 }
             }
 
-            // Fall back to cached environment's manager if no settings
+            // Fall back to cached environment's manager if no user-configured settings
             const project = context ? this.pm.get(context) : undefined;
             const key = project ? project.uri.toString() : 'global';
             const cachedEnv = this._previousEnvironments.get(key);
             if (cachedEnv) {
                 const cachedManager = this._environmentManagers.get(cachedEnv.envId.managerId);
                 if (cachedManager) {
-                    traceVerbose(`[getEnvironmentManager] Using cached manager ${cachedManager.id} for scope ${key}`);
                     return cachedManager;
                 }
             }
