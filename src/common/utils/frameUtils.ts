@@ -2,11 +2,16 @@ import { Uri } from 'vscode';
 import { ENVS_EXTENSION_ID, PYTHON_EXTENSION_ID } from '../constants';
 import { parseStack } from '../errors/utils';
 import { allExtensions, getExtension } from '../extension.apis';
+import { traceVerbose, traceWarn } from '../logging';
 import { normalizePath } from './pathUtils';
+
 interface FrameData {
     filePath: string;
     functionName: string;
 }
+
+// Cache to avoid repeated stack walks for the same caller location
+const extensionIdCache = new Map<string, string>();
 
 function getFrameData(): FrameData[] {
     const frames = parseStack(new Error());
@@ -65,24 +70,36 @@ export function getCallingExtension(): string {
         }
     }
 
-    const envExt = getExtension(ENVS_EXTENSION_ID);
-    const pythonExt = getExtension(PYTHON_EXTENSION_ID);
-    if (!envExt || !pythonExt) {
-        throw new Error('Something went wrong with feature registration');
+    // Generate cache key from the first relevant file path (the immediate caller)
+    const cacheKey = filePaths[0] ?? '';
+    const cachedResult = extensionIdCache.get(cacheKey);
+    if (cachedResult) {
+        traceVerbose(`Using cached extension ID for caller: ${cachedResult}`);
+        return cachedResult;
     }
-    const envsExtPath = normalizePath(envExt.extensionPath);
 
-    if (filePaths.every((filePath) => filePath.startsWith(envsExtPath))) {
+    const envExt = getExtension(ENVS_EXTENSION_ID);
+    const envsExtPath = envExt ? normalizePath(envExt.extensionPath) : undefined;
+
+    if (envsExtPath && filePaths.every((filePath) => filePath.startsWith(envsExtPath))) {
+        extensionIdCache.set(cacheKey, PYTHON_EXTENSION_ID);
         return PYTHON_EXTENSION_ID;
     }
 
     for (const ext of otherExts) {
         const extPath = normalizePath(ext.extensionPath);
         if (filePaths.some((filePath) => filePath.startsWith(extPath))) {
+            extensionIdCache.set(cacheKey, ext.id);
             return ext.id;
         }
     }
 
-    // Fallback - we're likely being called from Python extension in conda registration
+    // Fallback - we're likely being called from Python extension or built-in managers
+    traceWarn(
+        `Could not determine calling extension from stack frames. ` +
+            `Using fallback namespace '${PYTHON_EXTENSION_ID}'. ` +
+            `Caller paths: ${filePaths.slice(0, 3).join(', ')}`,
+    );
+    extensionIdCache.set(cacheKey, PYTHON_EXTENSION_ID);
     return PYTHON_EXTENSION_ID;
 }
