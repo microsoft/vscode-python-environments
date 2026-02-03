@@ -425,7 +425,7 @@ class NativePythonFinderImpl implements NativePythonFinder {
                             // Attempt graceful shutdown by closing stdin before killing
                             // This gives the process a chance to clean up
                             this.outputChannel.debug('[pet] Shutting down Python Locator server');
-                            proc.stdin.end();
+                            proc.stdin?.end();
                             // Give process a moment to exit gracefully, then force kill
                             setTimeout(() => {
                                 if (proc.exitCode === null) {
