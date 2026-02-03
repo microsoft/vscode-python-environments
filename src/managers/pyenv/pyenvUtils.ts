@@ -271,7 +271,7 @@ export async function resolvePyenvPath(
 ): Promise<PythonEnvironment | undefined> {
     try {
         const e = await nativeFinder.resolve(fsPath);
-        if (e.kind !== NativePythonEnvironmentKind.pyenv) {
+        if (e.kind !== NativePythonEnvironmentKind.pyenv && e.kind !== NativePythonEnvironmentKind.pyenvVirtualEnv) {
             return undefined;
         }
         const pyenv = await getPyenv(nativeFinder);
