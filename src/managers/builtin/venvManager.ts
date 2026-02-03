@@ -142,7 +142,7 @@ export class VenvManager implements EnvironmentManager {
 
             const venvRoot: Uri = Uri.file(await findParentIfFile(uri.fsPath));
 
-            const globals = await this.baseManager.getEnvironments('global');
+            const globals = await this.api.getEnvironments('global');
             let result: CreateEnvironmentResult | undefined = undefined;
             if (options?.quickCreate) {
                 // error on missing information
@@ -492,7 +492,7 @@ export class VenvManager implements EnvironmentManager {
 
     private async resetGlobalEnv() {
         this.globalEnv = undefined;
-        const globals = await this.baseManager.getEnvironments('global');
+        const globals = await this.api.getEnvironments('global');
         await this.loadGlobalEnv(globals);
     }
 
@@ -535,7 +535,7 @@ export class VenvManager implements EnvironmentManager {
      * Loads and maps Python environments to their corresponding project paths in the workspace. about  O(p × e) where p = projects.len and e = environments.len
      */
     private async loadEnvMap() {
-        const globals = await this.baseManager.getEnvironments('global');
+        const globals = await this.api.getEnvironments('global');
         await this.loadGlobalEnv(globals);
 
         this.fsPathToEnv.clear();
