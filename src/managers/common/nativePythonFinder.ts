@@ -7,7 +7,7 @@ import { PythonProjectApi } from '../../api';
 import { spawnProcess } from '../../common/childProcess.apis';
 import { ENVS_EXTENSION_ID, PYTHON_EXTENSION_ID } from '../../common/constants';
 import { getExtension } from '../../common/extension.apis';
-import { traceError, traceLog, traceVerbose, traceWarn } from '../../common/logging';
+import { traceError, traceLog, traceWarn } from '../../common/logging';
 import { untildify, untildifyArray } from '../../common/utils/pathUtils';
 import { isWindows } from '../../common/utils/platformUtils';
 import { createRunningWorkerPool, WorkerPool } from '../../common/utils/workerPool';
@@ -52,7 +52,7 @@ export interface NativeEnvManagerInfo {
 
 export type NativeInfo = NativeEnvInfo | NativeEnvManagerInfo;
 
-export function isNativeEnvInfo(info: NativeInfo): boolean {
+export function isNativeEnvInfo(info: NativeInfo): info is NativeEnvInfo {
     return !(info as NativeEnvManagerInfo).tool;
 }
 
@@ -149,7 +149,8 @@ class NativePythonFinderImpl implements NativePythonFinder {
             return options;
         }
         if (Array.isArray(options)) {
-            return options.map((item) => item.fsPath).join(',');
+            // Use null character as separator to avoid collisions with paths containing commas
+            return options.map((item) => item.fsPath).join('\0');
         }
         return 'all';
     }
@@ -158,9 +159,9 @@ class NativePythonFinderImpl implements NativePythonFinder {
         const key = this.getKey(options);
         this.cache.delete(key);
         if (!options) {
-            traceVerbose('Finder - refreshing all environments');
+            this.outputChannel.debug('[Finder] Refreshing all environments');
         } else {
-            traceVerbose('Finder - from cache environments', key);
+            this.outputChannel.debug(`[Finder] Hard refresh for key: ${key}`);
         }
         const result = await this.pool.addToQueue(options);
         // Validate result from worker pool
@@ -185,9 +186,9 @@ class NativePythonFinderImpl implements NativePythonFinder {
         }
 
         if (!options) {
-            traceVerbose('Finder - from cache refreshing all environments');
+            this.outputChannel.debug('[Finder] Returning cached environments for all');
         } else {
-            traceVerbose('Finder - from cache environments', key);
+            this.outputChannel.debug(`[Finder] Returning cached environments for key: ${key}`);
         }
         return cacheResult;
     }
@@ -199,7 +200,10 @@ class NativePythonFinderImpl implements NativePythonFinder {
     }
 
     private getRefreshOptions(options?: NativePythonEnvironmentKind | Uri[]): RefreshOptions | undefined {
-        // settings on where else to search
+        // Note: venvFolders is also fetched in getAllExtraSearchPaths() for configure().
+        // This duplication is intentional: when searchPaths is provided to the native finder,
+        // it may override (not supplement) the configured environmentDirectories.
+        // We must include venvFolders here to ensure they're always searched during targeted refreshes.
         const venvFolders = getPythonSettingAndUntildify<string[]>('venvFolders') ?? [];
         if (options) {
             if (typeof options === 'string') {
@@ -234,7 +238,16 @@ class NativePythonFinderImpl implements NativePythonFinder {
                 dispose: () => {
                     try {
                         if (proc.exitCode === null) {
-                            proc.kill();
+                            // Attempt graceful shutdown by closing stdin before killing
+                            // This gives the process a chance to clean up
+                            this.outputChannel.debug('[pet] Shutting down Python Locator server');
+                            proc.stdin.end();
+                            // Give process a moment to exit gracefully, then force kill
+                            setTimeout(() => {
+                                if (proc.exitCode === null) {
+                                    proc.kill();
+                                }
+                            }, 500);
                         }
                     } catch (ex) {
                         this.outputChannel.error('[pet] Error disposing finder', ex);
@@ -350,8 +363,8 @@ class NativePythonFinderImpl implements NativePythonFinder {
             poetryExecutable: getPythonSettingAndUntildify<string>('poetryPath'),
             cacheDirectory: this.cacheDirectory?.fsPath,
         };
-        // No need to send a configuration request, is there are no changes.
-        if (JSON.stringify(options) === JSON.stringify(this.lastConfiguration || {})) {
+        // No need to send a configuration request if there are no changes.
+        if (this.lastConfiguration && this.configurationEquals(options, this.lastConfiguration)) {
             this.outputChannel.debug('[pet] configure: No changes detected, skipping configuration update.');
             return;
         }
@@ -362,6 +375,43 @@ class NativePythonFinderImpl implements NativePythonFinder {
         } catch (ex) {
             this.outputChannel.error('[pet] configure: Configuration error', ex);
         }
+    }
+
+    /**
+     * Compares two ConfigurationOptions objects for equality.
+     * Uses property-by-property comparison to avoid issues with JSON.stringify
+     * (property order, undefined values serialization).
+     */
+    private configurationEquals(a: ConfigurationOptions, b: ConfigurationOptions): boolean {
+        // Compare simple optional string properties
+        if (a.condaExecutable !== b.condaExecutable) {
+            return false;
+        }
+        if (a.poetryExecutable !== b.poetryExecutable) {
+            return false;
+        }
+        if (a.cacheDirectory !== b.cacheDirectory) {
+            return false;
+        }
+
+        // Compare array properties using sorted comparison to handle order differences
+        const arraysEqual = (arr1: string[], arr2: string[]): boolean => {
+            if (arr1.length !== arr2.length) {
+                return false;
+            }
+            const sorted1 = [...arr1].sort();
+            const sorted2 = [...arr2].sort();
+            return sorted1.every((val, idx) => val === sorted2[idx]);
+        };
+
+        if (!arraysEqual(a.workspaceDirectories, b.workspaceDirectories)) {
+            return false;
+        }
+        if (!arraysEqual(a.environmentDirectories, b.environmentDirectories)) {
+            return false;
+        }
+
+        return true;
     }
 }
 
