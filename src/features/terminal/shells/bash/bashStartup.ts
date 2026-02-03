@@ -6,16 +6,11 @@ import { traceError, traceInfo, traceVerbose } from '../../../../common/logging'
 import { ShellConstants } from '../../../common/shellConstants';
 import { hasStartupCode, insertStartupCode, removeStartupCode } from '../common/editUtils';
 import { ShellScriptEditState, ShellSetupState, ShellStartupScriptProvider } from '../startupProvider';
-import { BASH_ENV_KEY, BASH_OLD_ENV_KEY, BASH_SCRIPT_VERSION, ZSH_ENV_KEY, ZSH_OLD_ENV_KEY } from './bashConstants';
+import { BASH_ENV_KEY, BASH_OLD_ENV_KEY, BASH_SCRIPT_VERSION } from './bashConstants';
 
 async function isBashLikeInstalled(): Promise<boolean> {
     const result = await Promise.all([which('bash', { nothrow: true }), which('sh', { nothrow: true })]);
     return result.some((r) => r !== null);
-}
-
-async function isZshInstalled(): Promise<boolean> {
-    const result = await which('zsh', { nothrow: true });
-    return result !== null;
 }
 
 async function isGitBashInstalled(): Promise<boolean> {
@@ -30,14 +25,6 @@ async function isGitBashInstalled(): Promise<boolean> {
 async function getBashProfiles(): Promise<string> {
     const homeDir = os.homedir();
     const profile: string = path.join(homeDir, '.bashrc');
-
-    return profile;
-}
-
-async function getZshProfiles(): Promise<string> {
-    const zdotdir = process.env.ZDOTDIR;
-    const baseDir = zdotdir || os.homedir();
-    const profile: string = path.join(baseDir, '.zshrc');
 
     return profile;
 }
@@ -175,68 +162,6 @@ export class BashStartupProvider implements ShellStartupScriptProvider {
         }
     }
 
-    clearCache(): Promise<void> {
-        return Promise.resolve();
-    }
-}
-
-export class ZshStartupProvider implements ShellStartupScriptProvider {
-    public readonly name: string = 'zsh';
-    public readonly shellType: string = ShellConstants.ZSH;
-
-    private async checkShellInstalled(): Promise<boolean> {
-        const found = await isZshInstalled();
-        if (!found) {
-            traceInfo('`zsh` was not found on the system', 'If it is installed make sure it is available on `PATH`');
-        }
-        return found;
-    }
-
-    async isSetup(): Promise<ShellSetupState> {
-        const found = await this.checkShellInstalled();
-        if (!found) {
-            return ShellSetupState.NotInstalled;
-        }
-
-        try {
-            const zshProfiles = await getZshProfiles();
-            return await isStartupSetup(zshProfiles, ZSH_ENV_KEY);
-        } catch (err) {
-            traceError('Failed to check zsh startup scripts', err);
-            return ShellSetupState.NotSetup;
-        }
-    }
-
-    async setupScripts(): Promise<ShellScriptEditState> {
-        const found = await this.checkShellInstalled();
-        if (!found) {
-            return ShellScriptEditState.NotInstalled;
-        }
-        try {
-            const zshProfiles = await getZshProfiles();
-            const result = await setupStartup(zshProfiles, ZSH_ENV_KEY, this.name);
-            return result ? ShellScriptEditState.Edited : ShellScriptEditState.NotEdited;
-        } catch (err) {
-            traceError('Failed to setup zsh startup scripts', err);
-            return ShellScriptEditState.NotEdited;
-        }
-    }
-
-    async teardownScripts(): Promise<ShellScriptEditState> {
-        const found = await this.checkShellInstalled();
-        if (!found) {
-            return ShellScriptEditState.NotInstalled;
-        }
-        try {
-            const zshProfiles = await getZshProfiles();
-            await removeStartup(zshProfiles, ZSH_OLD_ENV_KEY);
-            const result = await removeStartup(zshProfiles, ZSH_ENV_KEY);
-            return result ? ShellScriptEditState.Edited : ShellScriptEditState.NotEdited;
-        } catch (err) {
-            traceError('Failed to teardown zsh startup scripts', err);
-            return ShellScriptEditState.NotEdited;
-        }
-    }
     clearCache(): Promise<void> {
         return Promise.resolve();
     }

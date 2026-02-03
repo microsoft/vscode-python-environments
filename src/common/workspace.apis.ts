@@ -5,6 +5,7 @@ import {
     ConfigurationScope,
     Disposable,
     FileDeleteEvent,
+    FileRenameEvent,
     FileSystemWatcher,
     GlobPattern,
     Uri,
@@ -62,4 +63,12 @@ export function onDidDeleteFiles(
     disposables?: Disposable[],
 ): Disposable {
     return workspace.onDidDeleteFiles(listener, thisArgs, disposables);
+}
+
+export function onDidRenameFiles(
+    listener: (e: FileRenameEvent) => any,
+    thisArgs?: any,
+    disposables?: Disposable[],
+): Disposable {
+    return workspace.onDidRenameFiles(listener, thisArgs, disposables);
 }
