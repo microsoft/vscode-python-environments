@@ -579,3 +579,4 @@ envConfig.inspect
 - Create shared mock helpers (e.g., `createMockLogOutputChannel()`) instead of duplicating mock setup across multiple test files (1)
 - Always compile tests (`npm run compile-tests`) before running them after adding new test cases - test counts will be wrong if running against stale compiled output (1)
 - Never create "documentation tests" that just `assert.ok(true)` — if mocking limitations prevent testing, either test a different layer that IS mockable, or skip the test entirely with a clear explanation (1)
+- When stubbing vscode APIs in tests via wrapper modules (e.g., `workspaceApis`), the production code must also use those wrappers — sinon cannot stub properties directly on the vscode namespace like `workspace.workspaceFolders`, so both production and test code must reference the same stubbable wrapper functions (1)
