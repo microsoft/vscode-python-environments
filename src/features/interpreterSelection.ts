@@ -358,7 +358,7 @@ function getProjectSpecificEnvManager(projectManager: PythonProjectManager, scop
         const pw = projectManager.get(scope);
         const w = getWorkspaceFolder(scope);
         if (pw && w) {
-            const pwPath = path.normalize(pw.uri.fsPath);
+            const pwPath = path.resolve(pw.uri.fsPath);
             const matching = overrides.find((s) => path.resolve(w.uri.fsPath, s.path) === pwPath);
             if (matching && matching.envManager && matching.envManager.length > 0) {
                 return matching.envManager;

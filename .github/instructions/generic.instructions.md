@@ -35,6 +35,11 @@ Provide project context and coding guidelines that AI should follow when generat
 
 **CRITICAL**: This extension runs on Windows, macOS, and Linux. NEVER hardcode POSIX-style paths.
 
+- Use `path.join()` or `path.resolve()` instead of string concatenation with `/`
+- Use `Uri.file(path).fsPath` when comparing paths (Windows uses `\`, POSIX uses `/`)
+- When asserting path equality, compare `fsPath` to `fsPath`, not raw strings
+
 ## Learnings
 
 - When using `getConfiguration().inspect()`, always pass a scope/Uri to `getConfiguration(section, scope)` — otherwise `workspaceFolderValue` will be `undefined` because VS Code doesn't know which folder to inspect (1)
+- **path.normalize() vs path.resolve()**: On Windows, `path.normalize('\test')` keeps it as `\test`, but `path.resolve('\test')` adds the current drive → `C:\test`. When comparing paths, use `path.resolve()` on BOTH sides or they won't match (2)
