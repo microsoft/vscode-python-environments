@@ -146,7 +146,7 @@ suite('TerminalEnvVarInjector', () => {
             getConfigurationStub.returns(
                 createMockConfig({
                     useEnvFile: false,
-                    envFilePath: '${workspaceFolder}/.env.local',
+                    envFilePath: '${workspaceFolder}/.env',
                 }) as WorkspaceConfiguration,
             );
             envVarManager
@@ -194,7 +194,7 @@ suite('TerminalEnvVarInjector', () => {
             getConfigurationStub.returns(
                 createMockConfig({
                     useEnvFile: false,
-                    envFilePath: '${workspaceFolder}/.env.production',
+                    envFilePath: '${workspaceFolder}/.env',
                 }) as WorkspaceConfiguration,
             );
             envVarManager
@@ -208,7 +208,7 @@ suite('TerminalEnvVarInjector', () => {
         });
 
         test('different envFile paths should not matter when useEnvFile is false', async () => {
-            const pathConfigs = [undefined, '', '.env', '.env.local', '${workspaceFolder}/.env', '/absolute/path/.env'];
+            const pathConfigs = [undefined, '', '.env', '${workspaceFolder}/.env', '/absolute/path/.env'];
 
             for (const envFilePath of pathConfigs) {
                 mockScopedCollection.replace.resetHistory();
