@@ -96,9 +96,7 @@ export class PyEnvManager implements EnvironmentManager, Disposable {
         }
 
         if (scope === 'global') {
-            return this.collection.filter((env) => {
-                env.group === PYENV_VERSIONS;
-            });
+            return this.collection.filter((env) => env.group === PYENV_VERSIONS);
         }
 
         if (scope instanceof Uri) {
