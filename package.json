@@ -13,7 +13,9 @@
     ],
     "enabledApiProposals": [
         "terminalShellEnv",
-        "terminalDataWriteEvent"
+        "terminalDataWriteEvent",
+        "taskExecutionTerminal"
+        
     ],
     "capabilities": {
         "untrustedWorkspaces": {
