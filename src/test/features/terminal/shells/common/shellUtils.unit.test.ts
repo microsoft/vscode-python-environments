@@ -1,4 +1,6 @@
 import * as assert from 'assert';
+import { PythonCommandRunConfiguration } from '../../../../../api';
+import { ShellConstants } from '../../../../../features/common/shellConstants';
 import {
     extractProfilePath,
     getShellCommandAsString,
@@ -6,8 +8,6 @@ import {
     PROFILE_TAG_START,
     shellsWithLeadingSpaceHistorySupport,
 } from '../../../../../features/terminal/shells/common/shellUtils';
-import { ShellConstants } from '../../../../../features/common/shellConstants';
-import { PythonCommandRunConfiguration } from '../../../../../api';
 
 suite('Shell Utils', () => {
     suite('extractProfilePath', () => {
@@ -84,17 +84,17 @@ suite('Shell Utils', () => {
 
     suite('shellsWithLeadingSpaceHistorySupport', () => {
         test('should include bash, zsh, and gitbash', () => {
-            assert.ok(shellsWithLeadingSpaceHistorySupport.includes(ShellConstants.BASH));
-            assert.ok(shellsWithLeadingSpaceHistorySupport.includes(ShellConstants.ZSH));
-            assert.ok(shellsWithLeadingSpaceHistorySupport.includes(ShellConstants.GITBASH));
+            assert.ok(shellsWithLeadingSpaceHistorySupport.has(ShellConstants.BASH));
+            assert.ok(shellsWithLeadingSpaceHistorySupport.has(ShellConstants.ZSH));
+            assert.ok(shellsWithLeadingSpaceHistorySupport.has(ShellConstants.GITBASH));
         });
 
         test('should not include shells without leading space history support', () => {
-            assert.ok(!shellsWithLeadingSpaceHistorySupport.includes(ShellConstants.PWSH));
-            assert.ok(!shellsWithLeadingSpaceHistorySupport.includes(ShellConstants.CMD));
-            assert.ok(!shellsWithLeadingSpaceHistorySupport.includes(ShellConstants.FISH));
-            assert.ok(!shellsWithLeadingSpaceHistorySupport.includes(ShellConstants.SH));
-            assert.ok(!shellsWithLeadingSpaceHistorySupport.includes(ShellConstants.NU));
+            assert.ok(!shellsWithLeadingSpaceHistorySupport.has(ShellConstants.PWSH));
+            assert.ok(!shellsWithLeadingSpaceHistorySupport.has(ShellConstants.CMD));
+            assert.ok(!shellsWithLeadingSpaceHistorySupport.has(ShellConstants.FISH));
+            assert.ok(!shellsWithLeadingSpaceHistorySupport.has(ShellConstants.SH));
+            assert.ok(!shellsWithLeadingSpaceHistorySupport.has(ShellConstants.NU));
         });
     });
 

@@ -10,50 +10,36 @@ import { quoteArgs } from '../../../execution/execUtils';
  * - Zsh: When setopt HIST_IGNORE_SPACE is enabled
  * - Git Bash: Uses bash under the hood, same behavior as Bash
  */
-export const shellsWithLeadingSpaceHistorySupport = [ShellConstants.BASH, ShellConstants.ZSH, ShellConstants.GITBASH];
+export const shellsWithLeadingSpaceHistorySupport = new Set([
+    ShellConstants.BASH,
+    ShellConstants.ZSH,
+    ShellConstants.GITBASH,
+]);
 
-function getCommandAsString(command: PythonCommandRunConfiguration[], shell: string, delimiter: string): string {
+const defaultShellDelimiter = '&&';
+const shellDelimiterByShell = new Map<string, string>([
+    [ShellConstants.PWSH, ';'],
+    [ShellConstants.NU, ';'],
+    [ShellConstants.FISH, '; and'],
+]);
+
+export function getShellCommandAsString(shell: string, command: PythonCommandRunConfiguration[]): string {
+    const delimiter = shellDelimiterByShell.get(shell) ?? defaultShellDelimiter;
     const parts = [];
     for (const cmd of command) {
         const args = cmd.args ?? [];
         parts.push(quoteArgs([normalizeShellPath(cmd.executable, shell), ...args]).join(' '));
     }
-    if (shell === ShellConstants.PWSH) {
-        if (parts.length === 1) {
-            return parts[0];
-        }
-        return parts.map((p) => `(${p})`).join(` ${delimiter} `);
-    }
-    return parts.join(` ${delimiter} `);
-}
 
-export function getShellCommandAsString(shell: string, command: PythonCommandRunConfiguration[]): string {
-    let commandStr: string;
-    switch (shell) {
-        case ShellConstants.PWSH:
-            commandStr = getCommandAsString(command, shell, ';');
-            break;
-        case ShellConstants.NU:
-            commandStr = getCommandAsString(command, shell, ';');
-            break;
-        case ShellConstants.FISH:
-            commandStr = getCommandAsString(command, shell, '; and');
-            break;
-        case ShellConstants.BASH:
-        case ShellConstants.SH:
-        case ShellConstants.ZSH:
-
-        case ShellConstants.CMD:
-        case ShellConstants.GITBASH:
-        default:
-            commandStr = getCommandAsString(command, shell, '&&');
-            break;
+    let commandStr = parts.join(` ${delimiter} `);
+    if (shell === ShellConstants.PWSH && parts.length > 1) {
+        commandStr = parts.map((p) => `(${p})`).join(` ${delimiter} `);
     }
 
     // Add a leading space for shells that support history ignore with leading space.
     // This prevents the activation command from being saved in bash/zsh history
     // when HISTCONTROL=ignorespace (bash) or setopt HIST_IGNORE_SPACE (zsh) is set.
-    if (shellsWithLeadingSpaceHistorySupport.includes(shell)) {
+    if (shellsWithLeadingSpaceHistorySupport.has(shell)) {
         return ` ${commandStr}`;
     }
     return commandStr;
