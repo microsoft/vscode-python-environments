@@ -7,7 +7,6 @@ import { onDidChangeTerminalShellIntegration, onDidWriteTerminalData } from '../
 import { getConfiguration, getWorkspaceFolders } from '../../common/workspace.apis';
 
 export const SHELL_INTEGRATION_TIMEOUT = 500; // 0.5 seconds
-export const SHELL_INTEGRATION_POLL_INTERVAL = 20; // 0.02 seconds
 
 /**
  * Use `terminal.integrated.shellIntegration.timeout` setting if available.

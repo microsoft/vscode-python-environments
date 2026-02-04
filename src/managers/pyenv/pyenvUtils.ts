@@ -115,7 +115,9 @@ export async function getPyenv(native?: NativePythonFinder): Promise<string | un
         await state.set(PYENV_PATH_KEY, undefined);
     }
 
-    const pyenvBin = isWindows() ? 'pyenv.exe' : 'pyenv';
+    // pyenv-win provides pyenv.bat, not pyenv.exe
+    // See: https://github.com/pyenv-win/pyenv-win
+    const pyenvBin = isWindows() ? 'pyenv.bat' : 'pyenv';
     const pyenvRoot = process.env.PYENV_ROOT;
     if (pyenvRoot) {
         const pyenvPath = path.join(pyenvRoot, 'bin', pyenvBin);
@@ -269,7 +271,7 @@ export async function resolvePyenvPath(
 ): Promise<PythonEnvironment | undefined> {
     try {
         const e = await nativeFinder.resolve(fsPath);
-        if (e.kind !== NativePythonEnvironmentKind.pyenv) {
+        if (e.kind !== NativePythonEnvironmentKind.pyenv && e.kind !== NativePythonEnvironmentKind.pyenvVirtualEnv) {
             return undefined;
         }
         const pyenv = await getPyenv(nativeFinder);
