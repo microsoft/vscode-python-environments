@@ -568,6 +568,7 @@ class NativePythonFinderImpl implements NativePythonFinder {
             workspaceDirectories: this.api.getPythonProjects().map((item) => item.uri.fsPath),
             environmentDirectories: extraSearchPaths,
             condaExecutable: getPythonSettingAndUntildify<string>('condaPath'),
+            pipenvExecutable: getPythonSettingAndUntildify<string>('pipenvPath'),
             poetryExecutable: getPythonSettingAndUntildify<string>('poetryPath'),
             cacheDirectory: this.cacheDirectory?.fsPath,
         };
@@ -602,6 +603,9 @@ class NativePythonFinderImpl implements NativePythonFinder {
         if (a.condaExecutable !== b.condaExecutable) {
             return false;
         }
+        if (a.pipenvExecutable !== b.pipenvExecutable) {
+            return false;
+        }
         if (a.poetryExecutable !== b.poetryExecutable) {
             return false;
         }
@@ -634,6 +638,7 @@ type ConfigurationOptions = {
     workspaceDirectories: string[];
     environmentDirectories: string[];
     condaExecutable: string | undefined;
+    pipenvExecutable: string | undefined;
     poetryExecutable: string | undefined;
     cacheDirectory?: string;
 };

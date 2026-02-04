@@ -49,6 +49,17 @@ export async function clearPipenvCache(): Promise<void> {
     pipenvPath = undefined;
 }
 
+/**
+ * Check if any pipenv environments exist without requiring the pipenv CLI.
+ * This allows the manager to be registered even if the CLI is not found.
+ */
+export async function hasPipenvEnvironments(nativeFinder: NativePythonFinder): Promise<boolean> {
+    const data = await nativeFinder.refresh(false);
+    return data
+        .filter((e) => isNativeEnvInfo(e))
+        .some((e) => (e as NativeEnvInfo).kind === NativePythonEnvironmentKind.pipenv);
+}
+
 function getPipenvPathFromSettings(): string | undefined {
     const pipenvPath = getSettingWorkspaceScope<string>('python', 'pipenvPath');
     return pipenvPath ? pipenvPath : undefined;
@@ -191,12 +202,13 @@ export async function refreshPipenv(
 
     const collection: PythonEnvironment[] = [];
 
+    // Add environments even if pipenv CLI is not found.
+    // This allows users with existing pipenv environments to still see them
+    // for read-only management (e.g., selecting the environment, viewing info).
     for (const e of envs) {
-        if (pipenv) {
-            const environment = await nativeToPythonEnv(e, api, manager);
-            if (environment) {
-                collection.push(environment);
-            }
+        const environment = await nativeToPythonEnv(e, api, manager);
+        if (environment) {
+            collection.push(environment);
         }
     }
 
@@ -212,11 +224,10 @@ export async function resolvePipenvPath(
 ): Promise<PythonEnvironment | undefined> {
     const resolved = await nativeFinder.resolve(fsPath);
 
+    // Resolve pipenv environments even if the pipenv CLI is not found.
+    // This allows proper environment identification for read-only scenarios.
     if (resolved.kind === NativePythonEnvironmentKind.pipenv) {
-        const pipenv = await getPipenv(nativeFinder);
-        if (pipenv) {
-            return await nativeToPythonEnv(resolved, api, manager);
-        }
+        return await nativeToPythonEnv(resolved, api, manager);
     }
 
     return undefined;
