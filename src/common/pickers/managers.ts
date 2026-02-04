@@ -1,8 +1,18 @@
-import { commands, QuickInputButtons, QuickPickItem, QuickPickItemKind, workspace, WorkspaceFolder } from 'vscode';
+import {
+    commands,
+    QuickInputButtons,
+    QuickPickItem,
+    QuickPickItemKind,
+    ThemeIcon,
+    workspace,
+    WorkspaceFolder,
+} from 'vscode';
 import { PythonProjectCreator } from '../../api';
 import { InternalEnvironmentManager, InternalPackageManager } from '../../internal.api';
-import { Common, Pickers } from '../localize';
+import { Common, Interpreter, Pickers } from '../localize';
 import { showQuickPickWithButtons } from '../window.apis';
+
+export const ENTER_INTERPRETER_PATH_ID = 'EnterInterpreterPath';
 
 function getDescription(mgr: InternalEnvironmentManager | InternalPackageManager): string | undefined {
     if (mgr.description) {
@@ -22,17 +32,19 @@ export async function pickEnvironmentManager(
     managers: InternalEnvironmentManager[],
     defaultManagers?: InternalEnvironmentManager[],
     showBackButton?: boolean,
+    showEnterInterpreterPath?: boolean,
 ): Promise<string | undefined> {
     if (managers.length === 0) {
         return;
     }
 
-    if (managers.length === 1 && !managers[0].supportsQuickCreate) {
+    if (managers.length === 1 && !managers[0].supportsQuickCreate && !showEnterInterpreterPath) {
         // If there's only one manager and it doesn't support quick create, return its ID directly.
         return managers[0].id;
     }
 
     const items: (QuickPickItem | (QuickPickItem & { id: string }))[] = [];
+
     if (defaultManagers && defaultManagers.length > 0) {
         items.push({
             label: Common.recommended,
@@ -71,6 +83,23 @@ export async function pickEnvironmentManager(
                 id: m.id,
             })),
     );
+
+    // Add "Enter Interpreter Path" option at the bottom if enabled
+    if (showEnterInterpreterPath) {
+        items.push(
+            {
+                label: '',
+                kind: QuickPickItemKind.Separator,
+            },
+            {
+                label: Interpreter.enterInterpreterPath,
+                description: Interpreter.enterInterpreterPathDescription,
+                id: ENTER_INTERPRETER_PATH_ID,
+                iconPath: new ThemeIcon('folder-opened'),
+            },
+        );
+    }
+
     const item = await showQuickPickWithButtons(items, {
         placeHolder: Pickers.Managers.selectEnvironmentManager,
         ignoreFocusOut: true,

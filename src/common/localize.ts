@@ -25,6 +25,8 @@ export namespace Interpreter {
     export const statusBarSelect = l10n.t('Select Interpreter');
     export const browsePath = l10n.t('Browse...');
     export const createVirtualEnvironment = l10n.t('Create Virtual Environment...');
+    export const enterInterpreterPath = l10n.t('Enter Interpreter Path...');
+    export const enterInterpreterPathDescription = l10n.t('Browse and select a Python interpreter from anywhere');
 }
 
 export namespace PackageManagement {

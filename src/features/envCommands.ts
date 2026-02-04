@@ -1,6 +1,15 @@
 import * as fs from 'fs-extra';
 import * as path from 'path';
-import { commands, QuickInputButtons, TaskExecution, TaskRevealKind, Terminal, Uri, workspace } from 'vscode';
+import {
+    commands,
+    ProgressLocation,
+    QuickInputButtons,
+    TaskExecution,
+    TaskRevealKind,
+    Terminal,
+    Uri,
+    workspace,
+} from 'vscode';
 import {
     CreateEnvironmentOptions,
     PythonEnvironment,
@@ -21,15 +30,25 @@ import { removePythonProjectSetting, setEnvironmentManager, setPackageManager } 
 
 import { clipboardWriteText } from '../common/env.apis';
 import {} from '../common/errors/utils';
+import { Pickers } from '../common/localize';
 import { pickEnvironment } from '../common/pickers/environments';
 import {
+    ENTER_INTERPRETER_PATH_ID,
     pickCreator,
     pickEnvironmentManager,
     pickPackageManager,
     pickWorkspaceFolder,
 } from '../common/pickers/managers';
 import { pickProject, pickProjectMany } from '../common/pickers/projects';
-import { activeTextEditor, showErrorMessage, showInformationMessage } from '../common/window.apis';
+import { isWindows } from '../common/utils/platformUtils';
+import { handlePythonPath } from '../common/utils/pythonPath';
+import {
+    activeTextEditor,
+    showErrorMessage,
+    showInformationMessage,
+    showOpenDialog,
+    withProgress,
+} from '../common/window.apis';
 import { runAsTask } from './execution/runAsTask';
 import { runInTerminal } from './terminal/runInTerminal';
 import { TerminalManager } from './terminal/terminalManager';
@@ -43,6 +62,46 @@ import {
     ProjectPackage,
     PythonEnvTreeItem,
 } from './views/treeViewItems';
+
+/**
+ * Opens a file dialog to browse for a Python interpreter and resolves it using available managers.
+ */
+async function browseAndResolveInterpreter(
+    em: EnvironmentManagers,
+    projectUris?: Uri[],
+): Promise<PythonEnvironment | undefined> {
+    const filters = isWindows() ? { python: ['exe'] } : undefined;
+    const uris = await showOpenDialog({
+        canSelectFiles: true,
+        canSelectFolders: false,
+        canSelectMany: false,
+        filters,
+        title: Pickers.Environments.selectExecutable,
+    });
+    if (!uris || uris.length === 0) {
+        return;
+    }
+    const interpreterUri = uris[0];
+
+    // Get project-specific managers if projectUris are provided
+    const projectEnvManagers = projectUris
+        ? projectUris
+              .map((uri) => em.getEnvironmentManager(uri))
+              .filter((m): m is InternalEnvironmentManager => m !== undefined)
+        : [];
+
+    const environment = await withProgress(
+        {
+            location: ProgressLocation.Notification,
+            cancellable: false,
+        },
+        async (reporter, token) => {
+            return await handlePythonPath(interpreterUri, em.managers, projectEnvManagers, reporter, token);
+        },
+    );
+
+    return environment;
+}
 
 export async function refreshManagerCommand(context: unknown): Promise<void> {
     if (context instanceof EnvManagerTreeItem) {
@@ -133,7 +192,22 @@ export async function createAnyEnvironmentCommand(
     const select = options?.selectEnvironment;
     const projects = pm.getProjects(options?.uri ? [options?.uri] : undefined);
     if (projects.length === 0) {
-        const managerId = await pickEnvironmentManager(em.managers.filter((m) => m.supportsCreate));
+        const managerId = await pickEnvironmentManager(
+            em.managers.filter((m) => m.supportsCreate),
+            undefined,
+            undefined,
+            true, // showEnterInterpreterPath
+        );
+
+        // Handle "Enter Interpreter Path" selection
+        if (managerId === ENTER_INTERPRETER_PATH_ID) {
+            const env = await browseAndResolveInterpreter(em);
+            if (select && env) {
+                await em.setEnvironments('global', env);
+            }
+            return env;
+        }
+
         const manager = em.managers.find((m) => m.id === managerId);
         if (manager) {
             const env = await manager.create('global', { ...options });
@@ -165,7 +239,19 @@ export async function createAnyEnvironmentCommand(
                     em.managers.filter((m) => m.supportsCreate),
                     defaultManagers,
                     options?.showBackButton,
+                    true, // showEnterInterpreterPath
                 );
+
+                // Handle "Enter Interpreter Path" selection
+                if (managerId === ENTER_INTERPRETER_PATH_ID) {
+                    const projectUris = selected.map((p) => p.uri);
+                    const env = await browseAndResolveInterpreter(em, projectUris);
+                    if (select && env) {
+                        await em.setEnvironments(projectUris, env);
+                    }
+                    return env;
+                }
+
                 if (managerId?.startsWith('QuickCreate#')) {
                     quickCreate = true;
                     managerId = managerId.replace('QuickCreate#', '');
