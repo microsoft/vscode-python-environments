@@ -64,6 +64,7 @@ import { cleanupStartupScripts } from './features/terminal/shellStartupSetupHand
 import { TerminalActivationImpl } from './features/terminal/terminalActivationState';
 import { TerminalEnvVarInjector } from './features/terminal/terminalEnvVarInjector';
 import { TerminalManager, TerminalManagerImpl } from './features/terminal/terminalManager';
+import { registerTerminalPackageWatcher } from './features/terminal/terminalPackageWatcher';
 import { getEnvironmentForTerminal } from './features/terminal/utils';
 import { EnvManagerView } from './features/views/envManagersView';
 import { ProjectView } from './features/views/projectView';
@@ -460,6 +461,9 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
         ]);
 
         await applyInitialEnvironmentSelection(envManagers, projectManager, nativeFinder, api);
+
+        // Register manager-agnostic terminal watcher for package-modifying commands
+        registerTerminalPackageWatcher(api, terminalActivation, outputChannel, context.subscriptions);
 
         // Register listener for interpreter settings changes for interpreter re-selection
         context.subscriptions.push(
