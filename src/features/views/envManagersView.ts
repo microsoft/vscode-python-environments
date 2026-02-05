@@ -17,6 +17,7 @@ import {
     EnvManagerTreeItem,
     EnvTreeItem,
     EnvTreeItemKind,
+    getEnvironmentParentDirName,
     NoPythonEnvTreeItem,
     PackageTreeItem,
     PythonEnvTreeItem,
@@ -26,6 +27,53 @@ import {
 const COPIED_STATE = 'copied';
 const SELECTED_STATE = 'selected';
 const ENV_STATE_KEYS = [COPIED_STATE, SELECTED_STATE];
+
+/**
+ * Extracts the base name from a display name by removing version info.
+ * @example getBaseName('.venv (3.12)') returns '.venv'
+ * @example getBaseName('myenv (3.14.1)') returns 'myenv'
+ */
+function getBaseName(displayName: string): string {
+    return displayName.replace(/\s*\([0-9.]+\)\s*$/, '').trim();
+}
+
+/**
+ * Computes disambiguation suffixes for environments with similar base names.
+ *
+ * When multiple environments share the same base name (ignoring version numbers),
+ * this function returns a map from environment ID to the parent folder name,
+ * which can be displayed to help users distinguish between them.
+ *
+ * @example Two environments '.venv (3.12)' in folders 'alice' and 'bob' would
+ * return suffixes 'alice' and 'bob' respectively.
+ *
+ * @param envs List of environments to analyze
+ * @returns Map from environment ID to disambiguation suffix (parent folder name)
+ */
+function computeDisambiguationSuffixes(envs: PythonEnvironment[]): Map<string, string> {
+    const suffixes = new Map<string, string>();
+
+    // Group environments by their base name (ignoring version)
+    const baseNameToEnvs = new Map<string, PythonEnvironment[]>();
+    for (const env of envs) {
+        const displayName = env.displayName ?? env.name;
+        const baseName = getBaseName(displayName);
+        const existing = baseNameToEnvs.get(baseName) ?? [];
+        existing.push(env);
+        baseNameToEnvs.set(baseName, existing);
+    }
+
+    // For base names with multiple environments, compute suffixes
+    for (const [, similarEnvs] of baseNameToEnvs) {
+        if (similarEnvs.length > 1) {
+            for (const env of similarEnvs) {
+                suffixes.set(env.envId.id, getEnvironmentParentDirName(env));
+            }
+        }
+    }
+
+    return suffixes;
+}
 
 export class EnvManagerView implements TreeDataProvider<EnvTreeItem>, Disposable {
     private treeView: TreeView<EnvTreeItem>;
@@ -37,7 +85,10 @@ export class EnvManagerView implements TreeDataProvider<EnvTreeItem>, Disposable
     private selected: Map<string, string> = new Map();
     private disposables: Disposable[] = [];
 
-    public constructor(public providers: EnvironmentManagers, private stateManager: ITemporaryStateManager) {
+    public constructor(
+        public providers: EnvironmentManagers,
+        private stateManager: ITemporaryStateManager,
+    ) {
         this.treeView = window.createTreeView<EnvTreeItem>('env-managers', {
             treeDataProvider: this,
         });
@@ -119,8 +170,16 @@ export class EnvManagerView implements TreeDataProvider<EnvTreeItem>, Disposable
             const manager = (element as EnvManagerTreeItem).manager;
             const views: EnvTreeItem[] = [];
             const envs = await manager.getEnvironments('all');
-            envs.filter((e) => !e.group).forEach((env) => {
-                const view = new PythonEnvTreeItem(env, element as EnvManagerTreeItem, this.selected.get(env.envId.id));
+            const nonGroupedEnvs = envs.filter((e) => !e.group);
+            const disambiguationSuffixes = computeDisambiguationSuffixes(nonGroupedEnvs);
+            nonGroupedEnvs.forEach((env) => {
+                const suffix = disambiguationSuffixes.get(env.envId.id);
+                const view = new PythonEnvTreeItem(
+                    env,
+                    element as EnvManagerTreeItem,
+                    this.selected.get(env.envId.id),
+                    suffix,
+                );
                 views.push(view);
                 this.revealMap.set(env.envId.id, view);
             });
@@ -162,8 +221,10 @@ export class EnvManagerView implements TreeDataProvider<EnvTreeItem>, Disposable
                 return false;
             });
 
+            const groupDisambiguationSuffixes = computeDisambiguationSuffixes(grouped);
             grouped.forEach((env) => {
-                const view = new PythonEnvTreeItem(env, groupItem, this.selected.get(env.envId.id));
+                const suffix = groupDisambiguationSuffixes.get(env.envId.id);
+                const view = new PythonEnvTreeItem(env, groupItem, this.selected.get(env.envId.id), suffix);
                 views.push(view);
                 this.revealMap.set(env.envId.id, view);
             });
