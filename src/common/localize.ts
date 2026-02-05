@@ -96,6 +96,10 @@ export namespace VenvManagerStrings {
     export const venvErrorNoBasePython = l10n.t('No base Python found');
     export const venvErrorNoPython3 = l10n.t('Did not find any base Python 3');
 
+    export const venvVirtualEnvActive = l10n.t(
+        'VIRTUAL_ENV is set for this VS Code session. Selection saved for new terminals only.',
+    );
+
     export const venvName = l10n.t('Enter a name for the virtual environment');
     export const venvNameErrorEmpty = l10n.t('Name cannot be empty');
     export const venvNameErrorExists = l10n.t('A folder with the same name already exists');
