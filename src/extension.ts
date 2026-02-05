@@ -1,8 +1,7 @@
 import { commands, ExtensionContext, LogOutputChannel, Terminal, Uri, window } from 'vscode';
-import { version as extensionVersion } from '../package.json';
 import { PythonEnvironment, PythonEnvironmentApi, PythonProjectCreator } from './api';
 import { ensureCorrectVersion } from './common/extVersion';
-import { registerLogger, traceError, traceInfo, traceVerbose, traceWarn } from './common/logging';
+import { registerLogger, traceError, traceInfo, traceWarn } from './common/logging';
 import { clearPersistentState, setPersistentState } from './common/persistentState';
 import { newProjectSelection } from './common/pickers/managers';
 import { StopWatch } from './common/stopWatch';
@@ -66,7 +65,7 @@ import { TerminalEnvVarInjector } from './features/terminal/terminalEnvVarInject
 import { TerminalManager, TerminalManagerImpl } from './features/terminal/terminalManager';
 import { registerTerminalPackageWatcher } from './features/terminal/terminalPackageWatcher';
 import { getEnvironmentForTerminal } from './features/terminal/utils';
-import { handleEnvManagerSearchAction } from './features/views/envManagerSearch';
+import { handleEnvManagerSearchAction, openSearchSettings } from './features/views/envManagerSearch';
 import { EnvManagerView } from './features/views/envManagersView';
 import { ProjectView } from './features/views/projectView';
 import { PythonStatusBarImpl } from './features/views/pythonStatusBar';
@@ -103,7 +102,6 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
     ensureCorrectVersion();
 
     // log extension version
-    traceVerbose(`Python-envs extension version: ${extensionVersion}`);
     // log settings
     const configLevels = getEnvManagerAndPackageManagerConfigLevels();
     traceInfo(`\n=== ${configLevels.section} ===`);
@@ -184,6 +182,9 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
         commands.registerCommand('python-envs.managerSearch', async () => {
             const nativeFinder = await nativeFinderDeferred.promise;
             await handleEnvManagerSearchAction(envManagers, nativeFinder);
+        }),
+        commands.registerCommand('python-envs.searchSettings', async () => {
+            await openSearchSettings();
         }),
         commands.registerCommand('python-envs.refreshPackages', async (item) => {
             await refreshPackagesCommand(item, envManagers);

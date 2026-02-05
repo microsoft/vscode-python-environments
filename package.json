@@ -220,6 +220,12 @@
                 "icon": "$(search)"
             },
             {
+                "command": "python-envs.searchSettings",
+                "title": "%python-envs.searchSettings.title%",
+                "category": "Python",
+                "icon": "$(gear)"
+            },
+            {
                 "command": "python-envs.refreshPackages",
                 "title": "%python-envs.refreshPackages.title%",
                 "category": "Python",
@@ -553,6 +559,11 @@
                 },
                 {
                     "command": "python-envs.managerSearch",
+                    "group": "navigation",
+                    "when": "view == env-managers"
+                },
+                {
+                    "command": "python-envs.searchSettings",
                     "group": "navigation",
                     "when": "view == env-managers"
                 },

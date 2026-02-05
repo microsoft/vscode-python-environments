@@ -1,5 +1,5 @@
 import * as path from 'path';
-import { commands, ConfigurationTarget, QuickPickItem, window } from 'vscode';
+import { commands, ConfigurationTarget, window } from 'vscode';
 import { Common, EnvManagerSearchStrings } from '../../common/localize';
 import { traceLog } from '../../common/logging';
 import { getWorkspacePersistentState } from '../../common/persistentState';
@@ -8,54 +8,23 @@ import { getConfiguration, getWorkspaceFolders } from '../../common/workspace.ap
 import { EnvironmentManagers } from '../../internal.api';
 import { NativePythonFinder } from '../../managers/common/nativePythonFinder';
 
-type SearchAction = 'settings' | 'fullSearch';
-
-interface SearchActionItem extends QuickPickItem {
-    action: SearchAction;
-}
-
 const SUPPRESS_SAVE_PROMPT_KEY = 'python-envs.search.fullWorkspace.suppressSavePrompt';
 
 /**
- * Handles the "Manage Environment Search" action from the Environment Managers view.
- * Presents a quick pick menu allowing users to either adjust search path settings
- * or perform a full workspace search for Python environments.
+ * Handles the Environment Managers view search action.
+ * Performs a full workspace search for Python environments.
  */
 export async function handleEnvManagerSearchAction(
     envManagers: EnvironmentManagers,
     nativeFinder: NativePythonFinder,
 ): Promise<void> {
-    const items: SearchActionItem[] = [
-        {
-            label: EnvManagerSearchStrings.adjustSearchPaths,
-            description: EnvManagerSearchStrings.adjustSearchPathsDescription,
-            action: 'settings',
-        },
-        {
-            label: EnvManagerSearchStrings.fullWorkspaceSearch,
-            description: EnvManagerSearchStrings.fullWorkspaceSearchDescription,
-            action: 'fullSearch',
-        },
-    ];
-
-    const selection = await window.showQuickPick(items, {
-        placeHolder: EnvManagerSearchStrings.selectAction,
-        matchOnDescription: true,
-    });
-
-    if (!selection) {
-        return;
-    }
-
-    if (selection.action === 'settings') {
-        await openSearchSettings();
-        return;
-    }
-
     await runFullWorkspaceSearch(envManagers, nativeFinder);
 }
 
-async function openSearchSettings(): Promise<void> {
+/**
+ * Opens environment search settings.
+ */
+export async function openSearchSettings(): Promise<void> {
     await commands.executeCommand('workbench.action.openSettings', '@ext:ms-python.vscode-python-envs "search path"');
 }
 
@@ -64,7 +33,7 @@ async function openSearchSettings(): Promise<void> {
  * Uses the `./**` glob pattern to search the entire workspace tree.
  * After the search completes, prompts the user to save the search pattern to settings.
  */
-async function runFullWorkspaceSearch(
+export async function runFullWorkspaceSearch(
     envManagers: EnvironmentManagers,
     nativeFinder: NativePythonFinder,
 ): Promise<void> {
