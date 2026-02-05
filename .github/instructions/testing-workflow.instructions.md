@@ -37,17 +37,20 @@ This guide covers the full testing lifecycle:
 
 These mistakes have occurred REPEATEDLY. Check this list BEFORE writing any test code:
 
-| Mistake                                        | Fix                                                                |
-| ---------------------------------------------- | ------------------------------------------------------------------ |
-| Hardcoded POSIX paths like `'/test/workspace'` | Use `'.'` for relative paths, `Uri.file(x).fsPath` for comparisons |
-| Stubbing `workspace.getConfiguration` directly | Stub the wrapper `workspaceApis.getConfiguration` instead          |
-| Stubbing `workspace.workspaceFolders` property | Stub wrapper function `workspaceApis.getWorkspaceFolders()`        |
-| Comparing `fsPath` to raw string               | Compare `fsPath` to `Uri.file(expected).fsPath`                    |
+| Mistake                                        | Fix                                                                                        |
+| ---------------------------------------------- | ------------------------------------------------------------------------------------------ |
+| Hardcoded POSIX paths like `'/test/workspace'` | Use `'.'` for relative paths, `Uri.file(x).fsPath` for comparisons                         |
+| Stubbing `workspace.getConfiguration` directly | Stub the wrapper `workspaceApis.getConfiguration` instead                                  |
+| Stubbing `workspace.workspaceFolders` property | Stub wrapper function `workspaceApis.getWorkspaceFolders()`                                |
+| Comparing `fsPath` to raw string               | Compare `fsPath` to `Uri.file(expected).fsPath`                                            |
+| Stubbing `commands.executeCommand` directly    | First update production code to use `executeCommand` from `command.api.ts`, then stub that |
+| Stubbing `window.createTreeView` directly      | First update production code to use `createTreeView` from `window.apis.ts`, then stub that |
 
 **Pre-flight checklist before completing test work:**
 
 - [ ] All paths use `Uri.file().fsPath` (no hardcoded `/path/to/x`)
 - [ ] All VS Code API stubs use wrapper modules, not `vscode.*` directly
+- [ ] Production code uses wrappers for any VS Code API that tests need to stub (check `src/common/*.apis.ts`)
 - [ ] Tests pass on both Windows and POSIX
 
 ## Test Types
@@ -597,4 +600,5 @@ envConfig.inspect
 - Use `sinon.useFakeTimers()` with `clock.tickAsync()` instead of `await new Promise(resolve => setTimeout(resolve, ms))` for debounce/timeout handling - eliminates flakiness and speeds up tests significantly (1)
 - Always compile tests (`npm run compile-tests`) before running them after adding new test cases - test counts will be wrong if running against stale compiled output (1)
 - Never create "documentation tests" that just `assert.ok(true)` — if mocking limitations prevent testing, either test a different layer that IS mockable, or skip the test entirely with a clear explanation (1)
-- When stubbing vscode APIs in tests via wrapper modules (e.g., `workspaceApis`), the production code must also use those wrappers — sinon cannot stub properties directly on the vscode namespace like `workspace.workspaceFolders`, so both production and test code must reference the same stubbable wrapper functions (3)
+- When stubbing vscode APIs in tests via wrapper modules (e.g., `workspaceApis`), the production code must also use those wrappers — sinon cannot stub properties directly on the vscode namespace like `workspace.workspaceFolders`, so both production and test code must reference the same stubbable wrapper functions (4)
+- **Before writing tests**, check if the function under test calls VS Code APIs directly (e.g., `commands.executeCommand`, `window.createTreeView`, `workspace.getConfiguration`). If so, FIRST update the production code to use wrapper functions from `src/common/*.apis.ts` (create the wrapper if it doesn't exist), THEN write tests that stub those wrappers. This prevents CI failures where sinon cannot stub the vscode namespace (4)
