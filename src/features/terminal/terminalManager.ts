@@ -289,11 +289,13 @@ export class TerminalManagerImpl implements TerminalManager {
             });
         }
 
-        // Uncomment the code line below after the issue is resolved:
-        // https://github.com/microsoft/vscode-python-environments/issues/172
-        // const name = options.name ?? `Python: ${environment.displayName}`;
+        // Follow Python extension's terminal naming convention:
+        // - Default: 'Python'
+        // - Dedicated: 'Python: {filename}' (set by getDedicatedTerminal)
+        const name = options.name ?? 'Python';
         const newTerminal = createTerminal({
             ...options,
+            name,
             env: envVars,
         });
 
@@ -342,7 +344,10 @@ export class TerminalManagerImpl implements TerminalManager {
         const uriDir = uriStat.isDirectory() ? terminalKey.fsPath : path.dirname(terminalKey.fsPath);
         const cwd = config.get<boolean>('terminal.executeInFileDir', false) ? uriDir : projectDir;
 
-        const newTerminal = await this.create(environment, { cwd });
+        // Follow Python extension's naming: 'Python: {filename}' for dedicated terminals
+        const fileName = path.basename(terminalKey.fsPath).replace('.py', '');
+        const name = `Python: ${fileName}`;
+        const newTerminal = await this.create(environment, { cwd, name });
         this.dedicatedTerminals.set(key, newTerminal);
 
         const disable = onDidCloseTerminal((terminal) => {

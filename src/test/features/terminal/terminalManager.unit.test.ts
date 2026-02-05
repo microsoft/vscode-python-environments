@@ -2,6 +2,9 @@
 // Licensed under the MIT License.
 
 import * as assert from 'assert';
+import * as fsapi from 'fs-extra';
+import * as os from 'os';
+import * as path from 'path';
 import * as sinon from 'sinon';
 import { Disposable, Event, EventEmitter, Progress, Terminal, TerminalOptions, Uri } from 'vscode';
 import { PythonEnvironment } from '../../../api';
@@ -183,5 +186,136 @@ suite('TerminalManager - create()', () => {
         assert.ok(terminal, 'Terminal should be returned');
         assert.strictEqual(callOrder.includes('show'), false, 'No show() when activation skipped');
         assert.strictEqual(terminalActivation.activateCalls, 0, 'No activate() when disableActivation is true');
+    });
+});
+
+suite('TerminalManager - terminal naming', () => {
+    let terminalActivation: TestTerminalActivation;
+    let mockGetAutoActivationType: sinon.SinonStub;
+    let terminalManager: TerminalManagerImpl;
+    let mockTerminal: Partial<Terminal> & { show: sinon.SinonStub };
+    let createTerminalStub: sinon.SinonStub;
+
+    const createMockEnvironment = (): PythonEnvironment => ({
+        envId: { id: 'test-env-id', managerId: 'test-manager' },
+        name: 'Test Environment',
+        displayName: 'Test Environment',
+        shortDisplayName: 'TestEnv',
+        displayPath: '/path/to/env',
+        version: '3.9.0',
+        environmentPath: Uri.file('/path/to/python'),
+        sysPrefix: '/path/to/env',
+        execInfo: {
+            run: { executable: '/path/to/python' },
+            activation: [{ executable: '/path/to/activate' }],
+        },
+    });
+
+    setup(() => {
+        terminalActivation = new TestTerminalActivation();
+
+        mockTerminal = {
+            name: 'Test Terminal',
+            creationOptions: {} as TerminalOptions,
+            shellIntegration: undefined,
+            show: sinon.stub(),
+            sendText: sinon.stub(),
+        };
+
+        mockGetAutoActivationType = sinon.stub(terminalUtils, 'getAutoActivationType');
+        sinon.stub(terminalUtils, 'waitForShellIntegration').resolves(false);
+        sinon.stub(activationUtils, 'isActivatableEnvironment').returns(true);
+        sinon.stub(shellDetector, 'identifyTerminalShell').returns('bash');
+
+        createTerminalStub = sinon.stub(windowApis, 'createTerminal').returns(mockTerminal as Terminal);
+        sinon.stub(windowApis, 'onDidOpenTerminal').returns(new Disposable(() => {}));
+        sinon.stub(windowApis, 'onDidCloseTerminal').returns(new Disposable(() => {}));
+        sinon.stub(windowApis, 'onDidChangeWindowState').returns(new Disposable(() => {}));
+        sinon.stub(windowApis, 'terminals').returns([]);
+        sinon.stub(windowApis, 'withProgress').callsFake(async (_options, task) => {
+            const mockProgress: Progress<{ message?: string; increment?: number }> = { report: () => {} };
+            const mockCancellationToken = {
+                isCancellationRequested: false,
+                onCancellationRequested: () => new Disposable(() => {}),
+            };
+            return task(mockProgress, mockCancellationToken as never);
+        });
+
+        sinon.stub(workspaceApis, 'onDidChangeConfiguration').returns(new Disposable(() => {}));
+    });
+
+    teardown(() => {
+        sinon.restore();
+        terminalActivation.dispose();
+    });
+
+    function createTerminalManager(): TerminalManagerImpl {
+        const emptyEnvProviders: ShellEnvsProvider[] = [];
+        const emptyScriptProviders: ShellStartupScriptProvider[] = [];
+        return new TerminalManagerImpl(terminalActivation, emptyEnvProviders, emptyScriptProviders);
+    }
+
+    test('getDedicatedTerminal sets Python file name as terminal name', async () => {
+        mockGetAutoActivationType.returns(terminalUtils.ACT_TYPE_OFF);
+        terminalManager = createTerminalManager();
+        const env = createMockEnvironment();
+
+        const optionsList: TerminalOptions[] = [];
+        createTerminalStub.callsFake((options) => {
+            optionsList.push(options);
+            return mockTerminal as Terminal;
+        });
+
+        const tempRoot = await fsapi.mkdtemp(path.join(os.tmpdir(), 'py-envs-'));
+        const projectPath = path.join(tempRoot, 'project');
+        const filePath = path.join(projectPath, 'main.py');
+        await fsapi.ensureDir(projectPath);
+        await fsapi.writeFile(filePath, 'print("hello")');
+        const projectUri = Uri.file(projectPath);
+        const fileUri = Uri.file(filePath);
+
+        const config = { get: sinon.stub().returns(false) };
+        sinon.stub(workspaceApis, 'getConfiguration').returns(config as any);
+
+        try {
+            await terminalManager.getDedicatedTerminal(fileUri, projectUri, env);
+
+            assert.strictEqual(
+                optionsList[0]?.name,
+                'Python: main',
+                'Dedicated terminal should use the file name in the title',
+            );
+        } finally {
+            await fsapi.remove(tempRoot);
+        }
+    });
+
+    test('getProjectTerminal sets Python as terminal name', async () => {
+        mockGetAutoActivationType.returns(terminalUtils.ACT_TYPE_OFF);
+        terminalManager = createTerminalManager();
+        const env = createMockEnvironment();
+
+        const optionsList: TerminalOptions[] = [];
+        createTerminalStub.callsFake((options) => {
+            optionsList.push(options);
+            return mockTerminal as Terminal;
+        });
+
+        const tempRoot = await fsapi.mkdtemp(path.join(os.tmpdir(), 'py-envs-'));
+        const projectPath = path.join(tempRoot, 'project');
+        await fsapi.ensureDir(projectPath);
+        const projectUri = Uri.file(projectPath);
+
+        try {
+            await terminalManager.getProjectTerminal(projectUri, env);
+
+            assert.strictEqual(
+                optionsList[0]?.name,
+                'Python',
+                'Project terminal should use the Python title',
+            );
+        } finally {
+            await fsapi.remove(tempRoot);
+        }
     });
 });
