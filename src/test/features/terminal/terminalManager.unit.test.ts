@@ -6,7 +6,7 @@ import * as fsapi from 'fs-extra';
 import * as os from 'os';
 import * as path from 'path';
 import * as sinon from 'sinon';
-import { Disposable, Event, EventEmitter, Progress, Terminal, TerminalOptions, Uri } from 'vscode';
+import { Disposable, Event, EventEmitter, Progress, Terminal, TerminalOptions, Uri, WorkspaceConfiguration } from 'vscode';
 import { PythonEnvironment } from '../../../api';
 import * as windowApis from '../../../common/window.apis';
 import * as workspaceApis from '../../../common/workspace.apis';
@@ -274,8 +274,8 @@ suite('TerminalManager - terminal naming', () => {
         const projectUri = Uri.file(projectPath);
         const fileUri = Uri.file(filePath);
 
-        const config = { get: sinon.stub().returns(false) };
-        sinon.stub(workspaceApis, 'getConfiguration').returns(config as any);
+        const config = { get: sinon.stub().returns(false) } as unknown as WorkspaceConfiguration;
+        sinon.stub(workspaceApis, 'getConfiguration').returns(config);
 
         try {
             await terminalManager.getDedicatedTerminal(fileUri, projectUri, env);
