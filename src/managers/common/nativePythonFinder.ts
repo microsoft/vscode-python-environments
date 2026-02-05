@@ -52,6 +52,11 @@ export interface NativeEnvInfo {
     project?: string;
     arch?: 'x64' | 'x86';
     symlinks?: string[];
+    /**
+     * Error message if the environment is broken or invalid.
+     * This is reported by PET when detecting issues like broken symlinks or missing executables.
+     */
+    error?: string;
 }
 
 export interface NativeEnvManagerInfo {
