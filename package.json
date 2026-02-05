@@ -47,7 +47,7 @@
                     "type": "string",
                     "description": "%python-envs.defaultEnvManager.description%",
                     "default": "ms-python.python:venv",
-                    "scope": "window"
+                    "scope": "application"
                 },
                 "python-envs.defaultPackageManager": {
                     "type": "string",
@@ -212,6 +212,12 @@
                 "shortTitle": "Refresh All",
                 "category": "Python",
                 "icon": "$(refresh)"
+            },
+            {
+                "command": "python-envs.managerSearch",
+                "title": "%python-envs.managerSearch.title%",
+                "category": "Python",
+                "icon": "$(search)"
             },
             {
                 "command": "python-envs.refreshPackages",
@@ -542,6 +548,11 @@
                 },
                 {
                     "command": "python-envs.createAny",
+                    "group": "navigation",
+                    "when": "view == env-managers"
+                },
+                {
+                    "command": "python-envs.managerSearch",
                     "group": "navigation",
                     "when": "view == env-managers"
                 },

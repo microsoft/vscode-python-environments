@@ -66,6 +66,7 @@ import { TerminalEnvVarInjector } from './features/terminal/terminalEnvVarInject
 import { TerminalManager, TerminalManagerImpl } from './features/terminal/terminalManager';
 import { registerTerminalPackageWatcher } from './features/terminal/terminalPackageWatcher';
 import { getEnvironmentForTerminal } from './features/terminal/utils';
+import { handleEnvManagerSearchAction } from './features/views/envManagerSearch';
 import { EnvManagerView } from './features/views/envManagersView';
 import { ProjectView } from './features/views/projectView';
 import { PythonStatusBarImpl } from './features/views/pythonStatusBar';
@@ -147,6 +148,7 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
     setPythonApi(envManagers, projectManager, projectCreators, terminalManager, envVarManager);
     const api = await getPythonApi();
     const sysPythonManager = createDeferred<SysPythonManager>();
+    const nativeFinderDeferred = createDeferred<NativePythonFinder>();
 
     const temporaryStateManager = new TemporaryStateManager();
     context.subscriptions.push(temporaryStateManager);
@@ -178,6 +180,10 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
         commands.registerCommand('python-envs.viewLogs', () => outputChannel.show()),
         commands.registerCommand('python-envs.refreshAllManagers', async () => {
             await Promise.all(envManagers.managers.map((m) => m.refresh(undefined)));
+        }),
+        commands.registerCommand('python-envs.managerSearch', async () => {
+            const nativeFinder = await nativeFinderDeferred.promise;
+            await handleEnvManagerSearchAction(envManagers, nativeFinder);
         }),
         commands.registerCommand('python-envs.refreshPackages', async (item) => {
             await refreshPackagesCommand(item, envManagers);
@@ -448,6 +454,7 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
     setImmediate(async () => {
         // This is the finder that is used by all the built in environment managers
         const nativeFinder: NativePythonFinder = await createNativePythonFinder(outputChannel, api, context);
+        nativeFinderDeferred.resolve(nativeFinder);
         context.subscriptions.push(nativeFinder);
         const sysMgr = new SysPythonManager(nativeFinder, api, outputChannel);
         sysPythonManager.resolve(sysMgr);

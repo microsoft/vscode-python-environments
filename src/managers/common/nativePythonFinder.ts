@@ -8,11 +8,11 @@ import { PythonProjectApi } from '../../api';
 import { spawnProcess } from '../../common/childProcess.apis';
 import { ENVS_EXTENSION_ID, PYTHON_EXTENSION_ID } from '../../common/constants';
 import { getExtension } from '../../common/extension.apis';
-import { traceError, traceLog, traceWarn } from '../../common/logging';
+import { traceError, traceLog } from '../../common/logging';
 import { untildify, untildifyArray } from '../../common/utils/pathUtils';
 import { isWindows } from '../../common/utils/platformUtils';
 import { createRunningWorkerPool, WorkerPool } from '../../common/utils/workerPool';
-import { getConfiguration, getWorkspaceFolders } from '../../common/workspace.apis';
+import { getConfiguration } from '../../common/workspace.apis';
 import { noop } from './utils';
 
 // Timeout constants for JSON-RPC requests (in milliseconds)
@@ -103,6 +103,11 @@ export interface NativePythonFinder extends Disposable {
      * @param executable
      */
     resolve(executable: string): Promise<NativeEnvInfo>;
+    /**
+     * Sets temporary search paths used for the next discovery refresh.
+     * These paths are not persisted to user or workspace settings.
+     */
+    setTemporarySearchPaths(searchPaths?: string[]): void;
 }
 interface NativeLog {
     level: string;
@@ -156,6 +161,7 @@ class NativePythonFinderImpl implements NativePythonFinder {
     private startFailed: boolean = false;
     private restartAttempts: number = 0;
     private isRestarting: boolean = false;
+    private temporarySearchPaths: string[] | undefined;
 
     constructor(
         private readonly outputChannel: LogOutputChannel,
@@ -195,6 +201,10 @@ class NativePythonFinderImpl implements NativePythonFinder {
             }
             throw ex;
         }
+    }
+
+    public setTemporarySearchPaths(searchPaths?: string[]): void {
+        this.temporarySearchPaths = searchPaths?.filter((value) => value && value.trim() !== '');
     }
 
     /**
@@ -563,10 +573,12 @@ class NativePythonFinderImpl implements NativePythonFinder {
     private async configure() {
         // Get all extra search paths including legacy settings and new searchPaths
         const extraSearchPaths = await getAllExtraSearchPaths();
+        const temporarySearchPaths = this.temporarySearchPaths ?? [];
+        const environmentDirectories = Array.from(new Set([...extraSearchPaths, ...temporarySearchPaths]));
 
         const options: ConfigurationOptions = {
             workspaceDirectories: this.api.getPythonProjects().map((item) => item.uri.fsPath),
-            environmentDirectories: extraSearchPaths,
+            environmentDirectories,
             condaExecutable: getPythonSettingAndUntildify<string>('condaPath'),
             pipenvExecutable: getPythonSettingAndUntildify<string>('pipenvPath'),
             poetryExecutable: getPythonSettingAndUntildify<string>('poetryPath'),
@@ -685,29 +697,13 @@ export async function getAllExtraSearchPaths(): Promise<string[]> {
     // Get workspaceSearchPaths
     const workspaceSearchPaths = getWorkspaceSearchPaths();
 
-    // Resolve relative paths against workspace folders
+    // Keep workspaceSearchPaths entries as provided (no workspace prefixing).
     for (const searchPath of workspaceSearchPaths) {
         if (!searchPath || searchPath.trim() === '') {
             continue;
         }
 
-        const trimmedPath = searchPath.trim();
-
-        if (path.isAbsolute(trimmedPath)) {
-            // Absolute path - use as is
-            searchDirectories.push(trimmedPath);
-        } else {
-            // Relative path - resolve against all workspace folders
-            const workspaceFolders = getWorkspaceFolders();
-            if (workspaceFolders) {
-                for (const workspaceFolder of workspaceFolders) {
-                    const resolvedPath = path.resolve(workspaceFolder.uri.fsPath, trimmedPath);
-                    searchDirectories.push(resolvedPath);
-                }
-            } else {
-                traceWarn('Warning: No workspace folders found for relative path:', trimmedPath);
-            }
-        }
+        searchDirectories.push(searchPath.trim());
     }
 
     // Remove duplicates and return
@@ -748,7 +744,7 @@ function getWorkspaceSearchPaths(): string[] {
 
         if (inspection?.globalValue) {
             traceError(
-                'Error: python-envs.workspaceSearchPaths is set at the user/global level, but this setting can only be set at the workspace or workspace folder level.',
+                'python-envs.workspaceSearchPaths is set at the user/global level, but this setting can only be set at the workspace or workspace folder level.',
             );
         }
 

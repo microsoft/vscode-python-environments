@@ -31,6 +31,7 @@
     "python-envs.setEnvSelected.title": "Set!",
     "python-envs.remove.title": "Delete Environment",
     "python-envs.refreshAllManagers.title": "Refresh All Environment Managers",
+    "python-envs.managerSearch.title": "Manage Environment Search",
     "python-envs.refreshPackages.title": "Refresh Packages List",
     "python-envs.packages.title": "Manage Packages",
     "python-envs.clearCache.title": "Clear Cache",
