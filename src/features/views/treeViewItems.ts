@@ -93,14 +93,15 @@ export class PythonEnvTreeItem implements EnvTreeItem {
     private getContextValue() {
         const isBroken = !!this.environment.error;
         const activatable = !isBroken && isActivatableEnvironment(this.environment) ? 'activatable' : '';
-        const broken = isBroken ? 'broken' : '';
         let remove = '';
         if (this.parent.kind === EnvTreeItemKind.environmentGroup) {
             remove = this.parent.parent.manager.supportsRemove ? 'remove' : '';
         } else if (this.parent.kind === EnvTreeItemKind.manager) {
             remove = this.parent.manager.supportsRemove ? 'remove' : '';
         }
-        const parts = ['pythonEnvironment', remove, activatable, broken].filter(Boolean);
+        // Use different base context for broken environments so normal actions don't show
+        const baseContext = isBroken ? 'pythonBrokenEnvironment' : 'pythonEnvironment';
+        const parts = [baseContext, remove, activatable].filter(Boolean);
         return parts.join(';') + ';';
     }
 }

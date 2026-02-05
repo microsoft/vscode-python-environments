@@ -6,7 +6,7 @@
     "publisher": "ms-python",
     "preview": true,
     "engines": {
-        "vscode": "^1.110.0-20260204" 
+        "vscode": "^1.110.0-20260204"
     },
     "categories": [
         "Other"
@@ -458,6 +458,10 @@
                     "when": "view == env-managers && viewItem =~ /.*pythonEnvironment.*;remove;.*/"
                 },
                 {
+                    "command": "python-envs.remove",
+                    "when": "view == env-managers && viewItem =~ /.*pythonBrokenEnvironment.*;remove;.*/"
+                },
+                {
                     "command": "python-envs.setEnv",
                     "group": "inline",
                     "when": "view == env-managers && viewItem =~ /.*pythonEnvironment.*/ && viewItem =~ /^((?!selected).)*$/"
@@ -490,6 +494,16 @@
                     "command": "python-envs.copyEnvPathCopied",
                     "group": "inline",
                     "when": "view == env-managers && viewItem =~ /.*pythonEnvironment.*/ && viewItem =~ /.*copied.*/"
+                },
+                {
+                    "command": "python-envs.copyEnvPath",
+                    "group": "inline",
+                    "when": "view == env-managers && viewItem =~ /.*pythonBrokenEnvironment.*/ && viewItem =~ /^((?!copied).)*$/"
+                },
+                {
+                    "command": "python-envs.copyEnvPathCopied",
+                    "group": "inline",
+                    "when": "view == env-managers && viewItem =~ /.*pythonBrokenEnvironment.*/ && viewItem =~ /.*copied.*/"
                 },
                 {
                     "command": "python-envs.uninstallPackage",
