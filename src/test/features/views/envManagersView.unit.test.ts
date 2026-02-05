@@ -1,7 +1,8 @@
 import * as sinon from 'sinon';
 import * as typeMoq from 'typemoq';
-import { EventEmitter, TreeView, Uri, window } from 'vscode';
+import { EventEmitter, TreeView, Uri } from 'vscode';
 import { PythonEnvironment } from '../../../api';
+import * as windowApis from '../../../common/window.apis';
 import { EnvManagerView } from '../../../features/views/envManagersView';
 import { ITemporaryStateManager } from '../../../features/views/temporaryStateManager';
 import { EnvTreeItem } from '../../../features/views/treeViewItems';
@@ -65,7 +66,7 @@ suite('EnvManagerView.reveal Tests', () => {
         setupNonThenable(treeView);
 
         // Stub window.createTreeView
-        createTreeViewStub = sinon.stub(window, 'createTreeView').returns(treeView.object);
+        createTreeViewStub = sinon.stub(windowApis, 'createTreeView').returns(treeView.object);
     });
 
     teardown(() => {
@@ -203,7 +204,7 @@ suite('EnvManagerView.reveal Tests', () => {
 
         // Re-stub createTreeView to return the updated mock
         createTreeViewStub.restore();
-        createTreeViewStub = sinon.stub(window, 'createTreeView').returns(treeView.object);
+        createTreeViewStub = sinon.stub(windowApis, 'createTreeView').returns(treeView.object);
 
         const view = new EnvManagerView(envManagers.object, stateManager.object);
 

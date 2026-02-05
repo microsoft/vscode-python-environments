@@ -1,8 +1,9 @@
 import * as assert from 'assert';
 import * as sinon from 'sinon';
 import * as typeMoq from 'typemoq';
-import { commands, Uri } from 'vscode';
+import { Uri } from 'vscode';
 import { PythonEnvironment, PythonProject } from '../../api';
+import * as commandApi from '../../common/command.api';
 import * as managerApi from '../../common/pickers/managers';
 import * as projectApi from '../../common/pickers/projects';
 import { createAnyEnvironmentCommand, revealEnvInManagerView } from '../../features/envCommands';
@@ -185,7 +186,7 @@ suite('Reveal Env In Manager View Command Tests', () => {
     setup(() => {
         managerView = typeMoq.Mock.ofType<EnvManagerView>();
         setupNonThenable(managerView);
-        executeCommandStub = sinon.stub(commands, 'executeCommand');
+        executeCommandStub = sinon.stub(commandApi, 'executeCommand');
     });
 
     teardown(() => {

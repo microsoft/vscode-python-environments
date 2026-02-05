@@ -1,7 +1,8 @@
-import { Disposable, Event, EventEmitter, ProviderResult, TreeDataProvider, TreeItem, TreeView, window } from 'vscode';
+import { Disposable, Event, EventEmitter, ProviderResult, TreeDataProvider, TreeItem, TreeView } from 'vscode';
 import { DidChangeEnvironmentEventArgs, EnvironmentGroupInfo, PythonEnvironment } from '../../api';
 import { ProjectViews } from '../../common/localize';
 import { createSimpleDebounce } from '../../common/utils/debounce';
+import { createTreeView } from '../../common/window.apis';
 import {
     DidChangeEnvironmentManagerEventArgs,
     DidChangePackageManagerEventArgs,
@@ -42,7 +43,7 @@ export class EnvManagerView implements TreeDataProvider<EnvTreeItem>, Disposable
         public providers: EnvironmentManagers,
         private stateManager: ITemporaryStateManager,
     ) {
-        this.treeView = window.createTreeView<EnvTreeItem>('env-managers', {
+        this.treeView = createTreeView<EnvTreeItem>('env-managers', {
             treeDataProvider: this,
         });
 

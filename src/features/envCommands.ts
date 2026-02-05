@@ -1,15 +1,6 @@
 import * as fs from 'fs-extra';
 import * as path from 'path';
-import {
-    commands,
-    ProgressLocation,
-    QuickInputButtons,
-    TaskExecution,
-    TaskRevealKind,
-    Terminal,
-    Uri,
-    workspace,
-} from 'vscode';
+import { ProgressLocation, QuickInputButtons, TaskExecution, TaskRevealKind, Terminal, Uri, workspace } from 'vscode';
 import {
     CreateEnvironmentOptions,
     PythonEnvironment,
@@ -28,6 +19,7 @@ import {
 } from '../internal.api';
 import { removePythonProjectSetting, setEnvironmentManager, setPackageManager } from './settings/settingHelpers';
 
+import { executeCommand } from '../common/command.api';
 import { clipboardWriteText } from '../common/env.apis';
 import {} from '../common/errors/utils';
 import { Pickers } from '../common/localize';
@@ -470,7 +462,7 @@ export async function addPythonProjectCommand(
             'Open Folder',
         );
         if (r === 'Open Folder') {
-            await commands.executeCommand('vscode.openFolder');
+            await executeCommand('vscode.openFolder');
             return;
         }
     }
@@ -747,7 +739,7 @@ export async function copyPathToClipboard(item: unknown): Promise<void> {
 export async function revealProjectInExplorer(item: unknown): Promise<void> {
     if (item instanceof ProjectItem) {
         const projectUri = item.project.uri;
-        await commands.executeCommand('revealInExplorer', projectUri);
+        await executeCommand('revealInExplorer', projectUri);
     } else {
         traceVerbose(`Invalid context for reveal project in explorer: ${item}`);
     }
@@ -758,7 +750,7 @@ export async function revealProjectInExplorer(item: unknown): Promise<void> {
  */
 export async function revealEnvInManagerView(item: unknown, managerView: EnvManagerView): Promise<void> {
     if (item instanceof ProjectEnvironment) {
-        await commands.executeCommand('env-managers.focus');
+        await executeCommand('env-managers.focus');
         await managerView.reveal(item.environment);
         return;
     }
