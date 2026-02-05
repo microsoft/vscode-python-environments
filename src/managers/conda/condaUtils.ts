@@ -1046,6 +1046,7 @@ export async function createPrefixCondaEnvironment(
 export async function generateName(fsPath: string): Promise<string | undefined> {
     let attempts = 0;
     while (attempts < 5) {
+        attempts++;
         const randomStr = Math.random().toString(36).substring(2);
         const name = `env_${randomStr}`;
         const prefix = path.join(fsPath, name);
@@ -1074,32 +1075,16 @@ export async function quickCreateConda(
         },
         async () => {
             try {
+                const conda = await getConda();
                 await runCondaExecutable(['create', '--yes', '--prefix', prefix, 'python'], log);
                 if (additionalPackages && additionalPackages.length > 0) {
                     await runConda(['install', '--yes', '--prefix', prefix, ...additionalPackages], log);
                 }
                 const version = await getVersion(prefix);
 
+                // Use proper prefix-based activation with actual conda path
                 const environment = api.createPythonEnvironmentItem(
-                    {
-                        name: path.basename(prefix),
-                        environmentPath: Uri.file(prefix),
-                        displayName: `${version} (${name})`,
-                        displayPath: prefix,
-                        description: prefix,
-                        version,
-                        execInfo: {
-                            run: { executable: execPath },
-                            activatedRun: {
-                                executable: execPath,
-                                args: [],
-                            },
-                            activation: [{ executable: 'conda', args: ['activate', prefix] }],
-                            deactivation: [{ executable: 'conda', args: ['deactivate'] }],
-                        },
-                        sysPrefix: prefix,
-                        group: 'Prefix',
-                    },
+                    await getPrefixesCondaPythonInfo(prefix, execPath, version, conda, manager),
                     manager,
                 );
                 return environment;
