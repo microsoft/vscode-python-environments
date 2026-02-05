@@ -34,10 +34,14 @@ export class EnvManagerView implements TreeDataProvider<EnvTreeItem>, Disposable
     >();
     private revealMap = new Map<string, PythonEnvTreeItem>();
     private managerViews = new Map<string, EnvManagerTreeItem>();
+    private groupViews = new Map<string, PythonGroupEnvTreeItem>();
     private selected: Map<string, string> = new Map();
     private disposables: Disposable[] = [];
 
-    public constructor(public providers: EnvironmentManagers, private stateManager: ITemporaryStateManager) {
+    public constructor(
+        public providers: EnvironmentManagers,
+        private stateManager: ITemporaryStateManager,
+    ) {
         this.treeView = window.createTreeView<EnvTreeItem>('env-managers', {
             treeDataProvider: this,
         });
@@ -46,6 +50,7 @@ export class EnvManagerView implements TreeDataProvider<EnvTreeItem>, Disposable
             new Disposable(() => {
                 this.revealMap.clear();
                 this.managerViews.clear();
+                this.groupViews.clear();
                 this.selected.clear();
             }),
             this.treeView,
@@ -107,6 +112,7 @@ export class EnvManagerView implements TreeDataProvider<EnvTreeItem>, Disposable
         if (!element) {
             const views: EnvTreeItem[] = [];
             this.managerViews.clear();
+            this.groupViews.clear();
             this.providers.managers.forEach((m) => {
                 const view = new EnvManagerTreeItem(m);
                 views.push(view);
@@ -137,7 +143,10 @@ export class EnvManagerView implements TreeDataProvider<EnvTreeItem>, Disposable
             });
 
             groupObjects.forEach((group) => {
-                views.push(new PythonGroupEnvTreeItem(element as EnvManagerTreeItem, group));
+                const groupView = new PythonGroupEnvTreeItem(element as EnvManagerTreeItem, group);
+                const groupName = typeof group === 'string' ? group : group.name;
+                this.groupViews.set(`${manager.id}:${groupName}`, groupView);
+                views.push(groupView);
             });
 
             if (views.length === 0) {
@@ -202,12 +211,47 @@ export class EnvManagerView implements TreeDataProvider<EnvTreeItem>, Disposable
         return element.parent;
     }
 
-    reveal(environment?: PythonEnvironment) {
-        const view = environment ? this.revealMap.get(environment.envId.id) : undefined;
+    /**
+     * Reveals and focuses on the given environment in the Environment Managers view.
+     *
+     * @param environment - The Python environment to reveal
+     */
+    async reveal(environment?: PythonEnvironment): Promise<void> {
+        if (!environment) {
+            return;
+        }
+
+        const manager = this.providers.getEnvironmentManager(environment);
+        if (!manager) {
+            return;
+        }
+
+        if (!this.managerViews.has(manager.id)) {
+            await this.getChildren(undefined);
+        }
+
+        const managerView = this.managerViews.get(manager.id);
+        if (!managerView) {
+            return;
+        }
+
+        const groupName = typeof environment.group === 'string' ? environment.group : environment.group?.name;
+        if (groupName) {
+            if (!this.groupViews.has(`${manager.id}:${groupName}`)) {
+                await this.getChildren(managerView);
+            }
+
+            const groupView = this.groupViews.get(`${manager.id}:${groupName}`);
+            if (groupView) {
+                await this.getChildren(groupView);
+            }
+        } else {
+            await this.getChildren(managerView);
+        }
+
+        const view = this.revealMap.get(environment.envId.id);
         if (view && this.treeView.visible) {
-            setImmediate(async () => {
-                await this.treeView.reveal(view);
-            });
+            await this.treeView.reveal(view, { expand: false, focus: true, select: true });
         }
     }
 

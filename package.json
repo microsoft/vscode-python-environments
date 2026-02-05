@@ -314,6 +314,12 @@
                 "icon": "$(folder-opened)"
             },
             {
+                "command": "python-envs.revealEnvInManagerView",
+                "title": "%python-envs.revealEnvInManagerView.title%",
+                "category": "Python Envs",
+                "icon": "$(eye)"
+            },
+            {
                 "command": "python-envs.runPetInTerminal",
                 "title": "%python-envs.runPetInTerminal.title%",
                 "category": "Python",
@@ -424,6 +430,10 @@
                     "when": "false"
                 },
                 {
+                    "command": "python-envs.revealEnvInManagerView",
+                    "when": "false"
+                },
+                {
                     "command": "python-envs.createNewProjectFromTemplate",
                     "when": "config.python.useEnvironmentsExtension != false"
                 },
@@ -531,6 +541,11 @@
                     "command": "python-envs.uninstallPackage",
                     "group": "inline",
                     "when": "view == python-projects && viewItem == python-package"
+                },
+                {
+                    "command": "python-envs.revealEnvInManagerView",
+                    "group": "inline",
+                    "when": "view == python-projects && viewItem == python-env"
                 }
             ],
             "view/title": [

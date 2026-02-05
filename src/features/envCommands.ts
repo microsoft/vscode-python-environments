@@ -52,6 +52,7 @@ import {
 import { runAsTask } from './execution/runAsTask';
 import { runInTerminal } from './terminal/runInTerminal';
 import { TerminalManager } from './terminal/terminalManager';
+import { EnvManagerView } from './views/envManagersView';
 import {
     EnvManagerTreeItem,
     EnvTreeItemKind,
@@ -750,4 +751,17 @@ export async function revealProjectInExplorer(item: unknown): Promise<void> {
     } else {
         traceVerbose(`Invalid context for reveal project in explorer: ${item}`);
     }
+}
+
+/**
+ * Focuses the Environment Managers view and reveals the given project environment.
+ */
+export async function revealEnvInManagerView(item: unknown, managerView: EnvManagerView): Promise<void> {
+    if (item instanceof ProjectEnvironment) {
+        await commands.executeCommand('env-managers.focus');
+        await managerView.reveal(item.environment);
+        return;
+    }
+
+    traceVerbose(`Invalid context for reveal environment in manager view: ${item}`);
 }

@@ -35,6 +35,7 @@ import {
     refreshPackagesCommand,
     removeEnvironmentCommand,
     removePythonProject,
+    revealEnvInManagerView,
     revealProjectInExplorer,
     runAsTaskCommand,
     runInDedicatedTerminalCommand,
@@ -311,6 +312,9 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
         }),
         commands.registerCommand('python-envs.revealProjectInExplorer', async (item) => {
             await revealProjectInExplorer(item);
+        }),
+        commands.registerCommand('python-envs.revealEnvInManagerView', async (item) => {
+            await revealEnvInManagerView(item, managerView);
         }),
         commands.registerCommand('python-envs.terminal.activate', async () => {
             const terminal = activeTerminal();
