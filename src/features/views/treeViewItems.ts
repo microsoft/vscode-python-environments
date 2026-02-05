@@ -45,7 +45,10 @@ export class EnvManagerTreeItem implements EnvTreeItem {
 export class PythonGroupEnvTreeItem implements EnvTreeItem {
     public readonly kind = EnvTreeItemKind.environmentGroup;
     public readonly treeItem: TreeItem;
-    constructor(public readonly parent: EnvManagerTreeItem, public readonly group: string | EnvironmentGroupInfo) {
+    constructor(
+        public readonly parent: EnvManagerTreeItem,
+        public readonly group: string | EnvironmentGroupInfo,
+    ) {
         const label = typeof group === 'string' ? group : group.name;
         const item = new TreeItem(label, TreeItemCollapsibleState.Collapsed);
         item.contextValue = `pythonEnvGroup;${this.parent.manager.id}:${label};`;
@@ -69,6 +72,8 @@ export class PythonEnvTreeItem implements EnvTreeItem {
     ) {
         let name = environment.displayName ?? environment.name;
         let tooltip = environment.tooltip ?? environment.description;
+        const isBroken = !!environment.error;
+
         if (selected) {
             const selectedTooltip =
                 selected === 'global' ? EnvViewStrings.selectedGlobalTooltip : EnvViewStrings.selectedWorkspaceTooltip;
@@ -77,21 +82,25 @@ export class PythonEnvTreeItem implements EnvTreeItem {
 
         const item = new TreeItem(name, TreeItemCollapsibleState.Collapsed);
         item.contextValue = this.getContextValue();
-        item.description = environment.description;
-        item.tooltip = tooltip;
-        item.iconPath = environment.iconPath;
+        // Show error message for broken environments
+        item.description = isBroken ? environment.error : environment.description;
+        item.tooltip = isBroken ? environment.error : tooltip;
+        // Show warning icon for broken environments
+        item.iconPath = isBroken ? new ThemeIcon('warning') : environment.iconPath;
         this.treeItem = item;
     }
 
     private getContextValue() {
-        const activatable = isActivatableEnvironment(this.environment) ? 'activatable' : '';
+        const isBroken = !!this.environment.error;
+        const activatable = !isBroken && isActivatableEnvironment(this.environment) ? 'activatable' : '';
+        const broken = isBroken ? 'broken' : '';
         let remove = '';
         if (this.parent.kind === EnvTreeItemKind.environmentGroup) {
             remove = this.parent.parent.manager.supportsRemove ? 'remove' : '';
         } else if (this.parent.kind === EnvTreeItemKind.manager) {
             remove = this.parent.manager.supportsRemove ? 'remove' : '';
         }
-        const parts = ['pythonEnvironment', remove, activatable].filter(Boolean);
+        const parts = ['pythonEnvironment', remove, activatable, broken].filter(Boolean);
         return parts.join(';') + ';';
     }
 }
@@ -240,16 +249,22 @@ export class ProjectEnvironment implements ProjectTreeItem {
     public readonly kind = ProjectTreeItemKind.environment;
     public readonly id: string;
     public readonly treeItem: TreeItem;
-    constructor(public readonly parent: ProjectItem, public readonly environment: PythonEnvironment) {
+    constructor(
+        public readonly parent: ProjectItem,
+        public readonly environment: PythonEnvironment,
+    ) {
         this.id = this.getId(parent, environment);
+        const isBroken = !!environment.error;
         const item = new TreeItem(
             this.environment.displayName ?? this.environment.name,
             TreeItemCollapsibleState.Collapsed,
         );
-        item.contextValue = 'python-env';
-        item.description = this.environment.description;
-        item.tooltip = this.environment.tooltip;
-        item.iconPath = this.environment.iconPath;
+        item.contextValue = isBroken ? 'python-env;broken;' : 'python-env';
+        // Show error message for broken environments
+        item.description = isBroken ? this.environment.error : this.environment.description;
+        item.tooltip = isBroken ? this.environment.error : this.environment.tooltip;
+        // Show warning icon for broken environments
+        item.iconPath = isBroken ? new ThemeIcon('warning') : this.environment.iconPath;
         this.treeItem = item;
     }
 
