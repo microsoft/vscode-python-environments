@@ -84,9 +84,9 @@ export class TerminalEnvVarInjector implements Disposable {
         // Listen for changes to the python.envFile setting
         this.disposables.push(
             workspace.onDidChangeConfiguration((e) => {
-                if (e.affectsConfiguration('python.envFile')) {
+                if (e.affectsConfiguration('python.envFile') || e.affectsConfiguration('python.terminal.useEnvFile')) {
                     traceVerbose(
-                        'TerminalEnvVarInjector: python.envFile setting changed, updating environment variables',
+                        'TerminalEnvVarInjector: python.envFile or python.terminal.useEnvFile setting changed, updating environment variables',
                     );
                     this.updateEnvironmentVariables().catch((error) => {
                         traceError('Failed to update environment variables:', error);
