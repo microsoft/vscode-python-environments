@@ -11,7 +11,6 @@ import {
     Uri,
     WorkspaceConfiguration,
     WorkspaceFolder,
-    workspace,
 } from 'vscode';
 import * as workspaceApis from '../../common/workspace.apis';
 import { EnvVarManager } from '../../features/execution/envVariableManager';
@@ -61,16 +60,10 @@ suite('TerminalEnvVarInjector', () => {
         envVarManager = typeMoq.Mock.ofType<EnvVarManager>();
 
         workspaceFoldersValue = [testWorkspaceFolder];
-        Object.defineProperty(workspace, 'workspaceFolders', {
-            get: () => workspaceFoldersValue,
-            configurable: true,
-        });
 
-        // Mock workspace.onDidChangeConfiguration to return a proper disposable
-        Object.defineProperty(workspace, 'onDidChangeConfiguration', {
-            value: () => new Disposable(() => {}),
-            configurable: true,
-        });
+        // Stub workspace.apis wrappers so TerminalEnvVarInjector uses mockable functions
+        sinon.stub(workspaceApis, 'getWorkspaceFolders').callsFake(() => workspaceFoldersValue);
+        sinon.stub(workspaceApis, 'onDidChangeConfiguration').returns(new Disposable(() => {}));
 
         mockScopedCollection = {
             clear: sinon.stub(),
@@ -108,10 +101,13 @@ suite('TerminalEnvVarInjector', () => {
             sinon.assert.match(injector, sinon.match.object);
         });
 
-        test('should dispose cleanly', () => {
+        test('should dispose without clearing the entire collection (preserves shell activation vars)', () => {
             injector = new TerminalEnvVarInjector(envVarCollection.object, envVarManager.object);
             injector.dispose();
-            envVarCollection.verify((c) => c.clear(), typeMoq.Times.atLeastOnce());
+            // dispose() must NOT call envVarCollection.clear() because the collection
+            // is shared with ShellStartupActivationVariablesManager which contributes
+            // VSCODE_PYTHON_*_ACTIVATE variables that must survive extension deactivation.
+            envVarCollection.verify((c) => c.clear(), typeMoq.Times.never());
         });
 
         test('should register environment variable change event handler', () => {

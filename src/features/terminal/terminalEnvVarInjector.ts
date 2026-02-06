@@ -3,17 +3,16 @@
 
 import * as fse from 'fs-extra';
 import * as path from 'path';
-import {
-    Disposable,
-    EnvironmentVariableScope,
-    GlobalEnvironmentVariableCollection,
-    window,
-    workspace,
-    WorkspaceFolder,
-} from 'vscode';
+import { Disposable, EnvironmentVariableScope, GlobalEnvironmentVariableCollection, WorkspaceFolder } from 'vscode';
 import { traceError, traceVerbose } from '../../common/logging';
 import { resolveVariables } from '../../common/utils/internalVariables';
-import { getConfiguration, getWorkspaceFolder } from '../../common/workspace.apis';
+import { showInformationMessage } from '../../common/window.apis';
+import {
+    getConfiguration,
+    getWorkspaceFolder,
+    getWorkspaceFolders,
+    onDidChangeConfiguration,
+} from '../../common/workspace.apis';
 import { EnvVarManager } from '../execution/envVariableManager';
 
 /**
@@ -65,7 +64,7 @@ export class TerminalEnvVarInjector implements Disposable {
 
                 // Only show notification when env vars change and we have an env file but injection is disabled
                 if (!useEnvFile && envFilePath) {
-                    window.showInformationMessage(
+                    showInformationMessage(
                         'An environment file is configured but terminal environment injection is disabled. Enable "python.terminal.useEnvFile" to use environment variables from .env files in terminals.',
                     );
                 }
@@ -83,7 +82,7 @@ export class TerminalEnvVarInjector implements Disposable {
 
         // Listen for changes to the python.envFile setting
         this.disposables.push(
-            workspace.onDidChangeConfiguration((e) => {
+            onDidChangeConfiguration((e) => {
                 if (e.affectsConfiguration('python.envFile')) {
                     traceVerbose(
                         'TerminalEnvVarInjector: python.envFile setting changed, updating environment variables',
@@ -113,7 +112,7 @@ export class TerminalEnvVarInjector implements Disposable {
             } else {
                 // No provided workspace - update all workspaces
 
-                const workspaceFolders = workspace.workspaceFolders;
+                const workspaceFolders = getWorkspaceFolders();
                 if (!workspaceFolders || workspaceFolders.length === 0) {
                     traceVerbose('TerminalEnvVarInjector: No workspace folders found, skipping env var injection');
                     return;
@@ -136,7 +135,8 @@ export class TerminalEnvVarInjector implements Disposable {
      */
     private async injectEnvironmentVariablesForWorkspace(workspaceFolder: WorkspaceFolder): Promise<void> {
         const workspaceUri = workspaceFolder.uri;
-        const workspaceKey = workspaceUri.fsPath;
+        // Use path.resolve() for safe cross-platform map key (Windows \ vs POSIX /)
+        const workspaceKey = path.resolve(workspaceUri.fsPath);
 
         try {
             const envVars = await this.envVarManager.getEnvironmentVariables(workspaceUri);
@@ -210,14 +210,25 @@ export class TerminalEnvVarInjector implements Disposable {
 
     /**
      * Dispose of the injector and clean up resources.
+     * Only clears the .env variables this injector has tracked, preserving
+     * shell activation variables (VSCODE_PYTHON_*_ACTIVATE) set by
+     * ShellStartupActivationVariablesManager on the same shared collection.
      */
     dispose(): void {
         traceVerbose('TerminalEnvVarInjector: Disposing');
         this.disposables.forEach((disposable) => disposable.dispose());
         this.disposables = [];
 
-        // Clear all environment variables from the collection
-        this.envVarCollection.clear();
+        // Only remove the .env keys we tracked — do NOT call envVarCollection.clear().
+        // The collection is shared with ShellStartupActivationVariablesManager which
+        // contributes VSCODE_PYTHON_*_ACTIVATE variables that must survive disposal.
+        const workspaceFolders = getWorkspaceFolders();
+        if (workspaceFolders) {
+            for (const folder of workspaceFolders) {
+                const scope = this.getEnvironmentVariableCollectionScoped({ workspaceFolder: folder });
+                this.clearTrackedEnvVariables(scope, path.resolve(folder.uri.fsPath));
+            }
+        }
     }
 
     private getEnvironmentVariableCollectionScoped(scope: EnvironmentVariableScope = {}) {
@@ -226,12 +237,14 @@ export class TerminalEnvVarInjector implements Disposable {
     }
 
     /**
-     * Clear all environment variables for a workspace.
+     * Clear .env variables for a workspace when the .env file is deleted.
+     * Only removes tracked keys, preserving shell activation variables
+     * (VSCODE_PYTHON_*_ACTIVATE) set by ShellStartupActivationVariablesManager.
      */
     private clearWorkspaceVariables(workspaceFolder: WorkspaceFolder): void {
         try {
             const scope = this.getEnvironmentVariableCollectionScoped({ workspaceFolder });
-            scope.clear();
+            this.clearTrackedEnvVariables(scope, path.resolve(workspaceFolder.uri.fsPath));
         } catch (error) {
             traceError(`Failed to clear environment variables for workspace ${workspaceFolder.uri.fsPath}:`, error);
         }
