@@ -228,9 +228,11 @@ export namespace UvInstallStrings {
         return l10n.t('Python installed successfully at {0}', path);
     }
     export const installFailed = l10n.t('Failed to install Python');
-    export const uvInstallFailed = l10n.t('Failed to install uv');    export const uvInstallRestartRequired = l10n.t(
+    export const uvInstallFailed = l10n.t('Failed to install uv');
+    export const uvInstallRestartRequired = l10n.t(
         'uv was installed but may not be available in the current terminal. Please restart VS Code or open a new terminal and try again.',
-    );    export const dontAskAgain = l10n.t("Don't ask again");
+    );
+    export const dontAskAgain = l10n.t("Don't ask again");
     export const clickToInstallPython = l10n.t('No Python found, click to install');
     export const selectPythonVersion = l10n.t('Select Python version to install');
     export const installed = l10n.t('installed');
