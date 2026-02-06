@@ -198,22 +198,6 @@ export namespace EnvViewStrings {
     export const selectedWorkspaceTooltip = l10n.t('This environment is selected for project files');
 }
 
-export namespace EnvManagerSearchStrings {
-    export const selectAction = l10n.t('Select an action');
-    export const adjustSearchPaths = l10n.t('Adjust search path settings');
-    export const adjustSearchPathsDescription = l10n.t('Open settings for environment search paths');
-    export const fullWorkspaceSearch = l10n.t('Do full workspace search');
-    export const fullWorkspaceSearchDescription = l10n.t('Search the entire workspace for environments');
-    export const saveSearchPrompt = l10n.t('Save this search setting for future discovery?');
-    export const dontShowAgain = l10n.t("Don't show again");
-    export const slowLoadingMessage = l10n.t(
-        'Environment discovery is taking longer than expected. This may be due to workspace search paths.',
-    );
-    export const openSettings = l10n.t('Open Settings');
-    export const removeWorkspaceSearch = l10n.t('Remove Workspace Search');
-    export const dontShowForWorkspace = l10n.t("Don't Show for This Workspace");
-}
-
 export namespace ActivationStrings {
     export const envCollectionDescription = l10n.t('Environment variables for shell activation');
     export const revertedShellStartupScripts = l10n.t(

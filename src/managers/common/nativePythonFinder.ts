@@ -103,11 +103,6 @@ export interface NativePythonFinder extends Disposable {
      * @param executable
      */
     resolve(executable: string): Promise<NativeEnvInfo>;
-    /**
-     * Sets temporary search paths used for the next discovery refresh.
-     * These paths are not persisted to user or workspace settings.
-     */
-    setTemporarySearchPaths(searchPaths?: string[]): void;
 }
 interface NativeLog {
     level: string;
@@ -161,7 +156,6 @@ class NativePythonFinderImpl implements NativePythonFinder {
     private startFailed: boolean = false;
     private restartAttempts: number = 0;
     private isRestarting: boolean = false;
-    private temporarySearchPaths: string[] | undefined;
 
     constructor(
         private readonly outputChannel: LogOutputChannel,
@@ -201,10 +195,6 @@ class NativePythonFinderImpl implements NativePythonFinder {
             }
             throw ex;
         }
-    }
-
-    public setTemporarySearchPaths(searchPaths?: string[]): void {
-        this.temporarySearchPaths = searchPaths?.filter((value) => value && value.trim() !== '');
     }
 
     /**
@@ -573,12 +563,10 @@ class NativePythonFinderImpl implements NativePythonFinder {
     private async configure() {
         // Get all extra search paths including legacy settings and new searchPaths
         const extraSearchPaths = await getAllExtraSearchPaths();
-        const temporarySearchPaths = this.temporarySearchPaths ?? [];
-        const environmentDirectories = Array.from(new Set([...extraSearchPaths, ...temporarySearchPaths]));
 
         const options: ConfigurationOptions = {
             workspaceDirectories: this.api.getPythonProjects().map((item) => item.uri.fsPath),
-            environmentDirectories,
+            environmentDirectories: extraSearchPaths,
             condaExecutable: getPythonSettingAndUntildify<string>('condaPath'),
             pipenvExecutable: getPythonSettingAndUntildify<string>('pipenvPath'),
             poetryExecutable: getPythonSettingAndUntildify<string>('poetryPath'),

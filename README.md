@@ -6,10 +6,10 @@
 
 The Python Environments extension for VS Code helps you manage Python environments and packages using your preferred environment manager, backed by its extensible APIs. This extension provides unique support for specifying environments for specific files, entire Python folders, or projects, including multi-root and mono-repo scenarios. The core feature set includes:
 
-- 🌐 Create, delete, and manage environments
-- 📦 Install and uninstall packages within the selected environment
-- ✅ Create activated terminals
-- 🖌️ Add and create new Python projects
+-   🌐 Create, delete, and manage environments
+-   📦 Install and uninstall packages within the selected environment
+-   ✅ Create activated terminals
+-   🖌️ Add and create new Python projects
 
 > **Note:** This extension is in preview, and its APIs and features are subject to change as the project evolves.
 
@@ -31,9 +31,9 @@ The Python Environments panel provides an interface to create, delete and manage
 
 To simplify the environment creation process, you can use "Quick Create" to automatically create a new virtual environment using:
 
-- Your default environment manager (e.g., `venv`)
-- The latest Python version
-- Workspace dependencies
+-   Your default environment manager (e.g., `venv`)
+-   The latest Python version
+-   Workspace dependencies
 
 For more control, you can create a custom environment where you can specify Python version, environment name, packages to be installed, and more!
 
@@ -61,9 +61,9 @@ The following environment managers are supported out of the box:
 
 **Legend:**
 
-- **Create**: Ability to create new environments interactively.
-- **Quick Create**: Ability to create environments with minimal user input.
-- **Find Environments**: Ability to discover and list existing environments.
+-   **Create**: Ability to create new environments interactively.
+-   **Quick Create**: Ability to create environments with minimal user input.
+-   **Find Environments**: Ability to discover and list existing environments.
 
 Environment managers are responsible for specifying which package manager will be used by default to install and manage Python packages within the environment (`venv` uses `pip` by default). This ensures that packages are managed consistently according to the preferred tools and settings of the chosen environment manager.
 
@@ -107,8 +107,8 @@ There are a few ways to add a Python Project from the Python Environments panel:
 
 The **Python Envs: Create New Project from Template** command simplifies the process of starting a new Python project by scaffolding it for you. Whether in a new workspace or an existing one, this command configures the environment and boilerplate file structure, so you don’t have to worry about the initial setup, and only the code you want to write. There are currently two project types supported:
 
-- Package: A structured Python package with files like `__init__.py` and setup configurations.
-- Script: A simple project for standalone Python scripts, ideal for quick tasks or just to get you started.
+-   Package: A structured Python package with files like `__init__.py` and setup configurations.
+-   Script: A simple project for standalone Python scripts, ideal for quick tasks or just to get you started.
 
 ## Command Reference
 
@@ -127,31 +127,31 @@ All commands can be accessed via the Command Palette (`ctrl/cmd + Shift + P`):
 
 ### Python Environments Settings (`python-envs.`)
 
-| Setting (python-envs.)      | Default                   | Description                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
-| --------------------------- | ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| defaultEnvManager           | `"ms-python.python:venv"` | The default environment manager used for creating and managing environments.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
-| defaultPackageManager       | `"ms-python.python:pip"`  | The default package manager to use for installing and managing packages. This is often dictated by the default environment manager but can be customized.                                                                                                                                                                                                                                                                                                                                                                                                                       |
-| pythonProjects              | `[]`                      | A list of Python workspaces, specified by the path, in which you can set particular environment and package managers. You can set information for a workspace as `[{"path":  "/path/to/workspace", "envManager": "ms-python.python:venv", "packageManager": "ms-python.python:pip"]}`.                                                                                                                                                                                                                                                                                          |
-| terminal.showActivateButton | `false`                   | (experimental) Show a button in the terminal to activate/deactivate the current environment for the terminal. This button is only shown if the active terminal is associated with a project that has an activatable environment.                                                                                                                                                                                                                                                                                                                                                |
-| terminal.autoActivationType | `"command"`               | Specifies how the extension can activate an environment in a terminal. Accepted values: `command` (execute activation command in terminal), `shellStartup` (`terminal.integrated.shellIntegration.enabled` successfully enabled or we may modify shell startup scripts ), `off` (no auto-activation). Shell startup is only supported for: zsh, fish, pwsh, bash, cmd. **Takes precedence over** `python.terminal.activateEnvironment`. Restart terminals after changing this setting. To revert shell startup changes, run `Python Envs: Revert Shell Startup Script Changes`. |
-| alwaysUseUv                 | `true`                    | When `true`, [uv](https://github.com/astral-sh/uv) will be used to manage all virtual environments if available. When `false`, uv will only manage virtual environments explicitly created by uv.                                                                                                                                                                                                                                                                                                                                                                               |
-| globalSearchPaths           | `[]`                      | Global search paths for Python environments. Array of absolute directory paths or glob patterns to search for environments at the user level. This setting is merged with the legacy `python.venvPath` and `python.venvFolders` settings. Supports glob patterns like `**/.venv` or `/path/*/envs`. See [Search Paths and Glob Patterns](docs/search-paths-and-glob-patterns.md) for detailed usage.                                                                                                                                                                                                                                                                        |
-| workspaceSearchPaths        | `[]`                      | Workspace search paths for Python environments. Can be absolute paths, relative directory paths, or glob patterns searched within the workspace. Supports glob patterns like `**/.venv` or `tests/*/venv`. See [Search Paths and Glob Patterns](docs/search-paths-and-glob-patterns.md) for detailed usage.                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| Setting (python-envs.)                 | Default                   | Description                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| ---------------------------- | ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| defaultEnvManager            | `"ms-python.python:venv"` | The default environment manager used for creating and managing environments.                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| defaultPackageManager        | `"ms-python.python:pip"`  | The default package manager to use for installing and managing packages. This is often dictated by the default environment manager but can be customized.                                                                                                                                                                                                                                                                                                                                        |
+| pythonProjects               | `[]`                      | A list of Python workspaces, specified by the path, in which you can set particular environment and package managers. You can set information for a workspace as `[{"path":  "/path/to/workspace", "envManager": "ms-python.python:venv", "packageManager": "ms-python.python:pip"]}`.                                                                                                                                                                                                           |
+| terminal.showActivateButton  | `false`                   | (experimental) Show a button in the terminal to activate/deactivate the current environment for the terminal. This button is only shown if the active terminal is associated with a project that has an activatable environment.                                                                                                                                                                                                                                                                 |
+| terminal.autoActivationType  | `"command"`               | Specifies how the extension can activate an environment in a terminal. Accepted values: `command` (execute activation command in terminal), `shellStartup` (`terminal.integrated.shellIntegration.enabled` successfully enabled or we may modify shell startup scripts ), `off` (no auto-activation). Shell startup is only supported for: zsh, fish, pwsh, bash, cmd. **Takes precedence over** `python.terminal.activateEnvironment`. Restart terminals after changing this setting. To revert shell startup changes, run `Python Envs: Revert Shell Startup Script Changes`. |                                                                                        
+| alwaysUseUv                  | `true`                    | When `true`, [uv](https://github.com/astral-sh/uv) will be used to manage all virtual environments if available. When `false`, uv will only manage virtual environments explicitly created by uv.                                                                                                                                                                                                                                                                                                |
+| globalSearchPaths            | `[]`                      | Global search paths for Python environments. Array of absolute directory paths to search for environments at the user level. This setting is merged with the legacy `python.venvPath` and `python.venvFolders` settings.                                                                                                                                                                                                                                                                        |
+| workspaceSearchPaths         | `[]`                      | Workspace search paths for Python environments. Can be absolute paths or relative directory paths searched within the workspace.                                                                                                                                                                                                                                                                                                                                                                 |
 
 ### Supported Legacy Python Settings (`python.`)
 
 The following settings from the Python extension (`python.*`) are also supported by Python Environments.
 
-| Setting (`python.`)          | Default                     | Description                                                                                                                                                                                                                                                                        |
-| ---------------------------- | --------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| condaPath                    | `""`                        | Path to the conda executable. Used to locate and run conda for environment discovery and management.                                                                                                                                                                               |
-| defaultInterpreterPath       | `"python"`                  | Path to the default Python interpreter.                                                                                                                                                                                                                                            |
-| envFile                      | `"${workspaceFolder}/.env"` | Path to the environment file (`.env`) containing environment variable definitions. Used with `python.terminal.useEnvFile` to inject environment variables into terminals.                                                                                                          |
-| terminal.activateEnvironment | `true`                      | Legacy setting for terminal auto-activation. If `python-envs.terminal.autoActivationType` is not set and this is `false`, terminal auto-activation will be disabled. **Superseded by** `python-envs.terminal.autoActivationType` which takes precedence when configured.           |
-| terminal.executeInFileDir    | `false`                     | When `true`, the terminal's working directory will be set to the directory containing the Python file being executed, rather than the project root directory.                                                                                                                      |
-| terminal.useEnvFile          | `false`                     | Controls whether environment variables from `.env` files (specified by `python.envFile`) are injected into terminals.                                                                                                                                                              |
-| venvFolders                  | `[]`                        | Array of folder names to search for virtual environments. These folders are searched in addition to the standard locations. **Note:** This setting is merged with `python-envs.globalSearchPaths`. Consider migrating to `python-envs.globalSearchPaths` for future compatibility. |
-| venvPath                     | `""`                        | Path to a folder containing virtual environments. **Note:** This setting is merged with `python-envs.globalSearchPaths`. Consider migrating to `python-envs.globalSearchPaths` for future compatibility.                                                                           |
+| Setting (`python.`)                        | Default                     | Description                                                                                                                                                                                                                                                                                                            |
+| ------------------------------ | --------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| condaPath                      | `""`                        | Path to the conda executable. Used to locate and run conda for environment discovery and management.                                                                                                                                                                        |
+| defaultInterpreterPath         | `"python"`                  | Path to the default Python interpreter.                                                                   |
+| envFile                        | `"${workspaceFolder}/.env"` | Path to the environment file (`.env`) containing environment variable definitions. Used with `python.terminal.useEnvFile` to inject environment variables into terminals.                                                                                                   |                                                                                   
+| terminal.activateEnvironment   | `true`                      | Legacy setting for terminal auto-activation. If `python-envs.terminal.autoActivationType` is not set and this is `false`, terminal auto-activation will be disabled. **Superseded by** `python-envs.terminal.autoActivationType` which takes precedence when configured.                                               |
+| terminal.executeInFileDir      | `false`                     | When `true`, the terminal's working directory will be set to the directory containing the Python file being executed, rather than the project root directory.                                                                                                                                                          |
+| terminal.useEnvFile            | `false`                     | Controls whether environment variables from `.env` files (specified by `python.envFile`) are injected into terminals.                                                                                                                                                                                                  |
+| venvFolders                    | `[]`                        | Array of folder names to search for virtual environments. These folders are searched in addition to the standard locations. **Note:** This setting is merged with `python-envs.globalSearchPaths`. Consider migrating to `python-envs.globalSearchPaths` for future compatibility.                                    |
+| venvPath                       | `""`                        | Path to a folder containing virtual environments. **Note:** This setting is merged with `python-envs.globalSearchPaths`. Consider migrating to `python-envs.globalSearchPaths` for future compatibility.                                                                    |
 
 ## Extensibility
 
@@ -207,13 +207,13 @@ usage: `await vscode.commands.executeCommand('python-envs.createAny', options);`
 
 The Python Environments extension supports shell startup activation for environments. This feature allows you to automatically activate a Python environment when you open a terminal in VS Code. The activation is done by modifying the shell's startup script, which is supported for the following shells:
 
-- **Bash**: `~/.bashrc`
-- **Zsh**: `~/.zshrc` (or `$ZDOTDIR/.zshrc` if `ZDOTDIR` is set)
-- **Fish**: `~/.config/fish/config.fish`
-- **PowerShell**:
-    - (Mac/Linux):`~/.config/powershell/profile.ps1`
-    - (Windows): `~\Documents\PowerShell\Microsoft.PowerShell_profile.ps1`
-- **CMD**: `~/.cmdrc/cmd_startup.bat`
+-   **Bash**: `~/.bashrc`
+-   **Zsh**: `~/.zshrc` (or `$ZDOTDIR/.zshrc` if `ZDOTDIR` is set)
+-   **Fish**: `~/.config/fish/config.fish`
+-   **PowerShell**:
+    -   (Mac/Linux):`~/.config/powershell/profile.ps1`
+    -   (Windows): `~\Documents\PowerShell\Microsoft.PowerShell_profile.ps1`
+-   **CMD**: `~/.cmdrc/cmd_startup.bat`
 
 If at any time you would like to revert the changes made to the shell's script, you can do so by running `Python Envs: Revert Shell Startup Script Changes` via the Command Palette.
 
@@ -310,11 +310,11 @@ This section provides an overview of how the Python extension interacts with the
 
 Tools that may rely on these APIs in their own extensions include:
 
-- **Debuggers** (e.g., `debugpy`)
-- **Linters** (e.g., Pylint, Flake8, Mypy)
-- **Formatters** (e.g., Black, autopep8)
-- **Language Server extensions** (e.g., Pylance, Jedi)
-- **Environment and Package Manager extensions** (e.g., Pixi, Conda, Hatch)
+-   **Debuggers** (e.g., `debugpy`)
+-   **Linters** (e.g., Pylint, Flake8, Mypy)
+-   **Formatters** (e.g., Black, autopep8)
+-   **Language Server extensions** (e.g., Pylance, Jedi)
+-   **Environment and Package Manager extensions** (e.g., Pixi, Conda, Hatch)
 
 ### API Dependency
 
@@ -334,12 +334,6 @@ The relationship is illustrated below:
 
 In **trusted mode**, the Python Environments extension supports tasks like managing environments, installing/removing packages, and running tools. In **untrusted mode**, functionality is limited to language features, ensuring a secure and restricted environment.
 
-## Documentation
-
-- [Managing Python Projects](docs/managing-python-projects.md): Learn how to create and manage Python projects
-- [Search Paths and Glob Patterns](docs/search-paths-and-glob-patterns.md): Customize where the extension searches for Python environments
-- [Projects API Reference](docs/projects-api-reference.md): Technical reference for extension developers
-
 ## Contributing
 
 This project welcomes contributions and suggestions. Most contributions require you to agree to a
@@ -356,13 +350,13 @@ contact [opencode@microsoft.com](mailto:opencode@microsoft.com) with any additio
 
 ## Questions, issues, feature requests, and contributions
 
-- If you have a question about how to accomplish something with the extension, please [ask on our Discussions page](https://github.com/microsoft/vscode-python/discussions/categories/q-a).
-- If you come across a problem with the extension, please [file an issue](https://github.com/microsoft/vscode-python).
-- Contributions are always welcome! Please see our [contributing guide](https://github.com/Microsoft/vscode-python/blob/main/CONTRIBUTING.md) for more details.
-- Any and all feedback is appreciated and welcome!
-    - If someone has already [filed an issue](https://github.com/Microsoft/vscode-python) that encompasses your feedback, please leave a 👍/👎 reaction on the issue.
-    - Otherwise please start a [new discussion](https://github.com/microsoft/vscode-python/discussions/categories/ideas).
-- If you're interested in the development of the extension, you can read about our [development process](https://github.com/Microsoft/vscode-python/blob/main/CONTRIBUTING.md#development-process).
+-   If you have a question about how to accomplish something with the extension, please [ask on our Discussions page](https://github.com/microsoft/vscode-python/discussions/categories/q-a).
+-   If you come across a problem with the extension, please [file an issue](https://github.com/microsoft/vscode-python).
+-   Contributions are always welcome! Please see our [contributing guide](https://github.com/Microsoft/vscode-python/blob/main/CONTRIBUTING.md) for more details.
+-   Any and all feedback is appreciated and welcome!
+    -   If someone has already [filed an issue](https://github.com/Microsoft/vscode-python) that encompasses your feedback, please leave a 👍/👎 reaction on the issue.
+    -   Otherwise please start a [new discussion](https://github.com/microsoft/vscode-python/discussions/categories/ideas).
+-   If you're interested in the development of the extension, you can read about our [development process](https://github.com/Microsoft/vscode-python/blob/main/CONTRIBUTING.md#development-process).
 
 ## Data and telemetry
 

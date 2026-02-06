@@ -65,11 +65,7 @@ import { TerminalEnvVarInjector } from './features/terminal/terminalEnvVarInject
 import { TerminalManager, TerminalManagerImpl } from './features/terminal/terminalManager';
 import { registerTerminalPackageWatcher } from './features/terminal/terminalPackageWatcher';
 import { getEnvironmentForTerminal } from './features/terminal/utils';
-import {
-    handleEnvManagerSearchAction,
-    openSearchSettings,
-    startSlowLoadingMonitor,
-} from './features/views/envManagerSearch';
+import { openSearchSettings } from './features/views/envManagerSearch';
 import { EnvManagerView } from './features/views/envManagersView';
 import { ProjectView } from './features/views/projectView';
 import { PythonStatusBarImpl } from './features/views/pythonStatusBar';
@@ -150,7 +146,6 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
     setPythonApi(envManagers, projectManager, projectCreators, terminalManager, envVarManager);
     const api = await getPythonApi();
     const sysPythonManager = createDeferred<SysPythonManager>();
-    const nativeFinderDeferred = createDeferred<NativePythonFinder>();
 
     const temporaryStateManager = new TemporaryStateManager();
     context.subscriptions.push(temporaryStateManager);
@@ -182,10 +177,6 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
         commands.registerCommand('python-envs.viewLogs', () => outputChannel.show()),
         commands.registerCommand('python-envs.refreshAllManagers', async () => {
             await Promise.all(envManagers.managers.map((m) => m.refresh(undefined)));
-        }),
-        commands.registerCommand('python-envs.managerSearch', async () => {
-            const nativeFinder = await nativeFinderDeferred.promise;
-            await handleEnvManagerSearchAction(envManagers, nativeFinder);
         }),
         commands.registerCommand('python-envs.searchSettings', async () => {
             await openSearchSettings();
@@ -457,31 +448,21 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
      * Below are all the contributed features using the APIs.
      */
     setImmediate(async () => {
-        // Start monitoring for slow loading - will show notification if discovery takes too long
-        const cancelSlowLoadingMonitor = startSlowLoadingMonitor();
-
         // This is the finder that is used by all the built in environment managers
         const nativeFinder: NativePythonFinder = await createNativePythonFinder(outputChannel, api, context);
-        nativeFinderDeferred.resolve(nativeFinder);
         context.subscriptions.push(nativeFinder);
         const sysMgr = new SysPythonManager(nativeFinder, api, outputChannel);
         sysPythonManager.resolve(sysMgr);
+        await Promise.all([
+            registerSystemPythonFeatures(nativeFinder, context.subscriptions, outputChannel, sysMgr),
+            registerCondaFeatures(nativeFinder, context.subscriptions, outputChannel, projectManager),
+            registerPyenvFeatures(nativeFinder, context.subscriptions, projectManager),
+            registerPipenvFeatures(nativeFinder, context.subscriptions, projectManager),
+            registerPoetryFeatures(nativeFinder, context.subscriptions, outputChannel, projectManager),
+            shellStartupVarsMgr.initialize(),
+        ]);
 
-        try {
-            await Promise.all([
-                registerSystemPythonFeatures(nativeFinder, context.subscriptions, outputChannel, sysMgr),
-                registerCondaFeatures(nativeFinder, context.subscriptions, outputChannel, projectManager),
-                registerPyenvFeatures(nativeFinder, context.subscriptions, projectManager),
-                registerPipenvFeatures(nativeFinder, context.subscriptions, projectManager),
-                registerPoetryFeatures(nativeFinder, context.subscriptions, outputChannel, projectManager),
-                shellStartupVarsMgr.initialize(),
-            ]);
-
-            await applyInitialEnvironmentSelection(envManagers, projectManager, nativeFinder, api);
-        } finally {
-            // Cancel the slow loading monitor once initialization completes (or fails)
-            cancelSlowLoadingMonitor();
-        }
+        await applyInitialEnvironmentSelection(envManagers, projectManager, nativeFinder, api);
 
         // Register manager-agnostic terminal watcher for package-modifying commands
         registerTerminalPackageWatcher(api, terminalActivation, outputChannel, context.subscriptions);

@@ -1,7 +1,7 @@
 import assert from 'node:assert';
 import * as sinon from 'sinon';
 import { Uri } from 'vscode';
-import { getResourceUri, normalizePath, normalizePathKeepGlobs } from '../../common/utils/pathUtils';
+import { getResourceUri, normalizePath } from '../../common/utils/pathUtils';
 import * as utils from '../../common/utils/platformUtils';
 
 suite('Path Utilities', () => {
@@ -126,90 +126,6 @@ suite('Path Utilities', () => {
             const result = normalizePath(testPath);
 
             assert.strictEqual(result, 'C:/Path/To/File.txt');
-        });
-    });
-
-    suite('normalizePathKeepGlobs', () => {
-        teardown(() => {
-            sinon.restore();
-        });
-
-        suite('on POSIX systems', () => {
-            setup(() => {
-                sinon.stub(utils, 'isWindows').returns(false);
-            });
-
-            test('returns empty string for empty input', () => {
-                assert.strictEqual(normalizePathKeepGlobs(''), '');
-            });
-
-            test('returns empty string for whitespace-only input', () => {
-                assert.strictEqual(normalizePathKeepGlobs('   '), '');
-            });
-
-            test('trims whitespace from relative paths', () => {
-                assert.strictEqual(normalizePathKeepGlobs('  .venv  '), '.venv');
-            });
-
-            test('preserves relative paths as-is', () => {
-                assert.strictEqual(normalizePathKeepGlobs('./**'), './**');
-                assert.strictEqual(normalizePathKeepGlobs('envs/test'), 'envs/test');
-            });
-
-            test('resolves absolute paths', () => {
-                const result = normalizePathKeepGlobs('/home/user/envs');
-                assert.strictEqual(result, '/home/user/envs');
-            });
-
-            test('preserves case for relative paths', () => {
-                assert.strictEqual(normalizePathKeepGlobs('MyEnv'), 'MyEnv');
-            });
-
-            test('preserves case for absolute paths', () => {
-                const result = normalizePathKeepGlobs('/home/User/Envs');
-                assert.ok(result.includes('User') || result.includes('user'));
-            });
-        });
-
-        suite('on Windows systems', () => {
-            setup(() => {
-                sinon.stub(utils, 'isWindows').returns(true);
-            });
-
-            test('lowercases relative paths', () => {
-                assert.strictEqual(normalizePathKeepGlobs('.VENV'), '.venv');
-                assert.strictEqual(normalizePathKeepGlobs('MyEnv'), 'myenv');
-            });
-
-            test('lowercases absolute paths', () => {
-                // On Windows, path.resolve would handle the path
-                // The important part is that the result is lowercased
-                const result = normalizePathKeepGlobs('C:\\Users\\Test');
-                assert.strictEqual(result, result.toLowerCase());
-            });
-
-            test('handles glob patterns', () => {
-                assert.strictEqual(normalizePathKeepGlobs('./**'), './**');
-                assert.strictEqual(normalizePathKeepGlobs('**/.venv'), '**/.venv');
-            });
-        });
-
-        suite('path normalization consistency', () => {
-            setup(() => {
-                sinon.stub(utils, 'isWindows').returns(false);
-            });
-
-            test('same paths normalize to same value', () => {
-                const path1 = normalizePathKeepGlobs('.venv');
-                const path2 = normalizePathKeepGlobs('  .venv  ');
-                assert.strictEqual(path1, path2);
-            });
-
-            test('different paths normalize differently', () => {
-                const path1 = normalizePathKeepGlobs('.venv');
-                const path2 = normalizePathKeepGlobs('venv');
-                assert.notStrictEqual(path1, path2);
-            });
         });
     });
 });

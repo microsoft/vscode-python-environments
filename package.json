@@ -214,12 +214,6 @@
                 "icon": "$(refresh)"
             },
             {
-                "command": "python-envs.managerSearch",
-                "title": "%python-envs.managerSearch.title%",
-                "category": "Python",
-                "icon": "$(search)"
-            },
-            {
                 "command": "python-envs.searchSettings",
                 "title": "%python-envs.searchSettings.title%",
                 "category": "Python",

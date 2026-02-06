@@ -65,24 +65,6 @@ export function normalizePath(fsPath: string): string {
     return path1;
 }
 
-/**
- * Normalizes a search path for comparison while preserving relative and glob strings.
- * Absolute paths are resolved; relative/glob paths are trimmed and left intact.
- */
-export function normalizePathKeepGlobs(value: string): string {
-    const trimmed = value.trim();
-    if (!trimmed) {
-        return '';
-    }
-
-    if (path.isAbsolute(trimmed)) {
-        const resolved = path.resolve(trimmed);
-        return isWindows() ? resolved.toLowerCase() : resolved;
-    }
-
-    return isWindows() ? trimmed.toLowerCase() : trimmed;
-}
-
 export function getResourceUri(resourcePath: string, root?: string): Uri | undefined {
     try {
         if (!resourcePath) {
