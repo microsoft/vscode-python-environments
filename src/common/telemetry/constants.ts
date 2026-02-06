@@ -128,7 +128,7 @@ export interface IEventNamePropertyMapping {
         }
     */
     [EventNames.UV_PYTHON_INSTALL_FAILED]: {
-        stage: 'uvInstall' | 'pythonInstall';
+        stage: 'uvInstall' | 'pythonInstall' | 'findPath';
     };
 
     /* __GDPR__

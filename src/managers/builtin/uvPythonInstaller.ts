@@ -7,7 +7,6 @@ import {
     TaskRevealKind,
     TaskScope,
 } from 'vscode';
-import { PythonEnvironmentApi } from '../../api';
 import { spawnProcess } from '../../common/childProcess.apis';
 import { UvInstallStrings } from '../../common/localize';
 import { traceError, traceInfo, traceLog } from '../../common/logging';
@@ -142,6 +141,27 @@ export async function installUv(_log?: LogOutputChannel): Promise<boolean> {
 }
 
 /**
+ * Gets the path to the uv-managed Python installation.
+ * @returns Promise that resolves to the Python path, or undefined if not found
+ */
+export async function getUvPythonPath(): Promise<string | undefined> {
+    return new Promise((resolve) => {
+        const chunks: string[] = [];
+        const proc = spawnProcess('uv', ['python', 'find']);
+        proc.stdout?.on('data', (data) => chunks.push(data.toString()));
+        proc.on('error', () => resolve(undefined));
+        proc.on('exit', (code) => {
+            if (code === 0 && chunks.length > 0) {
+                const pythonPath = chunks.join('').trim();
+                resolve(pythonPath || undefined);
+            } else {
+                resolve(undefined);
+            }
+        });
+    });
+}
+
+/**
  * Installs Python using uv.
  * @param log Optional log output channel
  * @param version Optional Python version to install (e.g., "3.12"). If not specified, installs the latest.
@@ -171,21 +191,19 @@ export async function installPythonViaUv(_log?: LogOutputChannel, version?: stri
  * Respects the "Don't ask again" setting.
  *
  * @param trigger What triggered this prompt ('activation' or 'createEnvironment')
- * @param api The Python environment API (used to refresh environments after installation)
  * @param log Optional log output channel
- * @returns Promise that resolves to true if Python was successfully installed
+ * @returns Promise that resolves to the installed Python path, or undefined if not installed
  */
 export async function promptInstallPythonViaUv(
     trigger: 'activation' | 'createEnvironment',
-    api: PythonEnvironmentApi,
     log?: LogOutputChannel,
-): Promise<boolean> {
+): Promise<string | undefined> {
     const state = await getGlobalPersistentState();
     const dontAsk = await state.get<boolean>(UV_INSTALL_PYTHON_DONT_ASK_KEY);
 
     if (dontAsk) {
         traceLog('Skipping Python install prompt: user selected "Don\'t ask again"');
-        return false;
+        return undefined;
     }
 
     sendTelemetryEvent(EventNames.UV_PYTHON_INSTALL_PROMPTED, undefined, { trigger });
@@ -205,25 +223,24 @@ export async function promptInstallPythonViaUv(
     if (result === UvInstallStrings.dontAskAgain) {
         await state.set(UV_INSTALL_PYTHON_DONT_ASK_KEY, true);
         traceLog('User selected "Don\'t ask again" for Python install prompt');
-        return false;
+        return undefined;
     }
 
     if (result === UvInstallStrings.installPython) {
-        return await installPythonWithUv(api, log);
+        return await installPythonWithUv(log);
     }
 
-    return false;
+    return undefined;
 }
 
 /**
  * Installs Python using uv. If uv is not installed, installs it first.
  * This is the main entry point for programmatic Python installation.
  *
- * @param api The Python environment API (used to refresh environments after installation)
  * @param log Optional log output channel
- * @returns Promise that resolves to true if Python was successfully installed
+ * @returns Promise that resolves to the installed Python path, or undefined on failure
  */
-export async function installPythonWithUv(api: PythonEnvironmentApi, log?: LogOutputChannel): Promise<boolean> {
+export async function installPythonWithUv(log?: LogOutputChannel): Promise<string | undefined> {
     const uvInstalled = await isUvInstalled(log);
 
     sendTelemetryEvent(EventNames.UV_PYTHON_INSTALL_STARTED, undefined, { uvAlreadyInstalled: uvInstalled });
@@ -243,7 +260,7 @@ export async function installPythonWithUv(api: PythonEnvironmentApi, log?: LogOu
                 if (!uvSuccess) {
                     sendTelemetryEvent(EventNames.UV_PYTHON_INSTALL_FAILED, undefined, { stage: 'uvInstall' });
                     showErrorMessage(UvInstallStrings.uvInstallFailed);
-                    return false;
+                    return undefined;
                 }
             }
 
@@ -252,17 +269,23 @@ export async function installPythonWithUv(api: PythonEnvironmentApi, log?: LogOu
             if (!pythonSuccess) {
                 sendTelemetryEvent(EventNames.UV_PYTHON_INSTALL_FAILED, undefined, { stage: 'pythonInstall' });
                 showErrorMessage(UvInstallStrings.installFailed);
-                return false;
+                return undefined;
             }
 
-            // Step 3: Refresh environments to detect newly installed Python
-            traceInfo('Refreshing environments after Python installation...');
-            await api.refreshEnvironments(undefined);
+            // Step 3: Get the installed Python path using uv python find
+            const pythonPath = await getUvPythonPath();
+            if (!pythonPath) {
+                traceError('Python installed but could not find the path via uv python find');
+                sendTelemetryEvent(EventNames.UV_PYTHON_INSTALL_FAILED, undefined, { stage: 'findPath' });
+                showErrorMessage(UvInstallStrings.installFailed);
+                return undefined;
+            }
 
+            traceInfo(`Python installed successfully at: ${pythonPath}`);
             sendTelemetryEvent(EventNames.UV_PYTHON_INSTALL_COMPLETED);
-            showInformationMessage(UvInstallStrings.installComplete);
+            showInformationMessage(UvInstallStrings.installCompleteWithPath(pythonPath));
 
-            return true;
+            return pythonPath;
         },
     );
 }

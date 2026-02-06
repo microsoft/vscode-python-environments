@@ -76,7 +76,21 @@ export class SysPythonManager implements EnvironmentManager {
 
             // If no Python environments were found, offer to install via uv
             if (this.collection.length === 0) {
-                await promptInstallPythonViaUv('activation', this.api, this.log);
+                const pythonPath = await promptInstallPythonViaUv('activation', this.log);
+                if (pythonPath) {
+                    const resolved = await resolveSystemPythonEnvironmentPath(
+                        pythonPath,
+                        this.nativeFinder,
+                        this.api,
+                        this,
+                    );
+                    if (resolved) {
+                        this.collection.push(resolved);
+                        this._onDidChangeEnvironments.fire([
+                            { environment: resolved, kind: EnvironmentChangeKind.add },
+                        ]);
+                    }
+                }
             }
         } finally {
             this._initialized.resolve();
@@ -236,12 +250,17 @@ export class SysPythonManager implements EnvironmentManager {
         _scope: CreateEnvironmentScope,
         _options?: CreateEnvironmentOptions,
     ): Promise<PythonEnvironment | undefined> {
-        const success = await installPythonWithUv(this.api, this.log);
+        const pythonPath = await installPythonWithUv(this.log);
 
-        if (success) {
-            // Return the latest Python environment after installation
-            // The installPythonWithUv function already refreshes environments
-            return getLatest(this.collection);
+        if (pythonPath) {
+            // Resolve the installed Python using NativePythonFinder instead of full refresh
+            const resolved = await resolveSystemPythonEnvironmentPath(pythonPath, this.nativeFinder, this.api, this);
+            if (resolved) {
+                // Add to collection and fire change event
+                this.collection.push(resolved);
+                this._onDidChangeEnvironments.fire([{ environment: resolved, kind: EnvironmentChangeKind.add }]);
+                return resolved;
+            }
         }
 
         return undefined;

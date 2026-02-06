@@ -221,6 +221,12 @@ export namespace UvInstallStrings {
     export const installingUv = l10n.t('Installing uv...');
     export const installingPython = l10n.t('Installing Python via uv...');
     export const installComplete = l10n.t('Python installed successfully');
+    export function installCompleteWithDetails(version: string, path: string): string {
+        return l10n.t('Python {0} installed successfully at {1}', version, path);
+    }
+    export function installCompleteWithPath(path: string): string {
+        return l10n.t('Python installed successfully at {0}', path);
+    }
     export const installFailed = l10n.t('Failed to install Python');
     export const uvInstallFailed = l10n.t('Failed to install uv');
     export const dontAskAgain = l10n.t("Don't ask again");

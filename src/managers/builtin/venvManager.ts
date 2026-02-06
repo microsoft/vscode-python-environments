@@ -147,9 +147,11 @@ export class VenvManager implements EnvironmentManager {
 
             // If no Python environments found, offer to install Python via uv
             if (globals.length === 0) {
-                const installed = await promptInstallPythonViaUv('createEnvironment', this.api, this.log);
-                if (installed) {
-                    // Re-fetch environments after installation
+                const installedPath = await promptInstallPythonViaUv('createEnvironment', this.log);
+                if (installedPath) {
+                    // Refresh environments to detect the newly installed Python
+                    await this.api.refreshEnvironments(undefined);
+                    // Re-fetch environments after refresh
                     globals = await this.api.getEnvironments('global');
                     // Update globalEnv reference if we found any Python 3.x environments
                     const python3Envs = globals.filter((e) => e.version.startsWith('3.'));
