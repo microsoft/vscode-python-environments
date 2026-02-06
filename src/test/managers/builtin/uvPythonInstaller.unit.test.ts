@@ -172,4 +172,3 @@ suite('uvPythonInstaller - isDontAskAgainSet and clearDontAskAgain', () => {
 // NOTE: Installation functions (installUv, installPythonViaUv, installPythonWithUv) require
 // VS Code's Task API which cannot be fully mocked in unit tests.
 // These should be tested via integration tests in a real VS Code environment.
-

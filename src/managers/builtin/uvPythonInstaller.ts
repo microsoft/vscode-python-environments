@@ -1,4 +1,12 @@
-import { LogOutputChannel, ProgressLocation, ShellExecution, Task, TaskPanelKind, TaskRevealKind, TaskScope } from 'vscode';
+import {
+    LogOutputChannel,
+    ProgressLocation,
+    ShellExecution,
+    Task,
+    TaskPanelKind,
+    TaskRevealKind,
+    TaskScope,
+} from 'vscode';
 import { PythonEnvironmentApi } from '../../api';
 import { spawnProcess } from '../../common/childProcess.apis';
 import { UvInstallStrings } from '../../common/localize';
