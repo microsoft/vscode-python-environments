@@ -124,7 +124,7 @@
                 "python-envs.workspaceSearchPaths": {
                     "type": "array",
                     "description": "%python-envs.workspaceSearchPaths.description%",
-                    "default": [],
+                    "default": ["./**/.venv"],
                     "scope": "resource",
                     "items": {
                         "type": "string"
@@ -212,6 +212,12 @@
                 "shortTitle": "Refresh All",
                 "category": "Python",
                 "icon": "$(refresh)"
+            },
+            {
+                "command": "python-envs.searchSettings",
+                "title": "%python-envs.searchSettings.title%",
+                "category": "Python",
+                "icon": "$(gear)"
             },
             {
                 "command": "python-envs.refreshPackages",
@@ -566,6 +572,11 @@
                 },
                 {
                     "command": "python-envs.createAny",
+                    "group": "navigation",
+                    "when": "view == env-managers"
+                },
+                {
+                    "command": "python-envs.searchSettings",
                     "group": "navigation",
                     "when": "view == env-managers"
                 },

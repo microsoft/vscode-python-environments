@@ -8,7 +8,7 @@ import { PythonProjectApi } from '../../api';
 import { spawnProcess } from '../../common/childProcess.apis';
 import { ENVS_EXTENSION_ID, PYTHON_EXTENSION_ID } from '../../common/constants';
 import { getExtension } from '../../common/extension.apis';
-import { traceError, traceLog, traceWarn } from '../../common/logging';
+import { traceError, traceVerbose, traceWarn } from '../../common/logging';
 import { untildify, untildifyArray } from '../../common/utils/pathUtils';
 import { isWindows } from '../../common/utils/platformUtils';
 import { createRunningWorkerPool, WorkerPool } from '../../common/utils/workerPool';
@@ -672,9 +672,22 @@ function getPythonSettingAndUntildify<T>(name: string, scope?: Uri): T | undefin
 }
 
 /**
+ * Cross-platform check for absolute paths.
+ * Uses both current platform's check and Windows-specific check to handle
+ * Windows paths (e.g., C:\path) when running on Unix systems.
+ */
+function isAbsolutePath(inputPath: string): boolean {
+    return path.isAbsolute(inputPath) || path.win32.isAbsolute(inputPath);
+}
+
+/**
  * Gets all extra environment search paths from various configuration sources.
  * Combines legacy python settings (with migration), globalSearchPaths, and workspaceSearchPaths.
- * @returns Array of search directory paths
+ *
+ * Paths can include glob patterns which are expanded by the native
+ * Python Environment Tool (PET) during environment discovery.
+ *
+ * @returns Array of search paths (may include glob patterns)
  */
 export async function getAllExtraSearchPaths(): Promise<string[]> {
     const searchDirectories: string[] = [];
@@ -698,7 +711,7 @@ export async function getAllExtraSearchPaths(): Promise<string[]> {
 
         const trimmedPath = searchPath.trim();
 
-        if (path.isAbsolute(trimmedPath)) {
+        if (isAbsolutePath(trimmedPath)) {
             // Absolute path - use as is
             searchDirectories.push(trimmedPath);
         } else {
@@ -710,20 +723,16 @@ export async function getAllExtraSearchPaths(): Promise<string[]> {
                     searchDirectories.push(resolvedPath);
                 }
             } else {
-                traceWarn('Warning: No workspace folders found for relative path:', trimmedPath);
+                traceWarn('No workspace folders found for relative search path:', trimmedPath);
             }
         }
     }
 
-    // Remove duplicates and return
+    // Remove duplicates and normalize to forward slashes for cross-platform glob compatibility
     const uniquePaths = Array.from(new Set(searchDirectories));
-    traceLog(
-        'getAllExtraSearchPaths completed. Total unique search directories:',
-        uniquePaths.length,
-        'Paths:',
-        uniquePaths,
-    );
-    return uniquePaths;
+    const normalizedPaths = uniquePaths.map((p) => p.replace(/\\/g, '/'));
+    traceVerbose('Environment search directories:', normalizedPaths.length, 'paths');
+    return normalizedPaths;
 }
 
 /**
@@ -745,6 +754,7 @@ function getGlobalSearchPaths(): string[] {
 
 /**
  * Gets the most specific workspace-level setting available for workspaceSearchPaths.
+ * Supports glob patterns which are expanded by PET.
  */
 function getWorkspaceSearchPaths(): string[] {
     try {
@@ -753,11 +763,11 @@ function getWorkspaceSearchPaths(): string[] {
 
         if (inspection?.globalValue) {
             traceError(
-                'Error: python-envs.workspaceSearchPaths is set at the user/global level, but this setting can only be set at the workspace or workspace folder level.',
+                'python-envs.workspaceSearchPaths is set at the user/global level, but this setting can only be set at the workspace or workspace folder level.',
             );
         }
 
-        // For workspace settings, prefer workspaceFolder > workspace
+        // For workspace settings, prefer workspaceFolder > workspace > default
         if (inspection?.workspaceFolderValue) {
             return inspection.workspaceFolderValue;
         }
@@ -766,8 +776,8 @@ function getWorkspaceSearchPaths(): string[] {
             return inspection.workspaceValue;
         }
 
-        // Default empty array (don't use global value for workspace settings)
-        return [];
+        // Use the default value from package.json
+        return inspection?.defaultValue ?? [];
     } catch (error) {
         traceError('Error getting workspaceSearchPaths:', error);
         return [];
