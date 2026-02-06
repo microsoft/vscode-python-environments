@@ -31,6 +31,7 @@ suite('getAllExtraSearchPaths Integration Tests', () => {
         mockGetWorkspaceFolders = sinon.stub(workspaceApis, 'getWorkspaceFolders');
         mockUntildify = sinon.stub(pathUtils, 'untildify');
         // Also stub the namespace import version that might be used by untildifyArray
+        // Handle both Unix (~/) and Windows-style paths
         sinon
             .stub(pathUtils, 'untildifyArray')
             .callsFake((paths: string[]) =>
@@ -103,8 +104,8 @@ suite('getAllExtraSearchPaths Integration Tests', () => {
             assert.deepStrictEqual(result, []);
         });
 
-        test('Legacy and global paths are consolidated', async () => {
-            // Mock → Legacy paths and globalSearchPaths both exist
+        test('Legacy and global paths are consolidated (Unix)', async () => {
+            // Mock → Legacy paths and globalSearchPaths both exist (Unix-style)
             pythonConfig.get.withArgs('venvPath').returns('/home/user/.virtualenvs');
             pythonConfig.get.withArgs('venvFolders').returns(['/home/user/venvs']);
             envConfig.inspect.withArgs('globalSearchPaths').returns({
@@ -122,8 +123,27 @@ suite('getAllExtraSearchPaths Integration Tests', () => {
             assert.deepStrictEqual(actual, expected, 'Should contain exactly the expected paths');
         });
 
-        test('Legacy paths included alongside new settings', async () => {
-            // Mock → Legacy paths exist, no globalSearchPaths
+        test('Legacy and global paths are consolidated (Windows)', async () => {
+            // Mock → Legacy paths and globalSearchPaths both exist (Windows-style)
+            pythonConfig.get.withArgs('venvPath').returns('C:\\Users\\dev\\.virtualenvs');
+            pythonConfig.get.withArgs('venvFolders').returns(['D:\\shared\\venvs']);
+            envConfig.inspect.withArgs('globalSearchPaths').returns({
+                globalValue: ['C:\\Users\\dev\\.virtualenvs', 'D:\\shared\\venvs', 'E:\\additional\\path'],
+            });
+            envConfig.inspect.withArgs('workspaceSearchPaths').returns({});
+
+            // Run
+            const result = await getAllExtraSearchPaths();
+
+            // Assert - Should consolidate all paths (duplicates removed), normalized to forward slashes
+            const expected = new Set(['C:/Users/dev/.virtualenvs', 'D:/shared/venvs', 'E:/additional/path']);
+            const actual = new Set(result);
+            assert.strictEqual(actual.size, expected.size, 'Should have correct number of unique paths');
+            assert.deepStrictEqual(actual, expected, 'Should contain exactly the expected paths');
+        });
+
+        test('Legacy paths included alongside new settings (Unix)', async () => {
+            // Mock → Legacy paths exist, no globalSearchPaths (Unix-style)
             pythonConfig.get.withArgs('venvPath').returns('/home/user/.virtualenvs');
             pythonConfig.get.withArgs('venvFolders').returns(['/home/user/venvs', '/home/user/conda']);
             envConfig.inspect.withArgs('globalSearchPaths').returns({ globalValue: [] });
@@ -134,6 +154,23 @@ suite('getAllExtraSearchPaths Integration Tests', () => {
 
             // Assert - Should include all legacy paths
             const expected = new Set(['/home/user/.virtualenvs', '/home/user/venvs', '/home/user/conda']);
+            const actual = new Set(result);
+            assert.strictEqual(actual.size, expected.size, 'Should have correct number of unique paths');
+            assert.deepStrictEqual(actual, expected, 'Should contain exactly the expected paths');
+        });
+
+        test('Legacy paths included alongside new settings (Windows)', async () => {
+            // Mock → Legacy paths exist, no globalSearchPaths (Windows-style)
+            pythonConfig.get.withArgs('venvPath').returns('C:\\Users\\dev\\.virtualenvs');
+            pythonConfig.get.withArgs('venvFolders').returns(['C:\\Users\\dev\\venvs', 'D:\\conda\\envs']);
+            envConfig.inspect.withArgs('globalSearchPaths').returns({ globalValue: [] });
+            envConfig.inspect.withArgs('workspaceSearchPaths').returns({});
+
+            // Run
+            const result = await getAllExtraSearchPaths();
+
+            // Assert - Should include all legacy paths, normalized to forward slashes
+            const expected = new Set(['C:/Users/dev/.virtualenvs', 'C:/Users/dev/venvs', 'D:/conda/envs']);
             const actual = new Set(result);
             assert.strictEqual(actual.size, expected.size, 'Should have correct number of unique paths');
             assert.deepStrictEqual(actual, expected, 'Should contain exactly the expected paths');
@@ -184,8 +221,8 @@ suite('getAllExtraSearchPaths Integration Tests', () => {
     });
 
     suite('Configuration Source Tests', () => {
-        test('Global search paths with tilde expansion', async () => {
-            // Mock → No legacy, global paths with tildes
+        test('Global search paths with tilde expansion (Unix)', async () => {
+            // Mock → No legacy, global paths with tildes (Unix ~ expansion)
             pythonConfig.get.withArgs('venvPath').returns(undefined);
             pythonConfig.get.withArgs('venvFolders').returns(undefined);
             envConfig.inspect.withArgs('globalSearchPaths').returns({
@@ -206,8 +243,27 @@ suite('getAllExtraSearchPaths Integration Tests', () => {
             assert.deepStrictEqual(actual, expected, 'Should contain exactly the expected paths');
         });
 
-        test('Workspace folder setting preferred over workspace setting', async () => {
-            // Mock → Workspace settings at different levels
+        test('Global search paths with absolute paths (Windows)', async () => {
+            // Mock → No legacy, global paths with Windows absolute paths
+            pythonConfig.get.withArgs('venvPath').returns(undefined);
+            pythonConfig.get.withArgs('venvFolders').returns(undefined);
+            envConfig.inspect.withArgs('globalSearchPaths').returns({
+                globalValue: ['C:\\Users\\dev\\virtualenvs', 'D:\\conda\\envs'],
+            });
+            envConfig.inspect.withArgs('workspaceSearchPaths').returns({});
+
+            // Run
+            const result = await getAllExtraSearchPaths();
+
+            // Assert - Paths normalized to forward slashes
+            const expected = new Set(['C:/Users/dev/virtualenvs', 'D:/conda/envs']);
+            const actual = new Set(result);
+            assert.strictEqual(actual.size, expected.size, 'Should have correct number of unique paths');
+            assert.deepStrictEqual(actual, expected, 'Should contain exactly the expected paths');
+        });
+
+        test('Workspace folder setting preferred over workspace setting (Unix)', async () => {
+            // Mock → Workspace settings at different levels (Unix-style)
             pythonConfig.get.withArgs('venvPath').returns(undefined);
             pythonConfig.get.withArgs('venvFolders').returns(undefined);
             envConfig.inspect.withArgs('globalSearchPaths').returns({ globalValue: [] });
@@ -225,6 +281,30 @@ suite('getAllExtraSearchPaths Integration Tests', () => {
 
             // Assert - workspaceFolderValue takes priority, absolute path is kept as-is
             const expected = new Set(['/folder-level-path']);
+            const actual = new Set(result);
+            assert.strictEqual(actual.size, expected.size, 'Should have correct number of unique paths');
+            assert.deepStrictEqual(actual, expected, 'Should contain exactly the expected paths');
+        });
+
+        test('Workspace folder setting preferred over workspace setting (Windows)', async () => {
+            // Mock → Workspace settings at different levels (Windows-style)
+            pythonConfig.get.withArgs('venvPath').returns(undefined);
+            pythonConfig.get.withArgs('venvFolders').returns(undefined);
+            envConfig.inspect.withArgs('globalSearchPaths').returns({ globalValue: [] });
+            envConfig.inspect.withArgs('workspaceSearchPaths').returns({
+                workspaceValue: ['D:\\workspace-level'],
+                workspaceFolderValue: ['C:\\folder-level\\path'],
+            });
+
+            const workspace1 = Uri.file('C:\\Projects\\project1');
+            const workspace2 = Uri.file('C:\\Projects\\project2');
+            mockGetWorkspaceFolders.returns([{ uri: workspace1 }, { uri: workspace2 }]);
+
+            // Run
+            const result = await getAllExtraSearchPaths();
+
+            // Assert - workspaceFolderValue takes priority, normalized to forward slashes
+            const expected = new Set(['C:/folder-level/path']);
             const actual = new Set(result);
             assert.strictEqual(actual.size, expected.size, 'Should have correct number of unique paths');
             assert.deepStrictEqual(actual, expected, 'Should contain exactly the expected paths');
@@ -276,8 +356,8 @@ suite('getAllExtraSearchPaths Integration Tests', () => {
     });
 
     suite('Path Resolution Tests', () => {
-        test('Absolute paths used as-is', async () => {
-            // Mock → Mix of absolute paths
+        test('Absolute paths used as-is (Unix)', async () => {
+            // Mock → Mix of absolute paths (Unix-style)
             pythonConfig.get.withArgs('venvPath').returns(undefined);
             pythonConfig.get.withArgs('venvFolders').returns(undefined);
             envConfig.inspect.withArgs('globalSearchPaths').returns({
@@ -293,8 +373,32 @@ suite('getAllExtraSearchPaths Integration Tests', () => {
             // Run
             const result = await getAllExtraSearchPaths();
 
-            // Assert - For absolute paths, they should remain unchanged regardless of platform
+            // Assert - For absolute paths, they should remain unchanged
             const expected = new Set(['/absolute/path1', '/absolute/path2', '/absolute/workspace/path']);
+            const actual = new Set(result);
+            assert.strictEqual(actual.size, expected.size, 'Should have correct number of unique paths');
+            assert.deepStrictEqual(actual, expected, 'Should contain exactly the expected paths');
+        });
+
+        test('Absolute paths used as-is (Windows)', async () => {
+            // Mock → Mix of absolute paths (Windows-style)
+            pythonConfig.get.withArgs('venvPath').returns(undefined);
+            pythonConfig.get.withArgs('venvFolders').returns(undefined);
+            envConfig.inspect.withArgs('globalSearchPaths').returns({
+                globalValue: ['C:\\absolute\\path1', 'D:\\absolute\\path2'],
+            });
+            envConfig.inspect.withArgs('workspaceSearchPaths').returns({
+                workspaceFolderValue: ['E:\\workspace\\envs'],
+            });
+
+            const workspace = Uri.file('C:\\workspace');
+            mockGetWorkspaceFolders.returns([{ uri: workspace }]);
+
+            // Run
+            const result = await getAllExtraSearchPaths();
+
+            // Assert - Windows paths normalized to forward slashes
+            const expected = new Set(['C:/absolute/path1', 'D:/absolute/path2', 'E:/workspace/envs']);
             const actual = new Set(result);
             assert.strictEqual(actual.size, expected.size, 'Should have correct number of unique paths');
             assert.deepStrictEqual(actual, expected, 'Should contain exactly the expected paths');
@@ -384,8 +488,8 @@ suite('getAllExtraSearchPaths Integration Tests', () => {
             assert.deepStrictEqual(result, []);
         });
 
-        test('Power user - complex mix of all source types', async () => {
-            // Mock → Complex real-world scenario
+        test('Power user - complex mix of all source types (Unix)', async () => {
+            // Mock → Complex real-world scenario (Unix-style)
             pythonConfig.get.withArgs('venvPath').returns('/legacy/venv/path');
             pythonConfig.get.withArgs('venvFolders').returns(['/legacy/venvs']);
             envConfig.inspect.withArgs('globalSearchPaths').returns({
@@ -405,7 +509,6 @@ suite('getAllExtraSearchPaths Integration Tests', () => {
             const result = await getAllExtraSearchPaths();
 
             // Assert - Relative paths are resolved against workspace folders, absolutes kept as-is
-            // Expected: 4 from legacy/global + 1 absolute workspace path + 2 resolved .venv paths
             assert.ok(result.includes('/legacy/venv/path'));
             assert.ok(result.includes('/legacy/venvs'));
             assert.ok(result.includes('/global/conda'));
@@ -416,8 +519,40 @@ suite('getAllExtraSearchPaths Integration Tests', () => {
             assert.ok(result.some((p) => p.includes('project2') && p.endsWith('.venv')));
         });
 
-        test('Overlapping paths are deduplicated', async () => {
-            // Mock → Duplicate paths from different sources (using absolute paths to test dedup)
+        test('Power user - complex mix of all source types (Windows)', async () => {
+            // Mock → Complex real-world scenario (Windows-style)
+            pythonConfig.get.withArgs('venvPath').returns('C:\\legacy\\venv\\path');
+            pythonConfig.get.withArgs('venvFolders').returns(['D:\\legacy\\venvs']);
+            envConfig.inspect.withArgs('globalSearchPaths').returns({
+                globalValue: ['C:\\legacy\\venv\\path', 'D:\\legacy\\venvs', 'E:\\global\\conda'],
+            });
+            envConfig.inspect.withArgs('workspaceSearchPaths').returns({
+                workspaceFolderValue: ['.venv', 'F:\\shared\\team\\envs'],
+            });
+
+            const workspace1 = Uri.file('C:\\workspace\\project1');
+            const workspace2 = Uri.file('C:\\workspace\\project2');
+            mockGetWorkspaceFolders.returns([{ uri: workspace1 }, { uri: workspace2 }]);
+
+            // Run
+            const result = await getAllExtraSearchPaths();
+
+            // Assert - All paths normalized to forward slashes
+            assert.ok(result.includes('C:/legacy/venv/path'));
+            assert.ok(result.includes('D:/legacy/venvs'));
+            assert.ok(result.includes('E:/global/conda'));
+            assert.ok(result.includes('F:/shared/team/envs'));
+            // .venv resolved against both workspace folders
+            assert.ok(result.some((p) => p.includes('project1') && p.endsWith('.venv')));
+            assert.ok(result.some((p) => p.includes('project2') && p.endsWith('.venv')));
+            // Verify no backslashes remain
+            for (const p of result) {
+                assert.ok(!p.includes('\\'), `Path should not contain backslashes: ${p}`);
+            }
+        });
+
+        test('Overlapping paths are deduplicated (Unix)', async () => {
+            // Mock → Duplicate paths from different sources (Unix-style)
             pythonConfig.get.withArgs('venvPath').returns(undefined);
             pythonConfig.get.withArgs('venvFolders').returns(undefined);
             envConfig.inspect.withArgs('globalSearchPaths').returns({
@@ -435,6 +570,30 @@ suite('getAllExtraSearchPaths Integration Tests', () => {
 
             // Assert - Duplicates should be removed
             const expected = new Set(['/shared/path', '/global/unique', '/workspace/unique']);
+            const actual = new Set(result);
+            assert.strictEqual(actual.size, expected.size, 'Should have correct number of unique paths');
+            assert.deepStrictEqual(actual, expected, 'Should contain exactly the expected paths');
+        });
+
+        test('Overlapping paths are deduplicated (Windows)', async () => {
+            // Mock → Duplicate paths from different sources (Windows-style)
+            pythonConfig.get.withArgs('venvPath').returns(undefined);
+            pythonConfig.get.withArgs('venvFolders').returns(undefined);
+            envConfig.inspect.withArgs('globalSearchPaths').returns({
+                globalValue: ['C:\\shared\\path', 'D:\\global\\unique'],
+            });
+            envConfig.inspect.withArgs('workspaceSearchPaths').returns({
+                workspaceFolderValue: ['C:\\shared\\path', 'E:\\workspace\\unique'],
+            });
+
+            const workspace = Uri.file('C:\\workspace');
+            mockGetWorkspaceFolders.returns([{ uri: workspace }]);
+
+            // Run
+            const result = await getAllExtraSearchPaths();
+
+            // Assert - Duplicates should be removed, normalized to forward slashes
+            const expected = new Set(['C:/shared/path', 'D:/global/unique', 'E:/workspace/unique']);
             const actual = new Set(result);
             assert.strictEqual(actual.size, expected.size, 'Should have correct number of unique paths');
             assert.deepStrictEqual(actual, expected, 'Should contain exactly the expected paths');
