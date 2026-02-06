@@ -710,10 +710,11 @@ export async function getAllExtraSearchPaths(): Promise<string[]> {
         }
     }
 
-    // Remove duplicates and return
+    // Remove duplicates and normalize to forward slashes for cross-platform glob compatibility
     const uniquePaths = Array.from(new Set(searchDirectories));
-    traceVerbose('Environment search directories:', uniquePaths.length, 'paths');
-    return uniquePaths;
+    const normalizedPaths = uniquePaths.map((p) => p.replace(/\\/g, '/'));
+    traceVerbose('Environment search directories:', normalizedPaths.length, 'paths');
+    return normalizedPaths;
 }
 
 /**

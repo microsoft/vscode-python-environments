@@ -462,4 +462,85 @@ suite('getAllExtraSearchPaths Integration Tests', () => {
             assert.ok(result.some((p) => p.includes('workspace') && p.endsWith('.venv')));
         });
     });
+
+    suite('Cross-Platform Path Normalization', () => {
+        test('Backslashes are converted to forward slashes for glob compatibility', async () => {
+            // Mock → Windows-style paths with backslashes
+            pythonConfig.get.withArgs('venvPath').returns('C:\\Users\\test\\envs');
+            pythonConfig.get.withArgs('venvFolders').returns(['D:\\shared\\venvs']);
+            envConfig.inspect.withArgs('globalSearchPaths').returns({
+                globalValue: ['C:\\Python\\environments', 'E:\\projects\\**\\.venv'],
+            });
+            envConfig.inspect.withArgs('workspaceSearchPaths').returns({});
+
+            // Run
+            const result = await getAllExtraSearchPaths();
+
+            // Assert - All backslashes should be converted to forward slashes
+            for (const p of result) {
+                assert.ok(!p.includes('\\'), `Path should not contain backslashes: ${p}`);
+            }
+            assert.ok(result.includes('C:/Users/test/envs'));
+            assert.ok(result.includes('D:/shared/venvs'));
+            assert.ok(result.includes('C:/Python/environments'));
+            assert.ok(result.includes('E:/projects/**/.venv'));
+        });
+
+        test('Glob patterns with backslashes are normalized', async () => {
+            // Mock → Glob pattern with Windows backslashes
+            pythonConfig.get.withArgs('venvPath').returns(undefined);
+            pythonConfig.get.withArgs('venvFolders').returns(undefined);
+            envConfig.inspect.withArgs('globalSearchPaths').returns({
+                globalValue: ['C:\\workspace\\**\\venv', 'D:\\projects\\*\\.venv'],
+            });
+            envConfig.inspect.withArgs('workspaceSearchPaths').returns({});
+
+            // Run
+            const result = await getAllExtraSearchPaths();
+
+            // Assert - Glob patterns should use forward slashes
+            assert.ok(result.includes('C:/workspace/**/venv'));
+            assert.ok(result.includes('D:/projects/*/.venv'));
+        });
+
+        test('Linux/macOS paths with forward slashes are preserved', async () => {
+            // Mock → Unix-style paths (already using forward slashes)
+            pythonConfig.get.withArgs('venvPath').returns('/home/user/envs');
+            pythonConfig.get.withArgs('venvFolders').returns(['/opt/shared/venvs']);
+            envConfig.inspect.withArgs('globalSearchPaths').returns({
+                globalValue: ['/usr/local/python/environments', '/home/user/projects/**/.venv'],
+            });
+            envConfig.inspect.withArgs('workspaceSearchPaths').returns({});
+
+            // Run
+            const result = await getAllExtraSearchPaths();
+
+            // Assert - Forward slashes should be preserved as-is
+            assert.ok(result.includes('/home/user/envs'));
+            assert.ok(result.includes('/opt/shared/venvs'));
+            assert.ok(result.includes('/usr/local/python/environments'));
+            assert.ok(result.includes('/home/user/projects/**/.venv'));
+            // Verify no backslashes were introduced
+            for (const p of result) {
+                assert.ok(!p.includes('\\'), `Path should not contain backslashes: ${p}`);
+            }
+        });
+
+        test('Mixed path separators are normalized to forward slashes', async () => {
+            // Mock → Paths with mixed separators (edge case)
+            pythonConfig.get.withArgs('venvPath').returns(undefined);
+            pythonConfig.get.withArgs('venvFolders').returns(undefined);
+            envConfig.inspect.withArgs('globalSearchPaths').returns({
+                globalValue: ['C:/Users\\test/projects\\.venv', '/home/user\\mixed/path'],
+            });
+            envConfig.inspect.withArgs('workspaceSearchPaths').returns({});
+
+            // Run
+            const result = await getAllExtraSearchPaths();
+
+            // Assert - All backslashes normalized to forward slashes
+            assert.ok(result.includes('C:/Users/test/projects/.venv'));
+            assert.ok(result.includes('/home/user/mixed/path'));
+        });
+    });
 });
