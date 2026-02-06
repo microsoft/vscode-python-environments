@@ -12,7 +12,7 @@
     "python-envs.terminal.autoActivationType.off": "No automatic activation of environments.",
     "python-envs.terminal.useEnvFile.description": "Controls whether environment variables from .env files and python.envFile setting are injected into terminals.",
     "python-envs.globalSearchPaths.description": "Absolute paths to search for Python environments across all workspaces. Use for shared environment folders like `~/envs`.",
-    "python-envs.workspaceSearchPaths.description": "Paths to search for environments in this workspace. Defaults to `./**/.venv` to find all `.venv` folders nested within your workspace.",
+    "python-envs.workspaceSearchPaths.description": "Paths to search for environments in this workspace. By default, searches for a `.venv` folder in the workspace root.",
     "python-envs.terminal.revertStartupScriptChanges.title": "Revert Shell Startup Script Changes",
     "python-envs.reportIssue.title": "Report Issue",
     "python-envs.setEnvManager.title": "Set Environment Manager",
