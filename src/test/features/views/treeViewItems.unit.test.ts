@@ -4,6 +4,7 @@ import {
     EnvManagerTreeItem,
     getEnvironmentParentDirName,
     PythonEnvTreeItem,
+    PythonGroupEnvTreeItem,
 } from '../../../features/views/treeViewItems';
 import { InternalEnvironmentManager, PythonEnvironmentImpl } from '../../../internal.api';
 
@@ -73,6 +74,17 @@ function createMockManager(
 
 suite('Test TreeView Items', () => {
     suite('EnvManagerTreeItem', () => {
+        test('Sets id to manager id for tree item identification', () => {
+            // Arrange
+            const manager = createMockManager({ id: 'ms-python.python:venv' });
+
+            // Act
+            const item = new EnvManagerTreeItem(manager);
+
+            // Assert
+            assert.strictEqual(item.treeItem.id, 'ms-python.python:venv');
+        });
+
         test('Context value excludes create when manager does not support it', () => {
             // Arrange
             const manager = createMockManager({ supportsCreate: false });
@@ -125,6 +137,20 @@ suite('Test TreeView Items', () => {
         setup(() => {
             managerWithoutRemove = new EnvManagerTreeItem(createMockManager({ supportsRemove: false }));
             managerWithRemove = new EnvManagerTreeItem(createMockManager({ supportsRemove: true }));
+        });
+
+        test('Sets id to environment id for tree item identification', () => {
+            // Arrange
+            const env = createMockEnvironment({
+                id: 'unique-env-id-123',
+                environmentPath: '/home/user/envs/.venv/bin/python',
+            });
+
+            // Act
+            const item = new PythonEnvTreeItem(env, managerWithoutRemove);
+
+            // Assert
+            assert.strictEqual(item.treeItem.id, 'unique-env-id-123');
         });
 
         test('Context value excludes remove and activatable when not supported', () => {
@@ -239,6 +265,60 @@ suite('Test TreeView Items', () => {
 
             // Assert
             assert.strictEqual(item.treeItem.description, '[uv] my-project');
+        });
+    });
+
+    suite('PythonGroupEnvTreeItem', () => {
+        let parentManager: EnvManagerTreeItem;
+
+        setup(() => {
+            parentManager = new EnvManagerTreeItem(createMockManager({ id: 'ms-python.python:conda' }));
+        });
+
+        test('Sets id combining manager id and group name for tree item identification', () => {
+            // Arrange & Act
+            const item = new PythonGroupEnvTreeItem(parentManager, 'base');
+
+            // Assert
+            assert.strictEqual(item.treeItem.id, 'ms-python.python:conda:base');
+        });
+
+        test('Sets id correctly when group is EnvironmentGroupInfo object', () => {
+            // Arrange
+            const groupInfo = { name: 'dev-envs', description: 'Development environments' };
+
+            // Act
+            const item = new PythonGroupEnvTreeItem(parentManager, groupInfo);
+
+            // Assert
+            assert.strictEqual(item.treeItem.id, 'ms-python.python:conda:dev-envs');
+        });
+
+        test('Uses string group as label', () => {
+            // Arrange & Act
+            const item = new PythonGroupEnvTreeItem(parentManager, 'my-group');
+
+            // Assert
+            assert.strictEqual(item.treeItem.label, 'my-group');
+        });
+
+        test('Uses group name from EnvironmentGroupInfo as label', () => {
+            // Arrange
+            const groupInfo = { name: 'production', description: 'Production environments' };
+
+            // Act
+            const item = new PythonGroupEnvTreeItem(parentManager, groupInfo);
+
+            // Assert
+            assert.strictEqual(item.treeItem.label, 'production');
+        });
+
+        test('Sets contextValue with manager id and group name', () => {
+            // Arrange & Act
+            const item = new PythonGroupEnvTreeItem(parentManager, 'test-group');
+
+            // Assert
+            assert.strictEqual(item.treeItem.contextValue, 'pythonEnvGroup;ms-python.python:conda:test-group;');
         });
     });
 

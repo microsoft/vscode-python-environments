@@ -65,6 +65,7 @@ export class EnvManagerTreeItem implements EnvTreeItem {
     public readonly parent: undefined;
     constructor(public readonly manager: InternalEnvironmentManager) {
         const item = new TreeItem(manager.displayName, TreeItemCollapsibleState.Collapsed);
+        item.id = manager.id;
         item.contextValue = this.getContextValue();
         item.description = manager.description;
         item.tooltip = manager.tooltip ?? manager.description;
@@ -88,6 +89,7 @@ export class PythonGroupEnvTreeItem implements EnvTreeItem {
     ) {
         const label = typeof group === 'string' ? group : group.name;
         const item = new TreeItem(label, TreeItemCollapsibleState.Collapsed);
+        item.id = `${this.parent.manager.id}:${label}`;
         item.contextValue = `pythonEnvGroup;${this.parent.manager.id}:${label};`;
         this.treeItem = item;
 
@@ -127,6 +129,7 @@ export class PythonEnvTreeItem implements EnvTreeItem {
         }
 
         const item = new TreeItem(name, TreeItemCollapsibleState.Collapsed);
+        item.id = environment.envId.id;
         item.contextValue = this.getContextValue();
 
         // Build description with optional [uv] indicator and disambiguation suffix
