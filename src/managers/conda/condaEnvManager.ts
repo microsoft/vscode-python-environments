@@ -111,9 +111,7 @@ export class CondaEnvManager implements EnvironmentManager, Disposable {
         }
 
         if (scope === 'global') {
-            return this.collection.filter((env) => {
-                env.name === 'base';
-            });
+            return this.collection.filter((env) => env.name === 'base');
         }
 
         if (scope instanceof Uri) {
@@ -192,7 +190,10 @@ export class CondaEnvManager implements EnvironmentManager, Disposable {
         } catch (error) {
             this.log.error('Failed to create conda environment:', error);
             showErrorMessage(
-                l10n.t('Failed to create conda environment: {0}', error instanceof Error ? error.message : String(error)),
+                l10n.t(
+                    'Failed to create conda environment: {0}',
+                    error instanceof Error ? error.message : String(error),
+                ),
             );
             return undefined;
         }
