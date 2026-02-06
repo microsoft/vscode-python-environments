@@ -128,6 +128,31 @@ function getName(binPath: string): string {
 }
 
 async function getPythonInfo(env: NativeEnvInfo): Promise<PythonEnvironmentInfo> {
+    // Handle broken environments that have an error field
+    if (env.error) {
+        const venvName = env.name ?? (env.prefix ? path.basename(env.prefix) : 'Unknown');
+        const name = `${venvName} (broken)`;
+
+        return {
+            name: name,
+            displayName: name,
+            shortDisplayName: `(${venvName})`,
+            displayPath: env.prefix ?? env.executable ?? 'Unknown path',
+            version: env.version ?? 'Unknown',
+            description: env.error,
+            tooltip: env.error,
+            environmentPath: Uri.file(env.prefix ?? env.executable ?? ''),
+            iconPath: new ThemeIcon('warning'),
+            sysPrefix: env.prefix ?? '',
+            execInfo: {
+                run: {
+                    executable: env.executable ?? '',
+                },
+            },
+            error: env.error,
+        };
+    }
+
     if (env.executable && env.version && env.prefix) {
         const venvName = env.name ?? getName(env.executable);
         const sv = shortVersion(env.version);
@@ -193,6 +218,19 @@ export async function findVirtualEnvironments(
         );
 
     for (const e of envs) {
+        // Include environments with errors (broken environments) so users can see and diagnose them
+        if (e.error) {
+            log.warn(`Broken venv environment detected: ${e.error} - ${JSON.stringify(e)}`);
+            try {
+                const env = api.createPythonEnvironmentItem(await getPythonInfo(e), manager);
+                collection.push(env);
+                log.info(`Found broken venv environment: ${env.name}`);
+            } catch (err) {
+                log.error(`Failed to create broken environment item: ${err}`);
+            }
+            continue;
+        }
+
         if (!(e.prefix && e.executable && e.version)) {
             log.warn(`Invalid venv environment: ${JSON.stringify(e)}`);
             continue;

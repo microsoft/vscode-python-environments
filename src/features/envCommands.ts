@@ -1,15 +1,6 @@
 import * as fs from 'fs-extra';
 import * as path from 'path';
-import {
-    commands,
-    ProgressLocation,
-    QuickInputButtons,
-    TaskExecution,
-    TaskRevealKind,
-    Terminal,
-    Uri,
-    workspace,
-} from 'vscode';
+import { ProgressLocation, QuickInputButtons, TaskExecution, TaskRevealKind, Terminal, Uri, workspace } from 'vscode';
 import {
     CreateEnvironmentOptions,
     PythonEnvironment,
@@ -28,6 +19,7 @@ import {
 } from '../internal.api';
 import { removePythonProjectSetting, setEnvironmentManager, setPackageManager } from './settings/settingHelpers';
 
+import { executeCommand } from '../common/command.api';
 import { clipboardWriteText } from '../common/env.apis';
 import {} from '../common/errors/utils';
 import { Pickers } from '../common/localize';
@@ -52,6 +44,7 @@ import {
 import { runAsTask } from './execution/runAsTask';
 import { runInTerminal } from './terminal/runInTerminal';
 import { TerminalManager } from './terminal/terminalManager';
+import { EnvManagerView } from './views/envManagersView';
 import {
     EnvManagerTreeItem,
     EnvTreeItemKind,
@@ -469,7 +462,7 @@ export async function addPythonProjectCommand(
             'Open Folder',
         );
         if (r === 'Open Folder') {
-            await commands.executeCommand('vscode.openFolder');
+            await executeCommand('vscode.openFolder');
             return;
         }
     }
@@ -746,8 +739,21 @@ export async function copyPathToClipboard(item: unknown): Promise<void> {
 export async function revealProjectInExplorer(item: unknown): Promise<void> {
     if (item instanceof ProjectItem) {
         const projectUri = item.project.uri;
-        await commands.executeCommand('revealInExplorer', projectUri);
+        await executeCommand('revealInExplorer', projectUri);
     } else {
         traceVerbose(`Invalid context for reveal project in explorer: ${item}`);
     }
+}
+
+/**
+ * Focuses the Environment Managers view and reveals the given project environment.
+ */
+export async function revealEnvInManagerView(item: unknown, managerView: EnvManagerView): Promise<void> {
+    if (item instanceof ProjectEnvironment) {
+        await executeCommand('env-managers.focus');
+        await managerView.reveal(item.environment);
+        return;
+    }
+
+    traceVerbose(`Invalid context for reveal environment in manager view: ${item}`);
 }

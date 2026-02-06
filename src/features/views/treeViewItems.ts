@@ -118,6 +118,8 @@ export class PythonEnvTreeItem implements EnvTreeItem {
         const name = environment.displayName ?? environment.name;
 
         let tooltip = environment.tooltip ?? environment.description;
+        const isBroken = !!environment.error;
+
         if (selected) {
             const selectedTooltip =
                 selected === 'global' ? EnvViewStrings.selectedGlobalTooltip : EnvViewStrings.selectedWorkspaceTooltip;
@@ -138,20 +140,26 @@ export class PythonEnvTreeItem implements EnvTreeItem {
         }
         item.description = descriptionParts.length > 0 ? descriptionParts.join(' ') : undefined;
 
-        item.tooltip = tooltip;
-        item.iconPath = environment.iconPath;
+        // Replace description with error message for broken environments
+        item.description = isBroken ? environment.error : environment.description;
+        item.tooltip = isBroken ? environment.error : tooltip;
+        // Show warning icon for broken environments
+        item.iconPath = isBroken ? new ThemeIcon('warning') : environment.iconPath;
         this.treeItem = item;
     }
 
     private getContextValue() {
-        const activatable = isActivatableEnvironment(this.environment) ? 'activatable' : '';
+        const isBroken = !!this.environment.error;
+        const activatable = !isBroken && isActivatableEnvironment(this.environment) ? 'activatable' : '';
         let remove = '';
         if (this.parent.kind === EnvTreeItemKind.environmentGroup) {
             remove = this.parent.parent.manager.supportsRemove ? 'remove' : '';
         } else if (this.parent.kind === EnvTreeItemKind.manager) {
             remove = this.parent.manager.supportsRemove ? 'remove' : '';
         }
-        const parts = ['pythonEnvironment', remove, activatable].filter(Boolean);
+        // Use different base context for broken environments so normal actions don't show
+        const baseContext = isBroken ? 'pythonBrokenEnvironment' : 'pythonEnvironment';
+        const parts = [baseContext, remove, activatable].filter(Boolean);
         return parts.join(';') + ';';
     }
 }
@@ -305,14 +313,17 @@ export class ProjectEnvironment implements ProjectTreeItem {
         public readonly environment: PythonEnvironment,
     ) {
         this.id = this.getId(parent, environment);
+        const isBroken = !!environment.error;
         const item = new TreeItem(
             this.environment.displayName ?? this.environment.name,
             TreeItemCollapsibleState.Collapsed,
         );
-        item.contextValue = 'python-env';
-        item.description = this.environment.description;
-        item.tooltip = this.environment.tooltip;
-        item.iconPath = this.environment.iconPath;
+        item.contextValue = isBroken ? 'python-env;broken;' : 'python-env';
+        // Show error message for broken environments
+        item.description = isBroken ? this.environment.error : this.environment.description;
+        item.tooltip = isBroken ? this.environment.error : this.environment.tooltip;
+        // Show warning icon for broken environments
+        item.iconPath = isBroken ? new ThemeIcon('warning') : this.environment.iconPath;
         this.treeItem = item;
     }
 

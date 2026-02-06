@@ -217,6 +217,13 @@ export interface PythonEnvironmentInfo {
      * Optional `group` for this environment. This is used to group environments in the Environment Manager UI.
      */
     readonly group?: string | EnvironmentGroupInfo;
+
+    /**
+     * Error message if the environment is broken or invalid.
+     * When set, indicates this environment has issues (e.g., broken symlinks, missing Python executable).
+     * The UI should display a warning indicator and show this message to help users diagnose and fix the issue.
+     */
+    readonly error?: string;
 }
 
 /**
@@ -922,7 +929,8 @@ export interface PythonProjectEnvironmentApi {
 }
 
 export interface PythonEnvironmentManagerApi
-    extends PythonEnvironmentManagerRegistrationApi,
+    extends
+        PythonEnvironmentManagerRegistrationApi,
         PythonEnvironmentItemApi,
         PythonEnvironmentManagementApi,
         PythonEnvironmentsApi,
@@ -987,7 +995,8 @@ export interface PythonPackageManagementApi {
 }
 
 export interface PythonPackageManagerApi
-    extends PythonPackageManagerRegistrationApi,
+    extends
+        PythonPackageManagerRegistrationApi,
         PythonPackageGetterApi,
         PythonPackageManagementApi,
         PythonPackageItemApi {}
@@ -1206,10 +1215,7 @@ export interface PythonBackgroundRunApi {
 }
 
 export interface PythonExecutionApi
-    extends PythonTerminalCreateApi,
-        PythonTerminalRunApi,
-        PythonTaskRunApi,
-        PythonBackgroundRunApi {}
+    extends PythonTerminalCreateApi, PythonTerminalRunApi, PythonTaskRunApi, PythonBackgroundRunApi {}
 
 /**
  * Event arguments for when the monitored `.env` files or any other sources change.
@@ -1258,7 +1264,8 @@ export interface PythonEnvironmentVariablesApi {
  * The API for interacting with Python environments, package managers, and projects.
  */
 export interface PythonEnvironmentApi
-    extends PythonEnvironmentManagerApi,
+    extends
+        PythonEnvironmentManagerApi,
         PythonPackageManagerApi,
         PythonProjectApi,
         PythonExecutionApi,

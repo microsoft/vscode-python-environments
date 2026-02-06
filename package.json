@@ -6,7 +6,7 @@
     "publisher": "ms-python",
     "preview": true,
     "engines": {
-        "vscode": "^1.110.0-20260204" 
+        "vscode": "^1.110.0-20260204"
     },
     "categories": [
         "Other"
@@ -315,6 +315,12 @@
                 "icon": "$(folder-opened)"
             },
             {
+                "command": "python-envs.revealEnvInManagerView",
+                "title": "%python-envs.revealEnvInManagerView.title%",
+                "category": "Python Envs",
+                "icon": "$(eye)"
+            },
+            {
                 "command": "python-envs.runPetInTerminal",
                 "title": "%python-envs.runPetInTerminal.title%",
                 "category": "Python",
@@ -425,6 +431,10 @@
                     "when": "false"
                 },
                 {
+                    "command": "python-envs.revealEnvInManagerView",
+                    "when": "false"
+                },
+                {
                     "command": "python-envs.createNewProjectFromTemplate",
                     "when": "config.python.useEnvironmentsExtension != false"
                 },
@@ -446,6 +456,10 @@
                 {
                     "command": "python-envs.remove",
                     "when": "view == env-managers && viewItem =~ /.*pythonEnvironment.*;remove;.*/"
+                },
+                {
+                    "command": "python-envs.remove",
+                    "when": "view == env-managers && viewItem =~ /.*pythonBrokenEnvironment.*;remove;.*/"
                 },
                 {
                     "command": "python-envs.setEnv",
@@ -480,6 +494,16 @@
                     "command": "python-envs.copyEnvPathCopied",
                     "group": "inline",
                     "when": "view == env-managers && viewItem =~ /.*pythonEnvironment.*/ && viewItem =~ /.*copied.*/"
+                },
+                {
+                    "command": "python-envs.copyEnvPath",
+                    "group": "inline",
+                    "when": "view == env-managers && viewItem =~ /.*pythonBrokenEnvironment.*/ && viewItem =~ /^((?!copied).)*$/"
+                },
+                {
+                    "command": "python-envs.copyEnvPathCopied",
+                    "group": "inline",
+                    "when": "view == env-managers && viewItem =~ /.*pythonBrokenEnvironment.*/ && viewItem =~ /.*copied.*/"
                 },
                 {
                     "command": "python-envs.uninstallPackage",
@@ -532,6 +556,11 @@
                     "command": "python-envs.uninstallPackage",
                     "group": "inline",
                     "when": "view == python-projects && viewItem == python-package"
+                },
+                {
+                    "command": "python-envs.revealEnvInManagerView",
+                    "group": "inline",
+                    "when": "view == python-projects && viewItem == python-env"
                 }
             ],
             "view/title": [
