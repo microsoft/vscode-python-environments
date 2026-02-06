@@ -534,11 +534,6 @@
                     "when": "view == python-projects && viewItem =~ /.*python-workspace.*/"
                 },
                 {
-                    "command": "python-envs.createTerminal",
-                    "group": "inline",
-                    "when": "view == python-projects && viewItem =~ /.*python-workspace.*/"
-                },
-                {
                     "command": "python-envs.copyProjectPath",
                     "group": "inline",
                     "when": "view == python-projects && viewItem =~ /.*python-workspace.*/ && viewItem =~ /^((?!copied).)*$/"
