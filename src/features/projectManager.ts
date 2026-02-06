@@ -33,7 +33,9 @@ export class PythonProjectManagerImpl implements PythonProjectManager {
     private readonly updateDebounce = createSimpleDebounce(100, () => this.updateProjects());
 
     initialize(): void {
-        this.add(this.getInitialProjects());
+        // Load existing projects from settings without writing back to settings.
+        // This avoids overwriting user-configured project settings with defaults on reload.
+        this.loadProjects(this.getInitialProjects());
         this.disposables.push(
             this._onDidChangeProjects,
             new Disposable(() => this._projects.clear()),
@@ -171,6 +173,20 @@ export class PythonProjectManagerImpl implements PythonProjectManager {
         projectsToAdd.forEach((w) => this._projects.set(w.uri.toString(), w));
 
         if (projectsToRemove.length > 0 || projectsToAdd.length > 0) {
+            this._onDidChangeProjects.fire(Array.from(this._projects.values()));
+        }
+    }
+
+    /**
+     * Loads projects into the internal map without writing to settings.
+     * Use this for initial loading from existing settings to avoid overwriting
+     * user-configured project settings with defaults.
+     */
+    private loadProjects(projects: ProjectArray): void {
+        projects.forEach((project) => {
+            this._projects.set(project.uri.toString(), project);
+        });
+        if (projects.length > 0) {
             this._onDidChangeProjects.fire(Array.from(this._projects.values()));
         }
     }
