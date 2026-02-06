@@ -1613,6 +1613,8 @@ export class ProcessExecution implements vscode.ProcessExecution {
 }
 
 export class ShellExecution implements vscode.ShellExecution {
+    private static idCounter = 0;
+
     private _commandLine = '';
 
     private _command: string | vscode.ShellQuotedString = '';
@@ -1706,9 +1708,10 @@ export class ShellExecution implements vscode.ShellExecution {
         //     }
         // }
         // return hash.digest('hex');
-        // Return a simple unique ID based on command
+        // Return a deterministic unique ID based on command and a monotonic counter
         const cmd = typeof this._command === 'string' ? this._command : (this._command?.value ?? '');
-        return `shell-${cmd}-${Date.now()}`;
+        const argsStr = this._args?.map((a) => (typeof a === 'string' ? a : a.value)).join(',') ?? '';
+        return `shell-${cmd}-${argsStr}-${ShellExecution.idCounter++}`;
     }
 }
 

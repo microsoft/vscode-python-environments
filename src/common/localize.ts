@@ -97,7 +97,7 @@ export namespace VenvManagerStrings {
     export const venvErrorNoPython3 = l10n.t('Did not find any base Python 3');
 
     export const noEnvClickToCreate = l10n.t('No environment found, click to create');
-    export const noEnvFound = l10n.t('No python environments found.');
+    export const noEnvFound = l10n.t('No Python environments found.');
     export const createEnvironment = l10n.t('Create Environment');
 
     export const venvName = l10n.t('Enter a name for the virtual environment');
@@ -228,8 +228,9 @@ export namespace UvInstallStrings {
         return l10n.t('Python installed successfully at {0}', path);
     }
     export const installFailed = l10n.t('Failed to install Python');
-    export const uvInstallFailed = l10n.t('Failed to install uv');
-    export const dontAskAgain = l10n.t("Don't ask again");
+    export const uvInstallFailed = l10n.t('Failed to install uv');    export const uvInstallRestartRequired = l10n.t(
+        'uv was installed but may not be available in the current terminal. Please restart VS Code or open a new terminal and try again.',
+    );    export const dontAskAgain = l10n.t("Don't ask again");
     export const clickToInstallPython = l10n.t('No Python found, click to install');
     export const selectPythonVersion = l10n.t('Select Python version to install');
     export const installed = l10n.t('installed');

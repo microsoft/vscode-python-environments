@@ -20,7 +20,7 @@ import { isWindows } from '../../common/utils/platformUtils';
 import { showErrorMessage, showInformationMessage, showQuickPick, withProgress } from '../../common/window.apis';
 import { isUvInstalled, resetUvInstallationCache } from './helpers';
 
-const UV_INSTALL_PYTHON_DONT_ASK_KEY = 'python-envs:uv:UV_INSTALL_PYTHON_DONT_ASK';
+export const UV_INSTALL_PYTHON_DONT_ASK_KEY = 'python-envs:uv:UV_INSTALL_PYTHON_DONT_ASK';
 
 /**
  * Represents a Python version from uv python list
@@ -393,6 +393,15 @@ export async function installPythonWithUv(log?: LogOutputChannel, version?: stri
                 if (!uvSuccess) {
                     sendTelemetryEvent(EventNames.UV_PYTHON_INSTALL_FAILED, undefined, { stage: 'uvInstall' });
                     showErrorMessage(UvInstallStrings.uvInstallFailed);
+                    return undefined;
+                }
+
+                // Verify uv is now available on PATH
+                const uvNowInstalled = await isUvInstalled(log);
+                if (!uvNowInstalled) {
+                    traceError('uv installed but not found on PATH - may require terminal restart');
+                    sendTelemetryEvent(EventNames.UV_PYTHON_INSTALL_FAILED, undefined, { stage: 'uvNotOnPath' });
+                    showErrorMessage(UvInstallStrings.uvInstallRestartRequired);
                     return undefined;
                 }
             }

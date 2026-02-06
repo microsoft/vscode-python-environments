@@ -11,6 +11,7 @@ import {
     clearDontAskAgain,
     isDontAskAgainSet,
     promptInstallPythonViaUv,
+    UV_INSTALL_PYTHON_DONT_ASK_KEY,
 } from '../../../managers/builtin/uvPythonInstaller';
 import { createMockLogOutputChannel } from '../../mocks/helper';
 
@@ -91,7 +92,7 @@ suite('uvPythonInstaller - promptInstallPythonViaUv', () => {
         const result = await promptInstallPythonViaUv('activation', mockLog);
 
         assert.strictEqual(result, undefined);
-        assert(mockState.set.calledWith('python-envs:uv:UV_INSTALL_PYTHON_DONT_ASK', true), 'Should set dont ask flag');
+        assert(mockState.set.calledWith(UV_INSTALL_PYTHON_DONT_ASK_KEY, true), 'Should set dont ask flag');
     });
 
     test('should return undefined when user dismisses the dialog', async () => {
@@ -163,7 +164,7 @@ suite('uvPythonInstaller - isDontAskAgainSet and clearDontAskAgain', () => {
     test('clearDontAskAgain should set flag to false', async () => {
         await clearDontAskAgain();
 
-        assert(mockState.set.calledWith('python-envs:uv:UV_INSTALL_PYTHON_DONT_ASK', false), 'Should clear the flag');
+        assert(mockState.set.calledWith(UV_INSTALL_PYTHON_DONT_ASK_KEY, false), 'Should clear the flag');
     });
 });
 
