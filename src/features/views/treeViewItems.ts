@@ -138,10 +138,10 @@ export class PythonEnvTreeItem implements EnvTreeItem {
         if (disambiguationSuffix) {
             descriptionParts.push(disambiguationSuffix);
         }
-        item.description = descriptionParts.length > 0 ? descriptionParts.join(' ') : undefined;
+        const computedDescription = descriptionParts.length > 0 ? descriptionParts.join(' ') : undefined;
 
-        // Replace description with error message for broken environments
-        item.description = isBroken ? environment.error : environment.description;
+        // Use error message for broken environments, otherwise use computed description
+        item.description = isBroken ? environment.error : computedDescription;
         item.tooltip = isBroken ? environment.error : tooltip;
         // Show warning icon for broken environments
         item.iconPath = isBroken ? new ThemeIcon('warning') : environment.iconPath;
