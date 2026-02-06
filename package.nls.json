@@ -43,6 +43,7 @@
     "python-envs.terminal.deactivate.title": "Deactivate Environment in Current Terminal",
     "python-envs.uninstallPackage.title": "Uninstall Package",
     "python-envs.revealProjectInExplorer.title": "Reveal Project in Explorer",
+    "python-envs.revealEnvInManagerView.title": "Reveal in Environment Managers View",
     "python-envs.runPetInTerminal.title": "Run Python Environment Tool (PET) in Terminal...",
     "python-envs.alwaysUseUv.description": "When set to true, uv will be used to manage all virtual environments if available. When set to false, uv will only manage virtual environments explicitly created by uv."
 }

@@ -3,9 +3,12 @@ import * as sinon from 'sinon';
 import * as typeMoq from 'typemoq';
 import { Uri } from 'vscode';
 import { PythonEnvironment, PythonProject } from '../../api';
+import * as commandApi from '../../common/command.api';
 import * as managerApi from '../../common/pickers/managers';
 import * as projectApi from '../../common/pickers/projects';
-import { createAnyEnvironmentCommand } from '../../features/envCommands';
+import { createAnyEnvironmentCommand, revealEnvInManagerView } from '../../features/envCommands';
+import { EnvManagerView } from '../../features/views/envManagersView';
+import { ProjectEnvironment, ProjectItem } from '../../features/views/treeViewItems';
 import { EnvironmentManagers, InternalEnvironmentManager, PythonProjectManager } from '../../internal.api';
 import { setupNonThenable } from '../mocks/helper';
 
@@ -173,5 +176,51 @@ suite('Create Any Environment Command Tests', () => {
         assert.strictEqual(result, env.object, 'Expected the created environment to match the mocked environment.');
         manager.verifyAll();
         em.verifyAll();
+    });
+});
+
+suite('Reveal Env In Manager View Command Tests', () => {
+    let managerView: typeMoq.IMock<EnvManagerView>;
+    let executeCommandStub: sinon.SinonStub;
+
+    setup(() => {
+        managerView = typeMoq.Mock.ofType<EnvManagerView>();
+        setupNonThenable(managerView);
+        executeCommandStub = sinon.stub(commandApi, 'executeCommand');
+    });
+
+    teardown(() => {
+        sinon.restore();
+    });
+
+    test('Focuses env-managers view and reveals environment when given a ProjectEnvironment', async () => {
+        // Mock
+        const project: PythonProject = {
+            uri: Uri.file('/test/project'),
+            name: 'test-project',
+        };
+        const projectItem = new ProjectItem(project);
+
+        const environment: PythonEnvironment = {
+            envId: { id: 'test-env-id', managerId: 'test-manager' },
+            name: 'test-env',
+            displayName: 'Test Environment',
+            displayPath: '/path/to/env',
+            version: '3.10.0',
+            environmentPath: Uri.file('/path/to/env'),
+            execInfo: { run: { executable: '/path/to/python' }, activatedRun: { executable: '/path/to/python' } },
+            sysPrefix: '/path/to/env',
+        };
+        const projectEnv = new ProjectEnvironment(projectItem, environment);
+
+        executeCommandStub.resolves();
+        managerView.setup((m) => m.reveal(environment)).returns(() => Promise.resolve());
+
+        // Run
+        await revealEnvInManagerView(projectEnv, managerView.object);
+
+        // Assert
+        assert.ok(executeCommandStub.calledOnceWith('env-managers.focus'), 'Should focus the env-managers view');
+        managerView.verify((m) => m.reveal(environment), typeMoq.Times.once());
     });
 });

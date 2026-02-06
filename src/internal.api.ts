@@ -338,6 +338,7 @@ export class PythonEnvironmentImpl implements PythonEnvironment {
     public readonly execInfo: PythonEnvironmentExecutionInfo;
     public readonly sysPrefix: string;
     public readonly group?: string | EnvironmentGroupInfo;
+    public readonly error?: string;
 
     constructor(
         public readonly envId: PythonEnvironmentId,
@@ -355,6 +356,7 @@ export class PythonEnvironmentImpl implements PythonEnvironment {
         this.execInfo = info.execInfo;
         this.sysPrefix = info.sysPrefix;
         this.group = info.group;
+        this.error = info.error;
     }
 }
 

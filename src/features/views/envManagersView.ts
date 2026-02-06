@@ -1,7 +1,8 @@
-import { Disposable, Event, EventEmitter, ProviderResult, TreeDataProvider, TreeItem, TreeView, window } from 'vscode';
+import { Disposable, Event, EventEmitter, ProviderResult, TreeDataProvider, TreeItem, TreeView } from 'vscode';
 import { DidChangeEnvironmentEventArgs, EnvironmentGroupInfo, PythonEnvironment } from '../../api';
 import { ProjectViews } from '../../common/localize';
 import { createSimpleDebounce } from '../../common/utils/debounce';
+import { createTreeView } from '../../common/window.apis';
 import {
     DidChangeEnvironmentManagerEventArgs,
     DidChangePackageManagerEventArgs,
@@ -17,6 +18,7 @@ import {
     EnvManagerTreeItem,
     EnvTreeItem,
     EnvTreeItemKind,
+    getEnvironmentParentDirName,
     NoPythonEnvTreeItem,
     PackageTreeItem,
     PythonEnvTreeItem,
@@ -27,6 +29,53 @@ const COPIED_STATE = 'copied';
 const SELECTED_STATE = 'selected';
 const ENV_STATE_KEYS = [COPIED_STATE, SELECTED_STATE];
 
+/**
+ * Extracts the base name from a display name by removing version info.
+ * @example getBaseName('.venv (3.12)') returns '.venv'
+ * @example getBaseName('myenv (3.14.1)') returns 'myenv'
+ */
+function getBaseName(displayName: string): string {
+    return displayName.replace(/\s*\([0-9.]+\)\s*$/, '').trim();
+}
+
+/**
+ * Computes disambiguation suffixes for environments with similar base names.
+ *
+ * When multiple environments share the same base name (ignoring version numbers),
+ * this function returns a map from environment ID to the parent folder name,
+ * which can be displayed to help users distinguish between them.
+ *
+ * @example Two environments '.venv (3.12)' in folders 'alice' and 'bob' would
+ * return suffixes 'alice' and 'bob' respectively.
+ *
+ * @param envs List of environments to analyze
+ * @returns Map from environment ID to disambiguation suffix (parent folder name)
+ */
+function computeDisambiguationSuffixes(envs: PythonEnvironment[]): Map<string, string> {
+    const suffixes = new Map<string, string>();
+
+    // Group environments by their base name (ignoring version)
+    const baseNameToEnvs = new Map<string, PythonEnvironment[]>();
+    for (const env of envs) {
+        const displayName = env.displayName ?? env.name;
+        const baseName = getBaseName(displayName);
+        const existing = baseNameToEnvs.get(baseName) ?? [];
+        existing.push(env);
+        baseNameToEnvs.set(baseName, existing);
+    }
+
+    // For base names with multiple environments, compute suffixes
+    for (const [, similarEnvs] of baseNameToEnvs) {
+        if (similarEnvs.length > 1) {
+            for (const env of similarEnvs) {
+                suffixes.set(env.envId.id, getEnvironmentParentDirName(env));
+            }
+        }
+    }
+
+    return suffixes;
+}
+
 export class EnvManagerView implements TreeDataProvider<EnvTreeItem>, Disposable {
     private treeView: TreeView<EnvTreeItem>;
     private treeDataChanged: EventEmitter<EnvTreeItem | EnvTreeItem[] | null | undefined> = new EventEmitter<
@@ -34,11 +83,15 @@ export class EnvManagerView implements TreeDataProvider<EnvTreeItem>, Disposable
     >();
     private revealMap = new Map<string, PythonEnvTreeItem>();
     private managerViews = new Map<string, EnvManagerTreeItem>();
+    private groupViews = new Map<string, PythonGroupEnvTreeItem>();
     private selected: Map<string, string> = new Map();
     private disposables: Disposable[] = [];
 
-    public constructor(public providers: EnvironmentManagers, private stateManager: ITemporaryStateManager) {
-        this.treeView = window.createTreeView<EnvTreeItem>('env-managers', {
+    public constructor(
+        public providers: EnvironmentManagers,
+        private stateManager: ITemporaryStateManager,
+    ) {
+        this.treeView = createTreeView<EnvTreeItem>('env-managers', {
             treeDataProvider: this,
         });
 
@@ -46,6 +99,7 @@ export class EnvManagerView implements TreeDataProvider<EnvTreeItem>, Disposable
             new Disposable(() => {
                 this.revealMap.clear();
                 this.managerViews.clear();
+                this.groupViews.clear();
                 this.selected.clear();
             }),
             this.treeView,
@@ -107,6 +161,7 @@ export class EnvManagerView implements TreeDataProvider<EnvTreeItem>, Disposable
         if (!element) {
             const views: EnvTreeItem[] = [];
             this.managerViews.clear();
+            this.groupViews.clear();
             this.providers.managers.forEach((m) => {
                 const view = new EnvManagerTreeItem(m);
                 views.push(view);
@@ -119,8 +174,16 @@ export class EnvManagerView implements TreeDataProvider<EnvTreeItem>, Disposable
             const manager = (element as EnvManagerTreeItem).manager;
             const views: EnvTreeItem[] = [];
             const envs = await manager.getEnvironments('all');
-            envs.filter((e) => !e.group).forEach((env) => {
-                const view = new PythonEnvTreeItem(env, element as EnvManagerTreeItem, this.selected.get(env.envId.id));
+            const nonGroupedEnvs = envs.filter((e) => !e.group);
+            const disambiguationSuffixes = computeDisambiguationSuffixes(nonGroupedEnvs);
+            nonGroupedEnvs.forEach((env) => {
+                const suffix = disambiguationSuffixes.get(env.envId.id);
+                const view = new PythonEnvTreeItem(
+                    env,
+                    element as EnvManagerTreeItem,
+                    this.selected.get(env.envId.id),
+                    suffix,
+                );
                 views.push(view);
                 this.revealMap.set(env.envId.id, view);
             });
@@ -137,7 +200,10 @@ export class EnvManagerView implements TreeDataProvider<EnvTreeItem>, Disposable
             });
 
             groupObjects.forEach((group) => {
-                views.push(new PythonGroupEnvTreeItem(element as EnvManagerTreeItem, group));
+                const groupView = new PythonGroupEnvTreeItem(element as EnvManagerTreeItem, group);
+                const groupName = typeof group === 'string' ? group : group.name;
+                this.groupViews.set(`${manager.id}:${groupName}`, groupView);
+                views.push(groupView);
             });
 
             if (views.length === 0) {
@@ -162,8 +228,10 @@ export class EnvManagerView implements TreeDataProvider<EnvTreeItem>, Disposable
                 return false;
             });
 
+            const groupDisambiguationSuffixes = computeDisambiguationSuffixes(grouped);
             grouped.forEach((env) => {
-                const view = new PythonEnvTreeItem(env, groupItem, this.selected.get(env.envId.id));
+                const suffix = groupDisambiguationSuffixes.get(env.envId.id);
+                const view = new PythonEnvTreeItem(env, groupItem, this.selected.get(env.envId.id), suffix);
                 views.push(view);
                 this.revealMap.set(env.envId.id, view);
             });
@@ -202,12 +270,47 @@ export class EnvManagerView implements TreeDataProvider<EnvTreeItem>, Disposable
         return element.parent;
     }
 
-    reveal(environment?: PythonEnvironment) {
-        const view = environment ? this.revealMap.get(environment.envId.id) : undefined;
+    /**
+     * Reveals and focuses on the given environment in the Environment Managers view.
+     *
+     * @param environment - The Python environment to reveal
+     */
+    async reveal(environment?: PythonEnvironment): Promise<void> {
+        if (!environment) {
+            return;
+        }
+
+        const manager = this.providers.getEnvironmentManager(environment);
+        if (!manager) {
+            return;
+        }
+
+        if (!this.managerViews.has(manager.id)) {
+            await this.getChildren(undefined);
+        }
+
+        const managerView = this.managerViews.get(manager.id);
+        if (!managerView) {
+            return;
+        }
+
+        const groupName = typeof environment.group === 'string' ? environment.group : environment.group?.name;
+        if (groupName) {
+            if (!this.groupViews.has(`${manager.id}:${groupName}`)) {
+                await this.getChildren(managerView);
+            }
+
+            const groupView = this.groupViews.get(`${manager.id}:${groupName}`);
+            if (groupView) {
+                await this.getChildren(groupView);
+            }
+        } else {
+            await this.getChildren(managerView);
+        }
+
+        const view = this.revealMap.get(environment.envId.id);
         if (view && this.treeView.visible) {
-            setImmediate(async () => {
-                await this.treeView.reveal(view);
-            });
+            await this.treeView.reveal(view, { expand: false, focus: true, select: true });
         }
     }
 
