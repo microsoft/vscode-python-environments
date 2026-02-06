@@ -6,3 +6,6 @@ node_modules
 .nox/
 .venv/
 **/__pycache__/
+
+# Folder for storing AI generated artifacts
+ai-artifacts/*
