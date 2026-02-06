@@ -5,6 +5,43 @@ import { InternalEnvironmentManager, InternalPackageManager } from '../../intern
 import { isActivatableEnvironment } from '../common/activation';
 import { removable } from './utils';
 
+/**
+ * Extracts the parent folder name from an environment path for disambiguation.
+ *
+ * This function handles various path formats including:
+ * - Unix paths with bin folder: /home/user/my-project/.venv/bin/python → my-project
+ * - Windows paths with Scripts folder: C:\Users\bob\project\.venv\Scripts\python.exe → project
+ * - Direct venv folder paths: /home/user/project/.venv → project
+ *
+ * @param environment The Python environment to extract the parent folder from
+ * @returns The name of the parent folder containing the virtual environment
+ */
+export function getEnvironmentParentDirName(environment: PythonEnvironment): string {
+    const envPath = environment.environmentPath.fsPath.replace(/\\/g, '/');
+    const parts = envPath.split('/').filter((p) => p.length > 0);
+
+    let venvFolderIndex = -1;
+
+    for (let i = parts.length - 1; i >= 0; i--) {
+        const part = parts[i].toLowerCase();
+        if (part === 'bin' || part === 'scripts') {
+            venvFolderIndex = i - 1;
+            break;
+        }
+        if (part.startsWith('python')) {
+            continue;
+        }
+        venvFolderIndex = i;
+        break;
+    }
+
+    if (venvFolderIndex > 0) {
+        return parts[venvFolderIndex - 1];
+    }
+
+    return parts.length >= 2 ? parts[parts.length - 2] : parts[0] || '';
+}
+
 export enum EnvTreeItemKind {
     manager = 'python-env-manager',
     environment = 'python-env',
@@ -65,12 +102,21 @@ export class PythonGroupEnvTreeItem implements EnvTreeItem {
 export class PythonEnvTreeItem implements EnvTreeItem {
     public readonly kind = EnvTreeItemKind.environment;
     public readonly treeItem: TreeItem;
+    /**
+     * Creates a tree item for a Python environment.
+     * @param environment The Python environment to display
+     * @param parent The parent tree item (manager or group)
+     * @param selected If set, indicates this environment is selected ('global' or workspace path)
+     * @param disambiguationSuffix If set, shown in description to distinguish similarly-named environments
+     */
     constructor(
         public readonly environment: PythonEnvironment,
         public readonly parent: EnvManagerTreeItem | PythonGroupEnvTreeItem,
         public readonly selected?: string,
+        public readonly disambiguationSuffix?: string,
     ) {
-        let name = environment.displayName ?? environment.name;
+        const name = environment.displayName ?? environment.name;
+
         let tooltip = environment.tooltip ?? environment.description;
         const isBroken = !!environment.error;
 
@@ -82,8 +128,20 @@ export class PythonEnvTreeItem implements EnvTreeItem {
 
         const item = new TreeItem(name, TreeItemCollapsibleState.Collapsed);
         item.contextValue = this.getContextValue();
-        // Show error message for broken environments
-        item.description = isBroken ? environment.error : environment.description;
+
+        // Build description with optional [uv] indicator and disambiguation suffix
+        const uvIndicator = environment.description?.toLowerCase().includes('uv') ? '[uv]' : '';
+        const descriptionParts: string[] = [];
+        if (uvIndicator) {
+            descriptionParts.push(uvIndicator);
+        }
+        if (disambiguationSuffix) {
+            descriptionParts.push(disambiguationSuffix);
+        }
+        const computedDescription = descriptionParts.length > 0 ? descriptionParts.join(' ') : undefined;
+
+        // Use error message for broken environments, otherwise use computed description
+        item.description = isBroken ? environment.error : computedDescription;
         item.tooltip = isBroken ? environment.error : tooltip;
         // Show warning icon for broken environments
         item.iconPath = isBroken ? new ThemeIcon('warning') : environment.iconPath;
