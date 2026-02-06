@@ -672,6 +672,15 @@ function getPythonSettingAndUntildify<T>(name: string, scope?: Uri): T | undefin
 }
 
 /**
+ * Cross-platform check for absolute paths.
+ * Uses both current platform's check and Windows-specific check to handle
+ * Windows paths (e.g., C:\path) when running on Unix systems.
+ */
+function isAbsolutePath(inputPath: string): boolean {
+    return path.isAbsolute(inputPath) || path.win32.isAbsolute(inputPath);
+}
+
+/**
  * Gets all extra environment search paths from various configuration sources.
  * Combines legacy python settings (with migration), globalSearchPaths, and workspaceSearchPaths.
  *
@@ -702,7 +711,7 @@ export async function getAllExtraSearchPaths(): Promise<string[]> {
 
         const trimmedPath = searchPath.trim();
 
-        if (path.isAbsolute(trimmedPath)) {
+        if (isAbsolutePath(trimmedPath)) {
             // Absolute path - use as is
             searchDirectories.push(trimmedPath);
         } else {
