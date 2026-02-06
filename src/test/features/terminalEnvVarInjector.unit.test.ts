@@ -257,6 +257,7 @@ suite('TerminalEnvVarInjector', () => {
                 typeMoq.Times.exactly(2),
             );
         });
+    });
 
     suite('python.envFile compatibility', () => {
         test('python.envFile has no effect when useEnvFile is false', async () => {
