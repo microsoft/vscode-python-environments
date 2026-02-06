@@ -1,6 +1,7 @@
 import {
     LogOutputChannel,
     ProgressLocation,
+    QuickPickItem,
     ShellExecution,
     Task,
     TaskPanelKind,
@@ -16,10 +17,29 @@ import { EventNames } from '../../common/telemetry/constants';
 import { sendTelemetryEvent } from '../../common/telemetry/sender';
 import { createDeferred } from '../../common/utils/deferred';
 import { isWindows } from '../../common/utils/platformUtils';
-import { showErrorMessage, showInformationMessage, withProgress } from '../../common/window.apis';
+import { showErrorMessage, showInformationMessage, showQuickPick, withProgress } from '../../common/window.apis';
 import { isUvInstalled, resetUvInstallationCache } from './helpers';
 
 const UV_INSTALL_PYTHON_DONT_ASK_KEY = 'python-envs:uv:UV_INSTALL_PYTHON_DONT_ASK';
+
+/**
+ * Represents a Python version from uv python list
+ */
+export interface UvPythonVersion {
+    key: string;
+    version: string;
+    version_parts: {
+        major: number;
+        minor: number;
+        patch: number;
+    };
+    path: string | null;
+    url: string | null;
+    os: string;
+    variant: string;
+    implementation: string;
+    arch: string;
+}
 
 /**
  * Checks if a command is available on the system.
@@ -142,12 +162,17 @@ export async function installUv(_log?: LogOutputChannel): Promise<boolean> {
 
 /**
  * Gets the path to the uv-managed Python installation.
+ * @param version Optional Python version to find (e.g., "3.12")
  * @returns Promise that resolves to the Python path, or undefined if not found
  */
-export async function getUvPythonPath(): Promise<string | undefined> {
+export async function getUvPythonPath(version?: string): Promise<string | undefined> {
     return new Promise((resolve) => {
         const chunks: string[] = [];
-        const proc = spawnProcess('uv', ['python', 'find']);
+        const args = ['python', 'find'];
+        if (version) {
+            args.push(version);
+        }
+        const proc = spawnProcess('uv', args);
         proc.stdout?.on('data', (data) => chunks.push(data.toString()));
         proc.on('error', () => resolve(undefined));
         proc.on('exit', (code) => {
@@ -159,6 +184,96 @@ export async function getUvPythonPath(): Promise<string | undefined> {
             }
         });
     });
+}
+
+/**
+ * Gets available Python versions from uv.
+ * @returns Promise that resolves to an array of Python versions
+ */
+export async function getAvailablePythonVersions(): Promise<UvPythonVersion[]> {
+    return new Promise((resolve) => {
+        const chunks: string[] = [];
+        const proc = spawnProcess('uv', ['python', 'list', '--output-format', 'json']);
+        proc.stdout?.on('data', (data) => chunks.push(data.toString()));
+        proc.on('error', () => resolve([]));
+        proc.on('exit', (code) => {
+            if (code === 0 && chunks.length > 0) {
+                try {
+                    const versions = JSON.parse(chunks.join('')) as UvPythonVersion[];
+                    resolve(versions);
+                } catch {
+                    traceError('Failed to parse uv python list output');
+                    resolve([]);
+                }
+            } else {
+                resolve([]);
+            }
+        });
+    });
+}
+
+interface PythonVersionQuickPickItem extends QuickPickItem {
+    version: string;
+    isInstalled: boolean;
+}
+
+/**
+ * Shows a QuickPick to select a Python version to install.
+ * @returns Promise that resolves to the selected version string, or undefined if cancelled
+ */
+export async function selectPythonVersionToInstall(): Promise<string | undefined> {
+    const versions = await withProgress(
+        {
+            location: ProgressLocation.Notification,
+            title: UvInstallStrings.fetchingVersions,
+        },
+        async () => getAvailablePythonVersions(),
+    );
+
+    if (versions.length === 0) {
+        showErrorMessage(UvInstallStrings.failedToFetchVersions);
+        return undefined;
+    }
+
+    // Filter to only default variant (not freethreaded) and group by minor version
+    const seenMinorVersions = new Set<string>();
+    const items: PythonVersionQuickPickItem[] = [];
+
+    for (const v of versions) {
+        // Only include default variant CPython
+        if (v.variant !== 'default' || v.implementation !== 'cpython') {
+            continue;
+        }
+
+        // Create a minor version key (e.g., "3.13")
+        const minorKey = `${v.version_parts.major}.${v.version_parts.minor}`;
+
+        // Only show the latest patch for each minor version (they come sorted from uv)
+        if (seenMinorVersions.has(minorKey)) {
+            continue;
+        }
+        seenMinorVersions.add(minorKey);
+
+        const isInstalled = v.path !== null;
+        items.push({
+            label: `Python ${v.version}`,
+            description: isInstalled ? `$(check) ${UvInstallStrings.installed}` : undefined,
+            detail: isInstalled ? v.path ?? undefined : undefined,
+            version: v.version,
+            isInstalled,
+        });
+    }
+
+    const selected = await showQuickPick(items, {
+        placeHolder: UvInstallStrings.selectPythonVersion,
+        ignoreFocusOut: true,
+    });
+
+    if (!selected) {
+        return undefined;
+    }
+
+    return selected.version;
 }
 
 /**
@@ -238,9 +353,10 @@ export async function promptInstallPythonViaUv(
  * This is the main entry point for programmatic Python installation.
  *
  * @param log Optional log output channel
+ * @param version Optional Python version to install (e.g., "3.12")
  * @returns Promise that resolves to the installed Python path, or undefined on failure
  */
-export async function installPythonWithUv(log?: LogOutputChannel): Promise<string | undefined> {
+export async function installPythonWithUv(log?: LogOutputChannel, version?: string): Promise<string | undefined> {
     const uvInstalled = await isUvInstalled(log);
 
     sendTelemetryEvent(EventNames.UV_PYTHON_INSTALL_STARTED, undefined, { uvAlreadyInstalled: uvInstalled });
@@ -265,7 +381,7 @@ export async function installPythonWithUv(log?: LogOutputChannel): Promise<strin
             }
 
             // Step 2: Install Python via uv
-            const pythonSuccess = await installPythonViaUv(log);
+            const pythonSuccess = await installPythonViaUv(log, version);
             if (!pythonSuccess) {
                 sendTelemetryEvent(EventNames.UV_PYTHON_INSTALL_FAILED, undefined, { stage: 'pythonInstall' });
                 showErrorMessage(UvInstallStrings.installFailed);
@@ -273,7 +389,7 @@ export async function installPythonWithUv(log?: LogOutputChannel): Promise<strin
             }
 
             // Step 3: Get the installed Python path using uv python find
-            const pythonPath = await getUvPythonPath();
+            const pythonPath = await getUvPythonPath(version);
             if (!pythonPath) {
                 traceError('Python installed but could not find the path via uv python find');
                 sendTelemetryEvent(EventNames.UV_PYTHON_INSTALL_FAILED, undefined, { stage: 'findPath' });

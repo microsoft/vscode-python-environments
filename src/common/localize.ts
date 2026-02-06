@@ -231,4 +231,8 @@ export namespace UvInstallStrings {
     export const uvInstallFailed = l10n.t('Failed to install uv');
     export const dontAskAgain = l10n.t("Don't ask again");
     export const clickToInstallPython = l10n.t('No Python found, click to install');
+    export const selectPythonVersion = l10n.t('Select Python version to install');
+    export const installed = l10n.t('installed');
+    export const fetchingVersions = l10n.t('Fetching available Python versions...');
+    export const failedToFetchVersions = l10n.t('Failed to fetch available Python versions');
 }

@@ -30,7 +30,7 @@ import {
     setSystemEnvForWorkspaces,
 } from './cache';
 import { refreshPythons, resolveSystemPythonEnvironmentPath } from './utils';
-import { installPythonWithUv, promptInstallPythonViaUv } from './uvPythonInstaller';
+import { installPythonWithUv, promptInstallPythonViaUv, selectPythonVersionToInstall } from './uvPythonInstaller';
 
 export class SysPythonManager implements EnvironmentManager {
     private collection: PythonEnvironment[] = [];
@@ -244,13 +244,20 @@ export class SysPythonManager implements EnvironmentManager {
 
     /**
      * Installs a global Python using uv.
-     * This method installs uv if not present, then uses it to install Python.
+     * This method shows a QuickPick to select the Python version, then installs it.
      */
     async create(
         _scope: CreateEnvironmentScope,
         _options?: CreateEnvironmentOptions,
     ): Promise<PythonEnvironment | undefined> {
-        const pythonPath = await installPythonWithUv(this.log);
+        // Show QuickPick to select Python version
+        const selectedVersion = await selectPythonVersionToInstall();
+        if (!selectedVersion) {
+            // User cancelled
+            return undefined;
+        }
+
+        const pythonPath = await installPythonWithUv(this.log, selectedVersion);
 
         if (pythonPath) {
             // Resolve the installed Python using NativePythonFinder instead of full refresh
