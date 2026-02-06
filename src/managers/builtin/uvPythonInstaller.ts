@@ -1,25 +1,15 @@
-import {
-    LogOutputChannel,
-    ProgressLocation,
-    ShellExecution,
-    Task,
-    TaskPanelKind,
-    TaskRevealKind,
-    TaskScope,
-    tasks,
-    window,
-} from 'vscode';
+import { LogOutputChannel, ProgressLocation, ShellExecution, Task, TaskPanelKind, TaskRevealKind, TaskScope } from 'vscode';
 import { PythonEnvironmentApi } from '../../api';
 import { spawnProcess } from '../../common/childProcess.apis';
 import { UvInstallStrings } from '../../common/localize';
 import { traceError, traceInfo, traceLog } from '../../common/logging';
 import { getGlobalPersistentState } from '../../common/persistentState';
-import { executeTask } from '../../common/tasks.apis';
+import { executeTask, onDidEndTaskProcess } from '../../common/tasks.apis';
 import { EventNames } from '../../common/telemetry/constants';
 import { sendTelemetryEvent } from '../../common/telemetry/sender';
 import { createDeferred } from '../../common/utils/deferred';
 import { isWindows } from '../../common/utils/platformUtils';
-import { showInformationMessage } from '../../common/window.apis';
+import { showErrorMessage, showInformationMessage, withProgress } from '../../common/window.apis';
 import { isUvInstalled, resetUvInstallationCache } from './helpers';
 
 const UV_INSTALL_PYTHON_DONT_ASK_KEY = 'python-envs:uv:UV_INSTALL_PYTHON_DONT_ASK';
@@ -72,6 +62,9 @@ async function getUvInstallCommand(): Promise<{ executable: string; args: string
     };
 }
 
+// Timeout for task completion (5 minutes)
+const TASK_TIMEOUT_MS = 5 * 60 * 1000;
+
 /**
  * Runs a shell command as a visible VS Code task and waits for completion.
  * @param name Task name displayed in the UI
@@ -92,20 +85,29 @@ async function runTaskAndWait(name: string, executable: string, args: string[]):
 
     const deferred = createDeferred<boolean>();
 
-    const disposable = tasks.onDidEndTaskProcess((e) => {
+    const disposable = onDidEndTaskProcess((e) => {
         if (e.execution.task === task) {
-            disposable.dispose();
             deferred.resolve(e.exitCode === 0);
         }
     });
+
+    // Set up timeout to prevent indefinite waiting
+    const timeoutId = setTimeout(() => {
+        if (!deferred.completed) {
+            traceError(`Task "${name}" timed out after ${TASK_TIMEOUT_MS / 1000} seconds`);
+            deferred.resolve(false);
+        }
+    }, TASK_TIMEOUT_MS);
 
     try {
         await executeTask(task);
         return await deferred.promise;
     } catch (err) {
-        disposable.dispose();
         traceError(`Task "${name}" failed:`, err);
         return false;
+    } finally {
+        clearTimeout(timeoutId);
+        disposable.dispose();
     }
 }
 
@@ -218,7 +220,7 @@ export async function installPythonWithUv(api: PythonEnvironmentApi, log?: LogOu
 
     sendTelemetryEvent(EventNames.UV_PYTHON_INSTALL_STARTED, undefined, { uvAlreadyInstalled: uvInstalled });
 
-    return await window.withProgress(
+    return await withProgress(
         {
             location: ProgressLocation.Notification,
             title: UvInstallStrings.installingPython,
@@ -232,7 +234,7 @@ export async function installPythonWithUv(api: PythonEnvironmentApi, log?: LogOu
                 const uvSuccess = await installUv(log);
                 if (!uvSuccess) {
                     sendTelemetryEvent(EventNames.UV_PYTHON_INSTALL_FAILED, undefined, { stage: 'uvInstall' });
-                    window.showErrorMessage(UvInstallStrings.uvInstallFailed);
+                    showErrorMessage(UvInstallStrings.uvInstallFailed);
                     return false;
                 }
             }
@@ -241,7 +243,7 @@ export async function installPythonWithUv(api: PythonEnvironmentApi, log?: LogOu
             const pythonSuccess = await installPythonViaUv(log);
             if (!pythonSuccess) {
                 sendTelemetryEvent(EventNames.UV_PYTHON_INSTALL_FAILED, undefined, { stage: 'pythonInstall' });
-                window.showErrorMessage(UvInstallStrings.installFailed);
+                showErrorMessage(UvInstallStrings.installFailed);
                 return false;
             }
 
@@ -250,7 +252,7 @@ export async function installPythonWithUv(api: PythonEnvironmentApi, log?: LogOu
             await api.refreshEnvironments(undefined);
 
             sendTelemetryEvent(EventNames.UV_PYTHON_INSTALL_COMPLETED);
-            window.showInformationMessage(UvInstallStrings.installComplete);
+            showInformationMessage(UvInstallStrings.installComplete);
 
             return true;
         },

@@ -168,3 +168,8 @@ suite('uvPythonInstaller - isDontAskAgainSet and clearDontAskAgain', () => {
         assert(mockState.set.calledWith('python-envs:uv:UV_INSTALL_PYTHON_DONT_ASK', false), 'Should clear the flag');
     });
 });
+
+// NOTE: Installation functions (installUv, installPythonViaUv, installPythonWithUv) require
+// VS Code's Task API which cannot be fully mocked in unit tests.
+// These should be tested via integration tests in a real VS Code environment.
+

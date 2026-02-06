@@ -76,7 +76,7 @@ export class SysPythonManager implements EnvironmentManager {
 
             // If no Python environments were found, offer to install via uv
             if (this.collection.length === 0) {
-                promptInstallPythonViaUv('activation', this.api, this.log);
+                await promptInstallPythonViaUv('activation', this.api, this.log);
             }
         } finally {
             this._initialized.resolve();

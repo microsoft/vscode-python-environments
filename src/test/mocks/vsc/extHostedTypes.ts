@@ -1706,7 +1706,9 @@ export class ShellExecution implements vscode.ShellExecution {
         //     }
         // }
         // return hash.digest('hex');
-        throw new Error('Not spported');
+        // Return a simple unique ID based on command
+        const cmd = typeof this._command === 'string' ? this._command : this._command?.value ?? '';
+        return `shell-${cmd}-${Date.now()}`;
     }
 }
 
