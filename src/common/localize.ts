@@ -96,6 +96,10 @@ export namespace VenvManagerStrings {
     export const venvErrorNoBasePython = l10n.t('No base Python found');
     export const venvErrorNoPython3 = l10n.t('Did not find any base Python 3');
 
+    export const noEnvClickToCreate = l10n.t('No environment found, click to create');
+    export const noEnvFound = l10n.t('No python environments found.');
+    export const createEnvironment = l10n.t('Create Environment');
+
     export const venvName = l10n.t('Enter a name for the virtual environment');
     export const venvNameErrorEmpty = l10n.t('Name cannot be empty');
     export const venvNameErrorExists = l10n.t('A folder with the same name already exists');
@@ -205,4 +209,20 @@ export namespace ActivationStrings {
         Commands.viewLogs,
     );
     export const activatingEnvironment = l10n.t('Activating environment');
+}
+
+export namespace UvInstallStrings {
+    export const noPythonFound = l10n.t('No Python installation found');
+    export const installPythonPrompt = l10n.t('No Python found. Would you like to install Python using uv?');
+    export const installPythonAndUvPrompt = l10n.t(
+        'No Python found. Would you like to install uv and use it to install Python?',
+    );
+    export const installPython = l10n.t('Install Python');
+    export const installingUv = l10n.t('Installing uv...');
+    export const installingPython = l10n.t('Installing Python via uv...');
+    export const installComplete = l10n.t('Python installed successfully');
+    export const installFailed = l10n.t('Failed to install Python');
+    export const uvInstallFailed = l10n.t('Failed to install uv');
+    export const dontAskAgain = l10n.t("Don't ask again");
+    export const clickToInstallPython = l10n.t('No Python found, click to install');
 }

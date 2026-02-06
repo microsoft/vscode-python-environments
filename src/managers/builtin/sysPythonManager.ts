@@ -1,6 +1,8 @@
 import * as path from 'path';
 import { EventEmitter, LogOutputChannel, MarkdownString, ProgressLocation, ThemeIcon, Uri, window } from 'vscode';
 import {
+    CreateEnvironmentOptions,
+    CreateEnvironmentScope,
     DidChangeEnvironmentEventArgs,
     DidChangeEnvironmentsEventArgs,
     EnvironmentChangeKind,
@@ -28,6 +30,7 @@ import {
     setSystemEnvForWorkspaces,
 } from './cache';
 import { refreshPythons, resolveSystemPythonEnvironmentPath } from './utils';
+import { installPythonWithUv, promptInstallPythonViaUv } from './uvPythonInstaller';
 
 export class SysPythonManager implements EnvironmentManager {
     private collection: PythonEnvironment[] = [];
@@ -70,6 +73,11 @@ export class SysPythonManager implements EnvironmentManager {
 
         try {
             await this.internalRefresh(false, SysManagerStrings.sysManagerDiscovering);
+
+            // If no Python environments were found, offer to install via uv
+            if (this.collection.length === 0) {
+                promptInstallPythonViaUv('activation', this.api, this.log);
+            }
         } finally {
             this._initialized.resolve();
         }
@@ -218,6 +226,25 @@ export class SysPythonManager implements EnvironmentManager {
         }
 
         return resolved;
+    }
+
+    /**
+     * Installs a global Python using uv.
+     * This method installs uv if not present, then uses it to install Python.
+     */
+    async create(
+        _scope: CreateEnvironmentScope,
+        _options?: CreateEnvironmentOptions,
+    ): Promise<PythonEnvironment | undefined> {
+        const success = await installPythonWithUv(this.api, this.log);
+
+        if (success) {
+            // Return the latest Python environment after installation
+            // The installPythonWithUv function already refreshes environments
+            return getLatest(this.collection);
+        }
+
+        return undefined;
     }
 
     async clearCache(): Promise<void> {

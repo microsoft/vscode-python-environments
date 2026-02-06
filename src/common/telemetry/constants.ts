@@ -10,6 +10,11 @@ export enum EventNames {
     VENV_USING_UV = 'VENV.USING_UV',
     VENV_CREATION = 'VENV.CREATION',
 
+    UV_PYTHON_INSTALL_PROMPTED = 'UV.PYTHON_INSTALL_PROMPTED',
+    UV_PYTHON_INSTALL_STARTED = 'UV.PYTHON_INSTALL_STARTED',
+    UV_PYTHON_INSTALL_COMPLETED = 'UV.PYTHON_INSTALL_COMPLETED',
+    UV_PYTHON_INSTALL_FAILED = 'UV.PYTHON_INSTALL_FAILED',
+
     PACKAGE_MANAGEMENT = 'PACKAGE_MANAGEMENT',
     ADD_PROJECT = 'ADD_PROJECT',
     /**
@@ -83,13 +88,47 @@ export interface IEventNamePropertyMapping {
     /* __GDPR__
         "venv.using_uv": {"owner": "eleanorjboyd" }
     */
-    [EventNames.VENV_USING_UV]: never | undefined /* __GDPR__
+    [EventNames.VENV_USING_UV]: never | undefined;
+
+    /* __GDPR__
         "venv.creation": {
             "creationType": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "owner": "eleanorjboyd" }
         }
-    */;
+    */
     [EventNames.VENV_CREATION]: {
         creationType: 'quick' | 'custom';
+    };
+
+    /* __GDPR__
+        "uv.python_install_prompted": {
+            "trigger": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "owner": "karthiknadig" }
+        }
+    */
+    [EventNames.UV_PYTHON_INSTALL_PROMPTED]: {
+        trigger: 'activation' | 'createEnvironment';
+    };
+
+    /* __GDPR__
+        "uv.python_install_started": {
+            "uvAlreadyInstalled": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "owner": "karthiknadig" }
+        }
+    */
+    [EventNames.UV_PYTHON_INSTALL_STARTED]: {
+        uvAlreadyInstalled: boolean;
+    };
+
+    /* __GDPR__
+        "uv.python_install_completed": {"owner": "karthiknadig" }
+    */
+    [EventNames.UV_PYTHON_INSTALL_COMPLETED]: never | undefined;
+
+    /* __GDPR__
+        "uv.python_install_failed": {
+            "stage": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "owner": "karthiknadig" }
+        }
+    */
+    [EventNames.UV_PYTHON_INSTALL_FAILED]: {
+        stage: 'uvInstall' | 'pythonInstall';
     };
 
     /* __GDPR__
