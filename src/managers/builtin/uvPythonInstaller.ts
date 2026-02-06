@@ -162,23 +162,40 @@ export async function installUv(_log?: LogOutputChannel): Promise<boolean> {
 
 /**
  * Gets the path to the uv-managed Python installation.
- * @param version Optional Python version to find (e.g., "3.12")
+ * Uses `uv python list --only-installed --managed-python` to find only uv-installed Pythons.
+ * @param version Optional Python version to find (e.g., "3.12"). If not specified, returns the latest.
  * @returns Promise that resolves to the Python path, or undefined if not found
  */
 export async function getUvPythonPath(version?: string): Promise<string | undefined> {
     return new Promise((resolve) => {
         const chunks: string[] = [];
-        const args = ['python', 'find'];
-        if (version) {
-            args.push(version);
-        }
+        // Use --only-installed --managed-python to find only uv-managed Pythons
+        const args = ['python', 'list', '--only-installed', '--managed-python', '--output-format', 'json'];
         const proc = spawnProcess('uv', args);
         proc.stdout?.on('data', (data) => chunks.push(data.toString()));
         proc.on('error', () => resolve(undefined));
         proc.on('exit', (code) => {
             if (code === 0 && chunks.length > 0) {
-                const pythonPath = chunks.join('').trim();
-                resolve(pythonPath || undefined);
+                try {
+                    const versions = JSON.parse(chunks.join('')) as UvPythonVersion[];
+                    if (versions.length === 0) {
+                        resolve(undefined);
+                        return;
+                    }
+
+                    // If version specified, find matching one (e.g., "3.12" matches "3.12.11")
+                    if (version) {
+                        const match = versions.find((v) => v.version.startsWith(version) && v.path);
+                        resolve(match?.path ?? undefined);
+                    } else {
+                        // Return the first (latest) installed Python
+                        const installed = versions.find((v) => v.path);
+                        resolve(installed?.path ?? undefined);
+                    }
+                } catch {
+                    traceError('Failed to parse uv python list output');
+                    resolve(undefined);
+                }
             } else {
                 resolve(undefined);
             }
@@ -258,7 +275,7 @@ export async function selectPythonVersionToInstall(): Promise<string | undefined
         items.push({
             label: `Python ${v.version}`,
             description: isInstalled ? `$(check) ${UvInstallStrings.installed}` : undefined,
-            detail: isInstalled ? v.path ?? undefined : undefined,
+            detail: isInstalled ? (v.path ?? undefined) : undefined,
             version: v.version,
             isInstalled,
         });
