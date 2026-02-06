@@ -8,11 +8,11 @@ import { PythonProjectApi } from '../../api';
 import { spawnProcess } from '../../common/childProcess.apis';
 import { ENVS_EXTENSION_ID, PYTHON_EXTENSION_ID } from '../../common/constants';
 import { getExtension } from '../../common/extension.apis';
-import { traceError, traceLog } from '../../common/logging';
+import { traceError, traceVerbose, traceWarn } from '../../common/logging';
 import { untildify, untildifyArray } from '../../common/utils/pathUtils';
 import { isWindows } from '../../common/utils/platformUtils';
 import { createRunningWorkerPool, WorkerPool } from '../../common/utils/workerPool';
-import { getConfiguration } from '../../common/workspace.apis';
+import { getConfiguration, getWorkspaceFolders } from '../../common/workspace.apis';
 import { noop } from './utils';
 
 // Timeout constants for JSON-RPC requests (in milliseconds)
@@ -697,23 +697,34 @@ export async function getAllExtraSearchPaths(): Promise<string[]> {
     // Get workspaceSearchPaths
     const workspaceSearchPaths = getWorkspaceSearchPaths();
 
-    // Keep workspaceSearchPaths entries as provided (no workspace prefixing).
+    // Resolve relative paths against workspace folders
     for (const searchPath of workspaceSearchPaths) {
         if (!searchPath || searchPath.trim() === '') {
             continue;
         }
 
-        searchDirectories.push(searchPath.trim());
+        const trimmedPath = searchPath.trim();
+
+        if (path.isAbsolute(trimmedPath)) {
+            // Absolute path - use as is
+            searchDirectories.push(trimmedPath);
+        } else {
+            // Relative path - resolve against all workspace folders
+            const workspaceFolders = getWorkspaceFolders();
+            if (workspaceFolders) {
+                for (const workspaceFolder of workspaceFolders) {
+                    const resolvedPath = path.resolve(workspaceFolder.uri.fsPath, trimmedPath);
+                    searchDirectories.push(resolvedPath);
+                }
+            } else {
+                traceWarn('No workspace folders found for relative search path:', trimmedPath);
+            }
+        }
     }
 
     // Remove duplicates and return
     const uniquePaths = Array.from(new Set(searchDirectories));
-    traceLog(
-        'getAllExtraSearchPaths completed. Total unique search directories:',
-        uniquePaths.length,
-        'Paths:',
-        uniquePaths,
-    );
+    traceVerbose('Environment search directories:', uniquePaths.length, 'paths');
     return uniquePaths;
 }
 
@@ -748,7 +759,7 @@ function getWorkspaceSearchPaths(): string[] {
             );
         }
 
-        // For workspace settings, prefer workspaceFolder > workspace
+        // For workspace settings, prefer workspaceFolder > workspace > default
         if (inspection?.workspaceFolderValue) {
             return inspection.workspaceFolderValue;
         }
@@ -757,8 +768,8 @@ function getWorkspaceSearchPaths(): string[] {
             return inspection.workspaceValue;
         }
 
-        // Default empty array (don't use global value for workspace settings)
-        return [];
+        // Use the default value from package.json
+        return inspection?.defaultValue ?? [];
     } catch (error) {
         traceError('Error getting workspaceSearchPaths:', error);
         return [];

@@ -212,8 +212,8 @@ suite('getAllExtraSearchPaths Integration Tests', () => {
             pythonConfig.get.withArgs('venvFolders').returns(undefined);
             envConfig.inspect.withArgs('globalSearchPaths').returns({ globalValue: [] });
             envConfig.inspect.withArgs('workspaceSearchPaths').returns({
-                workspaceValue: ['workspace-level-path'],
-                workspaceFolderValue: ['folder-level-path'],
+                workspaceValue: ['/workspace-level-path'],
+                workspaceFolderValue: ['/folder-level-path'],
             });
 
             const workspace1 = Uri.file('/workspace/project1');
@@ -223,8 +223,8 @@ suite('getAllExtraSearchPaths Integration Tests', () => {
             // Run
             const result = await getAllExtraSearchPaths();
 
-            // Assert - Relative entries are kept as provided
-            const expected = new Set(['folder-level-path']);
+            // Assert - workspaceFolderValue takes priority, absolute path is kept as-is
+            const expected = new Set(['/folder-level-path']);
             const actual = new Set(result);
             assert.strictEqual(actual.size, expected.size, 'Should have correct number of unique paths');
             assert.deepStrictEqual(actual, expected, 'Should contain exactly the expected paths');
@@ -300,13 +300,13 @@ suite('getAllExtraSearchPaths Integration Tests', () => {
             assert.deepStrictEqual(actual, expected, 'Should contain exactly the expected paths');
         });
 
-        test('Relative paths are kept as provided', async () => {
+        test('Relative paths are resolved against workspace folders', async () => {
             // Mock → Relative workspace paths with multiple workspace folders
             pythonConfig.get.withArgs('venvPath').returns(undefined);
             pythonConfig.get.withArgs('venvFolders').returns(undefined);
             envConfig.inspect.withArgs('globalSearchPaths').returns({ globalValue: [] });
             envConfig.inspect.withArgs('workspaceSearchPaths').returns({
-                workspaceFolderValue: ['venvs', '../shared-envs'],
+                workspaceFolderValue: ['venvs', '.venv'],
             });
 
             const workspace1 = Uri.file('/workspace/project1');
@@ -316,14 +316,16 @@ suite('getAllExtraSearchPaths Integration Tests', () => {
             // Run
             const result = await getAllExtraSearchPaths();
 
-            // Assert - Relative paths are not resolved against workspace folders (order doesn't matter)
-            const expected = new Set(['venvs', '../shared-envs']);
-            const actual = new Set(result);
-            assert.strictEqual(actual.size, expected.size, 'Should have correct number of unique paths');
-            assert.deepStrictEqual(actual, expected, 'Should contain exactly the expected paths');
+            // Assert - Relative paths are resolved against each workspace folder
+            // path.resolve behavior varies by platform, so check the paths contain expected segments
+            assert.strictEqual(result.length, 4, 'Should have 4 paths (2 relative × 2 workspaces)');
+            assert.ok(result.some((p) => p.includes('project1') && p.endsWith('venvs')));
+            assert.ok(result.some((p) => p.includes('project2') && p.endsWith('venvs')));
+            assert.ok(result.some((p) => p.includes('project1') && p.endsWith('.venv')));
+            assert.ok(result.some((p) => p.includes('project2') && p.endsWith('.venv')));
         });
 
-        test('Relative paths without workspace folders are kept', async () => {
+        test('Relative paths without workspace folders logs warning', async () => {
             // Mock → Relative paths but no workspace folders
             pythonConfig.get.withArgs('venvPath').returns(undefined);
             pythonConfig.get.withArgs('venvFolders').returns(undefined);
@@ -337,9 +339,9 @@ suite('getAllExtraSearchPaths Integration Tests', () => {
             // Run
             const result = await getAllExtraSearchPaths();
 
-            // Assert
-            assert.deepStrictEqual(result, ['relative-path']);
-            assert.strictEqual(mockTraceWarn.called, false, 'Should not warn when keeping relative paths');
+            // Assert - Path is not added and warning is logged
+            assert.deepStrictEqual(result, []);
+            assert.ok(mockTraceWarn.called, 'Should warn about missing workspace folders');
         });
 
         test('Empty and whitespace paths are skipped', async () => {
@@ -350,7 +352,7 @@ suite('getAllExtraSearchPaths Integration Tests', () => {
                 globalValue: ['/valid/path', '', '  ', '/another/valid/path'],
             });
             envConfig.inspect.withArgs('workspaceSearchPaths').returns({
-                workspaceFolderValue: ['valid-relative', '', '   \t\n   ', 'another-valid'],
+                workspaceFolderValue: ['/workspace/valid', '', '   \t\n   ', '/workspace/another'],
             });
 
             const workspace = Uri.file('/workspace');
@@ -359,13 +361,8 @@ suite('getAllExtraSearchPaths Integration Tests', () => {
             // Run
             const result = await getAllExtraSearchPaths();
 
-            // Assert - Now globalSearchPaths empty strings should be filtered out (order doesn't matter)
-            const expected = new Set([
-                '/valid/path',
-                '/another/valid/path',
-                'valid-relative',
-                'another-valid',
-            ]);
+            // Assert - Empty strings filtered out, valid paths kept
+            const expected = new Set(['/valid/path', '/another/valid/path', '/workspace/valid', '/workspace/another']);
             const actual = new Set(result);
             assert.strictEqual(actual.size, expected.size, 'Should have correct number of unique paths');
             assert.deepStrictEqual(actual, expected, 'Should contain exactly the expected paths');
@@ -395,7 +392,7 @@ suite('getAllExtraSearchPaths Integration Tests', () => {
                 globalValue: ['/legacy/venv/path', '/legacy/venvs', '/global/conda', '~/personal/envs'],
             });
             envConfig.inspect.withArgs('workspaceSearchPaths').returns({
-                workspaceFolderValue: ['.venv', 'project-envs', '/shared/team/envs'],
+                workspaceFolderValue: ['.venv', '/shared/team/envs'],
             });
 
             const workspace1 = Uri.file('/workspace/project1');
@@ -407,32 +404,27 @@ suite('getAllExtraSearchPaths Integration Tests', () => {
             // Run
             const result = await getAllExtraSearchPaths();
 
-            // Assert - Should deduplicate and combine all sources (order doesn't matter)
-            const expected = new Set([
-                '/legacy/venv/path',
-                '/legacy/venvs',
-                '/global/conda',
-                '/home/user/personal/envs',
-                '.venv',
-                'project-envs',
-                '/shared/team/envs',
-            ]);
-            const actual = new Set(result);
-
-            // Check that we have exactly the expected paths (no more, no less)
-            assert.strictEqual(actual.size, expected.size, 'Should have correct number of unique paths');
-            assert.deepStrictEqual(actual, expected, 'Should contain exactly the expected paths');
+            // Assert - Relative paths are resolved against workspace folders, absolutes kept as-is
+            // Expected: 4 from legacy/global + 1 absolute workspace path + 2 resolved .venv paths
+            assert.ok(result.includes('/legacy/venv/path'));
+            assert.ok(result.includes('/legacy/venvs'));
+            assert.ok(result.includes('/global/conda'));
+            assert.ok(result.includes('/home/user/personal/envs'));
+            assert.ok(result.includes('/shared/team/envs'));
+            // .venv resolved against both workspace folders
+            assert.ok(result.some((p) => p.includes('project1') && p.endsWith('.venv')));
+            assert.ok(result.some((p) => p.includes('project2') && p.endsWith('.venv')));
         });
 
         test('Overlapping paths are deduplicated', async () => {
-            // Mock → Duplicate paths from different sources
+            // Mock → Duplicate paths from different sources (using absolute paths to test dedup)
             pythonConfig.get.withArgs('venvPath').returns(undefined);
             pythonConfig.get.withArgs('venvFolders').returns(undefined);
             envConfig.inspect.withArgs('globalSearchPaths').returns({
                 globalValue: ['/shared/path', '/global/unique'],
             });
             envConfig.inspect.withArgs('workspaceSearchPaths').returns({
-                workspaceFolderValue: ['/shared/path', 'workspace-unique'],
+                workspaceFolderValue: ['/shared/path', '/workspace/unique'],
             });
 
             const workspace = Uri.file('/workspace');
@@ -441,12 +433,8 @@ suite('getAllExtraSearchPaths Integration Tests', () => {
             // Run
             const result = await getAllExtraSearchPaths();
 
-            // Assert - Duplicates should be removed (order doesn't matter)
-            const expected = new Set([
-                '/shared/path',
-                '/global/unique',
-                'workspace-unique',
-            ]);
+            // Assert - Duplicates should be removed
+            const expected = new Set(['/shared/path', '/global/unique', '/workspace/unique']);
             const actual = new Set(result);
             assert.strictEqual(actual.size, expected.size, 'Should have correct number of unique paths');
             assert.deepStrictEqual(actual, expected, 'Should contain exactly the expected paths');
@@ -458,7 +446,7 @@ suite('getAllExtraSearchPaths Integration Tests', () => {
             pythonConfig.get.withArgs('venvFolders').returns(['/legacy/folder']);
             envConfig.inspect.withArgs('globalSearchPaths').returns({ globalValue: ['/global/path'] });
             envConfig.inspect.withArgs('workspaceSearchPaths').returns({
-                workspaceFolderValue: ['workspace-relative'],
+                workspaceFolderValue: ['.venv'],
             });
 
             const workspace = Uri.file('/workspace');
@@ -467,16 +455,11 @@ suite('getAllExtraSearchPaths Integration Tests', () => {
             // Run
             const result = await getAllExtraSearchPaths();
 
-            // Assert - Should consolidate all path types
-            const expected = new Set([
-                '/legacy/path',
-                '/legacy/folder',
-                '/global/path',
-                'workspace-relative',
-            ]);
-            const actual = new Set(result);
-            assert.strictEqual(actual.size, expected.size, 'Should have correct number of unique paths');
-            assert.deepStrictEqual(actual, expected, 'Should contain exactly the expected paths');
+            // Assert - Should consolidate all path types, relative resolved against workspace
+            assert.ok(result.includes('/legacy/path'));
+            assert.ok(result.includes('/legacy/folder'));
+            assert.ok(result.includes('/global/path'));
+            assert.ok(result.some((p) => p.includes('workspace') && p.endsWith('.venv')));
         });
     });
 });

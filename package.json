@@ -124,7 +124,7 @@
                 "python-envs.workspaceSearchPaths": {
                     "type": "array",
                     "description": "%python-envs.workspaceSearchPaths.description%",
-                    "default": [],
+                    "default": ["./**/.venv"],
                     "scope": "resource",
                     "items": {
                         "type": "string"
@@ -554,11 +554,6 @@
                 },
                 {
                     "command": "python-envs.createAny",
-                    "group": "navigation",
-                    "when": "view == env-managers"
-                },
-                {
-                    "command": "python-envs.managerSearch",
                     "group": "navigation",
                     "when": "view == env-managers"
                 },

@@ -206,6 +206,12 @@ export namespace EnvManagerSearchStrings {
     export const fullWorkspaceSearchDescription = l10n.t('Search the entire workspace for environments');
     export const saveSearchPrompt = l10n.t('Save this search setting for future discovery?');
     export const dontShowAgain = l10n.t("Don't show again");
+    export const slowLoadingMessage = l10n.t(
+        'Environment discovery is taking longer than expected. This may be due to workspace search paths.',
+    );
+    export const openSettings = l10n.t('Open Settings');
+    export const removeWorkspaceSearch = l10n.t('Remove Workspace Search');
+    export const dontShowForWorkspace = l10n.t("Don't Show for This Workspace");
 }
 
 export namespace ActivationStrings {

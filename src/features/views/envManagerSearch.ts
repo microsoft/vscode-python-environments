@@ -9,6 +9,8 @@ import { EnvironmentManagers } from '../../internal.api';
 import { NativePythonFinder } from '../../managers/common/nativePythonFinder';
 
 const SUPPRESS_SAVE_PROMPT_KEY = 'python-envs.search.fullWorkspace.suppressSavePrompt';
+const SUPPRESS_SLOW_LOADING_KEY = 'python-envs.search.slowLoading.suppressPrompt';
+const SLOW_LOADING_THRESHOLD_MS = 10_000; // 10 seconds
 
 /**
  * Handles the Environment Managers view search action.
@@ -22,10 +24,13 @@ export async function handleEnvManagerSearchAction(
 }
 
 /**
- * Opens environment search settings.
+ * Opens environment search settings at workspace level.
  */
 export async function openSearchSettings(): Promise<void> {
-    await commands.executeCommand('workbench.action.openSettings', '@ext:ms-python.vscode-python-envs "search path"');
+    await commands.executeCommand(
+        'workbench.action.openWorkspaceSettings',
+        '@ext:ms-python.vscode-python-envs "search path"',
+    );
 }
 
 /**
@@ -104,4 +109,57 @@ export async function appendWorkspaceSearchPaths(searchPaths: string[]): Promise
 
     const nextPaths = [...currentPaths, ...filteredSearchPaths];
     await config.update('workspaceSearchPaths', nextPaths, ConfigurationTarget.Workspace);
+}
+
+/**
+ * Clears the workspace-level `workspaceSearchPaths` setting.
+ */
+export async function clearWorkspaceSearchPaths(): Promise<void> {
+    const config = getConfiguration('python-envs');
+    await config.update('workspaceSearchPaths', [], ConfigurationTarget.Workspace);
+    traceLog('Cleared workspace search paths');
+}
+
+/**
+ * Monitors environment refresh and shows a notification if it takes too long.
+ * Returns a cleanup function to cancel the timeout if refresh completes early.
+ */
+export function startSlowLoadingMonitor(): () => void {
+    let timeoutId: NodeJS.Timeout | undefined;
+    let notificationShown = false;
+
+    const showNotification = async (): Promise<void> => {
+        const state = await getWorkspacePersistentState();
+        const suppressNotification = await state.get<boolean>(SUPPRESS_SLOW_LOADING_KEY, false);
+        if (suppressNotification || notificationShown) {
+            return;
+        }
+        notificationShown = true;
+
+        const response = await window.showWarningMessage(
+            EnvManagerSearchStrings.slowLoadingMessage,
+            EnvManagerSearchStrings.openSettings,
+            EnvManagerSearchStrings.removeWorkspaceSearch,
+            EnvManagerSearchStrings.dontShowForWorkspace,
+        );
+
+        if (response === EnvManagerSearchStrings.openSettings) {
+            await openSearchSettings();
+        } else if (response === EnvManagerSearchStrings.removeWorkspaceSearch) {
+            await clearWorkspaceSearchPaths();
+        } else if (response === EnvManagerSearchStrings.dontShowForWorkspace) {
+            await state.set(SUPPRESS_SLOW_LOADING_KEY, true);
+        }
+    };
+
+    timeoutId = setTimeout(() => {
+        showNotification();
+    }, SLOW_LOADING_THRESHOLD_MS);
+
+    return () => {
+        if (timeoutId) {
+            clearTimeout(timeoutId);
+            timeoutId = undefined;
+        }
+    };
 }
