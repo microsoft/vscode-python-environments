@@ -1,4 +1,4 @@
-import { commands, ExtensionContext, LogOutputChannel, Terminal, Uri, window } from 'vscode';
+import { commands, ExtensionContext, l10n, LogOutputChannel, ProgressLocation, Terminal, Uri, window } from 'vscode';
 import { version as extensionVersion } from '../package.json';
 import { PythonEnvironment, PythonEnvironmentApi, PythonProjectCreator } from './api';
 import { ensureCorrectVersion } from './common/extVersion';
@@ -16,6 +16,7 @@ import {
     createLogOutputChannel,
     onDidChangeActiveTerminal,
     onDidChangeTerminalShellIntegration,
+    withProgress,
 } from './common/window.apis';
 import { getConfiguration } from './common/workspace.apis';
 import { createManagerReady } from './features/common/managerReady';
@@ -178,7 +179,15 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
         }),
         commands.registerCommand('python-envs.viewLogs', () => outputChannel.show()),
         commands.registerCommand('python-envs.refreshAllManagers', async () => {
-            await Promise.all(envManagers.managers.map((m) => m.refresh(undefined)));
+            await withProgress(
+                {
+                    location: ProgressLocation.Notification,
+                    title: l10n.t('Refreshing environment managers...'),
+                },
+                async () => {
+                    await Promise.all(envManagers.managers.map((m) => m.refresh(undefined)));
+                },
+            );
         }),
         commands.registerCommand('python-envs.refreshPackages', async (item) => {
             await refreshPackagesCommand(item, envManagers);
@@ -193,7 +202,15 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
                 manager: managerId,
                 triggeredLocation: 'createSpecifiedCommand',
             });
-            return await createEnvironmentCommand(item, envManagers, projectManager);
+            return await withProgress(
+                {
+                    location: ProgressLocation.Notification,
+                    title: l10n.t('Creating environment...'),
+                },
+                async () => {
+                    return await createEnvironmentCommand(item, envManagers, projectManager);
+                },
+            );
         }),
         commands.registerCommand('python-envs.createAny', async (options) => {
             // Telemetry: record environment creation attempt with no specific manager
@@ -201,10 +218,18 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
                 manager: 'none',
                 triggeredLocation: 'createAnyCommand',
             });
-            return await createAnyEnvironmentCommand(
-                envManagers,
-                projectManager,
-                options ?? { selectEnvironment: true },
+            return await withProgress(
+                {
+                    location: ProgressLocation.Notification,
+                    title: l10n.t('Creating environment...'),
+                },
+                async () => {
+                    return await createAnyEnvironmentCommand(
+                        envManagers,
+                        projectManager,
+                        options ?? { selectEnvironment: true },
+                    );
+                },
             );
         }),
         commands.registerCommand('python-envs.remove', async (item) => {
