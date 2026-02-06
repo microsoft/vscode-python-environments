@@ -189,6 +189,76 @@ suite('TerminalEnvVarInjector', () => {
         });
     });
 
+    suite('Configuration change triggers updateEnvironmentVariables', () => {
+        let configChangeCallback: ((e: { affectsConfiguration(section: string): boolean }) => void) | undefined;
+
+        setup(() => {
+            // Capture the onDidChangeConfiguration listener so we can fire it manually
+            Object.defineProperty(workspace, 'onDidChangeConfiguration', {
+                value: (listener: (e: { affectsConfiguration(section: string): boolean }) => void) => {
+                    configChangeCallback = listener;
+                    return new Disposable(() => {});
+                },
+                configurable: true,
+            });
+        });
+
+        test('should call updateEnvironmentVariables when python.terminal.useEnvFile changes', async () => {
+            envVarManager
+                .setup((m) => m.getEnvironmentVariables(typeMoq.It.isAny()))
+                .returns(() => Promise.resolve({ VAR: 'value' }));
+
+            injector = new TerminalEnvVarInjector(envVarCollection.object, envVarManager.object);
+            await new Promise((resolve) => setTimeout(resolve, 50));
+
+            // getEnvironmentVariables is called once during initialization
+            envVarManager.verify(
+                (m) => m.getEnvironmentVariables(typeMoq.It.isAny()),
+                typeMoq.Times.once(),
+            );
+
+            // Fire config change for python.terminal.useEnvFile
+            assert.ok(configChangeCallback, 'onDidChangeConfiguration listener should be registered');
+            configChangeCallback!({
+                affectsConfiguration: (section: string) => section === 'python.terminal.useEnvFile',
+            });
+
+            await new Promise((resolve) => setTimeout(resolve, 50));
+
+            // Should have been called again after the config change
+            envVarManager.verify(
+                (m) => m.getEnvironmentVariables(typeMoq.It.isAny()),
+                typeMoq.Times.exactly(2),
+            );
+        });
+
+        test('should call updateEnvironmentVariables when python.envFile changes', async () => {
+            envVarManager
+                .setup((m) => m.getEnvironmentVariables(typeMoq.It.isAny()))
+                .returns(() => Promise.resolve({ VAR: 'value' }));
+
+            injector = new TerminalEnvVarInjector(envVarCollection.object, envVarManager.object);
+            await new Promise((resolve) => setTimeout(resolve, 50));
+
+            envVarManager.verify(
+                (m) => m.getEnvironmentVariables(typeMoq.It.isAny()),
+                typeMoq.Times.once(),
+            );
+
+            // Fire config change for python.envFile
+            configChangeCallback!({
+                affectsConfiguration: (section: string) => section === 'python.envFile',
+            });
+
+            await new Promise((resolve) => setTimeout(resolve, 50));
+
+            envVarManager.verify(
+                (m) => m.getEnvironmentVariables(typeMoq.It.isAny()),
+                typeMoq.Times.exactly(2),
+            );
+        });
+    });
+
     suite('python.envFile compatibility', () => {
         test('python.envFile has no effect when useEnvFile is false', async () => {
             getConfigurationStub.returns(
