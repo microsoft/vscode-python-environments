@@ -669,7 +669,11 @@ function getPythonSettingAndUntildify<T>(name: string, scope?: Uri): T | undefin
 /**
  * Gets all extra environment search paths from various configuration sources.
  * Combines legacy python settings (with migration), globalSearchPaths, and workspaceSearchPaths.
- * @returns Array of search directory paths
+ *
+ * Paths can include glob patterns which are expanded by the native
+ * Python Environment Tool (PET) during environment discovery.
+ *
+ * @returns Array of search paths (may include glob patterns)
  */
 export async function getAllExtraSearchPaths(): Promise<string[]> {
     const searchDirectories: string[] = [];
@@ -736,6 +740,7 @@ function getGlobalSearchPaths(): string[] {
 
 /**
  * Gets the most specific workspace-level setting available for workspaceSearchPaths.
+ * Supports glob patterns which are expanded by PET.
  */
 function getWorkspaceSearchPaths(): string[] {
     try {

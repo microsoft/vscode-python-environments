@@ -47,7 +47,7 @@
                     "type": "string",
                     "description": "%python-envs.defaultEnvManager.description%",
                     "default": "ms-python.python:venv",
-                    "scope": "application"
+                    "scope": "window"
                 },
                 "python-envs.defaultPackageManager": {
                     "type": "string",

@@ -287,7 +287,7 @@ suite('getAllExtraSearchPaths Integration Tests', () => {
         });
 
         test('Workspace folder setting preferred over workspace setting (Windows)', async () => {
-            // Mock → Workspace settings at different levels (Windows-style)
+            // Mock → Workspace settings at different levels (Windows-style paths in config)
             pythonConfig.get.withArgs('venvPath').returns(undefined);
             pythonConfig.get.withArgs('venvFolders').returns(undefined);
             envConfig.inspect.withArgs('globalSearchPaths').returns({ globalValue: [] });
@@ -296,8 +296,9 @@ suite('getAllExtraSearchPaths Integration Tests', () => {
                 workspaceFolderValue: ['C:\\folder-level\\path'],
             });
 
-            const workspace1 = Uri.file('C:\\Projects\\project1');
-            const workspace2 = Uri.file('C:\\Projects\\project2');
+            // Use Unix-style URIs for workspace folders (Uri.file behavior is OS-dependent)
+            const workspace1 = Uri.file('/projects/project1');
+            const workspace2 = Uri.file('/projects/project2');
             mockGetWorkspaceFolders.returns([{ uri: workspace1 }, { uri: workspace2 }]);
 
             // Run
@@ -381,7 +382,7 @@ suite('getAllExtraSearchPaths Integration Tests', () => {
         });
 
         test('Absolute paths used as-is (Windows)', async () => {
-            // Mock → Mix of absolute paths (Windows-style)
+            // Mock → Mix of absolute paths (Windows-style paths in config)
             pythonConfig.get.withArgs('venvPath').returns(undefined);
             pythonConfig.get.withArgs('venvFolders').returns(undefined);
             envConfig.inspect.withArgs('globalSearchPaths').returns({
@@ -391,7 +392,8 @@ suite('getAllExtraSearchPaths Integration Tests', () => {
                 workspaceFolderValue: ['E:\\workspace\\envs'],
             });
 
-            const workspace = Uri.file('C:\\workspace');
+            // Use Unix-style URIs for workspace folders (Uri.file behavior is OS-dependent)
+            const workspace = Uri.file('/workspace');
             mockGetWorkspaceFolders.returns([{ uri: workspace }]);
 
             // Run
@@ -520,7 +522,7 @@ suite('getAllExtraSearchPaths Integration Tests', () => {
         });
 
         test('Power user - complex mix of all source types (Windows)', async () => {
-            // Mock → Complex real-world scenario (Windows-style)
+            // Mock → Complex real-world scenario (Windows-style paths in config)
             pythonConfig.get.withArgs('venvPath').returns('C:\\legacy\\venv\\path');
             pythonConfig.get.withArgs('venvFolders').returns(['D:\\legacy\\venvs']);
             envConfig.inspect.withArgs('globalSearchPaths').returns({
@@ -530,8 +532,9 @@ suite('getAllExtraSearchPaths Integration Tests', () => {
                 workspaceFolderValue: ['.venv', 'F:\\shared\\team\\envs'],
             });
 
-            const workspace1 = Uri.file('C:\\workspace\\project1');
-            const workspace2 = Uri.file('C:\\workspace\\project2');
+            // Use Unix-style URIs for workspace folders (Uri.file behavior is OS-dependent)
+            const workspace1 = Uri.file('/workspace/project1');
+            const workspace2 = Uri.file('/workspace/project2');
             mockGetWorkspaceFolders.returns([{ uri: workspace1 }, { uri: workspace2 }]);
 
             // Run
@@ -576,7 +579,7 @@ suite('getAllExtraSearchPaths Integration Tests', () => {
         });
 
         test('Overlapping paths are deduplicated (Windows)', async () => {
-            // Mock → Duplicate paths from different sources (Windows-style)
+            // Mock → Duplicate paths from different sources (Windows-style paths in config)
             pythonConfig.get.withArgs('venvPath').returns(undefined);
             pythonConfig.get.withArgs('venvFolders').returns(undefined);
             envConfig.inspect.withArgs('globalSearchPaths').returns({
@@ -586,7 +589,8 @@ suite('getAllExtraSearchPaths Integration Tests', () => {
                 workspaceFolderValue: ['C:\\shared\\path', 'E:\\workspace\\unique'],
             });
 
-            const workspace = Uri.file('C:\\workspace');
+            // Use Unix-style URIs for workspace folders (Uri.file behavior is OS-dependent)
+            const workspace = Uri.file('/workspace');
             mockGetWorkspaceFolders.returns([{ uri: workspace }]);
 
             // Run

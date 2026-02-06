@@ -1,5 +1,6 @@
-import { commands, ExtensionContext, LogOutputChannel, Terminal, Uri, window } from 'vscode';
+import { commands, ExtensionContext, extensions, LogOutputChannel, Terminal, Uri, window } from 'vscode';
 import { PythonEnvironment, PythonEnvironmentApi, PythonProjectCreator } from './api';
+import { ENVS_EXTENSION_ID } from './common/constants';
 import { ensureCorrectVersion } from './common/extVersion';
 import { registerLogger, traceError, traceInfo, traceWarn } from './common/logging';
 import { clearPersistentState, setPersistentState } from './common/persistentState';
@@ -101,7 +102,10 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
 
     ensureCorrectVersion();
 
-    // log extension version
+    // Log extension version for diagnostics
+    const extensionVersion = extensions.getExtension(ENVS_EXTENSION_ID)?.packageJSON?.version;
+    traceInfo(`Python-envs extension version: ${extensionVersion ?? 'unknown'}`);
+
     // log settings
     const configLevels = getEnvManagerAndPackageManagerConfigLevels();
     traceInfo(`\n=== ${configLevels.section} ===`);
