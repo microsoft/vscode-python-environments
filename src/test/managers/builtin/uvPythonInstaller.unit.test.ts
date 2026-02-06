@@ -1,6 +1,7 @@
 import assert from 'assert';
 import * as sinon from 'sinon';
 import { LogOutputChannel } from 'vscode';
+import { PythonEnvironmentApi } from '../../../api';
 import { UvInstallStrings } from '../../../common/localize';
 import * as persistentState from '../../../common/persistentState';
 import { EventNames } from '../../../common/telemetry/constants';
@@ -16,7 +17,7 @@ import { createMockLogOutputChannel } from '../../mocks/helper';
 
 suite('uvPythonInstaller - promptInstallPythonViaUv', () => {
     let mockLog: LogOutputChannel;
-    let mockApi: { refreshEnvironments: sinon.SinonStub };
+    let mockApi: Partial<PythonEnvironmentApi>;
     let isUvInstalledStub: sinon.SinonStub;
     let showInformationMessageStub: sinon.SinonStub;
     let sendTelemetryEventStub: sinon.SinonStub;
@@ -44,7 +45,7 @@ suite('uvPythonInstaller - promptInstallPythonViaUv', () => {
     test('should return false when "Don\'t ask again" is set', async () => {
         mockState.get.resolves(true);
 
-        const result = await promptInstallPythonViaUv('activation', mockApi as any, mockLog);
+        const result = await promptInstallPythonViaUv('activation', mockApi as PythonEnvironmentApi, mockLog);
 
         assert.strictEqual(result, false);
         assert(showInformationMessageStub.notCalled, 'Should not show message when dont ask again is set');
@@ -56,7 +57,7 @@ suite('uvPythonInstaller - promptInstallPythonViaUv', () => {
         isUvInstalledStub.resolves(true);
         showInformationMessageStub.resolves(undefined); // User dismissed
 
-        await promptInstallPythonViaUv('activation', mockApi as any, mockLog);
+        await promptInstallPythonViaUv('activation', mockApi as PythonEnvironmentApi, mockLog);
 
         assert(
             showInformationMessageStub.calledWith(
@@ -73,7 +74,7 @@ suite('uvPythonInstaller - promptInstallPythonViaUv', () => {
         isUvInstalledStub.resolves(false);
         showInformationMessageStub.resolves(undefined); // User dismissed
 
-        await promptInstallPythonViaUv('activation', mockApi as any, mockLog);
+        await promptInstallPythonViaUv('activation', mockApi as PythonEnvironmentApi, mockLog);
 
         assert(
             showInformationMessageStub.calledWith(
@@ -90,7 +91,7 @@ suite('uvPythonInstaller - promptInstallPythonViaUv', () => {
         isUvInstalledStub.resolves(true);
         showInformationMessageStub.resolves(UvInstallStrings.dontAskAgain);
 
-        const result = await promptInstallPythonViaUv('activation', mockApi as any, mockLog);
+        const result = await promptInstallPythonViaUv('activation', mockApi as PythonEnvironmentApi, mockLog);
 
         assert.strictEqual(result, false);
         assert(mockState.set.calledWith('python-envs:uv:UV_INSTALL_PYTHON_DONT_ASK', true), 'Should set dont ask flag');
@@ -101,7 +102,7 @@ suite('uvPythonInstaller - promptInstallPythonViaUv', () => {
         isUvInstalledStub.resolves(true);
         showInformationMessageStub.resolves(undefined); // User dismissed
 
-        const result = await promptInstallPythonViaUv('activation', mockApi as any, mockLog);
+        const result = await promptInstallPythonViaUv('activation', mockApi as PythonEnvironmentApi, mockLog);
 
         assert.strictEqual(result, false);
     });
@@ -111,7 +112,7 @@ suite('uvPythonInstaller - promptInstallPythonViaUv', () => {
         isUvInstalledStub.resolves(true);
         showInformationMessageStub.resolves(undefined);
 
-        await promptInstallPythonViaUv('createEnvironment', mockApi as any, mockLog);
+        await promptInstallPythonViaUv('createEnvironment', mockApi as PythonEnvironmentApi, mockLog);
 
         assert(
             sendTelemetryEventStub.calledWith(EventNames.UV_PYTHON_INSTALL_PROMPTED, undefined, {
