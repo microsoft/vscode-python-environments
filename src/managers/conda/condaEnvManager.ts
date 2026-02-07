@@ -86,21 +86,24 @@ export class CondaEnvManager implements EnvironmentManager, Disposable {
 
         this._initialized = createDeferred();
 
-        await withProgress(
-            {
-                location: ProgressLocation.Window,
-                title: CondaStrings.condaDiscovering,
-            },
-            async () => {
-                this.collection = await refreshCondaEnvs(false, this.nativeFinder, this.api, this.log, this);
-                await this.loadEnvMap();
+        try {
+            await withProgress(
+                {
+                    location: ProgressLocation.Window,
+                    title: CondaStrings.condaDiscovering,
+                },
+                async () => {
+                    this.collection = await refreshCondaEnvs(false, this.nativeFinder, this.api, this.log, this);
+                    await this.loadEnvMap();
 
-                this._onDidChangeEnvironments.fire(
-                    this.collection.map((e) => ({ environment: e, kind: EnvironmentChangeKind.add })),
-                );
-            },
-        );
-        this._initialized.resolve();
+                    this._onDidChangeEnvironments.fire(
+                        this.collection.map((e) => ({ environment: e, kind: EnvironmentChangeKind.add })),
+                    );
+                },
+            );
+        } finally {
+            this._initialized.resolve();
+        }
     }
 
     async getEnvironments(scope: GetEnvironmentsScope): Promise<PythonEnvironment[]> {
