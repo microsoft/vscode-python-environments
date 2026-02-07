@@ -68,9 +68,11 @@ export class SysPythonManager implements EnvironmentManager {
 
         this._initialized = createDeferred();
 
-        await this.internalRefresh(false, SysManagerStrings.sysManagerDiscovering);
-
-        this._initialized.resolve();
+        try {
+            await this.internalRefresh(false, SysManagerStrings.sysManagerDiscovering);
+        } finally {
+            this._initialized.resolve();
+        }
     }
 
     refresh(_scope: RefreshEnvironmentsScope): Promise<void> {

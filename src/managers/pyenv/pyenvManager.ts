@@ -44,7 +44,10 @@ export class PyEnvManager implements EnvironmentManager, Disposable {
     private readonly _onDidChangeEnvironments = new EventEmitter<DidChangeEnvironmentsEventArgs>();
     public readonly onDidChangeEnvironments = this._onDidChangeEnvironments.event;
 
-    constructor(private readonly nativeFinder: NativePythonFinder, private readonly api: PythonEnvironmentApi) {
+    constructor(
+        private readonly nativeFinder: NativePythonFinder,
+        private readonly api: PythonEnvironmentApi,
+    ) {
         this.name = 'pyenv';
         this.displayName = 'PyEnv';
         this.preferredPackageManagerId = 'ms-python.python:pip';
@@ -71,21 +74,24 @@ export class PyEnvManager implements EnvironmentManager, Disposable {
 
         this._initialized = createDeferred();
 
-        await withProgress(
-            {
-                location: ProgressLocation.Window,
-                title: PyenvStrings.pyenvDiscovering,
-            },
-            async () => {
-                this.collection = await refreshPyenv(false, this.nativeFinder, this.api, this);
-                await this.loadEnvMap();
+        try {
+            await withProgress(
+                {
+                    location: ProgressLocation.Window,
+                    title: PyenvStrings.pyenvDiscovering,
+                },
+                async () => {
+                    this.collection = await refreshPyenv(false, this.nativeFinder, this.api, this);
+                    await this.loadEnvMap();
 
-                this._onDidChangeEnvironments.fire(
-                    this.collection.map((e) => ({ environment: e, kind: EnvironmentChangeKind.add })),
-                );
-            },
-        );
-        this._initialized.resolve();
+                    this._onDidChangeEnvironments.fire(
+                        this.collection.map((e) => ({ environment: e, kind: EnvironmentChangeKind.add })),
+                    );
+                },
+            );
+        } finally {
+            this._initialized.resolve();
+        }
     }
 
     async getEnvironments(scope: GetEnvironmentsScope): Promise<PythonEnvironment[]> {

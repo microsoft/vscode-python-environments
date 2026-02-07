@@ -49,7 +49,10 @@ export class PipenvManager implements EnvironmentManager {
 
     private _initialized: Deferred<void> | undefined;
 
-    constructor(public readonly nativeFinder: NativePythonFinder, public readonly api: PythonEnvironmentApi) {
+    constructor(
+        public readonly nativeFinder: NativePythonFinder,
+        public readonly api: PythonEnvironmentApi,
+    ) {
         this.name = 'pipenv';
         this.displayName = 'Pipenv';
         this.preferredPackageManagerId = 'ms-python.python:pip';
@@ -70,21 +73,24 @@ export class PipenvManager implements EnvironmentManager {
 
         this._initialized = createDeferred();
 
-        await withProgress(
-            {
-                location: ProgressLocation.Window,
-                title: PipenvStrings.pipenvDiscovering,
-            },
-            async () => {
-                this.collection = await refreshPipenv(false, this.nativeFinder, this.api, this);
-                await this.loadEnvMap();
+        try {
+            await withProgress(
+                {
+                    location: ProgressLocation.Window,
+                    title: PipenvStrings.pipenvDiscovering,
+                },
+                async () => {
+                    this.collection = await refreshPipenv(false, this.nativeFinder, this.api, this);
+                    await this.loadEnvMap();
 
-                this._onDidChangeEnvironments.fire(
-                    this.collection.map((e) => ({ environment: e, kind: EnvironmentChangeKind.add })),
-                );
-            },
-        );
-        this._initialized.resolve();
+                    this._onDidChangeEnvironments.fire(
+                        this.collection.map((e) => ({ environment: e, kind: EnvironmentChangeKind.add })),
+                    );
+                },
+            );
+        } finally {
+            this._initialized.resolve();
+        }
     }
 
     private async loadEnvMap() {
