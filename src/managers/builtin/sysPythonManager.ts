@@ -86,6 +86,8 @@ export class SysPythonManager implements EnvironmentManager {
                     );
                     if (resolved) {
                         this.collection.push(resolved);
+                        this.globalEnv = resolved;
+                        await setSystemEnvForGlobal(resolved.environmentPath.fsPath);
                         this._onDidChangeEnvironments.fire([
                             { environment: resolved, kind: EnvironmentChangeKind.add },
                         ]);
@@ -263,8 +265,10 @@ export class SysPythonManager implements EnvironmentManager {
             // Resolve the installed Python using NativePythonFinder instead of full refresh
             const resolved = await resolveSystemPythonEnvironmentPath(pythonPath, this.nativeFinder, this.api, this);
             if (resolved) {
-                // Add to collection and fire change event
+                // Add to collection, update global env, and fire change event
                 this.collection.push(resolved);
+                this.globalEnv = resolved;
+                await setSystemEnvForGlobal(resolved.environmentPath.fsPath);
                 this._onDidChangeEnvironments.fire([{ environment: resolved, kind: EnvironmentChangeKind.add }]);
                 return resolved;
             }

@@ -60,6 +60,7 @@ suite('uvPythonInstaller - promptInstallPythonViaUv', () => {
         assert(
             showInformationMessageStub.calledWith(
                 UvInstallStrings.installPythonPrompt,
+                { modal: true },
                 UvInstallStrings.installPython,
                 UvInstallStrings.dontAskAgain,
             ),
@@ -77,6 +78,7 @@ suite('uvPythonInstaller - promptInstallPythonViaUv', () => {
         assert(
             showInformationMessageStub.calledWith(
                 UvInstallStrings.installPythonAndUvPrompt,
+                { modal: true },
                 UvInstallStrings.installPython,
                 UvInstallStrings.dontAskAgain,
             ),

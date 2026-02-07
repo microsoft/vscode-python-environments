@@ -348,6 +348,7 @@ export async function promptInstallPythonViaUv(
 
     const result = await showInformationMessage(
         promptMessage,
+        { modal: true },
         UvInstallStrings.installPython,
         UvInstallStrings.dontAskAgain,
     );
@@ -414,10 +415,10 @@ export async function installPythonWithUv(log?: LogOutputChannel, version?: stri
                 return undefined;
             }
 
-            // Step 3: Get the installed Python path using uv python find
+            // Step 3: Get the installed Python path using uv-managed Python listing
             const pythonPath = await getUvPythonPath(version);
             if (!pythonPath) {
-                traceError('Python installed but could not find the path via uv python find');
+                traceError('Python installed but could not find the path via uv python list');
                 sendTelemetryEvent(EventNames.UV_PYTHON_INSTALL_FAILED, undefined, { stage: 'findPath' });
                 showErrorMessage(UvInstallStrings.installFailed);
                 return undefined;

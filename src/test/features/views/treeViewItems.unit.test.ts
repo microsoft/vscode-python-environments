@@ -1,8 +1,10 @@
 import * as assert from 'assert';
 import { Uri } from 'vscode';
+import { UvInstallStrings, VenvManagerStrings } from '../../../common/localize';
 import {
     EnvManagerTreeItem,
     getEnvironmentParentDirName,
+    NoPythonEnvTreeItem,
     PythonEnvTreeItem,
     PythonGroupEnvTreeItem,
 } from '../../../features/views/treeViewItems';
@@ -399,6 +401,90 @@ suite('Test TreeView Items', () => {
 
             // Assert
             assert.strictEqual(result, 'myapp');
+        });
+    });
+
+    suite('NoPythonEnvTreeItem', () => {
+        test('System manager with create: shows install Python label', () => {
+            const manager = new InternalEnvironmentManager('ms-python.python:test-manager', {
+                name: 'system',
+                displayName: 'Global',
+                description: 'test',
+                preferredPackageManagerId: 'pip',
+                refresh: () => Promise.resolve(),
+                getEnvironments: () => Promise.resolve([]),
+                resolve: () => Promise.resolve(undefined),
+                set: () => Promise.resolve(),
+                get: () => Promise.resolve(undefined),
+                create: () => Promise.resolve(undefined),
+            });
+            const managerItem = new EnvManagerTreeItem(manager);
+            const item = new NoPythonEnvTreeItem(managerItem);
+
+            assert.equal(item.treeItem.label, UvInstallStrings.clickToInstallPython);
+            assert.ok(item.treeItem.command, 'Should have a command');
+            assert.equal(item.treeItem.command?.title, UvInstallStrings.installPython);
+            assert.equal(item.treeItem.command?.command, 'python-envs.create');
+        });
+
+        test('Non-system manager with create: shows create environment label', () => {
+            const manager = new InternalEnvironmentManager('ms-python.python:test-manager', {
+                name: 'venv',
+                displayName: 'Venv',
+                description: 'test',
+                preferredPackageManagerId: 'pip',
+                refresh: () => Promise.resolve(),
+                getEnvironments: () => Promise.resolve([]),
+                resolve: () => Promise.resolve(undefined),
+                set: () => Promise.resolve(),
+                get: () => Promise.resolve(undefined),
+                create: () => Promise.resolve(undefined),
+            });
+            const managerItem = new EnvManagerTreeItem(manager);
+            const item = new NoPythonEnvTreeItem(managerItem);
+
+            assert.equal(item.treeItem.label, VenvManagerStrings.noEnvClickToCreate);
+            assert.ok(item.treeItem.command, 'Should have a command');
+            assert.equal(item.treeItem.command?.title, VenvManagerStrings.createEnvironment);
+            assert.equal(item.treeItem.command?.command, 'python-envs.create');
+        });
+
+        test('Manager without create: shows no env found label', () => {
+            const manager = new InternalEnvironmentManager('ms-python.python:test-manager', {
+                name: 'test',
+                displayName: 'Test',
+                description: 'test',
+                preferredPackageManagerId: 'pip',
+                refresh: () => Promise.resolve(),
+                getEnvironments: () => Promise.resolve([]),
+                resolve: () => Promise.resolve(undefined),
+                set: () => Promise.resolve(),
+                get: () => Promise.resolve(undefined),
+            });
+            const managerItem = new EnvManagerTreeItem(manager);
+            const item = new NoPythonEnvTreeItem(managerItem);
+
+            assert.equal(item.treeItem.label, VenvManagerStrings.noEnvFound);
+            assert.equal(item.treeItem.command, undefined, 'Should not have a command');
+        });
+
+        test('System manager without create: shows no env found label', () => {
+            const manager = new InternalEnvironmentManager('ms-python.python:test-manager', {
+                name: 'system',
+                displayName: 'Global',
+                description: 'test',
+                preferredPackageManagerId: 'pip',
+                refresh: () => Promise.resolve(),
+                getEnvironments: () => Promise.resolve([]),
+                resolve: () => Promise.resolve(undefined),
+                set: () => Promise.resolve(),
+                get: () => Promise.resolve(undefined),
+            });
+            const managerItem = new EnvManagerTreeItem(manager);
+            const item = new NoPythonEnvTreeItem(managerItem);
+
+            assert.equal(item.treeItem.label, VenvManagerStrings.noEnvFound);
+            assert.equal(item.treeItem.command, undefined, 'Should not have a command');
         });
     });
 });

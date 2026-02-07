@@ -213,9 +213,11 @@ export namespace ActivationStrings {
 
 export namespace UvInstallStrings {
     export const noPythonFound = l10n.t('No Python installation found');
-    export const installPythonPrompt = l10n.t('No Python found. Would you like to install Python using uv?');
+    export const installPythonPrompt = l10n.t(
+        'No Python found. Would you like to install Python using uv? This will download and run an installer from https://astral.sh.',
+    );
     export const installPythonAndUvPrompt = l10n.t(
-        'No Python found. Would you like to install uv and use it to install Python?',
+        'No Python found. Would you like to install uv and use it to install Python? This will download and run an installer from https://astral.sh.',
     );
     export const installPython = l10n.t('Install Python');
     export const installingUv = l10n.t('Installing uv...');
