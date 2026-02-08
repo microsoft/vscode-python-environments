@@ -32,7 +32,8 @@ import { PYTHON_EXTENSION_ID } from '../../common/constants';
 import { VenvManagerStrings } from '../../common/localize';
 import { traceError, traceWarn } from '../../common/logging';
 import { createDeferred, Deferred } from '../../common/utils/deferred';
-import { showErrorMessage, withProgress } from '../../common/window.apis';
+import { normalizePath } from '../../common/utils/pathUtils';
+import { showErrorMessage, showInformationMessage, withProgress } from '../../common/window.apis';
 import { findParentIfFile } from '../../features/envCommands';
 import { NativePythonFinder } from '../common/nativePythonFinder';
 import { getLatest, shortVersion, sortEnvironments } from '../common/utils';
@@ -383,6 +384,16 @@ export class VenvManager implements EnvironmentManager {
                 return;
             }
 
+            // Notify user if VIRTUAL_ENV is set and they're trying to select a different environment
+            if (process.env.VIRTUAL_ENV && environment) {
+                const virtualEnvPath = process.env.VIRTUAL_ENV;
+                const selectedPath = environment.sysPrefix;
+                // Only show notification if they selected a different environment
+                if (virtualEnvPath !== selectedPath) {
+                    showInformationMessage(VenvManagerStrings.venvVirtualEnvActive);
+                }
+            }
+
             const before = this.fsPathToEnv.get(pw.uri.fsPath);
             if (environment) {
                 this.fsPathToEnv.set(pw.uri.fsPath, environment);
@@ -541,7 +552,7 @@ export class VenvManager implements EnvironmentManager {
         this.fsPathToEnv.clear();
 
         const sorted = sortEnvironments(this.collection);
-        const projectPaths = this.api.getPythonProjects().map((p) => path.normalize(p.uri.fsPath));
+        const projectPaths = this.api.getPythonProjects().map((p) => normalizePath(p.uri.fsPath));
         const events: (() => void)[] = [];
         // Iterates through all workspace projects
         for (const p of projectPaths) {
@@ -580,7 +591,7 @@ export class VenvManager implements EnvironmentManager {
                 // Search through all known environments (e) and check if any are associated with the current project path. If so, add that environment and path in the map.
                 const found = sorted.find((e) => {
                     const t = this.api.getPythonProject(e.environmentPath)?.uri.fsPath;
-                    return t && path.normalize(t) === p;
+                    return t && normalizePath(t) === p;
                 });
                 if (found) {
                     this.fsPathToEnv.set(p, found);
@@ -595,11 +606,15 @@ export class VenvManager implements EnvironmentManager {
      * Finds a PythonEnvironment in the given collection (or all environments) that matches the provided file system path. O(e) where e = environments.len
      */
     private findEnvironmentByPath(fsPath: string, collection?: PythonEnvironment[]): PythonEnvironment | undefined {
-        const normalized = path.normalize(fsPath);
+        const normalized = normalizePath(fsPath);
         const envs = collection ?? this.collection;
         return envs.find((e) => {
-            const n = path.normalize(e.environmentPath.fsPath);
-            return n === normalized || path.dirname(n) === normalized || path.dirname(path.dirname(n)) === normalized;
+            const n = normalizePath(e.environmentPath.fsPath);
+            return (
+                n === normalized ||
+                normalizePath(path.dirname(e.environmentPath.fsPath)) === normalized ||
+                normalizePath(path.dirname(path.dirname(e.environmentPath.fsPath))) === normalized
+            );
         });
     }
 
