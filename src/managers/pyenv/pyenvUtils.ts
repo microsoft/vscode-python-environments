@@ -25,12 +25,15 @@ import { shortVersion, sortEnvironments } from '../common/utils';
 
 /**
  * Returns the pyenv root directory from the pyenv executable path.
- * On Windows, pyenv-win is at `~/.pyenv/pyenv-win/bin/pyenv.bat` (3 levels up).
- * On POSIX, pyenv is at `~/.pyenv/bin/pyenv` (2 levels up).
+ * Prefers `PYENV_ROOT` env var when set, otherwise goes up 2 levels from the binary.
+ * On POSIX, pyenv binary is at `<root>/bin/pyenv` (e.g. `~/.pyenv/bin/pyenv`).
+ * On Windows, pyenv-win binary is at `<root>/bin/pyenv.bat` (e.g. `~/.pyenv/pyenv-win/bin/pyenv.bat`,
+ * where `<root>` is `~/.pyenv/pyenv-win`).
  */
 export function getPyenvDir(pyenv: string): string {
-    if (isWindows()) {
-        return path.dirname(path.dirname(path.dirname(pyenv)));
+    const pyenvRoot = process.env.PYENV_ROOT;
+    if (pyenvRoot) {
+        return pyenvRoot;
     }
     return path.dirname(path.dirname(pyenv));
 }
