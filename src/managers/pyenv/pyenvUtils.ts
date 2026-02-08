@@ -23,6 +23,18 @@ import {
 } from '../common/nativePythonFinder';
 import { shortVersion, sortEnvironments } from '../common/utils';
 
+/**
+ * Returns the pyenv root directory from the pyenv executable path.
+ * On Windows, pyenv-win is at `~/.pyenv/pyenv-win/bin/pyenv.bat` (3 levels up).
+ * On POSIX, pyenv is at `~/.pyenv/bin/pyenv` (2 levels up).
+ */
+export function getPyenvDir(pyenv: string): string {
+    if (isWindows()) {
+        return path.dirname(path.dirname(path.dirname(pyenv)));
+    }
+    return path.dirname(path.dirname(pyenv));
+}
+
 async function findPyenv(): Promise<string | undefined> {
     try {
         return await which('pyenv');
@@ -174,8 +186,9 @@ function nativeToPythonEnv(
         return undefined;
     }
 
-    const versionsPath = normalizePath(path.join(path.dirname(path.dirname(pyenv)), 'versions'));
-    const envsPaths = normalizePath(path.join(path.dirname(versionsPath), 'envs'));
+    const pyenvDir = getPyenvDir(pyenv);
+    const versionsPath = normalizePath(path.join(pyenvDir, 'versions'));
+    const envsPaths = normalizePath(path.join(pyenvDir, 'envs'));
     let group = undefined;
     const normPrefix = normalizePath(info.prefix);
     if (normPrefix.startsWith(versionsPath)) {
