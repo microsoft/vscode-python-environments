@@ -99,6 +99,9 @@ export namespace VenvManagerStrings {
     export const noEnvClickToCreate = l10n.t('No environment found, click to create');
     export const noEnvFound = l10n.t('No Python environments found.');
     export const createEnvironment = l10n.t('Create Environment');
+    export const venvVirtualEnvActive = l10n.t(
+        'VIRTUAL_ENV is set for this VS Code session. Selection saved for new terminals only.',
+    );
 
     export const venvName = l10n.t('Enter a name for the virtual environment');
     export const venvNameErrorEmpty = l10n.t('Name cannot be empty');
