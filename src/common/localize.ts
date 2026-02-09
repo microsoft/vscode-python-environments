@@ -96,6 +96,9 @@ export namespace VenvManagerStrings {
     export const venvErrorNoBasePython = l10n.t('No base Python found');
     export const venvErrorNoPython3 = l10n.t('Did not find any base Python 3');
 
+    export const noEnvClickToCreate = l10n.t('No environment found, click to create');
+    export const noEnvFound = l10n.t('No Python environments found.');
+    export const createEnvironment = l10n.t('Create Environment');
     export const venvVirtualEnvActive = l10n.t(
         'VIRTUAL_ENV is set for this VS Code session. Selection saved for new terminals only.',
     );
@@ -209,4 +212,35 @@ export namespace ActivationStrings {
         Commands.viewLogs,
     );
     export const activatingEnvironment = l10n.t('Activating environment');
+}
+
+export namespace UvInstallStrings {
+    export const noPythonFound = l10n.t('No Python installation found');
+    export const installPythonPrompt = l10n.t(
+        'No Python found. Would you like to install Python using uv? This will download and run an installer from https://astral.sh.',
+    );
+    export const installPythonAndUvPrompt = l10n.t(
+        'No Python found. Would you like to install uv and use it to install Python? This will download and run an installer from https://astral.sh.',
+    );
+    export const installPython = l10n.t('Install Python');
+    export const installingUv = l10n.t('Installing uv...');
+    export const installingPython = l10n.t('Installing Python via uv...');
+    export const installComplete = l10n.t('Python installed successfully');
+    export function installCompleteWithDetails(version: string, path: string): string {
+        return l10n.t('Python {0} installed successfully at {1}', version, path);
+    }
+    export function installCompleteWithPath(path: string): string {
+        return l10n.t('Python installed successfully at {0}', path);
+    }
+    export const installFailed = l10n.t('Failed to install Python');
+    export const uvInstallFailed = l10n.t('Failed to install uv');
+    export const uvInstallRestartRequired = l10n.t(
+        'uv was installed but may not be available in the current terminal. Please restart VS Code or open a new terminal and try again.',
+    );
+    export const dontAskAgain = l10n.t("Don't ask again");
+    export const clickToInstallPython = l10n.t('No Python found, click to install');
+    export const selectPythonVersion = l10n.t('Select Python version to install');
+    export const installed = l10n.t('installed');
+    export const fetchingVersions = l10n.t('Fetching available Python versions...');
+    export const failedToFetchVersions = l10n.t('Failed to fetch available Python versions');
 }

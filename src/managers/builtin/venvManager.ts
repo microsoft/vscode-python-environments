@@ -37,6 +37,7 @@ import { showErrorMessage, showInformationMessage, withProgress } from '../../co
 import { findParentIfFile } from '../../features/envCommands';
 import { NativePythonFinder } from '../common/nativePythonFinder';
 import { getLatest, shortVersion, sortEnvironments } from '../common/utils';
+import { promptInstallPythonViaUv } from './uvPythonInstaller';
 import {
     clearVenvCache,
     CreateEnvironmentResult,
@@ -143,7 +144,26 @@ export class VenvManager implements EnvironmentManager {
 
             const venvRoot: Uri = Uri.file(await findParentIfFile(uri.fsPath));
 
-            const globals = await this.api.getEnvironments('global');
+            let globals = await this.api.getEnvironments('global');
+
+            // If no Python environments found, offer to install Python via uv
+            if (globals.length === 0) {
+                const installedPath = await promptInstallPythonViaUv('createEnvironment', this.log);
+                if (installedPath) {
+                    // Refresh environments to detect the newly installed Python
+                    await this.api.refreshEnvironments(undefined);
+                    // Re-fetch environments after refresh
+                    globals = await this.api.getEnvironments('global');
+                    // Update globalEnv reference if we found any Python 3.x environments
+                    const python3Envs = globals.filter((e) => e.version.startsWith('3.'));
+                    if (python3Envs.length === 0) {
+                        this.log.warn('Python installed via uv but no Python 3.x global environments were detected.');
+                    } else {
+                        this.globalEnv = getLatest(python3Envs);
+                    }
+                }
+            }
+
             let result: CreateEnvironmentResult | undefined = undefined;
             if (options?.quickCreate) {
                 // error on missing information

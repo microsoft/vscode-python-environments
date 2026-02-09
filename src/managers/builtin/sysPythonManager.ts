@@ -1,6 +1,8 @@
 import * as path from 'path';
 import { EventEmitter, LogOutputChannel, MarkdownString, ProgressLocation, ThemeIcon, Uri, window } from 'vscode';
 import {
+    CreateEnvironmentOptions,
+    CreateEnvironmentScope,
     DidChangeEnvironmentEventArgs,
     DidChangeEnvironmentsEventArgs,
     EnvironmentChangeKind,
@@ -28,6 +30,7 @@ import {
     setSystemEnvForWorkspaces,
 } from './cache';
 import { refreshPythons, resolveSystemPythonEnvironmentPath } from './utils';
+import { installPythonWithUv, promptInstallPythonViaUv, selectPythonVersionToInstall } from './uvPythonInstaller';
 
 export class SysPythonManager implements EnvironmentManager {
     private collection: PythonEnvironment[] = [];
@@ -70,6 +73,27 @@ export class SysPythonManager implements EnvironmentManager {
 
         try {
             await this.internalRefresh(false, SysManagerStrings.sysManagerDiscovering);
+
+            // If no Python environments were found, offer to install via uv
+            if (this.collection.length === 0) {
+                const pythonPath = await promptInstallPythonViaUv('activation', this.log);
+                if (pythonPath) {
+                    const resolved = await resolveSystemPythonEnvironmentPath(
+                        pythonPath,
+                        this.nativeFinder,
+                        this.api,
+                        this,
+                    );
+                    if (resolved) {
+                        this.collection.push(resolved);
+                        this.globalEnv = resolved;
+                        await setSystemEnvForGlobal(resolved.environmentPath.fsPath);
+                        this._onDidChangeEnvironments.fire([
+                            { environment: resolved, kind: EnvironmentChangeKind.add },
+                        ]);
+                    }
+                }
+            }
         } finally {
             this._initialized.resolve();
         }
@@ -218,6 +242,39 @@ export class SysPythonManager implements EnvironmentManager {
         }
 
         return resolved;
+    }
+
+    /**
+     * Installs a global Python using uv.
+     * This method shows a QuickPick to select the Python version, then installs it.
+     */
+    async create(
+        _scope: CreateEnvironmentScope,
+        _options?: CreateEnvironmentOptions,
+    ): Promise<PythonEnvironment | undefined> {
+        // Show QuickPick to select Python version
+        const selectedVersion = await selectPythonVersionToInstall();
+        if (!selectedVersion) {
+            // User cancelled
+            return undefined;
+        }
+
+        const pythonPath = await installPythonWithUv(this.log, selectedVersion);
+
+        if (pythonPath) {
+            // Resolve the installed Python using NativePythonFinder instead of full refresh
+            const resolved = await resolveSystemPythonEnvironmentPath(pythonPath, this.nativeFinder, this.api, this);
+            if (resolved) {
+                // Add to collection, update global env, and fire change event
+                this.collection.push(resolved);
+                this.globalEnv = resolved;
+                await setSystemEnvForGlobal(resolved.environmentPath.fsPath);
+                this._onDidChangeEnvironments.fire([{ environment: resolved, kind: EnvironmentChangeKind.add }]);
+                return resolved;
+            }
+        }
+
+        return undefined;
     }
 
     async clearCache(): Promise<void> {

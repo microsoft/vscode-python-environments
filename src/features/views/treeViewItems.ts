@@ -1,6 +1,6 @@
 import { Command, MarkdownString, ThemeIcon, TreeItem, TreeItemCollapsibleState } from 'vscode';
 import { EnvironmentGroupInfo, IconPath, Package, PythonEnvironment, PythonProject } from '../../api';
-import { EnvViewStrings } from '../../common/localize';
+import { EnvViewStrings, UvInstallStrings, VenvManagerStrings } from '../../common/localize';
 import { InternalEnvironmentManager, InternalPackageManager } from '../../internal.api';
 import { isActivatableEnvironment } from '../common/activation';
 import { removable } from './utils';
@@ -176,12 +176,16 @@ export class NoPythonEnvTreeItem implements EnvTreeItem {
         private readonly tooltip?: string | MarkdownString,
         private readonly iconPath?: string | IconPath,
     ) {
-        const item = new TreeItem(
-            this.parent.manager.supportsCreate
-                ? 'No environment found, click to create'
-                : 'No python environments found.',
-            TreeItemCollapsibleState.None,
-        );
+        // Use special message for system manager (Python installation)
+        const isSystemManager = this.parent.manager.name === 'system';
+        let label: string;
+        if (this.parent.manager.supportsCreate) {
+            label = isSystemManager ? UvInstallStrings.clickToInstallPython : VenvManagerStrings.noEnvClickToCreate;
+        } else {
+            label = VenvManagerStrings.noEnvFound;
+        }
+
+        const item = new TreeItem(label, TreeItemCollapsibleState.None);
         item.contextValue = 'python-no-environment';
         item.description = this.description;
         item.tooltip = this.tooltip;
@@ -189,7 +193,7 @@ export class NoPythonEnvTreeItem implements EnvTreeItem {
         if (this.parent.manager.supportsCreate) {
             item.command = {
                 command: 'python-envs.create',
-                title: 'Create Environment',
+                title: isSystemManager ? UvInstallStrings.installPython : VenvManagerStrings.createEnvironment,
                 arguments: [this.parent],
             };
         }
