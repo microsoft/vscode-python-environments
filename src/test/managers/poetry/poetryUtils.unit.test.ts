@@ -1,10 +1,15 @@
 import assert from 'node:assert';
+import path from 'node:path';
 import * as sinon from 'sinon';
 import { EnvironmentManager, PythonEnvironment, PythonEnvironmentApi, PythonEnvironmentInfo } from '../../../api';
 import * as childProcessApis from '../../../common/childProcess.apis';
+import * as pathUtils from '../../../common/utils/pathUtils';
+import * as platformUtils from '../../../common/utils/platformUtils';
 import { NativeEnvInfo } from '../../../managers/common/nativePythonFinder';
 import * as utils from '../../../managers/common/utils';
 import {
+    getDefaultPoetryCacheDir,
+    getDefaultPoetryVirtualenvsPath,
     getPoetryVersion,
     isPoetryVirtualenvsInProject,
     nativeToPythonEnv,
@@ -206,5 +211,157 @@ suite('getPoetryVersion - childProcess.apis mocking pattern', () => {
         const version = await getPoetryVersion('/usr/bin/poetry');
 
         assert.strictEqual(version, undefined);
+    });
+});
+
+suite('getDefaultPoetryCacheDir', () => {
+    let isWindowsStub: sinon.SinonStub;
+    let isMacStub: sinon.SinonStub;
+    let getUserHomeDirStub: sinon.SinonStub;
+    let originalLocalAppData: string | undefined;
+    let originalAppData: string | undefined;
+
+    setup(() => {
+        isWindowsStub = sinon.stub(platformUtils, 'isWindows');
+        isMacStub = sinon.stub(platformUtils, 'isMac');
+        getUserHomeDirStub = sinon.stub(pathUtils, 'getUserHomeDir');
+
+        // Save original env vars
+        originalLocalAppData = process.env.LOCALAPPDATA;
+        originalAppData = process.env.APPDATA;
+    });
+
+    teardown(() => {
+        sinon.restore();
+        // Restore original env vars
+        if (originalLocalAppData === undefined) {
+            delete process.env.LOCALAPPDATA;
+        } else {
+            process.env.LOCALAPPDATA = originalLocalAppData;
+        }
+        if (originalAppData === undefined) {
+            delete process.env.APPDATA;
+        } else {
+            process.env.APPDATA = originalAppData;
+        }
+    });
+
+    test('Windows: uses LOCALAPPDATA when available', () => {
+        isWindowsStub.returns(true);
+        process.env.LOCALAPPDATA = 'C:\\Users\\test\\AppData\\Local';
+
+        const result = getDefaultPoetryCacheDir();
+
+        assert.strictEqual(result, path.join('C:\\Users\\test\\AppData\\Local', 'pypoetry', 'Cache'));
+    });
+
+    test('Windows: falls back to APPDATA when LOCALAPPDATA is not set', () => {
+        isWindowsStub.returns(true);
+        delete process.env.LOCALAPPDATA;
+        process.env.APPDATA = 'C:\\Users\\test\\AppData\\Roaming';
+
+        const result = getDefaultPoetryCacheDir();
+
+        assert.strictEqual(result, path.join('C:\\Users\\test\\AppData\\Roaming', 'pypoetry', 'Cache'));
+    });
+
+    test('Windows: returns undefined when neither LOCALAPPDATA nor APPDATA is set', () => {
+        isWindowsStub.returns(true);
+        delete process.env.LOCALAPPDATA;
+        delete process.env.APPDATA;
+
+        const result = getDefaultPoetryCacheDir();
+
+        assert.strictEqual(result, undefined);
+    });
+
+    test('macOS: uses ~/Library/Caches/pypoetry', () => {
+        isWindowsStub.returns(false);
+        isMacStub.returns(true);
+        getUserHomeDirStub.returns('/Users/test');
+
+        const result = getDefaultPoetryCacheDir();
+
+        assert.strictEqual(result, path.join('/Users/test', 'Library', 'Caches', 'pypoetry'));
+    });
+
+    test('Linux: uses ~/.cache/pypoetry', () => {
+        isWindowsStub.returns(false);
+        isMacStub.returns(false);
+        getUserHomeDirStub.returns('/home/test');
+
+        const result = getDefaultPoetryCacheDir();
+
+        assert.strictEqual(result, path.join('/home/test', '.cache', 'pypoetry'));
+    });
+
+    test('returns undefined when home directory is not available (non-Windows)', () => {
+        isWindowsStub.returns(false);
+        getUserHomeDirStub.returns(undefined);
+
+        const result = getDefaultPoetryCacheDir();
+
+        assert.strictEqual(result, undefined);
+    });
+});
+
+suite('getDefaultPoetryVirtualenvsPath', () => {
+    let isWindowsStub: sinon.SinonStub;
+    let isMacStub: sinon.SinonStub;
+    let getUserHomeDirStub: sinon.SinonStub;
+    let originalLocalAppData: string | undefined;
+
+    setup(() => {
+        isWindowsStub = sinon.stub(platformUtils, 'isWindows');
+        isMacStub = sinon.stub(platformUtils, 'isMac');
+        getUserHomeDirStub = sinon.stub(pathUtils, 'getUserHomeDir');
+        originalLocalAppData = process.env.LOCALAPPDATA;
+    });
+
+    teardown(() => {
+        sinon.restore();
+        if (originalLocalAppData === undefined) {
+            delete process.env.LOCALAPPDATA;
+        } else {
+            process.env.LOCALAPPDATA = originalLocalAppData;
+        }
+    });
+
+    test('appends virtualenvs to cache directory', () => {
+        isWindowsStub.returns(false);
+        isMacStub.returns(false);
+        getUserHomeDirStub.returns('/home/test');
+
+        const result = getDefaultPoetryVirtualenvsPath();
+
+        assert.strictEqual(result, path.join('/home/test', '.cache', 'pypoetry', 'virtualenvs'));
+    });
+
+    test('Windows: returns correct virtualenvs path', () => {
+        isWindowsStub.returns(true);
+        process.env.LOCALAPPDATA = 'C:\\Users\\test\\AppData\\Local';
+
+        const result = getDefaultPoetryVirtualenvsPath();
+
+        assert.strictEqual(result, path.join('C:\\Users\\test\\AppData\\Local', 'pypoetry', 'Cache', 'virtualenvs'));
+    });
+
+    test('macOS: returns correct virtualenvs path', () => {
+        isWindowsStub.returns(false);
+        isMacStub.returns(true);
+        getUserHomeDirStub.returns('/Users/test');
+
+        const result = getDefaultPoetryVirtualenvsPath();
+
+        assert.strictEqual(result, path.join('/Users/test', 'Library', 'Caches', 'pypoetry', 'virtualenvs'));
+    });
+
+    test('returns undefined when cache dir is not available', () => {
+        isWindowsStub.returns(false);
+        getUserHomeDirStub.returns(undefined);
+
+        const result = getDefaultPoetryVirtualenvsPath();
+
+        assert.strictEqual(result, undefined);
     });
 });
