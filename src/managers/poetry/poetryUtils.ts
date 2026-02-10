@@ -17,6 +17,20 @@ import {
 } from '../common/nativePythonFinder';
 import { getShellActivationCommands, shortVersion, sortEnvironments } from '../common/utils';
 
+/**
+ * Checks if the POETRY_VIRTUALENVS_IN_PROJECT environment variable is set to a truthy value.
+ * When true, Poetry creates virtualenvs in the project's `.venv` directory.
+ * Mirrors the PET server logic in `pet-poetry/src/env_variables.rs`.
+ * @param envValue Optional override for the env var value (used for testing).
+ */
+export function isPoetryVirtualenvsInProject(envValue?: string): boolean {
+    const value = envValue ?? process.env.POETRY_VIRTUALENVS_IN_PROJECT;
+    if (value === undefined) {
+        return false;
+    }
+    return value === '1' || value.toLowerCase() === 'true';
+}
+
 async function findPoetry(): Promise<string | undefined> {
     try {
         return await which('poetry');
@@ -230,7 +244,7 @@ export async function getPoetryVersion(poetry: string): Promise<string | undefin
         return undefined;
     }
 }
-async function nativeToPythonEnv(
+export async function nativeToPythonEnv(
     info: NativeEnvInfo,
     api: PythonEnvironmentApi,
     manager: EnvironmentManager,
@@ -251,19 +265,25 @@ async function nativeToPythonEnv(
 
     // Determine if the environment is in Poetry's global virtualenvs directory
     let isGlobalPoetryEnv = false;
-    const virtualenvsPath = poetryVirtualenvsPath; // Use the cached value if available
-    if (virtualenvsPath) {
-        const normalizedVirtualenvsPath = path.normalize(virtualenvsPath);
-        isGlobalPoetryEnv = normalizedPrefix.startsWith(normalizedVirtualenvsPath);
-    } else {
-        // Fall back to checking the default location if we haven't cached the path yet
-        const homeDir = getUserHomeDir();
-        if (homeDir) {
-            const defaultPath = path.normalize(path.join(homeDir, '.cache', 'pypoetry', 'virtualenvs'));
-            isGlobalPoetryEnv = normalizedPrefix.startsWith(defaultPath);
 
-            // Try to get the actual path asynchronously for next time
-            getPoetryVirtualenvsPath(_poetry).catch((e) => traceError(`Error getting Poetry virtualenvs path: ${e}`));
+    // If POETRY_VIRTUALENVS_IN_PROJECT is set and env has a project, it's an in-project env
+    if (!isPoetryVirtualenvsInProject() || !info.project) {
+        const virtualenvsPath = poetryVirtualenvsPath; // Use the cached value if available
+        if (virtualenvsPath) {
+            const normalizedVirtualenvsPath = path.normalize(virtualenvsPath);
+            isGlobalPoetryEnv = normalizedPrefix.startsWith(normalizedVirtualenvsPath);
+        } else {
+            // Fall back to checking the default location if we haven't cached the path yet
+            const homeDir = getUserHomeDir();
+            if (homeDir) {
+                const defaultPath = path.normalize(path.join(homeDir, '.cache', 'pypoetry', 'virtualenvs'));
+                isGlobalPoetryEnv = normalizedPrefix.startsWith(defaultPath);
+
+                // Try to get the actual path asynchronously for next time
+                getPoetryVirtualenvsPath(_poetry).catch((e) =>
+                    traceError(`Error getting Poetry virtualenvs path: ${e}`),
+                );
+            }
         }
     }
 
