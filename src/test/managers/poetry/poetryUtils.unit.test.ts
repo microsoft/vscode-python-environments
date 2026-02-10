@@ -82,10 +82,20 @@ suite('Poetry Utils - getDefaultPoetryVirtualenvsPath', () => {
         assert.strictEqual(result, undefined);
     });
 
-    test('should return undefined when home directory is not available on non-Windows', () => {
+    test('should return undefined when home directory is empty string on non-Windows', () => {
         isWindowsStub.returns(false);
         Object.defineProperty(process, 'platform', { value: 'linux', configurable: true });
         getUserHomeDirStub.returns('');
+
+        const result = getDefaultPoetryVirtualenvsPath();
+
+        assert.strictEqual(result, undefined);
+    });
+
+    test('should return undefined when home directory is undefined on non-Windows', () => {
+        isWindowsStub.returns(false);
+        Object.defineProperty(process, 'platform', { value: 'linux', configurable: true });
+        getUserHomeDirStub.returns(undefined);
 
         const result = getDefaultPoetryVirtualenvsPath();
 
