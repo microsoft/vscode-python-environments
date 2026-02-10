@@ -21,9 +21,10 @@ import { getShellActivationCommands, shortVersion, sortEnvironments } from '../c
  * Checks if the POETRY_VIRTUALENVS_IN_PROJECT environment variable is set to a truthy value.
  * When true, Poetry creates virtualenvs in the project's `.venv` directory.
  * Mirrors the PET server logic in `pet-poetry/src/env_variables.rs`.
+ * @param envValue Optional override for the env var value (used for testing).
  */
-export function isPoetryVirtualenvsInProject(): boolean {
-    const value = process.env.POETRY_VIRTUALENVS_IN_PROJECT;
+export function isPoetryVirtualenvsInProject(envValue?: string): boolean {
+    const value = envValue ?? process.env.POETRY_VIRTUALENVS_IN_PROJECT;
     if (value === undefined) {
         return false;
     }
@@ -243,7 +244,7 @@ export async function getPoetryVersion(poetry: string): Promise<string | undefin
         return undefined;
     }
 }
-async function nativeToPythonEnv(
+export async function nativeToPythonEnv(
     info: NativeEnvInfo,
     api: PythonEnvironmentApi,
     manager: EnvironmentManager,
@@ -265,11 +266,8 @@ async function nativeToPythonEnv(
     // Determine if the environment is in Poetry's global virtualenvs directory
     let isGlobalPoetryEnv = false;
 
-    // If POETRY_VIRTUALENVS_IN_PROJECT is set, environments are created in-project (.venv)
-    // and should not be classified as global
-    if (isPoetryVirtualenvsInProject() && info.project) {
-        isGlobalPoetryEnv = false;
-    } else {
+    // If POETRY_VIRTUALENVS_IN_PROJECT is set and env has a project, it's an in-project env
+    if (!isPoetryVirtualenvsInProject() || !info.project) {
         const virtualenvsPath = poetryVirtualenvsPath; // Use the cached value if available
         if (virtualenvsPath) {
             const normalizedVirtualenvsPath = path.normalize(virtualenvsPath);
