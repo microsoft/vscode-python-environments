@@ -69,9 +69,8 @@ suite('Integration: Environment Manager + API', function () {
         // Get state after refresh
         const afterRefresh = await api.getEnvironments('all');
 
-        // State should be consistent (same or more environments)
-        // We can't assert exact equality since discovery might find more
-        assert.ok(afterRefresh.length >= 0, `Expected environments array, got ${typeof afterRefresh}`);
+        // Verify we got an actual array back (not undefined, null, or other type)
+        assert.ok(Array.isArray(afterRefresh), `Expected environments array, got ${typeof afterRefresh}`);
 
         // Verify the API returns consistent data on repeated calls
         const secondCall = await api.getEnvironments('all');
@@ -151,16 +150,37 @@ suite('Integration: Environment Manager + API', function () {
             return;
         }
 
-        // Check each environment has basic required properties
+        // Check each environment has basic required properties with valid values
         for (const env of environments) {
             const e = env as Record<string, unknown>;
 
             // Must have some form of identifier
             assert.ok('id' in e || 'envId' in e, 'Environment must have id or envId');
 
-            // If it has an id, it should be a string
+            // If it has an id, it should be a non-empty string
             if ('id' in e) {
                 assert.strictEqual(typeof e.id, 'string', 'Environment id should be a string');
+                assert.ok((e.id as string).length > 0, 'Environment id should not be empty');
+            }
+
+            // If it has envId, verify it's a valid object with required properties
+            if ('envId' in e && e.envId !== null && e.envId !== undefined) {
+                const envId = e.envId as Record<string, unknown>;
+                assert.strictEqual(typeof envId, 'object', 'envId should be an object');
+                assert.ok('id' in envId, 'envId should have an id property');
+                assert.ok('managerId' in envId, 'envId should have a managerId property');
+                assert.strictEqual(typeof envId.id, 'string', 'envId.id should be a string');
+                assert.ok((envId.id as string).length > 0, 'envId.id should not be empty');
+            }
+
+            // Verify name is a non-empty string if present
+            if ('name' in e && e.name !== undefined) {
+                assert.strictEqual(typeof e.name, 'string', 'Environment name should be a string');
+            }
+
+            // Verify displayName is a non-empty string if present
+            if ('displayName' in e && e.displayName !== undefined) {
+                assert.strictEqual(typeof e.displayName, 'string', 'Environment displayName should be a string');
             }
         }
     });

@@ -68,8 +68,22 @@ suite('E2E: Environment Discovery', function () {
             return;
         }
 
-        // This should complete without throwing
+        // Capture state before refresh to verify API is callable
+        const beforeRefresh = await api.getEnvironments('all');
+        assert.ok(Array.isArray(beforeRefresh), 'Should get environments before refresh');
+
+        // Trigger refresh - this should complete without throwing
         await api.refreshEnvironments(undefined);
+
+        // Verify API still works after refresh (observable side effect: API remains functional)
+        const afterRefresh = await api.getEnvironments('all');
+        assert.ok(Array.isArray(afterRefresh), 'Should get environments after refresh');
+
+        // Environments should still be available after refresh
+        // (count may change if discovery finds more, but should not lose all)
+        if (beforeRefresh.length > 0) {
+            assert.ok(afterRefresh.length > 0, 'Should not lose all environments after refresh');
+        }
     });
 
     /**
@@ -117,20 +131,43 @@ suite('E2E: Environment Discovery', function () {
 
         const env = environments[0] as Record<string, unknown>;
 
-        // Check required properties exist
-        // These are the minimum properties an environment should have
+        // Check required properties exist AND have valid values
         // PythonEnvironment has envId (a PythonEnvironmentId object), not id directly
         assert.ok('envId' in env, 'Environment should have an envId property');
-        assert.ok('name' in env, 'Environment should have a name property');
-        assert.ok('displayName' in env, 'Environment should have a displayName property');
+        assert.ok(env.envId !== null && env.envId !== undefined, 'envId should not be null/undefined');
 
-        // If execInfo exists, it should have expected shape
+        // Verify envId structure
+        const envId = env.envId as Record<string, unknown>;
+        assert.strictEqual(typeof envId, 'object', 'envId should be an object');
+        assert.ok('id' in envId, 'envId should have an id property');
+        assert.strictEqual(typeof envId.id, 'string', 'envId.id should be a string');
+        assert.ok((envId.id as string).length > 0, 'envId.id should not be empty');
+        assert.ok('managerId' in envId, 'envId should have a managerId property');
+
+        // Verify name exists and is a string
+        assert.ok('name' in env, 'Environment should have a name property');
+        assert.strictEqual(typeof env.name, 'string', 'name should be a string');
+
+        // Verify displayName exists and is a string
+        assert.ok('displayName' in env, 'Environment should have a displayName property');
+        assert.strictEqual(typeof env.displayName, 'string', 'displayName should be a string');
+
+        // If execInfo exists, it should have expected shape with valid values
         if ('execInfo' in env && env.execInfo) {
             const execInfo = env.execInfo as Record<string, unknown>;
+            assert.strictEqual(typeof execInfo, 'object', 'execInfo should be an object');
             assert.ok(
                 'run' in execInfo || 'activatedRun' in execInfo,
                 'execInfo should have run or activatedRun property',
             );
+
+            // Verify run command structure if present
+            if ('run' in execInfo && execInfo.run) {
+                const run = execInfo.run as Record<string, unknown>;
+                assert.ok('executable' in run, 'run should have an executable property');
+                assert.strictEqual(typeof run.executable, 'string', 'executable should be a string');
+                assert.ok((run.executable as string).length > 0, 'executable should not be empty');
+            }
         }
     });
 
@@ -147,5 +184,27 @@ suite('E2E: Environment Discovery', function () {
 
         // Verify it returns an array
         assert.ok(Array.isArray(globalEnvs), 'getEnvironments should return an array');
+
+        // If there are global envs, verify they have valid structure
+        if (globalEnvs.length > 0) {
+            const env = globalEnvs[0] as Record<string, unknown>;
+
+            // Global environments should have the same structure as all environments
+            assert.ok('envId' in env || 'id' in env, 'Global environment should have an identifier');
+
+            // Verify envId is properly structured if present
+            if ('envId' in env && env.envId) {
+                const envId = env.envId as Record<string, unknown>;
+                assert.strictEqual(typeof envId, 'object', 'envId should be an object');
+                assert.ok('id' in envId, 'envId should have an id property');
+            }
+        }
+
+        // Global envs should be a subset of all envs
+        const allEnvs = await api.getEnvironments('all');
+        assert.ok(
+            globalEnvs.length <= allEnvs.length,
+            `Global envs (${globalEnvs.length}) should not exceed all envs (${allEnvs.length})`,
+        );
     });
 });
