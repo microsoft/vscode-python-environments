@@ -1,4 +1,14 @@
-import { commands, ExtensionContext, extensions, l10n, LogOutputChannel, ProgressLocation, Terminal, Uri, window } from 'vscode';
+import {
+    commands,
+    ExtensionContext,
+    extensions,
+    l10n,
+    LogOutputChannel,
+    ProgressLocation,
+    Terminal,
+    Uri,
+    window,
+} from 'vscode';
 import { PythonEnvironment, PythonEnvironmentApi, PythonProjectCreator } from './api';
 import { ENVS_EXTENSION_ID } from './common/constants';
 import { ensureCorrectVersion } from './common/extVersion';
@@ -87,18 +97,14 @@ import { registerPoetryFeatures } from './managers/poetry/main';
 import { registerPyenvFeatures } from './managers/pyenv/main';
 
 export async function activate(context: ExtensionContext): Promise<PythonEnvironmentApi | undefined> {
-    // Use inspect() to check if the user has EXPLICITLY disabled this extension.
-    // Only skip activation if someone explicitly set useEnvironmentsExtension to false.
-    // This ignores defaultValues from other extensions' package.json and defaults to
-    // activating the extension if no explicit setting exists.
+    // Only skip activation if user explicitly set useEnvironmentsExtension to false
     const config = getConfiguration('python');
     const inspection = config.inspect<boolean>('useEnvironmentsExtension');
-    
-    // Check for explicit false values (user deliberately disabled the extension)
-    const explicitlyDisabled = inspection?.globalValue === false || 
-                               inspection?.workspaceValue === false ||
-                               inspection?.workspaceFolderValue === false;
-    
+    const explicitlyDisabled =
+        inspection?.globalValue === false ||
+        inspection?.workspaceValue === false ||
+        inspection?.workspaceFolderValue === false;
+
     const useEnvironmentsExtension = !explicitlyDisabled;
     traceInfo(`Experiment Status: useEnvironmentsExtension setting set to ${useEnvironmentsExtension}`);
     if (!useEnvironmentsExtension) {

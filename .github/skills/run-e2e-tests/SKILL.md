@@ -73,7 +73,7 @@ E2E tests have system requirements:
 
 - **Python installed** - At least one Python interpreter must be discoverable
 - **Extension builds** - Run `npm run compile` before tests
-- **Test settings** - Tests call `initializeTestSettings()` in `suiteSetup()` to configure `python.useEnvironmentsExtension: true` before activation
+- **CI needs webpack build** - Run `npm run compile` (webpack) before tests, not just `npm run compile-tests` (tsc)
 
 ## Adding New E2E Tests
 

@@ -102,7 +102,7 @@ suite('Integration: [Component A] + [Component B]', function () {
 
 ## Prerequisites
 
-- **Test settings** - Tests call `initializeTestSettings()` in `suiteSetup()` to configure `python.useEnvironmentsExtension: true` before activation
+- **CI needs webpack build** - Run `npm run compile` (webpack) before tests, not just `npm run compile-tests` (tsc)
 - **Extension builds** - Run `npm run compile` before tests
 
 ## Notes

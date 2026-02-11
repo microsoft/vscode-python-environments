@@ -117,7 +117,7 @@ suite('Smoke: [Feature Name]', function () {
 
 ## Prerequisites
 
-- **Test settings must be set PROGRAMMATICALLY**: Tests call `initializeTestSettings()` from `src/test/initialize.ts` in `suiteSetup()` to set `python.useEnvironmentsExtension: true` before extension activation. This follows the vscode-python pattern and is more reliable than static settings.json files
+- **CI needs webpack build**: The extension must be built with `npm run compile` (webpack) before tests run. The test runner uses `dist/extension.js` which is only created by webpack, not by `npm run compile-tests` (tsc)
 - **Extension builds**: Run `npm run compile` before tests
 
 ## Notes
