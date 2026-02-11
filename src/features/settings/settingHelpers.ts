@@ -1,12 +1,5 @@
 import * as path from 'path';
-import {
-    ConfigurationScope,
-    ConfigurationTarget,
-    Uri,
-    workspace,
-    WorkspaceConfiguration,
-    WorkspaceFolder,
-} from 'vscode';
+import { ConfigurationScope, ConfigurationTarget, Uri, WorkspaceConfiguration, WorkspaceFolder } from 'vscode';
 import { PythonProject } from '../../api';
 import { DEFAULT_ENV_MANAGER_ID, DEFAULT_PACKAGE_MANAGER_ID } from '../../common/constants';
 import { traceError, traceInfo, traceWarn } from '../../common/logging';
@@ -22,7 +15,7 @@ function getSettings(
 
     if (overrides.length > 0 && scope instanceof Uri) {
         const pw = wm.get(scope);
-        const w = workspace.getWorkspaceFolder(scope);
+        const w = workspaceApis.getWorkspaceFolder(scope);
         if (pw && w) {
             const pwPath = path.normalize(pw.uri.fsPath);
             return overrides.find((s) => path.resolve(w.uri.fsPath, s.path) === pwPath);
@@ -106,7 +99,7 @@ export async function setAllManagerSettings(edits: EditAllManagerSettings[]): Pr
         .filter((e) => !!e.project)
         .map((e) => e as EditAllManagerSettingsInternal)
         .forEach((e) => {
-            const w = workspace.getWorkspaceFolder(e.project.uri);
+            const w = workspaceApis.getWorkspaceFolder(e.project.uri);
             if (w) {
                 workspaces.set(w, [
                     ...(workspaces.get(w) || []),
@@ -136,13 +129,36 @@ export async function setAllManagerSettings(edits: EditAllManagerSettings[]): Pr
 
         es.forEach((e) => {
             const pwPath = path.normalize(e.project.uri.fsPath);
+            const isRoot = path.normalize(w.uri.fsPath) === pwPath;
             const index = overrides.findIndex((s) => path.resolve(w.uri.fsPath, s.path) === pwPath);
-            if (index >= 0) {
+
+            // For workspace root in single-folder workspaces (no workspaceFile),
+            // use default settings instead of pythonProjects entries
+            if (isRoot && !workspaceFile) {
+                // Remove existing entry if present (migration from buggy empty path)
+                if (index >= 0) {
+                    overrides.splice(index, 1);
+                }
+                if (config.get('defaultEnvManager') !== e.envManager) {
+                    promises.push(config.update('defaultEnvManager', e.envManager, ConfigurationTarget.Workspace));
+                }
+                if (config.get('defaultPackageManager') !== e.packageManager) {
+                    promises.push(
+                        config.update('defaultPackageManager', e.packageManager, ConfigurationTarget.Workspace),
+                    );
+                }
+            } else if (index >= 0) {
                 overrides[index].envManager = e.envManager;
                 overrides[index].packageManager = e.packageManager;
+                // Fix empty path to "." for workspace root (migration from buggy entries)
+                if (overrides[index].path === '') {
+                    overrides[index].path = '.';
+                }
             } else if (workspaceFile) {
+                // Use "." for workspace root instead of empty string
+                const relativePath = path.relative(w.uri.fsPath, pwPath).replace(/\\/g, '/');
                 overrides.push({
-                    path: path.relative(w.uri.fsPath, pwPath).replace(/\\/g, '/'),
+                    path: relativePath || '.',
                     envManager: e.envManager,
                     packageManager: e.packageManager,
                 });
@@ -160,13 +176,19 @@ export async function setAllManagerSettings(edits: EditAllManagerSettings[]): Pr
 
         // Only write pythonProjects if:
         // 1. There was already an explicit setting  OR
-        // 2. adding new project entries
-        const shouldWriteProjects = existingProjectsSetting !== undefined || overrides.length > originalOverridesLength;
+        // 2. adding new project entries  OR
+        // 3. removing entries (migration from buggy empty path)
+        const shouldWriteProjects =
+            existingProjectsSetting !== undefined ||
+            overrides.length > originalOverridesLength ||
+            overrides.length < originalOverridesLength;
         if (shouldWriteProjects) {
+            // If all entries are removed, set to undefined to clean up settings
+            const valueToWrite = overrides.length > 0 ? overrides : undefined;
             promises.push(
                 config.update(
                     'pythonProjects',
-                    overrides,
+                    valueToWrite,
                     workspaceFile ? ConfigurationTarget.WorkspaceFolder : ConfigurationTarget.Workspace,
                 ),
             );
@@ -204,7 +226,7 @@ export async function setEnvironmentManager(edits: EditEnvManagerSettings[]): Pr
         .filter((e) => !!e.project)
         .map((e) => e as EditEnvManagerSettingsInternal)
         .forEach((e) => {
-            const w = workspace.getWorkspaceFolder(e.project.uri);
+            const w = workspaceApis.getWorkspaceFolder(e.project.uri);
             if (w) {
                 workspaces.set(w, [...(workspaces.get(w) || []), { project: e.project, envManager: e.envManager }]);
             } else {
@@ -275,7 +297,7 @@ export async function setPackageManager(edits: EditPackageManagerSettings[]): Pr
         .filter((e) => !!e.project)
         .map((e) => e as EditPackageManagerSettingsInternal)
         .forEach((e) => {
-            const w = workspace.getWorkspaceFolder(e.project.uri);
+            const w = workspaceApis.getWorkspaceFolder(e.project.uri);
             if (w) {
                 workspaces.set(w, [
                     ...(workspaces.get(w) || []),
@@ -348,7 +370,7 @@ export async function addPythonProjectSetting(edits: EditProjectSettings[]): Pro
     const pkgManager = globalConfig.get<string>('defaultPackageManager', DEFAULT_PACKAGE_MANAGER_ID);
 
     edits.forEach((e) => {
-        const w = workspace.getWorkspaceFolder(e.project.uri);
+        const w = workspaceApis.getWorkspaceFolder(e.project.uri);
         if (w) {
             workspaces.set(w, [...(workspaces.get(w) || []), e]);
         } else {
@@ -366,10 +388,36 @@ export async function addPythonProjectSetting(edits: EditProjectSettings[]): Pro
     workspaces.forEach((es, w) => {
         const config = workspaceApis.getConfiguration('python-envs', w.uri);
         const overrides = config.get<PythonProjectSettings[]>('pythonProjects', []);
+        let overridesModified = false;
         es.forEach((e) => {
-            if (isMultiroot) {
-            }
             const pwPath = path.normalize(e.project.uri.fsPath);
+            const isRoot = path.normalize(w.uri.fsPath) === pwPath;
+
+            // For workspace root projects in single-folder workspaces, use default settings
+            // instead of adding to pythonProjects with empty path
+            if (isRoot && !isMultiroot) {
+                // Remove existing entry if present (migration from buggy empty path)
+                const existingIndex = overrides.findIndex((s) => path.resolve(w.uri.fsPath, s.path) === pwPath);
+                if (existingIndex >= 0) {
+                    overrides.splice(existingIndex, 1);
+                    overridesModified = true;
+                }
+
+                const effectiveEnvManager = e.envManager ?? envManager;
+                const effectivePkgManager = e.packageManager ?? pkgManager;
+                if (config.get('defaultEnvManager') !== effectiveEnvManager) {
+                    promises.push(
+                        config.update('defaultEnvManager', effectiveEnvManager, ConfigurationTarget.Workspace),
+                    );
+                }
+                if (config.get('defaultPackageManager') !== effectivePkgManager) {
+                    promises.push(
+                        config.update('defaultPackageManager', effectivePkgManager, ConfigurationTarget.Workspace),
+                    );
+                }
+                return;
+            }
+
             const index = overrides.findIndex((s) => {
                 if (s.workspace) {
                     // If the workspace is set, check workspace and path in existing overrides
@@ -381,16 +429,29 @@ export async function addPythonProjectSetting(edits: EditProjectSettings[]): Pro
                 // Preserve existing manager settings if not explicitly provided
                 overrides[index].envManager = e.envManager ?? overrides[index].envManager;
                 overrides[index].packageManager = e.packageManager ?? overrides[index].packageManager;
+                // Fix empty path to "." for workspace root in multi-root (migration from buggy entries)
+                if (overrides[index].path === '') {
+                    overrides[index].path = '.';
+                }
+                overridesModified = true;
             } else {
+                // Use "." for workspace root in multi-root workspaces instead of empty string
+                const relativePath = path.relative(w.uri.fsPath, pwPath).replace(/\\/g, '/');
                 overrides.push({
-                    path: path.relative(w.uri.fsPath, pwPath).replace(/\\/g, '/'),
+                    path: relativePath || '.',
                     envManager,
                     packageManager: pkgManager,
                     workspace: isMultiroot ? w.name : undefined,
                 });
+                overridesModified = true;
             }
         });
-        promises.push(config.update('pythonProjects', overrides, ConfigurationTarget.Workspace));
+        // Write pythonProjects if modified (entries added, removed, or updated)
+        if (overridesModified) {
+            // If all entries are removed, set to undefined to clean up settings
+            const valueToWrite = overrides.length > 0 ? overrides : undefined;
+            promises.push(config.update('pythonProjects', valueToWrite, ConfigurationTarget.Workspace));
+        }
     });
     await Promise.all(promises);
 }
@@ -399,7 +460,7 @@ export async function removePythonProjectSetting(edits: EditProjectSettings[]): 
     const noWorkspace: EditProjectSettings[] = [];
     const workspaces = new Map<WorkspaceFolder, EditProjectSettings[]>();
     edits.forEach((e) => {
-        const w = workspace.getWorkspaceFolder(e.project.uri);
+        const w = workspaceApis.getWorkspaceFolder(e.project.uri);
         if (w) {
             workspaces.set(w, [...(workspaces.get(w) || []), e]);
         } else {
