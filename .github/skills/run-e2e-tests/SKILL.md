@@ -122,4 +122,5 @@ suite('E2E: [Workflow Name]', function () {
 - E2E tests are slower than smoke tests (expect 1-3 minutes)
 - They may create/modify files - cleanup happens in `suiteTeardown`
 - First run downloads VS Code (~100MB, cached in `.vscode-test/`)
-- See [docs/e2e-tests.md](../../docs/e2e-tests.md) for detailed documentation
+- See [docs/e2e-tests.md](../../../docs/e2e-tests.md) for detailed documentation
+- See [docs/test-types-comparison.md](../../../docs/test-types-comparison.md) for when to use which test type

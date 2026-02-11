@@ -1,183 +1,250 @@
 # Integration Tests Guide
 
-Integration tests verify that multiple components work together correctly in a real VS Code environment.
+Integration tests verify that multiple extension components work together correctly in a real VS Code environment.
 
-## Integration vs Other Test Types
+## When to Use Integration Tests
 
-| Aspect | Unit Tests | Integration Tests | E2E Tests |
-|--------|-----------|-------------------|-----------|
-| **Environment** | Mocked VS Code | Real VS Code | Real VS Code |
-| **Scope** | Single function | Component interactions | Full workflows |
-| **Speed** | Fast (ms) | Medium (seconds) | Slow (minutes) |
-| **Focus** | Logic correctness | Components work together | User scenarios work |
+**Ask yourself:** "Do these components communicate and synchronize correctly?"
 
-## Quick Reference
+| Good for | Not good for |
+|----------|--------------|
+| API reflects internal state | Testing isolated logic |
+| Events fire and propagate | Quick sanity checks |
+| Components stay in sync | Full user workflows |
+| State changes trigger updates | UI behavior |
 
-| Action | Command |
-|--------|---------|
-| Run all integration tests | `npm run compile-tests && npm run integration-test` |
-| Run specific test | `npm run integration-test -- --grep "manager"` |
-| Debug in VS Code | Debug panel → "Integration Tests" → F5 |
+## Architecture
 
-## What Integration Tests Cover
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│                 npm run integration-test                             │
+│                           │                                          │
+│                           ▼                                          │
+│              ┌────────────────────────┐                             │
+│              │   @vscode/test-cli     │ ◄── Configured by           │
+│              │   (test launcher)      │     .vscode-test.mjs        │
+│              └───────────┬────────────┘     (label: integrationTests)│
+│                          │                                           │
+│         Downloads VS Code (first run, cached after)                  │
+│                          │                                           │
+│                          ▼                                           │
+│              ┌────────────────────────┐                             │
+│              │  VS Code Instance      │                             │
+│              │  (standalone, hidden)  │                             │
+│              ├────────────────────────┤                             │
+│              │  • Your extension      │ ◄── Compiled from out/      │
+│              │  • ms-python.python    │ ◄── installExtensions       │
+│              └───────────┬────────────┘                             │
+│                          │                                           │
+│                          ▼                                           │
+│              ┌────────────────────────┐                             │
+│              │  Extension Host        │                             │
+│              │  ┌──────────────────┐  │                             │
+│              │  │ Mocha Test       │  │ ◄── src/test/integration/   │
+│              │  │ Runner           │  │     index.ts                │
+│              │  └────────┬─────────┘  │                             │
+│              │           │            │                             │
+│              │           ▼            │                             │
+│              │  ┌──────────────────┐  │                             │
+│              │  │ Test verifies:   │  │                             │
+│              │  │ ┌──────────────┐ │  │                             │
+│              │  │ │ Component A  │◄┼──┼── API call                  │
+│              │  │ └──────┬───────┘ │  │                             │
+│              │  │        │ event   │  │                             │
+│              │  │        ▼         │  │                             │
+│              │  │ ┌──────────────┐ │  │                             │
+│              │  │ │ Component B  │─┼──┼──▶ State change verified    │
+│              │  │ └──────────────┘ │  │                             │
+│              │  └──────────────────┘  │                             │
+│              └────────────────────────┘                             │
+└─────────────────────────────────────────────────────────────────────┘
+```
 
-Based on the [gap analysis](../ai-artifacts/testing-work/02-gap-analysis.md):
+## What's Real vs Mocked
 
-| Component Interaction | What to Test |
-|----------------------|--------------|
-| Environment Manager + API | API reflects manager state, events fire |
-| Project Manager + Settings | Settings changes update project state |
-| Terminal + Environment | Terminal activates correct environment |
-| Package Manager + Environment | Package operations update env state |
+| Component | Real or Mocked | Notes |
+|-----------|----------------|-------|
+| VS Code APIs | **Real** | Full API access |
+| Extension components | **Real** | Managers, API, state |
+| Events | **Real** | Can subscribe and verify |
+| File system | **Real** | For side-effect verification |
+| Python environments | **Real** | Requires Python installed |
 
-## Writing Integration Tests
+## How to Run
 
-### File Naming
+### 1. Copilot Skill (Recommended for agents)
+Ask Copilot: "run integration tests" — uses the `run-integration-tests` skill at `.github/skills/run-integration-tests/`
 
-Place tests in `src/test/integration/` with pattern `*.integration.test.ts`:
+### 2. Test Explorer
+❌ **Integration tests cannot run in Test Explorer** — they require a separate VS Code instance.
+
+### 3. VS Code Debug (Recommended for debugging)
+1. Open Debug panel (Cmd+Shift+D)
+2. Select **"Integration Tests"** from dropdown
+3. Press **F5**
+4. Set breakpoints in test or extension code
+
+### 4. Command Line (Recommended for CI)
+```bash
+npm run compile-tests && npm run integration-test
+```
+
+### 5. Run Specific Test
+```bash
+npm run integration-test -- --grep "events"
+```
+
+## File Structure
 
 ```
 src/test/integration/
-├── index.ts                              # Test runner
-├── envManagerApi.integration.test.ts     # Manager + API integration
-├── projectSettings.integration.test.ts   # Project + Settings
-└── terminalEnv.integration.test.ts       # Terminal + Environment
+├── index.ts                              # Test runner entry point
+│                                         # - Sets VSC_PYTHON_INTEGRATION_TEST=1
+│                                         # - Configures Mocha (2min timeout)
+│                                         # - Finds *.integration.test.js
+│
+└── envManagerApi.integration.test.ts     # Test file
+                                          # - Suite: "Integration: Manager + API"
+                                          # - Tests: state sync, events, scopes
 ```
 
-### Test Structure
+### Naming Convention
+- Files: `*.integration.test.ts`
+- Suites: `suite('Integration: [Component A] + [Component B]', ...)`
+- Tests: What interaction is being verified
+
+## Test Template
 
 ```typescript
 import * as assert from 'assert';
 import * as vscode from 'vscode';
-import { waitForCondition, TestEventHandler } from '../testUtils';
 import { ENVS_EXTENSION_ID } from '../constants';
+import { waitForCondition } from '../testUtils';
 
 suite('Integration: [Component A] + [Component B]', function () {
-    this.timeout(120_000);
+    this.timeout(60_000);
 
-    let api: ExtensionApi;
+    let api: {
+        getEnvironments(scope: 'all' | 'global'): Promise<unknown[]>;
+        refreshEnvironments(scope: undefined): Promise<void>;
+        onDidChangeEnvironments?: vscode.Event<unknown>;
+    };
 
     suiteSetup(async function () {
         const extension = vscode.extensions.getExtension(ENVS_EXTENSION_ID);
         assert.ok(extension, 'Extension not found');
-        if (!extension.isActive) await extension.activate();
+
+        if (!extension.isActive) {
+            await extension.activate();
+        }
+
         api = extension.exports;
     });
 
-    test('[Interaction being tested]', async function () {
-        // Test that Component A and Component B work together
+    test('API reflects state after action', async function () {
+        // Trigger action
+        await api.refreshEnvironments(undefined);
+
+        // Verify API returns updated state
+        const envs = await api.getEnvironments('all');
+        assert.ok(envs.length > 0, 'Should have environments after refresh');
+    });
+
+    test('Event fires when state changes', async function () {
+        if (!api.onDidChangeEnvironments) {
+            this.skip();
+            return;
+        }
+
+        let eventFired = false;
+        const disposable = api.onDidChangeEnvironments(() => {
+            eventFired = true;
+        });
+
+        try {
+            await api.refreshEnvironments(undefined);
+            await waitForCondition(
+                () => eventFired,
+                10_000,
+                'Event did not fire'
+            );
+        } finally {
+            disposable.dispose();
+        }
     });
 });
 ```
 
-### Testing Events Between Components
+## Testing Events Pattern
 
-Use `TestEventHandler` to verify events propagate correctly:
+Use a helper to capture events:
 
 ```typescript
-test('Changes in manager fire API events', async function () {
-    const handler = new TestEventHandler(
-        api.environments.onDidChangeEnvironments,
-        'onDidChangeEnvironments'
-    );
+class EventCapture<T> {
+    private events: T[] = [];
+    private disposable: vscode.Disposable;
 
-    try {
-        // Trigger action that should fire events
-        await api.environments.refresh(undefined);
-        
-        // Verify events fired
-        if (handler.fired) {
-            assert.ok(handler.first !== undefined);
-        }
-    } finally {
-        handler.dispose();
+    constructor(event: vscode.Event<T>) {
+        this.disposable = event(e => this.events.push(e));
     }
+
+    get fired(): boolean { return this.events.length > 0; }
+    get count(): number { return this.events.length; }
+    get all(): T[] { return [...this.events]; }
+    
+    dispose() { this.disposable.dispose(); }
+}
+
+// Usage
+test('Events fire correctly', async function () {
+    const capture = new EventCapture(api.onDidChangeEnvironments);
+    
+    await api.refreshEnvironments(undefined);
+    await waitForCondition(() => capture.fired, 10_000, 'No event');
+    
+    assert.ok(capture.count >= 1);
+    capture.dispose();
 });
 ```
-
-### Testing State Synchronization
-
-```typescript
-test('API reflects manager state after changes', async function () {
-    // Get state before
-    const before = await api.environments.getEnvironments('all');
-    
-    // Perform action
-    await api.environments.refresh(undefined);
-    
-    // Get state after
-    const after = await api.environments.getEnvironments('all');
-    
-    // Verify consistency
-    assert.ok(Array.isArray(after), 'Should return array');
-});
-```
-
-## Key Differences from E2E Tests
-
-| Integration Tests | E2E Tests |
-|------------------|-----------|
-| Test component boundaries | Test user workflows |
-| "Does A talk to B correctly?" | "Can user do X?" |
-| Faster (30s-2min) | Slower (1-3min) |
-| Focus on internal contracts | Focus on external behavior |
-
-**Example:**
-- Integration: "When environment manager refreshes, does the API return updated data?"
-- E2E: "When user clicks refresh and selects an environment, does the terminal activate it?"
 
 ## Debugging Failures
 
 | Error | Likely Cause | Fix |
 |-------|--------------|-----|
-| `API not available` | Extension activation failed | Check Debug Console for errors |
-| `Event not fired` | Event wiring broken | Check event registration code |
-| `State mismatch` | Components out of sync | Add logging, check update paths |
-| `Timeout` | Async operation stuck | Increase timeout, check for deadlocks |
+| `Event not fired` | Event wiring broken, or wrong event | Check event registration; verify correct event |
+| `State mismatch` | Components out of sync | Add logging; check update propagation path |
+| `Timeout` | Async stuck or condition never met | Verify `waitForCondition` checks correct state |
+| `API undefined` | Extension didn't activate | Check settings.json; debug activation |
 
-Debug with VS Code: Debug panel → "Integration Tests" → F5
+## Learnings
 
-## Test Files
+- **API is flat**: Use `api.getEnvironments()`, NOT `api.environments.getEnvironments()` (1)
+- **Test settings required**: Need `.vscode-test/user-data/User/settings.json` with `"python.useEnvironmentsExtension": true` (1)
+- Events may fire multiple times — use `waitForCondition` not exact count assertions (1)
+- Dispose event listeners in `finally` blocks to prevent leaks (1)
 
-| File | Purpose |
-|------|---------|
-| `src/test/integration/index.ts` | Test runner entry point |
-| `src/test/integration/envManagerApi.integration.test.ts` | Manager + API tests |
-| `src/test/testUtils.ts` | Shared utilities |
-| `src/test/constants.ts` | Test constants |
+## Tips from vscode-python
 
-## Notes
+Patterns borrowed from the Python extension:
 
-- Integration tests run in a real VS Code instance
-- They're faster than E2E but slower than unit tests (expect 30s-2min)
-- Use `waitForCondition()` for async operations
-- First run downloads VS Code (~100MB, cached)
-- Tests auto-retry once on failure
-- Requires `.vscode-test/user-data/User/settings.json` with `"python.useEnvironmentsExtension": true`
+1. **`TestEventHandler<T>`** — Wraps event subscription with assertion helpers:
+   ```typescript
+   handler.assertFired(waitPeriod)
+   handler.assertFiredExactly(count, waitPeriod)
+   handler.assertFiredAtLeast(count, waitPeriod)
+   ```
 
-## CI Configuration
+2. **`Deferred<T>`** — Manual promise control for coordinating async:
+   ```typescript
+   const deferred = createDeferred<void>();
+   api.onDidChange(() => deferred.resolve());
+   await deferred.promise;
+   ```
 
-Integration tests run automatically on every PR via GitHub Actions (`.github/workflows/pr-check.yml`).
-
-**How CI sets up the environment:**
-
-```yaml
-# Python is installed via actions/setup-python
-- uses: actions/setup-python@v5  
-  with:
-    python-version: '3.11'
-
-# Test settings are configured before running tests
-- run: |
-    mkdir -p .vscode-test/user-data/User
-    echo '{"python.useEnvironmentsExtension": true}' > .vscode-test/user-data/User/settings.json
-
-# Linux requires xvfb for headless VS Code  
-- uses: GabrielBB/xvfb-action@v1
-  with:
-    run: npm run integration-test
-```
-
-**Test matrix:** Runs on `ubuntu-latest`, `windows-latest`, and `macos-latest`.
-
-**Job dependencies:** Integration tests run after smoke tests pass (`needs: [smoke-tests]`).
+3. **Retry patterns** — For inherently flaky operations:
+   ```typescript
+   await retryIfFail(async () => {
+       const envs = await api.getEnvironments('all');
+       assert.ok(envs.length > 0);
+   }, 30_000);
+   ```

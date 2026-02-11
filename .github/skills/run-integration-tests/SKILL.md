@@ -110,4 +110,5 @@ suite('Integration: [Component A] + [Component B]', function () {
 - Integration tests are faster than E2E (30s-2min vs 1-3min)
 - Focus on testing component boundaries, not full user workflows
 - First run downloads VS Code (~100MB, cached in `.vscode-test/`)
-- See [docs/integration-tests.md](../../docs/integration-tests.md) for detailed documentation
+- See [docs/integration-tests.md](../../../docs/integration-tests.md) for detailed documentation
+- See [docs/test-types-comparison.md](../../../docs/test-types-comparison.md) for when to use which test type

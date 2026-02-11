@@ -124,4 +124,5 @@ suite('Smoke: [Feature Name]', function () {
 
 - First run downloads VS Code (~100MB, cached in `.vscode-test/`)
 - Tests auto-retry once on failure
-- See [docs/smoke-tests.md](../../docs/smoke-tests.md) for detailed documentation
+- See [docs/smoke-tests.md](../../../docs/smoke-tests.md) for detailed documentation
+- See [docs/test-types-comparison.md](../../../docs/test-types-comparison.md) for when to use which test type
