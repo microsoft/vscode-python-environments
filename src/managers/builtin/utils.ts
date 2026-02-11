@@ -10,6 +10,7 @@ import {
 } from '../../api';
 import { showErrorMessageWithLogs } from '../../common/errors/utils';
 import { SysManagerStrings } from '../../common/localize';
+import { traceVerbose } from '../../common/logging';
 import { withProgress } from '../../common/window.apis';
 import {
     isNativeEnvInfo,
@@ -299,11 +300,16 @@ export async function resolveSystemPythonEnvironmentPath(
     api: PythonEnvironmentApi,
     manager: EnvironmentManager,
 ): Promise<PythonEnvironment | undefined> {
-    const resolved = await nativeFinder.resolve(fsPath);
+    try {
+        const resolved = await nativeFinder.resolve(fsPath);
 
-    // This is supposed to handle a python interpreter as long as we know some basic things about it
-    if (resolved.executable && resolved.version && resolved.prefix) {
-        const envInfo = getPythonInfo(resolved);
-        return api.createPythonEnvironmentItem(envInfo, manager);
+        // This is supposed to handle a python interpreter as long as we know some basic things about it
+        if (resolved.executable && resolved.version && resolved.prefix) {
+            const envInfo = getPythonInfo(resolved);
+            return api.createPythonEnvironmentItem(envInfo, manager);
+        }
+    } catch (ex) {
+        traceVerbose(`Failed to resolve env "${fsPath}": ${ex}`);
     }
+    return undefined;
 }
