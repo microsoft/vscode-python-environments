@@ -42,6 +42,48 @@
             ],
             "outFiles": ["${workspaceFolder}/out/**/*.js", "${workspaceFolder}/dist/**/*.js"],
             "preLaunchTask": "${defaultBuildTask}"
+        },
+        {
+            "name": "Smoke Tests",
+            "type": "extensionHost",
+            "request": "launch",
+            "env": {
+                "VSC_PYTHON_SMOKE_TEST": "1"
+            },
+            "args": [
+                "--extensionDevelopmentPath=${workspaceFolder}",
+                "--extensionTestsPath=${workspaceFolder}/out/test/smoke"
+            ],
+            "outFiles": ["${workspaceFolder}/out/**/*.js", "${workspaceFolder}/dist/**/*.js"],
+            "preLaunchTask": "${defaultBuildTask}"
+        },
+        {
+            "name": "E2E Tests",
+            "type": "extensionHost",
+            "request": "launch",
+            "env": {
+                "VSC_PYTHON_E2E_TEST": "1"
+            },
+            "args": [
+                "--extensionDevelopmentPath=${workspaceFolder}",
+                "--extensionTestsPath=${workspaceFolder}/out/test/e2e"
+            ],
+            "outFiles": ["${workspaceFolder}/out/**/*.js", "${workspaceFolder}/dist/**/*.js"],
+            "preLaunchTask": "${defaultBuildTask}"
+        },
+        {
+            "name": "Integration Tests",
+            "type": "extensionHost",
+            "request": "launch",
+            "env": {
+                "VSC_PYTHON_INTEGRATION_TEST": "1"
+            },
+            "args": [
+                "--extensionDevelopmentPath=${workspaceFolder}",
+                "--extensionTestsPath=${workspaceFolder}/out/test/integration"
+            ],
+            "outFiles": ["${workspaceFolder}/out/**/*.js", "${workspaceFolder}/dist/**/*.js"],
+            "preLaunchTask": "${defaultBuildTask}"
         }
     ]
 }

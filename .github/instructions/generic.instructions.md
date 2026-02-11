@@ -43,3 +43,7 @@ Provide project context and coding guidelines that AI should follow when generat
 
 - When using `getConfiguration().inspect()`, always pass a scope/Uri to `getConfiguration(section, scope)` — otherwise `workspaceFolderValue` will be `undefined` because VS Code doesn't know which folder to inspect (1)
 - **path.normalize() vs path.resolve()**: On Windows, `path.normalize('\test')` keeps it as `\test`, but `path.resolve('\test')` adds the current drive → `C:\test`. When comparing paths, use `path.resolve()` on BOTH sides or they won't match (2)
+- **Path comparisons vs user display**: Use `normalizePath()` from `pathUtils.ts` when comparing paths or using them as map keys, but preserve original paths for user-facing output like settings, logs, and UI (1)
+- **Test settings requirement**: Smoke/E2E/integration tests require `.vscode-test/user-data/User/settings.json` with `"python.useEnvironmentsExtension": true` — without this, `activate()` returns `undefined` and all API tests fail (1)
+- **API is flat, not nested**: Use `api.getEnvironments()`, NOT `api.environments.getEnvironments()`. The extension exports a flat API object (1)
+- **PythonEnvironment has `envId`, not `id`**: The environment identifier is `env.envId` (a `PythonEnvironmentId` object with `id` and `managerId`), not a direct `id` property (1)

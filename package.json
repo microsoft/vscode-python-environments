@@ -682,6 +682,9 @@
         "pretest": "npm run compile-tests && npm run compile",
         "lint": "eslint --config=eslint.config.mjs src",
         "unittest": "mocha --config=./build/.mocha.unittests.json",
+        "smoke-test": "vscode-test --label smokeTests",
+        "e2e-test": "vscode-test --label e2eTests",
+        "integration-test": "vscode-test --label integrationTests",
         "vsce-package": "vsce package -o ms-python-envs-insiders.vsix"
     },
     "devDependencies": {
