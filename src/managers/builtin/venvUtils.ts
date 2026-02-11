@@ -5,7 +5,7 @@ import { l10n, LogOutputChannel, ProgressLocation, QuickPickItem, QuickPickItemK
 import { EnvironmentManager, PythonEnvironment, PythonEnvironmentApi, PythonEnvironmentInfo } from '../../api';
 import { ENVS_EXTENSION_ID } from '../../common/constants';
 import { Common, VenvManagerStrings } from '../../common/localize';
-import { traceInfo } from '../../common/logging';
+import { traceInfo, traceVerbose } from '../../common/logging';
 import { getWorkspacePersistentState } from '../../common/persistentState';
 import { EventNames } from '../../common/telemetry/constants';
 import { sendTelemetryEvent } from '../../common/telemetry/sender';
@@ -581,15 +581,19 @@ export async function resolveVenvPythonEnvironmentPath(
     manager: EnvironmentManager,
     baseManager: EnvironmentManager,
 ): Promise<PythonEnvironment | undefined> {
-    const resolved = await nativeFinder.resolve(fsPath);
+    try {
+        const resolved = await nativeFinder.resolve(fsPath);
 
-    if (
-        resolved.kind === NativePythonEnvironmentKind.venv ||
-        resolved.kind === NativePythonEnvironmentKind.venvUv ||
-        resolved.kind === NativePythonEnvironmentKind.uvWorkspace
-    ) {
-        const envInfo = await getPythonInfo(resolved);
-        return api.createPythonEnvironmentItem(envInfo, manager);
+        if (
+            resolved.kind === NativePythonEnvironmentKind.venv ||
+            resolved.kind === NativePythonEnvironmentKind.venvUv ||
+            resolved.kind === NativePythonEnvironmentKind.uvWorkspace
+        ) {
+            const envInfo = await getPythonInfo(resolved);
+            return api.createPythonEnvironmentItem(envInfo, manager);
+        }
+    } catch (ex) {
+        traceVerbose(`Failed to resolve venv env "${fsPath}": ${ex}`);
     }
 
     return resolveSystemPythonEnvironmentPath(fsPath, nativeFinder, api, baseManager);
