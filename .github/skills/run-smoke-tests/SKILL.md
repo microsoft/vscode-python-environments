@@ -117,7 +117,7 @@ suite('Smoke: [Feature Name]', function () {
 
 ## Prerequisites
 
-- **Test settings file**: `.vscode-test/user-data/User/settings.json` must exist with `"python.useEnvironmentsExtension": true` (without this, the extension returns `undefined` from `activate()`)
+- **Test settings must be set PROGRAMMATICALLY**: Tests call `initializeTestSettings()` from `src/test/initialize.ts` in `suiteSetup()` to set `python.useEnvironmentsExtension: true` before extension activation. This follows the vscode-python pattern and is more reliable than static settings.json files
 - **Extension builds**: Run `npm run compile` before tests
 
 ## Notes

@@ -73,7 +73,7 @@ E2E tests have system requirements:
 
 - **Python installed** - At least one Python interpreter must be discoverable
 - **Extension builds** - Run `npm run compile` before tests
-- **Test settings file** - `.vscode-test/user-data/User/settings.json` must exist with `"python.useEnvironmentsExtension": true`
+- **Test settings** - Tests call `initializeTestSettings()` in `suiteSetup()` to configure `python.useEnvironmentsExtension: true` before activation
 
 ## Adding New E2E Tests
 

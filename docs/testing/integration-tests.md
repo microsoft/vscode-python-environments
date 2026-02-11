@@ -214,12 +214,12 @@ test('Events fire correctly', async function () {
 | `Event not fired` | Event wiring broken, or wrong event | Check event registration; verify correct event |
 | `State mismatch` | Components out of sync | Add logging; check update propagation path |
 | `Timeout` | Async stuck or condition never met | Verify `waitForCondition` checks correct state |
-| `API undefined` | Extension didn't activate | Check settings.json; debug activation |
+| `API undefined` | Settings not configured | Call `initializeTestSettings()` in `suiteSetup()` |
 
 ## Learnings
 
 - **API is flat**: Use `api.getEnvironments()`, NOT `api.environments.getEnvironments()` (1)
-- **Test settings required**: Need `.vscode-test/user-data/User/settings.json` with `"python.useEnvironmentsExtension": true` (1)
+- **Test settings must be set PROGRAMMATICALLY**: Call `initializeTestSettings()` in `suiteSetup()` BEFORE activating the extension. Static settings.json files are unreliable because ms-python.python may override defaults (1)
 - Events may fire multiple times — use `waitForCondition` not exact count assertions (1)
 - Dispose event listeners in `finally` blocks to prevent leaks (1)
 

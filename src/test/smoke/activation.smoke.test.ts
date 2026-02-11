@@ -27,16 +27,30 @@
  * - Has a generous timeout (60 seconds) for slow CI machines
  * - Retries once on failure (configured in the runner)
  * - Tests are independent - no shared state between tests
+ *
+ * CRITICAL PATTERN (from vscode-python):
+ * Settings must be configured PROGRAMMATICALLY before extension activation.
+ * Relying solely on settings.json files can fail because:
+ * - The ms-python.python extension may set useEnvironmentsExtension=false by default
+ * - Settings files may not be loaded before activation
+ * - Race conditions between file I/O and extension initialization
  */
 
 import * as assert from 'assert';
 import * as vscode from 'vscode';
 import { ENVS_EXTENSION_ID, MAX_EXTENSION_ACTIVATION_TIME } from '../constants';
+import { initializeTestSettings } from '../initialize';
 import { waitForCondition } from '../testUtils';
 
 suite('Smoke: Extension Activation', function () {
     // Smoke tests need longer timeouts - VS Code startup can be slow
     this.timeout(MAX_EXTENSION_ACTIVATION_TIME);
+
+    // CRITICAL: Configure settings BEFORE any test runs
+    // This follows the vscode-python pattern of programmatic configuration
+    suiteSetup(async function () {
+        await initializeTestSettings();
+    });
 
     /**
      * Test: Extension is installed and VS Code can find it

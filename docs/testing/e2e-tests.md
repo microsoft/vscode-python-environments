@@ -217,7 +217,7 @@ suite('E2E: Create Environment', function () {
 | Error | Likely Cause | Fix |
 |-------|--------------|-----|
 | `Timeout exceeded` | Async not awaited, or `waitForCondition` checks wrong state | Verify all Promises awaited; check condition logic |
-| `API not available` | Extension didn't activate properly | Check settings.json exists; debug with F5 |
+| `API not available` | Settings not configured | Call `initializeTestSettings()` in `suiteSetup()` |
 | `No environments` | Python not installed | Install Python, verify on PATH |
 | `Command hangs` | Command shows UI picker | Pass arguments to skip UI, or test differently |
 
@@ -225,7 +225,7 @@ suite('E2E: Create Environment', function () {
 
 - **API is flat**: Use `api.getEnvironments()`, NOT `api.environments.getEnvironments()` (1)
 - **envId not id**: Environment objects have `envId` property (a `PythonEnvironmentId` with `id` and `managerId`), not a direct `id` (1)
-- **Test settings required**: Need `.vscode-test/user-data/User/settings.json` with `"python.useEnvironmentsExtension": true` (1)
+- **Test settings must be set PROGRAMMATICALLY**: Call `initializeTestSettings()` in `suiteSetup()` BEFORE activating the extension. Static settings.json files are unreliable because ms-python.python may override defaults (1)
 - **Commands with UI block**: Only test commands that accept programmatic arguments or have no UI (1)
 - Use `waitForCondition()` for all async verifications — never use `sleep()` (1)
 

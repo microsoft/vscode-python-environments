@@ -154,11 +154,11 @@ suite('Smoke: [Feature Name]', function () {
 | `Extension did not activate` | Error in `activate()` | Debug with F5, check Debug Console |
 | `Command not registered` | Missing from package.json | Add to `contributes.commands` |
 | `Timeout exceeded` | Async not awaited, or waiting for wrong condition | Check all Promises are awaited |
-| `API undefined` | Missing settings file | Create `.vscode-test/user-data/User/settings.json` |
+| `API undefined` | Settings not configured | Call `initializeTestSettings()` in `suiteSetup()` |
 
 ## Learnings
 
-- **Test settings requirement**: Tests require `.vscode-test/user-data/User/settings.json` with `"python.useEnvironmentsExtension": true` — without this, `activate()` returns `undefined` (1)
+- **Test settings must be set PROGRAMMATICALLY**: Use `initializeTestSettings()` from `src/test/initialize.ts` in `suiteSetup()` BEFORE activating the extension. Static settings.json files are unreliable because ms-python.python may override defaults (1)
 - **API is flat**: Use `api.getEnvironments()`, NOT `api.environments.getEnvironments()` (1)
 - Use `waitForCondition()` instead of `sleep()` to reduce flakiness (1)
 - Commands that show UI will hang — test command existence, not execution (1)
