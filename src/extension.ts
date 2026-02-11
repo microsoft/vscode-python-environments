@@ -87,7 +87,13 @@ import { registerPoetryFeatures } from './managers/poetry/main';
 import { registerPyenvFeatures } from './managers/pyenv/main';
 
 export async function activate(context: ExtensionContext): Promise<PythonEnvironmentApi | undefined> {
-    const useEnvironmentsExtension = getConfiguration('python').get<boolean>('useEnvironmentsExtension', true);
+    // In smoke/e2e/integration tests, skip the useEnvironmentsExtension check since ms-python.python isn't installed
+    const isTestEnvironment = process.env.VSC_PYTHON_SMOKE_TEST === '1' || 
+                              process.env.VSC_PYTHON_E2E_TEST === '1' || 
+                              process.env.VSC_PYTHON_INTEGRATION_TEST === '1';
+    
+    const useEnvironmentsExtension = isTestEnvironment || 
+        getConfiguration('python').get<boolean>('useEnvironmentsExtension', true);
     traceInfo(`Experiment Status: useEnvironmentsExtension setting set to ${useEnvironmentsExtension}`);
     if (!useEnvironmentsExtension) {
         traceWarn(
