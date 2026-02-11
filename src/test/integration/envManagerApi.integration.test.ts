@@ -23,7 +23,6 @@
 import * as assert from 'assert';
 import * as vscode from 'vscode';
 import { ENVS_EXTENSION_ID } from '../constants';
-import { initializeTestSettings } from '../initialize';
 import { TestEventHandler, waitForCondition } from '../testUtils';
 
 suite('Integration: Environment Manager + API', function () {
@@ -40,10 +39,6 @@ suite('Integration: Environment Manager + API', function () {
     suiteSetup(async function () {
         // Set a shorter timeout for setup specifically
         this.timeout(20_000);
-
-        // CRITICAL: Configure settings BEFORE extension activation
-        // This follows the vscode-python pattern of programmatic configuration
-        await initializeTestSettings();
 
         const extension = vscode.extensions.getExtension(ENVS_EXTENSION_ID);
         assert.ok(extension, `Extension ${ENVS_EXTENSION_ID} not found`);

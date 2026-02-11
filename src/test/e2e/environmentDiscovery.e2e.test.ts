@@ -26,7 +26,6 @@
 import * as assert from 'assert';
 import * as vscode from 'vscode';
 import { ENVS_EXTENSION_ID } from '../constants';
-import { initializeTestSettings } from '../initialize';
 import { waitForCondition } from '../testUtils';
 
 suite('E2E: Environment Discovery', function () {
@@ -40,10 +39,6 @@ suite('E2E: Environment Discovery', function () {
     };
 
     suiteSetup(async function () {
-        // CRITICAL: Configure settings BEFORE extension activation
-        // This follows the vscode-python pattern of programmatic configuration
-        await initializeTestSettings();
-
         // Get and activate the extension
         const extension = vscode.extensions.getExtension(ENVS_EXTENSION_ID);
         assert.ok(extension, `Extension ${ENVS_EXTENSION_ID} not found`);
