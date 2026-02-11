@@ -99,11 +99,6 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
                                inspection?.workspaceValue === false ||
                                inspection?.workspaceFolderValue === false;
     
-    // DEBUG: Log to stdout which will appear in CI logs
-    console.log('[python-envs] activate() called');
-    console.log('[python-envs] inspection:', JSON.stringify(inspection));
-    console.log('[python-envs] explicitlyDisabled:', explicitlyDisabled);
-    
     const useEnvironmentsExtension = !explicitlyDisabled;
     traceInfo(`Experiment Status: useEnvironmentsExtension setting set to ${useEnvironmentsExtension}`);
     if (!useEnvironmentsExtension) {

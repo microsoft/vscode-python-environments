@@ -102,6 +102,9 @@ jobs:
       - name: Install Dependencies
         run: npm ci
 
+      - name: Compile Extension
+        run: npm run compile
+
       - name: Compile Tests
         run: npm run compile-tests
 
@@ -148,6 +151,9 @@ jobs:
       - name: Install Dependencies
         run: npm ci
 
+      - name: Compile Extension
+        run: npm run compile
+
       - name: Compile Tests
         run: npm run compile-tests
 
@@ -193,6 +199,9 @@ jobs:
 
       - name: Install Dependencies
         run: npm ci
+
+      - name: Compile Extension
+        run: npm run compile
 
       - name: Compile Tests
         run: npm run compile-tests
