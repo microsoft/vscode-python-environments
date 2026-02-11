@@ -291,15 +291,15 @@ export class VenvManager implements EnvironmentManager {
     }
 
     private updateCollection(environment: PythonEnvironment): void {
-        this.collection = this.collection.filter(
-            (e) => e.environmentPath.fsPath !== environment.environmentPath.fsPath,
-        );
+        const envPath = normalizePath(environment.environmentPath.fsPath);
+        this.collection = this.collection.filter((e) => normalizePath(e.environmentPath.fsPath) !== envPath);
     }
 
     private updateFsPathToEnv(environment: PythonEnvironment): Uri[] {
+        const envPath = normalizePath(environment.environmentPath.fsPath);
         const changed: Uri[] = [];
         this.fsPathToEnv.forEach((env, uri) => {
-            if (env.environmentPath.fsPath === environment.environmentPath.fsPath) {
+            if (normalizePath(env.environmentPath.fsPath) === envPath) {
                 this.fsPathToEnv.delete(uri);
                 changed.push(Uri.file(uri));
             }
@@ -361,7 +361,7 @@ export class VenvManager implements EnvironmentManager {
             return [];
         }
 
-        const env = this.fsPathToEnv.get(scope.fsPath);
+        const env = this.fsPathToEnv.get(normalizePath(scope.fsPath));
         return env ? [env] : [];
     }
 
@@ -378,7 +378,7 @@ export class VenvManager implements EnvironmentManager {
             return this.globalEnv;
         }
 
-        let env = this.fsPathToEnv.get(project.uri.fsPath);
+        let env = this.fsPathToEnv.get(normalizePath(project.uri.fsPath));
         if (!env) {
             env = this.findEnvironmentByPath(project.uri.fsPath);
         }
@@ -414,11 +414,12 @@ export class VenvManager implements EnvironmentManager {
                 }
             }
 
-            const before = this.fsPathToEnv.get(pw.uri.fsPath);
+            const normalizedPwPath = normalizePath(pw.uri.fsPath);
+            const before = this.fsPathToEnv.get(normalizedPwPath);
             if (environment) {
-                this.fsPathToEnv.set(pw.uri.fsPath, environment);
+                this.fsPathToEnv.set(normalizedPwPath, environment);
             } else {
-                this.fsPathToEnv.delete(pw.uri.fsPath);
+                this.fsPathToEnv.delete(normalizedPwPath);
             }
             await setVenvForWorkspace(pw.uri.fsPath, environment?.environmentPath.fsPath);
 
@@ -439,11 +440,12 @@ export class VenvManager implements EnvironmentManager {
 
             const before: Map<string, PythonEnvironment | undefined> = new Map();
             projects.forEach((p) => {
-                before.set(p.uri.fsPath, this.fsPathToEnv.get(p.uri.fsPath));
+                const normalizedPath = normalizePath(p.uri.fsPath);
+                before.set(p.uri.fsPath, this.fsPathToEnv.get(normalizedPath));
                 if (environment) {
-                    this.fsPathToEnv.set(p.uri.fsPath, environment);
+                    this.fsPathToEnv.set(normalizedPath, environment);
                 } else {
-                    this.fsPathToEnv.delete(p.uri.fsPath);
+                    this.fsPathToEnv.delete(normalizedPath);
                 }
             });
 

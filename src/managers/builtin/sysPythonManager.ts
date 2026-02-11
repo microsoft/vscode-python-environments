@@ -19,6 +19,7 @@ import {
 } from '../../api';
 import { SysManagerStrings } from '../../common/localize';
 import { createDeferred, Deferred } from '../../common/utils/deferred';
+import { normalizePath } from '../../common/utils/pathUtils';
 import { NativePythonFinder } from '../common/nativePythonFinder';
 import { getLatest } from '../common/utils';
 import {
@@ -134,7 +135,7 @@ export class SysPythonManager implements EnvironmentManager {
         }
 
         if (scope instanceof Uri) {
-            const env = this.fsPathToEnv.get(scope.fsPath);
+            const env = this.fsPathToEnv.get(normalizePath(scope.fsPath));
             if (env) {
                 return [env];
             }
@@ -171,10 +172,11 @@ export class SysPythonManager implements EnvironmentManager {
                 return;
             }
 
+            const normalizedPwPath = normalizePath(pw.uri.fsPath);
             if (environment) {
-                this.fsPathToEnv.set(pw.uri.fsPath, environment);
+                this.fsPathToEnv.set(normalizedPwPath, environment);
             } else {
-                this.fsPathToEnv.delete(pw.uri.fsPath);
+                this.fsPathToEnv.delete(normalizedPwPath);
             }
             await setSystemEnvForWorkspace(pw.uri.fsPath, environment?.environmentPath.fsPath);
         }
@@ -191,11 +193,12 @@ export class SysPythonManager implements EnvironmentManager {
 
             const before: Map<string, PythonEnvironment | undefined> = new Map();
             projects.forEach((p) => {
-                before.set(p.uri.fsPath, this.fsPathToEnv.get(p.uri.fsPath));
+                const normalizedPath = normalizePath(p.uri.fsPath);
+                before.set(p.uri.fsPath, this.fsPathToEnv.get(normalizedPath));
                 if (environment) {
-                    this.fsPathToEnv.set(p.uri.fsPath, environment);
+                    this.fsPathToEnv.set(normalizedPath, environment);
                 } else {
-                    this.fsPathToEnv.delete(p.uri.fsPath);
+                    this.fsPathToEnv.delete(normalizedPath);
                 }
             });
 
@@ -282,16 +285,20 @@ export class SysPythonManager implements EnvironmentManager {
     }
 
     private findEnvironmentByPath(fsPath: string): PythonEnvironment | undefined {
-        const normalized = path.normalize(fsPath); // /opt/homebrew/bin/python3.12
+        const normalized = normalizePath(fsPath);
         return this.collection.find((e) => {
-            const n = path.normalize(e.environmentPath.fsPath);
-            return n === normalized || path.dirname(n) === normalized || path.dirname(path.dirname(n)) === normalized;
+            const n = normalizePath(e.environmentPath.fsPath);
+            return (
+                n === normalized ||
+                normalizePath(path.dirname(e.environmentPath.fsPath)) === normalized ||
+                normalizePath(path.dirname(path.dirname(e.environmentPath.fsPath))) === normalized
+            );
         });
     }
 
     private fromEnvMap(uri: Uri): PythonEnvironment | undefined {
         // Find environment directly using the URI mapping
-        const env = this.fsPathToEnv.get(uri.fsPath);
+        const env = this.fsPathToEnv.get(normalizePath(uri.fsPath));
         if (env) {
             return env;
         }
@@ -299,7 +306,7 @@ export class SysPythonManager implements EnvironmentManager {
         // Find environment using the Python project for the Uri
         const project = this.api.getPythonProject(uri);
         if (project) {
-            return this.fsPathToEnv.get(project.uri.fsPath);
+            return this.fsPathToEnv.get(normalizePath(project.uri.fsPath));
         }
 
         return this.globalEnv;
@@ -332,7 +339,7 @@ export class SysPythonManager implements EnvironmentManager {
         }
 
         // Try to find workspace environments
-        const paths = this.api.getPythonProjects().map((p) => p.uri.fsPath);
+        const paths = this.api.getPythonProjects().map((p) => normalizePath(p.uri.fsPath));
 
         // Iterate over each path
         for (const p of paths) {
