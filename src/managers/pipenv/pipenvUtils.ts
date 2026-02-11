@@ -12,7 +12,7 @@ import {
     PythonEnvironmentInfo,
 } from '../../api';
 import { ENVS_EXTENSION_ID } from '../../common/constants';
-import { traceError, traceInfo } from '../../common/logging';
+import { traceError, traceInfo, traceVerbose } from '../../common/logging';
 import { getWorkspacePersistentState } from '../../common/persistentState';
 import { untildify } from '../../common/utils/pathUtils';
 import { getSettingWorkspaceScope } from '../../features/settings/settingHelpers';
@@ -222,12 +222,16 @@ export async function resolvePipenvPath(
     api: PythonEnvironmentApi,
     manager: EnvironmentManager,
 ): Promise<PythonEnvironment | undefined> {
-    const resolved = await nativeFinder.resolve(fsPath);
+    try {
+        const resolved = await nativeFinder.resolve(fsPath);
 
-    // Resolve pipenv environments even if the pipenv CLI is not found.
-    // This allows proper environment identification for read-only scenarios.
-    if (resolved.kind === NativePythonEnvironmentKind.pipenv) {
-        return await nativeToPythonEnv(resolved, api, manager);
+        // Resolve pipenv environments even if the pipenv CLI is not found.
+        // This allows proper environment identification for read-only scenarios.
+        if (resolved.kind === NativePythonEnvironmentKind.pipenv) {
+            return await nativeToPythonEnv(resolved, api, manager);
+        }
+    } catch (ex) {
+        traceVerbose(`Failed to resolve pipenv env "${fsPath}": ${ex}`);
     }
 
     return undefined;
