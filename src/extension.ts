@@ -87,13 +87,25 @@ import { registerPoetryFeatures } from './managers/poetry/main';
 import { registerPyenvFeatures } from './managers/pyenv/main';
 
 export async function activate(context: ExtensionContext): Promise<PythonEnvironmentApi | undefined> {
-    // In smoke/e2e/integration tests, skip the useEnvironmentsExtension check since ms-python.python isn't installed
+    // Check for explicit test environment (set via .vscode-test.mjs env vars)
     const isTestEnvironment = process.env.VSC_PYTHON_SMOKE_TEST === '1' || 
                               process.env.VSC_PYTHON_E2E_TEST === '1' || 
                               process.env.VSC_PYTHON_INTEGRATION_TEST === '1';
     
+    // Use inspect() to check if the setting has been explicitly set by the user.
+    // This is important because config.get() may return a defaultValue from other
+    // extensions' package.json (like ms-python.python setting it to false), even
+    // when those extensions aren't installed.
+    const config = getConfiguration('python');
+    const inspection = config.inspect<boolean>('useEnvironmentsExtension');
+    
+    // If no one has explicitly set this setting, default to true
+    const hasExplicitValue = inspection?.globalValue !== undefined || 
+                             inspection?.workspaceValue !== undefined ||
+                             inspection?.workspaceFolderValue !== undefined;
+    
     const useEnvironmentsExtension = isTestEnvironment || 
-        getConfiguration('python').get<boolean>('useEnvironmentsExtension', true);
+        (hasExplicitValue ? config.get<boolean>('useEnvironmentsExtension', true) : true);
     traceInfo(`Experiment Status: useEnvironmentsExtension setting set to ${useEnvironmentsExtension}`);
     if (!useEnvironmentsExtension) {
         traceWarn(
