@@ -68,6 +68,13 @@ export function isGreater(a: string | undefined, b: string | undefined): boolean
 
 export function sortEnvironments(collection: PythonEnvironment[]): PythonEnvironment[] {
     return collection.sort((a, b) => {
+        // Environments with errors should be sorted to the end
+        if (a.error && !b.error) {
+            return 1;
+        }
+        if (!a.error && b.error) {
+            return -1;
+        }
         if (a.version !== b.version) {
             return isGreater(a.version, b.version) ? -1 : 1;
         }
@@ -83,8 +90,12 @@ export function getLatest(collection: PythonEnvironment[]): PythonEnvironment | 
     if (collection.length === 0) {
         return undefined;
     }
-    let latest = collection[0];
-    for (const env of collection) {
+    // Filter out environments with errors first, then find latest
+    const nonErroredEnvs = collection.filter((e) => !e.error);
+    const candidates = nonErroredEnvs.length > 0 ? nonErroredEnvs : collection;
+
+    let latest = candidates[0];
+    for (const env of candidates) {
         if (isGreater(env.version, latest.version)) {
             latest = env;
         }

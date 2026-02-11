@@ -16,6 +16,7 @@ import {
 } from '../../api';
 import { PipenvStrings } from '../../common/localize';
 import { createDeferred, Deferred } from '../../common/utils/deferred';
+import { normalizePath } from '../../common/utils/pathUtils';
 import { withProgress } from '../../common/window.apis';
 import { NativePythonFinder } from '../common/nativePythonFinder';
 import {
@@ -101,7 +102,7 @@ export class PipenvManager implements EnvironmentManager {
             if (envPath) {
                 const env = this.findEnvironmentByPath(envPath);
                 if (env) {
-                    this.fsPathToEnv.set(project.uri.fsPath, env);
+                    this.fsPathToEnv.set(normalizePath(project.uri.fsPath), env);
                 }
             }
         }
@@ -114,8 +115,11 @@ export class PipenvManager implements EnvironmentManager {
     }
 
     private findEnvironmentByPath(fsPath: string): PythonEnvironment | undefined {
+        const normalized = normalizePath(fsPath);
         return this.collection.find(
-            (env) => env.environmentPath.fsPath === fsPath || env.execInfo?.run.executable === fsPath,
+            (env) =>
+                normalizePath(env.environmentPath.fsPath) === normalized ||
+                (env.execInfo?.run.executable && normalizePath(env.execInfo.run.executable) === normalized),
         );
     }
 
@@ -171,7 +175,7 @@ export class PipenvManager implements EnvironmentManager {
         if (scope instanceof Uri) {
             const project = this.api.getPythonProject(scope);
             if (project) {
-                const env = this.fsPathToEnv.get(project.uri.fsPath);
+                const env = this.fsPathToEnv.get(normalizePath(project.uri.fsPath));
                 return env ? [env] : [];
             }
         }
@@ -199,11 +203,12 @@ export class PipenvManager implements EnvironmentManager {
                 return;
             }
 
-            const before = this.fsPathToEnv.get(project.uri.fsPath);
+            const normalizedPath = normalizePath(project.uri.fsPath);
+            const before = this.fsPathToEnv.get(normalizedPath);
             if (environment) {
-                this.fsPathToEnv.set(project.uri.fsPath, environment);
+                this.fsPathToEnv.set(normalizedPath, environment);
             } else {
-                this.fsPathToEnv.delete(project.uri.fsPath);
+                this.fsPathToEnv.delete(normalizedPath);
             }
 
             await setPipenvForWorkspace(project.uri.fsPath, environment?.environmentPath.fsPath);
@@ -226,11 +231,12 @@ export class PipenvManager implements EnvironmentManager {
 
             const before: Map<string, PythonEnvironment | undefined> = new Map();
             projects.forEach((p) => {
-                before.set(p.uri.fsPath, this.fsPathToEnv.get(p.uri.fsPath));
+                const normalizedPath = normalizePath(p.uri.fsPath);
+                before.set(p.uri.fsPath, this.fsPathToEnv.get(normalizedPath));
                 if (environment) {
-                    this.fsPathToEnv.set(p.uri.fsPath, environment);
+                    this.fsPathToEnv.set(normalizedPath, environment);
                 } else {
-                    this.fsPathToEnv.delete(p.uri.fsPath);
+                    this.fsPathToEnv.delete(normalizedPath);
                 }
             });
 
@@ -258,7 +264,7 @@ export class PipenvManager implements EnvironmentManager {
         if (scope instanceof Uri) {
             const project = this.api.getPythonProject(scope);
             if (project) {
-                return this.fsPathToEnv.get(project.uri.fsPath);
+                return this.fsPathToEnv.get(normalizePath(project.uri.fsPath));
             }
         }
 
