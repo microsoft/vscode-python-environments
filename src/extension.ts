@@ -87,25 +87,24 @@ import { registerPoetryFeatures } from './managers/poetry/main';
 import { registerPyenvFeatures } from './managers/pyenv/main';
 
 export async function activate(context: ExtensionContext): Promise<PythonEnvironmentApi | undefined> {
-    // Check for explicit test environment (set via .vscode-test.mjs env vars)
-    const isTestEnvironment = process.env.VSC_PYTHON_SMOKE_TEST === '1' || 
-                              process.env.VSC_PYTHON_E2E_TEST === '1' || 
-                              process.env.VSC_PYTHON_INTEGRATION_TEST === '1';
-    
-    // Use inspect() to check if the setting has been explicitly set by the user.
-    // This is important because config.get() may return a defaultValue from other
-    // extensions' package.json (like ms-python.python setting it to false), even
-    // when those extensions aren't installed.
+    // Use inspect() to check if the user has EXPLICITLY disabled this extension.
+    // Only skip activation if someone explicitly set useEnvironmentsExtension to false.
+    // This ignores defaultValues from other extensions' package.json and defaults to
+    // activating the extension if no explicit setting exists.
     const config = getConfiguration('python');
     const inspection = config.inspect<boolean>('useEnvironmentsExtension');
     
-    // If no one has explicitly set this setting, default to true
-    const hasExplicitValue = inspection?.globalValue !== undefined || 
-                             inspection?.workspaceValue !== undefined ||
-                             inspection?.workspaceFolderValue !== undefined;
+    // Check for explicit false values (user deliberately disabled the extension)
+    const explicitlyDisabled = inspection?.globalValue === false || 
+                               inspection?.workspaceValue === false ||
+                               inspection?.workspaceFolderValue === false;
     
-    const useEnvironmentsExtension = isTestEnvironment || 
-        (hasExplicitValue ? config.get<boolean>('useEnvironmentsExtension', true) : true);
+    // DEBUG: Log to stdout which will appear in CI logs
+    console.log('[python-envs] activate() called');
+    console.log('[python-envs] inspection:', JSON.stringify(inspection));
+    console.log('[python-envs] explicitlyDisabled:', explicitlyDisabled);
+    
+    const useEnvironmentsExtension = !explicitlyDisabled;
     traceInfo(`Experiment Status: useEnvironmentsExtension setting set to ${useEnvironmentsExtension}`);
     if (!useEnvironmentsExtension) {
         traceWarn(
