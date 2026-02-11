@@ -339,24 +339,26 @@ export class SysPythonManager implements EnvironmentManager {
         }
 
         // Try to find workspace environments
-        const paths = this.api.getPythonProjects().map((p) => normalizePath(p.uri.fsPath));
+        const projects = this.api.getPythonProjects();
 
-        // Iterate over each path
-        for (const p of paths) {
-            const env = await getSystemEnvForWorkspace(p);
+        // Iterate over each project
+        for (const project of projects) {
+            const originalPath = project.uri.fsPath;
+            const normalizedPath = normalizePath(originalPath);
+            const env = await getSystemEnvForWorkspace(originalPath);
 
             if (env) {
                 const found = this.findEnvironmentByPath(env);
 
                 if (found) {
-                    this.fsPathToEnv.set(p, found);
+                    this.fsPathToEnv.set(normalizedPath, found);
                 } else {
                     // If not found, resolve the path.
                     const resolved = await resolveSystemPythonEnvironmentPath(env, this.nativeFinder, this.api, this);
 
                     if (resolved) {
                         // If resolved add it to the collection.
-                        this.fsPathToEnv.set(p, resolved);
+                        this.fsPathToEnv.set(normalizedPath, resolved);
                         this.collection.push(resolved);
                     } else {
                         this.log.error(`Failed to resolve python environment: ${env}`);

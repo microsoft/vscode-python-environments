@@ -271,22 +271,24 @@ export class PyEnvManager implements EnvironmentManager, Disposable {
             });
 
         // Try to find workspace environments
-        const paths = this.api.getPythonProjects().map((p) => normalizePath(p.uri.fsPath));
-        for (const p of paths) {
-            const env = await getPyenvForWorkspace(p);
+        const projects = this.api.getPythonProjects();
+        for (const project of projects) {
+            const originalPath = project.uri.fsPath;
+            const normalizedPath = normalizePath(originalPath);
+            const env = await getPyenvForWorkspace(originalPath);
 
             if (env) {
                 const found = this.findEnvironmentByPath(env);
 
                 if (found) {
-                    this.fsPathToEnv.set(p, found);
+                    this.fsPathToEnv.set(normalizedPath, found);
                 } else {
                     // If not found, resolve the pyenv path. Could be portable pyenv.
                     const resolved = await resolvePyenvPath(env, this.nativeFinder, this.api, this);
 
                     if (resolved) {
                         // If resolved add it to the collection
-                        this.fsPathToEnv.set(p, resolved);
+                        this.fsPathToEnv.set(normalizedPath, resolved);
                         this.collection.push(resolved);
                     } else {
                         traceError(`Failed to resolve pyenv environment: ${env}`);
@@ -296,16 +298,16 @@ export class PyEnvManager implements EnvironmentManager, Disposable {
                 // If there is not an environment already assigned by user to this project
                 // then see if there is one in the collection
                 if (pathSorted.length === 1) {
-                    this.fsPathToEnv.set(p, pathSorted[0]);
+                    this.fsPathToEnv.set(normalizedPath, pathSorted[0]);
                 } else {
                     // If there is more than one environment then we need to check if the project
                     // is a subfolder of one of the environments
                     const found = pathSorted.find((e) => {
                         const t = this.api.getPythonProject(e.environmentPath)?.uri.fsPath;
-                        return t && normalizePath(t) === p;
+                        return t && normalizePath(t) === normalizedPath;
                     });
                     if (found) {
-                        this.fsPathToEnv.set(p, found);
+                        this.fsPathToEnv.set(normalizedPath, found);
                     }
                 }
             }

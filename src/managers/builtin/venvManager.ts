@@ -574,16 +574,17 @@ export class VenvManager implements EnvironmentManager {
         this.fsPathToEnv.clear();
 
         const sorted = sortEnvironments(this.collection);
-        const projectPaths = this.api.getPythonProjects().map((p) => normalizePath(p.uri.fsPath));
+        const projects = this.api.getPythonProjects();
         const events: (() => void)[] = [];
         // Iterates through all workspace projects
-        for (const p of projectPaths) {
-            const env = await getVenvForWorkspace(p);
+        for (const project of projects) {
+            const originalPath = project.uri.fsPath;
+            const normalizedPath = normalizePath(originalPath);
+            const env = await getVenvForWorkspace(originalPath);
             if (env) {
                 // from env path find PythonEnvironment object in the collection.
                 let foundEnv = this.findEnvironmentByPath(env, sorted) ?? this.findEnvironmentByPath(env, globals);
-                const previousEnv = this.fsPathToEnv.get(p);
-                const pw = this.api.getPythonProject(Uri.file(p));
+                const previousEnv = this.fsPathToEnv.get(normalizedPath);
                 if (!foundEnv) {
                     // attempt to resolve
                     const resolved = await resolveVenvPythonEnvironmentPath(
@@ -603,20 +604,20 @@ export class VenvManager implements EnvironmentManager {
                     }
                 }
                 // Given found env, add it to the map and fire the event if needed.
-                this.fsPathToEnv.set(p, foundEnv);
-                if (pw && previousEnv?.envId.id !== foundEnv.envId.id) {
+                this.fsPathToEnv.set(normalizedPath, foundEnv);
+                if (previousEnv?.envId.id !== foundEnv.envId.id) {
                     events.push(() =>
-                        this._onDidChangeEnvironment.fire({ uri: pw.uri, old: undefined, new: foundEnv }),
+                        this._onDidChangeEnvironment.fire({ uri: project.uri, old: undefined, new: foundEnv }),
                     );
                 }
             } else {
                 // Search through all known environments (e) and check if any are associated with the current project path. If so, add that environment and path in the map.
                 const found = sorted.find((e) => {
                     const t = this.api.getPythonProject(e.environmentPath)?.uri.fsPath;
-                    return t && normalizePath(t) === p;
+                    return t && normalizePath(t) === normalizedPath;
                 });
                 if (found) {
-                    this.fsPathToEnv.set(p, found);
+                    this.fsPathToEnv.set(normalizedPath, found);
                 }
             }
         }
