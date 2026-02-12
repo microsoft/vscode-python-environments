@@ -73,3 +73,153 @@ jobs:
 
       - name: Run Tests
         run: npm run unittest
+
+  smoke-tests:
+    name: Smoke Tests
+    runs-on: ${{ matrix.os }}
+    needs: [build-vsix]
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        python-version: ['3.9', '3.12', '3.14']
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: Install Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install Dependencies
+        run: npm ci
+
+      - name: Compile Extension
+        run: npm run compile
+
+      - name: Compile Tests
+        run: npm run compile-tests
+
+      - name: Configure Test Settings
+        run: |
+          mkdir -p .vscode-test/user-data/User
+          echo '{"python.useEnvironmentsExtension": true}' > .vscode-test/user-data/User/settings.json
+        shell: bash
+
+      - name: Run Smoke Tests (Linux)
+        if: runner.os == 'Linux'
+        uses: GabrielBB/xvfb-action@v1
+        with:
+          run: npm run smoke-test
+
+      - name: Run Smoke Tests (non-Linux)
+        if: runner.os != 'Linux'
+        run: npm run smoke-test
+
+  e2e-tests:
+    name: E2E Tests
+    runs-on: ${{ matrix.os }}
+    needs: [smoke-tests]
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        python-version: ['3.9', '3.12', '3.14']
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: Install Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install Dependencies
+        run: npm ci
+
+      - name: Compile Extension
+        run: npm run compile
+
+      - name: Compile Tests
+        run: npm run compile-tests
+
+      - name: Configure Test Settings
+        run: |
+          mkdir -p .vscode-test/user-data/User
+          echo '{"python.useEnvironmentsExtension": true}' > .vscode-test/user-data/User/settings.json
+        shell: bash
+
+      - name: Run E2E Tests (Linux)
+        if: runner.os == 'Linux'
+        uses: GabrielBB/xvfb-action@v1
+        with:
+          run: npm run e2e-test
+
+      - name: Run E2E Tests (non-Linux)
+        if: runner.os != 'Linux'
+        run: npm run e2e-test
+
+  integration-tests:
+    name: Integration Tests
+    runs-on: ${{ matrix.os }}
+    needs: [smoke-tests]
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        python-version: ['3.9', '3.12', '3.14']
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: Install Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install Dependencies
+        run: npm ci
+
+      - name: Compile Extension
+        run: npm run compile
+
+      - name: Compile Tests
+        run: npm run compile-tests
+
+      - name: Configure Test Settings
+        run: |
+          mkdir -p .vscode-test/user-data/User
+          echo '{"python.useEnvironmentsExtension": true}' > .vscode-test/user-data/User/settings.json
+        shell: bash
+
+      - name: Run Integration Tests (Linux)
+        if: runner.os == 'Linux'
+        uses: GabrielBB/xvfb-action@v1
+        with:
+          run: npm run integration-test
+
+      - name: Run Integration Tests (non-Linux)
+        if: runner.os != 'Linux'
+        run: npm run integration-test

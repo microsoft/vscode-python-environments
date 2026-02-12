@@ -43,3 +43,8 @@ Provide project context and coding guidelines that AI should follow when generat
 
 - When using `getConfiguration().inspect()`, always pass a scope/Uri to `getConfiguration(section, scope)` — otherwise `workspaceFolderValue` will be `undefined` because VS Code doesn't know which folder to inspect (1)
 - **path.normalize() vs path.resolve()**: On Windows, `path.normalize('\test')` keeps it as `\test`, but `path.resolve('\test')` adds the current drive → `C:\test`. When comparing paths, use `path.resolve()` on BOTH sides or they won't match (2)
+- **Path comparisons vs user display**: Use `normalizePath()` from `pathUtils.ts` when comparing paths or using them as map keys, but preserve original paths for user-facing output like settings, logs, and UI (1)
+- **CI test jobs need webpack build**: Smoke/E2E/integration tests run in a real VS Code instance against `dist/extension.js` (built by webpack). CI jobs must run `npm run compile` (webpack), not just `npm run compile-tests` (tsc). Without webpack, the extension code isn't built and tests run against stale/missing code (1)
+- **Use inspect() for setting checks with defaults from other extensions**: When checking `python.useEnvironmentsExtension`, use `config.inspect()` and only check explicit user values (`globalValue`, `workspaceValue`, `workspaceFolderValue`). Ignore `defaultValue` as it may come from other extensions' package.json even when not installed (1)
+- **API is flat, not nested**: Use `api.getEnvironments()`, NOT `api.environments.getEnvironments()`. The extension exports a flat API object (1)
+- **PythonEnvironment has `envId`, not `id`**: The environment identifier is `env.envId` (a `PythonEnvironmentId` object with `id` and `managerId`), not a direct `id` property (1)

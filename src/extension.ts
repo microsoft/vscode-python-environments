@@ -1,4 +1,14 @@
-import { commands, ExtensionContext, extensions, l10n, LogOutputChannel, ProgressLocation, Terminal, Uri, window } from 'vscode';
+import {
+    commands,
+    ExtensionContext,
+    extensions,
+    l10n,
+    LogOutputChannel,
+    ProgressLocation,
+    Terminal,
+    Uri,
+    window,
+} from 'vscode';
 import { PythonEnvironment, PythonEnvironmentApi, PythonProjectCreator } from './api';
 import { ENVS_EXTENSION_ID } from './common/constants';
 import { ensureCorrectVersion } from './common/extVersion';
@@ -18,7 +28,7 @@ import {
     onDidChangeTerminalShellIntegration,
     withProgress,
 } from './common/window.apis';
-import { getConfiguration } from './common/workspace.apis';
+import { getConfiguration, getWorkspaceFolders } from './common/workspace.apis';
 import { createManagerReady } from './features/common/managerReady';
 import { AutoFindProjects } from './features/creators/autoFindProjects';
 import { ExistingProjects } from './features/creators/existingProjects';
@@ -87,7 +97,31 @@ import { registerPoetryFeatures } from './managers/poetry/main';
 import { registerPyenvFeatures } from './managers/pyenv/main';
 
 export async function activate(context: ExtensionContext): Promise<PythonEnvironmentApi | undefined> {
-    const useEnvironmentsExtension = getConfiguration('python').get<boolean>('useEnvironmentsExtension', true);
+    // Only skip activation if user explicitly set useEnvironmentsExtension to false.
+    // When disabled, the main Python extension handles environments instead (legacy mode).
+    const config = getConfiguration('python');
+    const inspection = config.inspect<boolean>('useEnvironmentsExtension');
+
+    // Check global and workspace-level explicit disables
+    let explicitlyDisabled = inspection?.globalValue === false || inspection?.workspaceValue === false;
+
+    // Also check folder-scoped settings in multi-root workspaces
+    // (inspect() on an unscoped config won't populate workspaceFolderValue reliably)
+    if (!explicitlyDisabled) {
+        const workspaceFolders = getWorkspaceFolders();
+        if (workspaceFolders) {
+            for (const folder of workspaceFolders) {
+                const folderConfig = getConfiguration('python', folder.uri);
+                const folderInspection = folderConfig.inspect<boolean>('useEnvironmentsExtension');
+                if (folderInspection?.workspaceFolderValue === false) {
+                    explicitlyDisabled = true;
+                    break;
+                }
+            }
+        }
+    }
+
+    const useEnvironmentsExtension = !explicitlyDisabled;
     traceInfo(`Experiment Status: useEnvironmentsExtension setting set to ${useEnvironmentsExtension}`);
     if (!useEnvironmentsExtension) {
         traceWarn(
