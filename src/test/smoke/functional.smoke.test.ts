@@ -39,13 +39,9 @@ suite('Smoke: Functional Checks', function () {
         assert.ok(api, 'API not exported');
 
         // Wait for environment managers to register (happens async in setImmediate)
-        // This may fail in CI if the pet binary is not available
+        // This will fail if the pet binary is not available - which is correct behavior
         const result = await waitForApiReady(api, 45_000);
-        managersReady = result.ready;
-        if (!result.ready) {
-            console.log(`[WARN] Managers not ready: ${result.error}`);
-            console.log('[WARN] Tests requiring managers will be skipped');
-        }
+        assert.ok(result.ready, `Environment managers failed to initialize: ${result.error}`);
     });
 
     // =========================================================================
@@ -53,12 +49,6 @@ suite('Smoke: Functional Checks', function () {
     // =========================================================================
 
     test('getEnvironments returns an array', async function () {
-        // Skip if managers aren't ready (e.g., pet binary not available in CI)
-        if (!managersReady) {
-            this.skip();
-            return;
-        }
-
         // This test verifies discovery machinery works
         // Even if no Python is installed, it should return an empty array, not throw
 
@@ -68,27 +58,10 @@ suite('Smoke: Functional Checks', function () {
     });
 
     test('getEnvironments finds Python installations when available', async function () {
-        // Skip if managers aren't ready (e.g., pet binary not available in CI)
-        if (!managersReady) {
-            this.skip();
-            return;
-        }
-
-        // Skip this test if no Python is expected (CI without Python)
-        if (process.env.SKIP_PYTHON_TESTS) {
-            this.skip();
-            return;
-        }
-
         const environments = await api.getEnvironments('all');
 
-        // On a typical dev machine, we expect at least one Python
-        // This test may need to be conditional based on CI environment
-        if (environments.length === 0) {
-            console.log('[WARN] No Python environments found - is Python installed?');
-            // Don't fail - just warn. CI may not have Python.
-            return;
-        }
+        // CI should have Python installed, so we expect at least one environment
+        assert.ok(environments.length > 0, 'Expected at least one Python environment - is Python installed?');
 
         // Verify environment structure
         const env = environments[0];
