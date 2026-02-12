@@ -16,11 +16,11 @@ Run E2E (end-to-end) tests to verify complete user workflows work correctly.
 
 ## Quick Reference
 
-| Action            | Command                                     |
-| ----------------- | ------------------------------------------- |
-| Run all E2E tests | `npm run compile-tests && npm run e2e-test` |
-| Run specific test | `npm run e2e-test -- --grep "discovers"`    |
-| Debug in VS Code  | Debug panel → "E2E Tests" → F5              |
+| Action            | Command                                                        |
+| ----------------- | -------------------------------------------------------------- |
+| Run all E2E tests | `npm run compile && npm run compile-tests && npm run e2e-test` |
+| Run specific test | `npm run e2e-test -- --grep "discovers"`                       |
+| Debug in VS Code  | Debug panel → "E2E Tests" → F5                                 |
 
 ## How E2E Tests Work
 
@@ -37,7 +37,7 @@ They take longer (1-3 minutes) but catch integration issues.
 ### Step 1: Compile and Run
 
 ```bash
-npm run compile-tests && npm run e2e-test
+npm run compile && npm run compile-tests && npm run e2e-test
 ```
 
 ### Step 2: Interpret Results
@@ -122,5 +122,4 @@ suite('E2E: [Workflow Name]', function () {
 - E2E tests are slower than smoke tests (expect 1-3 minutes)
 - They may create/modify files - cleanup happens in `suiteTeardown`
 - First run downloads VS Code (~100MB, cached in `.vscode-test/`)
-- See [docs/e2e-tests.md](../../../docs/e2e-tests.md) for detailed documentation
-- See [docs/test-types-comparison.md](../../../docs/test-types-comparison.md) for when to use which test type
+- For more details on E2E tests and how they compare to other test types, refer to the project's testing documentation.

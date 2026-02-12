@@ -55,7 +55,7 @@
                 "--extensionTestsPath=${workspaceFolder}/out/test/smoke"
             ],
             "outFiles": ["${workspaceFolder}/out/**/*.js", "${workspaceFolder}/dist/**/*.js"],
-            "preLaunchTask": "${defaultBuildTask}"
+            "preLaunchTask": "tasks: build"
         },
         {
             "name": "E2E Tests",
@@ -69,7 +69,7 @@
                 "--extensionTestsPath=${workspaceFolder}/out/test/e2e"
             ],
             "outFiles": ["${workspaceFolder}/out/**/*.js", "${workspaceFolder}/dist/**/*.js"],
-            "preLaunchTask": "${defaultBuildTask}"
+            "preLaunchTask": "tasks: build"
         },
         {
             "name": "Integration Tests",
@@ -83,7 +83,7 @@
                 "--extensionTestsPath=${workspaceFolder}/out/test/integration"
             ],
             "outFiles": ["${workspaceFolder}/out/**/*.js", "${workspaceFolder}/dist/**/*.js"],
-            "preLaunchTask": "${defaultBuildTask}"
+            "preLaunchTask": "tasks: build"
         }
     ]
 }

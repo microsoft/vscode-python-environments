@@ -14,11 +14,11 @@ Run smoke tests to verify the extension loads and basic functionality works in a
 
 ## Quick Reference
 
-| Action              | Command                                              |
-| ------------------- | ---------------------------------------------------- |
-| Run all smoke tests | `npm run compile-tests && npm run smoke-test`        |
-| Run specific test   | `npm run smoke-test -- --grep "Extension activates"` |
-| Debug in VS Code    | Debug panel → "Smoke Tests" → F5                     |
+| Action              | Command                                                          |
+| ------------------- | ---------------------------------------------------------------- |
+| Run all smoke tests | `npm run compile && npm run compile-tests && npm run smoke-test` |
+| Run specific test   | `npm run smoke-test -- --grep "Extension activates"`             |
+| Debug in VS Code    | Debug panel → "Smoke Tests" → F5                                 |
 
 ## How Smoke Tests Work
 
@@ -37,7 +37,7 @@ This is why smoke tests are slower (~10-60s) but catch real integration issues.
 ### Step 1: Compile and Run
 
 ```bash
-npm run compile-tests && npm run smoke-test
+npm run compile && npm run compile-tests && npm run smoke-test
 ```
 
 ### Step 2: Interpret Results
@@ -124,5 +124,3 @@ suite('Smoke: [Feature Name]', function () {
 
 - First run downloads VS Code (~100MB, cached in `.vscode-test/`)
 - Tests auto-retry once on failure
-- See [docs/smoke-tests.md](../../../docs/smoke-tests.md) for detailed documentation
-- See [docs/test-types-comparison.md](../../../docs/test-types-comparison.md) for when to use which test type

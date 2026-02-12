@@ -14,11 +14,11 @@ Run integration tests to verify that multiple components (managers, API, setting
 
 ## Quick Reference
 
-| Action                    | Command                                             |
-| ------------------------- | --------------------------------------------------- |
-| Run all integration tests | `npm run compile-tests && npm run integration-test` |
-| Run specific test         | `npm run integration-test -- --grep "manager"`      |
-| Debug in VS Code          | Debug panel → "Integration Tests" → F5              |
+| Action                    | Command                                                                |
+| ------------------------- | ---------------------------------------------------------------------- |
+| Run all integration tests | `npm run compile && npm run compile-tests && npm run integration-test` |
+| Run specific test         | `npm run integration-test -- --grep "manager"`                         |
+| Debug in VS Code          | Debug panel → "Integration Tests" → F5                                 |
 
 ## How Integration Tests Work
 
@@ -35,7 +35,7 @@ They're faster than E2E (which test full workflows) but more thorough than smoke
 ### Step 1: Compile and Run
 
 ```bash
-npm run compile-tests && npm run integration-test
+npm run compile && npm run compile-tests && npm run integration-test
 ```
 
 ### Step 2: Interpret Results
@@ -110,5 +110,3 @@ suite('Integration: [Component A] + [Component B]', function () {
 - Integration tests are faster than E2E (30s-2min vs 1-3min)
 - Focus on testing component boundaries, not full user workflows
 - First run downloads VS Code (~100MB, cached in `.vscode-test/`)
-- See [docs/integration-tests.md](../../../docs/integration-tests.md) for detailed documentation
-- See [docs/test-types-comparison.md](../../../docs/test-types-comparison.md) for when to use which test type

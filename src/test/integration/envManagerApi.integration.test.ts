@@ -87,16 +87,10 @@ suite('Integration: Environment Manager + API', function () {
             // Trigger a refresh which should fire events
             await api.refreshEnvironments(undefined);
 
-            // Wait a bit for events to propagate
-            // Note: Events may or may not fire depending on whether anything changed
-            // This test verifies the event mechanism works, not that changes occurred
-            await new Promise((resolve) => setTimeout(resolve, 1000));
-
-            // If any events fired, verify they have expected shape
-            if (handler.fired) {
-                const event = handler.first;
-                assert.ok(event !== undefined, 'Event should have a value');
-            }
+            // Assert that at least one event fired during refresh
+            await handler.assertFiredAtLeast(1, 5000);
+            const event = handler.first;
+            assert.ok(event !== undefined, 'Event should have a value');
         } finally {
             handler.dispose();
         }
