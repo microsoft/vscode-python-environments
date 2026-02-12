@@ -41,8 +41,9 @@ export default defineConfig([
             `--user-data-dir=${userDataDir}`,
             '--disable-workspace-trust',
         ],
-        // NOTE: Do NOT install ms-python.python!
-        // It defines python.useEnvironmentsExtension=false by default.
+        // Install ms-python.python for the native Python tools (pet binary).
+        // We use inspect() for useEnvironmentsExtension check, so defaults are ignored.
+        installExtensions: ['ms-python.python'],
     },
     {
         label: 'integrationTests',
@@ -59,8 +60,9 @@ export default defineConfig([
             `--user-data-dir=${userDataDir}`,
             '--disable-workspace-trust',
         ],
-        // NOTE: Do NOT install ms-python.python!
-        // It defines python.useEnvironmentsExtension=false by default.
+        // Install ms-python.python for the native Python tools (pet binary).
+        // We use inspect() for useEnvironmentsExtension check, so defaults are ignored.
+        installExtensions: ['ms-python.python'],
     },
     {
         label: 'extensionTests',
