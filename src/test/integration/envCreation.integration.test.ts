@@ -66,6 +66,7 @@ suite('Integration: Environment Creation', function () {
      * Test: Managers that support creation are available
      *
      * At least one environment manager (venv or conda) should support creation.
+     * This test verifies that global Python installations are discoverable.
      */
     test('At least one manager supports environment creation', async function () {
         // Get all environments to force managers to load
@@ -74,10 +75,20 @@ suite('Integration: Environment Creation', function () {
         // Check if we have global Python installations that can create venvs
         const globalEnvs = await api.getEnvironments('global');
 
-        // If we have global Python installations, venv creation should be possible
-        if (globalEnvs.length > 0) {
-            console.log(`Found ${globalEnvs.length} global Python installations for venv creation`);
+        // Assert we have at least one global Python that can serve as base for venv creation
+        assert.ok(
+            globalEnvs.length > 0,
+            'At least one global Python installation should be available for environment creation. ' +
+                'If this fails, ensure Python is installed and discoverable on this system.',
+        );
+
+        // Verify the global environments have required properties for creation
+        for (const env of globalEnvs) {
+            assert.ok(env.envId, 'Global environment must have envId');
+            assert.ok(env.environmentPath, 'Global environment must have environmentPath');
         }
+
+        console.log(`Found ${globalEnvs.length} global Python installations for venv creation`);
     });
 
     /**
@@ -206,23 +217,31 @@ suite('Integration: Environment Creation', function () {
      * Note: This may require special permissions or configurations.
      */
     test('Global scope creation is handled', async function () {
-        // This test verifies the API handles global scope without crashing
-        // Actual creation may require specific configurations
+        // This test verifies the API handles global scope correctly
+        let createdEnv: PythonEnvironment | undefined;
 
         try {
             // Attempt global creation - this may prompt for user input
-            // so we use quickCreate and expect it might fail
-            const result = await api.createEnvironment('global', { quickCreate: true });
+            // so we use quickCreate and expect it might return undefined
+            createdEnv = await api.createEnvironment('global', { quickCreate: true });
 
-            // If it succeeds, clean up
-            if (result) {
-                await api.removeEnvironment(result);
+            if (createdEnv) {
+                // If creation succeeded, verify the environment has valid structure
+                assert.ok(createdEnv.envId, 'Created global env must have envId');
+                assert.ok(createdEnv.envId.id, 'Created global env must have envId.id');
+                assert.ok(createdEnv.environmentPath, 'Created global env must have environmentPath');
+            } else {
+                // quickCreate returned undefined - this is acceptable behavior
+                // (e.g., no manager configured for global creation)
+                console.log('Global creation returned undefined (quickCreate not fully supported)');
             }
-        } catch (e) {
-            // Global creation not supported or no manager available
-            // This is acceptable - the test verifies the API doesn't crash
-            console.log('Global creation not available:', (e as Error).message);
+        } finally {
+            // Cleanup: always try to remove if created
+            if (createdEnv) {
+                await api.removeEnvironment(createdEnv);
+            }
         }
+        // Test passes if we got here without throwing - API handled scope correctly
     });
 
     /**
@@ -239,18 +258,27 @@ suite('Integration: Environment Creation', function () {
         }
 
         const uris = workspaceFolders.map((f) => f.uri);
+        let createdEnv: PythonEnvironment | undefined;
 
         try {
-            // This may prompt for manager selection
-            const result = await api.createEnvironment(uris, { quickCreate: true });
+            // This may prompt for manager selection - quickCreate should handle it
+            createdEnv = await api.createEnvironment(uris, { quickCreate: true });
 
-            if (result) {
-                await api.removeEnvironment(result);
+            if (createdEnv) {
+                // Verify created environment has valid structure
+                assert.ok(createdEnv.envId, 'Multi-URI created env must have envId');
+                assert.ok(createdEnv.environmentPath, 'Multi-URI created env must have environmentPath');
+            } else {
+                // quickCreate returned undefined - acceptable for multi-URI scenario
+                console.log('Multi-URI creation returned undefined (quickCreate not fully supported)');
             }
-        } catch (e) {
-            // Multi-URI creation may not be fully supported in all configurations
-            console.log('Multi-URI creation result:', (e as Error).message);
+        } finally {
+            // Cleanup: always try to remove if created
+            if (createdEnv) {
+                await api.removeEnvironment(createdEnv);
+            }
         }
+        // Test passes if we got here without throwing - API handled multi-URI correctly
     });
 
     /**

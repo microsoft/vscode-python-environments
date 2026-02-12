@@ -196,7 +196,8 @@ suite('Integration: Python Projects', function () {
     /**
      * Test: Environment can be unset for project
      *
-     * Setting undefined as environment should clear the association.
+     * Setting undefined as environment should clear the explicit association.
+     * After clearing, getEnvironment may return auto-discovered env or undefined.
      */
     test('setEnvironment with undefined clears association', async function () {
         const projects = api.getPythonProjects();
@@ -213,11 +214,29 @@ suite('Integration: Python Projects', function () {
         // Set environment first
         await api.setEnvironment(project.uri, env);
 
+        // Verify it was set
+        const beforeClear = await api.getEnvironment(project.uri);
+        assert.ok(beforeClear, 'Environment should be set before clearing');
+        assert.strictEqual(beforeClear.envId.id, env.envId.id, 'Should have the explicitly set environment');
+
         // Clear environment
         await api.setEnvironment(project.uri, undefined);
 
-        // Note: getEnvironment may still return an auto-selected environment
-        // based on discovery. The key test is that no error occurs.
+        // After clearing, if there's still an environment, it should either be:
+        // 1. undefined (no auto-discovery)
+        // 2. Different from the explicitly set one (auto-discovered fallback)
+        // 3. Same as before if it happens to be auto-discovered too (edge case)
+        const afterClear = await api.getEnvironment(project.uri);
+
+        // The key assertion: the operation completed without error
+        // and the API behaves consistently (returns env or undefined)
+        if (afterClear) {
+            assert.ok(afterClear.envId, 'If environment returned, it must have valid envId');
+            assert.ok(afterClear.envId.id, 'If environment returned, envId must have id');
+        }
+        // If undefined, that's also valid - explicit selection was cleared
+
+        console.log('After clearing:', afterClear?.displayName ?? 'undefined (no auto-discovery)');
     });
 
     /**

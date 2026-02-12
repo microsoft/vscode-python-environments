@@ -272,26 +272,23 @@ suite('Integration: Terminal Activation', function () {
 
         const env = environments[0];
 
-        try {
-            const execution = await api.runAsTask(env, {
-                name: 'Test Python Task',
-                args: ['--version'],
-                project: projects[0],
-            });
+        const execution = await api.runAsTask(env, {
+            name: 'Test Python Task',
+            args: ['--version'],
+            project: projects[0],
+        });
 
-            assert.ok(execution, 'runAsTask should return execution');
-            assert.ok(execution.task, 'Execution should have task');
+        assert.ok(execution, 'runAsTask should return execution');
+        assert.ok(execution.task, 'Execution should have task');
+        assert.ok(execution.task.name, 'Task should have name');
+        assert.ok(execution.task.definition, 'Task should have definition');
 
-            // Clean up - terminate the task
-            vscode.tasks.taskExecutions.forEach((t) => {
-                if (t === execution) {
-                    t.terminate();
-                }
-            });
-        } catch (e) {
-            // Tasks may fail in test environment
-            console.log('runAsTask error:', (e as Error).message);
-        }
+        // Clean up - terminate the task
+        vscode.tasks.taskExecutions.forEach((t) => {
+            if (t === execution) {
+                t.terminate();
+            }
+        });
     });
 
     /**
@@ -308,24 +305,19 @@ suite('Integration: Terminal Activation', function () {
         }
 
         // Find an environment with Python executable
-        let targetEnv = environments[0];
+        const targetEnv = environments[0];
 
-        try {
-            const process = await api.runInBackground(targetEnv, {
-                args: ['--version'],
-            });
+        const process = await api.runInBackground(targetEnv, {
+            args: ['--version'],
+        });
 
-            assert.ok(process, 'runInBackground should return process');
-            assert.ok(process.stdout, 'Process should have stdout');
-            assert.ok(process.stderr, 'Process should have stderr');
-            assert.ok(typeof process.kill === 'function', 'Process should have kill method');
+        assert.ok(process, 'runInBackground should return process');
+        assert.ok(process.stdout, 'Process should have stdout');
+        assert.ok(process.stderr, 'Process should have stderr');
+        assert.ok(typeof process.kill === 'function', 'Process should have kill method');
 
-            // Clean up
-            process.kill();
-        } catch (e) {
-            // Background process may fail if Python not properly configured
-            console.log('runInBackground error:', (e as Error).message);
-        }
+        // Clean up
+        process.kill();
     });
 
     /**

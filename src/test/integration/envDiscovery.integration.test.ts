@@ -99,19 +99,30 @@ suite('Integration: Environment Discovery', function () {
             // Reset any previous events
             handler.reset();
 
-            // Trigger refresh
+            // First, check if we have environments on this system
+            const preCheckEnvs = await api.getEnvironments('all');
+
+            if (preCheckEnvs.length === 0) {
+                // No environments discovered - can't test events
+                console.log('No environments available to test event firing');
+                this.skip();
+                return;
+            }
+
+            // Trigger refresh - this should fire events for discovered environments
             await api.refreshEnvironments(undefined);
 
-            // Give time for events to propagate
-            // Note: Events may not fire if no environments change
-            // This test verifies the event mechanism works when changes occur
-            const environments = await api.getEnvironments('all');
+            // Wait for events to propagate (discovery is async)
+            await handler.assertFiredAtLeast(1, 10_000);
 
-            if (environments.length > 0) {
-                // If we have environments, we should have received events during discovery
-                // (unless this is a repeat run with cached data)
-                console.log(`Event fired ${handler.count} times during refresh`);
-            }
+            // Verify event has valid structure
+            const event = handler.first;
+            assert.ok(event, 'Event should have a value');
+
+            // The event should have either added or removed environments
+            assert.ok('added' in event || 'removed' in event, 'Event should have added or removed property');
+
+            console.log(`Event fired ${handler.count} times during refresh`);
         } finally {
             handler.dispose();
         }

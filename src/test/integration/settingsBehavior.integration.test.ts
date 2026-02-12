@@ -47,18 +47,27 @@ suite('Integration: Settings Behavior', function () {
     /**
      * Test: Extension settings are accessible
      *
-     * The python-envs configuration section should be accessible.
+     * The python-envs configuration section should be accessible with expected types.
      */
     test('Extension settings section is accessible', async function () {
         const config = vscode.workspace.getConfiguration('python-envs');
 
         assert.ok(config, 'python-envs configuration should be accessible');
 
-        // Check some expected settings exist
+        // Check some expected settings exist and have correct types
         const defaultEnvManager = config.get('defaultEnvManager');
         const defaultPackageManager = config.get('defaultPackageManager');
 
-        // Settings should have values (may be defaults)
+        // Assert settings have expected types (string or undefined)
+        assert.ok(
+            typeof defaultEnvManager === 'string' || defaultEnvManager === undefined,
+            `defaultEnvManager should be string or undefined, got ${typeof defaultEnvManager}`,
+        );
+        assert.ok(
+            typeof defaultPackageManager === 'string' || defaultPackageManager === undefined,
+            `defaultPackageManager should be string or undefined, got ${typeof defaultPackageManager}`,
+        );
+
         console.log('defaultEnvManager:', defaultEnvManager);
         console.log('defaultPackageManager:', defaultPackageManager);
     });
@@ -227,13 +236,26 @@ suite('Integration: Settings Behavior', function () {
     /**
      * Test: Terminal settings are accessible
      *
-     * Terminal-specific settings should be accessible.
+     * Terminal-specific settings should be accessible with expected types.
      */
     test('Terminal settings are accessible', async function () {
         const config = vscode.workspace.getConfiguration('python-envs');
 
         const activationType = config.get('terminal.autoActivationType');
         const showButton = config.get('terminal.showActivateButton');
+
+        // Assert settings have expected types
+        // activationType should be string (enum value) or undefined
+        assert.ok(
+            typeof activationType === 'string' || activationType === undefined,
+            `terminal.autoActivationType should be string or undefined, got ${typeof activationType}`,
+        );
+
+        // showButton should be boolean or undefined
+        assert.ok(
+            typeof showButton === 'boolean' || showButton === undefined,
+            `terminal.showActivateButton should be boolean or undefined, got ${typeof showButton}`,
+        );
 
         console.log('terminal.autoActivationType:', activationType);
         console.log('terminal.showActivateButton:', showButton);
@@ -242,20 +264,25 @@ suite('Integration: Settings Behavior', function () {
     /**
      * Test: alwaysUseUv setting is accessible
      *
-     * The uv preference setting should be readable.
+     * The uv preference setting should be readable and have expected type.
      */
     test('alwaysUseUv setting is accessible', async function () {
         const config = vscode.workspace.getConfiguration('python-envs');
         const alwaysUseUv = config.get('alwaysUseUv');
 
-        // Default is true according to docs
+        // alwaysUseUv should be boolean or undefined
+        assert.ok(
+            typeof alwaysUseUv === 'boolean' || alwaysUseUv === undefined,
+            `alwaysUseUv should be boolean or undefined, got ${typeof alwaysUseUv}`,
+        );
+
         console.log('alwaysUseUv:', alwaysUseUv);
     });
 
     /**
      * Test: Legacy python settings are accessible
      *
-     * Legacy python.* settings should be readable for migration.
+     * Legacy python.* settings should be readable for migration with expected types.
      */
     test('Legacy python settings are accessible', async function () {
         const pythonConfig = vscode.workspace.getConfiguration('python');
@@ -266,6 +293,24 @@ suite('Integration: Settings Behavior', function () {
         const defaultInterpreterPath = pythonConfig.get('defaultInterpreterPath');
         const condaPath = pythonConfig.get('condaPath');
 
+        // Assert types are as expected
+        assert.ok(
+            typeof venvPath === 'string' || venvPath === undefined,
+            `venvPath should be string or undefined, got ${typeof venvPath}`,
+        );
+        assert.ok(
+            Array.isArray(venvFolders) || venvFolders === undefined,
+            `venvFolders should be array or undefined, got ${typeof venvFolders}`,
+        );
+        assert.ok(
+            typeof defaultInterpreterPath === 'string' || defaultInterpreterPath === undefined,
+            `defaultInterpreterPath should be string or undefined, got ${typeof defaultInterpreterPath}`,
+        );
+        assert.ok(
+            typeof condaPath === 'string' || condaPath === undefined,
+            `condaPath should be string or undefined, got ${typeof condaPath}`,
+        );
+
         console.log('Legacy settings:');
         console.log('  venvPath:', venvPath);
         console.log('  venvFolders:', venvFolders);
@@ -274,28 +319,39 @@ suite('Integration: Settings Behavior', function () {
     });
 
     /**
-     * Test: Settings update is reflected in API
+     * Test: Settings and API are connected
      *
-     * When settings change, the API should reflect the changes.
-     * Note: This test doesn't actually modify settings to avoid side effects.
+     * Verify that settings API and environment API both work and return consistent data.
      */
     test('Settings and API are connected', async function () {
-        // Get current environment
+        // Get current environment from API
         const currentEnv = await api.getEnvironment(undefined);
 
         // Get current settings
         const config = vscode.workspace.getConfiguration('python-envs');
-        const currentProjects = config.get('pythonProjects');
+        const pythonProjects = config.get('pythonProjects');
 
-        // Just verify we can read both without error
+        // Assert we can read settings
+        assert.ok(
+            pythonProjects === undefined || Array.isArray(pythonProjects),
+            'pythonProjects should be undefined or array',
+        );
+
+        // If we have an environment, verify it has valid structure
+        if (currentEnv) {
+            assert.ok(currentEnv.envId, 'Current environment should have envId');
+            assert.ok(currentEnv.displayName, 'Current environment should have displayName');
+        }
+
+        // This test verifies both APIs are working together without errors
         console.log('Current env:', currentEnv?.displayName ?? 'none');
-        console.log('Projects setting exists:', currentProjects !== undefined);
+        console.log('Projects setting type:', Array.isArray(pythonProjects) ? 'array' : typeof pythonProjects);
     });
 
     /**
      * Test: Workspace folder scope is respected
      *
-     * Settings at workspace folder level should be isolated.
+     * Settings at workspace folder level should be independently inspectable.
      */
     test('Workspace folder settings scope is respected', async function () {
         const workspaceFolders = vscode.workspace.workspaceFolders;
@@ -309,9 +365,19 @@ suite('Integration: Settings Behavior', function () {
         const config1 = vscode.workspace.getConfiguration('python-envs', workspaceFolders[0].uri);
         const config2 = vscode.workspace.getConfiguration('python-envs', workspaceFolders[1].uri);
 
-        // Both should be independently configurable
+        // Both should be independently inspectable
         const inspect1 = config1.inspect('pythonProjects');
         const inspect2 = config2.inspect('pythonProjects');
+
+        // Assert inspect returns valid results for both folders
+        assert.ok(inspect1, 'Should be able to inspect settings for folder 1');
+        assert.ok(inspect2, 'Should be able to inspect settings for folder 2');
+
+        // Assert the inspection objects have the expected structure
+        assert.ok('key' in inspect1, 'Inspection should have key property');
+        assert.ok('key' in inspect2, 'Inspection should have key property');
+        assert.strictEqual(inspect1.key, 'python-envs.pythonProjects', 'Key should be python-envs.pythonProjects');
+        assert.strictEqual(inspect2.key, 'python-envs.pythonProjects', 'Key should be python-envs.pythonProjects');
 
         console.log('Folder 1 pythonProjects:', inspect1?.workspaceFolderValue);
         console.log('Folder 2 pythonProjects:', inspect2?.workspaceFolderValue);
