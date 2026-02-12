@@ -231,9 +231,10 @@ suite('Integration: Environment Creation', function () {
                 assert.ok(createdEnv.envId.id, 'Created global env must have envId.id');
                 assert.ok(createdEnv.environmentPath, 'Created global env must have environmentPath');
             } else {
-                // quickCreate returned undefined - this is acceptable behavior
-                // (e.g., no manager configured for global creation)
-                console.log('Global creation returned undefined (quickCreate not fully supported)');
+                // quickCreate returned undefined - skip this test as feature not available
+                console.log('Global creation not supported with quickCreate, skipping');
+                this.skip();
+                return;
             }
         } finally {
             // Cleanup: try to remove if created, but handle dialog errors in test mode
@@ -249,7 +250,6 @@ suite('Integration: Environment Creation', function () {
                 }
             }
         }
-        // Test passes if we got here without throwing - API handled scope correctly
     });
 
     /**
@@ -277,8 +277,10 @@ suite('Integration: Environment Creation', function () {
                 assert.ok(createdEnv.envId, 'Multi-URI created env must have envId');
                 assert.ok(createdEnv.environmentPath, 'Multi-URI created env must have environmentPath');
             } else {
-                // quickCreate returned undefined - acceptable for multi-URI scenario
-                console.log('Multi-URI creation returned undefined (quickCreate not fully supported)');
+                // quickCreate returned undefined - skip this test as feature not available
+                console.log('Multi-URI creation not supported with quickCreate, skipping');
+                this.skip();
+                return;
             }
         } finally {
             // Cleanup: always try to remove if created
@@ -286,7 +288,6 @@ suite('Integration: Environment Creation', function () {
                 await api.removeEnvironment(createdEnv);
             }
         }
-        // Test passes if we got here without throwing - API handled multi-URI correctly
     });
 
     /**

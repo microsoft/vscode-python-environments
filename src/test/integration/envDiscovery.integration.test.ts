@@ -96,9 +96,6 @@ suite('Integration: Environment Discovery', function () {
         );
 
         try {
-            // Reset any previous events
-            handler.reset();
-
             // First, check if we have environments on this system
             const preCheckEnvs = await api.getEnvironments('all');
 
@@ -108,6 +105,9 @@ suite('Integration: Environment Discovery', function () {
                 this.skip();
                 return;
             }
+
+            // Reset handler RIGHT BEFORE the action we're testing
+            handler.reset();
 
             // Trigger refresh - this should fire events for discovered environments
             await api.refreshEnvironments(undefined);
@@ -120,14 +120,12 @@ suite('Integration: Environment Discovery', function () {
             const events = handler.first;
             assert.ok(events, 'Event should have a value');
             assert.ok(Array.isArray(events), 'Event should be an array');
-            assert.ok(events.length > 0, 'Event array should not be empty');
+            assert.ok(events.length > 0, 'Should have received environment change events');
 
             // Each event item should have kind and environment properties
             const firstItem = events[0];
             assert.ok('kind' in firstItem, 'Event item should have kind property');
             assert.ok('environment' in firstItem, 'Event item should have environment property');
-
-            console.log(`Event fired ${handler.count} times during refresh`);
         } finally {
             handler.dispose();
         }
@@ -183,8 +181,9 @@ suite('Integration: Environment Discovery', function () {
         const resolved = await api.resolveEnvironment(env.environmentPath);
 
         if (!resolved) {
-            // Some environments may not be resolvable (broken/stale)
+            // Environment could not be resolved - this might be expected for broken envs
             console.log('Environment could not be resolved:', env.displayName);
+            this.skip();
             return;
         }
 

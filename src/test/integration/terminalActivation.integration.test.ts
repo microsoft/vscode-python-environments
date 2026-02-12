@@ -190,9 +190,8 @@ suite('Integration: Terminal Activation', function () {
         assert.ok(terminal1, 'First call should return terminal');
         assert.ok(terminal2, 'Second call should return terminal');
 
-        // Note: Terminal instances may be different objects but refer to same terminal
-        console.log('Terminal 1 name:', terminal1.name);
-        console.log('Terminal 2 name:', terminal2.name);
+        // Verify same terminal is reused (terminal names should match for same key)
+        assert.strictEqual(terminal1.name, terminal2.name, 'Same key should reuse the same terminal');
     });
 
     /**

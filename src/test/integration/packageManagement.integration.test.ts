@@ -196,8 +196,11 @@ suite('Integration: Package Management', function () {
         const pipInstalled = packages.some((p) => p.name.toLowerCase() === 'pip');
         const setuptoolsInstalled = packages.some((p) => p.name.toLowerCase() === 'setuptools');
 
-        console.log(`pip installed: ${pipInstalled}, setuptools installed: ${setuptoolsInstalled}`);
-        console.log(`Total packages: ${packages.length}`);
+        // Virtual environment should have pip or at least some packages
+        assert.ok(pipInstalled || packages.length > 0, 'Virtual environment should have pip or at least some packages');
+        console.log(
+            `pip installed: ${pipInstalled}, setuptools installed: ${setuptoolsInstalled}, total: ${packages.length}`,
+        );
     });
 
     /**
@@ -270,32 +273,47 @@ suite('Integration: Package Management', function () {
         }
 
         const wasInstalled = initialPackages.some((p) => p.name.toLowerCase() === testPackage);
+        let packageInstalled = wasInstalled;
 
-        if (wasInstalled) {
-            // Uninstall first
+        try {
+            if (wasInstalled) {
+                // Uninstall first
+                await api.managePackages(targetEnv, { uninstall: [testPackage] });
+                packageInstalled = false;
+                await sleep(2000);
+            }
+
+            // Install package
+            await api.managePackages(targetEnv, { install: [testPackage] });
+            packageInstalled = true;
+
+            // Refresh and verify
+            await api.refreshPackages(targetEnv);
+            const afterInstall = await api.getPackages(targetEnv);
+
+            const isNowInstalled = afterInstall?.some((p) => p.name.toLowerCase() === testPackage);
+            assert.ok(isNowInstalled, `${testPackage} should be installed after managePackages install`);
+
+            // Uninstall
             await api.managePackages(targetEnv, { uninstall: [testPackage] });
-            await sleep(2000);
+            packageInstalled = false;
+
+            // Refresh and verify
+            await api.refreshPackages(targetEnv);
+            const afterUninstall = await api.getPackages(targetEnv);
+
+            const isStillInstalled = afterUninstall?.some((p) => p.name.toLowerCase() === testPackage);
+            assert.ok(!isStillInstalled, `${testPackage} should be uninstalled after managePackages uninstall`);
+        } finally {
+            // Ensure cleanup even if assertions fail
+            if (packageInstalled) {
+                try {
+                    await api.managePackages(targetEnv, { uninstall: [testPackage] });
+                } catch {
+                    console.log('Cleanup: failed to uninstall test package');
+                }
+            }
         }
-
-        // Install package
-        await api.managePackages(targetEnv, { install: [testPackage] });
-
-        // Refresh and verify
-        await api.refreshPackages(targetEnv);
-        const afterInstall = await api.getPackages(targetEnv);
-
-        const isNowInstalled = afterInstall?.some((p) => p.name.toLowerCase() === testPackage);
-        assert.ok(isNowInstalled, `${testPackage} should be installed after managePackages install`);
-
-        // Uninstall
-        await api.managePackages(targetEnv, { uninstall: [testPackage] });
-
-        // Refresh and verify
-        await api.refreshPackages(targetEnv);
-        const afterUninstall = await api.getPackages(targetEnv);
-
-        const isStillInstalled = afterUninstall?.some((p) => p.name.toLowerCase() === testPackage);
-        assert.ok(!isStillInstalled, `${testPackage} should be uninstalled after managePackages uninstall`);
     });
 
     /**

@@ -273,11 +273,15 @@ suite('Integration: Interpreter Selection Priority', function () {
                 const event = handler.last;
                 assert.ok(event, 'Event should have value if fired');
                 assert.ok(event.new, 'Event should have new environment');
-                console.log(
-                    'Event fired for same env selection:',
-                    `old=${event.old?.envId.id}, new=${event.new.envId.id}`,
-                );
-                // Note: old and new may differ if there was intermediate state from teardown
+
+                // If event fired, old and new should be the same (idempotent)
+                if (event.old) {
+                    assert.strictEqual(
+                        event.old.envId.id,
+                        event.new.envId.id,
+                        'Idempotent operation should have same old and new environment',
+                    );
+                }
             } else {
                 // No event fired - this is the ideal idempotent behavior
                 console.log('No event fired for same env selection (idempotent behavior)');
@@ -340,13 +344,16 @@ suite('Integration: Interpreter Selection Priority', function () {
         // Get environment - may return auto-discovered env or undefined
         const autoEnv = await api.getEnvironment(undefined);
 
-        // Key assertion: clearing should have changed something or returned undefined
+        // Key assertion: clearing should have an effect
+        // Either returns undefined OR returns a different environment (auto-discovered)
         if (autoEnv) {
-            // If an environment is returned, it should have valid structure
             assert.ok(autoEnv.envId, 'Auto-discovered env must have envId');
             assert.ok(autoEnv.envId.id, 'Auto-discovered env must have envId.id');
+            // Note: autoEnv might equal beforeClear if auto-discovery picks the same one,
+            // but the explicit selection should be cleared
+        } else {
+            // Undefined is a valid result - no auto-discovery available
+            console.log('Selection cleared, no auto-discovery fallback');
         }
-
-        console.log('After clearing selection:', autoEnv?.displayName ?? 'none (cleared successfully)');
     });
 });

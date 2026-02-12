@@ -19,7 +19,7 @@
 
 import * as assert from 'assert';
 import * as vscode from 'vscode';
-import { PythonEnvironmentApi } from '../../api';
+import { PythonEnvironment, PythonEnvironmentApi } from '../../api';
 import { ENVS_EXTENSION_ID } from '../constants';
 import { TestEventHandler, waitForCondition } from '../testUtils';
 
@@ -27,6 +27,7 @@ suite('Integration: Python Projects', function () {
     this.timeout(60_000);
 
     let api: PythonEnvironmentApi;
+    let originalProjectEnvs: Map<string, PythonEnvironment | undefined>;
 
     suiteSetup(async function () {
         this.timeout(30_000);
@@ -42,6 +43,26 @@ suite('Integration: Python Projects', function () {
         api = extension.exports as PythonEnvironmentApi;
         assert.ok(api, 'API not available');
         assert.ok(typeof api.getPythonProjects === 'function', 'getPythonProjects method not available');
+
+        // Save original state for restoration
+        originalProjectEnvs = new Map();
+        const projects = api.getPythonProjects();
+        for (const project of projects) {
+            const env = await api.getEnvironment(project.uri);
+            originalProjectEnvs.set(project.uri.toString(), env);
+        }
+    });
+
+    suiteTeardown(async function () {
+        // Restore original state
+        for (const [uriStr, env] of originalProjectEnvs) {
+            try {
+                const uri = vscode.Uri.parse(uriStr);
+                await api.setEnvironment(uri, env);
+            } catch {
+                // Ignore errors during cleanup
+            }
+        }
     });
 
     /**
