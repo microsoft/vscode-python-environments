@@ -6,12 +6,6 @@
  *
  * This file is loaded by the VS Code Extension Host test runner.
  * It configures Mocha and runs all E2E tests.
- *
- * E2E tests differ from smoke tests:
- * - Smoke tests: Quick sanity checks (extension loads, commands exist)
- * - E2E tests: Full user workflows (create env, install packages, select interpreter)
- *
- * Both run in a REAL VS Code instance with REAL APIs.
  */
 
 import * as glob from 'glob';

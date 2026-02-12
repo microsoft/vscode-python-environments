@@ -3,15 +3,6 @@
 
 /**
  * Integration Test Runner Entry Point
- *
- * Integration tests verify that multiple components work together correctly.
- * They run in a REAL VS Code instance but focus on component interactions
- * rather than full user workflows (that's E2E).
- *
- * Integration tests differ from:
- * - Unit tests: Use real VS Code APIs, not mocks
- * - E2E tests: Test component interactions, not complete workflows
- * - Smoke tests: More thorough than quick sanity checks
  */
 
 import * as glob from 'glob';

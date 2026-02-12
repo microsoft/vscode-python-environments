@@ -9,7 +9,6 @@ on:
 
 env:
   NODE_VERSION: '22.21.1'
-  PYTHON_VERSION: '3.11'
 
 jobs:
   build-vsix:

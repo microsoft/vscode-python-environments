@@ -13,25 +13,6 @@
  * 2. Extension activates without throwing errors
  * 3. Extension API is exported and accessible
  *
- * HOW TO RUN:
- * Option 1: VS Code - Use "Smoke Tests" launch configuration
- * Option 2: Terminal - npm run smoke-test
- *
- * HOW TO DEBUG:
- * 1. Set breakpoints in this file or extension code
- * 2. Select "Smoke Tests" from the Debug dropdown
- * 3. Press F5 to start debugging
- *
- * FLAKINESS PREVENTION:
- * - Uses waitForCondition() instead of arbitrary sleep()
- * - Has a generous timeout (60 seconds) for slow CI machines
- * - Retries once on failure (configured in the runner)
- * - Tests are independent - no shared state between tests
- *
- * NOTE: We do NOT install ms-python.python in test configuration.
- * This is intentional - that extension defines python.useEnvironmentsExtension=false
- * by default, which would cause our extension to skip activation.
- * Without it installed, our extension uses its own default of true.
  */
 
 import * as assert from 'assert';
@@ -45,14 +26,6 @@ suite('Smoke: Extension Activation', function () {
 
     /**
      * Test: Extension is installed and VS Code can find it
-     *
-     * WHY THIS MATTERS:
-     * If VS Code can't find the extension, there's a packaging or
-     * installation problem. This catches broken builds early.
-     *
-     * ASSERTION STRATEGY:
-     * We use assert.ok() with a descriptive message. If the extension
-     * isn't found, the test fails immediately with clear feedback.
      */
     test('Extension is installed', function () {
         const extension = vscode.extensions.getExtension(ENVS_EXTENSION_ID);
@@ -69,21 +42,11 @@ suite('Smoke: Extension Activation', function () {
     /**
      * Test: Extension activates successfully
      *
-     * WHY THIS MATTERS:
-     * Extension activation runs significant initialization code.
-     * If activation fails, the extension is broken and all features
-     * will be unavailable.
-     *
      * ASSERTION STRATEGY:
      * 1. First verify extension exists (prerequisite)
      * 2. Trigger activation if not already active
      * 3. Wait for activation to complete (with timeout)
      * 4. Verify no errors occurred
-     *
-     * FLAKINESS PREVENTION:
-     * - Use waitForCondition() instead of sleep
-     * - Check isActive property, not just await activate()
-     * - Give generous timeout for CI environments
      */
     test('Extension activates without errors', async function () {
         const extension = vscode.extensions.getExtension(ENVS_EXTENSION_ID);
@@ -126,14 +89,9 @@ suite('Smoke: Extension Activation', function () {
     /**
      * Test: Extension exports its API
      *
-     * WHY THIS MATTERS:
-     * Other extensions depend on our API. If the API isn't exported,
-     * integrations will fail silently.
-     *
      * ASSERTION STRATEGY:
      * - Verify exports is not undefined
      * - Verify exports is not null
-     * - Optionally verify expected API shape (commented out - enable when API stabilizes)
      */
     test('Extension exports API', async function () {
         const extension = vscode.extensions.getExtension(ENVS_EXTENSION_ID);
@@ -166,10 +124,6 @@ suite('Smoke: Extension Activation', function () {
 
     /**
      * Test: Extension commands are registered
-     *
-     * WHY THIS MATTERS:
-     * Commands are the primary way users interact with the extension.
-     * If commands aren't registered, the extension appears broken.
      *
      * ASSERTION STRATEGY:
      * - Get all registered commands from VS Code

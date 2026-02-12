@@ -13,14 +13,6 @@
  * 2. Environment discovery runs successfully
  * 3. At least one Python environment is found (assumes Python is installed)
  * 4. Environment objects have expected properties
- *
- * PREREQUISITES:
- * - Python must be installed on the test machine
- * - At least one Python environment should be discoverable (system Python, venv, conda, etc.)
- *
- * HOW TO RUN:
- * Option 1: VS Code - Use "E2E Tests" launch configuration
- * Option 2: Terminal - npm run e2e-test
  */
 
 import * as assert from 'assert';
@@ -29,7 +21,6 @@ import { ENVS_EXTENSION_ID } from '../constants';
 import { waitForCondition } from '../testUtils';
 
 suite('E2E: Environment Discovery', function () {
-    // E2E can be slower but 2x activation time is excessive
     this.timeout(90_000);
 
     // The API is FLAT - methods are directly on the api object, not nested
@@ -48,7 +39,6 @@ suite('E2E: Environment Discovery', function () {
             await waitForCondition(() => extension.isActive, 30_000, 'Extension did not activate');
         }
 
-        // Get the API - it's a flat interface, not nested
         api = extension.exports;
         assert.ok(api, 'Extension API not available');
         assert.ok(typeof api.getEnvironments === 'function', 'getEnvironments method not available');
@@ -57,9 +47,6 @@ suite('E2E: Environment Discovery', function () {
     /**
      * Test: Can trigger environment refresh
      *
-     * WHY THIS MATTERS:
-     * Users need to be able to refresh environments when they install new Python versions
-     * or create new virtual environments outside VS Code.
      */
     test('Can trigger environment refresh', async function () {
         // Skip if API doesn't have refresh method
@@ -89,13 +76,6 @@ suite('E2E: Environment Discovery', function () {
     /**
      * Test: Discovers at least one environment
      *
-     * WHY THIS MATTERS:
-     * The primary value of this extension is discovering Python environments.
-     * If no environments are found, the extension isn't working.
-     *
-     * ASSUMPTIONS:
-     * - Test machine has Python installed somewhere
-     * - Discovery timeout is sufficient for the machine
      */
     test('Discovers at least one environment', async function () {
         // Wait for discovery to find at least one environment
@@ -116,9 +96,6 @@ suite('E2E: Environment Discovery', function () {
     /**
      * Test: Discovered environments have required properties
      *
-     * WHY THIS MATTERS:
-     * Other parts of the extension and external consumers depend on environment
-     * objects having certain properties. This catches schema regressions.
      */
     test('Environments have required properties', async function () {
         const environments = await api.getEnvironments('all');
@@ -174,9 +151,6 @@ suite('E2E: Environment Discovery', function () {
     /**
      * Test: Can get global environments
      *
-     * WHY THIS MATTERS:
-     * Users often want to see system-wide Python installations separate from
-     * workspace-specific virtual environments.
      */
     test('Can get global environments', async function () {
         // This should not throw, even if there are no global environments

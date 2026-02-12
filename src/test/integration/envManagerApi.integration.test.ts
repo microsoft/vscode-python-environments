@@ -14,10 +14,6 @@
  * 2. Changes through API update manager state
  * 3. Events fire when state changes
  *
- * DIFFERS FROM:
- * - Unit tests: Uses real VS Code, not mocks
- * - E2E tests: Focuses on component integration, not full workflows
- * - Smoke tests: More thorough verification of behavior
  */
 
 import * as assert from 'assert';
@@ -26,7 +22,7 @@ import { ENVS_EXTENSION_ID } from '../constants';
 import { TestEventHandler, waitForCondition } from '../testUtils';
 
 suite('Integration: Environment Manager + API', function () {
-    // Shorter timeout for faster feedback - integration tests shouldn't take 2 min
+    // Shorter timeout for faster feedback
     this.timeout(45_000);
 
     // The API is FLAT - methods are directly on the api object, not nested
@@ -55,9 +51,6 @@ suite('Integration: Environment Manager + API', function () {
     /**
      * Test: API and manager stay in sync after refresh
      *
-     * WHY THIS MATTERS:
-     * The API is backed by internal managers. If they get out of sync,
-     * users see stale data or missing environments.
      */
     test('API reflects manager state after refresh', async function () {
         // Get initial state (verify we can call API before refresh)
@@ -80,9 +73,6 @@ suite('Integration: Environment Manager + API', function () {
     /**
      * Test: Events fire when environments change
      *
-     * WHY THIS MATTERS:
-     * UI components and other extensions subscribe to change events.
-     * If events don't fire, the UI won't update.
      */
     test('Change events fire on refresh', async function () {
         // Skip if event is not available
@@ -115,9 +105,6 @@ suite('Integration: Environment Manager + API', function () {
     /**
      * Test: Global vs all environments are different scopes
      *
-     * WHY THIS MATTERS:
-     * Users expect "global" to show system Python, "all" to include workspace envs.
-     * If scopes aren't properly separated, filtering doesn't work.
      */
     test('Different scopes return appropriate environments', async function () {
         const allEnvs = await api.getEnvironments('all');
@@ -138,9 +125,6 @@ suite('Integration: Environment Manager + API', function () {
     /**
      * Test: Environment objects are properly structured
      *
-     * WHY THIS MATTERS:
-     * Consumers depend on environment object structure. If properties
-     * are missing or malformed, integrations break.
      */
     test('Environment objects have consistent structure', async function () {
         const environments = await api.getEnvironments('all');

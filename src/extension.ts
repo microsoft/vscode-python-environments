@@ -97,7 +97,8 @@ import { registerPoetryFeatures } from './managers/poetry/main';
 import { registerPyenvFeatures } from './managers/pyenv/main';
 
 export async function activate(context: ExtensionContext): Promise<PythonEnvironmentApi | undefined> {
-    // Only skip activation if user explicitly set useEnvironmentsExtension to false
+    // Only skip activation if user explicitly set useEnvironmentsExtension to false.
+    // When disabled, the main Python extension handles environments instead (legacy mode).
     const config = getConfiguration('python');
     const inspection = config.inspect<boolean>('useEnvironmentsExtension');
     const explicitlyDisabled =
