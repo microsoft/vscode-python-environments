@@ -88,6 +88,38 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Checkout Python Environment Tools
+        uses: actions/checkout@v4
+        with:
+          repository: 'microsoft/python-environment-tools'
+          path: 'python-env-tools-src'
+          sparse-checkout: |
+            crates
+            Cargo.toml
+            Cargo.lock
+          sparse-checkout-cone-mode: false
+
+      - name: Install Rust Toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Build Python Environment Tools
+        run: cargo build --release --package pet
+        working-directory: python-env-tools-src
+
+      - name: Copy pet binary (Unix)
+        if: runner.os != 'Windows'
+        run: |
+          mkdir -p python-env-tools/bin
+          cp python-env-tools-src/target/release/pet python-env-tools/bin/
+          chmod +x python-env-tools/bin/pet
+
+      - name: Copy pet binary (Windows)
+        if: runner.os == 'Windows'
+        run: |
+          mkdir -p python-env-tools/bin
+          cp python-env-tools-src/target/release/pet.exe python-env-tools/bin/
+        shell: bash
+
       - name: Install Node
         uses: actions/setup-node@v4
         with:
@@ -138,6 +170,38 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Checkout Python Environment Tools
+        uses: actions/checkout@v4
+        with:
+          repository: 'microsoft/python-environment-tools'
+          path: 'python-env-tools-src'
+          sparse-checkout: |
+            crates
+            Cargo.toml
+            Cargo.lock
+          sparse-checkout-cone-mode: false
+
+      - name: Install Rust Toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Build Python Environment Tools
+        run: cargo build --release --package pet
+        working-directory: python-env-tools-src
+
+      - name: Copy pet binary (Unix)
+        if: runner.os != 'Windows'
+        run: |
+          mkdir -p python-env-tools/bin
+          cp python-env-tools-src/target/release/pet python-env-tools/bin/
+          chmod +x python-env-tools/bin/pet
+
+      - name: Copy pet binary (Windows)
+        if: runner.os == 'Windows'
+        run: |
+          mkdir -p python-env-tools/bin
+          cp python-env-tools-src/target/release/pet.exe python-env-tools/bin/
+        shell: bash
+
       - name: Install Node
         uses: actions/setup-node@v4
         with:
@@ -187,6 +251,38 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Checkout Python Environment Tools
+        uses: actions/checkout@v4
+        with:
+          repository: 'microsoft/python-environment-tools'
+          path: 'python-env-tools-src'
+          sparse-checkout: |
+            crates
+            Cargo.toml
+            Cargo.lock
+          sparse-checkout-cone-mode: false
+
+      - name: Install Rust Toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Build Python Environment Tools
+        run: cargo build --release --package pet
+        working-directory: python-env-tools-src
+
+      - name: Copy pet binary (Unix)
+        if: runner.os != 'Windows'
+        run: |
+          mkdir -p python-env-tools/bin
+          cp python-env-tools-src/target/release/pet python-env-tools/bin/
+          chmod +x python-env-tools/bin/pet
+
+      - name: Copy pet binary (Windows)
+        if: runner.os == 'Windows'
+        run: |
+          mkdir -p python-env-tools/bin
+          cp python-env-tools-src/target/release/pet.exe python-env-tools/bin/
+        shell: bash
 
       - name: Install Node
         uses: actions/setup-node@v4
