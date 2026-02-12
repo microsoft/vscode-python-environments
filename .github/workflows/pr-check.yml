@@ -114,6 +114,13 @@ jobs:
           echo '{"python.useEnvironmentsExtension": true}' > .vscode-test/user-data/User/settings.json
         shell: bash
 
+      - name: Download VS Code
+        uses: nick-fields/retry@v3
+        with:
+          timeout_minutes: 10
+          max_attempts: 3
+          command: npx @vscode/test-cli download
+
       - name: Run Smoke Tests (Linux)
         if: runner.os == 'Linux'
         uses: GabrielBB/xvfb-action@v1
@@ -164,6 +171,13 @@ jobs:
           echo '{"python.useEnvironmentsExtension": true}' > .vscode-test/user-data/User/settings.json
         shell: bash
 
+      - name: Download VS Code
+        uses: nick-fields/retry@v3
+        with:
+          timeout_minutes: 10
+          max_attempts: 3
+          command: npx @vscode/test-cli download
+
       - name: Run E2E Tests (Linux)
         if: runner.os == 'Linux'
         uses: GabrielBB/xvfb-action@v1
@@ -213,6 +227,13 @@ jobs:
           mkdir -p .vscode-test/user-data/User
           echo '{"python.useEnvironmentsExtension": true}' > .vscode-test/user-data/User/settings.json
         shell: bash
+
+      - name: Download VS Code
+        uses: nick-fields/retry@v3
+        with:
+          timeout_minutes: 10
+          max_attempts: 3
+          command: npx @vscode/test-cli download
 
       - name: Run Integration Tests (Linux)
         if: runner.os == 'Linux'
