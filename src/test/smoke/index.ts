@@ -23,7 +23,6 @@ export async function run(): Promise<void> {
         ui: 'tdd',
         color: true,
         timeout: 120_000, // 2 minutes - smoke tests can be slow
-        retries: 1, // Retry once on failure to handle flakiness
         slow: 10_000, // Mark tests as slow if they take > 10s
     });
 
