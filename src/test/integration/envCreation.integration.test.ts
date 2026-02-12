@@ -236,9 +236,17 @@ suite('Integration: Environment Creation', function () {
                 console.log('Global creation returned undefined (quickCreate not fully supported)');
             }
         } finally {
-            // Cleanup: always try to remove if created
+            // Cleanup: try to remove if created, but handle dialog errors in test mode
             if (createdEnv) {
-                await api.removeEnvironment(createdEnv);
+                try {
+                    await api.removeEnvironment(createdEnv);
+                } catch (e) {
+                    // Ignore dialog errors in test mode - VS Code blocks dialogs
+                    if (!String(e).includes('DialogService')) {
+                        throw e;
+                    }
+                    console.log('Skipping cleanup for global environment (dialog blocked in tests)');
+                }
             }
         }
         // Test passes if we got here without throwing - API handled scope correctly

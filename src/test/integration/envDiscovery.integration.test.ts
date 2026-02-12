@@ -116,11 +116,16 @@ suite('Integration: Environment Discovery', function () {
             await handler.assertFiredAtLeast(1, 10_000);
 
             // Verify event has valid structure
-            const event = handler.first;
-            assert.ok(event, 'Event should have a value');
+            // DidChangeEnvironmentsEventArgs is an array of {kind, environment}
+            const events = handler.first;
+            assert.ok(events, 'Event should have a value');
+            assert.ok(Array.isArray(events), 'Event should be an array');
+            assert.ok(events.length > 0, 'Event array should not be empty');
 
-            // The event should have either added or removed environments
-            assert.ok('added' in event || 'removed' in event, 'Event should have added or removed property');
+            // Each event item should have kind and environment properties
+            const firstItem = events[0];
+            assert.ok('kind' in firstItem, 'Event item should have kind property');
+            assert.ok('environment' in firstItem, 'Event item should have environment property');
 
             console.log(`Event fired ${handler.count} times during refresh`);
         } finally {

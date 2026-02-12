@@ -31,6 +31,7 @@ suite('Integration: Interpreter Selection Priority', function () {
     this.timeout(60_000);
 
     let api: PythonEnvironmentApi;
+    let originalEnv: import('../../api').PythonEnvironment | undefined;
 
     suiteSetup(async function () {
         this.timeout(30_000);
@@ -45,6 +46,22 @@ suite('Integration: Interpreter Selection Priority', function () {
 
         api = extension.exports as PythonEnvironmentApi;
         assert.ok(api, 'API not available');
+
+        // Save original state for restoration
+        originalEnv = await api.getEnvironment(undefined);
+    });
+
+    // Reset to original state after each test to prevent state pollution
+    teardown(async function () {
+        try {
+            if (originalEnv) {
+                await api.setEnvironment(undefined, originalEnv);
+            } else {
+                await api.setEnvironment(undefined, undefined);
+            }
+        } catch {
+            // Ignore errors during reset
+        }
     });
 
     /**
@@ -250,10 +267,20 @@ suite('Integration: Interpreter Selection Priority', function () {
             // Wait a bit and check - should not fire (or fire with same old/new)
             await new Promise((resolve) => setTimeout(resolve, 1000));
 
-            // Either no event fired, or event had old === new
+            // Either no event fired, or event fired (with valid structure)
+            // The exact behavior depends on implementation details
             if (handler.fired) {
-                // If event fired, it should be with same env
-                console.log('Event fired for same env selection:', handler.last?.new?.displayName);
+                const event = handler.last;
+                assert.ok(event, 'Event should have value if fired');
+                assert.ok(event.new, 'Event should have new environment');
+                console.log(
+                    'Event fired for same env selection:',
+                    `old=${event.old?.envId.id}, new=${event.new.envId.id}`,
+                );
+                // Note: old and new may differ if there was intermediate state from teardown
+            } else {
+                // No event fired - this is the ideal idempotent behavior
+                console.log('No event fired for same env selection (idempotent behavior)');
             }
         } finally {
             handler.dispose();
@@ -304,6 +331,8 @@ suite('Integration: Interpreter Selection Priority', function () {
 
         // Set an explicit environment
         await api.setEnvironment(undefined, environments[0]);
+        const beforeClear = await api.getEnvironment(undefined);
+        assert.ok(beforeClear, 'Should have environment before clearing');
 
         // Clear the selection
         await api.setEnvironment(undefined, undefined);
@@ -311,8 +340,13 @@ suite('Integration: Interpreter Selection Priority', function () {
         // Get environment - may return auto-discovered env or undefined
         const autoEnv = await api.getEnvironment(undefined);
 
-        // This test verifies the operation completes without error
-        // The result depends on available environments and settings
-        console.log('After clearing selection:', autoEnv?.displayName ?? 'none');
+        // Key assertion: clearing should have changed something or returned undefined
+        if (autoEnv) {
+            // If an environment is returned, it should have valid structure
+            assert.ok(autoEnv.envId, 'Auto-discovered env must have envId');
+            assert.ok(autoEnv.envId.id, 'Auto-discovered env must have envId.id');
+        }
+
+        console.log('After clearing selection:', autoEnv?.displayName ?? 'none (cleared successfully)');
     });
 });
