@@ -13,6 +13,7 @@ import os
 import subprocess
 import sys
 from pathlib import Path
+from typing import Dict, List, Optional
 
 # Tools that modify files and should trigger validation
 FILE_EDIT_TOOLS = {"editFiles", "createFile", "create_file", "replace_string_in_file"}
@@ -21,7 +22,7 @@ FILE_EDIT_TOOLS = {"editFiles", "createFile", "create_file", "replace_string_in_
 TYPESCRIPT_EXTENSIONS = {".ts", ".tsx"}
 
 
-def run_eslint(files: list[str], cwd: Path) -> str | None:
+def run_eslint(files: List[str], cwd: Path) -> Optional[str]:
     """Run ESLint on specified files and return errors."""
     ts_files = [f for f in files if Path(f).suffix in TYPESCRIPT_EXTENSIONS]
     if not ts_files:
@@ -61,12 +62,14 @@ def run_eslint(files: list[str], cwd: Path) -> str | None:
 
                 return f"ESLint: {', '.join(summary)}. " + " | ".join(sample_errors[:3])
     except (subprocess.TimeoutExpired, FileNotFoundError):
+        # ESLint failures (timeout or missing binary) should not block the hook;
+        # treat them as "no lint results" and continue without reporting lint output.
         pass
 
     return None
 
 
-def extract_files_from_tool_input(tool_name: str, tool_input: dict) -> list[str]:
+def extract_files_from_tool_input(tool_name: str, tool_input: Dict) -> List[str]:
     """Extract file paths from tool input based on tool type."""
     files = []
 

@@ -12,9 +12,8 @@ Analyzes import/export patterns to identify:
 
 import pathlib
 import re
-from collections import defaultdict
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Set, Tuple
+from typing import Dict, List, Optional, Set
 
 import pathspec
 

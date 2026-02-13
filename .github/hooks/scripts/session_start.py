@@ -15,9 +15,10 @@ import os
 import subprocess
 import sys
 from pathlib import Path
+from typing import Dict, List, Optional
 
 
-def run_command(cmd: list[str], cwd: Path | None = None) -> str | None:
+def run_command(cmd: List[str], cwd: Optional[Path] = None) -> Optional[str]:
     """Run a command and return stdout, or None on failure."""
     try:
         result = subprocess.run(
@@ -30,11 +31,12 @@ def run_command(cmd: list[str], cwd: Path | None = None) -> str | None:
         if result.returncode == 0:
             return result.stdout.strip()
     except (subprocess.TimeoutExpired, FileNotFoundError):
+        # Git/gh CLI not available or timed out; return None to skip this context.
         pass
     return None
 
 
-def get_git_context(repo_root: Path) -> dict:
+def get_git_context(repo_root: Path) -> Dict:
     """Get current git context."""
     context = {}
 
@@ -65,7 +67,7 @@ def get_git_context(repo_root: Path) -> dict:
     return context
 
 
-def get_issue_context(repo_root: Path) -> dict:
+def get_issue_context(repo_root: Path) -> Dict:
     """Get open issue context if gh CLI is available."""
     context = {}
 
@@ -92,12 +94,13 @@ def get_issue_context(repo_root: Path) -> dict:
                 f"#{i['number']}: {i['title']}" for i in issues[:3]
             ]
         except json.JSONDecodeError:
+            # Malformed JSON from gh CLI; skip issue context.
             pass
 
     return context
 
 
-def get_snapshot_summary(repo_root: Path) -> dict:
+def get_snapshot_summary(repo_root: Path) -> Dict:
     """Get snapshot summary if available."""
     snapshot_path = repo_root / "analysis" / "analysis-snapshot.json"
     if not snapshot_path.exists():
@@ -115,6 +118,7 @@ def get_snapshot_summary(repo_root: Path) -> dict:
             "circular_dependencies": summary.get("circular_dependency_count", 0),
         }
     except (json.JSONDecodeError, OSError):
+        # Snapshot file unreadable or malformed; skip snapshot context.
         return {}
 
 
@@ -155,8 +159,8 @@ def main() -> int:
 
     # Add reminder about skills
     parts.append(
-        "Available skills: /generate-snapshot, /run-pre-commit-checks, "
-        "/cross-platform-paths, /settings-precedence, /manager-discovery"
+        "Available skills: generate-snapshot, run-pre-commit-checks, "
+        "cross-platform-paths, settings-precedence, python-manager-discovery"
     )
 
     # Output response

@@ -67,13 +67,13 @@ tools:
 
 Load these skills on-demand for detailed knowledge:
 
-| Skill                    | When to Use                                       |
-| ------------------------ | ------------------------------------------------- |
-| `/generate-snapshot`     | Generate codebase health snapshot for planning    |
-| `/run-pre-commit-checks` | Run mandatory checks before committing            |
-| `/cross-platform-paths`  | Reviewing/writing path-related code               |
-| `/settings-precedence`   | Reviewing/writing settings code                   |
-| `/manager-discovery`     | Working on specific manager (poetry, conda, etc.) |
+| Skill                      | When to Use                                       |
+| -------------------------- | ------------------------------------------------- |
+| `generate-snapshot`        | Generate codebase health snapshot for planning    |
+| `run-pre-commit-checks`    | Run mandatory checks before committing            |
+| `cross-platform-paths`     | Reviewing/writing path-related code               |
+| `settings-precedence`      | Reviewing/writing settings code                   |
+| `python-manager-discovery` | Working on specific manager (poetry, conda, etc.) |
 
 ---
 
@@ -103,7 +103,7 @@ Planning → Development → Review → Merge
 
 1. **Gather context:**
     - Check open GitHub issues (`github/list_issues`, `github/search_issues`)
-    - Generate snapshot: use `/generate-snapshot` skill for details
+    - Generate snapshot: Use `generate-snapshot` skill for details
     - Check open PRs for related work
 
 2. **Analyze and prioritize:**
@@ -140,9 +140,9 @@ git checkout -b feature/issue-N   # or bug/issue-N, chore/issue-N
 
 Follow guidelines from `.github/instructions/generic.instructions.md`:
 
-- **Paths:** Use `/cross-platform-paths` skill for patterns
-- **Settings:** Use `/settings-precedence` skill for patterns
-- **Managers:** Use `/manager-discovery` skill for manager-specific knowledge
+- **Paths:** Use `cross-platform-paths` skill for patterns
+- **Settings:** Use `settings-precedence` skill for patterns
+- **Managers:** Use `python-manager-discovery` skill for manager-specific knowledge
 - **Localization:** `l10n.t()` for user-facing messages
 - **Logging:** `traceLog`/`traceVerbose`, never `console.log`
 
@@ -172,7 +172,7 @@ Run **Reviewer** agent (`.github/agents/reviewer.agent.md`) with:
 
 ## 5. Pre-Commit Checks (REQUIRED)
 
-Use `/run-pre-commit-checks` skill for details. Quick reference:
+Use `run-pre-commit-checks` skill for details. Quick reference:
 
 ```powershell
 npm run lint           # ESLint

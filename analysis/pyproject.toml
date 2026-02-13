@@ -4,7 +4,6 @@ version = "0.1.0"
 description = "Code health and technical debt analysis tools"
 requires-python = ">=3.9"
 dependencies = [
-    "gitpython>=3.1.0",
     "radon>=6.0.0",
     "pathspec>=0.11.0",
 ]

@@ -2,6 +2,7 @@
 name: settings-precedence
 description: VS Code settings precedence rules and common pitfalls. Essential for any code that reads or writes settings. Covers getConfiguration scope, inspect() vs get(), and multi-workspace handling.
 argument-hint: Review settings handling in [file or component]
+user-invocable: false
 ---
 
 # VS Code Settings Precedence

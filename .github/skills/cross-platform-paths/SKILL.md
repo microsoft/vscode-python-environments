@@ -1,7 +1,8 @@
 ---
 name: cross-platform-paths
-description: Critical patterns for cross-platform path handling in this VS Code extension. Windows vs POSIX path bugs are the #1 source of issues. Use this skill when reviewing or writing path-related code.
+description: 'Critical patterns for cross-platform path handling in this VS Code extension. Windows vs POSIX path bugs are the #1 source of issues. Use this skill when reviewing or writing path-related code.'
 argument-hint: Review path handling in [file or component]
+user-invocable: false
 ---
 
 # Cross-Platform Path Handling

@@ -38,7 +38,7 @@ Runs when subagents complete:
 
 ## Requirements
 
-These scripts use Python 3.10+ with no external dependencies (beyond what's already in the repo).
+These scripts use Python 3.9+ with no external dependencies (beyond what's already in the repo).
 
 They expect:
 

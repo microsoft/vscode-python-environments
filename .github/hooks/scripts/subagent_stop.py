@@ -21,7 +21,7 @@ def main() -> int:
         input_data = {}
 
     agent_type = input_data.get("agent_type", "")
-    agent_id = input_data.get("agent_id", "")
+    # agent_id available in input_data if needed for logging
     stop_hook_active = input_data.get("stop_hook_active", False)
 
     # Prevent infinite loops

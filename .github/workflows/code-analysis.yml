@@ -30,7 +30,7 @@ jobs:
       - name: Install analysis dependencies
         working-directory: analysis
         run: |
-          uv pip install --system -r pyproject.toml
+          uv pip install --system .
 
       - name: Generate snapshot
         working-directory: analysis

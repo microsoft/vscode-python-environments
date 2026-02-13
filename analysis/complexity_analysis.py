@@ -206,7 +206,6 @@ def analyze_typescript_file(
         start_line = content[: match.start()].count("\n") + 1
 
         # Find function end (rough estimate - count braces)
-        func_start = match.end()
         func_end = len(content)
 
         if i + 1 < len(func_matches):

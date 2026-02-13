@@ -1,8 +1,8 @@
 ---
-name: manager-discovery
+name: python-manager-discovery
 description: Environment manager-specific discovery patterns and known issues. Use when working on or reviewing environment discovery code for conda, poetry, pipenv, pyenv, or venv.
 argument-hint: 'manager name (e.g., poetry, conda, pyenv)'
-user-invocable: true
+user-invocable: false
 ---
 
 # Environment Manager Discovery Patterns

@@ -13,9 +13,10 @@ import os
 import subprocess
 import sys
 from pathlib import Path
+from typing import List, Optional, Tuple
 
 
-def run_command(cmd: list[str], cwd: Path | None = None) -> tuple[int, str]:
+def run_command(cmd: List[str], cwd: Optional[Path] = None) -> Tuple[int, str]:
     """Run a command and return (exit_code, output)."""
     try:
         result = subprocess.run(
@@ -96,7 +97,7 @@ def main() -> int:
                 "decision": "block",
                 "reason": (
                     "You have uncommitted TypeScript changes. "
-                    "Before finishing, run /run-pre-commit-checks skill "
+                    "Before finishing, use the run-pre-commit-checks skill "
                     "or manually run: npm run lint && npm run compile-tests && npm run unittest. "
                     "If checks pass and changes are ready, commit them. "
                     "If this session is just research/exploration, you can proceed without committing."

@@ -115,13 +115,6 @@ def analyze_git_log(repo_root: pathlib.Path) -> Dict[str, FileStats]:
     file_stats: Dict[str, FileStats] = defaultdict(lambda: FileStats(path=""))
 
     # Get commits from last N days, limited to MAX_COMMITS
-    since_date = datetime.now(timezone.utc).replace(
-        hour=0, minute=0, second=0, microsecond=0
-    )
-    since_date = since_date.replace(
-        year=since_date.year - 1 if DAYS_OF_HISTORY >= 365 else since_date.year
-    )
-
     try:
         log_output = run_git_command(
             [

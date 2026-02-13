@@ -41,11 +41,11 @@ Automated reviews consistently miss:
 
 For deep-dive patterns, these skills provide additional context:
 
-| Skill                   | Use When                        |
-| ----------------------- | ------------------------------- |
-| `/cross-platform-paths` | Reviewing path-related code     |
-| `/settings-precedence`  | Reviewing settings code         |
-| `/manager-discovery`    | Reviewing manager-specific code |
+| Skill                      | Use When                        |
+| -------------------------- | ------------------------------- |
+| `cross-platform-paths`     | Reviewing path-related code     |
+| `settings-precedence`      | Reviewing settings code         |
+| `python-manager-discovery` | Reviewing manager-specific code |
 
 The patterns below are the essential subset needed during reviews.
 
