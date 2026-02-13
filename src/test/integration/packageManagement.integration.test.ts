@@ -84,7 +84,7 @@ suite('Integration: Package Management', function () {
 
         // May be undefined if package manager not available
         if (packages === undefined) {
-            console.log('Package manager not available for:', targetEnv.displayName);
+            this.skip();
             return;
         }
 
@@ -224,7 +224,7 @@ suite('Integration: Package Management', function () {
 
         // Both should return valid results (or undefined for same reason)
         if (packages1 === undefined || packages2 === undefined) {
-            console.log('Package manager not available for one or both environments');
+            this.skip();
             return;
         }
 

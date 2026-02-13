@@ -255,6 +255,14 @@ suite('Integration: Interpreter Selection Priority', function () {
         // Set environment first time
         await api.setEnvironment(undefined, env);
 
+        // Wait for any async config changes to settle before testing idempotency
+        await new Promise((resolve) => setTimeout(resolve, 500));
+
+        // Verify the environment was actually set
+        const currentEnv = await api.getEnvironment(undefined);
+        assert.ok(currentEnv, 'Environment should be set before idempotency test');
+        assert.strictEqual(currentEnv.envId.id, env.envId.id, 'Environment should match what we just set');
+
         const handler = new TestEventHandler<DidChangeEnvironmentEventArgs>(
             api.onDidChangeEnvironment,
             'onDidChangeEnvironment',
@@ -284,7 +292,7 @@ suite('Integration: Interpreter Selection Priority', function () {
                 }
             } else {
                 // No event fired - this is the ideal idempotent behavior
-                console.log('No event fired for same env selection (idempotent behavior)');
+                assert.ok(!handler.fired, 'No event should fire when setting same environment');
             }
         } finally {
             handler.dispose();
@@ -353,7 +361,7 @@ suite('Integration: Interpreter Selection Priority', function () {
             // but the explicit selection should be cleared
         } else {
             // Undefined is a valid result - no auto-discovery available
-            console.log('Selection cleared, no auto-discovery fallback');
+            assert.strictEqual(autoEnv, undefined, 'Cleared selection with no auto-discovery should return undefined');
         }
     });
 });

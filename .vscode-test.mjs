@@ -48,6 +48,7 @@ export default defineConfig([
     {
         label: 'integrationTests',
         files: 'out/test/integration/**/*.integration.test.js',
+        workspaceFolder: 'src/test/integration/test-workspace/integration-tests.code-workspace',
         mocha: {
             ui: 'tdd',
             timeout: 60000,

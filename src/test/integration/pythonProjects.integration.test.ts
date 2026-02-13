@@ -254,10 +254,13 @@ suite('Integration: Python Projects', function () {
         if (afterClear) {
             assert.ok(afterClear.envId, 'If environment returned, it must have valid envId');
             assert.ok(afterClear.envId.id, 'If environment returned, envId must have id');
+        } else {
+            assert.strictEqual(
+                afterClear,
+                undefined,
+                'Cleared association should return undefined when no auto-discovery',
+            );
         }
-        // If undefined, that's also valid - explicit selection was cleared
-
-        console.log('After clearing:', afterClear?.displayName ?? 'undefined (no auto-discovery)');
     });
 
     /**

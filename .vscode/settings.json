@@ -29,5 +29,8 @@
     "python-envs.pythonProjects": [],
     "git.branchRandomName.enable": true,
     "git.branchProtection": ["main"],
-    "git.branchProtectionPrompt": "alwaysCommitToNewBranch"
+    "git.branchProtectionPrompt": "alwaysCommitToNewBranch",
+    "chat.tools.terminal.autoApprove": {
+        "npx tsc": true
+    }
 }
