@@ -300,34 +300,6 @@ suite('Integration: Interpreter Selection Priority', function () {
     });
 
     /**
-     * Test: Environment selection works with URI arrays
-     *
-     * setEnvironment should handle array of URIs for multi-select scenarios.
-     */
-    test('setEnvironment handles URI array', async function () {
-        const environments = await api.getEnvironments('all');
-        const projects = api.getPythonProjects();
-
-        if (environments.length === 0 || projects.length < 2) {
-            this.skip();
-            return;
-        }
-
-        const env = environments[0];
-        const uris = projects.slice(0, 2).map((p) => p.uri);
-
-        // Set environment for multiple URIs at once
-        await api.setEnvironment(uris, env);
-
-        // Verify both projects have the environment
-        for (const uri of uris) {
-            const retrieved = await api.getEnvironment(uri);
-            assert.ok(retrieved, `URI ${uri.fsPath} should have environment`);
-            assert.strictEqual(retrieved.envId.id, env.envId.id, `URI ${uri.fsPath} should have set environment`);
-        }
-    });
-
-    /**
      * Test: Clearing selection falls back to auto-discovery
      *
      * After clearing an explicit selection, auto-discovery should

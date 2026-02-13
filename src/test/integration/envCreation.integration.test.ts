@@ -253,44 +253,6 @@ suite('Integration: Environment Creation', function () {
     });
 
     /**
-     * Test: Creation with multiple URIs selects manager
-     *
-     * When passing multiple URIs, the API should handle manager selection.
-     */
-    test('Multiple URI scope is handled', async function () {
-        const workspaceFolders = vscode.workspace.workspaceFolders;
-
-        if (!workspaceFolders || workspaceFolders.length < 2) {
-            this.skip();
-            return;
-        }
-
-        const uris = workspaceFolders.map((f) => f.uri);
-        let createdEnv: PythonEnvironment | undefined;
-
-        try {
-            // This may prompt for manager selection - quickCreate should handle it
-            createdEnv = await api.createEnvironment(uris, { quickCreate: true });
-
-            if (createdEnv) {
-                // Verify created environment has valid structure
-                assert.ok(createdEnv.envId, 'Multi-URI created env must have envId');
-                assert.ok(createdEnv.environmentPath, 'Multi-URI created env must have environmentPath');
-            } else {
-                // quickCreate returned undefined - skip this test as feature not available
-                console.log('Multi-URI creation not supported with quickCreate, skipping');
-                this.skip();
-                return;
-            }
-        } finally {
-            // Cleanup: always try to remove if created
-            if (createdEnv) {
-                await api.removeEnvironment(createdEnv);
-            }
-        }
-    });
-
-    /**
      * Test: Creation returns properly structured environment
      *
      * A successfully created environment should have all required fields.

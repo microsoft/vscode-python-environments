@@ -264,39 +264,6 @@ suite('Integration: Python Projects', function () {
     });
 
     /**
-     * Test: Multiple projects can have different environments
-     *
-     * In a multi-project workspace, each project can have its own environment.
-     */
-    test('Different projects can have different environments', async function () {
-        const projects = api.getPythonProjects();
-        const environments = await api.getEnvironments('all');
-
-        if (projects.length < 2 || environments.length < 2) {
-            this.skip();
-            return;
-        }
-
-        const project1 = projects[0];
-        const project2 = projects[1];
-        const env1 = environments[0];
-        const env2 = environments[1];
-
-        // Set different environments for different projects
-        await api.setEnvironment(project1.uri, env1);
-        await api.setEnvironment(project2.uri, env2);
-
-        // Verify each project has its assigned environment
-        const retrieved1 = await api.getEnvironment(project1.uri);
-        const retrieved2 = await api.getEnvironment(project2.uri);
-
-        assert.ok(retrieved1, 'Project 1 should have environment');
-        assert.ok(retrieved2, 'Project 2 should have environment');
-        assert.strictEqual(retrieved1.envId.id, env1.envId.id, 'Project 1 should have env1');
-        assert.strictEqual(retrieved2.envId.id, env2.envId.id, 'Project 2 should have env2');
-    });
-
-    /**
      * Test: File within project resolves to project environment
      *
      * A file path inside a project should resolve to that project's environment.

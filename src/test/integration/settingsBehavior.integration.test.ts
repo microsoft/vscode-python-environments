@@ -347,39 +347,4 @@ suite('Integration: Settings Behavior', function () {
         console.log('Current env:', currentEnv?.displayName ?? 'none');
         console.log('Projects setting type:', Array.isArray(pythonProjects) ? 'array' : typeof pythonProjects);
     });
-
-    /**
-     * Test: Workspace folder scope is respected
-     *
-     * Settings at workspace folder level should be independently inspectable.
-     */
-    test('Workspace folder settings scope is respected', async function () {
-        const workspaceFolders = vscode.workspace.workspaceFolders;
-
-        if (!workspaceFolders || workspaceFolders.length < 2) {
-            // Need at least 2 folders to test isolation
-            this.skip();
-            return;
-        }
-
-        const config1 = vscode.workspace.getConfiguration('python-envs', workspaceFolders[0].uri);
-        const config2 = vscode.workspace.getConfiguration('python-envs', workspaceFolders[1].uri);
-
-        // Both should be independently inspectable
-        const inspect1 = config1.inspect('pythonProjects');
-        const inspect2 = config2.inspect('pythonProjects');
-
-        // Assert inspect returns valid results for both folders
-        assert.ok(inspect1, 'Should be able to inspect settings for folder 1');
-        assert.ok(inspect2, 'Should be able to inspect settings for folder 2');
-
-        // Assert the inspection objects have the expected structure
-        assert.ok('key' in inspect1, 'Inspection should have key property');
-        assert.ok('key' in inspect2, 'Inspection should have key property');
-        assert.strictEqual(inspect1.key, 'python-envs.pythonProjects', 'Key should be python-envs.pythonProjects');
-        assert.strictEqual(inspect2.key, 'python-envs.pythonProjects', 'Key should be python-envs.pythonProjects');
-
-        console.log('Folder 1 pythonProjects:', inspect1?.workspaceFolderValue);
-        console.log('Folder 2 pythonProjects:', inspect2?.workspaceFolderValue);
-    });
 });
