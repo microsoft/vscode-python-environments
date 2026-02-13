@@ -69,13 +69,13 @@ class LongFunction:
 
 # Debt marker patterns
 DEBT_PATTERNS = [
-    (r"#\s*(TODO|FIXME|HACK|XXX|BUG|REFACTOR|OPTIMIZE|REVIEW)[:|\s](.+)$", "python"),
+    (r"#\s*(TODO|FIXME|HACK|XXX|BUG|REFACTOR|OPTIMIZE|REVIEW)[:\s](.+)$", "python"),
     (
-        r"//\s*(TODO|FIXME|HACK|XXX|BUG|REFACTOR|OPTIMIZE|REVIEW)[:|\s](.+)$",
+        r"//\s*(TODO|FIXME|HACK|XXX|BUG|REFACTOR|OPTIMIZE|REVIEW)[:\s](.+)$",
         "typescript",
     ),
     (
-        r"/\*\s*(TODO|FIXME|HACK|XXX|BUG|REFACTOR|OPTIMIZE|REVIEW)[:|\s](.+?)\*/",
+        r"/\*\s*(TODO|FIXME|HACK|XXX|BUG|REFACTOR|OPTIMIZE|REVIEW)[:\s](.+?)\*/",
         "typescript",
     ),
 ]

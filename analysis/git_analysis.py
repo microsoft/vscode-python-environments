@@ -92,6 +92,7 @@ def run_git_command(args: List[str], cwd: pathlib.Path) -> str:
         capture_output=True,
         text=True,
         check=True,
+        timeout=60,
     )
     return result.stdout
 

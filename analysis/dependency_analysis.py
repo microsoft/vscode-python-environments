@@ -122,7 +122,7 @@ def extract_imports_typescript(
     # import './path'
     # const x = require('./path')
     import_patterns = [
-        r'import\s+(?:.*?\s+from\s+)?[\'"]([^\'"]+)[\'"]',
+        r'import\s+(?:[^\'";]+?\s+from\s+)?[\'"]([^\'"]+)[\'"]',
         r'require\s*\(\s*[\'"]([^\'"]+)[\'"]\s*\)',
         r'import\s*\(\s*[\'"]([^\'"]+)[\'"]\s*\)',  # dynamic import
     ]

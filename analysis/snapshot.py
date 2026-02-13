@@ -34,6 +34,7 @@ def get_git_info(repo_root: pathlib.Path) -> dict:
             capture_output=True,
             text=True,
             check=True,
+            timeout=10,
         ).stdout.strip()
 
         short_sha = subprocess.run(
@@ -42,6 +43,7 @@ def get_git_info(repo_root: pathlib.Path) -> dict:
             capture_output=True,
             text=True,
             check=True,
+            timeout=10,
         ).stdout.strip()
 
         branch = subprocess.run(
@@ -50,6 +52,7 @@ def get_git_info(repo_root: pathlib.Path) -> dict:
             capture_output=True,
             text=True,
             check=True,
+            timeout=10,
         ).stdout.strip()
 
         # Get commit message
@@ -59,6 +62,7 @@ def get_git_info(repo_root: pathlib.Path) -> dict:
             capture_output=True,
             text=True,
             check=True,
+            timeout=10,
         ).stdout.strip()
 
         return {
@@ -67,7 +71,7 @@ def get_git_info(repo_root: pathlib.Path) -> dict:
             "branch": branch,
             "message": message[:200],  # Truncate long messages
         }
-    except subprocess.CalledProcessError:
+    except (subprocess.CalledProcessError, subprocess.TimeoutExpired):
         return {
             "sha": "unknown",
             "short_sha": "unknown",
