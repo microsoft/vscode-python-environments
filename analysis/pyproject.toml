@@ -1,0 +1,20 @@
+[project]
+name = "vscode-python-environments-analysis"
+version = "0.1.0"
+description = "Code health and technical debt analysis tools"
+requires-python = ">=3.9"
+dependencies = [
+    "gitpython>=3.1.0",
+    "radon>=6.0.0",
+    "pathspec>=0.11.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0.0",
+]
+
+[tool.uv]
+dev-dependencies = [
+    "pytest>=7.0.0",
+]
