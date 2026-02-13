@@ -42,70 +42,29 @@ suite('Integration: Environment Creation', function () {
 
         api = extension.exports as PythonEnvironmentApi;
         assert.ok(api, 'API not available');
-    });
-
-    /**
-     * Test: createEnvironment API is available
-     *
-     * The API should have a createEnvironment method.
-     */
-    test('createEnvironment API is available', async function () {
         assert.ok(typeof api.createEnvironment === 'function', 'createEnvironment should be a function');
-    });
-
-    /**
-     * Test: removeEnvironment API is available
-     *
-     * The API should have a removeEnvironment method.
-     */
-    test('removeEnvironment API is available', async function () {
         assert.ok(typeof api.removeEnvironment === 'function', 'removeEnvironment should be a function');
     });
 
-    /**
-     * Test: Managers that support creation are available
-     *
-     * At least one environment manager (venv or conda) should support creation.
-     * This test verifies that global Python installations are discoverable.
-     */
-    test('At least one manager supports environment creation', async function () {
-        // Get all environments to force managers to load
-        await api.getEnvironments('all');
-
-        // Check if we have global Python installations that can create venvs
-        const globalEnvs = await api.getEnvironments('global');
-
-        // Assert we have at least one global Python that can serve as base for venv creation
-        assert.ok(
-            globalEnvs.length > 0,
-            'At least one global Python installation should be available for environment creation. ' +
-                'If this fails, ensure Python is installed and discoverable on this system.',
-        );
-
-        // Verify the global environments have required properties for creation
-        for (const env of globalEnvs) {
-            assert.ok(env.envId, 'Global environment must have envId');
-            assert.ok(env.environmentPath, 'Global environment must have environmentPath');
-        }
-
-        console.log(`Found ${globalEnvs.length} global Python installations for venv creation`);
-    });
+    // =========================================================================
+    // ENVIRONMENT CREATION BEHAVIOR TESTS
+    // These tests verify actual user-facing creation and removal workflows.
+    // =========================================================================
 
     /**
      * Test: Created environment appears in discovery
      *
-     * After creating an environment, it should be discoverable via getEnvironments.
-     * This test creates a real environment and cleans it up.
+     * BEHAVIOR TESTED: User creates an environment via quickCreate,
+     * then the environment should be discoverable via getEnvironments.
      */
     test('Created environment appears in discovery', async function () {
+        // --- SETUP: Ensure we have prerequisites ---
         const workspaceFolders = vscode.workspace.workspaceFolders;
-
         if (!workspaceFolders || workspaceFolders.length === 0) {
             this.skip();
             return;
         }
 
-        // Check if we have Python available for venv creation
         const globalEnvs = await api.getEnvironments('global');
         if (globalEnvs.length === 0) {
             console.log('No global Python installations found, skipping creation test');
@@ -117,17 +76,16 @@ suite('Integration: Environment Creation', function () {
         let createdEnv: PythonEnvironment | undefined;
 
         try {
-            // Create environment with quickCreate to avoid prompts
+            // --- ACTION: User creates environment ---
             createdEnv = await api.createEnvironment(workspaceUri, { quickCreate: true });
 
             if (!createdEnv) {
-                // Creation may have been cancelled or failed silently
                 console.log('Environment creation returned undefined (may require user input)');
                 this.skip();
                 return;
             }
 
-            // Refresh and verify the environment appears
+            // --- VERIFY: Created environment is discoverable ---
             await api.refreshEnvironments(workspaceUri);
             const environments = await api.getEnvironments(workspaceUri);
 
@@ -153,11 +111,12 @@ suite('Integration: Environment Creation', function () {
     /**
      * Test: Environment removal removes from discovery
      *
-     * After removing an environment, it should no longer appear in discovery.
+     * BEHAVIOR TESTED: User removes an environment, then it should
+     * no longer appear in discovery results.
      */
     test('Removed environment disappears from discovery', async function () {
+        // --- SETUP: Create an environment to remove ---
         const workspaceFolders = vscode.workspace.workspaceFolders;
-
         if (!workspaceFolders || workspaceFolders.length === 0) {
             this.skip();
             return;
@@ -173,25 +132,21 @@ suite('Integration: Environment Creation', function () {
         let createdEnv: PythonEnvironment | undefined;
 
         try {
-            // Create environment
             createdEnv = await api.createEnvironment(workspaceUri, { quickCreate: true });
-
             if (!createdEnv) {
                 this.skip();
                 return;
             }
 
-            // Record the environment ID
             const envId = createdEnv.envId.id;
 
-            // Remove environment
+            // --- ACTION: User removes environment ---
             await api.removeEnvironment(createdEnv);
-            createdEnv = undefined; // Mark as cleaned up
+            createdEnv = undefined;
 
-            // Give time for removal to complete
             await sleep(1000);
 
-            // Refresh and verify it's gone
+            // --- VERIFY: Environment is no longer discoverable ---
             await api.refreshEnvironments(workspaceUri);
             const environments = await api.getEnvironments(workspaceUri);
 

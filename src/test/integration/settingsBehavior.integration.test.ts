@@ -5,17 +5,17 @@
  * Integration Test: Settings Behavior
  *
  * PURPOSE:
- * Verify that settings are read and written correctly, and that
- * the extension respects VS Code's settings hierarchy.
+ * Verify that the extension's settings-related APIs work correctly
+ * and interact properly with VS Code's settings system.
  *
  * WHAT THIS TESTS:
- * 1. Opening workspace doesn't pollute settings
- * 2. Manual selection writes to settings
- * 3. Settings scope is respected
- * 4. Environment variables API works
+ * 1. Environment variables API works correctly
+ * 2. Extension correctly defines required settings in package.json
+ * 3. Settings and API work together consistently
  *
- * NOTE: These tests interact with VS Code settings.
- * Care should be taken to restore original settings after tests.
+ * NOTE: These tests focus on extension behavior, not VS Code's
+ * configuration system. Tests just reading settings without
+ * exercising extension code belong elsewhere.
  */
 
 import * as assert from 'assert';
@@ -42,14 +42,22 @@ suite('Integration: Settings Behavior', function () {
 
         api = extension.exports as PythonEnvironmentApi;
         assert.ok(api, 'API not available');
+        assert.ok(typeof api.getEnvironmentVariables === 'function', 'getEnvironmentVariables should be a function');
+        assert.ok(api.onDidChangeEnvironmentVariables, 'onDidChangeEnvironmentVariables should be available');
     });
 
+    // =========================================================================
+    // EXTENSION SETTINGS SCHEMA TESTS
+    // Verify that settings defined in package.json are accessible.
+    // =========================================================================
+
     /**
-     * Test: Extension settings are accessible
+     * Test: Extension settings are defined in package.json
      *
      * The python-envs configuration section should be accessible with expected types.
+     * This verifies our package.json contributes the correct settings schema.
      */
-    test('Extension settings section is accessible', async function () {
+    test('Extension settings are defined in package.json', async function () {
         const config = vscode.workspace.getConfiguration('python-envs');
 
         assert.ok(config, 'python-envs configuration should be accessible');
@@ -73,55 +81,10 @@ suite('Integration: Settings Behavior', function () {
     });
 
     /**
-     * Test: workspaceSearchPaths setting is accessible
-     *
-     * The search paths setting should be readable.
-     */
-    test('workspaceSearchPaths setting is readable', async function () {
-        const workspaceFolders = vscode.workspace.workspaceFolders;
-
-        if (!workspaceFolders || workspaceFolders.length === 0) {
-            this.skip();
-            return;
-        }
-
-        const config = vscode.workspace.getConfiguration('python-envs', workspaceFolders[0].uri);
-        const searchPaths = config.get<string[]>('workspaceSearchPaths');
-
-        // Default should be ["./**/.venv"]
-        assert.ok(
-            Array.isArray(searchPaths) || searchPaths === undefined,
-            'workspaceSearchPaths should be array or undefined',
-        );
-
-        if (searchPaths) {
-            console.log('workspaceSearchPaths:', searchPaths);
-        }
-    });
-
-    /**
-     * Test: globalSearchPaths setting is accessible
-     *
-     * The global search paths setting should be readable.
-     */
-    test('globalSearchPaths setting is readable', async function () {
-        const config = vscode.workspace.getConfiguration('python-envs');
-        const globalPaths = config.get<string[]>('globalSearchPaths');
-
-        assert.ok(
-            Array.isArray(globalPaths) || globalPaths === undefined,
-            'globalSearchPaths should be array or undefined',
-        );
-
-        if (globalPaths) {
-            console.log('globalSearchPaths:', globalPaths);
-        }
-    });
-
-    /**
      * Test: pythonProjects setting structure
      *
-     * The pythonProjects setting should have the correct structure.
+     * The pythonProjects setting should have the correct structure when set.
+     * This validates our package.json schema for pythonProjects.
      */
     test('pythonProjects setting has correct structure', async function () {
         const workspaceFolders = vscode.workspace.workspaceFolders;
@@ -144,40 +107,10 @@ suite('Integration: Settings Behavior', function () {
         console.log('pythonProjects:', JSON.stringify(projects, null, 2));
     });
 
-    /**
-     * Test: Settings inspection shows scope
-     *
-     * Using inspect() should show which scope a setting comes from.
-     */
-    test('Settings inspection shows scope information', async function () {
-        const workspaceFolders = vscode.workspace.workspaceFolders;
-
-        if (!workspaceFolders || workspaceFolders.length === 0) {
-            this.skip();
-            return;
-        }
-
-        const config = vscode.workspace.getConfiguration('python-envs', workspaceFolders[0].uri);
-        const inspection = config.inspect('defaultEnvManager');
-
-        assert.ok(inspection, 'Inspection should return result');
-        assert.ok(
-            'defaultValue' in inspection || 'globalValue' in inspection,
-            'Inspection should have value properties',
-        );
-
-        console.log('defaultEnvManager inspection:', JSON.stringify(inspection, null, 2));
-    });
-
-    /**
-     * Test: Environment variables API is available
-     *
-     * The getEnvironmentVariables API should be callable.
-     */
-    test('getEnvironmentVariables API is available', async function () {
-        assert.ok(typeof api.getEnvironmentVariables === 'function', 'getEnvironmentVariables should be a function');
-        assert.ok(api.onDidChangeEnvironmentVariables, 'onDidChangeEnvironmentVariables should be available');
-    });
+    // =========================================================================
+    // ENVIRONMENT VARIABLES API TESTS
+    // These tests verify the extension's getEnvironmentVariables API behavior.
+    // =========================================================================
 
     /**
      * Test: getEnvironmentVariables returns object
@@ -233,90 +166,10 @@ suite('Integration: Settings Behavior', function () {
         assert.ok(typeof envVars === 'object', 'Should return object for undefined uri');
     });
 
-    /**
-     * Test: Terminal settings are accessible
-     *
-     * Terminal-specific settings should be accessible with expected types.
-     */
-    test('Terminal settings are accessible', async function () {
-        const config = vscode.workspace.getConfiguration('python-envs');
-
-        const activationType = config.get('terminal.autoActivationType');
-        const showButton = config.get('terminal.showActivateButton');
-
-        // Assert settings have expected types
-        // activationType should be string (enum value) or undefined
-        assert.ok(
-            typeof activationType === 'string' || activationType === undefined,
-            `terminal.autoActivationType should be string or undefined, got ${typeof activationType}`,
-        );
-
-        // showButton should be boolean or undefined
-        assert.ok(
-            typeof showButton === 'boolean' || showButton === undefined,
-            `terminal.showActivateButton should be boolean or undefined, got ${typeof showButton}`,
-        );
-
-        console.log('terminal.autoActivationType:', activationType);
-        console.log('terminal.showActivateButton:', showButton);
-    });
-
-    /**
-     * Test: alwaysUseUv setting is accessible
-     *
-     * The uv preference setting should be readable and have expected type.
-     */
-    test('alwaysUseUv setting is accessible', async function () {
-        const config = vscode.workspace.getConfiguration('python-envs');
-        const alwaysUseUv = config.get('alwaysUseUv');
-
-        // alwaysUseUv should be boolean or undefined
-        assert.ok(
-            typeof alwaysUseUv === 'boolean' || alwaysUseUv === undefined,
-            `alwaysUseUv should be boolean or undefined, got ${typeof alwaysUseUv}`,
-        );
-
-        console.log('alwaysUseUv:', alwaysUseUv);
-    });
-
-    /**
-     * Test: Legacy python settings are accessible
-     *
-     * Legacy python.* settings should be readable for migration with expected types.
-     */
-    test('Legacy python settings are accessible', async function () {
-        const pythonConfig = vscode.workspace.getConfiguration('python');
-
-        // These are legacy settings that may have values
-        const venvPath = pythonConfig.get('venvPath');
-        const venvFolders = pythonConfig.get('venvFolders');
-        const defaultInterpreterPath = pythonConfig.get('defaultInterpreterPath');
-        const condaPath = pythonConfig.get('condaPath');
-
-        // Assert types are as expected
-        assert.ok(
-            typeof venvPath === 'string' || venvPath === undefined,
-            `venvPath should be string or undefined, got ${typeof venvPath}`,
-        );
-        assert.ok(
-            Array.isArray(venvFolders) || venvFolders === undefined,
-            `venvFolders should be array or undefined, got ${typeof venvFolders}`,
-        );
-        assert.ok(
-            typeof defaultInterpreterPath === 'string' || defaultInterpreterPath === undefined,
-            `defaultInterpreterPath should be string or undefined, got ${typeof defaultInterpreterPath}`,
-        );
-        assert.ok(
-            typeof condaPath === 'string' || condaPath === undefined,
-            `condaPath should be string or undefined, got ${typeof condaPath}`,
-        );
-
-        console.log('Legacy settings:');
-        console.log('  venvPath:', venvPath);
-        console.log('  venvFolders:', venvFolders);
-        console.log('  defaultInterpreterPath:', defaultInterpreterPath);
-        console.log('  condaPath:', condaPath);
-    });
+    // =========================================================================
+    // SETTINGS + API INTEGRATION TESTS
+    // These tests verify settings and API work together correctly.
+    // =========================================================================
 
     /**
      * Test: Settings and API are connected

@@ -138,7 +138,7 @@ suite('Integration: Multi-Root Workspace', function () {
     /**
      * Test: Workspace folder settings scope is respected
      *
-     * Settings at workspace folder level should be independently inspectable
+     * Settings at workspace folder level should be independently accessible
      * across different folders.
      */
     test('Workspace folder settings scope is respected', async function () {
@@ -147,7 +147,7 @@ suite('Integration: Multi-Root Workspace', function () {
         const config1 = vscode.workspace.getConfiguration('python-envs', workspaceFolders[0].uri);
         const config2 = vscode.workspace.getConfiguration('python-envs', workspaceFolders[1].uri);
 
-        // Both should be independently inspectable
+        // Both should be independently accessible via inspect()
         const inspect1 = config1.inspect('pythonProjects');
         const inspect2 = config2.inspect('pythonProjects');
 
