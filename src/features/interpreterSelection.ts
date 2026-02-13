@@ -391,28 +391,12 @@ async function tryResolveInterpreterPath(
             }
 
             if (manager && resolvedEnv) {
-                // Create a wrapper environment that uses the user's specified path
-                const newEnv: PythonEnvironment = {
-                    envId: {
-                        id: `defaultInterpreterPath:${interpreterPath}`,
-                        managerId: manager.id,
-                    },
-                    name: 'defaultInterpreterPath: ' + (resolved.version ?? ''),
-                    displayName: 'defaultInterpreterPath: ' + (resolved.version ?? ''),
-                    version: resolved.version ?? '',
-                    displayPath: interpreterPath,
-                    environmentPath: Uri.file(interpreterPath),
-                    sysPrefix: resolved.prefix ?? '',
-                    execInfo: {
-                        run: {
-                            executable: interpreterPath,
-                        },
-                    },
-                };
+                // Use the resolved environment directly - it has the canonical ID format
+                // The 'source' field tracks that this came from defaultInterpreterPath setting
                 traceVerbose(
-                    `[tryResolveInterpreterPath] Resolved '${interpreterPath}' to ${resolved.executable} (${resolved.version})`,
+                    `[tryResolveInterpreterPath] Resolved '${interpreterPath}' to ${resolved.executable} (${resolved.version}) with ID ${resolvedEnv.envId.id}`,
                 );
-                return { manager, environment: newEnv, source: 'defaultInterpreterPath' };
+                return { manager, environment: resolvedEnv, source: 'defaultInterpreterPath' };
             }
         }
         traceVerbose(
