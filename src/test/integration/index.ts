@@ -17,7 +17,6 @@ export async function run(): Promise<void> {
         ui: 'tdd',
         color: true,
         timeout: 120_000, // 2 minutes
-        retries: 1,
         slow: 15_000, // Mark as slow if > 15s
     });
 

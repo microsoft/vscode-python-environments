@@ -515,34 +515,44 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
      * Below are all the contributed features using the APIs.
      */
     setImmediate(async () => {
-        // This is the finder that is used by all the built in environment managers
-        const nativeFinder: NativePythonFinder = await createNativePythonFinder(outputChannel, api, context);
-        context.subscriptions.push(nativeFinder);
-        const sysMgr = new SysPythonManager(nativeFinder, api, outputChannel);
-        sysPythonManager.resolve(sysMgr);
-        await Promise.all([
-            registerSystemPythonFeatures(nativeFinder, context.subscriptions, outputChannel, sysMgr),
-            registerCondaFeatures(nativeFinder, context.subscriptions, outputChannel, projectManager),
-            registerPyenvFeatures(nativeFinder, context.subscriptions, projectManager),
-            registerPipenvFeatures(nativeFinder, context.subscriptions, projectManager),
-            registerPoetryFeatures(nativeFinder, context.subscriptions, outputChannel, projectManager),
-            shellStartupVarsMgr.initialize(),
-        ]);
+        try {
+            // This is the finder that is used by all the built in environment managers
+            const nativeFinder: NativePythonFinder = await createNativePythonFinder(outputChannel, api, context);
+            context.subscriptions.push(nativeFinder);
+            const sysMgr = new SysPythonManager(nativeFinder, api, outputChannel);
+            sysPythonManager.resolve(sysMgr);
+            await Promise.all([
+                registerSystemPythonFeatures(nativeFinder, context.subscriptions, outputChannel, sysMgr),
+                registerCondaFeatures(nativeFinder, context.subscriptions, outputChannel, projectManager),
+                registerPyenvFeatures(nativeFinder, context.subscriptions, projectManager),
+                registerPipenvFeatures(nativeFinder, context.subscriptions, projectManager),
+                registerPoetryFeatures(nativeFinder, context.subscriptions, outputChannel, projectManager),
+                shellStartupVarsMgr.initialize(),
+            ]);
 
-        await applyInitialEnvironmentSelection(envManagers, projectManager, nativeFinder, api);
+            await applyInitialEnvironmentSelection(envManagers, projectManager, nativeFinder, api);
 
-        // Register manager-agnostic terminal watcher for package-modifying commands
-        registerTerminalPackageWatcher(api, terminalActivation, outputChannel, context.subscriptions);
+            // Register manager-agnostic terminal watcher for package-modifying commands
+            registerTerminalPackageWatcher(api, terminalActivation, outputChannel, context.subscriptions);
 
-        // Register listener for interpreter settings changes for interpreter re-selection
-        context.subscriptions.push(
-            registerInterpreterSettingsChangeListener(envManagers, projectManager, nativeFinder, api),
-        );
+            // Register listener for interpreter settings changes for interpreter re-selection
+            context.subscriptions.push(
+                registerInterpreterSettingsChangeListener(envManagers, projectManager, nativeFinder, api),
+            );
 
-        sendTelemetryEvent(EventNames.EXTENSION_MANAGER_REGISTRATION_DURATION, start.elapsedTime);
-        await terminalManager.initialize(api);
-        sendManagerSelectionTelemetry(projectManager);
-        await sendProjectStructureTelemetry(projectManager, envManagers);
+            sendTelemetryEvent(EventNames.EXTENSION_MANAGER_REGISTRATION_DURATION, start.elapsedTime);
+            await terminalManager.initialize(api);
+            sendManagerSelectionTelemetry(projectManager);
+            await sendProjectStructureTelemetry(projectManager, envManagers);
+        } catch (error) {
+            traceError('Failed to initialize environment managers:', error);
+            // Show a user-friendly error message
+            window.showErrorMessage(
+                l10n.t(
+                    'Python Environments: Failed to initialize environment managers. Some features may not work correctly. Check the Output panel for details.',
+                ),
+            );
+        }
     });
 
     sendTelemetryEvent(EventNames.EXTENSION_ACTIVATION_DURATION, start.elapsedTime);
