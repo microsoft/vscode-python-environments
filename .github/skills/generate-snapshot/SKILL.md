@@ -20,10 +20,12 @@ This skill generates a comprehensive code health snapshot using the analysis mod
 
 ```powershell
 cd analysis
-python snapshot.py --output ./analysis-snapshot.json
+python snapshot.py --output ../analysis-snapshot.json
 ```
 
 Add `--pretty` flag to also print the JSON to stdout.
+
+**Note:** The snapshot is written to the repository root (`analysis-snapshot.json`), not inside the `analysis/` folder. This path is ignored by `.gitignore`.
 
 ## Snapshot Structure
 

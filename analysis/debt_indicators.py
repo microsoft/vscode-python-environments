@@ -115,7 +115,9 @@ def should_analyze_file(
         ".git",
         ".vscode-test",
     }
-    for part in filepath.parts:
+    # Use relative path parts to avoid matching directories in repo root path
+    rel_parts = filepath.relative_to(repo_root).parts
+    for part in rel_parts:
         if part in skip_dirs:
             return False
 

@@ -89,7 +89,7 @@ def get_issue_context(repo_root: Path) -> Dict:
     if issues_json:
         try:
             issues = json.loads(issues_json)
-            context["open_issues_count"] = len(issues)
+            context["recent_issues_count"] = len(issues)
             context["recent_issues"] = [
                 f"#{i['number']}: {i['title']}" for i in issues[:3]
             ]
@@ -102,7 +102,7 @@ def get_issue_context(repo_root: Path) -> Dict:
 
 def get_snapshot_summary(repo_root: Path) -> Dict:
     """Get snapshot summary if available."""
-    snapshot_path = repo_root / "analysis" / "analysis-snapshot.json"
+    snapshot_path = repo_root / "analysis-snapshot.json"
     if not snapshot_path.exists():
         return {}
 
@@ -149,7 +149,7 @@ def main() -> int:
             parts.append(f"Uncommitted changes: {changes} files")
 
     if issue_context.get("recent_issues"):
-        parts.append(f"Open issues: {issue_context.get('open_issues_count', 0)}")
+        parts.append(f"Recent issues: {issue_context.get('recent_issues_count', 0)}")
 
     if snapshot_context:
         if snapshot_context.get("fixme_count", 0) > 0:
