@@ -174,6 +174,7 @@ suite('Interpreter Selection - Priority Chain', () => {
             // Setup: No pythonProjects[], no user-configured defaultEnvManager (returns undefined)
             // But there IS a user-configured defaultInterpreterPath
             sandbox.stub(workspaceApis, 'getConfiguration').returns(createMockConfig([]) as WorkspaceConfiguration);
+            sandbox.stub(workspaceApis, 'getWorkspaceFolders').returns([]);
             sandbox.stub(helpers, 'getUserConfiguredSetting').callsFake((section: string, key: string) => {
                 if (section === 'python' && key === 'defaultInterpreterPath') {
                     return '/usr/bin/python3.11';
@@ -198,6 +199,7 @@ suite('Interpreter Selection - Priority Chain', () => {
     suite('Priority 3: python.defaultInterpreterPath', () => {
         test('should use defaultInterpreterPath when set and resolvable', async () => {
             sandbox.stub(workspaceApis, 'getConfiguration').returns(createMockConfig([]) as WorkspaceConfiguration);
+            sandbox.stub(workspaceApis, 'getWorkspaceFolders').returns([]);
             sandbox.stub(helpers, 'getUserConfiguredSetting').callsFake((section: string, key: string) => {
                 if (section === 'python' && key === 'defaultInterpreterPath') {
                     return '/usr/bin/python3.11';
@@ -220,8 +222,49 @@ suite('Interpreter Selection - Priority Chain', () => {
             assert.strictEqual(result.environment.displayPath, '/usr/bin/python3.11');
         });
 
+        test('should resolve ${workspaceFolder} in defaultInterpreterPath before native resolution', async () => {
+            const workspaceUri = Uri.file('/test/workspace');
+            const expandedInterpreterPath = '/test/workspace/backend/.venv/bin/python';
+            const workspaceFolder = { name: 'workspace', uri: workspaceUri } as WorkspaceFolder;
+
+            sandbox.stub(workspaceApis, 'getConfiguration').returns(createMockConfig([]) as WorkspaceConfiguration);
+            sandbox.stub(workspaceApis, 'getWorkspaceFolder').returns(workspaceFolder);
+            sandbox.stub(workspaceApis, 'getWorkspaceFolders').returns([workspaceFolder]);
+            sandbox.stub(helpers, 'getUserConfiguredSetting').callsFake((section: string, key: string) => {
+                if (section === 'python' && key === 'defaultInterpreterPath') {
+                    return '${workspaceFolder}/backend/.venv/bin/python';
+                }
+                return undefined;
+            });
+            mockNativeFinder.resolve.resolves({
+                executable: expandedInterpreterPath,
+                version: '3.11.0',
+                prefix: '/test/workspace/backend/.venv',
+            });
+            mockApi.resolveEnvironment.resolves({
+                ...mockVenvEnv,
+                displayPath: expandedInterpreterPath,
+                environmentPath: Uri.file(expandedInterpreterPath),
+                execInfo: { run: { executable: expandedInterpreterPath } },
+            });
+
+            const result = await resolveEnvironmentByPriority(
+                workspaceUri,
+                mockEnvManagers as unknown as EnvironmentManagers,
+                mockProjectManager as unknown as PythonProjectManager,
+                mockNativeFinder as unknown as NativePythonFinder,
+                mockApi as unknown as PythonEnvironmentApi,
+            );
+
+            assert.strictEqual(result.source, 'defaultInterpreterPath');
+            assert.ok(result.environment);
+            assert.strictEqual(result.environment.displayPath, expandedInterpreterPath);
+            assert.ok(mockNativeFinder.resolve.calledOnceWithExactly(expandedInterpreterPath));
+        });
+
         test('should fall through to Priority 4 when defaultInterpreterPath cannot be resolved', async () => {
             sandbox.stub(workspaceApis, 'getConfiguration').returns(createMockConfig([]) as WorkspaceConfiguration);
+            sandbox.stub(workspaceApis, 'getWorkspaceFolders').returns([]);
             sandbox.stub(helpers, 'getUserConfiguredSetting').callsFake((section: string, key: string) => {
                 if (section === 'python' && key === 'defaultInterpreterPath') {
                     return '/nonexistent/python';
@@ -249,6 +292,7 @@ suite('Interpreter Selection - Priority Chain', () => {
             const resolvedHomebrewPath = '/opt/homebrew/bin/python3';
 
             sandbox.stub(workspaceApis, 'getConfiguration').returns(createMockConfig([]) as WorkspaceConfiguration);
+            sandbox.stub(workspaceApis, 'getWorkspaceFolders').returns([]);
             sandbox.stub(helpers, 'getUserConfiguredSetting').callsFake((section: string, key: string) => {
                 if (section === 'python' && key === 'defaultInterpreterPath') {
                     return userPyenvPath;
@@ -371,6 +415,7 @@ suite('Interpreter Selection - Priority Chain', () => {
     suite('Edge Cases', () => {
         test('should fall through when nativeFinder resolves but returns no executable', async () => {
             sandbox.stub(workspaceApis, 'getConfiguration').returns(createMockConfig([]) as WorkspaceConfiguration);
+            sandbox.stub(workspaceApis, 'getWorkspaceFolders').returns([]);
             sandbox.stub(helpers, 'getUserConfiguredSetting').callsFake((section: string, key: string) => {
                 if (section === 'python' && key === 'defaultInterpreterPath') {
                     return '/some/path/python';
@@ -395,6 +440,7 @@ suite('Interpreter Selection - Priority Chain', () => {
 
         test('should fall through when api.resolveEnvironment returns undefined', async () => {
             sandbox.stub(workspaceApis, 'getConfiguration').returns(createMockConfig([]) as WorkspaceConfiguration);
+            sandbox.stub(workspaceApis, 'getWorkspaceFolders').returns([]);
             sandbox.stub(helpers, 'getUserConfiguredSetting').callsFake((section: string, key: string) => {
                 if (section === 'python' && key === 'defaultInterpreterPath') {
                     return '/usr/bin/python3.11';
