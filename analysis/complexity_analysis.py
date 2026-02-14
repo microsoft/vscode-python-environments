@@ -279,8 +279,8 @@ def analyze_complexity(repo_root: pathlib.Path) -> dict:
         if file_complexity:
             results["python"].append(file_complexity.to_dict())
 
-    # Analyze TypeScript files
-    ts_files = find_source_files(repo_root, [".ts"])
+    # Analyze TypeScript/JavaScript files
+    ts_files = find_source_files(repo_root, [".ts", ".tsx", ".js", ".jsx"])
     for filepath in ts_files:
         file_complexity = analyze_typescript_file(filepath, repo_root)
         if file_complexity:

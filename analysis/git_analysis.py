@@ -207,6 +207,15 @@ def _should_skip_file(filepath: str) -> bool:
         ".git/",
         "package-lock.json",
         ".vsix",
+        # Skip test files and directories
+        "/test/",
+        "/tests/",
+        "/__tests__/",
+        ".test.",
+        ".spec.",
+        "_test.",
+        "_spec.",
+        "/mocks/",
     ]
     return any(pattern in filepath for pattern in skip_patterns)
 

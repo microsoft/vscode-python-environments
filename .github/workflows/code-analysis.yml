@@ -31,9 +31,8 @@ jobs:
           uv pip install --system .
 
       - name: Generate snapshot
-        working-directory: analysis
         run: |
-          python snapshot.py --output ../analysis-snapshot.json
+          python -m analysis.snapshot --output analysis-snapshot.json
 
       - name: Upload snapshot artifact
         uses: actions/upload-artifact@v4

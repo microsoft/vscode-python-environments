@@ -12,14 +12,15 @@ import json
 import pathlib
 import subprocess
 import sys
+import traceback
 from datetime import datetime, timezone
 from typing import Optional
 
-# Import analysis modules
-from complexity_analysis import analyze_complexity
-from debt_indicators import analyze_debt
-from dependency_analysis import analyze_dependencies
-from git_analysis import analyze_repository as analyze_git
+# Import analysis modules (relative imports for package structure)
+from .complexity_analysis import analyze_complexity
+from .debt_indicators import analyze_debt
+from .dependency_analysis import analyze_dependencies
+from .git_analysis import analyze_repository as analyze_git
 
 # Snapshot schema version - increment when breaking changes are made
 SCHEMA_VERSION = "1.0.0"
@@ -285,6 +286,7 @@ def main() -> int:
         return 0
     except Exception as e:
         print(f"Error generating snapshot: {e}", file=sys.stderr)
+        traceback.print_exc()
         return 1
 
 
