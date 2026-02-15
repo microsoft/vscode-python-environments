@@ -9,6 +9,7 @@ long functions, and code smells.
 
 import pathlib
 import re
+import subprocess
 from dataclasses import dataclass
 from typing import Dict, List, Optional
 
@@ -126,6 +127,40 @@ def should_analyze_file(
         return False
 
     return True
+
+
+def get_tracked_source_files(
+    repo_root: pathlib.Path, extensions: List[str]
+) -> List[pathlib.Path]:
+    """Get source files tracked by git (respects .gitignore automatically)."""
+    try:
+        result = subprocess.run(
+            ["git", "ls-files", "--cached", "--others", "--exclude-standard"],
+            cwd=repo_root,
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        if result.returncode != 0:
+            return []
+
+        files = []
+        for line in result.stdout.splitlines():
+            line = line.strip()
+            if line and any(line.endswith(ext) for ext in extensions):
+                filepath = repo_root / line
+                if filepath.exists():
+                    files.append(filepath)
+        return files
+    except (subprocess.TimeoutExpired, FileNotFoundError):
+        # Fall back to rglob if git is not available
+        gitignore = load_gitignore(repo_root)
+        files = []
+        for ext in extensions:
+            for filepath in repo_root.rglob(f"*{ext}"):
+                if should_analyze_file(filepath, repo_root, gitignore):
+                    files.append(filepath)
+        return files
 
 
 def find_debt_markers(
@@ -341,20 +376,13 @@ def analyze_debt(repo_root: pathlib.Path) -> dict:
     Returns:
         Dictionary with all debt indicators
     """
-    gitignore = load_gitignore(repo_root)
-
     all_markers: List[DebtMarker] = []
     large_files: List[LargeFile] = []
     long_functions: List[LongFunction] = []
 
-    # Find all source files
+    # Find all source files using git ls-files (respects .gitignore)
     extensions = [".py", ".ts", ".js", ".tsx", ".jsx"]
-    source_files = []
-
-    for ext in extensions:
-        for filepath in repo_root.rglob(f"*{ext}"):
-            if should_analyze_file(filepath, repo_root, gitignore):
-                source_files.append(filepath)
+    source_files = get_tracked_source_files(repo_root, extensions)
 
     # Analyze each file
     for filepath in source_files:

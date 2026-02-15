@@ -32,16 +32,29 @@ def run_command(cmd: List[str], cwd: Optional[Path] = None) -> Tuple[int, str]:
 
 
 def has_uncommitted_changes(repo_root: Path) -> bool:
-    """Check if there are uncommitted changes."""
+    """Check if there are uncommitted changes (tracked files only)."""
     code, output = run_command(["git", "status", "--porcelain"], repo_root)
     if code == 0 and output:
-        # Ignore all untracked files (marked with ??) - only track staged/modified
+        # Filter to only tracked files (staged/modified, not untracked with ??)
         lines = [
             line
             for line in output.split("\n")
             if line.strip() and not line.strip().startswith("??")
         ]
         return len(lines) > 0
+    return False
+
+
+def has_untracked_ts_files(repo_root: Path) -> bool:
+    """Check if there are untracked TypeScript files."""
+    code, output = run_command(["git", "status", "--porcelain"], repo_root)
+    if code == 0 and output:
+        for line in output.split("\n"):
+            if line.strip().startswith("??"):
+                # Extract filename from untracked entry (format: "?? path/to/file")
+                filename = line.strip()[3:].strip()
+                if filename.endswith((".ts", ".tsx")):
+                    return True
     return False
 
 
@@ -88,8 +101,11 @@ def main() -> int:
         print(json.dumps({}))
         return 0
 
-    # Check for uncommitted TypeScript changes
-    if has_uncommitted_changes(repo_root) and check_ts_files_changed(repo_root):
+    # Check for uncommitted TypeScript changes (including new untracked TS files)
+    ts_work_present = (
+        has_uncommitted_changes(repo_root) and check_ts_files_changed(repo_root)
+    ) or has_untracked_ts_files(repo_root)
+    if ts_work_present:
         # There are uncommitted TS changes - remind about pre-commit checks
         response = {
             "hookSpecificOutput": {

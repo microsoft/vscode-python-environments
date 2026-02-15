@@ -12,6 +12,7 @@ Analyzes import/export patterns to identify:
 
 import pathlib
 import re
+import subprocess
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Set
 
@@ -106,6 +107,40 @@ def should_analyze_file(
     return True
 
 
+def get_tracked_source_files(
+    repo_root: pathlib.Path, extensions: List[str]
+) -> List[pathlib.Path]:
+    """Get source files tracked by git (respects .gitignore automatically)."""
+    try:
+        result = subprocess.run(
+            ["git", "ls-files", "--cached", "--others", "--exclude-standard"],
+            cwd=repo_root,
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        if result.returncode != 0:
+            return []
+
+        files = []
+        for line in result.stdout.splitlines():
+            line = line.strip()
+            if line and any(line.endswith(ext) for ext in extensions):
+                filepath = repo_root / line
+                if filepath.exists():
+                    files.append(filepath)
+        return files
+    except (subprocess.TimeoutExpired, FileNotFoundError):
+        # Fall back to rglob if git is not available
+        gitignore = load_gitignore(repo_root)
+        files = []
+        for ext in extensions:
+            for filepath in repo_root.rglob(f"*{ext}"):
+                if should_analyze_file(filepath, repo_root, gitignore):
+                    files.append(filepath)
+        return files
+
+
 def extract_imports_typescript(
     filepath: pathlib.Path, repo_root: pathlib.Path
 ) -> Set[str]:
@@ -178,17 +213,11 @@ def resolve_import_path(
 
 def build_dependency_graph(repo_root: pathlib.Path) -> Dict[str, ModuleInfo]:
     """Build a dependency graph of all TypeScript modules."""
-    gitignore = load_gitignore(repo_root)
     modules: Dict[str, ModuleInfo] = {}
 
-    # Find all TypeScript/JavaScript files
+    # Find all TypeScript/JavaScript files using git ls-files (respects .gitignore)
     extensions = [".ts", ".tsx", ".js", ".jsx"]
-    source_files = []
-
-    for ext in extensions:
-        for filepath in repo_root.rglob(f"*{ext}"):
-            if should_analyze_file(filepath, repo_root, gitignore):
-                source_files.append(filepath)
+    source_files = get_tracked_source_files(repo_root, extensions)
 
     # First pass: extract imports
     for filepath in source_files:
@@ -303,33 +332,35 @@ def compute_layer_violations(modules: Dict[str, ModuleInfo]) -> List[dict]:
         "managers",
     ]
 
-    def get_layer(path: str) -> int:
-        """Get the layer index for a module path."""
+    def get_layer(path: str) -> Optional[int]:
+        """Get the layer index for a module path. Returns None for unknown layers."""
         parts = path.lower().split("/")
         for i, layer in enumerate(layer_order):
             if layer in parts:
                 return i
-        return len(layer_order)  # Unknown = highest layer
+        return None  # Unknown layer
 
     violations = []
     for module_path, module_info in modules.items():
         module_layer = get_layer(module_path)
+        # Skip modules with unknown layers
+        if module_layer is None:
+            continue
 
         for imported_path in module_info.imports:
             imported_layer = get_layer(imported_path)
+            # Skip imports with unknown layers
+            if imported_layer is None:
+                continue
 
             # Lower layer importing from higher layer is a violation
             if module_layer < imported_layer:
                 violations.append(
                     {
                         "from": module_path,
-                        "from_layer": layer_order[module_layer]
-                        if module_layer < len(layer_order)
-                        else "unknown",
+                        "from_layer": layer_order[module_layer],
                         "imports": imported_path,
-                        "imports_layer": layer_order[imported_layer]
-                        if imported_layer < len(layer_order)
-                        else "unknown",
+                        "imports_layer": layer_order[imported_layer],
                     }
                 )
 
