@@ -148,6 +148,8 @@ def resolve_import_path(
 ) -> Optional[str]:
     """Resolve a relative import path to a workspace-relative path."""
     from_dir = from_file.parent
+    # Ensure repo_root is absolute for reliable relative_to() calls
+    repo_root = repo_root.resolve()
 
     # Handle the import path
     # Remove ./ or ../ prefixes and resolve

@@ -35,11 +35,11 @@ def has_uncommitted_changes(repo_root: Path) -> bool:
     """Check if there are uncommitted changes."""
     code, output = run_command(["git", "status", "--porcelain"], repo_root)
     if code == 0 and output:
-        # Filter out untracked files in certain directories
+        # Ignore all untracked files (marked with ??) - only track staged/modified
         lines = [
             line
             for line in output.split("\n")
-            if line.strip() and not line.strip().startswith("??")  # Ignore untracked
+            if line.strip() and not line.strip().startswith("??")
         ]
         return len(lines) > 0
     return False

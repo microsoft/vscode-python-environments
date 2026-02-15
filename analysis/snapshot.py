@@ -72,7 +72,7 @@ def get_git_info(repo_root: pathlib.Path) -> dict:
             "branch": branch,
             "message": message[:200],  # Truncate long messages
         }
-    except (subprocess.CalledProcessError, subprocess.TimeoutExpired):
+    except (subprocess.CalledProcessError, subprocess.TimeoutExpired, FileNotFoundError):
         return {
             "sha": "unknown",
             "short_sha": "unknown",
