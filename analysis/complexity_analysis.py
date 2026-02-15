@@ -60,7 +60,7 @@ class FileComplexity:
             "max_complexity": self.max_complexity,
             "avg_complexity": round(self.avg_complexity, 2),
             "maintainability_index": round(self.maintainability_index, 2)
-            if self.maintainability_index
+            if self.maintainability_index is not None
             else None,
             "functions": [f.to_dict() for f in self.functions],
         }

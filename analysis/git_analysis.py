@@ -326,7 +326,7 @@ def calculate_bus_factor(file_stats: Dict[str, FileStats]) -> dict:
 
     # Files with low bus factor (knowledge silos)
     knowledge_silos = [
-        {"path": stats.path, "sole_author": list(stats.authors)[0]}
+        {"path": stats.path, "sole_author": sorted(stats.authors)[0]}
         for stats in file_stats.values()
         if stats.author_count == 1 and stats.change_count >= 3
     ]
