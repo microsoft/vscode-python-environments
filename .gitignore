@@ -9,3 +9,6 @@ node_modules
 
 # Folder for storing AI generated artifacts
 ai-artifacts/*
+
+# Code health analysis snapshots (generated, uploaded as artifacts)
+analysis-snapshot.json

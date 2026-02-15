@@ -1,0 +1,59 @@
+name: Code Health Analysis
+
+on:
+  push:
+    branches:
+      - 'main'
+  workflow_dispatch: # Allow manual trigger
+
+jobs:
+  generate-snapshot:
+    name: Generate Code Health Snapshot
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # Full history for git analysis
+
+      - name: Install Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+
+      - name: Install analysis dependencies
+        working-directory: analysis
+        run: |
+          uv pip install --system .
+
+      - name: Generate snapshot
+        run: |
+          python -m analysis.snapshot --output analysis-snapshot.json
+
+      - name: Upload snapshot artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: code-health-snapshot-${{ github.sha }}
+          path: analysis-snapshot.json
+          retention-days: 90
+          if-no-files-found: error
+
+      - name: Print summary
+        run: |
+          echo "## Code Health Snapshot Generated" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Commit:** \`${{ github.sha }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Summary Metrics" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          jq -r '.summary | to_entries | .[] | "- **\(.key):** \(.value)"' analysis-snapshot.json >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Top Priority Hotspots" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| File | Changes | Complexity | Priority Score |" >> $GITHUB_STEP_SUMMARY
+          echo "|------|---------|------------|----------------|" >> $GITHUB_STEP_SUMMARY
+          jq -r '.priority_hotspots[:5] | .[] | "| \(.path) | \(.change_count) | \(.max_complexity) | \(.priority_score) |"' analysis-snapshot.json >> $GITHUB_STEP_SUMMARY
