@@ -59,12 +59,7 @@ export interface TerminalInit {
 }
 
 export interface TerminalManager
-    extends TerminalEnvironment,
-        TerminalInit,
-        TerminalActivation,
-        TerminalCreation,
-        TerminalGetters,
-        Disposable {}
+    extends TerminalEnvironment, TerminalInit, TerminalActivation, TerminalCreation, TerminalGetters, Disposable {}
 
 export class TerminalManagerImpl implements TerminalManager {
     private disposables: Disposable[] = [];
@@ -321,7 +316,7 @@ export class TerminalManagerImpl implements TerminalManager {
 
     private dedicatedTerminals = new Map<string, Terminal>();
     async getDedicatedTerminal(
-        terminalKey: Uri,
+        terminalKey: Uri | string,
         project: Uri | PythonProject,
         environment: PythonEnvironment,
         createNew: boolean = false,
@@ -336,17 +331,26 @@ export class TerminalManagerImpl implements TerminalManager {
         }
 
         const puri = project instanceof Uri ? project : project.uri;
-        const config = getConfiguration('python', terminalKey);
+        const config = getConfiguration('python', terminalKey instanceof Uri ? terminalKey : puri);
         const projectStat = await fsapi.stat(puri.fsPath);
         const projectDir = projectStat.isDirectory() ? puri.fsPath : path.dirname(puri.fsPath);
 
-        const uriStat = await fsapi.stat(terminalKey.fsPath);
-        const uriDir = uriStat.isDirectory() ? terminalKey.fsPath : path.dirname(terminalKey.fsPath);
-        const cwd = config.get<boolean>('terminal.executeInFileDir', false) ? uriDir : projectDir;
+        let cwd: string;
+        let name: string;
 
-        // Follow Python extension's naming: 'Python: {filename}' for dedicated terminals
-        const fileName = path.basename(terminalKey.fsPath).replace('.py', '');
-        const name = `Python: ${fileName}`;
+        if (terminalKey instanceof Uri) {
+            const uriStat = await fsapi.stat(terminalKey.fsPath);
+            const uriDir = uriStat.isDirectory() ? terminalKey.fsPath : path.dirname(terminalKey.fsPath);
+            cwd = config.get<boolean>('terminal.executeInFileDir', false) ? uriDir : projectDir;
+            // Follow Python extension's naming: 'Python: {filename}' for dedicated terminals
+            const fileName = path.basename(terminalKey.fsPath).replace('.py', '');
+            name = `Python: ${fileName}`;
+        } else {
+            // When terminalKey is a string, use project directory and the string as name
+            cwd = projectDir;
+            name = `Python: ${terminalKey}`;
+        }
+
         const newTerminal = await this.create(environment, { cwd, name });
         this.dedicatedTerminals.set(key, newTerminal);
 
