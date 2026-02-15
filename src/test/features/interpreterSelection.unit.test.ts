@@ -2,6 +2,7 @@
 // Licensed under the MIT License.
 
 import * as assert from 'assert';
+import * as path from 'path';
 import * as sinon from 'sinon';
 import { ConfigurationChangeEvent, Uri, WorkspaceConfiguration, WorkspaceFolder } from 'vscode';
 import { PythonEnvironment, PythonEnvironmentApi, PythonProject } from '../../api';
@@ -223,8 +224,9 @@ suite('Interpreter Selection - Priority Chain', () => {
         });
 
         test('should resolve ${workspaceFolder} in defaultInterpreterPath before native resolution', async () => {
-            const workspaceUri = Uri.file('/test/workspace');
-            const expandedInterpreterPath = '/test/workspace/backend/.venv/bin/python';
+            const workspaceUri = Uri.file(path.resolve('/test/workspace'));
+            // resolveVariables does simple string substitution, so forward slashes in the setting remain
+            const expandedInterpreterPath = workspaceUri.fsPath + '/backend/.venv/bin/python';
             const workspaceFolder = { name: 'workspace', uri: workspaceUri } as WorkspaceFolder;
 
             sandbox.stub(workspaceApis, 'getConfiguration').returns(createMockConfig([]) as WorkspaceConfiguration);
@@ -239,7 +241,7 @@ suite('Interpreter Selection - Priority Chain', () => {
             mockNativeFinder.resolve.resolves({
                 executable: expandedInterpreterPath,
                 version: '3.11.0',
-                prefix: '/test/workspace/backend/.venv',
+                prefix: path.join(workspaceUri.fsPath, 'backend', '.venv'),
             });
             mockApi.resolveEnvironment.resolves({
                 ...mockVenvEnv,
@@ -723,6 +725,7 @@ suite('Interpreter Selection - resolveGlobalEnvironmentByPriority', () => {
     test('should use defaultInterpreterPath for global scope when configured', async () => {
         const userPyenvPath = '/Users/test/.pyenv/versions/3.13.7/bin/python';
 
+        sandbox.stub(workspaceApis, 'getWorkspaceFolders').returns([]);
         sandbox.stub(helpers, 'getUserConfiguredSetting').callsFake((section: string, key: string) => {
             if (section === 'python' && key === 'defaultInterpreterPath') {
                 return userPyenvPath;
@@ -754,6 +757,7 @@ suite('Interpreter Selection - resolveGlobalEnvironmentByPriority', () => {
         const userPyenvPath = '/Users/test/.pyenv/versions/3.13.7/bin/python';
         const resolvedHomebrewPath = '/opt/homebrew/bin/python3';
 
+        sandbox.stub(workspaceApis, 'getWorkspaceFolders').returns([]);
         sandbox.stub(helpers, 'getUserConfiguredSetting').callsFake((section: string, key: string) => {
             if (section === 'python' && key === 'defaultInterpreterPath') {
                 return userPyenvPath;
