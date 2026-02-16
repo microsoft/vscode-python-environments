@@ -9,11 +9,10 @@ long functions, and code smells.
 
 import pathlib
 import re
-import subprocess
 from dataclasses import dataclass
 from typing import Dict, List, Optional
 
-import pathspec
+from .file_discovery import get_tracked_source_files
 
 
 @dataclass
@@ -84,83 +83,6 @@ DEBT_PATTERNS = [
 # Thresholds (configurable)
 LARGE_FILE_THRESHOLD = 500  # lines of code
 LONG_FUNCTION_THRESHOLD = 50  # lines
-
-
-def load_gitignore(repo_root: pathlib.Path) -> Optional[pathspec.PathSpec]:
-    """Load .gitignore patterns."""
-    gitignore_path = repo_root / ".gitignore"
-    if not gitignore_path.exists():
-        return None
-
-    with open(gitignore_path, "r", encoding="utf-8") as f:
-        patterns = f.read().splitlines()
-
-    return pathspec.PathSpec.from_lines("gitwildmatch", patterns)
-
-
-def should_analyze_file(
-    filepath: pathlib.Path,
-    repo_root: pathlib.Path,
-    gitignore: Optional[pathspec.PathSpec],
-) -> bool:
-    """Check if a file should be analyzed."""
-    rel_path = filepath.relative_to(repo_root).as_posix()
-
-    # Skip common non-source directories
-    skip_dirs = {
-        "node_modules",
-        "dist",
-        "out",
-        ".venv",
-        "__pycache__",
-        ".git",
-        ".vscode-test",
-    }
-    # Use relative path parts to avoid matching directories in repo root path
-    rel_parts = filepath.relative_to(repo_root).parts
-    for part in rel_parts:
-        if part in skip_dirs:
-            return False
-
-    # Skip if matched by gitignore
-    if gitignore and gitignore.match_file(rel_path):
-        return False
-
-    return True
-
-
-def get_tracked_source_files(
-    repo_root: pathlib.Path, extensions: List[str]
-) -> List[pathlib.Path]:
-    """Get source files tracked by git (respects .gitignore automatically)."""
-    try:
-        result = subprocess.run(
-            ["git", "ls-files", "--cached", "--others", "--exclude-standard"],
-            cwd=repo_root,
-            capture_output=True,
-            text=True,
-            timeout=30,
-        )
-        if result.returncode != 0:
-            return []
-
-        files = []
-        for line in result.stdout.splitlines():
-            line = line.strip()
-            if line and any(line.endswith(ext) for ext in extensions):
-                filepath = repo_root / line
-                if filepath.exists():
-                    files.append(filepath)
-        return files
-    except (subprocess.TimeoutExpired, FileNotFoundError):
-        # Fall back to rglob if git is not available
-        gitignore = load_gitignore(repo_root)
-        files = []
-        for ext in extensions:
-            for filepath in repo_root.rglob(f"*{ext}"):
-                if should_analyze_file(filepath, repo_root, gitignore):
-                    files.append(filepath)
-        return files
 
 
 def find_debt_markers(

@@ -199,6 +199,9 @@ def analyze_git_log(repo_root: pathlib.Path) -> Dict[str, FileStats]:
 
 def _should_skip_file(filepath: str) -> bool:
     """Check if file should be excluded from analysis."""
+    # Normalize path separators so patterns work cross-platform
+    normalized_path = filepath.replace("\\", "/")
+
     skip_patterns = [
         "node_modules/",
         "dist/",
@@ -207,17 +210,38 @@ def _should_skip_file(filepath: str) -> bool:
         ".git/",
         "package-lock.json",
         ".vsix",
-        # Skip test files and directories
+        # Skip test directories
         "/test/",
         "/tests/",
         "/__tests__/",
-        ".test.",
-        ".spec.",
-        "_test.",
-        "_spec.",
         "/mocks/",
     ]
-    return any(pattern in filepath for pattern in skip_patterns)
+    if any(pattern in normalized_path for pattern in skip_patterns):
+        return True
+
+    # Check filename-based test patterns
+    import pathlib
+
+    path = pathlib.Path(filepath)
+    filename = path.name
+
+    # Common test file naming conventions
+    if (
+        filename.startswith("test_")
+        or filename.endswith("_test.py")
+        or filename.endswith("_tests.py")
+        or ".test." in filename
+        or ".spec." in filename
+    ):
+        return True
+
+    # Skip files in well-known test directories (check path parts)
+    test_dirs = {"test", "tests", "__tests__", "mocks"}
+    dir_parts = path.parts[:-1]  # exclude the filename
+    if any(part in test_dirs for part in dir_parts):
+        return True
+
+    return False
 
 
 def analyze_temporal_coupling(

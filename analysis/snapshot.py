@@ -182,33 +182,33 @@ def generate_snapshot(
     Returns:
         Complete snapshot dictionary
     """
-    print("Starting code health analysis...")
+    print("Starting code health analysis...", file=sys.stderr)
 
     # Gather metadata
     git_info = get_git_info(repo_root)
     timestamp = datetime.now(timezone.utc).isoformat()
 
-    print(f"  Commit: {git_info['short_sha']} ({git_info['branch']})")
-    print(f"  Time: {timestamp}")
+    print(f"  Commit: {git_info['short_sha']} ({git_info['branch']})", file=sys.stderr)
+    print(f"  Time: {timestamp}", file=sys.stderr)
 
     # Run all analyses
-    print("  Analyzing git history...")
+    print("  Analyzing git history...", file=sys.stderr)
     git_data = analyze_git(repo_root)
 
-    print("  Analyzing code complexity...")
+    print("  Analyzing code complexity...", file=sys.stderr)
     complexity_data = analyze_complexity(repo_root)
 
-    print("  Scanning for debt indicators...")
+    print("  Scanning for debt indicators...", file=sys.stderr)
     debt_data = analyze_debt(repo_root)
 
-    print("  Analyzing dependencies...")
+    print("  Analyzing dependencies...", file=sys.stderr)
     dependency_data = analyze_dependencies(repo_root)
 
     # Compute derived metrics
-    print("  Computing priority hotspots...")
+    print("  Computing priority hotspots...", file=sys.stderr)
     priority_hotspots = compute_priority_hotspots(git_data, complexity_data)
 
-    print("  Generating summary metrics...")
+    print("  Generating summary metrics...", file=sys.stderr)
     summary = compute_summary_metrics(
         git_data, complexity_data, debt_data, dependency_data
     )
@@ -233,9 +233,9 @@ def generate_snapshot(
         output_path.parent.mkdir(parents=True, exist_ok=True)
         with open(output_path, "w", encoding="utf-8") as f:
             json.dump(snapshot, f, indent=2, ensure_ascii=False)
-        print(f"  Snapshot written to: {output_path}")
+        print(f"  Snapshot written to: {output_path}", file=sys.stderr)
 
-    print("Analysis complete!")
+    print("Analysis complete!", file=sys.stderr)
     return snapshot
 
 
