@@ -220,8 +220,6 @@ def _should_skip_file(filepath: str) -> bool:
         return True
 
     # Check filename-based test patterns
-    import pathlib
-
     path = pathlib.Path(filepath)
     filename = path.name
 
