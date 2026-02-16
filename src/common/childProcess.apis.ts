@@ -1,4 +1,35 @@
 import * as cp from 'child_process';
+import { promisify } from 'util';
+
+const cpExec = promisify(cp.exec);
+
+/**
+ * Result of execProcess - contains stdout and stderr as strings.
+ */
+export interface ExecResult {
+    stdout: string;
+    stderr: string;
+}
+
+/**
+ * Executes a command and returns the result as a promise.
+ * This function abstracts cp.exec to make it easier to mock in tests.
+ *
+ * @param command The command to execute (can include arguments).
+ * @param options Optional execution options.
+ * @returns A promise that resolves with { stdout, stderr } strings.
+ */
+export async function execProcess(command: string, options?: cp.ExecOptions): Promise<ExecResult> {
+    const env = {
+        PYTHONUTF8: '1',
+        ...(options?.env ?? process.env),
+    };
+    const result = await cpExec(command, { ...options, env });
+    return {
+        stdout: result.stdout ?? '',
+        stderr: result.stderr ?? '',
+    };
+}
 
 /**
  * Spawns a new process using the specified command and arguments.

@@ -1,9 +1,14 @@
 import assert from 'node:assert';
 import * as sinon from 'sinon';
-import { isPoetryVirtualenvsInProject, nativeToPythonEnv } from '../../../managers/poetry/poetryUtils';
-import * as utils from '../../../managers/common/utils';
 import { EnvironmentManager, PythonEnvironment, PythonEnvironmentApi, PythonEnvironmentInfo } from '../../../api';
+import * as childProcessApis from '../../../common/childProcess.apis';
 import { NativeEnvInfo } from '../../../managers/common/nativePythonFinder';
+import * as utils from '../../../managers/common/utils';
+import {
+    getPoetryVersion,
+    isPoetryVirtualenvsInProject,
+    nativeToPythonEnv,
+} from '../../../managers/poetry/poetryUtils';
 
 suite('isPoetryVirtualenvsInProject', () => {
     test('should return false when env var is not set', () => {
@@ -155,5 +160,51 @@ suite('nativeToPythonEnv - POETRY_VIRTUALENVS_IN_PROJECT integration', () => {
         assert.ok(capturedInfo, 'Should have captured environment info');
         // Falls through to normal check since env var is falsy
         assert.strictEqual(capturedInfo!.group, undefined, 'Non-global path should not be global');
+    });
+});
+
+suite('getPoetryVersion - childProcess.apis mocking pattern', () => {
+    let execProcessStub: sinon.SinonStub;
+
+    setup(() => {
+        execProcessStub = sinon.stub(childProcessApis, 'execProcess');
+    });
+
+    teardown(() => {
+        sinon.restore();
+    });
+
+    test('should parse Poetry 1.x version format', async () => {
+        execProcessStub.resolves({ stdout: 'Poetry version 1.5.1\n', stderr: '' });
+
+        const version = await getPoetryVersion('/usr/bin/poetry');
+
+        assert.strictEqual(version, '1.5.1');
+        assert.ok(execProcessStub.calledOnce);
+        assert.ok(execProcessStub.calledWith('"/usr/bin/poetry" --version'));
+    });
+
+    test('should parse Poetry 2.x version format', async () => {
+        execProcessStub.resolves({ stdout: 'Poetry (version 2.1.3)\n', stderr: '' });
+
+        const version = await getPoetryVersion('/usr/bin/poetry');
+
+        assert.strictEqual(version, '2.1.3');
+    });
+
+    test('should return undefined when command fails', async () => {
+        execProcessStub.rejects(new Error('Command not found'));
+
+        const version = await getPoetryVersion('/nonexistent/poetry');
+
+        assert.strictEqual(version, undefined);
+    });
+
+    test('should return undefined when output does not match expected format', async () => {
+        execProcessStub.resolves({ stdout: 'unexpected output', stderr: '' });
+
+        const version = await getPoetryVersion('/usr/bin/poetry');
+
+        assert.strictEqual(version, undefined);
     });
 });
