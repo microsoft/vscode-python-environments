@@ -350,8 +350,8 @@ suite('TerminalManager - terminal naming', () => {
                 'Dedicated terminal with string key should use the string in the title',
             );
             assert.strictEqual(
-                path.resolve(optionsList[0]?.cwd as string),
-                path.resolve(projectPath),
+                Uri.file(optionsList[0]?.cwd as string).fsPath,
+                Uri.file(projectPath).fsPath,
                 'Dedicated terminal with string key should use project directory as cwd',
             );
         } finally {
