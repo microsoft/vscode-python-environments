@@ -20,7 +20,6 @@ export async function run(): Promise<void> {
         ui: 'tdd',
         color: true,
         timeout: 180_000, // 3 minutes - E2E workflows can be slow
-        retries: 1, // Retry once on failure
         slow: 30_000, // Mark tests as slow if they take > 30s
     });
 

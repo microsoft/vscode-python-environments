@@ -6,6 +6,7 @@ import { commands, ConfigurationChangeEvent, Disposable, l10n, Uri } from 'vscod
 import { PythonEnvironment, PythonEnvironmentApi } from '../api';
 import { SYSTEM_MANAGER_ID, VENV_MANAGER_ID } from '../common/constants';
 import { traceError, traceInfo, traceVerbose, traceWarn } from '../common/logging';
+import { resolveVariables } from '../common/utils/internalVariables';
 import { showWarningMessage } from '../common/window.apis';
 import {
     getConfiguration,
@@ -105,7 +106,8 @@ async function resolvePriorityChainCore(
     // PRIORITY 3: User-configured python.defaultInterpreterPath
     const userInterpreterPath = getUserConfiguredSetting<string>('python', 'defaultInterpreterPath', scope);
     if (userInterpreterPath) {
-        const resolved = await tryResolveInterpreterPath(nativeFinder, api, userInterpreterPath, envManagers);
+        const expandedInterpreterPath = resolveVariables(userInterpreterPath, scope);
+        const resolved = await tryResolveInterpreterPath(nativeFinder, api, expandedInterpreterPath, envManagers);
         if (resolved) {
             traceVerbose(`${logPrefix} Priority 3: Using defaultInterpreterPath: ${userInterpreterPath}`);
             return { result: resolved, errors };

@@ -11,7 +11,6 @@ export default defineConfig([
         mocha: {
             ui: 'tdd',
             timeout: 120000,
-            retries: 1,
         },
         env: {
             VSC_PYTHON_SMOKE_TEST: '1',
@@ -32,7 +31,6 @@ export default defineConfig([
         mocha: {
             ui: 'tdd',
             timeout: 180000,
-            retries: 1,
         },
         env: {
             VSC_PYTHON_E2E_TEST: '1',
@@ -52,7 +50,6 @@ export default defineConfig([
         mocha: {
             ui: 'tdd',
             timeout: 60000,
-            retries: 1,
         },
         env: {
             VSC_PYTHON_INTEGRATION_TEST: '1',
