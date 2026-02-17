@@ -240,7 +240,7 @@ suite('Integration: Interpreter Selection Priority', function () {
      * Test: Setting same environment doesn't fire extra events
      *
      * Setting the same environment twice should not fire change event
-     * on the second call.
+     * on the second call. This ensures idempotent behavior.
      */
     test('Setting same environment is idempotent', async function () {
         const environments = await api.getEnvironments('all');
@@ -272,28 +272,11 @@ suite('Integration: Interpreter Selection Priority', function () {
             // Set same environment again
             await api.setEnvironment(undefined, env);
 
-            // Wait a bit and check - should not fire (or fire with same old/new)
+            // Wait for any potential events to fire
             await new Promise((resolve) => setTimeout(resolve, 1000));
 
-            // Either no event fired, or event fired (with valid structure)
-            // The exact behavior depends on implementation details
-            if (handler.fired) {
-                const event = handler.last;
-                assert.ok(event, 'Event should have value if fired');
-                assert.ok(event.new, 'Event should have new environment');
-
-                // If event fired, old and new should be the same (idempotent)
-                if (event.old) {
-                    assert.strictEqual(
-                        event.old.envId.id,
-                        event.new.envId.id,
-                        'Idempotent operation should have same old and new environment',
-                    );
-                }
-            } else {
-                // No event fired - this is the ideal idempotent behavior
-                assert.ok(!handler.fired, 'No event should fire when setting same environment');
-            }
+            // Idempotent behavior: no event should fire when setting same environment
+            assert.strictEqual(handler.fired, false, 'No event should fire when setting the same environment');
         } finally {
             handler.dispose();
         }
@@ -303,9 +286,10 @@ suite('Integration: Interpreter Selection Priority', function () {
      * Test: Clearing selection falls back to auto-discovery
      *
      * After clearing an explicit selection, auto-discovery should
-     * provide a fallback environment if available.
+     * provide a fallback environment. The system should find an
+     * auto-discovered environment (e.g., .venv in workspace).
      */
-    test('Clearing selection allows auto-discovery fallback', async function () {
+    test('Clearing selection falls back to auto-discovery', async function () {
         const environments = await api.getEnvironments('all');
 
         if (environments.length === 0) {
@@ -321,19 +305,13 @@ suite('Integration: Interpreter Selection Priority', function () {
         // Clear the selection
         await api.setEnvironment(undefined, undefined);
 
-        // Get environment - may return auto-discovered env or undefined
+        // Get environment - should return auto-discovered environment
         const autoEnv = await api.getEnvironment(undefined);
 
-        // Key assertion: clearing should have an effect
-        // Either returns undefined OR returns a different environment (auto-discovered)
-        if (autoEnv) {
-            assert.ok(autoEnv.envId, 'Auto-discovered env must have envId');
-            assert.ok(autoEnv.envId.id, 'Auto-discovered env must have envId.id');
-            // Note: autoEnv might equal beforeClear if auto-discovery picks the same one,
-            // but the explicit selection should be cleared
-        } else {
-            // Undefined is a valid result - no auto-discovery available
-            assert.strictEqual(autoEnv, undefined, 'Cleared selection with no auto-discovery should return undefined');
-        }
+        // Auto-discovery should provide a fallback environment
+        assert.ok(autoEnv, 'Auto-discovery should provide a fallback environment after clearing');
+        assert.ok(autoEnv.envId, 'Auto-discovered env must have envId');
+        assert.ok(autoEnv.envId.id, 'Auto-discovered env must have envId.id');
+        assert.ok(autoEnv.displayName, 'Auto-discovered env must have displayName');
     });
 });

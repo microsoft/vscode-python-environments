@@ -220,7 +220,7 @@ suite('Integration: Environment Discovery', function () {
      * Test: Multiple refreshes are idempotent
      *
      * Calling refresh multiple times should not cause duplicate
-     * environments or errors.
+     * environments or errors. Counts should be strictly equal.
      */
     test('Multiple refreshes do not create duplicates', async function () {
         // First refresh
@@ -235,10 +235,16 @@ suite('Integration: Environment Discovery', function () {
         await api.refreshEnvironments(undefined);
         const thirdCount = (await api.getEnvironments('all')).length;
 
-        // Counts should be consistent (may vary slightly due to system changes)
-        assert.ok(
-            Math.abs(firstCount - secondCount) <= 1 && Math.abs(secondCount - thirdCount) <= 1,
-            `Environment counts should be stable: ${firstCount}, ${secondCount}, ${thirdCount}`,
+        // Counts should be strictly equal for idempotent refresh
+        assert.strictEqual(
+            firstCount,
+            secondCount,
+            `Refresh should be idempotent: first=${firstCount}, second=${secondCount}`,
+        );
+        assert.strictEqual(
+            secondCount,
+            thirdCount,
+            `Refresh should be idempotent: second=${secondCount}, third=${thirdCount}`,
         );
     });
 });

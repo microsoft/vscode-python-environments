@@ -320,11 +320,12 @@ suite('Integration: Terminal Activation', function () {
     });
 
     /**
-     * Test: Terminal uses correct environment
+     * Test: createTerminal succeeds for any valid environment
      *
-     * Commands in terminal should use the specified Python environment.
+     * Verifies that createTerminal returns a valid terminal object
+     * for any discovered environment without throwing.
      */
-    test('Terminal uses specified environment', async function () {
+    test('createTerminal succeeds for any environment', async function () {
         const environments = await api.getEnvironments('all');
 
         if (environments.length === 0) {
@@ -339,9 +340,9 @@ suite('Integration: Terminal Activation', function () {
         });
         createdTerminals.push(terminal);
 
-        // Terminal should be configured with the environment
-        // We can verify the terminal was created without error
-        assert.ok(terminal, 'Terminal should be created for environment');
+        // Verify terminal was created successfully
+        assert.ok(terminal, 'createTerminal should return a terminal');
+        assert.ok(terminal.name, 'Terminal should have a name');
         console.log('Created terminal for:', env.displayName);
     });
 });

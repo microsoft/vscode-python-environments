@@ -102,7 +102,7 @@ suite('Integration: Environment Creation', function () {
                 try {
                     await api.removeEnvironment(createdEnv);
                 } catch (e) {
-                    console.log('Cleanup failed (may already be removed):', e);
+                    console.warn('Cleanup warning - failed to remove environment:', e);
                 }
             }
         }
@@ -158,8 +158,8 @@ suite('Integration: Environment Creation', function () {
             if (createdEnv) {
                 try {
                     await api.removeEnvironment(createdEnv);
-                } catch {
-                    // Ignore cleanup errors
+                } catch (e) {
+                    console.warn('Cleanup warning - failed to remove environment:', e);
                 }
             }
         }
@@ -248,8 +248,8 @@ suite('Integration: Environment Creation', function () {
             if (createdEnv) {
                 try {
                     await api.removeEnvironment(createdEnv);
-                } catch {
-                    // Ignore cleanup errors
+                } catch (e) {
+                    console.warn('Cleanup warning - failed to remove environment:', e);
                 }
             }
         }

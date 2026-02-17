@@ -126,7 +126,8 @@ suite('Integration: Package Management', function () {
     /**
      * Test: refreshPackages updates package list
      *
-     * After refreshing, the package list should be up to date.
+     * After refreshing, the package list should be consistent.
+     * Multiple calls should return the same packages (idempotent).
      */
     test('refreshPackages updates list', async function () {
         const environments = await api.getEnvironments('all');
@@ -146,6 +147,8 @@ suite('Integration: Package Management', function () {
             return;
         }
 
+        const initialCount = initial.length;
+
         // Refresh
         await api.refreshPackages(env);
 
@@ -154,16 +157,20 @@ suite('Integration: Package Management', function () {
 
         assert.ok(Array.isArray(after), 'Should return array after refresh');
 
-        // Package counts should be similar (no external changes during test)
-        // Allow some variance for cache effects
+        // Package counts should be identical (no external changes during test)
+        assert.strictEqual(
+            after.length,
+            initialCount,
+            `Package count should be stable after refresh: expected ${initialCount}, got ${after.length}`,
+        );
     });
 
     /**
-     * Test: Standard library packages typically present
+     * Test: getPackages returns non-empty array for environments with packages
      *
-     * Most Python environments should have pip installed.
+     * For virtual environments, at minimum pip should typically be present.
      */
-    test('Common packages are discoverable', async function () {
+    test('getPackages returns packages for virtual environment', async function () {
         const environments = await api.getEnvironments('all');
 
         if (environments.length === 0) {
@@ -172,7 +179,7 @@ suite('Integration: Package Management', function () {
         }
 
         // Find a virtual environment (more likely to have pip)
-        let targetEnv = environments.find(
+        const targetEnv = environments.find(
             (env) =>
                 env.displayName.includes('venv') ||
                 env.displayName.includes('.venv') ||
@@ -180,27 +187,24 @@ suite('Integration: Package Management', function () {
         );
 
         if (!targetEnv) {
-            // Fall back to first environment
-            targetEnv = environments[0];
-        }
-
-        const packages = await api.getPackages(targetEnv);
-
-        if (!packages || packages.length === 0) {
-            console.log('No packages found in:', targetEnv.displayName);
+            console.log('No virtual environment found, skipping');
             this.skip();
             return;
         }
 
-        // Look for common packages
-        const pipInstalled = packages.some((p) => p.name.toLowerCase() === 'pip');
-        const setuptoolsInstalled = packages.some((p) => p.name.toLowerCase() === 'setuptools');
+        const packages = await api.getPackages(targetEnv);
 
-        // Virtual environment should have pip or at least some packages
-        assert.ok(pipInstalled || packages.length > 0, 'Virtual environment should have pip or at least some packages');
-        console.log(
-            `pip installed: ${pipInstalled}, setuptools installed: ${setuptoolsInstalled}, total: ${packages.length}`,
-        );
+        if (packages === undefined) {
+            console.log('Package manager not available for:', targetEnv.displayName);
+            this.skip();
+            return;
+        }
+
+        // Virtual environments should have at least pip installed
+        const pipInstalled = packages.some((p) => p.name.toLowerCase() === 'pip');
+        assert.ok(pipInstalled, `Virtual environment ${targetEnv.displayName} should have pip installed`);
+
+        console.log(`Found ${packages.length} packages in ${targetEnv.displayName}`);
     });
 
     /**
@@ -353,11 +357,12 @@ suite('Integration: Package Management', function () {
     });
 
     /**
-     * Test: Invalid environment returns undefined packages
+     * Test: getPackages returns array or undefined, never throws
      *
-     * For an environment without a package manager, should return undefined.
+     * For any environment, getPackages should return either a valid
+     * array of packages or undefined (if no package manager), never throw.
      */
-    test('Missing package manager returns undefined', async function () {
+    test('getPackages returns array or undefined for all environments', async function () {
         const environments = await api.getEnvironments('all');
 
         if (environments.length === 0) {
@@ -365,13 +370,27 @@ suite('Integration: Package Management', function () {
             return;
         }
 
-        // System Python or unusual environments may not have package managers
+        let arrayCount = 0;
+        let undefinedCount = 0;
+
+        // Verify each environment returns valid result
         for (const env of environments) {
             const packages = await api.getPackages(env);
-            // Result should be either array or undefined, never throw
             if (packages !== undefined) {
-                assert.ok(Array.isArray(packages), 'Should be array if defined');
+                assert.ok(Array.isArray(packages), `getPackages should return array for ${env.displayName}`);
+                arrayCount++;
+            } else {
+                undefinedCount++;
             }
         }
+
+        // Log results for visibility
+        console.log(`getPackages results: ${arrayCount} returned arrays, ${undefinedCount} returned undefined`);
+
+        // At least some should return arrays (unless all envs lack package managers)
+        assert.ok(
+            arrayCount > 0 || undefinedCount === environments.length,
+            'At least one environment should have a package manager, or all should return undefined consistently',
+        );
     });
 });

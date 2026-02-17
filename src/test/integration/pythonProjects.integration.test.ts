@@ -173,9 +173,19 @@ suite('Integration: Python Projects', function () {
         // Set environment for project
         await api.setEnvironment(project.uri, env);
 
-        // Get environment and verify
-        const retrievedEnv = await api.getEnvironment(project.uri);
+        // Wait for the environment to be retrievable with the correct ID
+        // This handles async persistence across platforms
+        await waitForCondition(
+            async () => {
+                const retrieved = await api.getEnvironment(project.uri);
+                return retrieved !== undefined && retrieved.envId.id === env.envId.id;
+            },
+            5000,
+            `Environment was not set correctly. Expected envId: ${env.envId.id}`,
+        );
 
+        // Final verification
+        const retrievedEnv = await api.getEnvironment(project.uri);
         assert.ok(retrievedEnv, 'Should get environment after setting');
         assert.strictEqual(retrievedEnv.envId.id, env.envId.id, 'Retrieved environment should match set environment');
     });
@@ -189,38 +199,41 @@ suite('Integration: Python Projects', function () {
         const projects = api.getPythonProjects();
         const environments = await api.getEnvironments('all');
 
-        if (projects.length === 0 || environments.length === 0) {
+        if (projects.length === 0 || environments.length < 2) {
+            // Need at least 2 environments to guarantee a change
             this.skip();
             return;
         }
 
         const project = projects[0];
 
-        // Get current environment to ensure we make an actual change
+        // Get current environment to pick a different one
         const currentEnv = await api.getEnvironment(project.uri);
 
-        // Pick an environment different from current, or clear and re-set
+        // Pick an environment different from current
         let targetEnv = environments[0];
-        if (currentEnv && currentEnv.envId.id === targetEnv.envId.id && environments.length > 1) {
+        if (currentEnv && currentEnv.envId.id === targetEnv.envId.id) {
             targetEnv = environments[1];
         }
 
-        // Clear environment first to ensure change event fires
-        // (in case targetEnv is already set)
-        await api.setEnvironment(project.uri, undefined);
-
+        // Register handler BEFORE making the change
         const handler = new TestEventHandler(api.onDidChangeEnvironment, 'onDidChangeEnvironment');
 
         try {
             // Set environment - this should fire the event
             await api.setEnvironment(project.uri, targetEnv);
 
-            // Event should fire
-            await handler.assertFired(5000);
+            // Wait for an event where event.new is defined (the actual change event)
+            await waitForCondition(
+                () => handler.all.some((e) => e.new !== undefined),
+                5000,
+                'onDidChangeEnvironment with new environment was not fired',
+            );
 
-            const event = handler.last;
-            assert.ok(event, 'Event should have value');
-            assert.ok(event.new, 'Event should have new environment');
+            // Find the event with the new environment
+            const changeEvent = handler.all.find((e) => e.new !== undefined);
+            assert.ok(changeEvent, 'Should have change event with new environment');
+            assert.ok(changeEvent.new, 'Event should have new environment');
         } finally {
             handler.dispose();
         }
@@ -246,6 +259,16 @@ suite('Integration: Python Projects', function () {
 
         // Set environment first
         await api.setEnvironment(project.uri, env);
+
+        // Wait for it to be set
+        await waitForCondition(
+            async () => {
+                const retrieved = await api.getEnvironment(project.uri);
+                return retrieved !== undefined && retrieved.envId.id === env.envId.id;
+            },
+            5000,
+            'Environment was not set before clearing',
+        );
 
         // Verify it was set
         const beforeClear = await api.getEnvironment(project.uri);
@@ -294,6 +317,16 @@ suite('Integration: Python Projects', function () {
 
         // Set environment for project
         await api.setEnvironment(project.uri, env);
+
+        // Wait for it to be set
+        await waitForCondition(
+            async () => {
+                const retrieved = await api.getEnvironment(project.uri);
+                return retrieved !== undefined && retrieved.envId.id === env.envId.id;
+            },
+            5000,
+            'Environment was not set for project',
+        );
 
         // Create a hypothetical file path inside the project
         const fileUri = vscode.Uri.joinPath(project.uri, 'some_script.py');
