@@ -194,14 +194,26 @@ suite('Integration: Python Projects', function () {
             return;
         }
 
+        const project = projects[0];
+
+        // Get current environment to ensure we make an actual change
+        const currentEnv = await api.getEnvironment(project.uri);
+
+        // Pick an environment different from current, or clear and re-set
+        let targetEnv = environments[0];
+        if (currentEnv && currentEnv.envId.id === targetEnv.envId.id && environments.length > 1) {
+            targetEnv = environments[1];
+        }
+
+        // Clear environment first to ensure change event fires
+        // (in case targetEnv is already set)
+        await api.setEnvironment(project.uri, undefined);
+
         const handler = new TestEventHandler(api.onDidChangeEnvironment, 'onDidChangeEnvironment');
 
         try {
-            const project = projects[0];
-            const env = environments[0];
-
-            // Set environment
-            await api.setEnvironment(project.uri, env);
+            // Set environment - this should fire the event
+            await api.setEnvironment(project.uri, targetEnv);
 
             // Event should fire
             await handler.assertFired(5000);
