@@ -15,12 +15,15 @@ export interface ExecResult {
  * Executes a command and returns the result as a promise.
  * This function abstracts cp.exec to make it easier to mock in tests.
  *
+ * Environment handling: process.env is always inherited, with options.env merged on top.
+ * PYTHONUTF8='1' is set as a fallback (can be overridden by process.env or options.env).
+ *
  * @param command The command to execute (can include arguments).
  * @param options Optional execution options.
  * @returns A promise that resolves with { stdout, stderr } strings.
  */
 export async function execProcess(command: string, options?: cp.ExecOptions): Promise<ExecResult> {
-    // Always inherit process.env, then merge options.env overrides, with PYTHONUTF8 as default
+    // Sets PYTHONUTF8='1' as fallback, then inherits process.env, then merges options.env overrides
     const env = {
         PYTHONUTF8: '1',
         ...process.env,
@@ -37,6 +40,9 @@ export async function execProcess(command: string, options?: cp.ExecOptions): Pr
 /**
  * Spawns a new process using the specified command and arguments.
  * This function abstracts cp.spawn to make it easier to mock in tests.
+ *
+ * Environment handling: process.env is always inherited, with options.env merged on top.
+ * PYTHONUTF8='1' is set as a fallback (can be overridden by process.env or options.env).
  *
  * When stdio: 'pipe' is used, returns ChildProcessWithoutNullStreams.
  * Otherwise returns the standard ChildProcess.
@@ -58,7 +64,7 @@ export function spawnProcess(
     args: string[],
     options?: cp.SpawnOptions,
 ): cp.ChildProcess | cp.ChildProcessWithoutNullStreams {
-    // Always inherit process.env, then merge options.env overrides, with PYTHONUTF8 as default
+    // Sets PYTHONUTF8='1' as fallback, then inherits process.env, then merges options.env overrides
     const env = {
         PYTHONUTF8: '1',
         ...process.env,
