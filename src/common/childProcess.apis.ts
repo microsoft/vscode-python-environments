@@ -24,7 +24,8 @@ export async function execProcess(command: string, options?: cp.ExecOptions): Pr
         PYTHONUTF8: '1',
         ...(options?.env ?? process.env),
     };
-    const result = await cpExec(command, { ...options, env });
+    // Force encoding: 'utf8' to guarantee string output (cp.exec can return Buffers otherwise)
+    const result = await cpExec(command, { ...options, env, encoding: 'utf8' });
     return {
         stdout: result.stdout ?? '',
         stderr: result.stderr ?? '',
