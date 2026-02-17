@@ -20,9 +20,11 @@ export interface ExecResult {
  * @returns A promise that resolves with { stdout, stderr } strings.
  */
 export async function execProcess(command: string, options?: cp.ExecOptions): Promise<ExecResult> {
+    // Always inherit process.env, then merge options.env overrides, with PYTHONUTF8 as default
     const env = {
         PYTHONUTF8: '1',
-        ...(options?.env ?? process.env),
+        ...process.env,
+        ...options?.env,
     };
     // Force encoding: 'utf8' to guarantee string output (cp.exec can return Buffers otherwise)
     const result = await cpExec(command, { ...options, env, encoding: 'utf8' });
@@ -56,10 +58,11 @@ export function spawnProcess(
     args: string[],
     options?: cp.SpawnOptions,
 ): cp.ChildProcess | cp.ChildProcessWithoutNullStreams {
-    // Set PYTHONUTF8=1; user-provided PYTHONUTF8 values take precedence.
+    // Always inherit process.env, then merge options.env overrides, with PYTHONUTF8 as default
     const env = {
         PYTHONUTF8: '1',
-        ...(options?.env ?? process.env),
+        ...process.env,
+        ...options?.env,
     };
     return cp.spawn(command, args, { ...options, env });
 }
