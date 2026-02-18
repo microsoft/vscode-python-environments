@@ -23,7 +23,7 @@ import { CondaStrings } from '../../common/localize';
 import { traceError } from '../../common/logging';
 import { createDeferred, Deferred } from '../../common/utils/deferred';
 import { normalizePath } from '../../common/utils/pathUtils';
-import { showErrorMessage, withProgress } from '../../common/window.apis';
+import { showErrorMessage, showInformationMessage, withProgress } from '../../common/window.apis';
 import { NativePythonFinder } from '../common/nativePythonFinder';
 import { CondaSourcingStatus } from './condaSourcingUtils';
 import {
@@ -289,6 +289,16 @@ export class CondaEnvManager implements EnvironmentManager, Disposable {
             const folder = this.api.getPythonProject(scope);
             const fsPath = folder?.uri?.fsPath ?? scope.fsPath;
             if (fsPath) {
+                // Notify user if CONDA_PREFIX is set and they're trying to select a different environment
+                if (process.env.CONDA_PREFIX && checkedEnv) {
+                    const condaPrefixPath = process.env.CONDA_PREFIX;
+                    const selectedPath = checkedEnv.environmentPath.fsPath;
+                    // Only show notification if they selected a different environment
+                    if (condaPrefixPath !== selectedPath) {
+                        showInformationMessage(CondaStrings.condaCondaPrefixActive);
+                    }
+                }
+
                 const normalizedFsPath = normalizePath(fsPath);
                 if (checkedEnv) {
                     this.fsPathToEnv.set(normalizedFsPath, checkedEnv);
