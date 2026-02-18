@@ -6,16 +6,22 @@ import * as fsapi from 'fs-extra';
 import * as os from 'os';
 import * as path from 'path';
 import * as sinon from 'sinon';
-import { Disposable, Event, EventEmitter, Progress, Terminal, TerminalOptions, Uri, WorkspaceConfiguration } from 'vscode';
+import {
+    Disposable,
+    Event,
+    EventEmitter,
+    Progress,
+    Terminal,
+    TerminalOptions,
+    Uri,
+    WorkspaceConfiguration,
+} from 'vscode';
 import { PythonEnvironment } from '../../../api';
 import * as windowApis from '../../../common/window.apis';
 import * as workspaceApis from '../../../common/workspace.apis';
 import * as activationUtils from '../../../features/common/activation';
 import * as shellDetector from '../../../features/common/shellDetector';
-import {
-    ShellEnvsProvider,
-    ShellStartupScriptProvider,
-} from '../../../features/terminal/shells/startupProvider';
+import { ShellEnvsProvider, ShellStartupScriptProvider } from '../../../features/terminal/shells/startupProvider';
 import {
     DidChangeTerminalActivationStateEvent,
     TerminalActivationInternal,
@@ -309,11 +315,107 @@ suite('TerminalManager - terminal naming', () => {
         try {
             await terminalManager.getProjectTerminal(projectUri, env);
 
+            assert.strictEqual(optionsList[0]?.name, 'Python', 'Project terminal should use the Python title');
+        } finally {
+            await fsapi.remove(tempRoot);
+        }
+    });
+
+    // Regression test for https://github.com/microsoft/vscode-python-environments/issues/1230
+    test('getDedicatedTerminal with string key uses string as terminal name', async () => {
+        mockGetAutoActivationType.returns(terminalUtils.ACT_TYPE_OFF);
+        terminalManager = createTerminalManager();
+        const env = createMockEnvironment();
+
+        const optionsList: TerminalOptions[] = [];
+        createTerminalStub.callsFake((options) => {
+            optionsList.push(options);
+            return mockTerminal as Terminal;
+        });
+
+        const tempRoot = await fsapi.mkdtemp(path.join(os.tmpdir(), 'py-envs-'));
+        const projectPath = path.join(tempRoot, 'project');
+        await fsapi.ensureDir(projectPath);
+        const projectUri = Uri.file(projectPath);
+
+        const config = { get: sinon.stub().returns(false) } as unknown as WorkspaceConfiguration;
+        sinon.stub(workspaceApis, 'getConfiguration').returns(config);
+
+        try {
+            await terminalManager.getDedicatedTerminal('my-terminal-key', projectUri, env);
+
             assert.strictEqual(
                 optionsList[0]?.name,
-                'Python',
-                'Project terminal should use the Python title',
+                'Python: my-terminal-key',
+                'Dedicated terminal with string key should use the string in the title',
             );
+            assert.strictEqual(
+                Uri.file(optionsList[0]?.cwd as string).fsPath,
+                Uri.file(projectPath).fsPath,
+                'Dedicated terminal with string key should use project directory as cwd',
+            );
+        } finally {
+            await fsapi.remove(tempRoot);
+        }
+    });
+
+    // Regression test for https://github.com/microsoft/vscode-python-environments/issues/1230
+    test('getDedicatedTerminal with string key reuses terminal for same key', async () => {
+        mockGetAutoActivationType.returns(terminalUtils.ACT_TYPE_OFF);
+        terminalManager = createTerminalManager();
+        const env = createMockEnvironment();
+
+        let createCount = 0;
+        createTerminalStub.callsFake((options) => {
+            createCount++;
+            return { ...mockTerminal, name: options.name } as Terminal;
+        });
+
+        const tempRoot = await fsapi.mkdtemp(path.join(os.tmpdir(), 'py-envs-'));
+        const projectPath = path.join(tempRoot, 'project');
+        await fsapi.ensureDir(projectPath);
+        const projectUri = Uri.file(projectPath);
+
+        const config = { get: sinon.stub().returns(false) } as unknown as WorkspaceConfiguration;
+        sinon.stub(workspaceApis, 'getConfiguration').returns(config);
+
+        try {
+            const terminal1 = await terminalManager.getDedicatedTerminal('my-key', projectUri, env);
+            const terminal2 = await terminalManager.getDedicatedTerminal('my-key', projectUri, env);
+
+            assert.strictEqual(terminal1, terminal2, 'Same string key should return the same terminal');
+            assert.strictEqual(createCount, 1, 'Terminal should be created only once');
+        } finally {
+            await fsapi.remove(tempRoot);
+        }
+    });
+
+    // Regression test for https://github.com/microsoft/vscode-python-environments/issues/1230
+    test('getDedicatedTerminal with string key uses different terminals for different keys', async () => {
+        mockGetAutoActivationType.returns(terminalUtils.ACT_TYPE_OFF);
+        terminalManager = createTerminalManager();
+        const env = createMockEnvironment();
+
+        let createCount = 0;
+        createTerminalStub.callsFake((options) => {
+            createCount++;
+            return { ...mockTerminal, name: options.name, id: createCount } as unknown as Terminal;
+        });
+
+        const tempRoot = await fsapi.mkdtemp(path.join(os.tmpdir(), 'py-envs-'));
+        const projectPath = path.join(tempRoot, 'project');
+        await fsapi.ensureDir(projectPath);
+        const projectUri = Uri.file(projectPath);
+
+        const config = { get: sinon.stub().returns(false) } as unknown as WorkspaceConfiguration;
+        sinon.stub(workspaceApis, 'getConfiguration').returns(config);
+
+        try {
+            const terminal1 = await terminalManager.getDedicatedTerminal('key-1', projectUri, env);
+            const terminal2 = await terminalManager.getDedicatedTerminal('key-2', projectUri, env);
+
+            assert.notStrictEqual(terminal1, terminal2, 'Different string keys should return different terminals');
+            assert.strictEqual(createCount, 2, 'Two terminals should be created');
         } finally {
             await fsapi.remove(tempRoot);
         }
