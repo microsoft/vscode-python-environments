@@ -168,6 +168,9 @@ export namespace CondaStrings {
     export const condaMissingPythonNoFix = l10n.t(
         'No Python found in the selected conda environment. Please select another environment or install Python manually.',
     );
+    export const condaCondaPrefixActive = l10n.t(
+        'CONDA_PREFIX is set for this VS Code session. Selection saved for new terminals only.',
+    );
 }
 
 export namespace PyenvStrings {
