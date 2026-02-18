@@ -685,6 +685,7 @@
         "smoke-test": "vscode-test --label smokeTests",
         "e2e-test": "vscode-test --label e2eTests --install-extensions ms-python.python",
         "integration-test": "vscode-test --label integrationTests --install-extensions ms-python.python",
+        "integration-test-multiroot": "vscode-test --label integrationTestsMultiRoot --install-extensions ms-python.python",
         "vsce-package": "vsce package -o ms-python-envs-insiders.vsix"
     },
     "devDependencies": {

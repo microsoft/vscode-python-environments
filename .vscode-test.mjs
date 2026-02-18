@@ -45,7 +45,8 @@ export default defineConfig([
     },
     {
         label: 'integrationTests',
-        files: 'out/test/integration/**/*.integration.test.js',
+        files: 'out/test/integration/*.integration.test.js',
+        workspaceFolder: 'src/test/integration/test-workspace/project-a',
         mocha: {
             ui: 'tdd',
             timeout: 60000,
@@ -60,6 +61,23 @@ export default defineConfig([
         // ms-python.python is installed via CLI flag (--install-extensions) for
         // the native Python tools (pet binary). We use inspect() for
         // useEnvironmentsExtension check, so Python extension's default is ignored.
+    },
+    {
+        label: 'integrationTestsMultiRoot',
+        files: 'out/test/integration/multiroot/*.integration.test.js',
+        workspaceFolder: 'src/test/integration/test-workspace/integration-tests.code-workspace',
+        mocha: {
+            ui: 'tdd',
+            timeout: 60000,
+            retries: 1,
+        },
+        env: {
+            VSC_PYTHON_INTEGRATION_TEST: '1',
+        },
+        launchArgs: [
+            `--user-data-dir=${userDataDir}`,
+            '--disable-workspace-trust',
+        ],
     },
     {
         label: 'extensionTests',

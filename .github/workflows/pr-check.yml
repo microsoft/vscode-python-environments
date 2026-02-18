@@ -175,7 +175,7 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
-        python-version: ['3.9', '3.12', '3.14']
+        python-version: ['3.10', '3.12', '3.14']
 
     steps:
       - name: Checkout
@@ -268,7 +268,7 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
-        python-version: ['3.9', '3.12', '3.14']
+        python-version: ['3.10', '3.12', '3.14']
 
     steps:
       - name: Checkout
@@ -352,3 +352,53 @@ jobs:
       - name: Run Integration Tests (non-Linux)
         if: runner.os != 'Linux'
         run: npm run integration-test
+
+  integration-tests-multiroot:
+    name: Integration Tests (Multi-Root)
+    runs-on: ${{ matrix.os }}
+    needs: [smoke-tests]
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        python-version: ['3.10', '3.12', '3.14']
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: Install Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install Dependencies
+        run: npm ci
+
+      - name: Compile Extension
+        run: npm run compile
+
+      - name: Compile Tests
+        run: npm run compile-tests
+
+      - name: Configure Test Settings
+        run: |
+          mkdir -p .vscode-test/user-data/User
+          echo '{"python.useEnvironmentsExtension": true}' > .vscode-test/user-data/User/settings.json
+        shell: bash
+
+      - name: Run Integration Tests Multi-Root (Linux)
+        if: runner.os == 'Linux'
+        uses: GabrielBB/xvfb-action@v1
+        with:
+          run: npm run integration-test-multiroot
+
+      - name: Run Integration Tests Multi-Root (non-Linux)
+        if: runner.os != 'Linux'
+        run: npm run integration-test-multiroot
