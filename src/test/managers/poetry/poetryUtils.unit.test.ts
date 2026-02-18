@@ -3,16 +3,20 @@ import path from 'node:path';
 import * as sinon from 'sinon';
 import { EnvironmentManager, PythonEnvironment, PythonEnvironmentApi, PythonEnvironmentInfo } from '../../../api';
 import * as childProcessApis from '../../../common/childProcess.apis';
+import * as persistentState from '../../../common/persistentState';
 import * as pathUtils from '../../../common/utils/pathUtils';
 import * as platformUtils from '../../../common/utils/platformUtils';
 import { NativeEnvInfo } from '../../../managers/common/nativePythonFinder';
 import * as utils from '../../../managers/common/utils';
 import {
+    clearPoetryCache,
     getDefaultPoetryCacheDir,
     getDefaultPoetryVirtualenvsPath,
     getPoetryVersion,
+    getPoetryVirtualenvsPath,
     isPoetryVirtualenvsInProject,
     nativeToPythonEnv,
+    POETRY_VIRTUALENVS_PATH_KEY,
 } from '../../../managers/poetry/poetryUtils';
 
 suite('isPoetryVirtualenvsInProject', () => {
@@ -363,5 +367,183 @@ suite('getDefaultPoetryVirtualenvsPath', () => {
         const result = getDefaultPoetryVirtualenvsPath();
 
         assert.strictEqual(result, undefined);
+    });
+});
+
+suite('getPoetryVirtualenvsPath - {cache-dir} placeholder resolution', () => {
+    let execProcessStub: sinon.SinonStub;
+    let isWindowsStub: sinon.SinonStub;
+    let isMacStub: sinon.SinonStub;
+    let getUserHomeDirStub: sinon.SinonStub;
+    let getWorkspacePersistentStateStub: sinon.SinonStub;
+    let mockState: { get: sinon.SinonStub; set: sinon.SinonStub };
+
+    setup(async () => {
+        execProcessStub = sinon.stub(childProcessApis, 'execProcess');
+        isWindowsStub = sinon.stub(platformUtils, 'isWindows');
+        isMacStub = sinon.stub(platformUtils, 'isMac');
+        getUserHomeDirStub = sinon.stub(pathUtils, 'getUserHomeDir');
+
+        // Create a mock state object to track persistence
+        mockState = {
+            get: sinon.stub(),
+            set: sinon.stub().resolves(),
+        };
+        getWorkspacePersistentStateStub = sinon.stub(persistentState, 'getWorkspacePersistentState');
+        getWorkspacePersistentStateStub.resolves(mockState);
+
+        // Clear Poetry cache before each test
+        await clearPoetryCache();
+    });
+
+    teardown(() => {
+        sinon.restore();
+    });
+
+    test('resolves {cache-dir} placeholder when poetry config cache-dir succeeds', async () => {
+        // First call: virtualenvs.path returns a path with {cache-dir}
+        execProcessStub.onFirstCall().resolves({ stdout: '{cache-dir}/virtualenvs\n', stderr: '' });
+        // Second call: cache-dir config returns the actual path
+        execProcessStub.onSecondCall().resolves({ stdout: '/home/test/.cache/pypoetry\n', stderr: '' });
+
+        const result = await getPoetryVirtualenvsPath('/usr/bin/poetry');
+
+        assert.strictEqual(result, path.join('/home/test/.cache/pypoetry', 'virtualenvs'));
+        // Verify the resolved path was persisted
+        assert.ok(
+            mockState.set.calledWith(
+                POETRY_VIRTUALENVS_PATH_KEY,
+                path.join('/home/test/.cache/pypoetry', 'virtualenvs'),
+            ),
+        );
+    });
+
+    test('falls back to platform default when poetry config cache-dir fails', async () => {
+        isWindowsStub.returns(false);
+        isMacStub.returns(false);
+        getUserHomeDirStub.returns('/home/test');
+
+        // First call: virtualenvs.path returns a path with {cache-dir}
+        execProcessStub.onFirstCall().resolves({ stdout: '{cache-dir}/virtualenvs\n', stderr: '' });
+        // Second call: cache-dir config fails
+        execProcessStub.onSecondCall().rejects(new Error('Command failed'));
+
+        const result = await getPoetryVirtualenvsPath('/usr/bin/poetry');
+
+        // Should fall back to platform default cache dir
+        const expectedPath = path.join('/home/test', '.cache', 'pypoetry', 'virtualenvs');
+        assert.strictEqual(result, expectedPath);
+        // The resolved path should still be persisted
+        assert.ok(mockState.set.calledWith(POETRY_VIRTUALENVS_PATH_KEY, expectedPath));
+    });
+
+    test('falls back to platform default when poetry config cache-dir returns non-absolute path', async () => {
+        isWindowsStub.returns(false);
+        isMacStub.returns(false);
+        getUserHomeDirStub.returns('/home/test');
+
+        // First call: virtualenvs.path returns a path with {cache-dir}
+        execProcessStub.onFirstCall().resolves({ stdout: '{cache-dir}/virtualenvs\n', stderr: '' });
+        // Second call: cache-dir returns a relative path (invalid)
+        execProcessStub.onSecondCall().resolves({ stdout: 'relative/path\n', stderr: '' });
+
+        const result = await getPoetryVirtualenvsPath('/usr/bin/poetry');
+
+        // Should fall back to platform default cache dir
+        const expectedPath = path.join('/home/test', '.cache', 'pypoetry', 'virtualenvs');
+        assert.strictEqual(result, expectedPath);
+    });
+
+    test('does not persist path when placeholder cannot be resolved and no platform default', async () => {
+        isWindowsStub.returns(false);
+        isMacStub.returns(false);
+        getUserHomeDirStub.returns(undefined); // No home dir available
+
+        // First call: virtualenvs.path returns a path with {cache-dir}
+        execProcessStub.onFirstCall().resolves({ stdout: '{cache-dir}/virtualenvs\n', stderr: '' });
+        // Second call: cache-dir config fails
+        execProcessStub.onSecondCall().rejects(new Error('Command failed'));
+
+        const result = await getPoetryVirtualenvsPath('/usr/bin/poetry');
+
+        // Should fall back to platform default (which returns undefined when home is not available)
+        assert.strictEqual(result, undefined);
+        // Path should NOT be persisted when unresolved
+        assert.ok(!mockState.set.calledWith(POETRY_VIRTUALENVS_PATH_KEY, sinon.match.any));
+    });
+
+    test('handles virtualenvs.path without {cache-dir} placeholder (absolute path)', async () => {
+        // virtualenvs.path returns an absolute path directly
+        execProcessStub.onFirstCall().resolves({ stdout: '/custom/virtualenvs/path\n', stderr: '' });
+
+        const result = await getPoetryVirtualenvsPath('/usr/bin/poetry');
+
+        assert.strictEqual(result, '/custom/virtualenvs/path');
+        // Should be persisted
+        assert.ok(mockState.set.calledWith(POETRY_VIRTUALENVS_PATH_KEY, '/custom/virtualenvs/path'));
+    });
+
+    test('falls back to platform default when virtualenvs.path returns non-absolute path without placeholder', async () => {
+        isWindowsStub.returns(false);
+        isMacStub.returns(false);
+        getUserHomeDirStub.returns('/home/test');
+
+        // virtualenvs.path returns a relative path (not valid)
+        execProcessStub.onFirstCall().resolves({ stdout: 'relative/path\n', stderr: '' });
+
+        const result = await getPoetryVirtualenvsPath('/usr/bin/poetry');
+
+        // Should fall back to platform default
+        const expectedPath = path.join('/home/test', '.cache', 'pypoetry', 'virtualenvs');
+        assert.strictEqual(result, expectedPath);
+    });
+
+    test('uses cached value from persistent state', async () => {
+        mockState.get.resolves('/cached/virtualenvs/path');
+
+        const result = await getPoetryVirtualenvsPath('/usr/bin/poetry');
+
+        assert.strictEqual(result, '/cached/virtualenvs/path');
+        // Should not call exec since we have a cached value
+        assert.ok(!execProcessStub.called);
+    });
+
+    test('handles virtualenvs.path config command failure', async () => {
+        isWindowsStub.returns(false);
+        isMacStub.returns(false);
+        getUserHomeDirStub.returns('/home/test');
+
+        // virtualenvs.path config fails
+        execProcessStub.onFirstCall().rejects(new Error('Config command failed'));
+
+        const result = await getPoetryVirtualenvsPath('/usr/bin/poetry');
+
+        // Should fall back to platform default
+        const expectedPath = path.join('/home/test', '.cache', 'pypoetry', 'virtualenvs');
+        assert.strictEqual(result, expectedPath);
+    });
+
+    test('Windows: resolves {cache-dir} with platform default when cache-dir query fails', async () => {
+        const originalLocalAppData = process.env.LOCALAPPDATA;
+        try {
+            isWindowsStub.returns(true);
+            process.env.LOCALAPPDATA = 'C:\\Users\\test\\AppData\\Local';
+
+            // First call: virtualenvs.path returns a path with {cache-dir}
+            execProcessStub.onFirstCall().resolves({ stdout: '{cache-dir}/virtualenvs\n', stderr: '' });
+            // Second call: cache-dir config fails
+            execProcessStub.onSecondCall().rejects(new Error('Command failed'));
+
+            const result = await getPoetryVirtualenvsPath('C:\\poetry\\poetry.exe');
+
+            const expectedPath = path.join('C:\\Users\\test\\AppData\\Local', 'pypoetry', 'Cache', 'virtualenvs');
+            assert.strictEqual(result, expectedPath);
+        } finally {
+            if (originalLocalAppData === undefined) {
+                delete process.env.LOCALAPPDATA;
+            } else {
+                process.env.LOCALAPPDATA = originalLocalAppData;
+            }
+        }
     });
 });
