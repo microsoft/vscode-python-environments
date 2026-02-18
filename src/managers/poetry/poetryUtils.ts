@@ -8,6 +8,7 @@ import { traceError, traceInfo } from '../../common/logging';
 import { getWorkspacePersistentState } from '../../common/persistentState';
 import { getUserHomeDir, untildify } from '../../common/utils/pathUtils';
 import { isWindows } from '../../common/utils/platformUtils';
+import { getSettingWorkspaceScope } from '../../features/settings/settingHelpers';
 import {
     isNativeEnvInfo,
     NativeEnvInfo,
@@ -48,6 +49,11 @@ export const POETRY_VIRTUALENVS_PATH_KEY = `${ENVS_EXTENSION_ID}:poetry:VIRTUALE
 
 let poetryPath: string | undefined;
 let poetryVirtualenvsPath: string | undefined;
+
+function getPoetryPathFromSettings(): string | undefined {
+    const poetryPath = getSettingWorkspaceScope<string>('python', 'poetryPath');
+    return poetryPath ? poetryPath : undefined;
+}
 
 export async function clearPoetryCache(): Promise<void> {
     // Reset in-memory cache
@@ -112,6 +118,17 @@ export async function setPoetryForWorkspaces(fsPath: string[], envPath: string |
 }
 
 export async function getPoetry(native?: NativePythonFinder): Promise<string | undefined> {
+    // Priority 1: Settings (if explicitly set and valid)
+    const settingPath = getPoetryPathFromSettings();
+    if (settingPath) {
+        if (await fs.exists(untildify(settingPath))) {
+            traceInfo(`Using poetry from settings: ${settingPath}`);
+            return untildify(settingPath);
+        }
+        traceInfo(`Poetry path from settings does not exist: ${settingPath}`);
+    }
+
+    // Priority 2: In-memory cache
     if (poetryPath) {
         if (await fs.exists(untildify(poetryPath))) {
             return untildify(poetryPath);
@@ -119,6 +136,7 @@ export async function getPoetry(native?: NativePythonFinder): Promise<string | u
         poetryPath = undefined;
     }
 
+    // Priority 3: Persistent state
     const state = await getWorkspacePersistentState();
     const storedPath = await state.get<string>(POETRY_PATH_KEY);
     if (storedPath) {
@@ -136,14 +154,14 @@ export async function getPoetry(native?: NativePythonFinder): Promise<string | u
         await state.set(POETRY_PATH_KEY, undefined);
     }
 
-    // Check in standard PATH locations
+    // Priority 4: PATH lookup
     poetryPath = await findPoetry();
     if (poetryPath) {
         await setPoetry(poetryPath);
         return poetryPath;
     }
 
-    // Check for user-installed poetry
+    // Priority 5: Known user-install locations
     const home = getUserHomeDir();
     if (home) {
         const poetryUserInstall = path.join(
@@ -157,6 +175,7 @@ export async function getPoetry(native?: NativePythonFinder): Promise<string | u
         }
     }
 
+    // Priority 6: Native finder as fallback
     if (native) {
         const data = await native.refresh(false);
         const managers = data
