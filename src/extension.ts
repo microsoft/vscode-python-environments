@@ -494,8 +494,9 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
             }
             const envVar = shellEnv.value;
             if (envVar) {
-                if (envVar['VIRTUAL_ENV']) {
-                    const envPath = normalizeShellPath(envVar['VIRTUAL_ENV'], e.terminal.state.shell);
+                const envVarPath = envVar['VIRTUAL_ENV'] || envVar['CONDA_PREFIX'];
+                if (envVarPath) {
+                    const envPath = normalizeShellPath(envVarPath, e.terminal.state.shell);
                     const env = await api.resolveEnvironment(Uri.file(envPath));
                     if (env) {
                         monitoredTerminals.set(e.terminal, env);
