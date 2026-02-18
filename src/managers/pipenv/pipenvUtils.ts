@@ -66,6 +66,17 @@ function getPipenvPathFromSettings(): string | undefined {
 }
 
 export async function getPipenv(native?: NativePythonFinder): Promise<string | undefined> {
+    // Priority 1: Settings (if explicitly set and valid)
+    const settingPath = getPipenvPathFromSettings();
+    if (settingPath) {
+        if (await fs.exists(untildify(settingPath))) {
+            traceInfo(`Using pipenv from settings: ${settingPath}`);
+            return untildify(settingPath);
+        }
+        traceInfo(`Pipenv path from settings does not exist: ${settingPath}`);
+    }
+
+    // Priority 2: In-memory cache
     if (pipenvPath) {
         if (await fs.exists(untildify(pipenvPath))) {
             return untildify(pipenvPath);
@@ -73,6 +84,7 @@ export async function getPipenv(native?: NativePythonFinder): Promise<string | u
         pipenvPath = undefined;
     }
 
+    // Priority 3: Persistent state
     const state = await getWorkspacePersistentState();
     const storedPath = await state.get<string>(PIPENV_PATH_KEY);
     if (storedPath) {
@@ -84,18 +96,7 @@ export async function getPipenv(native?: NativePythonFinder): Promise<string | u
         await state.set(PIPENV_PATH_KEY, undefined);
     }
 
-    // try to get from settings
-    const settingPath = getPipenvPathFromSettings();
-    if (settingPath) {
-        if (await fs.exists(untildify(settingPath))) {
-            pipenvPath = settingPath;
-            traceInfo(`Using pipenv from settings: ${settingPath}`);
-            return untildify(pipenvPath);
-        }
-        traceInfo(`Pipenv path from settings does not exist: ${settingPath}`);
-    }
-
-    // Try to find pipenv in PATH
+    // Priority 4: PATH lookup
     const foundPipenv = await findPipenv();
     if (foundPipenv) {
         pipenvPath = foundPipenv;
@@ -103,7 +104,7 @@ export async function getPipenv(native?: NativePythonFinder): Promise<string | u
         return foundPipenv;
     }
 
-    // Use native finder as fallback
+    // Priority 5: Native finder as fallback
     if (native) {
         const data = await native.refresh(false);
         const managers = data
