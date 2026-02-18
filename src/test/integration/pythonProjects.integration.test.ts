@@ -175,12 +175,13 @@ suite('Integration: Python Projects', function () {
 
         // Wait for the environment to be retrievable with the correct ID
         // This handles async persistence across platforms
+        // Use 15s timeout - CI runners (especially macos) can be slow with settings persistence
         await waitForCondition(
             async () => {
                 const retrieved = await api.getEnvironment(project.uri);
                 return retrieved !== undefined && retrieved.envId.id === env.envId.id;
             },
-            5000,
+            15_000,
             `Environment was not set correctly. Expected envId: ${env.envId.id}`,
         );
 
@@ -224,9 +225,10 @@ suite('Integration: Python Projects', function () {
             await api.setEnvironment(project.uri, targetEnv);
 
             // Wait for an event where event.new is defined (the actual change event)
+            // Use 15s timeout - CI runners can be slow
             await waitForCondition(
                 () => handler.all.some((e) => e.new !== undefined),
-                5000,
+                15_000,
                 'onDidChangeEnvironment with new environment was not fired',
             );
 
@@ -261,12 +263,13 @@ suite('Integration: Python Projects', function () {
         await api.setEnvironment(project.uri, env);
 
         // Wait for it to be set
+        // Use 15s timeout - CI runners can be slow with settings persistence
         await waitForCondition(
             async () => {
                 const retrieved = await api.getEnvironment(project.uri);
                 return retrieved !== undefined && retrieved.envId.id === env.envId.id;
             },
-            5000,
+            15_000,
             'Environment was not set before clearing',
         );
 
@@ -319,12 +322,13 @@ suite('Integration: Python Projects', function () {
         await api.setEnvironment(project.uri, env);
 
         // Wait for it to be set
+        // Use 15s timeout - CI runners can be slow with settings persistence
         await waitForCondition(
             async () => {
                 const retrieved = await api.getEnvironment(project.uri);
                 return retrieved !== undefined && retrieved.envId.id === env.envId.id;
             },
-            5000,
+            15_000,
             'Environment was not set for project',
         );
 

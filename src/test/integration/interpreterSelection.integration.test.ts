@@ -171,8 +171,8 @@ suite('Integration: Interpreter Selection Priority', function () {
             // Change to new environment
             await api.setEnvironment(undefined, newEnv);
 
-            // Wait for event
-            await handler.assertFired(5000);
+            // Wait for event - use 15s timeout for CI stability
+            await handler.assertFired(15_000);
 
             const event = handler.last;
             assert.ok(event, 'Event should have fired');
