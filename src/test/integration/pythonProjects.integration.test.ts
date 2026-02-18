@@ -170,8 +170,21 @@ suite('Integration: Python Projects', function () {
         const project = projects[0];
         const env = environments[0];
 
+        // Diagnostic logging for CI debugging
+        console.log(`[TEST DEBUG] Project URI: ${project.uri.fsPath}`);
+        console.log(`[TEST DEBUG] Setting environment with envId: ${env.envId.id}`);
+        console.log(`[TEST DEBUG] Environment path: ${env.environmentPath?.fsPath}`);
+        console.log(`[TEST DEBUG] Total environments available: ${environments.length}`);
+        environments.forEach((e, i) => {
+            console.log(`[TEST DEBUG]   env[${i}]: ${e.envId.id} (${e.displayName})`);
+        });
+
         // Set environment for project
         await api.setEnvironment(project.uri, env);
+
+        // Track what getEnvironment returns during polling for diagnostics
+        let pollCount = 0;
+        let lastRetrievedId: string | undefined;
 
         // Wait for the environment to be retrievable with the correct ID
         // This handles async persistence across platforms
@@ -179,10 +192,18 @@ suite('Integration: Python Projects', function () {
         await waitForCondition(
             async () => {
                 const retrieved = await api.getEnvironment(project.uri);
+                pollCount++;
+                const retrievedId = retrieved?.envId?.id;
+                if (retrievedId !== lastRetrievedId) {
+                    console.log(
+                        `[TEST DEBUG] Poll #${pollCount}: getEnvironment returned envId=${retrievedId ?? 'undefined'}`,
+                    );
+                    lastRetrievedId = retrievedId;
+                }
                 return retrieved !== undefined && retrieved.envId.id === env.envId.id;
             },
             15_000,
-            `Environment was not set correctly. Expected envId: ${env.envId.id}`,
+            `Environment was not set correctly. Expected envId: ${env.envId.id}, last retrieved: ${lastRetrievedId}`,
         );
 
         // Final verification
