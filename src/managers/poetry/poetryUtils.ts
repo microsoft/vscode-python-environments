@@ -3,6 +3,7 @@ import * as path from 'path';
 import { Uri } from 'vscode';
 import which from 'which';
 import { EnvironmentManager, PythonEnvironment, PythonEnvironmentApi, PythonEnvironmentInfo } from '../../api';
+import { execProcess } from '../../common/childProcess.apis';
 import { ENVS_EXTENSION_ID } from '../../common/constants';
 import { traceError, traceInfo } from '../../common/logging';
 import { getWorkspacePersistentState } from '../../common/persistentState';
@@ -190,7 +191,7 @@ export async function getPoetryVirtualenvsPath(poetryExe?: string): Promise<stri
     const poetry = poetryExe || (await getPoetry());
     if (poetry) {
         try {
-            const { stdout } = await exec(`"${poetry}" config virtualenvs.path`);
+            const { stdout } = await execProcess(`"${poetry}" config virtualenvs.path`);
             if (stdout) {
                 const venvPath = stdout.trim();
                 // Poetry might return the path with placeholders like {cache-dir}
@@ -225,20 +226,14 @@ export async function getPoetryVirtualenvsPath(poetryExe?: string): Promise<stri
     return undefined;
 }
 
-// These are now exported for use in main.ts or environment manager logic
-import * as cp from 'child_process';
-import { promisify } from 'util';
-
-const exec = promisify(cp.exec);
-
 export async function getPoetryVersion(poetry: string): Promise<string | undefined> {
     try {
-        const { stdout } = await exec(`"${poetry}" --version`);
+        const { stdout } = await execProcess(`"${poetry}" --version`);
         // Handle both formats:
         // Old: "Poetry version 1.5.1"
         // New: "Poetry (version 2.1.3)"
         traceInfo(`Poetry version output: ${stdout.trim()}`);
-        const match = stdout.match(/Poetry (?:version|[\(\s]+version[\s\)]+)([0-9]+\.[0-9]+\.[0-9]+)/i);
+        const match = stdout.match(/Poetry (?:version |[\(\s]+version[\s\)]+)([0-9]+\.[0-9]+\.[0-9]+)/i);
         return match ? match[1] : undefined;
     } catch {
         return undefined;
