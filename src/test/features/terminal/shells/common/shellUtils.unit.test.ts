@@ -99,9 +99,7 @@ suite('Shell Utils', () => {
     });
 
     suite('getShellCommandAsString', () => {
-        const sampleCommand: PythonCommandRunConfiguration[] = [
-            { executable: 'source', args: ['/path/to/activate'] },
-        ];
+        const sampleCommand: PythonCommandRunConfiguration[] = [{ executable: 'source', args: ['/path/to/activate'] }];
 
         suite('leading space for history ignore', () => {
             test('should add leading space for bash commands', () => {
@@ -182,6 +180,28 @@ suite('Shell Utils', () => {
                 const result = getShellCommandAsString(ShellConstants.FISH, multiCommand);
                 assert.ok(result.includes('; and'), 'Fish should use "; and" to join commands');
                 assert.ok(!result.startsWith(' '), 'Fish command should not start with a leading space');
+            });
+        });
+
+        suite('empty command handling', () => {
+            test('should return empty string for empty command array (bash)', () => {
+                const result = getShellCommandAsString(ShellConstants.BASH, []);
+                assert.strictEqual(result, '', 'Empty command array should return empty string');
+            });
+
+            test('should return empty string for empty command array (gitbash)', () => {
+                const result = getShellCommandAsString(ShellConstants.GITBASH, []);
+                assert.strictEqual(result, '', 'Empty command array should return empty string');
+            });
+
+            test('should return empty string for empty command array (pwsh)', () => {
+                const result = getShellCommandAsString(ShellConstants.PWSH, []);
+                assert.strictEqual(result, '', 'Empty command array should return empty string');
+            });
+
+            test('should return empty string for empty command array (cmd)', () => {
+                const result = getShellCommandAsString(ShellConstants.CMD, []);
+                assert.strictEqual(result, '', 'Empty command array should return empty string');
             });
         });
     });
