@@ -582,7 +582,12 @@ async function generateShellActivationMapFromConfig(
     return { shellActivation, shellDeactivation };
 }
 
-async function windowsExceptionGenerateConfig(
+/**
+ * Generates shell-specific activation configuration for Windows.
+ * Handles PowerShell, CMD, and Git Bash with appropriate scripts.
+ * @internal Exported for testing
+ */
+export async function windowsExceptionGenerateConfig(
     sourceInitPath: string,
     prefix: string,
     condaFolder: string,
@@ -600,10 +605,16 @@ async function windowsExceptionGenerateConfig(
     const pwshActivate = [{ executable: activation }, { executable: 'conda', args: ['activate', quotedPrefix] }];
     const cmdActivate = [{ executable: sourceInitPath }, { executable: 'conda', args: ['activate', quotedPrefix] }];
 
-    // Use conda.sh for bash-based shells (Git Bash) instead of activate.bat
-    // conda.sh is the proper initialization script for bash shells
-    const bashSourcePath = condaShPath ?? sourceInitPath;
-    const bashActivate = [{ executable: 'source', args: [bashSourcePath.replace(/\\/g, '/'), quotedPrefix] }];
+    // When condaShPath is available, it is an initialization script (conda.sh) and does not
+    // itself activate an environment. In that case, first source conda.sh, then
+    // run "conda activate <envIdentifier>". When falling back to sourceInitPath,
+    // retain the existing single "source <activate-script> <env>" behavior.
+    const bashActivate: PythonCommandRunConfiguration[] = condaShPath
+        ? [
+              { executable: 'source', args: [condaShPath.replace(/\\/g, '/')] },
+              { executable: 'conda', args: ['activate', quotedPrefix] },
+          ]
+        : [{ executable: 'source', args: [sourceInitPath.replace(/\\/g, '/'), quotedPrefix] }];
     traceVerbose(
         `Windows activation commands: 
         PowerShell: ${JSON.stringify(pwshActivate)}, 
