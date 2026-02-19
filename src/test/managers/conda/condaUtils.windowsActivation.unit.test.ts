@@ -9,7 +9,8 @@ import { windowsExceptionGenerateConfig } from '../../../managers/conda/condaUti
  *
  * Key behavior tested:
  * - Git Bash uses conda.sh (initialization script) + conda activate when condaShPath is available
- * - Git Bash falls back to source <activate-script> <env> when condaShPath is not available
+ * - Git Bash skips activation when condaShPath is not available and sourceInitPath is .bat
+ * - Git Bash falls back to source <activate-script> <env> when condaShPath is not available and source is not .bat
  * - PowerShell uses ps1 hook + conda activate
  * - CMD uses activate.bat + conda activate
  */
@@ -51,10 +52,31 @@ suite('Conda Utils - windowsExceptionGenerateConfig', () => {
             assert.deepStrictEqual(gitBashActivation[1].args, ['activate', 'myenv']);
         });
 
-        test('Falls back to single source command when condaShPath is undefined', async () => {
-            // Arrange
+        test('Skips Git Bash activation when condaShPath is undefined and sourceInitPath is .bat', async () => {
+            // Arrange: sourceInitPath is a .bat file which Git Bash cannot source
             getCondaHookPs1PathStub.resolves(undefined);
             const sourceInitPath = 'C:\\conda\\Scripts\\activate.bat';
+            const prefix = 'myenv';
+            const condaFolder = 'C:\\conda';
+            const condaShPath = undefined; // Not available
+
+            // Act
+            const result = await windowsExceptionGenerateConfig(sourceInitPath, prefix, condaFolder, condaShPath);
+
+            // Assert: Git Bash activation should be empty since .bat cannot be sourced
+            const gitBashActivation = result.shellActivation.get(ShellConstants.GITBASH);
+            assert.ok(gitBashActivation, 'Git Bash activation should be defined');
+            assert.strictEqual(
+                gitBashActivation.length,
+                0,
+                'Git Bash activation should be empty when sourceInitPath is .bat',
+            );
+        });
+
+        test('Falls back to single source command when condaShPath is undefined and source is not .bat', async () => {
+            // Arrange: sourceInitPath is a bash-compatible script (no .bat extension)
+            getCondaHookPs1PathStub.resolves(undefined);
+            const sourceInitPath = 'C:\\conda\\Scripts\\activate'; // No .bat extension
             const prefix = 'myenv';
             const condaFolder = 'C:\\conda';
             const condaShPath = undefined; // Not available
@@ -65,11 +87,11 @@ suite('Conda Utils - windowsExceptionGenerateConfig', () => {
             // Assert
             const gitBashActivation = result.shellActivation.get(ShellConstants.GITBASH);
             assert.ok(gitBashActivation, 'Git Bash activation should be defined');
-            assert.strictEqual(gitBashActivation.length, 1, 'Should have 1 command when condaShPath not available');
+            assert.strictEqual(gitBashActivation.length, 1, 'Should have 1 command when source is bash-compatible');
 
             // Single command: source <activate-script> <env>
             assert.strictEqual(gitBashActivation[0].executable, 'source');
-            assert.deepStrictEqual(gitBashActivation[0].args, ['C:/conda/Scripts/activate.bat', 'myenv']);
+            assert.deepStrictEqual(gitBashActivation[0].args, ['C:/conda/Scripts/activate', 'myenv']);
         });
 
         test('Converts Windows backslashes to forward slashes for bash', async () => {

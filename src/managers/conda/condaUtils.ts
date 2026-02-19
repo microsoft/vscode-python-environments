@@ -512,10 +512,10 @@ async function buildShellActivationMapForConda(
         // P3: Handle Windows specifically ;this is carryover from vscode-python
         if (isWindows()) {
             logs.push('✓ Using Windows-specific activation configuration');
-            // Get conda.sh for bash-based shells (Git Bash, WSL bash)
+            // Get conda.sh for bash-based shells on Windows (e.g., Git Bash)
             const condaShPath = envManager.sourcingInformation.shellSourcingScripts?.sh;
             if (!condaShPath) {
-                logs.push('conda.sh not found, falling back to global sourcing script for bash activation');
+                logs.push('conda.sh not found, using preferred sourcing script path for bash activation');
             }
             shellMaps = await windowsExceptionGenerateConfig(
                 preferredSourcingPath,
@@ -607,14 +607,24 @@ export async function windowsExceptionGenerateConfig(
 
     // When condaShPath is available, it is an initialization script (conda.sh) and does not
     // itself activate an environment. In that case, first source conda.sh, then
-    // run "conda activate <envIdentifier>". When falling back to sourceInitPath,
-    // retain the existing single "source <activate-script> <env>" behavior.
-    const bashActivate: PythonCommandRunConfiguration[] = condaShPath
-        ? [
-              { executable: 'source', args: [condaShPath.replace(/\\/g, '/')] },
-              { executable: 'conda', args: ['activate', quotedPrefix] },
-          ]
-        : [{ executable: 'source', args: [sourceInitPath.replace(/\\/g, '/'), quotedPrefix] }];
+    // run "conda activate <envIdentifier>".
+    // When falling back to sourceInitPath, only emit a bash "source" command if the script
+    // is bash-compatible; on Windows, sourceInitPath may point to "activate.bat", which
+    // cannot be sourced by Git Bash, so in that case we skip emitting a Git Bash activation.
+    let bashActivate: PythonCommandRunConfiguration[];
+    if (condaShPath) {
+        bashActivate = [
+            { executable: 'source', args: [condaShPath.replace(/\\/g, '/')] },
+            { executable: 'conda', args: ['activate', quotedPrefix] },
+        ];
+    } else if (sourceInitPath.toLowerCase().endsWith('.bat')) {
+        traceVerbose(
+            `Skipping Git Bash activation fallback because sourceInitPath is a batch script: ${sourceInitPath}`,
+        );
+        bashActivate = [];
+    } else {
+        bashActivate = [{ executable: 'source', args: [sourceInitPath.replace(/\\/g, '/'), quotedPrefix] }];
+    }
     traceVerbose(
         `Windows activation commands: 
         PowerShell: ${JSON.stringify(pwshActivate)}, 
