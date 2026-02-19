@@ -310,8 +310,8 @@ suite('Project Manager Initialization - Settings Preservation', () => {
         test('adding a workspace folder should NOT write project settings', async () => {
             const mockConfig = new MockWorkspaceConfiguration();
             (mockConfig as any).get = <T>(key: string, defaultValue?: T): T | undefined => {
-                if (key === 'pythonProjects') return [] as unknown as T;
-                if (key === 'defaultEnvManager') return 'ms-python.python:venv' as T;
+                if (key === 'pythonProjects') {return [] as unknown as T;}
+                if (key === 'defaultEnvManager') {return 'ms-python.python:venv' as T;}
                 return defaultValue;
             };
             mockConfig.update = () => Promise.resolve();
@@ -347,8 +347,8 @@ suite('Project Manager Initialization - Settings Preservation', () => {
         test('removing a workspace folder should NOT write additional settings', async () => {
             const mockConfig = new MockWorkspaceConfiguration();
             (mockConfig as any).get = <T>(key: string, defaultValue?: T): T | undefined => {
-                if (key === 'pythonProjects') return [] as unknown as T;
-                if (key === 'defaultEnvManager') return 'ms-python.python:venv' as T;
+                if (key === 'pythonProjects') {return [] as unknown as T;}
+                if (key === 'defaultEnvManager') {return 'ms-python.python:venv' as T;}
                 return defaultValue;
             };
             mockConfig.update = () => Promise.resolve();
