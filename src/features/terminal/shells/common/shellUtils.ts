@@ -24,6 +24,11 @@ const shellDelimiterByShell = new Map<string, string>([
 ]);
 
 export function getShellCommandAsString(shell: string, command: PythonCommandRunConfiguration[]): string {
+    // Return empty string for empty command arrays (e.g., when activation is intentionally skipped)
+    if (command.length === 0) {
+        return '';
+    }
+
     const delimiter = shellDelimiterByShell.get(shell) ?? defaultShellDelimiter;
     const parts = [];
     for (const cmd of command) {
