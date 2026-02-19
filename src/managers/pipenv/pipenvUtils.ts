@@ -1,6 +1,8 @@
 // Utility functions for Pipenv environment management
 
+import * as nativeFs from 'fs';
 import * as fs from 'fs-extra';
+import * as os from 'os';
 import * as path from 'path';
 import { Uri } from 'vscode';
 import which from 'which';
@@ -284,4 +286,60 @@ export async function setPipenvForWorkspaces(fsPath: string[], envPath: string |
         }
     });
     await state.set(PIPENV_WORKSPACE_KEY, data);
+}
+
+/**
+ * Get the directories where pipenv virtualenvs may be stored.
+ *
+ * Pipenv can store virtualenvs in multiple locations with this priority:
+ * 1. WORKON_HOME (if set) - commonly shared with virtualenvwrapper
+ * 2. XDG_DATA_HOME/virtualenvs (Linux, if XDG_DATA_HOME is set)
+ * 3. ~/.local/share/virtualenvs (Linux/macOS default)
+ * 4. ~/.virtualenvs (Windows default)
+ *
+ * @returns Array of existing virtualenv directories
+ */
+export function getPipenvVirtualenvDirs(): string[] {
+    const dirs: string[] = [];
+
+    // WORKON_HOME takes precedence (shared with virtualenvwrapper)
+    const workonHome = process.env.WORKON_HOME;
+    if (workonHome) {
+        const resolved = untildify(workonHome);
+        if (nativeFs.existsSync(resolved)) {
+            dirs.push(resolved);
+            traceVerbose(`Pipenv: WORKON_HOME found at ${resolved}`);
+        } else {
+            traceVerbose(`Pipenv: WORKON_HOME set but does not exist: ${resolved}`);
+        }
+    }
+
+    // XDG_DATA_HOME/virtualenvs (primarily Linux, but check on all platforms)
+    const xdgDataHome = process.env.XDG_DATA_HOME;
+    if (xdgDataHome) {
+        const xdgVenvs = path.join(untildify(xdgDataHome), 'virtualenvs');
+        if (nativeFs.existsSync(xdgVenvs) && !dirs.includes(xdgVenvs)) {
+            dirs.push(xdgVenvs);
+            traceVerbose(`Pipenv: XDG_DATA_HOME/virtualenvs found at ${xdgVenvs}`);
+        }
+    }
+
+    // Platform-specific defaults
+    if (process.platform === 'linux' || process.platform === 'darwin') {
+        // Linux/macOS: ~/.local/share/virtualenvs
+        const defaultUnix = path.join(os.homedir(), '.local', 'share', 'virtualenvs');
+        if (nativeFs.existsSync(defaultUnix) && !dirs.includes(defaultUnix)) {
+            dirs.push(defaultUnix);
+            traceVerbose(`Pipenv: Platform default found at ${defaultUnix}`);
+        }
+    } else if (process.platform === 'win32') {
+        // Windows: ~/.virtualenvs
+        const defaultWin = path.join(os.homedir(), '.virtualenvs');
+        if (nativeFs.existsSync(defaultWin) && !dirs.includes(defaultWin)) {
+            dirs.push(defaultWin);
+            traceVerbose(`Pipenv: Platform default found at ${defaultWin}`);
+        }
+    }
+
+    return dirs;
 }
