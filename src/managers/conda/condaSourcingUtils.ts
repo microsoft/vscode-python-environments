@@ -7,6 +7,19 @@ import { traceError, traceInfo, traceVerbose } from '../../common/logging';
 import { isWindows } from '../../common/utils/platformUtils';
 
 /**
+ * Shell-specific sourcing scripts for conda activation.
+ * Each field is optional since not all scripts may be available on all systems.
+ */
+export interface ShellSourcingScripts {
+    /** PowerShell hook script (conda-hook.ps1) */
+    ps1?: string;
+    /** Bash/sh initialization script (conda.sh) */
+    sh?: string;
+    /** Windows CMD batch file (activate.bat) */
+    cmd?: string;
+}
+
+/**
  * Represents the status of conda sourcing in the current environment
  */
 export class CondaSourcingStatus {
@@ -16,14 +29,14 @@ export class CondaSourcingStatus {
      * @param condaFolder Path to the conda installation folder (derived from condaPath)
      * @param isActiveOnLaunch Whether conda was activated before VS Code launch
      * @param globalSourcingScript Path to the global sourcing script (if exists)
-     * @param shellSourcingScripts List of paths to shell-specific sourcing scripts
+     * @param shellSourcingScripts Shell-specific sourcing scripts (if found)
      */
     constructor(
         public readonly condaPath: string,
         public readonly condaFolder: string,
         public isActiveOnLaunch?: boolean,
         public globalSourcingScript?: string,
-        public shellSourcingScripts?: string[],
+        public shellSourcingScripts?: ShellSourcingScripts,
     ) {}
 
     /**
@@ -40,15 +53,23 @@ export class CondaSourcingStatus {
             lines.push(`├─ Global Sourcing Script: ${this.globalSourcingScript}`);
         }
 
-        if (this.shellSourcingScripts?.length) {
-            lines.push('└─ Shell-specific Sourcing Scripts:');
-            this.shellSourcingScripts.forEach((script, index, array) => {
-                const isLast = index === array.length - 1;
-                if (script) {
-                    // Only include scripts that exist
-                    lines.push(`   ${isLast ? '└─' : '├─'} ${script}`);
-                }
-            });
+        if (this.shellSourcingScripts) {
+            const scripts = this.shellSourcingScripts;
+            const entries = [
+                scripts.ps1 && `PowerShell: ${scripts.ps1}`,
+                scripts.sh && `Bash/sh: ${scripts.sh}`,
+                scripts.cmd && `CMD: ${scripts.cmd}`,
+            ].filter(Boolean);
+
+            if (entries.length > 0) {
+                lines.push('└─ Shell-specific Sourcing Scripts:');
+                entries.forEach((entry, index, array) => {
+                    const isLast = index === array.length - 1;
+                    lines.push(`   ${isLast ? '└─' : '├─'} ${entry}`);
+                });
+            } else {
+                lines.push('└─ No Shell-specific Sourcing Scripts Found');
+            }
         } else {
             lines.push('└─ No Shell-specific Sourcing Scripts Found');
         }
@@ -120,7 +141,7 @@ export async function findGlobalSourcingScript(condaFolder: string): Promise<str
     }
 }
 
-export async function findShellSourcingScripts(sourcingStatus: CondaSourcingStatus): Promise<string[]> {
+export async function findShellSourcingScripts(sourcingStatus: CondaSourcingStatus): Promise<ShellSourcingScripts> {
     const logs: string[] = [];
     logs.push('=== Conda Sourcing Shell Script Search ===');
 
@@ -170,7 +191,7 @@ export async function findShellSourcingScripts(sourcingStatus: CondaSourcingStat
         traceVerbose(logs.join('\n'));
     }
 
-    return [ps1Script, shScript, cmdActivate] as string[];
+    return { ps1: ps1Script, sh: shScript, cmd: cmdActivate };
 }
 
 /**

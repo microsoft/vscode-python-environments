@@ -512,10 +512,16 @@ async function buildShellActivationMapForConda(
         // P3: Handle Windows specifically ;this is carryover from vscode-python
         if (isWindows()) {
             logs.push('✓ Using Windows-specific activation configuration');
+            // Get conda.sh for bash-based shells (Git Bash, WSL bash)
+            const condaShPath = envManager.sourcingInformation.shellSourcingScripts?.sh;
+            if (!condaShPath) {
+                logs.push('conda.sh not found, falling back to global sourcing script for bash activation');
+            }
             shellMaps = await windowsExceptionGenerateConfig(
                 preferredSourcingPath,
                 envIdentifier,
                 envManager.sourcingInformation.condaFolder,
+                condaShPath,
             );
             return shellMaps;
         }
@@ -580,6 +586,7 @@ async function windowsExceptionGenerateConfig(
     sourceInitPath: string,
     prefix: string,
     condaFolder: string,
+    condaShPath?: string,
 ): Promise<ShellCommandMaps> {
     const shellActivation: Map<string, PythonCommandRunConfiguration[]> = new Map();
     const shellDeactivation: Map<string, PythonCommandRunConfiguration[]> = new Map();
@@ -593,7 +600,10 @@ async function windowsExceptionGenerateConfig(
     const pwshActivate = [{ executable: activation }, { executable: 'conda', args: ['activate', quotedPrefix] }];
     const cmdActivate = [{ executable: sourceInitPath }, { executable: 'conda', args: ['activate', quotedPrefix] }];
 
-    const bashActivate = [{ executable: 'source', args: [sourceInitPath.replace(/\\/g, '/'), quotedPrefix] }];
+    // Use conda.sh for bash-based shells (Git Bash) instead of activate.bat
+    // conda.sh is the proper initialization script for bash shells
+    const bashSourcePath = condaShPath ?? sourceInitPath;
+    const bashActivate = [{ executable: 'source', args: [bashSourcePath.replace(/\\/g, '/'), quotedPrefix] }];
     traceVerbose(
         `Windows activation commands: 
         PowerShell: ${JSON.stringify(pwshActivate)}, 
