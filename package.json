@@ -6,15 +6,14 @@
     "publisher": "ms-python",
     "preview": true,
     "engines": {
-        "vscode": "^1.110.0-20260204"
+        "vscode": "^1.106.0"
     },
     "categories": [
         "Other"
     ],
     "enabledApiProposals": [
         "terminalShellEnv",
-        "terminalDataWriteEvent",
-        "taskExecutionTerminal"
+        "terminalDataWriteEvent"
     ],
     "capabilities": {
         "untrustedWorkspaces": {
