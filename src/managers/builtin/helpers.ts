@@ -68,7 +68,11 @@ export async function runUV(
 ): Promise<string> {
     log?.info(`Running: uv ${args.join(' ')}`);
     return new Promise<string>((resolve, reject) => {
-        const proc = spawnProcess('uv', args, { cwd: cwd, timeout });
+        const spawnOptions: { cwd?: string; timeout?: number } = { cwd };
+        if (timeout !== undefined) {
+            spawnOptions.timeout = timeout;
+        }
+        const proc = spawnProcess('uv', args, spawnOptions);
         token?.onCancellationRequested(() => {
             proc.kill();
             reject(new CancellationError());
