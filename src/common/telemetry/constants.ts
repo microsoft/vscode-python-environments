@@ -40,6 +40,14 @@ export enum EventNames {
      * - toolName: string (the tool being used: venv, conda, poetry, etc.)
      */
     ENVIRONMENT_TOOL_USAGE = 'ENVIRONMENT_TOOL_USAGE',
+     * Telemetry event for environment discovery per manager.
+     * Properties:
+     * - managerId: string (the id of the environment manager)
+     * - result: 'success' | 'error' | 'timeout'
+     * - envCount: number (environments found, on success only)
+     * - errorType: string (error class name, on failure only)
+     */
+    ENVIRONMENT_DISCOVERY = 'ENVIRONMENT_DISCOVERY',
 }
 
 // Map all events to their properties
@@ -142,12 +150,17 @@ export interface IEventNamePropertyMapping {
     /* __GDPR__
         "package_management": {
             "managerId": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "owner": "eleanorjboyd" },
-            "result": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "owner": "eleanorjboyd" }
+            "result": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "owner": "eleanorjboyd" },
+            "errorType": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "owner": "eleanorjboyd" },
+            "triggerSource": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "owner": "eleanorjboyd" },
+            "<duration>": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "isMeasurement": true, "owner": "eleanorjboyd" }
         }
     */
     [EventNames.PACKAGE_MANAGEMENT]: {
         managerId: string;
         result: 'success' | 'error' | 'cancelled';
+        errorType?: string;
+        triggerSource: 'ui' | 'requirements' | 'package' | 'uninstall';
     };
 
     /* __GDPR__
@@ -196,5 +209,18 @@ export interface IEventNamePropertyMapping {
     */
     [EventNames.ENVIRONMENT_TOOL_USAGE]: {
         toolName: string;
+        "environment_discovery": {
+            "managerId": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "owner": "eleanorjboyd" },
+            "result": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "owner": "eleanorjboyd" },
+            "envCount": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "isMeasurement": true, "owner": "eleanorjboyd" },
+            "errorType": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "owner": "eleanorjboyd" },
+            "<duration>": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "isMeasurement": true, "owner": "eleanorjboyd" }
+        }
+    */
+    [EventNames.ENVIRONMENT_DISCOVERY]: {
+        managerId: string;
+        result: 'success' | 'error' | 'timeout';
+        envCount?: number;
+        errorType?: string;
     };
 }

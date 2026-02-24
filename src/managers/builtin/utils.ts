@@ -139,14 +139,29 @@ export async function refreshPythons(
     return sortEnvironments(collection);
 }
 
+const PIP_LIST_TIMEOUT_MS = 30_000;
+
 async function refreshPipPackagesRaw(environment: PythonEnvironment, log?: LogOutputChannel): Promise<string> {
     // Use environmentPath directly for consistency with UV environment tracking
     const useUv = await shouldUseUv(log, environment.environmentPath.fsPath);
     if (useUv) {
-        return await runUV(['pip', 'list', '--python', environment.execInfo.run.executable], undefined, log);
+        return await runUV(
+            ['pip', 'list', '--python', environment.execInfo.run.executable],
+            undefined,
+            log,
+            undefined,
+            PIP_LIST_TIMEOUT_MS,
+        );
     }
     try {
-        return await runPython(environment.execInfo.run.executable, ['-m', 'pip', 'list'], undefined, log);
+        return await runPython(
+            environment.execInfo.run.executable,
+            ['-m', 'pip', 'list'],
+            undefined,
+            log,
+            undefined,
+            PIP_LIST_TIMEOUT_MS,
+        );
     } catch (ex) {
         log?.error('Error running pip list', ex);
         log?.info(

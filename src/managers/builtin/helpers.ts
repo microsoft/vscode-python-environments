@@ -64,10 +64,15 @@ export async function runUV(
     cwd?: string,
     log?: LogOutputChannel,
     token?: CancellationToken,
+    timeout?: number,
 ): Promise<string> {
     log?.info(`Running: uv ${args.join(' ')}`);
     return new Promise<string>((resolve, reject) => {
-        const proc = spawnProcess('uv', args, { cwd: cwd });
+        const spawnOptions: { cwd?: string; timeout?: number } = { cwd };
+        if (timeout !== undefined) {
+            spawnOptions.timeout = timeout;
+        }
+        const proc = spawnProcess('uv', args, spawnOptions);
         token?.onCancellationRequested(() => {
             proc.kill();
             reject(new CancellationError());
@@ -104,10 +109,11 @@ export async function runPython(
     cwd?: string,
     log?: LogOutputChannel,
     token?: CancellationToken,
+    timeout?: number,
 ): Promise<string> {
     log?.info(`Running: ${python} ${args.join(' ')}`);
     return new Promise<string>((resolve, reject) => {
-        const proc = spawnProcess(python, args, { cwd: cwd });
+        const proc = spawnProcess(python, args, { cwd: cwd, timeout });
         token?.onCancellationRequested(() => {
             proc.kill();
             reject(new CancellationError());

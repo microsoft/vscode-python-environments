@@ -28,6 +28,7 @@ import {
     SetEnvironmentScope,
 } from './api';
 import { CreateEnvironmentNotSupported, RemoveEnvironmentNotSupported } from './common/errors/NotSupportedError';
+import { StopWatch } from './common/stopWatch';
 import { EventNames } from './common/telemetry/constants';
 import { sendTelemetryEvent } from './common/telemetry/sender';
 
@@ -201,8 +202,30 @@ export class InternalEnvironmentManager implements EnvironmentManager {
             : Promise.reject(new RemoveEnvironmentNotSupported(`Remove Environment not supported by: ${this.id}`));
     }
 
-    refresh(options: RefreshEnvironmentsScope): Promise<void> {
-        return this.manager.refresh(options);
+    async refresh(options: RefreshEnvironmentsScope): Promise<void> {
+        const sw = new StopWatch();
+        try {
+            await this.manager.refresh(options);
+            const envs = await this.manager.getEnvironments('all').catch(() => []);
+            sendTelemetryEvent(EventNames.ENVIRONMENT_DISCOVERY, sw.elapsedTime, {
+                managerId: this.id,
+                result: 'success',
+                envCount: envs.length,
+            });
+        } catch (ex) {
+            const isTimeout = ex instanceof Error && ex.message.includes('timed out');
+            sendTelemetryEvent(
+                EventNames.ENVIRONMENT_DISCOVERY,
+                sw.elapsedTime,
+                {
+                    managerId: this.id,
+                    result: isTimeout ? 'timeout' : 'error',
+                    errorType: ex instanceof Error ? ex.name : 'unknown',
+                },
+                ex instanceof Error ? ex : undefined,
+            );
+            throw ex;
+        }
     }
 
     getEnvironments(options: GetEnvironmentsScope): Promise<PythonEnvironment[]> {
@@ -245,6 +268,23 @@ export class InternalEnvironmentManager implements EnvironmentManager {
     }
 }
 
+function inferPackageManagementTrigger(
+    options: PackageManagementOptions,
+): 'ui' | 'requirements' | 'package' | 'uninstall' {
+    const hasInstall = options.install && options.install.length > 0;
+    const hasUninstall = options.uninstall && options.uninstall.length > 0;
+    if (!hasInstall && hasUninstall) {
+        return 'uninstall';
+    }
+    if (!hasInstall) {
+        return 'ui'; // empty install list opens the package picker UI
+    }
+    if (options.install?.some((arg) => arg === '-r' || arg === '--requirement')) {
+        return 'requirements';
+    }
+    return 'package';
+}
+
 export class InternalPackageManager implements PackageManager {
     public constructor(
         public readonly id: string,
@@ -271,18 +311,30 @@ export class InternalPackageManager implements PackageManager {
     }
 
     async manage(environment: PythonEnvironment, options: PackageManagementOptions): Promise<void> {
+        const stopWatch = new StopWatch();
+        const triggerSource = inferPackageManagementTrigger(options);
         try {
             await this.manager.manage(environment, options);
-            sendTelemetryEvent(EventNames.PACKAGE_MANAGEMENT, undefined, { managerId: this.id, result: 'success' });
+            sendTelemetryEvent(EventNames.PACKAGE_MANAGEMENT, stopWatch.elapsedTime, {
+                managerId: this.id,
+                result: 'success',
+                triggerSource,
+            });
         } catch (error) {
             if (error instanceof CancellationError) {
-                sendTelemetryEvent(EventNames.PACKAGE_MANAGEMENT, undefined, {
+                sendTelemetryEvent(EventNames.PACKAGE_MANAGEMENT, stopWatch.elapsedTime, {
                     managerId: this.id,
                     result: 'cancelled',
+                    triggerSource,
                 });
                 throw error;
             }
-            sendTelemetryEvent(EventNames.PACKAGE_MANAGEMENT, undefined, { managerId: this.id, result: 'error' });
+            sendTelemetryEvent(EventNames.PACKAGE_MANAGEMENT, stopWatch.elapsedTime, {
+                managerId: this.id,
+                result: 'error',
+                errorType: error instanceof Error ? error.name : 'unknown',
+                triggerSource,
+            });
             throw error;
         }
     }
