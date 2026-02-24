@@ -40,6 +40,7 @@ export enum EventNames {
      * - toolName: string (the tool being used: venv, conda, poetry, etc.)
      */
     ENVIRONMENT_TOOL_USAGE = 'ENVIRONMENT_TOOL_USAGE',
+    /**
      * Telemetry event for environment discovery per manager.
      * Properties:
      * - managerId: string (the id of the environment manager)
@@ -209,14 +210,24 @@ export interface IEventNamePropertyMapping {
     */
     [EventNames.ENVIRONMENT_TOOL_USAGE]: {
         toolName: string;
-        "environment_discovery": {
-            "managerId": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "owner": "eleanorjboyd" },
-            "result": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "owner": "eleanorjboyd" },
-            "envCount": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "isMeasurement": true, "owner": "eleanorjboyd" },
-            "errorType": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "owner": "eleanorjboyd" },
-            "<duration>": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "isMeasurement": true, "owner": "eleanorjboyd" }
-        }
-    */
+        environment_discovery: {
+            managerId: { classification: 'SystemMetaData'; purpose: 'FeatureInsight'; owner: 'eleanorjboyd' };
+            result: { classification: 'SystemMetaData'; purpose: 'FeatureInsight'; owner: 'eleanorjboyd' };
+            envCount: {
+                classification: 'SystemMetaData';
+                purpose: 'FeatureInsight';
+                isMeasurement: true;
+                owner: 'eleanorjboyd';
+            };
+            errorType: { classification: 'SystemMetaData'; purpose: 'FeatureInsight'; owner: 'eleanorjboyd' };
+            '<duration>': {
+                classification: 'SystemMetaData';
+                purpose: 'FeatureInsight';
+                isMeasurement: true;
+                owner: 'eleanorjboyd';
+            };
+        };
+    };
     [EventNames.ENVIRONMENT_DISCOVERY]: {
         managerId: string;
         result: 'success' | 'error' | 'timeout';
