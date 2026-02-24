@@ -1,5 +1,6 @@
 import { getDefaultEnvManagerSetting, getDefaultPkgManagerSetting } from '../../features/settings/settingHelpers';
 import { EnvironmentManagers, PythonProjectManager } from '../../internal.api';
+import { getUvEnvironments } from '../../managers/builtin/uvEnvironments';
 import { getWorkspaceFolders } from '../workspace.apis';
 import { EventNames } from './constants';
 import { sendTelemetryEvent } from './sender';
@@ -115,19 +116,23 @@ export async function sendEnvironmentToolUsageTelemetry(
         try {
             const env = await envManagers.getEnvironment(project.uri);
             if (env?.envId?.managerId) {
-                const toolName = extractToolName(env.envId.managerId);
+                let toolName = extractToolName(env.envId.managerId);
 
-                // Check if this is a UV environment (UV uses venv manager but has 'uv' in description)
-                const isUv = env.description?.toLowerCase().includes('uv') ?? false;
-
-                // Determine the tool name
-                if (isUv) {
-                    toolsUsed.add('uv');
-                } else {
-                    // Normalize 'global' to 'system' for consistency
-                    const normalizedTool = toolName === 'global' ? 'system' : toolName;
-                    toolsUsed.add(normalizedTool);
+                // UV environments share the venv manager. Check the persistent UV env list instead
+                if (toolName === 'venv' && env.environmentPath) {
+                    // Lazily load UV environment paths only when a venv environment is encountered
+                    const uvEnvPaths = await getUvEnvironments();
+                    if (uvEnvPaths.includes(env.environmentPath.fsPath)) {
+                        toolName = 'uv';
+                    }
                 }
+
+                // Normalize 'global' to 'system' for consistency
+                if (toolName === 'global') {
+                    toolName = 'system';
+                }
+
+                toolsUsed.add(toolName);
             }
         } catch {
             // Ignore errors when getting environment for a project
