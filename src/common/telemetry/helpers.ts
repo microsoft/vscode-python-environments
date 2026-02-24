@@ -1,6 +1,7 @@
 import { getDefaultEnvManagerSetting, getDefaultPkgManagerSetting } from '../../features/settings/settingHelpers';
 import { EnvironmentManagers, PythonProjectManager } from '../../internal.api';
 import { getUvEnvironments } from '../../managers/builtin/uvEnvironments';
+import { traceVerbose } from '../logging';
 import { getWorkspaceFolders } from '../workspace.apis';
 import { EventNames } from './constants';
 import { sendTelemetryEvent } from './sender';
@@ -106,43 +107,50 @@ export async function sendEnvironmentToolUsageTelemetry(
     pm: PythonProjectManager,
     envManagers: EnvironmentManagers,
 ): Promise<void> {
-    const projects = pm.getProjects();
+    try {
+        const projects = pm.getProjects();
 
-    // Track which tools are used (Set ensures uniqueness)
-    const toolsUsed = new Set<string>();
+        // Track which tools are used (Set ensures uniqueness)
+        const toolsUsed = new Set<string>();
 
-    // Check which environment manager is used for each project
-    for (const project of projects) {
-        try {
-            const env = await envManagers.getEnvironment(project.uri);
-            if (env?.envId?.managerId) {
-                let toolName = extractToolName(env.envId.managerId);
+        // Lazily loaded once when a venv environment is first encountered
+        let uvEnvPaths: string[] | undefined;
 
-                // UV environments share the venv manager. Check the persistent UV env list instead
-                if (toolName === 'venv' && env.environmentPath) {
-                    // Lazily load UV environment paths only when a venv environment is encountered
-                    const uvEnvPaths = await getUvEnvironments();
-                    if (uvEnvPaths.includes(env.environmentPath.fsPath)) {
-                        toolName = 'uv';
+        // Check which environment manager is used for each project
+        for (const project of projects) {
+            try {
+                const env = await envManagers.getEnvironment(project.uri);
+                if (env?.envId?.managerId) {
+                    let toolName = extractToolName(env.envId.managerId);
+
+                    // UV environments share the venv manager. Check the persistent UV env list instead
+                    if (toolName === 'venv' && env.environmentPath) {
+                        uvEnvPaths ??= await getUvEnvironments();
+                        if (uvEnvPaths.includes(env.environmentPath.fsPath)) {
+                            toolName = 'uv';
+                        }
                     }
-                }
 
-                // Normalize 'global' to 'system' for consistency
-                if (toolName === 'global') {
-                    toolName = 'system';
-                }
+                    // Normalize 'global' to 'system' for consistency
+                    if (toolName === 'global') {
+                        toolName = 'system';
+                    }
 
-                toolsUsed.add(toolName);
+                    toolsUsed.add(toolName);
+                }
+            } catch {
+                // Ignore errors when getting environment for a project
             }
-        } catch {
-            // Ignore errors when getting environment for a project
         }
-    }
 
-    // Fire one event per tool used
-    toolsUsed.forEach((tool) => {
-        sendTelemetryEvent(EventNames.ENVIRONMENT_TOOL_USAGE, undefined, {
-            toolName: tool,
+        // Fire one event per tool used
+        toolsUsed.forEach((tool) => {
+            sendTelemetryEvent(EventNames.ENVIRONMENT_TOOL_USAGE, undefined, {
+                toolName: tool,
+            });
         });
-    });
+    } catch (error) {
+        // Telemetry failures must never disrupt extension activation
+        traceVerbose('Failed to send environment tool usage telemetry:', error);
+    }
 }
