@@ -210,24 +210,16 @@ export interface IEventNamePropertyMapping {
     */
     [EventNames.ENVIRONMENT_TOOL_USAGE]: {
         toolName: string;
-        environment_discovery: {
-            managerId: { classification: 'SystemMetaData'; purpose: 'FeatureInsight'; owner: 'eleanorjboyd' };
-            result: { classification: 'SystemMetaData'; purpose: 'FeatureInsight'; owner: 'eleanorjboyd' };
-            envCount: {
-                classification: 'SystemMetaData';
-                purpose: 'FeatureInsight';
-                isMeasurement: true;
-                owner: 'eleanorjboyd';
-            };
-            errorType: { classification: 'SystemMetaData'; purpose: 'FeatureInsight'; owner: 'eleanorjboyd' };
-            '<duration>': {
-                classification: 'SystemMetaData';
-                purpose: 'FeatureInsight';
-                isMeasurement: true;
-                owner: 'eleanorjboyd';
-            };
-        };
     };
+    /* __GDPR__
+        "environment_discovery": {
+            "managerId": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "owner": "eleanorjboyd" },
+            "result": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "owner": "eleanorjboyd" },
+            "envCount": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "isMeasurement": true, "owner": "eleanorjboyd" },
+            "errorType": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "owner": "eleanorjboyd" },
+            "<duration>": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "isMeasurement": true, "owner": "eleanorjboyd" }
+        }
+    */
     [EventNames.ENVIRONMENT_DISCOVERY]: {
         managerId: string;
         result: 'success' | 'error' | 'timeout';
