@@ -23,6 +23,56 @@ const RESOLVE_TIMEOUT_MS = 30_000; // 30 seconds for single resolve
 // Restart/recovery constants
 const MAX_RESTART_ATTEMPTS = 3;
 const RESTART_BACKOFF_BASE_MS = 1_000; // 1 second base, exponential: 1s, 2s, 4s
+const MAX_CONFIGURE_TIMEOUTS_BEFORE_KILL = 2; // Kill on the 2nd consecutive timeout
+
+/**
+ * Computes the configure timeout with exponential backoff.
+ * @param retryCount Number of consecutive configure timeouts so far
+ * @returns Timeout in milliseconds: 30s, 60s, 120s, ... capped at REFRESH_TIMEOUT_MS
+ */
+export function getConfigureTimeoutMs(retryCount: number): number {
+    return Math.min(CONFIGURE_TIMEOUT_MS * Math.pow(2, retryCount), REFRESH_TIMEOUT_MS);
+}
+
+/**
+ * Encapsulates the configure retry state machine.
+ * Tracks consecutive timeout count and decides whether to kill the process.
+ */
+export class ConfigureRetryState {
+    private _timeoutCount: number = 0;
+
+    get timeoutCount(): number {
+        return this._timeoutCount;
+    }
+
+    /** Returns the timeout duration for the current attempt (with exponential backoff). */
+    getTimeoutMs(): number {
+        return getConfigureTimeoutMs(this._timeoutCount);
+    }
+
+    /** Call after a successful configure. Resets the timeout counter. */
+    onSuccess(): void {
+        this._timeoutCount = 0;
+    }
+
+    /**
+     * Call after a configure timeout. Increments the counter and returns
+     * whether the process should be killed (true = kill, false = let it continue).
+     */
+    onTimeout(): boolean {
+        this._timeoutCount++;
+        if (this._timeoutCount >= MAX_CONFIGURE_TIMEOUTS_BEFORE_KILL) {
+            this._timeoutCount = 0;
+            return true; // Kill the process
+        }
+        return false; // Let PET continue
+    }
+
+    /** Call after a non-timeout error or process restart. Resets the counter. */
+    reset(): void {
+        this._timeoutCount = 0;
+    }
+}
 
 export async function getNativePythonToolsPath(): Promise<string> {
     const envsExt = getExtension(ENVS_EXTENSION_ID);
@@ -120,13 +170,26 @@ interface RefreshOptions {
 }
 
 /**
+ * Error thrown when a JSON-RPC request times out.
+ */
+export class RpcTimeoutError extends Error {
+    constructor(
+        public readonly method: string,
+        timeoutMs: number,
+    ) {
+        super(`Request '${method}' timed out after ${timeoutMs}ms`);
+        this.name = this.constructor.name;
+    }
+}
+
+/**
  * Wraps a JSON-RPC sendRequest call with a timeout.
  * @param connection The JSON-RPC connection
  * @param method The RPC method name
  * @param params The parameters to send
  * @param timeoutMs Timeout in milliseconds
  * @returns The result of the request
- * @throws Error if the request times out
+ * @throws RpcTimeoutError if the request times out
  */
 async function sendRequestWithTimeout<T>(
     connection: rpc.MessageConnection,
@@ -138,7 +201,7 @@ async function sendRequestWithTimeout<T>(
     const timeoutPromise = new Promise<never>((_, reject) => {
         const timer = setTimeout(() => {
             cts.cancel();
-            reject(new Error(`Request '${method}' timed out after ${timeoutMs}ms`));
+            reject(new RpcTimeoutError(method, timeoutMs));
         }, timeoutMs);
         // Clear timeout if the CancellationTokenSource is disposed
         cts.token.onCancellationRequested(() => clearTimeout(timer));
@@ -161,6 +224,7 @@ class NativePythonFinderImpl implements NativePythonFinder {
     private startFailed: boolean = false;
     private restartAttempts: number = 0;
     private isRestarting: boolean = false;
+    private readonly configureRetry = new ConfigureRetryState();
 
     constructor(
         private readonly outputChannel: LogOutputChannel,
@@ -192,8 +256,9 @@ class NativePythonFinderImpl implements NativePythonFinder {
             this.restartAttempts = 0;
             return environment;
         } catch (ex) {
-            // On timeout, kill the hung process so next request triggers restart
-            if (ex instanceof Error && ex.message.includes('timed out')) {
+            // On resolve timeout (not configure — configure handles its own timeout),
+            // kill the hung process so next request triggers restart
+            if (ex instanceof RpcTimeoutError && ex.method !== 'configure') {
                 this.outputChannel.warn('[pet] Resolve request timed out, killing hung process for restart');
                 this.killProcess();
                 this.processExited = true;
@@ -260,6 +325,7 @@ class NativePythonFinderImpl implements NativePythonFinder {
             this.processExited = false;
             this.startFailed = false;
             this.lastConfiguration = undefined; // Force reconfiguration
+            this.configureRetry.reset();
 
             // Start fresh
             this.connection = this.start();
@@ -544,8 +610,9 @@ class NativePythonFinderImpl implements NativePythonFinder {
             // Reset restart attempts on successful refresh
             this.restartAttempts = 0;
         } catch (ex) {
-            // On timeout, kill the hung process so next request triggers restart
-            if (ex instanceof Error && ex.message.includes('timed out')) {
+            // On refresh timeout (not configure — configure handles its own timeout),
+            // kill the hung process so next request triggers restart
+            if (ex instanceof RpcTimeoutError && ex.method !== 'configure') {
                 this.outputChannel.warn('[pet] Request timed out, killing hung process for restart');
                 this.killProcess();
                 this.processExited = true;
@@ -583,17 +650,40 @@ class NativePythonFinderImpl implements NativePythonFinder {
             return;
         }
         this.outputChannel.info('[pet] configure: Sending configuration update:', JSON.stringify(options));
+        // Exponential backoff: 30s, 60s on retry. Capped at REFRESH_TIMEOUT_MS.
+        const timeoutMs = this.configureRetry.getTimeoutMs();
+        if (this.configureRetry.timeoutCount > 0) {
+            this.outputChannel.info(
+                `[pet] configure: Using extended timeout of ${timeoutMs}ms (retry ${this.configureRetry.timeoutCount})`,
+            );
+        }
         try {
+            await sendRequestWithTimeout(this.connection, 'configure', options, timeoutMs);
+            // Only cache after success so failed/timed-out calls will retry
             this.lastConfiguration = options;
-            await sendRequestWithTimeout(this.connection, 'configure', options, CONFIGURE_TIMEOUT_MS);
+            this.configureRetry.onSuccess();
         } catch (ex) {
-            // On timeout, kill the hung process so next request triggers restart
-            if (ex instanceof Error && ex.message.includes('timed out')) {
-                this.outputChannel.warn('[pet] Configure request timed out, killing hung process for restart');
-                this.killProcess();
-                this.processExited = true;
+            // Clear cached config so the next call retries instead of short-circuiting via configurationEquals
+            this.lastConfiguration = undefined;
+            if (ex instanceof RpcTimeoutError) {
+                const shouldKill = this.configureRetry.onTimeout();
+                if (shouldKill) {
+                    this.outputChannel.error(
+                        '[pet] Configure timed out on consecutive attempts, killing hung process for restart',
+                    );
+                    this.killProcess();
+                    this.processExited = true;
+                } else {
+                    this.outputChannel.warn(
+                        `[pet] Configure request timed out (attempt ${this.configureRetry.timeoutCount}/${MAX_CONFIGURE_TIMEOUTS_BEFORE_KILL}), ` +
+                            'will retry on next request without killing process',
+                    );
+                }
+            } else {
+                // Non-timeout errors reset the counter so only consecutive timeouts are counted
+                this.configureRetry.reset();
+                this.outputChannel.error('[pet] configure: Configuration error', ex);
             }
-            this.outputChannel.error('[pet] configure: Configuration error', ex);
             throw ex;
         }
     }
