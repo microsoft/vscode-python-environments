@@ -34,6 +34,46 @@ export function getConfigureTimeoutMs(retryCount: number): number {
     return Math.min(CONFIGURE_TIMEOUT_MS * Math.pow(2, retryCount), REFRESH_TIMEOUT_MS);
 }
 
+/**
+ * Encapsulates the configure retry state machine.
+ * Tracks consecutive timeout count and decides whether to kill the process.
+ */
+export class ConfigureRetryState {
+    private _timeoutCount: number = 0;
+
+    get timeoutCount(): number {
+        return this._timeoutCount;
+    }
+
+    /** Returns the timeout duration for the current attempt (with exponential backoff). */
+    getTimeoutMs(): number {
+        return getConfigureTimeoutMs(this._timeoutCount);
+    }
+
+    /** Call after a successful configure. Resets the timeout counter. */
+    onSuccess(): void {
+        this._timeoutCount = 0;
+    }
+
+    /**
+     * Call after a configure timeout. Increments the counter and returns
+     * whether the process should be killed (true = kill, false = let it continue).
+     */
+    onTimeout(): boolean {
+        this._timeoutCount++;
+        if (this._timeoutCount >= MAX_CONFIGURE_TIMEOUTS_BEFORE_KILL) {
+            this._timeoutCount = 0;
+            return true; // Kill the process
+        }
+        return false; // Let PET continue
+    }
+
+    /** Call after a non-timeout error or process restart. Resets the counter. */
+    reset(): void {
+        this._timeoutCount = 0;
+    }
+}
+
 export async function getNativePythonToolsPath(): Promise<string> {
     const envsExt = getExtension(ENVS_EXTENSION_ID);
     if (envsExt) {
@@ -184,7 +224,7 @@ class NativePythonFinderImpl implements NativePythonFinder {
     private startFailed: boolean = false;
     private restartAttempts: number = 0;
     private isRestarting: boolean = false;
-    private configureTimeoutCount: number = 0;
+    private readonly configureRetry = new ConfigureRetryState();
 
     constructor(
         private readonly outputChannel: LogOutputChannel,
@@ -285,7 +325,7 @@ class NativePythonFinderImpl implements NativePythonFinder {
             this.processExited = false;
             this.startFailed = false;
             this.lastConfiguration = undefined; // Force reconfiguration
-            this.configureTimeoutCount = 0;
+            this.configureRetry.reset();
 
             // Start fresh
             this.connection = this.start();
@@ -611,38 +651,37 @@ class NativePythonFinderImpl implements NativePythonFinder {
         }
         this.outputChannel.info('[pet] configure: Sending configuration update:', JSON.stringify(options));
         // Exponential backoff: 30s, 60s on retry. Capped at REFRESH_TIMEOUT_MS.
-        const timeoutMs = getConfigureTimeoutMs(this.configureTimeoutCount);
-        if (this.configureTimeoutCount > 0) {
+        const timeoutMs = this.configureRetry.getTimeoutMs();
+        if (this.configureRetry.timeoutCount > 0) {
             this.outputChannel.info(
-                `[pet] configure: Using extended timeout of ${timeoutMs}ms (retry ${this.configureTimeoutCount})`,
+                `[pet] configure: Using extended timeout of ${timeoutMs}ms (retry ${this.configureRetry.timeoutCount})`,
             );
         }
         try {
             await sendRequestWithTimeout(this.connection, 'configure', options, timeoutMs);
             // Only cache after success so failed/timed-out calls will retry
             this.lastConfiguration = options;
-            this.configureTimeoutCount = 0;
+            this.configureRetry.onSuccess();
         } catch (ex) {
             // Clear cached config so the next call retries instead of short-circuiting via configurationEquals
             this.lastConfiguration = undefined;
             if (ex instanceof RpcTimeoutError) {
-                this.configureTimeoutCount++;
-                if (this.configureTimeoutCount >= MAX_CONFIGURE_TIMEOUTS_BEFORE_KILL) {
-                    // Repeated configure timeouts suggest PET is truly hung — kill and restart
+                const shouldKill = this.configureRetry.onTimeout();
+                if (shouldKill) {
                     this.outputChannel.error(
-                        `[pet] Configure timed out ${this.configureTimeoutCount} consecutive times, killing hung process for restart`,
+                        '[pet] Configure timed out on consecutive attempts, killing hung process for restart',
                     );
                     this.killProcess();
                     this.processExited = true;
-                    this.configureTimeoutCount = 0;
                 } else {
-                    // First timeout — PET may still be working. Let it continue and retry next call.
                     this.outputChannel.warn(
-                        `[pet] Configure request timed out (attempt ${this.configureTimeoutCount}/${MAX_CONFIGURE_TIMEOUTS_BEFORE_KILL}), ` +
+                        `[pet] Configure request timed out (attempt ${this.configureRetry.timeoutCount}/${MAX_CONFIGURE_TIMEOUTS_BEFORE_KILL}), ` +
                             'will retry on next request without killing process',
                     );
                 }
             } else {
+                // Non-timeout errors reset the counter so only consecutive timeouts are counted
+                this.configureRetry.reset();
                 this.outputChannel.error('[pet] configure: Configuration error', ex);
             }
             throw ex;
