@@ -25,6 +25,15 @@ const MAX_RESTART_ATTEMPTS = 3;
 const RESTART_BACKOFF_BASE_MS = 1_000; // 1 second base, exponential: 1s, 2s, 4s
 const MAX_CONFIGURE_TIMEOUTS_BEFORE_KILL = 2; // Kill on the 2nd consecutive timeout
 
+/**
+ * Computes the configure timeout with exponential backoff.
+ * @param retryCount Number of consecutive configure timeouts so far
+ * @returns Timeout in milliseconds: 30s, 60s, 120s, ... capped at REFRESH_TIMEOUT_MS
+ */
+export function getConfigureTimeoutMs(retryCount: number): number {
+    return Math.min(CONFIGURE_TIMEOUT_MS * Math.pow(2, retryCount), REFRESH_TIMEOUT_MS);
+}
+
 export async function getNativePythonToolsPath(): Promise<string> {
     const envsExt = getExtension(ENVS_EXTENSION_ID);
     if (envsExt) {
@@ -123,7 +132,7 @@ interface RefreshOptions {
 /**
  * Error thrown when a JSON-RPC request times out.
  */
-class RpcTimeoutError extends Error {
+export class RpcTimeoutError extends Error {
     constructor(
         public readonly method: string,
         timeoutMs: number,
@@ -602,7 +611,7 @@ class NativePythonFinderImpl implements NativePythonFinder {
         }
         this.outputChannel.info('[pet] configure: Sending configuration update:', JSON.stringify(options));
         // Exponential backoff: 30s, 60s on retry. Capped at REFRESH_TIMEOUT_MS.
-        const timeoutMs = Math.min(CONFIGURE_TIMEOUT_MS * Math.pow(2, this.configureTimeoutCount), REFRESH_TIMEOUT_MS);
+        const timeoutMs = getConfigureTimeoutMs(this.configureTimeoutCount);
         if (this.configureTimeoutCount > 0) {
             this.outputChannel.info(
                 `[pet] configure: Using extended timeout of ${timeoutMs}ms (retry ${this.configureTimeoutCount})`,
