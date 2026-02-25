@@ -129,6 +129,7 @@ class RpcTimeoutError extends Error {
         timeoutMs: number,
     ) {
         super(`Request '${method}' timed out after ${timeoutMs}ms`);
+        this.name = this.constructor.name;
     }
 }
 
@@ -600,12 +601,21 @@ class NativePythonFinderImpl implements NativePythonFinder {
             return;
         }
         this.outputChannel.info('[pet] configure: Sending configuration update:', JSON.stringify(options));
+        // Exponential backoff: 30s, 60s on retry. Capped at REFRESH_TIMEOUT_MS.
+        const timeoutMs = Math.min(CONFIGURE_TIMEOUT_MS * Math.pow(2, this.configureTimeoutCount), REFRESH_TIMEOUT_MS);
+        if (this.configureTimeoutCount > 0) {
+            this.outputChannel.info(
+                `[pet] configure: Using extended timeout of ${timeoutMs}ms (retry ${this.configureTimeoutCount})`,
+            );
+        }
         try {
-            await sendRequestWithTimeout(this.connection, 'configure', options, CONFIGURE_TIMEOUT_MS);
+            await sendRequestWithTimeout(this.connection, 'configure', options, timeoutMs);
             // Only cache after success so failed/timed-out calls will retry
             this.lastConfiguration = options;
             this.configureTimeoutCount = 0;
         } catch (ex) {
+            // Clear cached config so the next call retries instead of short-circuiting via configurationEquals
+            this.lastConfiguration = undefined;
             if (ex instanceof RpcTimeoutError) {
                 this.configureTimeoutCount++;
                 if (this.configureTimeoutCount >= MAX_CONFIGURE_TIMEOUTS_BEFORE_KILL) {
