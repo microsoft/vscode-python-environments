@@ -23,6 +23,7 @@ const RESOLVE_TIMEOUT_MS = 30_000; // 30 seconds for single resolve
 // Restart/recovery constants
 const MAX_RESTART_ATTEMPTS = 3;
 const RESTART_BACKOFF_BASE_MS = 1_000; // 1 second base, exponential: 1s, 2s, 4s
+const MAX_CONFIGURE_TIMEOUTS_BEFORE_KILL = 2; // Kill on the 2nd consecutive timeout
 
 export async function getNativePythonToolsPath(): Promise<string> {
     const envsExt = getExtension(ENVS_EXTENSION_ID);
@@ -120,13 +121,25 @@ interface RefreshOptions {
 }
 
 /**
+ * Error thrown when a JSON-RPC request times out.
+ */
+class RpcTimeoutError extends Error {
+    constructor(
+        public readonly method: string,
+        timeoutMs: number,
+    ) {
+        super(`Request '${method}' timed out after ${timeoutMs}ms`);
+    }
+}
+
+/**
  * Wraps a JSON-RPC sendRequest call with a timeout.
  * @param connection The JSON-RPC connection
  * @param method The RPC method name
  * @param params The parameters to send
  * @param timeoutMs Timeout in milliseconds
  * @returns The result of the request
- * @throws Error if the request times out
+ * @throws RpcTimeoutError if the request times out
  */
 async function sendRequestWithTimeout<T>(
     connection: rpc.MessageConnection,
@@ -138,7 +151,7 @@ async function sendRequestWithTimeout<T>(
     const timeoutPromise = new Promise<never>((_, reject) => {
         const timer = setTimeout(() => {
             cts.cancel();
-            reject(new Error(`Request '${method}' timed out after ${timeoutMs}ms`));
+            reject(new RpcTimeoutError(method, timeoutMs));
         }, timeoutMs);
         // Clear timeout if the CancellationTokenSource is disposed
         cts.token.onCancellationRequested(() => clearTimeout(timer));
@@ -161,6 +174,7 @@ class NativePythonFinderImpl implements NativePythonFinder {
     private startFailed: boolean = false;
     private restartAttempts: number = 0;
     private isRestarting: boolean = false;
+    private configureTimeoutCount: number = 0;
 
     constructor(
         private readonly outputChannel: LogOutputChannel,
@@ -192,8 +206,9 @@ class NativePythonFinderImpl implements NativePythonFinder {
             this.restartAttempts = 0;
             return environment;
         } catch (ex) {
-            // On timeout, kill the hung process so next request triggers restart
-            if (ex instanceof Error && ex.message.includes('timed out')) {
+            // On resolve timeout (not configure — configure handles its own timeout),
+            // kill the hung process so next request triggers restart
+            if (ex instanceof RpcTimeoutError && ex.method !== 'configure') {
                 this.outputChannel.warn('[pet] Resolve request timed out, killing hung process for restart');
                 this.killProcess();
                 this.processExited = true;
@@ -260,6 +275,7 @@ class NativePythonFinderImpl implements NativePythonFinder {
             this.processExited = false;
             this.startFailed = false;
             this.lastConfiguration = undefined; // Force reconfiguration
+            this.configureTimeoutCount = 0;
 
             // Start fresh
             this.connection = this.start();
@@ -544,8 +560,9 @@ class NativePythonFinderImpl implements NativePythonFinder {
             // Reset restart attempts on successful refresh
             this.restartAttempts = 0;
         } catch (ex) {
-            // On timeout, kill the hung process so next request triggers restart
-            if (ex instanceof Error && ex.message.includes('timed out')) {
+            // On refresh timeout (not configure — configure handles its own timeout),
+            // kill the hung process so next request triggers restart
+            if (ex instanceof RpcTimeoutError && ex.method !== 'configure') {
                 this.outputChannel.warn('[pet] Request timed out, killing hung process for restart');
                 this.killProcess();
                 this.processExited = true;
@@ -584,16 +601,31 @@ class NativePythonFinderImpl implements NativePythonFinder {
         }
         this.outputChannel.info('[pet] configure: Sending configuration update:', JSON.stringify(options));
         try {
-            this.lastConfiguration = options;
             await sendRequestWithTimeout(this.connection, 'configure', options, CONFIGURE_TIMEOUT_MS);
+            // Only cache after success so failed/timed-out calls will retry
+            this.lastConfiguration = options;
+            this.configureTimeoutCount = 0;
         } catch (ex) {
-            // On timeout, kill the hung process so next request triggers restart
-            if (ex instanceof Error && ex.message.includes('timed out')) {
-                this.outputChannel.warn('[pet] Configure request timed out, killing hung process for restart');
-                this.killProcess();
-                this.processExited = true;
+            if (ex instanceof RpcTimeoutError) {
+                this.configureTimeoutCount++;
+                if (this.configureTimeoutCount >= MAX_CONFIGURE_TIMEOUTS_BEFORE_KILL) {
+                    // Repeated configure timeouts suggest PET is truly hung — kill and restart
+                    this.outputChannel.error(
+                        `[pet] Configure timed out ${this.configureTimeoutCount} consecutive times, killing hung process for restart`,
+                    );
+                    this.killProcess();
+                    this.processExited = true;
+                    this.configureTimeoutCount = 0;
+                } else {
+                    // First timeout — PET may still be working. Let it continue and retry next call.
+                    this.outputChannel.warn(
+                        `[pet] Configure request timed out (attempt ${this.configureTimeoutCount}/${MAX_CONFIGURE_TIMEOUTS_BEFORE_KILL}), ` +
+                            'will retry on next request without killing process',
+                    );
+                }
+            } else {
+                this.outputChannel.error('[pet] configure: Configuration error', ex);
             }
-            this.outputChannel.error('[pet] configure: Configuration error', ex);
             throw ex;
         }
     }
