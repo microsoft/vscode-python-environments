@@ -6,7 +6,7 @@ import * as pathUtils from '../../../common/utils/pathUtils';
 import * as workspaceApis from '../../../common/workspace.apis';
 
 // Import the function under test
-import { getAllExtraSearchPaths } from '../../../managers/common/nativePythonFinder';
+import { getAllExtraSearchPaths, resetWorkspaceSearchPathsGlobalWarningFlag } from '../../../managers/common/nativePythonFinder';
 
 interface MockWorkspaceConfig {
     get: sinon.SinonStub;
@@ -26,6 +26,8 @@ suite('getAllExtraSearchPaths Integration Tests', () => {
     let envConfig: MockWorkspaceConfig;
 
     setup(() => {
+        resetWorkspaceSearchPathsGlobalWarningFlag();
+
         // Mock VS Code workspace APIs
         mockGetConfiguration = sinon.stub(workspaceApis, 'getConfiguration');
         mockGetWorkspaceFolders = sinon.stub(workspaceApis, 'getWorkspaceFolders');
@@ -87,6 +89,7 @@ suite('getAllExtraSearchPaths Integration Tests', () => {
 
     teardown(() => {
         sinon.restore();
+        resetWorkspaceSearchPathsGlobalWarningFlag();
     });
 
     suite('Legacy Path Consolidation Tests', () => {
@@ -329,6 +332,33 @@ suite('getAllExtraSearchPaths Integration Tests', () => {
             assert(
                 mockTraceError.calledWith(sinon.match(/workspaceSearchPaths.*global.*level/i)),
                 'Should log error about incorrect setting level',
+            );
+        });
+
+        test('Global workspace setting warning is only logged once across multiple calls', async () => {
+            // Mock → Workspace setting incorrectly set at global level
+            pythonConfig.get.withArgs('venvPath').returns(undefined);
+            pythonConfig.get.withArgs('venvFolders').returns(undefined);
+            envConfig.inspect.withArgs('globalSearchPaths').returns({ globalValue: [] });
+            envConfig.inspect.withArgs('workspaceSearchPaths').returns({
+                globalValue: ['should-be-ignored'],
+            });
+
+            // Run multiple times
+            await getAllExtraSearchPaths();
+            await getAllExtraSearchPaths();
+            await getAllExtraSearchPaths();
+
+            // Assert - error should only be logged once, not three times
+            const matchingCalls = mockTraceError
+                .getCalls()
+                .filter((call: sinon.SinonSpyCall) =>
+                    /workspaceSearchPaths.*global.*level/i.test(String(call.args[0])),
+                );
+            assert.strictEqual(
+                matchingCalls.length,
+                1,
+                `Expected exactly 1 error about workspaceSearchPaths global level, got ${matchingCalls.length}`,
             );
         });
 
