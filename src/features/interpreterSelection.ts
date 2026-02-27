@@ -114,16 +114,11 @@ async function resolvePriorityChainCore(
             const error: SettingResolutionError = {
                 setting: 'defaultInterpreterPath',
                 configuredValue: userInterpreterPath,
-                reason: `Path contains unresolved variables`,
+                reason: l10n.t('Path contains unresolved variables'),
             };
             errors.push(error);
         } else {
-            const resolved = await tryResolveInterpreterPath(
-                nativeFinder,
-                api,
-                expandedInterpreterPath,
-                envManagers,
-            );
+            const resolved = await tryResolveInterpreterPath(nativeFinder, api, expandedInterpreterPath, envManagers);
             if (resolved) {
                 traceVerbose(`${logPrefix} Priority 3: Using defaultInterpreterPath: ${userInterpreterPath}`);
                 return { result: resolved, errors };
