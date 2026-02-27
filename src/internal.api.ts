@@ -27,7 +27,9 @@ import {
     ResolveEnvironmentContext,
     SetEnvironmentScope,
 } from './api';
+import { ISSUES_URL } from './common/constants';
 import { CreateEnvironmentNotSupported, RemoveEnvironmentNotSupported } from './common/errors/NotSupportedError';
+import { traceWarn } from './common/logging';
 import { StopWatch } from './common/stopWatch';
 import { EventNames } from './common/telemetry/constants';
 import { sendTelemetryEvent } from './common/telemetry/sender';
@@ -205,19 +207,30 @@ export class InternalEnvironmentManager implements EnvironmentManager {
 
     async refresh(options: RefreshEnvironmentsScope): Promise<void> {
         const sw = new StopWatch();
+        const SLOW_DISCOVERY_THRESHOLD_MS = 15000;
         try {
             await this.manager.refresh(options);
             const envs = await this.manager.getEnvironments('all').catch(() => []);
-            sendTelemetryEvent(EventNames.ENVIRONMENT_DISCOVERY, sw.elapsedTime, {
+            const duration = sw.elapsedTime;
+            sendTelemetryEvent(EventNames.ENVIRONMENT_DISCOVERY, duration, {
                 managerId: this.id,
                 result: 'success',
                 envCount: envs.length,
             });
+
+            // Log warning for slow discovery
+            if (duration > SLOW_DISCOVERY_THRESHOLD_MS) {
+                traceWarn(
+                    `[${this.displayName}] Environment discovery took ${(duration / 1000).toFixed(1)}s (found ${envs.length} environments). ` +
+                        `If this is causing problems, please report it: ${ISSUES_URL}/new`,
+                );
+            }
         } catch (ex) {
+            const duration = sw.elapsedTime;
             const errorType = classifyError(ex);
             sendTelemetryEvent(
                 EventNames.ENVIRONMENT_DISCOVERY,
-                sw.elapsedTime,
+                duration,
                 {
                     managerId: this.id,
                     result: errorType === 'canceled' || errorType === 'spawn_timeout' ? 'timeout' : 'error',
@@ -225,6 +238,16 @@ export class InternalEnvironmentManager implements EnvironmentManager {
                 },
                 ex instanceof Error ? ex : undefined,
             );
+
+            // Log verbose failure message to help users report issues
+            const errorMessage = ex instanceof Error ? ex.message : String(ex);
+            traceWarn(
+                `[${this.displayName}] Environment discovery failed after ${(duration / 1000).toFixed(1)}s.\n` +
+                    `  Error: ${errorType} - ${errorMessage}\n` +
+                    `  If environments are not being detected correctly, please report this issue:\n` +
+                    `  ${ISSUES_URL}/new`,
+            );
+
             throw ex;
         }
     }

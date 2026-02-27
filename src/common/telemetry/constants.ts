@@ -49,6 +49,7 @@ export enum EventNames {
      * - errorType: string (error class name, on failure only)
      */
     ENVIRONMENT_DISCOVERY = 'ENVIRONMENT_DISCOVERY',
+    MANAGER_READY_TIMEOUT = 'MANAGER_READY.TIMEOUT',
 }
 
 // Map all events to their properties
@@ -226,5 +227,16 @@ export interface IEventNamePropertyMapping {
         result: 'success' | 'error' | 'timeout';
         envCount?: number;
         errorType?: string;
+    };
+
+    /* __GDPR__
+        "manager_ready.timeout": {
+            "managerId": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "owner": "eleanorjboyd" },
+            "managerKind": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "owner": "eleanorjboyd" }
+        }
+    */
+    [EventNames.MANAGER_READY_TIMEOUT]: {
+        managerId: string;
+        managerKind: 'environment' | 'package';
     };
 }
