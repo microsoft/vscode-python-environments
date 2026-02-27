@@ -106,13 +106,9 @@ export async function logDiscoverySummary(envManagers: EnvironmentManagers): Pro
 
     if (totalEnvCount === 0) {
         traceWarn(
-            `No Python environments were found.\n` +
-                `  This may cause issues with Python tooling in VS Code.\n` +
-                `  Troubleshooting:\n` +
-                `    - Ensure Python is installed and on your PATH\n` +
-                `    - Check if your virtual environment has an 'activate' script\n` +
-                `    - Try running "Python Environments: Refresh All Environment Managers"\n` +
-                `  If environments should be detected, please report this: ${ISSUES_URL}/new`,
+            `No Python environments were found. ` +
+                `Try running "Python Environments: Run Python Environment Tool (PET) in Terminal..." from the Command Palette to diagnose. ` +
+                `If environments should be detected, please report this: ${ISSUES_URL}/new`,
         );
     } else {
         traceInfo(
