@@ -264,6 +264,36 @@ suite('Interpreter Selection - Priority Chain', () => {
             assert.ok(mockNativeFinder.resolve.calledOnceWithExactly(expandedInterpreterPath));
         });
 
+        test('should skip native resolution when defaultInterpreterPath has unresolved variables', async () => {
+            // When resolveVariables can't resolve ${workspaceFolder} (e.g., global scope with no workspace),
+            // the path still contains '${' and should be skipped without calling nativeFinder.resolve
+            sandbox.stub(workspaceApis, 'getConfiguration').returns(createMockConfig([]) as WorkspaceConfiguration);
+            sandbox.stub(workspaceApis, 'getWorkspaceFolders').returns([]);
+            sandbox.stub(workspaceApis, 'getWorkspaceFolder').returns(undefined);
+            sandbox.stub(helpers, 'getUserConfiguredSetting').callsFake((section: string, key: string) => {
+                if (section === 'python' && key === 'defaultInterpreterPath') {
+                    return '${workspaceFolder}/.venv/bin/python3';
+                }
+                return undefined;
+            });
+            mockVenvManager.get.resolves(mockVenvEnv);
+
+            const result = await resolveEnvironmentByPriority(
+                testUri,
+                mockEnvManagers as unknown as EnvironmentManagers,
+                mockProjectManager as unknown as PythonProjectManager,
+                mockNativeFinder as unknown as NativePythonFinder,
+                mockApi as unknown as PythonEnvironmentApi,
+            );
+
+            // Should fall through to auto-discovery without calling nativeFinder.resolve
+            assert.strictEqual(result.source, 'autoDiscovery');
+            assert.ok(
+                mockNativeFinder.resolve.notCalled,
+                'nativeFinder.resolve should not be called with unresolved variables',
+            );
+        });
+
         test('should fall through to Priority 4 when defaultInterpreterPath cannot be resolved', async () => {
             sandbox.stub(workspaceApis, 'getConfiguration').returns(createMockConfig([]) as WorkspaceConfiguration);
             sandbox.stub(workspaceApis, 'getWorkspaceFolders').returns([]);

@@ -842,6 +842,15 @@ function getGlobalSearchPaths(): string[] {
     }
 }
 
+let workspaceSearchPathsGlobalWarningShown = false;
+
+/**
+ * Resets the error flag for testing purposes.
+ */
+export function resetWorkspaceSearchPathsErrorFlag(): void {
+    workspaceSearchPathsGlobalWarningShown = false;
+}
+
 /**
  * Gets the most specific workspace-level setting available for workspaceSearchPaths.
  * Supports glob patterns which are expanded by PET.
@@ -851,7 +860,8 @@ function getWorkspaceSearchPaths(): string[] {
         const envConfig = getConfiguration('python-envs');
         const inspection = envConfig.inspect<string[]>('workspaceSearchPaths');
 
-        if (inspection?.globalValue) {
+        if (inspection?.globalValue && !workspaceSearchPathsGlobalWarningShown) {
+            workspaceSearchPathsGlobalWarningShown = true;
             traceError(
                 'python-envs.workspaceSearchPaths is set at the user/global level, but this setting can only be set at the workspace or workspace folder level.',
             );
