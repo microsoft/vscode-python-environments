@@ -329,6 +329,13 @@ export class PythonEnvironmentManagers implements EnvironmentManagers {
                     },
                 ]);
             }
+            traceVerbose(
+                `[setEnvironment] scope=${scope instanceof Uri ? scope.fsPath : scope}, ` +
+                    `env=${environment?.envId?.id ?? 'undefined'}, manager=${manager.id}, ` +
+                    `project=${project?.uri?.toString() ?? 'none'}, ` +
+                    `packageManager=${this.getPackageManager(environment)?.id ?? 'UNDEFINED'}, ` +
+                    `settingsPersisted=${!!(project && this.getPackageManager(environment))}`,
+            );
         }
 
         const key = project ? project.uri.toString() : 'global';
@@ -505,6 +512,10 @@ export class PythonEnvironmentManagers implements EnvironmentManagers {
     async getEnvironment(scope: GetEnvironmentScope): Promise<PythonEnvironment | undefined> {
         const manager = this.getEnvironmentManager(scope);
         if (!manager) {
+            traceVerbose(
+                `[getEnvironment] No manager found for scope=${scope instanceof Uri ? scope.fsPath : scope}, ` +
+                    `settingsManagerId=${getDefaultEnvManagerSetting(this.pm, scope instanceof Uri ? scope : undefined)}`,
+            );
             return undefined;
         }
 
