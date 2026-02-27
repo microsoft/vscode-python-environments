@@ -136,6 +136,14 @@ export namespace SysManagerStrings {
     export const packageRefreshError = l10n.t('Error refreshing packages');
 }
 
+export namespace PixiStrings {
+    export const pixiExtensionRecommendation = l10n.t(
+        'Pixi environments were detected. Install the Pixi extension for full support including activation and environment management.',
+    );
+    export const install = l10n.t('Install Pixi Extension');
+    export const dontAskAgain = l10n.t("Don't Ask Again");
+}
+
 export namespace CondaStrings {
     export const condaManager = l10n.t('Manages Conda environments');
     export const condaDiscovering = l10n.t('Discovering Conda environments');
