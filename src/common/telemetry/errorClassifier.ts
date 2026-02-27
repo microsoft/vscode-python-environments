@@ -11,7 +11,7 @@ export type DiscoveryErrorType =
 
 /**
  * Classifies an error into a telemetry-safe category for the `errorType` property.
- * Does NOT include raw error messages (PII risk from file paths) — only the category.
+ * Does NOT include raw error messages — only the category.
  */
 export function classifyError(ex: unknown): DiscoveryErrorType {
     if (ex instanceof CancellationError) {
