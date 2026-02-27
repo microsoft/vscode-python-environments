@@ -547,6 +547,12 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
             await sendProjectStructureTelemetry(projectManager, envManagers);
         } catch (error) {
             traceError('Failed to initialize environment managers:', error);
+            sendTelemetryEvent(
+                EventNames.EXTENSION_MANAGER_REGISTRATION_DURATION,
+                start.elapsedTime,
+                undefined,
+                error instanceof Error ? error : undefined,
+            );
             // Show a user-friendly error message
             window.showErrorMessage(
                 l10n.t(

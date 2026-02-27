@@ -60,7 +60,8 @@ export interface IEventNamePropertyMapping {
 
     /* __GDPR__
         "environment_manager.registered": {
-            "managerId" : { "classification": "SystemMetaData", "purpose": "FeatureInsight", "owner": "eleanorjboyd" }
+            "managerId" : { "classification": "SystemMetaData", "purpose": "FeatureInsight", "owner": "eleanorjboyd" },
+            "<duration>": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "isMeasurement": true, "owner": "eleanorjboyd" }
         }
     */
     [EventNames.ENVIRONMENT_MANAGER_REGISTERED]: {

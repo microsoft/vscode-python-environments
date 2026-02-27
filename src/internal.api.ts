@@ -31,6 +31,7 @@ import { CreateEnvironmentNotSupported, RemoveEnvironmentNotSupported } from './
 import { StopWatch } from './common/stopWatch';
 import { EventNames } from './common/telemetry/constants';
 import { sendTelemetryEvent } from './common/telemetry/sender';
+import { classifyError } from './common/telemetry/errorClassifier';
 
 export type EnvironmentManagerScope = undefined | string | Uri | PythonEnvironment;
 export type PackageManagerScope = undefined | string | Uri | PythonEnvironment | Package;
@@ -213,14 +214,14 @@ export class InternalEnvironmentManager implements EnvironmentManager {
                 envCount: envs.length,
             });
         } catch (ex) {
-            const isTimeout = ex instanceof Error && ex.message.includes('timed out');
+            const errorType = classifyError(ex);
             sendTelemetryEvent(
                 EventNames.ENVIRONMENT_DISCOVERY,
                 sw.elapsedTime,
                 {
                     managerId: this.id,
-                    result: isTimeout ? 'timeout' : 'error',
-                    errorType: ex instanceof Error ? ex.name : 'unknown',
+                    result: errorType === 'canceled' || errorType === 'spawn_timeout' ? 'timeout' : 'error',
+                    errorType,
                 },
                 ex instanceof Error ? ex : undefined,
             );
