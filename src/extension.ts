@@ -17,7 +17,11 @@ import { clearPersistentState, setPersistentState } from './common/persistentSta
 import { newProjectSelection } from './common/pickers/managers';
 import { StopWatch } from './common/stopWatch';
 import { EventNames } from './common/telemetry/constants';
-import { sendManagerSelectionTelemetry, sendProjectStructureTelemetry } from './common/telemetry/helpers';
+import {
+    sendEnvironmentToolUsageTelemetry,
+    sendManagerSelectionTelemetry,
+    sendProjectStructureTelemetry,
+} from './common/telemetry/helpers';
 import { sendTelemetryEvent } from './common/telemetry/sender';
 import { createDeferred } from './common/utils/deferred';
 
@@ -542,11 +546,11 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
             );
 
             sendTelemetryEvent(EventNames.EXTENSION_MANAGER_REGISTRATION_DURATION, start.elapsedTime);
-
             try {
                 await terminalManager.initialize(api);
                 sendManagerSelectionTelemetry(projectManager);
                 await sendProjectStructureTelemetry(projectManager, envManagers);
+              await sendEnvironmentToolUsageTelemetry(projectManager, envManagers);
             } catch (postInitError) {
                 traceError('Post-initialization tasks failed:', postInitError);
             }

@@ -33,6 +33,14 @@ export enum EventNames {
      */
     PROJECT_STRUCTURE = 'PROJECT_STRUCTURE',
     /**
+     * Telemetry event for environment tool usage at extension startup.
+     * Fires once per tool that has at least one project using it.
+     * Use dcount(machineId) by toolName to get unique users per tool.
+     * Properties:
+     * - toolName: string (the tool being used: venv, conda, poetry, etc.)
+     */
+    ENVIRONMENT_TOOL_USAGE = 'ENVIRONMENT_TOOL_USAGE',
+    /**
      * Telemetry event for environment discovery per manager.
      * Properties:
      * - managerId: string (the id of the environment manager)
@@ -196,6 +204,14 @@ export interface IEventNamePropertyMapping {
         projectUnderRoot: number;
     };
 
+    /* __GDPR__
+        "environment_tool_usage": {
+            "toolName": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "owner": "stellaHuang95" }
+        }
+    */
+    [EventNames.ENVIRONMENT_TOOL_USAGE]: {
+        toolName: string;
+    };
     /* __GDPR__
         "environment_discovery": {
             "managerId": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "owner": "eleanorjboyd" },
