@@ -9,7 +9,7 @@ import {
     TaskScope,
 } from 'vscode';
 import { spawnProcess } from '../../common/childProcess.apis';
-import { UvInstallStrings } from '../../common/localize';
+import { Common, UvInstallStrings } from '../../common/localize';
 import { traceError, traceInfo, traceLog } from '../../common/logging';
 import { getGlobalPersistentState } from '../../common/persistentState';
 import { executeTask, onDidEndTaskProcess } from '../../common/tasks.apis';
@@ -350,10 +350,10 @@ export async function promptInstallPythonViaUv(
         promptMessage,
         { modal: true },
         UvInstallStrings.installPython,
-        UvInstallStrings.dontAskAgain,
+        Common.dontAskAgain,
     );
 
-    if (result === UvInstallStrings.dontAskAgain) {
+    if (result === Common.dontAskAgain) {
         await state.set(UV_INSTALL_PYTHON_DONT_ASK_KEY, true);
         traceLog('User selected "Don\'t ask again" for Python install prompt');
         return undefined;
