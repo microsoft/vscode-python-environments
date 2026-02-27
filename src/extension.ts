@@ -24,6 +24,7 @@ import {
     sendProjectStructureTelemetry,
 } from './common/telemetry/helpers';
 import { sendTelemetryEvent } from './common/telemetry/sender';
+import { safeRegister } from './common/utils/asyncUtils';
 import { createDeferred } from './common/utils/deferred';
 
 import {
@@ -527,13 +528,23 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
             context.subscriptions.push(nativeFinder);
             const sysMgr = new SysPythonManager(nativeFinder, api, outputChannel);
             sysPythonManager.resolve(sysMgr);
+            // Each manager registers independently — one failure must not block the others.
             await Promise.all([
-                registerSystemPythonFeatures(nativeFinder, context.subscriptions, outputChannel, sysMgr),
-                registerCondaFeatures(nativeFinder, context.subscriptions, outputChannel, projectManager),
-                registerPyenvFeatures(nativeFinder, context.subscriptions, projectManager),
-                registerPipenvFeatures(nativeFinder, context.subscriptions, projectManager),
-                registerPoetryFeatures(nativeFinder, context.subscriptions, outputChannel, projectManager),
-                shellStartupVarsMgr.initialize(),
+                safeRegister(
+                    'system',
+                    registerSystemPythonFeatures(nativeFinder, context.subscriptions, outputChannel, sysMgr),
+                ),
+                safeRegister(
+                    'conda',
+                    registerCondaFeatures(nativeFinder, context.subscriptions, outputChannel, projectManager),
+                ),
+                safeRegister('pyenv', registerPyenvFeatures(nativeFinder, context.subscriptions, projectManager)),
+                safeRegister('pipenv', registerPipenvFeatures(nativeFinder, context.subscriptions, projectManager)),
+                safeRegister(
+                    'poetry',
+                    registerPoetryFeatures(nativeFinder, context.subscriptions, outputChannel, projectManager),
+                ),
+                safeRegister('shellStartupVars', shellStartupVarsMgr.initialize()),
             ]);
 
             await applyInitialEnvironmentSelection(envManagers, projectManager, nativeFinder, api);
