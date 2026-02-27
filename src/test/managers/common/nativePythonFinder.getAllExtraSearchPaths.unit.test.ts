@@ -6,7 +6,7 @@ import * as pathUtils from '../../../common/utils/pathUtils';
 import * as workspaceApis from '../../../common/workspace.apis';
 
 // Import the function under test
-import { getAllExtraSearchPaths, resetWorkspaceSearchPathsErrorFlag } from '../../../managers/common/nativePythonFinder';
+import { getAllExtraSearchPaths, resetWorkspaceSearchPathsGlobalWarningFlag } from '../../../managers/common/nativePythonFinder';
 
 interface MockWorkspaceConfig {
     get: sinon.SinonStub;
@@ -26,7 +26,7 @@ suite('getAllExtraSearchPaths Integration Tests', () => {
     let envConfig: MockWorkspaceConfig;
 
     setup(() => {
-        resetWorkspaceSearchPathsErrorFlag();
+        resetWorkspaceSearchPathsGlobalWarningFlag();
 
         // Mock VS Code workspace APIs
         mockGetConfiguration = sinon.stub(workspaceApis, 'getConfiguration');
@@ -89,7 +89,7 @@ suite('getAllExtraSearchPaths Integration Tests', () => {
 
     teardown(() => {
         sinon.restore();
-        resetWorkspaceSearchPathsErrorFlag();
+        resetWorkspaceSearchPathsGlobalWarningFlag();
     });
 
     suite('Legacy Path Consolidation Tests', () => {
@@ -358,7 +358,7 @@ suite('getAllExtraSearchPaths Integration Tests', () => {
             assert.strictEqual(
                 matchingCalls.length,
                 1,
-                `Expected exactly 1 warning about workspaceSearchPaths global level, got ${matchingCalls.length}`,
+                `Expected exactly 1 error about workspaceSearchPaths global level, got ${matchingCalls.length}`,
             );
         });
 

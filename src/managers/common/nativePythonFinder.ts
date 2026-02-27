@@ -845,9 +845,9 @@ function getGlobalSearchPaths(): string[] {
 let workspaceSearchPathsGlobalWarningShown = false;
 
 /**
- * Resets the error flag for testing purposes.
+ * @internal Test-only helper to reset the workspaceSearchPaths global-level warning flag.
  */
-export function resetWorkspaceSearchPathsErrorFlag(): void {
+export function resetWorkspaceSearchPathsGlobalWarningFlag(): void {
     workspaceSearchPathsGlobalWarningShown = false;
 }
 
