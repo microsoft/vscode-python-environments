@@ -15,6 +15,7 @@ export namespace Common {
     export const ok = l10n.t('Ok');
     export const quickCreate = l10n.t('Quick Create');
     export const installPython = l10n.t('Install Python');
+    export const dontAskAgain = l10n.t("Don't ask again");
 }
 
 export namespace WorkbenchStrings {
@@ -141,7 +142,6 @@ export namespace PixiStrings {
         'Pixi environments were detected. Install the Pixi extension for full support including activation and environment management.',
     );
     export const install = l10n.t('Install Pixi Extension');
-    export const dontAskAgain = l10n.t("Don't Ask Again");
 }
 
 export namespace CondaStrings {
@@ -248,7 +248,6 @@ export namespace UvInstallStrings {
     export const uvInstallRestartRequired = l10n.t(
         'uv was installed but may not be available in the current terminal. Please restart VS Code or open a new terminal and try again.',
     );
-    export const dontAskAgain = l10n.t("Don't ask again");
     export const clickToInstallPython = l10n.t('No Python found, click to install');
     export const selectPythonVersion = l10n.t('Select Python version to install');
     export const installed = l10n.t('installed');
