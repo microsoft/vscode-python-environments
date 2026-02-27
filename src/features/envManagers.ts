@@ -16,6 +16,7 @@ import {
     PackageManagerAlreadyRegisteredError,
 } from '../common/errors/AlreadyRegisteredError';
 import { traceError, traceVerbose } from '../common/logging';
+import { StopWatch } from '../common/stopWatch';
 import { EventNames } from '../common/telemetry/constants';
 import { sendTelemetryEvent } from '../common/telemetry/sender';
 import { getCallingExtension } from '../common/utils/frameUtils';
@@ -71,6 +72,7 @@ export class PythonEnvironmentManagers implements EnvironmentManagers {
     constructor(private readonly pm: PythonProjectManager) {}
 
     public registerEnvironmentManager(manager: EnvironmentManager): Disposable {
+        const registrationStopWatch = new StopWatch();
         const managerId = generateId(manager.name);
         if (this._environmentManagers.has(managerId)) {
             const ex = new EnvironmentManagerAlreadyRegisteredError(
@@ -105,7 +107,7 @@ export class PythonEnvironmentManagers implements EnvironmentManagers {
         this._onDidChangeEnvironmentManager.fire({ kind: 'registered', manager: mgr });
 
         if (!managerId.toLowerCase().startsWith('undefined_publisher.')) {
-            sendTelemetryEvent(EventNames.ENVIRONMENT_MANAGER_REGISTERED, undefined, {
+            sendTelemetryEvent(EventNames.ENVIRONMENT_MANAGER_REGISTERED, registrationStopWatch.elapsedTime, {
                 managerId,
             });
         }
@@ -327,6 +329,13 @@ export class PythonEnvironmentManagers implements EnvironmentManagers {
                     },
                 ]);
             }
+            traceVerbose(
+                `[setEnvironment] scope=${scope instanceof Uri ? scope.fsPath : scope}, ` +
+                    `env=${environment?.envId?.id ?? 'undefined'}, manager=${manager.id}, ` +
+                    `project=${project?.uri?.toString() ?? 'none'}, ` +
+                    `packageManager=${this.getPackageManager(environment)?.id ?? 'UNDEFINED'}, ` +
+                    `settingsPersisted=${!!(project && this.getPackageManager(environment))}`,
+            );
         }
 
         const key = project ? project.uri.toString() : 'global';
@@ -503,6 +512,10 @@ export class PythonEnvironmentManagers implements EnvironmentManagers {
     async getEnvironment(scope: GetEnvironmentScope): Promise<PythonEnvironment | undefined> {
         const manager = this.getEnvironmentManager(scope);
         if (!manager) {
+            traceVerbose(
+                `[getEnvironment] No manager found for scope=${scope instanceof Uri ? scope.fsPath : scope}, ` +
+                    `settingsManagerId=${getDefaultEnvManagerSetting(this.pm, scope instanceof Uri ? scope : undefined)}`,
+            );
             return undefined;
         }
 
