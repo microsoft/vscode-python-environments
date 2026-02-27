@@ -1,6 +1,15 @@
 import * as fs from 'fs-extra';
 import * as path from 'path';
-import { ProgressLocation, QuickInputButtons, TaskExecution, TaskRevealKind, Terminal, Uri, workspace } from 'vscode';
+import {
+    ProgressLocation,
+    QuickInputButtons,
+    TaskExecution,
+    TaskRevealKind,
+    Terminal,
+    Uri,
+    l10n,
+    workspace,
+} from 'vscode';
 import {
     CreateEnvironmentOptions,
     PythonEnvironment,
@@ -92,6 +101,10 @@ async function browseAndResolveInterpreter(
             return await handlePythonPath(interpreterUri, em.managers, projectEnvManagers, reporter, token);
         },
     );
+
+    if (!environment) {
+        showErrorMessage(l10n.t('Selected file is not a valid Python interpreter: {0}', interpreterUri.fsPath));
+    }
 
     return environment;
 }

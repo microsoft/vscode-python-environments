@@ -1,9 +1,8 @@
-import { Uri, Progress, CancellationToken } from 'vscode';
+import { CancellationToken, Progress, Uri } from 'vscode';
 import { PythonEnvironment } from '../../api';
 import { InternalEnvironmentManager } from '../../internal.api';
-import { traceVerbose, traceError } from '../logging';
 import { PYTHON_EXTENSION_ID } from '../constants';
-import { showErrorMessage } from '../window.apis';
+import { traceVerbose, traceWarn } from '../logging';
 
 const priorityOrder = [
     `${PYTHON_EXTENSION_ID}:pyenv`,
@@ -74,7 +73,6 @@ export async function handlePythonPath(
         }
     }
 
-    traceError(`Unable to handle ${interpreterUri.fsPath}`);
-    showErrorMessage(`Unable to handle ${interpreterUri.fsPath}`);
+    traceWarn(`Unable to handle ${interpreterUri.fsPath}`);
     return undefined;
 }

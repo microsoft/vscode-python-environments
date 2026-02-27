@@ -19,6 +19,7 @@ import { StopWatch } from './common/stopWatch';
 import { EventNames } from './common/telemetry/constants';
 import {
     logDiscoverySummary,
+    sendEnvironmentToolUsageTelemetry,
     sendManagerSelectionTelemetry,
     sendProjectStructureTelemetry,
 } from './common/telemetry/helpers';
@@ -549,6 +550,7 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
             await terminalManager.initialize(api);
             sendManagerSelectionTelemetry(projectManager);
             await sendProjectStructureTelemetry(projectManager, envManagers);
+            await sendEnvironmentToolUsageTelemetry(projectManager, envManagers);
 
             // Log discovery summary to help users troubleshoot environment detection issues
             await logDiscoverySummary(envManagers);

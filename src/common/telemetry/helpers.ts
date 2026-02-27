@@ -1,10 +1,22 @@
 import { getDefaultEnvManagerSetting, getDefaultPkgManagerSetting } from '../../features/settings/settingHelpers';
 import { EnvironmentManagers, PythonProjectManager } from '../../internal.api';
+import { getUvEnvironments } from '../../managers/builtin/uvEnvironments';
 import { ISSUES_URL } from '../constants';
-import { traceInfo, traceWarn } from '../logging';
+import { traceInfo, traceVerbose, traceWarn } from '../logging';
 import { getWorkspaceFolders } from '../workspace.apis';
 import { EventNames } from './constants';
 import { sendTelemetryEvent } from './sender';
+
+/**
+ * Extracts the base tool name from a manager ID.
+ * Example: 'ms-python.python:venv' -> 'venv'
+ * Example: 'ms-python.python:conda' -> 'conda'
+ */
+function extractToolName(managerId: string): string {
+    // Manager IDs follow the pattern 'extensionId:toolName'
+    const parts = managerId.split(':');
+    return parts.length > 1 ? parts[1].toLowerCase() : managerId.toLowerCase();
+}
 
 export function sendManagerSelectionTelemetry(pm: PythonProjectManager) {
     const ems: Set<string> = new Set();
@@ -81,6 +93,67 @@ export async function sendProjectStructureTelemetry(
         uniqueInterpreterCount,
         projectUnderRoot,
     });
+}
+
+/**
+ * Sends telemetry about which environment tools are actively used across all projects.
+ * This tracks ACTUAL USAGE (which environments are set for projects), not just what's installed.
+ *
+ * Fires one event per tool that has at least one project using it.
+ * This allows simple deduplication: dcount(machineId) by toolName gives unique users per tool.
+ *
+ * Called once at extension activation to understand user's environment tool usage patterns.
+ */
+export async function sendEnvironmentToolUsageTelemetry(
+    pm: PythonProjectManager,
+    envManagers: EnvironmentManagers,
+): Promise<void> {
+    try {
+        const projects = pm.getProjects();
+
+        // Track which tools are used (Set ensures uniqueness)
+        const toolsUsed = new Set<string>();
+
+        // Lazily loaded once when a venv environment is first encountered
+        let uvEnvPaths: string[] | undefined;
+
+        // Check which environment manager is used for each project
+        for (const project of projects) {
+            try {
+                const env = await envManagers.getEnvironment(project.uri);
+                if (env?.envId?.managerId) {
+                    let toolName = extractToolName(env.envId.managerId);
+
+                    // UV environments share the venv manager. Check the persistent UV env list instead
+                    if (toolName === 'venv' && env.environmentPath) {
+                        uvEnvPaths ??= await getUvEnvironments();
+                        if (uvEnvPaths.includes(env.environmentPath.fsPath)) {
+                            toolName = 'uv';
+                        }
+                    }
+
+                    // Normalize 'global' to 'system' for consistency
+                    if (toolName === 'global') {
+                        toolName = 'system';
+                    }
+
+                    toolsUsed.add(toolName);
+                }
+            } catch {
+                // Ignore errors when getting environment for a project
+            }
+        }
+
+        // Fire one event per tool used
+        toolsUsed.forEach((tool) => {
+            sendTelemetryEvent(EventNames.ENVIRONMENT_TOOL_USAGE, undefined, {
+                toolName: tool,
+            });
+        });
+    } catch (error) {
+        // Telemetry failures must never disrupt extension activation
+        traceVerbose('Failed to send environment tool usage telemetry:', error);
+    }
 }
 
 /**
