@@ -542,9 +542,14 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
             );
 
             sendTelemetryEvent(EventNames.EXTENSION_MANAGER_REGISTRATION_DURATION, start.elapsedTime);
-            await terminalManager.initialize(api);
-            sendManagerSelectionTelemetry(projectManager);
-            await sendProjectStructureTelemetry(projectManager, envManagers);
+
+            try {
+                await terminalManager.initialize(api);
+                sendManagerSelectionTelemetry(projectManager);
+                await sendProjectStructureTelemetry(projectManager, envManagers);
+            } catch (postInitError) {
+                traceError('Post-initialization tasks failed:', postInitError);
+            }
         } catch (error) {
             traceError('Failed to initialize environment managers:', error);
             sendTelemetryEvent(

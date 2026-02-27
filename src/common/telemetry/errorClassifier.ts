@@ -1,4 +1,5 @@
 import { CancellationError } from 'vscode';
+import { RpcTimeoutError } from '../../managers/common/nativePythonFinder';
 
 export type DiscoveryErrorType =
     | 'spawn_timeout'
@@ -15,6 +16,10 @@ export type DiscoveryErrorType =
 export function classifyError(ex: unknown): DiscoveryErrorType {
     if (ex instanceof CancellationError) {
         return 'canceled';
+    }
+
+    if (ex instanceof RpcTimeoutError) {
+        return 'spawn_timeout';
     }
 
     if (!(ex instanceof Error)) {
