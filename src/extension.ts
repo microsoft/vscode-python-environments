@@ -17,7 +17,11 @@ import { clearPersistentState, setPersistentState } from './common/persistentSta
 import { newProjectSelection } from './common/pickers/managers';
 import { StopWatch } from './common/stopWatch';
 import { EventNames } from './common/telemetry/constants';
-import { sendManagerSelectionTelemetry, sendProjectStructureTelemetry } from './common/telemetry/helpers';
+import {
+    logDiscoverySummary,
+    sendManagerSelectionTelemetry,
+    sendProjectStructureTelemetry,
+} from './common/telemetry/helpers';
 import { sendTelemetryEvent } from './common/telemetry/sender';
 import { createDeferred } from './common/utils/deferred';
 
@@ -545,6 +549,9 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
             await terminalManager.initialize(api);
             sendManagerSelectionTelemetry(projectManager);
             await sendProjectStructureTelemetry(projectManager, envManagers);
+
+            // Log discovery summary to help users troubleshoot environment detection issues
+            await logDiscoverySummary(envManagers);
         } catch (error) {
             traceError('Failed to initialize environment managers:', error);
             // Show a user-friendly error message

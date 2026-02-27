@@ -1,5 +1,7 @@
 import { getDefaultEnvManagerSetting, getDefaultPkgManagerSetting } from '../../features/settings/settingHelpers';
 import { EnvironmentManagers, PythonProjectManager } from '../../internal.api';
+import { ISSUES_URL } from '../constants';
+import { traceInfo, traceWarn } from '../logging';
 import { getWorkspaceFolders } from '../workspace.apis';
 import { EventNames } from './constants';
 import { sendTelemetryEvent } from './sender';
@@ -58,7 +60,7 @@ export async function sendProjectStructureTelemetry(
         for (const wsFolder of workspaceFolders) {
             const workspacePath = wsFolder.uri.fsPath;
             const projectPath = project.uri.fsPath;
-            
+
             // Check if project is a subdirectory of workspace folder:
             // - Path must start with workspace path
             // - Path must not be equal to workspace path
@@ -79,4 +81,42 @@ export async function sendProjectStructureTelemetry(
         uniqueInterpreterCount,
         projectUnderRoot,
     });
+}
+
+/**
+ * Logs a summary of environment discovery results after startup.
+ * If no environments are found, logs guidance to help users troubleshoot.
+ */
+export async function logDiscoverySummary(envManagers: EnvironmentManagers): Promise<void> {
+    const managers = envManagers.managers;
+    let totalEnvCount = 0;
+    const managerSummaries: string[] = [];
+
+    for (const manager of managers) {
+        try {
+            const envs = await manager.getEnvironments('all');
+            totalEnvCount += envs.length;
+            if (envs.length > 0) {
+                managerSummaries.push(`${manager.displayName}: ${envs.length}`);
+            }
+        } catch {
+            // Discovery errors are already logged by InternalEnvironmentManager.refresh()
+        }
+    }
+
+    if (totalEnvCount === 0) {
+        traceWarn(
+            `No Python environments were found.\n` +
+                `  This may cause issues with Python tooling in VS Code.\n` +
+                `  Troubleshooting:\n` +
+                `    - Ensure Python is installed and on your PATH\n` +
+                `    - Check if your virtual environment has an 'activate' script\n` +
+                `    - Try running "Python Environments: Refresh All Environment Managers"\n` +
+                `  If environments should be detected, please report this: ${ISSUES_URL}/new`,
+        );
+    } else {
+        traceInfo(
+            `Environment discovery complete: ${totalEnvCount} environments found (${managerSummaries.join(', ')})`,
+        );
+    }
 }

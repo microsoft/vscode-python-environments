@@ -4,6 +4,7 @@ export const ENVS_EXTENSION_ID = 'ms-python.vscode-python-envs';
 export const PYTHON_EXTENSION_ID = 'ms-python.python';
 export const JUPYTER_EXTENSION_ID = 'ms-toolsai.jupyter';
 export const EXTENSION_ROOT_DIR = path.dirname(__dirname);
+export const ISSUES_URL = 'https://github.com/microsoft/vscode-python-environments/issues';
 
 export const DEFAULT_PACKAGE_MANAGER_ID = 'ms-python.python:pip';
 export const DEFAULT_ENV_MANAGER_ID = 'ms-python.python:venv';
