@@ -1,7 +1,8 @@
 import { getDefaultEnvManagerSetting, getDefaultPkgManagerSetting } from '../../features/settings/settingHelpers';
 import { EnvironmentManagers, PythonProjectManager } from '../../internal.api';
 import { getUvEnvironments } from '../../managers/builtin/uvEnvironments';
-import { traceVerbose } from '../logging';
+import { ISSUES_URL } from '../constants';
+import { traceInfo, traceVerbose, traceWarn } from '../logging';
 import { getWorkspaceFolders } from '../workspace.apis';
 import { EventNames } from './constants';
 import { sendTelemetryEvent } from './sender';
@@ -152,5 +153,39 @@ export async function sendEnvironmentToolUsageTelemetry(
     } catch (error) {
         // Telemetry failures must never disrupt extension activation
         traceVerbose('Failed to send environment tool usage telemetry:', error);
+    }
+}
+
+/**
+ * Logs a summary of environment discovery results after startup.
+ * If no environments are found, logs guidance to help users troubleshoot.
+ */
+export async function logDiscoverySummary(envManagers: EnvironmentManagers): Promise<void> {
+    const managers = envManagers.managers;
+    let totalEnvCount = 0;
+    const managerSummaries: string[] = [];
+
+    for (const manager of managers) {
+        try {
+            const envs = await manager.getEnvironments('all');
+            totalEnvCount += envs.length;
+            if (envs.length > 0) {
+                managerSummaries.push(`${manager.displayName}: ${envs.length}`);
+            }
+        } catch {
+            // Discovery errors are already logged by InternalEnvironmentManager.refresh()
+        }
+    }
+
+    if (totalEnvCount === 0) {
+        traceWarn(
+            `No Python environments were found. ` +
+                `Try running "Python Environments: Run Python Environment Tool (PET) in Terminal..." from the Command Palette to diagnose. ` +
+                `If environments should be detected, please report this: ${ISSUES_URL}/new`,
+        );
+    } else {
+        traceInfo(
+            `Environment discovery complete: ${totalEnvCount} environments found (${managerSummaries.join(', ')})`,
+        );
     }
 }

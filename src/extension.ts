@@ -18,6 +18,7 @@ import { newProjectSelection } from './common/pickers/managers';
 import { StopWatch } from './common/stopWatch';
 import { EventNames } from './common/telemetry/constants';
 import {
+    logDiscoverySummary,
     sendEnvironmentToolUsageTelemetry,
     sendManagerSelectionTelemetry,
     sendProjectStructureTelemetry,
@@ -550,6 +551,9 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
             sendManagerSelectionTelemetry(projectManager);
             await sendProjectStructureTelemetry(projectManager, envManagers);
             await sendEnvironmentToolUsageTelemetry(projectManager, envManagers);
+
+            // Log discovery summary to help users troubleshoot environment detection issues
+            await logDiscoverySummary(envManagers);
         } catch (error) {
             traceError('Failed to initialize environment managers:', error);
             // Show a user-friendly error message
