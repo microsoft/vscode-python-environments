@@ -93,7 +93,7 @@
                 "python-envs.terminal.autoActivationType": {
                     "type": "string",
                     "markdownDescription": "%python-envs.terminal.autoActivationType.description%",
-                    "default": "command",
+                    "default": "off",
                     "enum": [
                         "command",
                         "shellStartup",
