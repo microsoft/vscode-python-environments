@@ -9,9 +9,12 @@ import {
     PythonEnvironmentInfo,
 } from '../../api';
 import { showErrorMessageWithLogs } from '../../common/errors/utils';
-import { SysManagerStrings } from '../../common/localize';
-import { traceVerbose } from '../../common/logging';
-import { withProgress } from '../../common/window.apis';
+import { getExtension } from '../../common/extension.apis';
+import { Common, PixiStrings, SysManagerStrings } from '../../common/localize';
+import { traceInfo, traceVerbose } from '../../common/logging';
+import { getGlobalPersistentState } from '../../common/persistentState';
+import { showInformationMessage, withProgress } from '../../common/window.apis';
+import { installExtension } from '../../common/workbenchCommands';
 import {
     isNativeEnvInfo,
     NativeEnvInfo,
@@ -21,6 +24,10 @@ import {
 import { shortVersion, sortEnvironments } from '../common/utils';
 import { runPython, runUV, shouldUseUv } from './helpers';
 import { parsePipList, PipPackage } from './pipListUtils';
+
+const PIXI_EXTENSION_ID = 'renan-r-santos.pixi-code';
+const PIXI_RECOMMEND_DONT_ASK_KEY = 'pixi-extension-recommend-dont-ask';
+let pixiRecommendationShown = false;
 
 function asPackageQuickPickItem(name: string, version?: string): QuickPickItem {
     return {
@@ -99,6 +106,38 @@ function getPythonInfo(env: NativeEnvInfo): PythonEnvironmentInfo {
     }
 }
 
+async function recommendPixiExtension(): Promise<void> {
+    if (pixiRecommendationShown) {
+        return;
+    }
+    pixiRecommendationShown = true;
+
+    if (getExtension(PIXI_EXTENSION_ID)) {
+        return;
+    }
+
+    const state = await getGlobalPersistentState();
+    const dontAsk = await state.get<boolean>(PIXI_RECOMMEND_DONT_ASK_KEY);
+    if (dontAsk) {
+        traceInfo('Skipping Pixi extension recommendation: user selected "Don\'t ask again"');
+        return;
+    }
+
+    const result = await showInformationMessage(
+        PixiStrings.pixiExtensionRecommendation,
+        PixiStrings.install,
+        Common.dontAskAgain,
+    );
+
+    if (result === PixiStrings.install) {
+        traceInfo(`Installing extension: ${PIXI_EXTENSION_ID}`);
+        await installExtension(PIXI_EXTENSION_ID);
+    } else if (result === Common.dontAskAgain) {
+        await state.set(PIXI_RECOMMEND_DONT_ASK_KEY, true);
+        traceInfo('User selected "Don\'t ask again" for Pixi extension recommendation');
+    }
+}
+
 export async function refreshPythons(
     hardRefresh: boolean,
     nativeFinder: NativePythonFinder,
@@ -109,24 +148,28 @@ export async function refreshPythons(
 ): Promise<PythonEnvironment[]> {
     const collection: PythonEnvironment[] = [];
     const data = await nativeFinder.refresh(hardRefresh, uris);
-    const envs = data
-        .filter((e) => isNativeEnvInfo(e))
-        .map((e) => e as NativeEnvInfo)
-        .filter(
-            (e) =>
-                e.kind === undefined ||
-                (e.kind &&
-                    [
-                        NativePythonEnvironmentKind.globalPaths,
-                        NativePythonEnvironmentKind.homebrew,
-                        NativePythonEnvironmentKind.linuxGlobal,
-                        NativePythonEnvironmentKind.macCommandLineTools,
-                        NativePythonEnvironmentKind.macPythonOrg,
-                        NativePythonEnvironmentKind.macXCode,
-                        NativePythonEnvironmentKind.windowsRegistry,
-                        NativePythonEnvironmentKind.windowsStore,
-                    ].includes(e.kind)),
-        );
+    const allNativeEnvs = data.filter((e) => isNativeEnvInfo(e)).map((e) => e as NativeEnvInfo);
+
+    const hasPixiEnvs = allNativeEnvs.some((e) => e.kind === NativePythonEnvironmentKind.pixi);
+    if (hasPixiEnvs) {
+        recommendPixiExtension().catch((e) => log.error('Error recommending Pixi extension', e));
+    }
+
+    const envs = allNativeEnvs.filter(
+        (e) =>
+            e.kind === undefined ||
+            (e.kind &&
+                [
+                    NativePythonEnvironmentKind.globalPaths,
+                    NativePythonEnvironmentKind.homebrew,
+                    NativePythonEnvironmentKind.linuxGlobal,
+                    NativePythonEnvironmentKind.macCommandLineTools,
+                    NativePythonEnvironmentKind.macPythonOrg,
+                    NativePythonEnvironmentKind.macXCode,
+                    NativePythonEnvironmentKind.windowsRegistry,
+                    NativePythonEnvironmentKind.windowsStore,
+                ].includes(e.kind)),
+    );
     envs.forEach((env) => {
         try {
             const envInfo = getPythonInfo(env);

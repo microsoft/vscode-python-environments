@@ -16,6 +16,7 @@ const priorityOrder = [
     `${PYTHON_EXTENSION_ID}:system`,
 ];
 function sortManagersByPriority(managers: InternalEnvironmentManager[]): InternalEnvironmentManager[] {
+    const systemId = priorityOrder[priorityOrder.length - 1];
     return managers.sort((a, b) => {
         const aIndex = priorityOrder.indexOf(a.id);
         const bIndex = priorityOrder.indexOf(b.id);
@@ -23,10 +24,11 @@ function sortManagersByPriority(managers: InternalEnvironmentManager[]): Interna
             return 0;
         }
         if (aIndex === -1) {
-            return 1;
+            // Unknown managers should come before system (last resort) but after other known managers
+            return b.id === systemId ? -1 : 1;
         }
         if (bIndex === -1) {
-            return -1;
+            return a.id === systemId ? 1 : -1;
         }
         return aIndex - bIndex;
     });

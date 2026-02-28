@@ -2,7 +2,7 @@ import assert from 'assert';
 import * as sinon from 'sinon';
 import { LogOutputChannel } from 'vscode';
 import * as childProcessApis from '../../../common/childProcess.apis';
-import { UvInstallStrings } from '../../../common/localize';
+import { Common, UvInstallStrings } from '../../../common/localize';
 import * as persistentState from '../../../common/persistentState';
 import { EventNames } from '../../../common/telemetry/constants';
 import * as telemetrySender from '../../../common/telemetry/sender';
@@ -67,7 +67,7 @@ suite('uvPythonInstaller - promptInstallPythonViaUv', () => {
                 UvInstallStrings.installPythonPrompt,
                 { modal: true },
                 UvInstallStrings.installPython,
-                UvInstallStrings.dontAskAgain,
+                Common.dontAskAgain,
             ),
             'Should show install Python prompt when uv is installed',
         );
@@ -85,7 +85,7 @@ suite('uvPythonInstaller - promptInstallPythonViaUv', () => {
                 UvInstallStrings.installPythonAndUvPrompt,
                 { modal: true },
                 UvInstallStrings.installPython,
-                UvInstallStrings.dontAskAgain,
+                Common.dontAskAgain,
             ),
             'Should show install Python AND uv prompt when uv is not installed',
         );
@@ -94,7 +94,7 @@ suite('uvPythonInstaller - promptInstallPythonViaUv', () => {
     test('should set persistent state when user clicks "Don\'t ask again"', async () => {
         mockState.get.resolves(false);
         isUvInstalledStub.resolves(true);
-        showInformationMessageStub.resolves(UvInstallStrings.dontAskAgain);
+        showInformationMessageStub.resolves(Common.dontAskAgain);
 
         const result = await promptInstallPythonViaUv('activation', mockLog);
 
