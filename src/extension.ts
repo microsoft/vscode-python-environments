@@ -95,7 +95,11 @@ import { collectEnvironmentInfo, getEnvManagerAndPackageManagerConfigLevels, run
 import { EnvironmentManagers, ProjectCreators, PythonProjectManager } from './internal.api';
 import { registerSystemPythonFeatures } from './managers/builtin/main';
 import { SysPythonManager } from './managers/builtin/sysPythonManager';
-import { createNativePythonFinder, NativePythonFinder } from './managers/common/nativePythonFinder';
+import {
+    createNativePythonFinder,
+    NativePythonFinder,
+    PetBinaryNotFoundError,
+} from './managers/common/nativePythonFinder';
 import { IDisposable } from './managers/common/types';
 import { registerCondaFeatures } from './managers/conda/main';
 import { registerPipenvFeatures } from './managers/pipenv/main';
@@ -522,12 +526,50 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
      * Below are all the contributed features using the APIs.
      */
     setImmediate(async () => {
+        // Resolve the pet binary and spawn the finder process. Failures here are pet related.
+        let nativeFinder: NativePythonFinder;
         try {
-            // This is the finder that is used by all the built in environment managers
-            const nativeFinder: NativePythonFinder = await createNativePythonFinder(outputChannel, api, context);
-            context.subscriptions.push(nativeFinder);
-            const sysMgr = new SysPythonManager(nativeFinder, api, outputChannel);
-            sysPythonManager.resolve(sysMgr);
+            nativeFinder = await createNativePythonFinder(outputChannel, api, context);
+        } catch (error) {
+            traceError('Failed to start Python finder (pet):', error);
+
+            const errnoError = error as NodeJS.ErrnoException;
+            // PetBinaryNotFoundError = file missing; errno .code = OS spawn failure; anything else = unknown.
+            const reason =
+                error instanceof PetBinaryNotFoundError
+                    ? 'binary_not_found'
+                    : errnoError.code
+                      ? 'spawn_failed'
+                      : 'unknown';
+            sendTelemetryEvent(EventNames.PET_START_FAILED, undefined, {
+                errorCode: errnoError.code ?? 'UNKNOWN',
+                reason,
+                platform: process.platform,
+                arch: process.arch,
+            });
+
+            const openOutput = l10n.t('Open Output');
+            const openSettings = l10n.t('Open Settings');
+            const choice = await window.showErrorMessage(
+                l10n.t('Python Environments: Failed to start the Python finder. Some features may not work correctly.'),
+                openOutput,
+                openSettings,
+            );
+            if (choice === openOutput) {
+                outputChannel.show();
+            } else if (choice === openSettings) {
+                await commands.executeCommand('workbench.action.openSettings', 'python.defaultInterpreterPath');
+            }
+            return;
+        }
+
+        context.subscriptions.push(nativeFinder);
+        const sysMgr = new SysPythonManager(nativeFinder, api, outputChannel);
+        sysPythonManager.resolve(sysMgr);
+
+        // Manager registration and post-registration setup. safeRegister() absorbs
+        // individual manager failures, so errors here are unexpected and non-pet-related.
+        try {
             // Each manager registers independently — one failure must not block the others.
             await Promise.all([
                 safeRegister(
@@ -567,7 +609,6 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
             await logDiscoverySummary(envManagers);
         } catch (error) {
             traceError('Failed to initialize environment managers:', error);
-            // Show a user-friendly error message
             window.showErrorMessage(
                 l10n.t(
                     'Python Environments: Failed to initialize environment managers. Some features may not work correctly. Check the Output panel for details.',

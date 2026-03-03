@@ -9,6 +9,8 @@ import { spawnProcess } from '../../common/childProcess.apis';
 import { ENVS_EXTENSION_ID, PYTHON_EXTENSION_ID } from '../../common/constants';
 import { getExtension } from '../../common/extension.apis';
 import { traceError, traceVerbose, traceWarn } from '../../common/logging';
+import { EventNames } from '../../common/telemetry/constants';
+import { sendTelemetryEvent } from '../../common/telemetry/sender';
 import { untildify, untildifyArray } from '../../common/utils/pathUtils';
 import { isWindows } from '../../common/utils/platformUtils';
 import { createRunningWorkerPool, WorkerPool } from '../../common/utils/workerPool';
@@ -74,21 +76,38 @@ export class ConfigureRetryState {
     }
 }
 
+export class PetBinaryNotFoundError extends Error {
+    constructor(message: string) {
+        super(message);
+        this.name = 'PetBinaryNotFoundError';
+    }
+}
+
 export async function getNativePythonToolsPath(): Promise<string> {
     const envsExt = getExtension(ENVS_EXTENSION_ID);
     if (envsExt) {
         const petPath = path.join(envsExt.extensionPath, 'python-env-tools', 'bin', isWindows() ? 'pet.exe' : 'pet');
-        if (await fs.pathExists(petPath)) {
+        const exists = await fs.pathExists(petPath);
+        traceVerbose(`[pet] Primary path (envs-ext): ${petPath} — exists: ${exists}`);
+        if (exists) {
             return petPath;
         }
+    } else {
+        traceVerbose(`[pet] Envs extension (${ENVS_EXTENSION_ID}) not found; trying Python extension fallback`);
     }
 
     const python = getExtension(PYTHON_EXTENSION_ID);
     if (!python) {
-        throw new Error('Python extension not found');
+        throw new PetBinaryNotFoundError('Python extension not found and envs extension pet binary is missing');
     }
 
-    return path.join(python.extensionPath, 'python-env-tools', 'bin', isWindows() ? 'pet.exe' : 'pet');
+    const fallbackPath = path.join(python.extensionPath, 'python-env-tools', 'bin', isWindows() ? 'pet.exe' : 'pet');
+    const fallbackExists = await fs.pathExists(fallbackPath);
+    traceVerbose(`[pet] Fallback path (python-ext): ${fallbackPath} — exists: ${fallbackExists}`);
+    if (!fallbackExists) {
+        throw new PetBinaryNotFoundError(`Python finder binary not found at: ${fallbackPath}`);
+    }
+    return fallbackPath;
 }
 
 export interface NativeEnvInfo {
@@ -224,6 +243,7 @@ class NativePythonFinderImpl implements NativePythonFinder {
     private startFailed: boolean = false;
     private restartAttempts: number = 0;
     private isRestarting: boolean = false;
+    private isDisposed: boolean = false;
     private readonly configureRetry = new ConfigureRetryState();
 
     constructor(
@@ -426,6 +446,7 @@ class NativePythonFinderImpl implements NativePythonFinder {
     }
 
     public dispose() {
+        this.isDisposed = true;
         this.pool.stop();
         this.startDisposables.forEach((d) => d.dispose());
         this.connection.dispose();
@@ -475,11 +496,18 @@ class NativePythonFinderImpl implements NativePythonFinder {
             // Handle process exit - mark as exited so pending requests fail fast
             this.proc.on('exit', (code, signal) => {
                 this.processExited = true;
-                if (code !== 0) {
+                const wasExpected = this.isRestarting || this.isDisposed;
+                if (!wasExpected && code !== 0) {
                     this.outputChannel.error(
                         `[pet] Python Environment Tools exited unexpectedly with code ${code}, signal ${signal}`,
                     );
                 }
+                sendTelemetryEvent(EventNames.PET_PROCESS_EXIT, undefined, {
+                    exitCode: code,
+                    signal: signal ?? null,
+                    restartAttempt: this.restartAttempts,
+                    wasExpected,
+                });
             });
 
             // Handle process errors (e.g., ENOENT if executable not found)
@@ -898,5 +926,7 @@ export async function createNativePythonFinder(
     api: PythonProjectApi,
     context: ExtensionContext,
 ): Promise<NativePythonFinder> {
-    return new NativePythonFinderImpl(outputChannel, await getNativePythonToolsPath(), api, getCacheDirectory(context));
+    const petPath = await getNativePythonToolsPath();
+    traceVerbose(`[pet] Resolved pet binary path: ${petPath}`);
+    return new NativePythonFinderImpl(outputChannel, petPath, api, getCacheDirectory(context));
 }
