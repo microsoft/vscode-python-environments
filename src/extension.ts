@@ -10,7 +10,7 @@ import {
     window,
 } from 'vscode';
 import { PythonEnvironment, PythonEnvironmentApi, PythonProjectCreator } from './api';
-import { ENVS_EXTENSION_ID } from './common/constants';
+import { ENVS_EXTENSION_ID, SYSTEM_MANAGER_ID, VENV_MANAGER_ID } from './common/constants';
 import { ensureCorrectVersion } from './common/extVersion';
 import { registerLogger, traceError, traceInfo, traceWarn } from './common/logging';
 import { clearPersistentState, setPersistentState } from './common/persistentState';
@@ -545,6 +545,18 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
                     registerPoetryFeatures(nativeFinder, context.subscriptions, outputChannel, projectManager),
                 ),
                 safeRegister('shellStartupVars', shellStartupVarsMgr.initialize()),
+            ]);
+
+            // Pre-warm system and venv manager caches before initial environment selection.
+            await Promise.all([
+                envManagers
+                    .getEnvironmentManager(SYSTEM_MANAGER_ID)
+                    ?.getEnvironments('all')
+                    .catch(() => {}),
+                envManagers
+                    .getEnvironmentManager(VENV_MANAGER_ID)
+                    ?.getEnvironments('all')
+                    .catch(() => {}),
             ]);
 
             await applyInitialEnvironmentSelection(envManagers, projectManager, nativeFinder, api);

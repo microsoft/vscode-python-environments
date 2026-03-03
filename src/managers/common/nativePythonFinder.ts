@@ -238,6 +238,11 @@ class NativePythonFinderImpl implements NativePythonFinder {
             1,
             'NativeRefresh-task',
         );
+
+        // Start discovery immediately so the cache is warm before managers call initialize().
+        void this.refresh(false).catch((err) => {
+            traceWarn('[pet] Background pre-warm refresh failed:', err);
+        });
     }
 
     public async resolve(executable: string): Promise<NativeEnvInfo> {
