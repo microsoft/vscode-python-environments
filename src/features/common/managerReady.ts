@@ -10,7 +10,7 @@ import { installExtension } from '../../common/workbenchCommands';
 import { EnvironmentManagers, PythonProjectManager } from '../../internal.api';
 import { getDefaultEnvManagerSetting, getDefaultPkgManagerSetting } from '../settings/settingHelpers';
 
-const MANAGER_READY_TIMEOUT_MS = 30_000;
+export const MANAGER_READY_TIMEOUT_MS = 30_000;
 
 interface ManagerReady extends Disposable {
     waitForEnvManager(uris?: Uri[]): Promise<void>;
@@ -25,6 +25,48 @@ function getExtensionId(managerId: string): string | undefined {
     const regex = /^(.*):([a-zA-Z0-9-_]*)$/;
     const parts = regex.exec(managerId);
     return parts ? parts[1] : undefined;
+}
+
+/**
+ * Wraps a deferred with a timeout so a missing/dead manager cannot block the API forever.
+ * On timeout the deferred is resolved (not rejected) so callers proceed with degraded results
+ * instead of hanging.
+ */
+export function withManagerTimeout(
+    deferred: Deferred<void>,
+    managerId: string,
+    kind: 'environment' | 'package',
+): Promise<void> {
+    if (deferred.completed) {
+        return deferred.promise;
+    }
+    return new Promise<void>((resolve) => {
+        const timer = setTimeout(() => {
+            if (!deferred.completed) {
+                traceWarn(
+                    `Timed out after ${MANAGER_READY_TIMEOUT_MS / 1000}s waiting for ${kind} manager "${managerId}" to register. ` +
+                        `The manager may not be installed or its extension failed to activate. Proceeding without it. ` +
+                        `To prevent this, check your "python-envs.defaultEnvManager" and "python-envs.pythonProjects" settings.`,
+                );
+                sendTelemetryEvent(EventNames.MANAGER_READY_TIMEOUT, undefined, {
+                    managerId,
+                    managerKind: kind,
+                });
+                deferred.resolve();
+            }
+        }, MANAGER_READY_TIMEOUT_MS);
+
+        deferred.promise.then(
+            () => {
+                clearTimeout(timer);
+                resolve();
+            },
+            () => {
+                clearTimeout(timer);
+                resolve();
+            },
+        );
+    });
 }
 
 class ManagerReadyImpl implements ManagerReady {
@@ -111,44 +153,6 @@ class ManagerReadyImpl implements ManagerReady {
         }
     }
 
-    /**
-     * Wraps a deferred with a timeout so a missing/dead manager cannot block the API forever.
-     * On timeout the deferred is resolved (not rejected) so callers proceed with degraded results
-     * instead of hanging.
-     */
-    private _withTimeout(deferred: Deferred<void>, managerId: string, kind: string): Promise<void> {
-        if (deferred.completed) {
-            return deferred.promise;
-        }
-        return new Promise<void>((resolve) => {
-            const timer = setTimeout(() => {
-                if (!deferred.completed) {
-                    traceWarn(
-                        `Timed out after ${MANAGER_READY_TIMEOUT_MS / 1000}s waiting for ${kind} manager "${managerId}" to register. ` +
-                            `The manager may not be installed or its extension failed to activate. Proceeding without it. ` +
-                            `To prevent this, check your "python-envs.defaultEnvManager" and "python-envs.pythonProjects" settings.`,
-                    );
-                    sendTelemetryEvent(EventNames.MANAGER_READY_TIMEOUT, undefined, {
-                        managerId,
-                        managerKind: kind as 'environment' | 'package',
-                    });
-                    deferred.resolve();
-                }
-            }, MANAGER_READY_TIMEOUT_MS);
-
-            deferred.promise.then(
-                () => {
-                    clearTimeout(timer);
-                    resolve();
-                },
-                () => {
-                    clearTimeout(timer);
-                    resolve();
-                },
-            );
-        });
-    }
-
     public dispose(): void {
         this.disposables.forEach((d) => d.dispose());
         this.envManagers.clear();
@@ -161,7 +165,7 @@ class ManagerReadyImpl implements ManagerReady {
         }
         const deferred = createDeferred<void>();
         this.envManagers.set(managerId, deferred);
-        return this._withTimeout(deferred, managerId, 'environment');
+        return withManagerTimeout(deferred, managerId, 'environment');
     }
 
     public async waitForEnvManager(uris?: Uri[]): Promise<void> {
@@ -210,7 +214,7 @@ class ManagerReadyImpl implements ManagerReady {
         }
         const deferred = createDeferred<void>();
         this.pkgManagers.set(managerId, deferred);
-        return this._withTimeout(deferred, managerId, 'package');
+        return withManagerTimeout(deferred, managerId, 'package');
     }
 
     public async waitForPkgManager(uris?: Uri[]): Promise<void> {
