@@ -50,6 +50,8 @@ export enum EventNames {
      */
     ENVIRONMENT_DISCOVERY = 'ENVIRONMENT_DISCOVERY',
     MANAGER_READY_TIMEOUT = 'MANAGER_READY.TIMEOUT',
+    PET_START_FAILED = 'PET.START_FAILED',
+    PET_PROCESS_EXIT = 'PET.PROCESS_EXIT',
 }
 
 // Map all events to their properties
@@ -237,5 +239,35 @@ export interface IEventNamePropertyMapping {
     [EventNames.MANAGER_READY_TIMEOUT]: {
         managerId: string;
         managerKind: 'environment' | 'package';
+    };
+
+    /* __GDPR__
+        "pet.start_failed": {
+            "errorCode": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "owner": "eleanorjboyd" },
+            "reason": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "owner": "eleanorjboyd" },
+            "platform": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "owner": "eleanorjboyd" },
+            "arch": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "owner": "eleanorjboyd" }
+        }
+    */
+    [EventNames.PET_START_FAILED]: {
+        errorCode: string;
+        reason: 'binary_not_found' | 'spawn_failed' | 'unknown';
+        platform: string;
+        arch: string;
+    };
+
+    /* __GDPR__
+        "pet.process_exit": {
+            "exitCode": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "owner": "eleanorjboyd" },
+            "signal": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "owner": "eleanorjboyd" },
+            "restartAttempt": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "isMeasurement": true, "owner": "eleanorjboyd" },
+            "wasExpected": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "owner": "eleanorjboyd" }
+        }
+    */
+    [EventNames.PET_PROCESS_EXIT]: {
+        exitCode: number | null;
+        signal: string | null;
+        restartAttempt: number;
+        wasExpected: boolean;
     };
 }

@@ -522,12 +522,39 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
      * Below are all the contributed features using the APIs.
      */
     setImmediate(async () => {
+        // Resolve the pet binary and spawn the finder process. Failures here are pet related.
+        let nativeFinder: NativePythonFinder;
         try {
-            // This is the finder that is used by all the built in environment managers
-            const nativeFinder: NativePythonFinder = await createNativePythonFinder(outputChannel, api, context);
-            context.subscriptions.push(nativeFinder);
-            const sysMgr = new SysPythonManager(nativeFinder, api, outputChannel);
-            sysPythonManager.resolve(sysMgr);
+            nativeFinder = await createNativePythonFinder(outputChannel, api, context);
+        } catch (error) {
+            traceError('Failed to start Python finder (pet):', error);
+
+            const errnoError = error as NodeJS.ErrnoException;
+            // Plain Error (no .code) = binary not found by getNativePythonToolsPath.
+            // Errno error (has .code) = spawn failed (ENOENT, EACCES, EPERM, etc.).
+            const reason = errnoError.code ? 'spawn_failed' : 'binary_not_found';
+            sendTelemetryEvent(EventNames.PET_START_FAILED, undefined, {
+                errorCode: errnoError.code ?? 'UNKNOWN',
+                reason,
+                platform: process.platform,
+                arch: process.arch,
+            });
+
+            window.showErrorMessage(
+                l10n.t(
+                    'Python Environments: Failed to start the Python finder. Some features may not work correctly. Check the Output panel for details.',
+                ),
+            );
+            return;
+        }
+
+        context.subscriptions.push(nativeFinder);
+        const sysMgr = new SysPythonManager(nativeFinder, api, outputChannel);
+        sysPythonManager.resolve(sysMgr);
+
+        // Manager registration and post-registration setup. safeRegister() absorbs
+        // individual manager failures, so errors here are unexpected and non-pet-related.
+        try {
             // Each manager registers independently — one failure must not block the others.
             await Promise.all([
                 safeRegister(
@@ -567,7 +594,6 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
             await logDiscoverySummary(envManagers);
         } catch (error) {
             traceError('Failed to initialize environment managers:', error);
-            // Show a user-friendly error message
             window.showErrorMessage(
                 l10n.t(
                     'Python Environments: Failed to initialize environment managers. Some features may not work correctly. Check the Output panel for details.',
