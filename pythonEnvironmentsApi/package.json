@@ -1,23 +1,36 @@
 {
     "name": "@vscode/python-environments",
+    "description": "An API facade for the Python Environments extension in VS Code",
     "version": "1.0.0",
-    "description": "An API facade for the Python Environments extension API in VS Code",
     "author": {
         "name": "Microsoft Corporation"
     },
+    "keywords": [
+        "Python",
+        "VSCode",
+        "API",
+        "Environments"
+    ],
     "main": "./out/main.js",
     "types": "./out/main.d.ts",
+    "engines": {
+        "node": ">=22.21.1",
+        "vscode": "^1.110.0"
+    },
     "license": "MIT",
-    "publisher": "Microsoft",
+    "homepage": "https://github.com/microsoft/vscode-python-environments/tree/main/pythonEnvironmentsApi",
     "repository": {
         "type": "git",
         "url": "https://github.com/microsoft/vscode-python-environments"
     },
+    "bugs": {
+        "url": "https://github.com/microsoft/vscode-python-environments/issues"
+    },
     "scripts": {
-        "prepublishOnly": "echo \"Please use the CI pipeline to publish this package.\" && exit 1",
+        "prepublishOnly": "echo \"⛔ Can only publish from a secure pipeline ⛔\" && node -e \"process.exitCode = 1\"",
         "prepack": "npm run all:publish",
-        "all:publish": "npm run clean && npm run compile",
-        "compile": "tsc -p tsconfig.json",
+        "all:publish": "git clean -xfd . && npm install && npm run compile",
+        "compile": "node ./node_modules/typescript/lib/tsc.js -b ./tsconfig.json",
         "clean": "node -e \"const fs = require('fs'); fs.rmSync('./out', { recursive: true, force: true });\""
     },
     "devDependencies": {
