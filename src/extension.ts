@@ -95,7 +95,11 @@ import { collectEnvironmentInfo, getEnvManagerAndPackageManagerConfigLevels, run
 import { EnvironmentManagers, ProjectCreators, PythonProjectManager } from './internal.api';
 import { registerSystemPythonFeatures } from './managers/builtin/main';
 import { SysPythonManager } from './managers/builtin/sysPythonManager';
-import { createNativePythonFinder, NativePythonFinder } from './managers/common/nativePythonFinder';
+import {
+    createNativePythonFinder,
+    NativePythonFinder,
+    PetBinaryNotFoundError,
+} from './managers/common/nativePythonFinder';
 import { IDisposable } from './managers/common/types';
 import { registerCondaFeatures } from './managers/conda/main';
 import { registerPipenvFeatures } from './managers/pipenv/main';
@@ -530,9 +534,13 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
             traceError('Failed to start Python finder (pet):', error);
 
             const errnoError = error as NodeJS.ErrnoException;
-            // Plain Error (no .code) = binary not found by getNativePythonToolsPath.
-            // Errno error (has .code) = spawn failed (ENOENT, EACCES, EPERM, etc.).
-            const reason = errnoError.code ? 'spawn_failed' : 'binary_not_found';
+            // PetBinaryNotFoundError = file missing; errno .code = OS spawn failure; anything else = unknown.
+            const reason =
+                error instanceof PetBinaryNotFoundError
+                    ? 'binary_not_found'
+                    : errnoError.code
+                      ? 'spawn_failed'
+                      : 'unknown';
             sendTelemetryEvent(EventNames.PET_START_FAILED, undefined, {
                 errorCode: errnoError.code ?? 'UNKNOWN',
                 reason,
@@ -540,11 +548,18 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
                 arch: process.arch,
             });
 
-            window.showErrorMessage(
-                l10n.t(
-                    'Python Environments: Failed to start the Python finder. Some features may not work correctly. Check the Output panel for details.',
-                ),
+            const openOutput = l10n.t('Open Output');
+            const openSettings = l10n.t('Open Settings');
+            const choice = await window.showErrorMessage(
+                l10n.t('Python Environments: Failed to start the Python finder. Some features may not work correctly.'),
+                openOutput,
+                openSettings,
             );
+            if (choice === openOutput) {
+                outputChannel.show();
+            } else if (choice === openSettings) {
+                await commands.executeCommand('workbench.action.openSettings', 'python.defaultInterpreterPath');
+            }
             return;
         }
 

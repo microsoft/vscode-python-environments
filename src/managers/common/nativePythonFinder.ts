@@ -76,6 +76,13 @@ export class ConfigureRetryState {
     }
 }
 
+export class PetBinaryNotFoundError extends Error {
+    constructor(message: string) {
+        super(message);
+        this.name = 'PetBinaryNotFoundError';
+    }
+}
+
 export async function getNativePythonToolsPath(): Promise<string> {
     const envsExt = getExtension(ENVS_EXTENSION_ID);
     if (envsExt) {
@@ -91,14 +98,14 @@ export async function getNativePythonToolsPath(): Promise<string> {
 
     const python = getExtension(PYTHON_EXTENSION_ID);
     if (!python) {
-        throw new Error('Python extension not found and envs extension pet binary is missing');
+        throw new PetBinaryNotFoundError('Python extension not found and envs extension pet binary is missing');
     }
 
     const fallbackPath = path.join(python.extensionPath, 'python-env-tools', 'bin', isWindows() ? 'pet.exe' : 'pet');
     const fallbackExists = await fs.pathExists(fallbackPath);
     traceVerbose(`[pet] Fallback path (python-ext): ${fallbackPath} — exists: ${fallbackExists}`);
     if (!fallbackExists) {
-        throw new Error(`Python finder binary not found at: ${fallbackPath}`);
+        throw new PetBinaryNotFoundError(`Python finder binary not found at: ${fallbackPath}`);
     }
     return fallbackPath;
 }
@@ -490,7 +497,7 @@ class NativePythonFinderImpl implements NativePythonFinder {
             this.proc.on('exit', (code, signal) => {
                 this.processExited = true;
                 const wasExpected = this.isRestarting || this.isDisposed;
-                if (code !== 0) {
+                if (!wasExpected && code !== 0) {
                     this.outputChannel.error(
                         `[pet] Python Environment Tools exited unexpectedly with code ${code}, signal ${signal}`,
                     );
