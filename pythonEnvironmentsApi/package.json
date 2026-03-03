@@ -1,0 +1,27 @@
+{
+    "name": "@vscode/python-environments",
+    "version": "1.0.0",
+    "description": "An API facade for the Python Environments extension API in VS Code",
+    "author": {
+        "name": "Microsoft Corporation"
+    },
+    "main": "./out/main.js",
+    "types": "./out/main.d.ts",
+    "license": "MIT",
+    "publisher": "Microsoft",
+    "repository": {
+        "type": "git",
+        "url": "https://github.com/microsoft/vscode-python-environments"
+    },
+    "scripts": {
+        "prepublishOnly": "echo \"Please use the CI pipeline to publish this package.\" && exit 1",
+        "prepack": "npm run all:publish",
+        "all:publish": "npm run clean && npm run compile",
+        "compile": "tsc -p tsconfig.json",
+        "clean": "node -e \"const fs = require('fs'); fs.rmSync('./out', { recursive: true, force: true });\""
+    },
+    "devDependencies": {
+        "@types/vscode": "^1.99.0",
+        "typescript": "^5.1.3"
+    }
+}
