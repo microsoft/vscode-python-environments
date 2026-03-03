@@ -549,14 +549,16 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
 
             // Pre-warm system and venv manager caches before initial environment selection.
             await Promise.all([
-                envManagers
-                    .getEnvironmentManager(SYSTEM_MANAGER_ID)
-                    ?.getEnvironments('all')
-                    .catch(() => {}),
-                envManagers
-                    .getEnvironmentManager(VENV_MANAGER_ID)
-                    ?.getEnvironments('all')
-                    .catch(() => {}),
+                (
+                    envManagers.getEnvironmentManager(SYSTEM_MANAGER_ID)?.getEnvironments('all') ?? Promise.resolve()
+                ).catch((err) => {
+                    traceWarn('[pre-warm] System manager cache warm-up failed:', err);
+                }),
+                (envManagers.getEnvironmentManager(VENV_MANAGER_ID)?.getEnvironments('all') ?? Promise.resolve()).catch(
+                    (err) => {
+                        traceWarn('[pre-warm] Venv manager cache warm-up failed:', err);
+                    },
+                ),
             ]);
 
             await applyInitialEnvironmentSelection(envManagers, projectManager, nativeFinder, api);
