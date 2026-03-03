@@ -135,6 +135,15 @@
                     "description": "%python-envs.alwaysUseUv.description%",
                     "default": true,
                     "scope": "machine"
+                },
+                "python-envs.experimental.managerReadyTimeout": {
+                    "type": "integer",
+                    "default": 15,
+                    "minimum": 5,
+                    "maximum": 120,
+                    "markdownDescription": "%python-envs.experimental.managerReadyTimeout.description%",
+                    "scope": "machine",
+                    "tags": ["experimental"]
                 }
             }
         },

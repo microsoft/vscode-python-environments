@@ -7,10 +7,20 @@ import { sendTelemetryEvent } from '../../common/telemetry/sender';
 import { createDeferred, Deferred } from '../../common/utils/deferred';
 import { showErrorMessage } from '../../common/window.apis';
 import { installExtension } from '../../common/workbenchCommands';
+import { getConfiguration } from '../../common/workspace.apis';
 import { EnvironmentManagers, PythonProjectManager } from '../../internal.api';
 import { getDefaultEnvManagerSetting, getDefaultPkgManagerSetting } from '../settings/settingHelpers';
 
-const MANAGER_READY_TIMEOUT_MS = 30_000;
+const DEFAULT_MANAGER_READY_TIMEOUT_MS = 15_000;
+
+function getManagerReadyTimeoutMs(): number {
+    const config = getConfiguration('python-envs');
+    const userValue = config.get<number>('experimental.managerReadyTimeout');
+    if (typeof userValue === 'number' && userValue >= 5 && userValue <= 120) {
+        return userValue * 1000;
+    }
+    return DEFAULT_MANAGER_READY_TIMEOUT_MS;
+}
 
 interface ManagerReady extends Disposable {
     waitForEnvManager(uris?: Uri[]): Promise<void>;
@@ -120,13 +130,16 @@ class ManagerReadyImpl implements ManagerReady {
         if (deferred.completed) {
             return deferred.promise;
         }
+        const timeoutMs = getManagerReadyTimeoutMs();
         return new Promise<void>((resolve) => {
             const timer = setTimeout(() => {
                 if (!deferred.completed) {
                     traceWarn(
-                        `Timed out after ${MANAGER_READY_TIMEOUT_MS / 1000}s waiting for ${kind} manager "${managerId}" to register. ` +
+                        `Timed out after ${timeoutMs / 1000}s waiting for ${kind} manager "${managerId}" to register. ` +
                             `The manager may not be installed or its extension failed to activate. Proceeding without it. ` +
-                            `To prevent this, check your "python-envs.defaultEnvManager" and "python-envs.pythonProjects" settings.`,
+                            `To prevent this, check your "python-envs.defaultEnvManager" and "python-envs.pythonProjects" settings. ` +
+                            `If the manager is slow to start (e.g. on a remote or network filesystem), increase the timeout via ` +
+                            `"python-envs.experimental.managerReadyTimeout" (current: ${timeoutMs / 1000}s, range: 5–120s).`,
                     );
                     sendTelemetryEvent(EventNames.MANAGER_READY_TIMEOUT, undefined, {
                         managerId,
@@ -134,7 +147,7 @@ class ManagerReadyImpl implements ManagerReady {
                     });
                     deferred.resolve();
                 }
-            }, MANAGER_READY_TIMEOUT_MS);
+            }, timeoutMs);
 
             deferred.promise.then(
                 () => {
