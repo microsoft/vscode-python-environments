@@ -33,6 +33,7 @@ import {
     AutoActivationType,
     getAutoActivationType,
     getEnvironmentForTerminal,
+    shouldActivateInCurrentTerminal,
     waitForShellIntegration,
 } from './utils';
 
@@ -405,8 +406,21 @@ export class TerminalManagerImpl implements TerminalManager {
 
     public async initialize(api: PythonEnvironmentApi): Promise<void> {
         const actType = getAutoActivationType();
+
+        // Match vscode-python behavior: when activateEnvInCurrentTerminal is explicitly false,
+        // skip activation for ALL pre-existing terminals (terminals open before extension load).
+        // New terminals opened after extension load are still activated via autoActivateOnTerminalOpen.
+        const skipPreExistingTerminals = !shouldActivateInCurrentTerminal() && terminals().length > 0;
+        if (skipPreExistingTerminals) {
+            traceVerbose(
+                'python.terminal.activateEnvInCurrentTerminal is explicitly disabled, skipping activation for pre-existing terminals',
+            );
+        }
+
         if (actType === ACT_TYPE_COMMAND) {
-            await Promise.all(terminals().map(async (t) => this.activateUsingCommand(api, t)));
+            if (!skipPreExistingTerminals) {
+                await Promise.all(terminals().map(async (t) => this.activateUsingCommand(api, t)));
+            }
         } else if (actType === ACT_TYPE_SHELL) {
             const shells = new Set(
                 terminals()
@@ -415,14 +429,16 @@ export class TerminalManagerImpl implements TerminalManager {
             );
             if (shells.size > 0) {
                 await this.handleSetupCheck(shells);
-                await Promise.all(
-                    terminals().map(async (t) => {
-                        // If the shell is not set up, we activate using command fallback.
-                        if (this.shellSetup.get(identifyTerminalShell(t)) === false) {
-                            await this.activateUsingCommand(api, t);
-                        }
-                    }),
-                );
+                if (!skipPreExistingTerminals) {
+                    await Promise.all(
+                        terminals().map(async (t) => {
+                            // If the shell is not set up, we activate using command fallback.
+                            if (this.shellSetup.get(identifyTerminalShell(t)) === false) {
+                                await this.activateUsingCommand(api, t);
+                            }
+                        }),
+                    );
+                }
             }
         }
     }

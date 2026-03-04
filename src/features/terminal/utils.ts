@@ -262,6 +262,39 @@ export async function setAutoActivationType(value: AutoActivationType): Promise<
     return await config.update('terminal.autoActivationType', value, true);
 }
 
+/**
+ * Determines whether activation commands should be sent to the currently focused terminal and previous terminal.
+ * Checks the legacy `python.terminal.activateEnvInCurrentTerminal` setting.
+ *
+ * - If the user has explicitly set the value to `false` at any scope
+ *   (global, workspace, or workspace folder), returns `false`.
+ * - Otherwise (default or explicitly `true`), returns `true`.
+ *
+ * @returns `false` only when the user has explicitly set the setting to `false`; `true` otherwise.
+ */
+export function shouldActivateInCurrentTerminal(): boolean {
+    const pythonConfig = getConfiguration('python');
+    const inspected = pythonConfig.inspect<boolean>('terminal.activateEnvInCurrentTerminal');
+
+    if (!inspected) {
+        return true;
+    }
+
+    // Check explicit user-set values at each scope (highest precedence first).
+    // Only respect `false` when the user has deliberately set it.
+    if (inspected.workspaceFolderValue === false) {
+        return false;
+    }
+    if (inspected.workspaceValue === false) {
+        return false;
+    }
+    if (inspected.globalValue === false) {
+        return false;
+    }
+
+    return true;
+}
+
 export async function getAllDistinctProjectEnvironments(
     api: PythonProjectGetterApi & PythonProjectEnvironmentApi,
 ): Promise<PythonEnvironment[] | undefined> {

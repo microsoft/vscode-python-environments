@@ -7,6 +7,7 @@ import {
     ACT_TYPE_SHELL,
     AutoActivationType,
     getAutoActivationType,
+    shouldActivateInCurrentTerminal,
 } from '../../../features/terminal/utils';
 
 interface MockWorkspaceConfig {
@@ -352,5 +353,128 @@ suite('Terminal Utils - getAutoActivationType', () => {
                 assert.strictEqual(result, expected, `Should handle ${input} value correctly`);
             });
         });
+    });
+});
+
+suite('Terminal Utils - shouldActivateInCurrentTerminal', () => {
+    let mockGetConfiguration: sinon.SinonStub;
+    let pythonConfig: MockWorkspaceConfig;
+
+    setup(() => {
+        mockGetConfiguration = sinon.stub(workspaceApis, 'getConfiguration');
+
+        pythonConfig = {
+            get: sinon.stub(),
+            inspect: sinon.stub(),
+            update: sinon.stub(),
+        };
+
+        mockGetConfiguration.withArgs('python').returns(pythonConfig);
+    });
+
+    teardown(() => {
+        sinon.restore();
+    });
+
+    test('should return true when inspect returns undefined (no config)', () => {
+        pythonConfig.inspect.withArgs('terminal.activateEnvInCurrentTerminal').returns(undefined);
+
+        assert.strictEqual(shouldActivateInCurrentTerminal(), true, 'Should default to true when no config exists');
+    });
+
+    test('should return true when no explicit values are set (all undefined)', () => {
+        pythonConfig.inspect.withArgs('terminal.activateEnvInCurrentTerminal').returns({
+            key: 'terminal.activateEnvInCurrentTerminal',
+            defaultValue: false,
+            globalValue: undefined,
+            workspaceValue: undefined,
+            workspaceFolderValue: undefined,
+        });
+
+        assert.strictEqual(
+            shouldActivateInCurrentTerminal(),
+            true,
+            'Should return true when only defaultValue is set (not user-explicit)',
+        );
+    });
+
+    test('should return false when globalValue is explicitly false', () => {
+        pythonConfig.inspect.withArgs('terminal.activateEnvInCurrentTerminal').returns({
+            key: 'terminal.activateEnvInCurrentTerminal',
+            defaultValue: false,
+            globalValue: false,
+            workspaceValue: undefined,
+            workspaceFolderValue: undefined,
+        });
+
+        assert.strictEqual(
+            shouldActivateInCurrentTerminal(),
+            false,
+            'Should return false when user explicitly set globalValue to false',
+        );
+    });
+
+    test('should return false when workspaceValue is explicitly false', () => {
+        pythonConfig.inspect.withArgs('terminal.activateEnvInCurrentTerminal').returns({
+            key: 'terminal.activateEnvInCurrentTerminal',
+            defaultValue: false,
+            globalValue: undefined,
+            workspaceValue: false,
+            workspaceFolderValue: undefined,
+        });
+
+        assert.strictEqual(
+            shouldActivateInCurrentTerminal(),
+            false,
+            'Should return false when user explicitly set workspaceValue to false',
+        );
+    });
+
+    test('should return false when workspaceFolderValue is explicitly false', () => {
+        pythonConfig.inspect.withArgs('terminal.activateEnvInCurrentTerminal').returns({
+            key: 'terminal.activateEnvInCurrentTerminal',
+            defaultValue: false,
+            globalValue: undefined,
+            workspaceValue: undefined,
+            workspaceFolderValue: false,
+        });
+
+        assert.strictEqual(
+            shouldActivateInCurrentTerminal(),
+            false,
+            'Should return false when user explicitly set workspaceFolderValue to false',
+        );
+    });
+
+    test('should return true when globalValue is explicitly true', () => {
+        pythonConfig.inspect.withArgs('terminal.activateEnvInCurrentTerminal').returns({
+            key: 'terminal.activateEnvInCurrentTerminal',
+            defaultValue: false,
+            globalValue: true,
+            workspaceValue: undefined,
+            workspaceFolderValue: undefined,
+        });
+
+        assert.strictEqual(
+            shouldActivateInCurrentTerminal(),
+            true,
+            'Should return true when user explicitly set globalValue to true',
+        );
+    });
+
+    test('workspaceFolderValue false takes precedence over globalValue true', () => {
+        pythonConfig.inspect.withArgs('terminal.activateEnvInCurrentTerminal').returns({
+            key: 'terminal.activateEnvInCurrentTerminal',
+            defaultValue: false,
+            globalValue: true,
+            workspaceValue: undefined,
+            workspaceFolderValue: false,
+        });
+
+        assert.strictEqual(
+            shouldActivateInCurrentTerminal(),
+            false,
+            'workspaceFolderValue false should take precedence',
+        );
     });
 });
