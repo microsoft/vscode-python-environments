@@ -35,18 +35,3 @@ export async function activate() {
 }
 ```
 
-## API
-
-The full API surface is exported from the package. Key interfaces include:
-
-- **`PythonEnvironmentApi`** – the top-level composite interface returned by `PythonEnvironments.api()`.
-- **`PythonEnvironment`** – represents a single Python environment.
-- **`EnvironmentManager`** – register and manage environment managers.
-- **`PackageManager`** – register and manage package managers.
-- **`PythonProject`** – represents a Python project.
-
-See the [API reference](https://github.com/microsoft/vscode-python-environments/blob/main/docs/projects-api-reference.md) for complete documentation.
-
-## License
-
-MIT
