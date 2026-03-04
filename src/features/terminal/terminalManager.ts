@@ -407,7 +407,7 @@ export class TerminalManagerImpl implements TerminalManager {
     public async initialize(api: PythonEnvironmentApi): Promise<void> {
         const actType = getAutoActivationType();
 
-        // Match vscode-python behavior: when activateEnvInCurrentTerminal is explicitly false,
+        // When activateEnvInCurrentTerminal is explicitly false,
         // skip activation for ALL pre-existing terminals (terminals open before extension load).
         // New terminals opened after extension load are still activated via autoActivateOnTerminalOpen.
         const skipPreExistingTerminals = !shouldActivateInCurrentTerminal() && terminals().length > 0;
