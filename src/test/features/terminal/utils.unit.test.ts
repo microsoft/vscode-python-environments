@@ -477,4 +477,55 @@ suite('Terminal Utils - shouldActivateInCurrentTerminal', () => {
             'workspaceFolderValue false should take precedence',
         );
     });
+
+    test('should return false when globalRemoteValue is explicitly false', () => {
+        pythonConfig.inspect.withArgs('terminal.activateEnvInCurrentTerminal').returns({
+            key: 'terminal.activateEnvInCurrentTerminal',
+            defaultValue: false,
+            globalRemoteValue: false,
+            globalValue: undefined,
+            workspaceValue: undefined,
+            workspaceFolderValue: undefined,
+        });
+
+        assert.strictEqual(
+            shouldActivateInCurrentTerminal(),
+            false,
+            'Should return false when user explicitly set globalRemoteValue to false',
+        );
+    });
+
+    test('should return false when globalLocalValue is explicitly false', () => {
+        pythonConfig.inspect.withArgs('terminal.activateEnvInCurrentTerminal').returns({
+            key: 'terminal.activateEnvInCurrentTerminal',
+            defaultValue: false,
+            globalLocalValue: false,
+            globalValue: undefined,
+            workspaceValue: undefined,
+            workspaceFolderValue: undefined,
+        });
+
+        assert.strictEqual(
+            shouldActivateInCurrentTerminal(),
+            false,
+            'Should return false when user explicitly set globalLocalValue to false',
+        );
+    });
+
+    test('workspaceValue false takes precedence over globalRemoteValue true', () => {
+        pythonConfig.inspect.withArgs('terminal.activateEnvInCurrentTerminal').returns({
+            key: 'terminal.activateEnvInCurrentTerminal',
+            defaultValue: false,
+            globalRemoteValue: true,
+            globalValue: undefined,
+            workspaceValue: false,
+            workspaceFolderValue: undefined,
+        });
+
+        assert.strictEqual(
+            shouldActivateInCurrentTerminal(),
+            false,
+            'workspaceValue false should take precedence over globalRemoteValue true',
+        );
+    });
 });

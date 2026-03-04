@@ -263,11 +263,16 @@ export async function setAutoActivationType(value: AutoActivationType): Promise<
 }
 
 /**
- * Determines whether activation commands should be sent to the currently focused terminal and previous terminal.
- * Checks the legacy `python.terminal.activateEnvInCurrentTerminal` setting.
+ * Determines whether activation commands should be sent to pre-existing terminals
+ * (terminals open before extension load).
  *
- * - If the user has explicitly set the value to `false` at any scope
- *   (global, workspace, or workspace folder), returns `false`.
+ * Checks the legacy `python.terminal.activateEnvInCurrentTerminal` setting using `inspect()`
+ * to distinguish between the default value and an explicitly user-set value.
+ *
+ * Priority: workspaceFolderValue > workspaceValue > globalRemoteValue > globalLocalValue > globalValue
+ * (matches the precedence used by getShellIntegrationEnabledCache and getAutoActivationType)
+ *
+ * - If the user has explicitly set the value to `false` at any scope, returns `false`.
  * - Otherwise (default or explicitly `true`), returns `true`.
  *
  * @returns `false` only when the user has explicitly set the setting to `false`; `true` otherwise.
@@ -280,12 +285,20 @@ export function shouldActivateInCurrentTerminal(): boolean {
         return true;
     }
 
-    // Check explicit user-set values at each scope (highest precedence first).
     // Only respect `false` when the user has deliberately set it.
+    // Priority: workspaceFolder > workspace > globalRemote > globalLocal > global
+    const inspectValue = inspected as Record<string, unknown>;
+
     if (inspected.workspaceFolderValue === false) {
         return false;
     }
     if (inspected.workspaceValue === false) {
+        return false;
+    }
+    if ('globalRemoteValue' in inspected && inspectValue.globalRemoteValue === false) {
+        return false;
+    }
+    if ('globalLocalValue' in inspected && inspectValue.globalLocalValue === false) {
         return false;
     }
     if (inspected.globalValue === false) {
