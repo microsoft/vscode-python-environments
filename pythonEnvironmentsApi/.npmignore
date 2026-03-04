@@ -1,5 +1,5 @@
 node_modules/
 src/
 out/**/*.map
-out/**/*.tsbuildinfo
+*.tsbuildinfo
 tsconfig*.json

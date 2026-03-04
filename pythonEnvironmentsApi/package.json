@@ -30,7 +30,7 @@
         "prepublishOnly": "echo \"⛔ Can only publish from a secure pipeline ⛔\" && node -e \"process.exitCode = 1\"",
         "prepack": "npm run all:publish",
         "all:publish": "git clean -xfd . && npm install && npm run compile",
-        "compile": "node ./node_modules/typescript/lib/tsc.js -b ./tsconfig.json",
+        "compile": "tsc -b ./tsconfig.json",
         "clean": "node -e \"const fs = require('fs'); fs.rmSync('./out', { recursive: true, force: true });\""
     },
     "devDependencies": {
