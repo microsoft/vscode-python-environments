@@ -1,0 +1,53 @@
+name: $(Date:yyyyMMdd)$(Rev:.r)
+
+trigger: none
+pr: none
+
+resources:
+  repositories:
+    - repository: templates
+      type: github
+      name: microsoft/vscode-engineering
+      ref: main
+      endpoint: Monaco
+
+parameters:
+  - name: quality
+    displayName: Quality
+    type: string
+    default: latest
+    values:
+      - latest
+      - next
+  - name: publishPythonEnvsApi
+    displayName: 🚀 Publish @vscode/python-environments
+    type: boolean
+    default: false
+
+extends:
+  template: azure-pipelines/npm-package/pipeline.yml@templates
+  parameters:
+    npmPackages:
+      - name: pythonEnvironmentsApi
+        testPlatforms:
+          - name: Linux
+            nodeVersions:
+              - 22.21.1
+          - name: MacOS
+            nodeVersions:
+              - 22.21.1
+          - name: Windows
+            nodeVersions:
+              - 22.21.1
+        testSteps:
+          - template: /build/templates/test-steps.yml@self
+            parameters:
+              package: pythonEnvironmentsApi
+        buildSteps:
+          - template: /build/templates/pack-steps.yml@self
+            parameters:
+              package: pythonEnvironmentsApi
+        ghTagPrefix: release/pythonEnvironmentsApi/
+        tag: ${{ parameters.quality }}
+        publishPackage: ${{ parameters.publishPythonEnvsApi }}
+        workingDirectory: $(Build.SourcesDirectory)/pythonEnvironmentsApi
