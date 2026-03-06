@@ -1,7 +1,0 @@
-parameters:
-- name: package
-
-steps:
-  - script: npm install
-    workingDirectory: $(Build.SourcesDirectory)/${{ parameters.package }}
-    displayName: Install package dependencies
