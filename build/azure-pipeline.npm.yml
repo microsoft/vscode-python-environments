@@ -79,6 +79,11 @@ extends:
         jobs:
           - job: BuildPackage
             displayName: Build npm package
+            templateContext:
+              outputs:
+                - output: buildArtifacts
+                  PathtoPublish: $(Build.ArtifactStagingDirectory)
+                  ArtifactName: npm-package
             steps:
               - ${{ each step in parameters.buildSteps }}:
                   - ${{ step }}
