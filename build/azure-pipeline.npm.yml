@@ -32,7 +32,7 @@ parameters:
           versionSpec: '22.21.1'
         displayName: Select Node version
 
-      - script: npm ci
+      - script: npm install
         workingDirectory: $(Build.SourcesDirectory)/pythonEnvironmentsApi
         displayName: Install package dependencies
 
