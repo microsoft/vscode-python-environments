@@ -34,6 +34,7 @@
         "clean": "node -e \"const fs = require('fs'); fs.rmSync('./out', { recursive: true, force: true });\""
     },
     "devDependencies": {
+        "@types/node": "^22.0.0",
         "@types/vscode": "^1.99.0",
         "typescript": "^5.1.3"
     }

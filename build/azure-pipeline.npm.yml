@@ -32,7 +32,7 @@ parameters:
           versionSpec: '22.21.1'
         displayName: Select Node version
 
-      - script: npm ci
+      - script: npm install
         workingDirectory: $(Build.SourcesDirectory)/pythonEnvironmentsApi
         displayName: Install package dependencies
 
@@ -68,7 +68,8 @@ extends:
         enabled: true
     pool:
       name: AzurePipelines-EO
-      os: windows
+      image: 1ESPT-Ubuntu22.04
+      os: linux
 
     customBuildTags:
       - ES365AIMigrationTooling
@@ -79,6 +80,11 @@ extends:
         jobs:
           - job: BuildPackage
             displayName: Build npm package
+            templateContext:
+              outputs:
+                - output: pipelineArtifact
+                  targetPath: $(Build.ArtifactStagingDirectory)
+                  artifactName: npm-package
             steps:
               - ${{ each step in parameters.buildSteps }}:
                   - ${{ step }}
@@ -90,12 +96,6 @@ extends:
                   contents: '*.tgz'
                   targetFolder: $(Build.ArtifactStagingDirectory)
 
-              - task: 1ES.PublishBuildArtifacts@1
-                displayName: Publish build artifact
-                inputs:
-                  pathToPublish: $(Build.ArtifactStagingDirectory)
-                  artifactName: npm-package
-
       - stage: Publish
         displayName: Publish to npm
         dependsOn: Build
@@ -104,13 +104,11 @@ extends:
           - job: PublishPackage
             displayName: Publish $(PackageName)
             steps:
-              - task: DownloadBuildArtifacts@1
+              - task: DownloadPipelineArtifact@2
                 displayName: Download build artifact
                 inputs:
-                  buildType: current
-                  downloadType: single
                   artifactName: npm-package
-                  downloadPath: $(Build.ArtifactStagingDirectory)
+                  targetPath: $(Build.ArtifactStagingDirectory)/npm-package
 
               - task: NodeTool@0
                 inputs:
@@ -121,7 +119,7 @@ extends:
                 workingDirectory: $(Build.SourcesDirectory)/pythonEnvironmentsApi
                 displayName: Configure npm auth
 
-              - bash: npm publish $(Build.ArtifactStagingDirectory)/npm-package/*.tgz --tag $(npmTag) --access public
+              - bash: npm publish $(Build.ArtifactStagingDirectory)/npm-package/*.tgz --tag $(npmTag) --access public --ignore-scripts
                 displayName: Publish to npm (${{ parameters.quality }})
                 workingDirectory: $(Build.SourcesDirectory)/pythonEnvironmentsApi
                 env:
