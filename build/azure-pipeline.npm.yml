@@ -93,8 +93,8 @@ extends:
               - task: 1ES.PublishBuildArtifacts@1
                 displayName: Publish build artifact
                 inputs:
-                  pathToPublish: $(Build.ArtifactStagingDirectory)
-                  artifactName: npm-package
+                  PathToPublish: $(Build.ArtifactStagingDirectory)
+                  ArtifactName: npm-package
 
       - stage: Publish
         displayName: Publish to npm
