@@ -528,4 +528,20 @@ suite('Terminal Utils - shouldActivateInCurrentTerminal', () => {
             'workspaceValue false should take precedence over globalRemoteValue true',
         );
     });
+
+    test('should return false when globalValue is false even if workspaceValue is true (any explicit false wins)', () => {
+        pythonConfig.inspect.withArgs('terminal.activateEnvInCurrentTerminal').returns({
+            key: 'terminal.activateEnvInCurrentTerminal',
+            defaultValue: false,
+            globalValue: false,
+            workspaceValue: true,
+            workspaceFolderValue: undefined,
+        });
+
+        assert.strictEqual(
+            shouldActivateInCurrentTerminal(),
+            false,
+            'Any explicit false at any scope should return false, regardless of higher-precedence true values',
+        );
+    });
 });
