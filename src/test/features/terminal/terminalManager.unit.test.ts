@@ -21,7 +21,13 @@ import * as windowApis from '../../../common/window.apis';
 import * as workspaceApis from '../../../common/workspace.apis';
 import * as activationUtils from '../../../features/common/activation';
 import * as shellDetector from '../../../features/common/shellDetector';
-import { ShellEnvsProvider, ShellStartupScriptProvider } from '../../../features/terminal/shells/startupProvider';
+import * as shellUtils from '../../../features/terminal/shells/common/shellUtils';
+import {
+    ShellEnvsProvider,
+    ShellScriptEditState,
+    ShellSetupState,
+    ShellStartupScriptProvider,
+} from '../../../features/terminal/shells/startupProvider';
 import {
     DidChangeTerminalActivationStateEvent,
     TerminalActivationInternal,
@@ -419,5 +425,195 @@ suite('TerminalManager - terminal naming', () => {
         } finally {
             await fsapi.remove(tempRoot);
         }
+    });
+});
+
+suite('TerminalManager - initialize() with activateEnvInCurrentTerminal', () => {
+    let terminalActivation: TestTerminalActivation;
+    let terminalManager: TerminalManagerImpl;
+    let mockGetAutoActivationType: sinon.SinonStub;
+    let mockShouldActivateInCurrentTerminal: sinon.SinonStub;
+    let mockTerminals: sinon.SinonStub;
+    let mockGetEnvironmentForTerminal: sinon.SinonStub;
+
+    const createMockTerminal = (name: string): Terminal =>
+        ({
+            name,
+            creationOptions: {} as TerminalOptions,
+            shellIntegration: undefined,
+            show: sinon.stub(),
+            sendText: sinon.stub(),
+        }) as unknown as Terminal;
+
+    const createMockEnvironment = (): PythonEnvironment => ({
+        envId: { id: 'test-env-id', managerId: 'test-manager' },
+        name: 'Test Environment',
+        displayName: 'Test Environment',
+        shortDisplayName: 'TestEnv',
+        displayPath: '/path/to/env',
+        version: '3.9.0',
+        environmentPath: Uri.file('/path/to/python'),
+        sysPrefix: '/path/to/env',
+        execInfo: {
+            run: { executable: '/path/to/python' },
+            activation: [{ executable: '/path/to/activate' }],
+        },
+    });
+
+    setup(() => {
+        terminalActivation = new TestTerminalActivation();
+
+        mockGetAutoActivationType = sinon.stub(terminalUtils, 'getAutoActivationType');
+        mockShouldActivateInCurrentTerminal = sinon.stub(terminalUtils, 'shouldActivateInCurrentTerminal');
+        mockGetEnvironmentForTerminal = sinon.stub(terminalUtils, 'getEnvironmentForTerminal');
+        sinon.stub(terminalUtils, 'waitForShellIntegration').resolves(false);
+        sinon.stub(activationUtils, 'isActivatableEnvironment').returns(true);
+        sinon.stub(shellDetector, 'identifyTerminalShell').returns('bash');
+
+        sinon.stub(windowApis, 'createTerminal').callsFake(() => createMockTerminal('new'));
+        sinon.stub(windowApis, 'onDidOpenTerminal').returns(new Disposable(() => {}));
+        sinon.stub(windowApis, 'onDidCloseTerminal').returns(new Disposable(() => {}));
+        sinon.stub(windowApis, 'onDidChangeWindowState').returns(new Disposable(() => {}));
+        sinon.stub(windowApis, 'activeTerminal').returns(undefined);
+
+        mockTerminals = sinon.stub(windowApis, 'terminals');
+
+        sinon.stub(windowApis, 'withProgress').callsFake(async (_options, task) => {
+            const mockProgress = { report: () => {} };
+            const mockToken = {
+                isCancellationRequested: false,
+                onCancellationRequested: () => new Disposable(() => {}),
+            };
+            return task(mockProgress as never, mockToken as never);
+        });
+        sinon.stub(workspaceApis, 'onDidChangeConfiguration').returns(new Disposable(() => {}));
+    });
+
+    teardown(() => {
+        sinon.restore();
+        terminalActivation.dispose();
+    });
+
+    function createTerminalManager(): TerminalManagerImpl {
+        return new TerminalManagerImpl(terminalActivation, [], []);
+    }
+
+    test('initialize activates all pre-existing terminals when shouldActivateInCurrentTerminal returns true', async () => {
+        const terminal1 = createMockTerminal('terminal1');
+        const terminal2 = createMockTerminal('terminal2');
+        const env = createMockEnvironment();
+
+        mockGetAutoActivationType.returns(terminalUtils.ACT_TYPE_COMMAND);
+        mockShouldActivateInCurrentTerminal.returns(true);
+        mockTerminals.returns([terminal1, terminal2]);
+        mockGetEnvironmentForTerminal.resolves(env);
+
+        terminalManager = createTerminalManager();
+        await terminalManager.initialize({} as never);
+
+        assert.strictEqual(
+            terminalActivation.activateCalls,
+            2,
+            'Should activate all pre-existing terminals when activateEnvInCurrentTerminal is true/default',
+        );
+    });
+
+    test('initialize skips all pre-existing terminals when shouldActivateInCurrentTerminal returns false', async () => {
+        const terminal1 = createMockTerminal('terminal1');
+        const terminal2 = createMockTerminal('terminal2');
+        const env = createMockEnvironment();
+
+        mockGetAutoActivationType.returns(terminalUtils.ACT_TYPE_COMMAND);
+        mockShouldActivateInCurrentTerminal.returns(false);
+        mockTerminals.returns([terminal1, terminal2]);
+        mockGetEnvironmentForTerminal.resolves(env);
+
+        terminalManager = createTerminalManager();
+        await terminalManager.initialize({} as never);
+
+        assert.strictEqual(
+            terminalActivation.activateCalls,
+            0,
+            'Should skip all pre-existing terminals when activateEnvInCurrentTerminal is explicitly false',
+        );
+    });
+
+    test('initialize proceeds normally when shouldActivateInCurrentTerminal returns false but no pre-existing terminals', async () => {
+        mockGetAutoActivationType.returns(terminalUtils.ACT_TYPE_COMMAND);
+        mockShouldActivateInCurrentTerminal.returns(false);
+        mockTerminals.returns([]);
+
+        terminalManager = createTerminalManager();
+        await terminalManager.initialize({} as never);
+
+        assert.strictEqual(
+            terminalActivation.activateCalls,
+            0,
+            'Should have no activations when there are no terminals',
+        );
+    });
+
+    test('initialize skips shell fallback activation for pre-existing terminals when shouldActivateInCurrentTerminal returns false (ACT_TYPE_SHELL)', async () => {
+        const terminal1 = createMockTerminal('terminal1');
+        const env = createMockEnvironment();
+
+        // Mock a shell startup provider that reports NotSetup so shellSetup gets set to false,
+        // which would normally trigger the command fallback activation.
+        const mockShellProvider: ShellStartupScriptProvider = {
+            name: 'bash-test',
+            shellType: 'bash',
+            isSetup: sinon.stub().resolves(ShellSetupState.NotSetup),
+            setupScripts: sinon.stub().resolves(ShellScriptEditState.NotEdited),
+            teardownScripts: sinon.stub().resolves(ShellScriptEditState.NotEdited),
+            clearCache: sinon.stub().resolves(),
+        };
+        sinon.stub(shellUtils, 'getShellIntegrationEnabledCache').resolves(false);
+        sinon.stub(shellUtils, 'shouldUseProfileActivation').returns(false);
+
+        mockGetAutoActivationType.returns(terminalUtils.ACT_TYPE_SHELL);
+        mockShouldActivateInCurrentTerminal.returns(false);
+        mockTerminals.returns([terminal1]);
+        mockGetEnvironmentForTerminal.resolves(env);
+
+        terminalManager = new TerminalManagerImpl(terminalActivation, [], [mockShellProvider]);
+        await terminalManager.initialize({} as never);
+
+        assert.strictEqual(
+            terminalActivation.activateCalls,
+            0,
+            'Should skip shell fallback activation for pre-existing terminals when activateEnvInCurrentTerminal is explicitly false',
+        );
+    });
+
+    test('initialize activates via shell command fallback for pre-existing terminals when shouldActivateInCurrentTerminal returns true (ACT_TYPE_SHELL)', async () => {
+        const terminal1 = createMockTerminal('terminal1');
+        const env = createMockEnvironment();
+
+        // Mock a shell startup provider that reports NotSetup so shellSetup gets set to false,
+        // triggering the command fallback activation.
+        const mockShellProvider: ShellStartupScriptProvider = {
+            name: 'bash-test',
+            shellType: 'bash',
+            isSetup: sinon.stub().resolves(ShellSetupState.NotSetup),
+            setupScripts: sinon.stub().resolves(ShellScriptEditState.NotEdited),
+            teardownScripts: sinon.stub().resolves(ShellScriptEditState.NotEdited),
+            clearCache: sinon.stub().resolves(),
+        };
+        sinon.stub(shellUtils, 'getShellIntegrationEnabledCache').resolves(false);
+        sinon.stub(shellUtils, 'shouldUseProfileActivation').returns(false);
+
+        mockGetAutoActivationType.returns(terminalUtils.ACT_TYPE_SHELL);
+        mockShouldActivateInCurrentTerminal.returns(true);
+        mockTerminals.returns([terminal1]);
+        mockGetEnvironmentForTerminal.resolves(env);
+
+        terminalManager = new TerminalManagerImpl(terminalActivation, [], [mockShellProvider]);
+        await terminalManager.initialize({} as never);
+
+        assert.strictEqual(
+            terminalActivation.activateCalls,
+            1,
+            'Should activate via command fallback when shell setup reports not setup',
+        );
     });
 });
