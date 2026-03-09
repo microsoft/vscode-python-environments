@@ -56,7 +56,6 @@ variables:
       value: next
     ${{ else }}:
       value: latest
-  # TODO: Replace with your actual Azure Artifacts feed URL
   - name: AzureArtifactsFeedUrl
     value: 'https://pkgs.dev.azure.com/azure-public/vside/_packaging/python-environments/npm/registry/'
   # Same URL without the https:// prefix (used in .npmrc auth lines)
