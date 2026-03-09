@@ -21,7 +21,13 @@ import * as windowApis from '../../../common/window.apis';
 import * as workspaceApis from '../../../common/workspace.apis';
 import * as activationUtils from '../../../features/common/activation';
 import * as shellDetector from '../../../features/common/shellDetector';
-import { ShellEnvsProvider, ShellStartupScriptProvider } from '../../../features/terminal/shells/startupProvider';
+import * as shellUtils from '../../../features/terminal/shells/common/shellUtils';
+import {
+    ShellEnvsProvider,
+    ShellScriptEditState,
+    ShellSetupState,
+    ShellStartupScriptProvider,
+} from '../../../features/terminal/shells/startupProvider';
 import {
     DidChangeTerminalActivationStateEvent,
     TerminalActivationInternal,
@@ -544,6 +550,70 @@ suite('TerminalManager - initialize() with activateEnvInCurrentTerminal', () => 
             terminalActivation.activateCalls,
             0,
             'Should have no activations when there are no terminals',
+        );
+    });
+
+    test('initialize skips shell fallback activation for pre-existing terminals when shouldActivateInCurrentTerminal returns false (ACT_TYPE_SHELL)', async () => {
+        const terminal1 = createMockTerminal('terminal1');
+        const env = createMockEnvironment();
+
+        // Mock a shell startup provider that reports NotSetup so shellSetup gets set to false,
+        // which would normally trigger the command fallback activation.
+        const mockShellProvider: ShellStartupScriptProvider = {
+            name: 'bash-test',
+            shellType: 'bash',
+            isSetup: sinon.stub().resolves(ShellSetupState.NotSetup),
+            setupScripts: sinon.stub().resolves(ShellScriptEditState.NotEdited),
+            teardownScripts: sinon.stub().resolves(ShellScriptEditState.NotEdited),
+            clearCache: sinon.stub().resolves(),
+        };
+        sinon.stub(shellUtils, 'getShellIntegrationEnabledCache').resolves(false);
+        sinon.stub(shellUtils, 'shouldUseProfileActivation').returns(false);
+
+        mockGetAutoActivationType.returns(terminalUtils.ACT_TYPE_SHELL);
+        mockShouldActivateInCurrentTerminal.returns(false);
+        mockTerminals.returns([terminal1]);
+        mockGetEnvironmentForTerminal.resolves(env);
+
+        terminalManager = new TerminalManagerImpl(terminalActivation, [], [mockShellProvider]);
+        await terminalManager.initialize({} as never);
+
+        assert.strictEqual(
+            terminalActivation.activateCalls,
+            0,
+            'Should skip shell fallback activation for pre-existing terminals when activateEnvInCurrentTerminal is explicitly false',
+        );
+    });
+
+    test('initialize activates via shell command fallback for pre-existing terminals when shouldActivateInCurrentTerminal returns true (ACT_TYPE_SHELL)', async () => {
+        const terminal1 = createMockTerminal('terminal1');
+        const env = createMockEnvironment();
+
+        // Mock a shell startup provider that reports NotSetup so shellSetup gets set to false,
+        // triggering the command fallback activation.
+        const mockShellProvider: ShellStartupScriptProvider = {
+            name: 'bash-test',
+            shellType: 'bash',
+            isSetup: sinon.stub().resolves(ShellSetupState.NotSetup),
+            setupScripts: sinon.stub().resolves(ShellScriptEditState.NotEdited),
+            teardownScripts: sinon.stub().resolves(ShellScriptEditState.NotEdited),
+            clearCache: sinon.stub().resolves(),
+        };
+        sinon.stub(shellUtils, 'getShellIntegrationEnabledCache').resolves(false);
+        sinon.stub(shellUtils, 'shouldUseProfileActivation').returns(false);
+
+        mockGetAutoActivationType.returns(terminalUtils.ACT_TYPE_SHELL);
+        mockShouldActivateInCurrentTerminal.returns(true);
+        mockTerminals.returns([terminal1]);
+        mockGetEnvironmentForTerminal.resolves(env);
+
+        terminalManager = new TerminalManagerImpl(terminalActivation, [], [mockShellProvider]);
+        await terminalManager.initialize({} as never);
+
+        assert.strictEqual(
+            terminalActivation.activateCalls,
+            1,
+            'Should activate via command fallback when shell setup reports not setup',
         );
     });
 });
