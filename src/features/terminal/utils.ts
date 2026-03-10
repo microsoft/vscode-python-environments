@@ -262,6 +262,52 @@ export async function setAutoActivationType(value: AutoActivationType): Promise<
     return await config.update('terminal.autoActivationType', value, true);
 }
 
+/**
+ * Determines whether activation commands should be sent to pre-existing terminals
+ * (terminals open before extension load).
+ *
+ * Checks the legacy `python.terminal.activateEnvInCurrentTerminal` setting using `inspect()`
+ * to distinguish between the default value and an explicitly user-set value.
+ *
+ * Priority: workspaceFolderValue > workspaceValue > globalRemoteValue > globalLocalValue > globalValue
+ * (matches the precedence used by getShellIntegrationEnabledCache and getAutoActivationType)
+ *
+ * - If the user has explicitly set the value to `false` at any scope, returns `false`.
+ * - Otherwise (default or explicitly `true`), returns `true`.
+ *
+ * @returns `false` only when the user has explicitly set the setting to `false`; `true` otherwise.
+ */
+export function shouldActivateInCurrentTerminal(): boolean {
+    const pythonConfig = getConfiguration('python');
+    const inspected = pythonConfig.inspect<boolean>('terminal.activateEnvInCurrentTerminal');
+
+    if (!inspected) {
+        return true;
+    }
+
+    // Only respect `false` when the user has deliberately set it.
+    // Priority: workspaceFolder > workspace > globalRemote > globalLocal > global
+    const inspectValue = inspected as Record<string, unknown>;
+
+    if (inspected.workspaceFolderValue === false) {
+        return false;
+    }
+    if (inspected.workspaceValue === false) {
+        return false;
+    }
+    if ('globalRemoteValue' in inspected && inspectValue.globalRemoteValue === false) {
+        return false;
+    }
+    if ('globalLocalValue' in inspected && inspectValue.globalLocalValue === false) {
+        return false;
+    }
+    if (inspected.globalValue === false) {
+        return false;
+    }
+
+    return true;
+}
+
 export async function getAllDistinctProjectEnvironments(
     api: PythonProjectGetterApi & PythonProjectEnvironmentApi,
 ): Promise<PythonEnvironment[] | undefined> {
