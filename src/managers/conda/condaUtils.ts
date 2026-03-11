@@ -55,7 +55,7 @@ import { selectFromCommonPackagesToInstall } from '../common/pickers';
 import { Installable } from '../common/types';
 import { shortVersion, sortEnvironments } from '../common/utils';
 import { CondaEnvManager } from './condaEnvManager';
-import { getCondaHookPs1Path, getLocalActivationScript } from './condaSourcingUtils';
+import { getCondaHookPs1Path, getLocalActivationScript, ShellCondaInitStatus } from './condaSourcingUtils';
 import { createStepBasedCondaFlow } from './condaStepBasedFlow';
 
 export const CONDA_PATH_KEY = `${ENVS_EXTENSION_ID}:conda:CONDA_PATH`;
@@ -526,12 +526,21 @@ async function buildShellActivationMapForConda(
             return shellMaps;
         }
 
-        logs.push('✓ Using source command with preferred path');
-        const condaSourcingPathFirst = {
-            executable: 'source',
-            args: [preferredSourcingPath, envIdentifier],
-        };
-        shellMaps = await generateShellActivationMapFromConfig([condaSourcingPathFirst], [condaCommonDeactivate]);
+        logs.push('✓ Using shell-specific activation commands');
+        const condaShPath = envManager.sourcingInformation.shellSourcingScripts?.sh;
+        const condaFishPath = envManager.sourcingInformation.shellSourcingScripts?.fish;
+        const condaPs1Path = envManager.sourcingInformation.shellSourcingScripts?.ps1;
+
+        shellMaps = nonWindowsGenerateConfig(
+            preferredSourcingPath,
+            envIdentifier,
+            condaCommonDeactivate,
+            envManager.sourcingInformation.condaPath,
+            condaShPath,
+            condaFishPath,
+            condaPs1Path,
+            envManager.sourcingInformation.shellInitStatus,
+        );
         return shellMaps;
     } catch (error) {
         logs.push(
@@ -578,6 +587,9 @@ async function generateShellActivationMapFromConfig(
 
     shellActivation.set(ShellConstants.PWSH, activate);
     shellDeactivation.set(ShellConstants.PWSH, deactivate);
+
+    shellActivation.set(ShellConstants.FISH, activate);
+    shellDeactivation.set(ShellConstants.FISH, deactivate);
 
     return { shellActivation, shellDeactivation };
 }
@@ -644,6 +656,113 @@ export async function windowsExceptionGenerateConfig(
 
     shellActivation.set(ShellConstants.PWSH, pwshActivate);
     shellDeactivation.set(ShellConstants.PWSH, [condaCommonDeactivate]);
+
+    return { shellActivation, shellDeactivation };
+}
+
+/**
+ * Generates shell-specific activation configuration for non-Windows (Linux/macOS).
+ * Uses conda.sh for bash-like shells, conda.fish for Fish, and conda-hook.ps1 for PowerShell.
+ * Falls back to `source <activate-script> <env>` for bash-like shells when conda.sh is unavailable.
+ *
+ * For each shell, when the shell-specific sourcing script is not found, checks whether
+ * `conda init <shell>` has been run (via shellInitStatus). If it has, bare `conda` is used
+ * since the shell will set up the conda function on startup. Otherwise, the full conda path
+ * is used as the executable.
+ *
+ * @internal Exported for testing
+ */
+export function nonWindowsGenerateConfig(
+    sourceInitPath: string,
+    envIdentifier: string,
+    condaCommonDeactivate: PythonCommandRunConfiguration,
+    condaPath: string,
+    condaShPath?: string,
+    condaFishPath?: string,
+    condaPs1Path?: string,
+    shellInitStatus?: ShellCondaInitStatus,
+): ShellCommandMaps {
+    const shellActivation: Map<string, PythonCommandRunConfiguration[]> = new Map();
+    const shellDeactivation: Map<string, PythonCommandRunConfiguration[]> = new Map();
+    const deactivate = [condaCommonDeactivate];
+
+    // Helper: determine the conda executable for a given shell based on init status.
+    // If `conda init <shell>` has been run, the shell profile sets up `conda` as a shell
+    // function on startup, so bare `conda` works. Otherwise, use the full path to the
+    // conda binary (the user will see an actionable error if hooks aren't set up).
+    const condaExe = (shell: keyof ShellCondaInitStatus): string => (shellInitStatus?.[shell] ? 'conda' : condaPath);
+
+    // Bash-like shells: use conda.sh if available, otherwise fall back to source activate
+    let bashActivate: PythonCommandRunConfiguration[];
+    if (condaShPath) {
+        bashActivate = [
+            { executable: 'source', args: [condaShPath] },
+            { executable: 'conda', args: ['activate', envIdentifier] },
+        ];
+    } else {
+        bashActivate = [{ executable: 'source', args: [sourceInitPath, envIdentifier] }];
+    }
+
+    // POSIX sh (e.g. dash) does not support `source`; use `.` (dot) instead
+    let shActivate: PythonCommandRunConfiguration[];
+    if (condaShPath) {
+        shActivate = [
+            { executable: '.', args: [condaShPath] },
+            { executable: 'conda', args: ['activate', envIdentifier] },
+        ];
+    } else {
+        shActivate = [{ executable: '.', args: [sourceInitPath, envIdentifier] }];
+    }
+
+    shellActivation.set(ShellConstants.BASH, bashActivate);
+    shellDeactivation.set(ShellConstants.BASH, deactivate);
+
+    shellActivation.set(ShellConstants.SH, shActivate);
+    shellDeactivation.set(ShellConstants.SH, deactivate);
+
+    shellActivation.set(ShellConstants.ZSH, bashActivate);
+    shellDeactivation.set(ShellConstants.ZSH, deactivate);
+
+    shellActivation.set(ShellConstants.GITBASH, bashActivate);
+    shellDeactivation.set(ShellConstants.GITBASH, deactivate);
+
+    // Fish shell: use conda.fish if available. Otherwise, check if `conda init fish`
+    // was run — if so, bare `conda` works; if not, use the full conda path.
+    let fishActivate: PythonCommandRunConfiguration[];
+    if (condaFishPath) {
+        fishActivate = [
+            { executable: 'source', args: [condaFishPath] },
+            { executable: 'conda', args: ['activate', envIdentifier] },
+        ];
+    } else {
+        fishActivate = [{ executable: condaExe('fish'), args: ['activate', envIdentifier] }];
+    }
+
+    shellActivation.set(ShellConstants.FISH, fishActivate);
+    shellDeactivation.set(ShellConstants.FISH, deactivate);
+
+    // PowerShell: use conda-hook.ps1 if available. Otherwise, check if `conda init powershell`
+    // was run — if so, bare `conda` works; if not, use the full conda path.
+    let pwshActivate: PythonCommandRunConfiguration[];
+    if (condaPs1Path) {
+        pwshActivate = [
+            { executable: '&', args: [condaPs1Path] },
+            { executable: 'conda', args: ['activate', envIdentifier] },
+        ];
+    } else {
+        pwshActivate = [{ executable: condaExe('pwsh'), args: ['activate', envIdentifier] }];
+    }
+
+    shellActivation.set(ShellConstants.PWSH, pwshActivate);
+    shellDeactivation.set(ShellConstants.PWSH, deactivate);
+
+    traceVerbose(
+        `Non-Windows activation commands:
+        Bash: ${JSON.stringify(bashActivate)},
+        SH: ${JSON.stringify(shActivate)},
+        Fish: ${JSON.stringify(fishActivate)},
+        PowerShell: ${JSON.stringify(pwshActivate)}`,
+    );
 
     return { shellActivation, shellDeactivation };
 }
