@@ -699,7 +699,7 @@
         "@types/which": "^3.0.4",
         "@typescript-eslint/eslint-plugin": "^8.16.0",
         "@typescript-eslint/parser": "^8.16.0",
-        "@vscode/test-electron": "^2.3.2",
+        "@vscode/test-electron": "^2.5.2",
         "@vscode/vsce": "^2.24.0",
         "eslint": "^9.15.0",
         "glob": "^8.1.0",
