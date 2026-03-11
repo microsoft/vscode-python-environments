@@ -20,7 +20,12 @@ parameters:
       - preview
 
   - name: publishPackage
-    displayName: 🚀 Publish to npm
+    displayName: 🚀 Publish npm
+    type: boolean
+    default: false
+
+  - name: publishToConsumptionFeed
+    displayName: 📡 Publish to msft_consumption feed
     type: boolean
     default: false
 
@@ -64,6 +69,10 @@ variables:
   # Managed Identity service connection for Azure Artifacts auth (shared with Pylance)
   - name: AzureServiceConnection
     value: 'PylanceSecureVsIdePublishWithManagedIdentity'
+  - name: ConsumptionFeedUrl
+    value: 'https://pkgs.dev.azure.com/azure-public/vside/_packaging/msft_consumption/npm/registry/'
+  - name: ConsumptionFeedUrlNoProtocol
+    value: 'pkgs.dev.azure.com/azure-public/vside/_packaging/msft_consumption/npm/registry/'
 
 extends:
   template: azure-pipelines/MicroBuild.1ES.Official.yml@MicroBuildTemplate
@@ -168,3 +177,48 @@ extends:
                       npm publish $tgz.FullName --registry $(AzureArtifactsFeedUrl) --ignore-scripts
                   }
                 displayName: npm publish (${{ parameters.quality }})
+
+      - stage: PublishConsumption
+        displayName: Publish package to msft_consumption feed
+        dependsOn: Publish
+        condition: and(not(failed()), eq('${{ parameters.publishToConsumptionFeed }}', 'true'))
+        jobs:
+          - job: PullToConsumption
+            displayName: Pull $(PackageName) to msft_consumption
+            steps:
+              - checkout: none
+
+              - task: NodeTool@0
+                inputs:
+                  versionSpec: '22.21.1'
+                displayName: Select Node version
+
+              - task: AzureCLI@2
+                displayName: Acquire AAD token via Managed Identity
+                inputs:
+                  azureSubscription: '$(AzureServiceConnection)'
+                  scriptType: 'pscore'
+                  scriptLocation: 'inlineScript'
+                  inlineScript: |
+                    $token = az account get-access-token --query accessToken --resource 499b84ac-1321-427f-aa17-267ca6975798 -o tsv
+                    Write-Host "##vso[task.setvariable variable=AzdoToken;issecret=true]$token"
+
+              - powershell: |
+                  @"
+                  registry=$(ConsumptionFeedUrl)
+                  always-auth=true
+                  "@ | Out-File -FilePath .npmrc
+
+                  @"
+                  ; begin auth token
+                  //$(ConsumptionFeedUrlNoProtocol):username=VssSessionToken
+                  //$(ConsumptionFeedUrlNoProtocol):_authToken=$env:AZDO_TOKEN
+                  //$(ConsumptionFeedUrlNoProtocol):email=not-used@example.com
+                  ; end auth token
+                  "@ | Out-File -FilePath $HOME/.npmrc
+                env:
+                  AZDO_TOKEN: $(AzdoToken)
+                displayName: Create .npmrc files
+
+              - script: npm i -g $(PackageName)@$(npmTag) --registry $(ConsumptionFeedUrl)
+                displayName: Pull to msft_consumption
