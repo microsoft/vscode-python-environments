@@ -6,11 +6,13 @@ import { nonWindowsGenerateConfig } from '../../../managers/conda/condaUtils';
  * Tests for nonWindowsGenerateConfig - Non-Windows shell activation commands.
  *
  * Key behavior tested:
- * - Bash/ZSH/SH use conda.sh + conda activate when condaShPath is available
- * - Bash/ZSH/SH fall back to source <activate> <env> when condaShPath is unavailable
+ * - Bash/ZSH use conda.sh + conda activate when condaShPath is available
+ * - SH uses dot (.) instead of source for POSIX compliance
+ * - Bash/ZSH fall back to source <activate> <env> when condaShPath is unavailable
+ * - SH falls back to . <activate> <env> when condaShPath is unavailable
  * - Fish uses conda.fish + conda activate when condaFishPath is available
  * - Fish fallback uses bare `conda` if conda init fish was run, else full conda path
- * - PowerShell uses conda-hook.ps1 + conda activate when condaPs1Path is available
+ * - PowerShell uses & conda-hook.ps1 + conda activate when condaPs1Path is available
  * - PowerShell fallback uses bare `conda` if conda init pwsh was run, else full conda path
  */
 suite('Conda Utils - nonWindowsGenerateConfig', () => {
@@ -30,7 +32,7 @@ suite('Conda Utils - nonWindowsGenerateConfig', () => {
                 condaShPath,
             );
 
-            for (const shell of [ShellConstants.BASH, ShellConstants.ZSH, ShellConstants.SH, ShellConstants.GITBASH]) {
+            for (const shell of [ShellConstants.BASH, ShellConstants.ZSH, ShellConstants.GITBASH]) {
                 const activation = result.shellActivation.get(shell);
                 assert.ok(activation, `${shell} activation should be defined`);
                 assert.strictEqual(activation.length, 2, `${shell} should have 2 commands`);
@@ -41,16 +43,45 @@ suite('Conda Utils - nonWindowsGenerateConfig', () => {
             }
         });
 
+        test('SH uses dot instead of source with conda.sh', () => {
+            const condaShPath = '/home/user/miniforge3/etc/profile.d/conda.sh';
+            const result = nonWindowsGenerateConfig(
+                sourceInitPath,
+                envIdentifier,
+                condaDeactivate,
+                condaPath,
+                condaShPath,
+            );
+
+            const activation = result.shellActivation.get(ShellConstants.SH);
+            assert.ok(activation, 'SH activation should be defined');
+            assert.strictEqual(activation.length, 2, 'SH should have 2 commands');
+            assert.strictEqual(activation[0].executable, '.', 'SH should use dot instead of source');
+            assert.deepStrictEqual(activation[0].args, [condaShPath]);
+            assert.strictEqual(activation[1].executable, 'conda');
+            assert.deepStrictEqual(activation[1].args, ['activate', envIdentifier]);
+        });
+
         test('Falls back to source activate when condaShPath is not provided', () => {
             const result = nonWindowsGenerateConfig(sourceInitPath, envIdentifier, condaDeactivate, condaPath);
 
-            for (const shell of [ShellConstants.BASH, ShellConstants.ZSH, ShellConstants.SH, ShellConstants.GITBASH]) {
+            for (const shell of [ShellConstants.BASH, ShellConstants.ZSH, ShellConstants.GITBASH]) {
                 const activation = result.shellActivation.get(shell);
                 assert.ok(activation, `${shell} activation should be defined`);
                 assert.strictEqual(activation.length, 1, `${shell} should have 1 command`);
                 assert.strictEqual(activation[0].executable, 'source');
                 assert.deepStrictEqual(activation[0].args, [sourceInitPath, envIdentifier]);
             }
+        });
+
+        test('SH falls back to dot activate when condaShPath is not provided', () => {
+            const result = nonWindowsGenerateConfig(sourceInitPath, envIdentifier, condaDeactivate, condaPath);
+
+            const activation = result.shellActivation.get(ShellConstants.SH);
+            assert.ok(activation, 'SH activation should be defined');
+            assert.strictEqual(activation.length, 1, 'SH should have 1 command');
+            assert.strictEqual(activation[0].executable, '.', 'SH should use dot instead of source');
+            assert.deepStrictEqual(activation[0].args, [sourceInitPath, envIdentifier]);
         });
     });
 
@@ -125,7 +156,7 @@ suite('Conda Utils - nonWindowsGenerateConfig', () => {
     });
 
     suite('PowerShell activation', () => {
-        test('Uses conda-hook.ps1 + conda activate when condaPs1Path is provided', () => {
+        test('Uses & conda-hook.ps1 + conda activate when condaPs1Path is provided', () => {
             const condaPs1Path = '/home/user/miniforge3/shell/condabin/conda-hook.ps1';
             const result = nonWindowsGenerateConfig(
                 sourceInitPath,
@@ -140,7 +171,8 @@ suite('Conda Utils - nonWindowsGenerateConfig', () => {
             const activation = result.shellActivation.get(ShellConstants.PWSH);
             assert.ok(activation, 'PowerShell activation should be defined');
             assert.strictEqual(activation.length, 2, 'Should have 2 commands');
-            assert.strictEqual(activation[0].executable, condaPs1Path);
+            assert.strictEqual(activation[0].executable, '&');
+            assert.deepStrictEqual(activation[0].args, [condaPs1Path]);
             assert.strictEqual(activation[1].executable, 'conda');
             assert.deepStrictEqual(activation[1].args, ['activate', envIdentifier]);
         });
@@ -224,10 +256,11 @@ suite('Conda Utils - nonWindowsGenerateConfig', () => {
             assert.strictEqual(fishActivation[0].executable, 'source');
             assert.deepStrictEqual(fishActivation[0].args, [condaFishPath]);
 
-            // PowerShell uses conda-hook.ps1
+            // PowerShell uses & conda-hook.ps1
             const pwshActivation = result.shellActivation.get(ShellConstants.PWSH);
             assert.ok(pwshActivation);
-            assert.strictEqual(pwshActivation[0].executable, condaPs1Path);
+            assert.strictEqual(pwshActivation[0].executable, '&');
+            assert.deepStrictEqual(pwshActivation[0].args, [condaPs1Path]);
         });
     });
 });

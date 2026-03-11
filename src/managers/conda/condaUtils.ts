@@ -703,10 +703,21 @@ export function nonWindowsGenerateConfig(
         bashActivate = [{ executable: 'source', args: [sourceInitPath, envIdentifier] }];
     }
 
+    // POSIX sh (e.g. dash) does not support `source`; use `.` (dot) instead
+    let shActivate: PythonCommandRunConfiguration[];
+    if (condaShPath) {
+        shActivate = [
+            { executable: '.', args: [condaShPath] },
+            { executable: 'conda', args: ['activate', envIdentifier] },
+        ];
+    } else {
+        shActivate = [{ executable: '.', args: [sourceInitPath, envIdentifier] }];
+    }
+
     shellActivation.set(ShellConstants.BASH, bashActivate);
     shellDeactivation.set(ShellConstants.BASH, deactivate);
 
-    shellActivation.set(ShellConstants.SH, bashActivate);
+    shellActivation.set(ShellConstants.SH, shActivate);
     shellDeactivation.set(ShellConstants.SH, deactivate);
 
     shellActivation.set(ShellConstants.ZSH, bashActivate);
@@ -734,7 +745,10 @@ export function nonWindowsGenerateConfig(
     // was run — if so, bare `conda` works; if not, use the full conda path.
     let pwshActivate: PythonCommandRunConfiguration[];
     if (condaPs1Path) {
-        pwshActivate = [{ executable: condaPs1Path }, { executable: 'conda', args: ['activate', envIdentifier] }];
+        pwshActivate = [
+            { executable: '&', args: [condaPs1Path] },
+            { executable: 'conda', args: ['activate', envIdentifier] },
+        ];
     } else {
         pwshActivate = [{ executable: condaExe('pwsh'), args: ['activate', envIdentifier] }];
     }
@@ -745,6 +759,7 @@ export function nonWindowsGenerateConfig(
     traceVerbose(
         `Non-Windows activation commands:
         Bash: ${JSON.stringify(bashActivate)},
+        SH: ${JSON.stringify(shActivate)},
         Fish: ${JSON.stringify(fishActivate)},
         PowerShell: ${JSON.stringify(pwshActivate)}`,
     );
