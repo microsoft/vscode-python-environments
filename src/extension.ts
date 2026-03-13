@@ -17,6 +17,7 @@ import { clearPersistentState, setPersistentState } from './common/persistentSta
 import { newProjectSelection } from './common/pickers/managers';
 import { StopWatch } from './common/stopWatch';
 import { EventNames } from './common/telemetry/constants';
+import { classifyError } from './common/telemetry/errorClassifier';
 import {
     logDiscoverySummary,
     sendEnvironmentToolUsageTelemetry,
@@ -522,6 +523,7 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
      * Below are all the contributed features using the APIs.
      */
     setImmediate(async () => {
+        let failureStage = 'nativeFinder';
         try {
             // This is the finder that is used by all the built in environment managers
             const nativeFinder: NativePythonFinder = await createNativePythonFinder(outputChannel, api, context);
@@ -529,6 +531,7 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
             const sysMgr = new SysPythonManager(nativeFinder, api, outputChannel);
             sysPythonManager.resolve(sysMgr);
             // Each manager registers independently — one failure must not block the others.
+            failureStage = 'managerRegistration';
             await Promise.all([
                 safeRegister(
                     'system',
@@ -547,17 +550,22 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
                 safeRegister('shellStartupVars', shellStartupVarsMgr.initialize()),
             ]);
 
+            failureStage = 'envSelection';
             await applyInitialEnvironmentSelection(envManagers, projectManager, nativeFinder, api);
 
             // Register manager-agnostic terminal watcher for package-modifying commands
+            failureStage = 'terminalWatcher';
             registerTerminalPackageWatcher(api, terminalActivation, outputChannel, context.subscriptions);
 
             // Register listener for interpreter settings changes for interpreter re-selection
+            failureStage = 'settingsListener';
             context.subscriptions.push(
                 registerInterpreterSettingsChangeListener(envManagers, projectManager, nativeFinder, api),
             );
 
-            sendTelemetryEvent(EventNames.EXTENSION_MANAGER_REGISTRATION_DURATION, start.elapsedTime);
+            sendTelemetryEvent(EventNames.EXTENSION_MANAGER_REGISTRATION_DURATION, start.elapsedTime, {
+                result: 'success',
+            });
             try {
                 await terminalManager.initialize(api);
                 sendManagerSelectionTelemetry(projectManager);
@@ -574,7 +582,11 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
             sendTelemetryEvent(
                 EventNames.EXTENSION_MANAGER_REGISTRATION_DURATION,
                 start.elapsedTime,
-                undefined,
+                {
+                    result: 'error',
+                    failureStage,
+                    errorType: classifyError(error),
+                },
                 error instanceof Error ? error : undefined,
             );
             // Show a user-friendly error message

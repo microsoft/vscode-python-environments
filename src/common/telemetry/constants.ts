@@ -50,6 +50,14 @@ export enum EventNames {
      */
     ENVIRONMENT_DISCOVERY = 'ENVIRONMENT_DISCOVERY',
     MANAGER_READY_TIMEOUT = 'MANAGER_READY.TIMEOUT',
+    /**
+     * Telemetry event for individual manager registration failure.
+     * Fires once per manager that fails during registration (inside safeRegister).
+     * Properties:
+     * - managerName: string (e.g. 'system', 'conda', 'pyenv', 'pipenv', 'poetry', 'shellStartupVars')
+     * - errorType: string (classified error category from classifyError)
+     */
+    MANAGER_REGISTRATION_FAILED = 'MANAGER_REGISTRATION.FAILED',
 }
 
 // Map all events to their properties
@@ -62,10 +70,17 @@ export interface IEventNamePropertyMapping {
     [EventNames.EXTENSION_ACTIVATION_DURATION]: never | undefined;
     /* __GDPR__
        "extension.manager_registration_duration": {
-           "duration" : { "classification": "SystemMetaData", "purpose": "FeatureInsight", "owner": "eleanorjboyd" }
+           "duration" : { "classification": "SystemMetaData", "purpose": "FeatureInsight", "owner": "eleanorjboyd" },
+           "result" : { "classification": "SystemMetaData", "purpose": "FeatureInsight", "owner": "eleanorjboyd" },
+           "failureStage" : { "classification": "SystemMetaData", "purpose": "FeatureInsight", "owner": "eleanorjboyd" },
+           "errorType" : { "classification": "SystemMetaData", "purpose": "FeatureInsight", "owner": "eleanorjboyd" }
        }
     */
-    [EventNames.EXTENSION_MANAGER_REGISTRATION_DURATION]: never | undefined;
+    [EventNames.EXTENSION_MANAGER_REGISTRATION_DURATION]: {
+        result: 'success' | 'error';
+        failureStage?: string;
+        errorType?: string;
+    };
 
     /* __GDPR__
         "environment_manager.registered": {
@@ -238,5 +253,16 @@ export interface IEventNamePropertyMapping {
     [EventNames.MANAGER_READY_TIMEOUT]: {
         managerId: string;
         managerKind: 'environment' | 'package';
+    };
+
+    /* __GDPR__
+        "manager_registration.failed": {
+            "managerName": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "owner": "eleanorjboyd" },
+            "errorType": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "owner": "eleanorjboyd" }
+        }
+    */
+    [EventNames.MANAGER_REGISTRATION_FAILED]: {
+        managerName: string;
+        errorType: string;
     };
 }
