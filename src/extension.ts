@@ -524,6 +524,25 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
      */
     setImmediate(async () => {
         let failureStage = 'nativeFinder';
+        // Watchdog: fires if setup hasn't completed within 120s, indicating a likely hang
+        const SETUP_HANG_TIMEOUT_MS = 120_000;
+        let hangWatchdogActive = true;
+        const clearHangWatchdog = () => {
+            if (!hangWatchdogActive) {
+                return;
+            }
+            hangWatchdogActive = false;
+            clearTimeout(hangWatchdog);
+        };
+        const hangWatchdog = setTimeout(() => {
+            if (!hangWatchdogActive) {
+                return;
+            }
+            hangWatchdogActive = false;
+            traceError(`Setup appears hung during stage: ${failureStage}`);
+            sendTelemetryEvent(EventNames.SETUP_HANG_DETECTED, start.elapsedTime, { failureStage });
+        }, SETUP_HANG_TIMEOUT_MS);
+        context.subscriptions.push({ dispose: clearHangWatchdog });
         try {
             // This is the finder that is used by all the built in environment managers
             const nativeFinder: NativePythonFinder = await createNativePythonFinder(outputChannel, api, context);
@@ -566,6 +585,7 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
             sendTelemetryEvent(EventNames.EXTENSION_MANAGER_REGISTRATION_DURATION, start.elapsedTime, {
                 result: 'success',
             });
+            clearHangWatchdog();
             try {
                 await terminalManager.initialize(api);
                 sendManagerSelectionTelemetry(projectManager);
@@ -578,6 +598,7 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
                 traceError('Post-initialization tasks failed:', postInitError);
             }
         } catch (error) {
+            clearHangWatchdog();
             traceError('Failed to initialize environment managers:', error);
             sendTelemetryEvent(
                 EventNames.EXTENSION_MANAGER_REGISTRATION_DURATION,

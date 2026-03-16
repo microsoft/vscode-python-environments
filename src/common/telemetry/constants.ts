@@ -58,6 +58,14 @@ export enum EventNames {
      * - errorType: string (classified error category from classifyError)
      */
     MANAGER_REGISTRATION_FAILED = 'MANAGER_REGISTRATION.FAILED',
+    /**
+     * Telemetry event fired when the setup block appears to be hung.
+     * A watchdog timer fires after a deadline; if the setup completes normally,
+     * the timer is cancelled and this event never fires.
+     * Properties:
+     * - failureStage: string (which phase was in progress when the watchdog fired)
+     */
+    SETUP_HANG_DETECTED = 'SETUP.HANG_DETECTED',
 }
 
 // Map all events to their properties
@@ -264,5 +272,15 @@ export interface IEventNamePropertyMapping {
     [EventNames.MANAGER_REGISTRATION_FAILED]: {
         managerName: string;
         errorType: string;
+    };
+
+    /* __GDPR__
+        "setup.hang_detected": {
+            "failureStage": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "owner": "eleanorjboyd" },
+            "<duration>": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "isMeasurement": true, "owner": "eleanorjboyd" }
+        }
+    */
+    [EventNames.SETUP_HANG_DETECTED]: {
+        failureStage: string;
     };
 }
