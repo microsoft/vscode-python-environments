@@ -96,12 +96,86 @@ import { collectEnvironmentInfo, getEnvManagerAndPackageManagerConfigLevels, run
 import { EnvironmentManagers, ProjectCreators, PythonProjectManager } from './internal.api';
 import { registerSystemPythonFeatures } from './managers/builtin/main';
 import { SysPythonManager } from './managers/builtin/sysPythonManager';
-import { createNativePythonFinder, NativePythonFinder } from './managers/common/nativePythonFinder';
+import {
+    createNativePythonFinder,
+    NativePythonEnvironmentKind,
+    NativePythonFinder,
+} from './managers/common/nativePythonFinder';
 import { IDisposable } from './managers/common/types';
 import { registerCondaFeatures } from './managers/conda/main';
 import { registerPipenvFeatures } from './managers/pipenv/main';
 import { registerPoetryFeatures } from './managers/poetry/main';
 import { registerPyenvFeatures } from './managers/pyenv/main';
+
+/**
+ * Map from PET NativePythonEnvironmentKind to the manager name used in registration.
+ * Only includes kinds that have a dedicated manager (not system/venv/etc.).
+ */
+const PET_KIND_TO_MANAGER: ReadonlyMap<NativePythonEnvironmentKind, string> = new Map([
+    [NativePythonEnvironmentKind.conda, 'conda'],
+    [NativePythonEnvironmentKind.pyenv, 'pyenv'],
+    [NativePythonEnvironmentKind.pyenvVirtualEnv, 'pyenv'],
+    [NativePythonEnvironmentKind.pipenv, 'pipenv'],
+    [NativePythonEnvironmentKind.poetry, 'poetry'],
+]);
+
+/**
+ * Checks whether PET discovered environments whose corresponding manager did not register.
+ * Uses a soft (cached) refresh so it doesn't trigger additional PET work.
+ */
+async function checkPetManagerMismatch(
+    nativeFinder: NativePythonFinder,
+    envManagers: EnvironmentManagers,
+): Promise<void> {
+    const registeredIds = new Set(envManagers.managers.map((m) => m.id));
+
+    // Map manager names to their expected managerId prefix
+    const managerIdPrefixes: ReadonlyMap<string, string> = new Map([
+        ['conda', 'ms-python.python:conda'],
+        ['pyenv', 'ms-python.python:pyenv'],
+        ['pipenv', 'ms-python.python:pipenv'],
+        ['poetry', 'ms-python.python:poetry'],
+    ]);
+
+    // Group PET kinds by manager name to avoid double-counting (e.g. pyenv + pyenvVirtualEnv)
+    const kindsByManager = new Map<string, NativePythonEnvironmentKind[]>();
+    for (const [kind, managerName] of PET_KIND_TO_MANAGER) {
+        const existing = kindsByManager.get(managerName) ?? [];
+        existing.push(kind);
+        kindsByManager.set(managerName, existing);
+    }
+
+    for (const [managerName, kinds] of kindsByManager) {
+        const expectedPrefix = managerIdPrefixes.get(managerName);
+        if (!expectedPrefix) {
+            continue;
+        }
+
+        // Check if the corresponding manager registered
+        const isRegistered = Array.from(registeredIds).some((id) => id.startsWith(expectedPrefix));
+        if (isRegistered) {
+            continue;
+        }
+
+        // Manager not registered — check if PET found environments of any related kind
+        let totalPetEnvs = 0;
+        for (const kind of kinds) {
+            try {
+                const petEnvs = await nativeFinder.refresh(false, kind);
+                totalPetEnvs += petEnvs.length;
+            } catch {
+                // PET query failed — don't block post-init; skip this kind
+            }
+        }
+
+        if (totalPetEnvs > 0) {
+            sendTelemetryEvent(EventNames.MANAGER_DISCOVERY_MISMATCH, undefined, {
+                managerName,
+                petEnvCount: totalPetEnvs,
+            });
+        }
+    }
+}
 
 export async function activate(context: ExtensionContext): Promise<PythonEnvironmentApi | undefined> {
     // Only skip activation if user explicitly set useEnvironmentsExtension to false.
@@ -594,6 +668,9 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
 
                 // Log discovery summary to help users troubleshoot environment detection issues
                 await logDiscoverySummary(envManagers);
+
+                // Check for PET-vs-manager mismatches (PET found envs but manager didn't register)
+                await checkPetManagerMismatch(nativeFinder, envManagers);
             } catch (postInitError) {
                 traceError('Post-initialization tasks failed:', postInitError);
             }

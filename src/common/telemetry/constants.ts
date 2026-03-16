@@ -66,6 +66,22 @@ export enum EventNames {
      * - failureStage: string (which phase was in progress when the watchdog fired)
      */
     SETUP_HANG_DETECTED = 'SETUP.HANG_DETECTED',
+    /**
+     * Telemetry event for when a manager skips registration because its tool was not found.
+     * This is an expected outcome (not an error) and is distinct from MANAGER_REGISTRATION_FAILED.
+     * Properties:
+     * - managerName: string (e.g. 'conda', 'pyenv', 'pipenv', 'poetry')
+     * - reason: string ('tool_not_found')
+     */
+    MANAGER_REGISTRATION_SKIPPED = 'MANAGER_REGISTRATION.SKIPPED',
+    /**
+     * Telemetry event fired after manager registration when PET discovered environments
+     * of a kind whose corresponding manager did not register.
+     * Properties:
+     * - managerName: string (e.g. 'conda', 'pyenv', 'pipenv', 'poetry')
+     * - petEnvCount: number (how many envs PET found for that kind)
+     */
+    MANAGER_DISCOVERY_MISMATCH = 'MANAGER_DISCOVERY.MISMATCH',
 }
 
 // Map all events to their properties
@@ -282,5 +298,27 @@ export interface IEventNamePropertyMapping {
     */
     [EventNames.SETUP_HANG_DETECTED]: {
         failureStage: string;
+    };
+
+    /* __GDPR__
+        "manager_registration.skipped": {
+            "managerName": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "owner": "eleanorjboyd" },
+            "reason": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "owner": "eleanorjboyd" }
+        }
+    */
+    [EventNames.MANAGER_REGISTRATION_SKIPPED]: {
+        managerName: string;
+        reason: 'tool_not_found';
+    };
+
+    /* __GDPR__
+        "manager_discovery.mismatch": {
+            "managerName": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "owner": "eleanorjboyd" },
+            "petEnvCount": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "isMeasurement": true, "owner": "eleanorjboyd" }
+        }
+    */
+    [EventNames.MANAGER_DISCOVERY_MISMATCH]: {
+        managerName: string;
+        petEnvCount: number;
     };
 }
