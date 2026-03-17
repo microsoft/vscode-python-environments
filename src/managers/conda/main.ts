@@ -34,19 +34,24 @@ export async function registerCondaFeatures(
         return;
     }
 
-    // Conda was found — errors below are real registration failures (let safeRegister handle them)
-    const sourcingStatus: CondaSourcingStatus = await constructCondaSourcingStatus(condaPath);
-    traceInfo(sourcingStatus.toString());
+    // Conda was found — errors below are real registration failures (let safeRegister handle telemetry)
+    try {
+        const sourcingStatus: CondaSourcingStatus = await constructCondaSourcingStatus(condaPath);
+        traceInfo(sourcingStatus.toString());
 
-    const envManager = new CondaEnvManager(nativeFinder, api, log);
-    const packageManager = new CondaPackageManager(api, log);
+        const envManager = new CondaEnvManager(nativeFinder, api, log);
+        const packageManager = new CondaPackageManager(api, log);
 
-    envManager.sourcingInformation = sourcingStatus;
+        envManager.sourcingInformation = sourcingStatus;
 
-    disposables.push(
-        envManager,
-        packageManager,
-        api.registerEnvironmentManager(envManager),
-        api.registerPackageManager(packageManager),
-    );
+        disposables.push(
+            envManager,
+            packageManager,
+            api.registerEnvironmentManager(envManager),
+            api.registerPackageManager(packageManager),
+        );
+    } catch (ex) {
+        await notifyMissingManagerIfDefault('ms-python.python:conda', projectManager, api);
+        throw ex;
+    }
 }
