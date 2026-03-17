@@ -25,18 +25,13 @@ export async function registerCondaFeatures(
         // get Conda will return only ONE conda manager, that correlates to a single conda install
         condaPath = await getConda(nativeFinder);
     } catch (ex) {
-        // Only treat the known "Conda not found" error as a skip;
-        // other errors (e.g. PET timeout/crash) should propagate to safeRegister.
-        if (ex instanceof Error && ex.message === 'Conda not found') {
-            traceInfo('Conda not found, turning off conda features.', ex);
-            sendTelemetryEvent(EventNames.MANAGER_REGISTRATION_SKIPPED, undefined, {
-                managerName: 'conda',
-                reason: 'tool_not_found',
-            });
-            await notifyMissingManagerIfDefault('ms-python.python:conda', projectManager, api);
-            return;
-        }
-        throw ex;
+        traceInfo('Conda not found, turning off conda features.', ex);
+        sendTelemetryEvent(EventNames.MANAGER_REGISTRATION_SKIPPED, undefined, {
+            managerName: 'conda',
+            reason: 'tool_not_found',
+        });
+        await notifyMissingManagerIfDefault('ms-python.python:conda', projectManager, api);
+        return;
     }
 
     // Conda was found — errors below are real registration failures (let safeRegister handle them)
