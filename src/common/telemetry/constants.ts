@@ -95,9 +95,9 @@ export interface IEventNamePropertyMapping {
     /* __GDPR__
        "extension.manager_registration_duration": {
            "duration" : { "classification": "SystemMetaData", "purpose": "FeatureInsight", "owner": "eleanorjboyd" },
-           "result" : { "classification": "SystemMetaData", "purpose": "FeatureInsight", "owner": "eleanorjboyd" },
-           "failureStage" : { "classification": "SystemMetaData", "purpose": "FeatureInsight", "owner": "eleanorjboyd" },
-           "errorType" : { "classification": "SystemMetaData", "purpose": "FeatureInsight", "owner": "eleanorjboyd" }
+           "result" : { "classification": "SystemMetaData", "purpose": "FeatureInsight", "owner": "StellaHuang95" },
+           "failureStage" : { "classification": "SystemMetaData", "purpose": "FeatureInsight", "owner": "StellaHuang95" },
+           "errorType" : { "classification": "SystemMetaData", "purpose": "FeatureInsight", "owner": "StellaHuang95" }
        }
     */
     [EventNames.EXTENSION_MANAGER_REGISTRATION_DURATION]: {
@@ -281,8 +281,8 @@ export interface IEventNamePropertyMapping {
 
     /* __GDPR__
         "manager_registration.failed": {
-            "managerName": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "owner": "eleanorjboyd" },
-            "errorType": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "owner": "eleanorjboyd" }
+            "managerName": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "owner": "StellaHuang95" },
+            "errorType": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "owner": "StellaHuang95" }
         }
     */
     [EventNames.MANAGER_REGISTRATION_FAILED]: {
@@ -292,8 +292,8 @@ export interface IEventNamePropertyMapping {
 
     /* __GDPR__
         "setup.hang_detected": {
-            "failureStage": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "owner": "eleanorjboyd" },
-            "<duration>": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "isMeasurement": true, "owner": "eleanorjboyd" }
+            "failureStage": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "owner": "StellaHuang95" },
+            "<duration>": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "isMeasurement": true, "owner": "StellaHuang95" }
         }
     */
     [EventNames.SETUP_HANG_DETECTED]: {
@@ -302,8 +302,8 @@ export interface IEventNamePropertyMapping {
 
     /* __GDPR__
         "manager_registration.skipped": {
-            "managerName": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "owner": "eleanorjboyd" },
-            "reason": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "owner": "eleanorjboyd" }
+            "managerName": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "owner": "StellaHuang95" },
+            "reason": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "owner": "StellaHuang95" }
         }
     */
     [EventNames.MANAGER_REGISTRATION_SKIPPED]: {
@@ -313,8 +313,8 @@ export interface IEventNamePropertyMapping {
 
     /* __GDPR__
         "manager_discovery.mismatch": {
-            "managerName": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "owner": "eleanorjboyd" },
-            "petEnvCount": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "isMeasurement": true, "owner": "eleanorjboyd" }
+            "managerName": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "owner": "StellaHuang95" },
+            "petEnvCount": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "isMeasurement": true, "owner": "StellaHuang95" }
         }
     */
     [EventNames.MANAGER_DISCOVERY_MISMATCH]: {
