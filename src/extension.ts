@@ -98,6 +98,7 @@ import { registerSystemPythonFeatures } from './managers/builtin/main';
 import { SysPythonManager } from './managers/builtin/sysPythonManager';
 import {
     createNativePythonFinder,
+    isNativeEnvInfo,
     NativePythonEnvironmentKind,
     NativePythonFinder,
 } from './managers/common/nativePythonFinder';
@@ -137,6 +138,18 @@ async function checkPetManagerMismatch(
         ['poetry', 'ms-python.python:poetry'],
     ]);
 
+    // Use a single cached refresh to avoid triggering per-kind hard refreshes on cache miss
+    let allEnvs;
+    try {
+        allEnvs = await nativeFinder.refresh(false);
+    } catch {
+        // PET query failed — don't block post-init
+        return;
+    }
+
+    // Filter to only environment entries (not manager entries)
+    const envInfos = allEnvs.filter(isNativeEnvInfo);
+
     // Group PET kinds by manager name to avoid double-counting (e.g. pyenv + pyenvVirtualEnv)
     const kindsByManager = new Map<string, NativePythonEnvironmentKind[]>();
     for (const [kind, managerName] of PET_KIND_TO_MANAGER) {
@@ -157,16 +170,8 @@ async function checkPetManagerMismatch(
             continue;
         }
 
-        // Manager not registered — check if PET found environments of any related kind
-        let totalPetEnvs = 0;
-        for (const kind of kinds) {
-            try {
-                const petEnvs = await nativeFinder.refresh(false, kind);
-                totalPetEnvs += petEnvs.length;
-            } catch {
-                // PET query failed — don't block post-init; skip this kind
-            }
-        }
+        // Manager not registered — count PET environments of any related kind
+        const totalPetEnvs = envInfos.filter((e) => e.kind !== undefined && kinds.includes(e.kind)).length;
 
         if (totalPetEnvs > 0) {
             sendTelemetryEvent(EventNames.MANAGER_DISCOVERY_MISMATCH, undefined, {
