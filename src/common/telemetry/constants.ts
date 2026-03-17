@@ -74,14 +74,6 @@ export enum EventNames {
      * - reason: string ('tool_not_found')
      */
     MANAGER_REGISTRATION_SKIPPED = 'MANAGER_REGISTRATION.SKIPPED',
-    /**
-     * Telemetry event fired after manager registration when PET discovered environments
-     * of a kind whose corresponding manager did not register.
-     * Properties:
-     * - managerName: string (e.g. 'conda', 'pyenv', 'pipenv', 'poetry')
-     * - petEnvCount: number (how many envs PET found for that kind)
-     */
-    MANAGER_DISCOVERY_MISMATCH = 'MANAGER_DISCOVERY.MISMATCH',
 }
 
 // Map all events to their properties
@@ -309,16 +301,5 @@ export interface IEventNamePropertyMapping {
     [EventNames.MANAGER_REGISTRATION_SKIPPED]: {
         managerName: string;
         reason: 'tool_not_found';
-    };
-
-    /* __GDPR__
-        "manager_discovery.mismatch": {
-            "managerName": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "owner": "StellaHuang95" },
-            "petEnvCount": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "isMeasurement": true, "owner": "StellaHuang95" }
-        }
-    */
-    [EventNames.MANAGER_DISCOVERY_MISMATCH]: {
-        managerName: string;
-        petEnvCount: number;
     };
 }
