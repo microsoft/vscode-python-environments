@@ -1,6 +1,9 @@
 import { Disposable } from 'vscode';
 import { PythonEnvironmentApi } from '../../api';
 import { traceInfo } from '../../common/logging';
+import { EventNames } from '../../common/telemetry/constants';
+import { classifyError } from '../../common/telemetry/errorClassifier';
+import { sendTelemetryEvent } from '../../common/telemetry/sender';
 import { getPythonApi } from '../../features/pythonApi';
 import { PythonProjectManager } from '../../internal.api';
 import { NativePythonFinder } from '../common/nativePythonFinder';
@@ -35,6 +38,10 @@ export async function registerPipenvFeatures(
             traceInfo(
                 'Pipenv not found, turning off pipenv features. If you have pipenv installed in a non-standard location, set the "python.pipenvPath" setting.',
             );
+            sendTelemetryEvent(EventNames.MANAGER_REGISTRATION_SKIPPED, undefined, {
+                managerName: 'pipenv',
+                reason: 'tool_not_found',
+            });
             await notifyMissingManagerIfDefault('ms-python.python:pipenv', projectManager, api);
         }
     } catch (ex) {
@@ -42,6 +49,10 @@ export async function registerPipenvFeatures(
             'Pipenv not found, turning off pipenv features. If you have pipenv installed in a non-standard location, set the "python.pipenvPath" setting.',
             ex,
         );
+        sendTelemetryEvent(EventNames.MANAGER_REGISTRATION_FAILED, undefined, {
+            managerName: 'pipenv',
+            errorType: classifyError(ex),
+        });
         await notifyMissingManagerIfDefault('ms-python.python:pipenv', projectManager, api);
     }
 }

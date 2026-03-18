@@ -1,6 +1,8 @@
 import { Disposable, LogOutputChannel } from 'vscode';
 import { PythonEnvironmentApi } from '../../api';
 import { traceInfo } from '../../common/logging';
+import { EventNames } from '../../common/telemetry/constants';
+import { sendTelemetryEvent } from '../../common/telemetry/sender';
 import { getPythonApi } from '../../features/pythonApi';
 import { PythonProjectManager } from '../../internal.api';
 import { NativePythonFinder } from '../common/nativePythonFinder';
@@ -18,9 +20,22 @@ export async function registerCondaFeatures(
 ): Promise<void> {
     const api: PythonEnvironmentApi = await getPythonApi();
 
+    let condaPath: string | undefined;
     try {
         // get Conda will return only ONE conda manager, that correlates to a single conda install
-        const condaPath: string = await getConda(nativeFinder);
+        condaPath = await getConda(nativeFinder);
+    } catch (ex) {
+        traceInfo('Conda not found, turning off conda features.', ex);
+        sendTelemetryEvent(EventNames.MANAGER_REGISTRATION_SKIPPED, undefined, {
+            managerName: 'conda',
+            reason: 'tool_not_found',
+        });
+        await notifyMissingManagerIfDefault('ms-python.python:conda', projectManager, api);
+        return;
+    }
+
+    // Conda was found — errors below are real registration failures (let safeRegister handle telemetry)
+    try {
         const sourcingStatus: CondaSourcingStatus = await constructCondaSourcingStatus(condaPath);
         traceInfo(sourcingStatus.toString());
 
@@ -36,7 +51,7 @@ export async function registerCondaFeatures(
             api.registerPackageManager(packageManager),
         );
     } catch (ex) {
-        traceInfo('Conda not found, turning off conda features.', ex);
         await notifyMissingManagerIfDefault('ms-python.python:conda', projectManager, api);
+        throw ex;
     }
 }

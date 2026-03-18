@@ -1,4 +1,7 @@
 import { traceError } from '../logging';
+import { EventNames } from '../telemetry/constants';
+import { classifyError } from '../telemetry/errorClassifier';
+import { sendTelemetryEvent } from '../telemetry/sender';
 
 export async function timeout(milliseconds: number): Promise<void> {
     return new Promise<void>((resolve) => setTimeout(resolve, milliseconds));
@@ -13,5 +16,9 @@ export async function safeRegister(name: string, task: Promise<void>): Promise<v
         await task;
     } catch (error) {
         traceError(`Failed to register ${name} features:`, error);
+        sendTelemetryEvent(EventNames.MANAGER_REGISTRATION_FAILED, undefined, {
+            managerName: name,
+            errorType: classifyError(error),
+        });
     }
 }
