@@ -125,6 +125,7 @@ export async function refreshPythons(
                         NativePythonEnvironmentKind.macXCode,
                         NativePythonEnvironmentKind.windowsRegistry,
                         NativePythonEnvironmentKind.windowsStore,
+                        NativePythonEnvironmentKind.winpython,
                     ].includes(e.kind)),
         );
     envs.forEach((env) => {
