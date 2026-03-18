@@ -17,6 +17,7 @@ import { clearPersistentState, setPersistentState } from './common/persistentSta
 import { newProjectSelection } from './common/pickers/managers';
 import { StopWatch } from './common/stopWatch';
 import { EventNames } from './common/telemetry/constants';
+import { classifyError } from './common/telemetry/errorClassifier';
 import {
     logDiscoverySummary,
     sendEnvironmentToolUsageTelemetry,
@@ -522,6 +523,26 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
      * Below are all the contributed features using the APIs.
      */
     setImmediate(async () => {
+        let failureStage = 'nativeFinder';
+        // Watchdog: fires if setup hasn't completed within 120s, indicating a likely hang
+        const SETUP_HANG_TIMEOUT_MS = 120_000;
+        let hangWatchdogActive = true;
+        const clearHangWatchdog = () => {
+            if (!hangWatchdogActive) {
+                return;
+            }
+            hangWatchdogActive = false;
+            clearTimeout(hangWatchdog);
+        };
+        const hangWatchdog = setTimeout(() => {
+            if (!hangWatchdogActive) {
+                return;
+            }
+            hangWatchdogActive = false;
+            traceError(`Setup appears hung during stage: ${failureStage}`);
+            sendTelemetryEvent(EventNames.SETUP_HANG_DETECTED, start.elapsedTime, { failureStage });
+        }, SETUP_HANG_TIMEOUT_MS);
+        context.subscriptions.push({ dispose: clearHangWatchdog });
         try {
             // This is the finder that is used by all the built in environment managers
             const nativeFinder: NativePythonFinder = await createNativePythonFinder(outputChannel, api, context);
@@ -529,6 +550,7 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
             const sysMgr = new SysPythonManager(nativeFinder, api, outputChannel);
             sysPythonManager.resolve(sysMgr);
             // Each manager registers independently — one failure must not block the others.
+            failureStage = 'managerRegistration';
             await Promise.all([
                 safeRegister(
                     'system',
@@ -547,17 +569,23 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
                 safeRegister('shellStartupVars', shellStartupVarsMgr.initialize()),
             ]);
 
+            failureStage = 'envSelection';
             await applyInitialEnvironmentSelection(envManagers, projectManager, nativeFinder, api);
 
             // Register manager-agnostic terminal watcher for package-modifying commands
+            failureStage = 'terminalWatcher';
             registerTerminalPackageWatcher(api, terminalActivation, outputChannel, context.subscriptions);
 
             // Register listener for interpreter settings changes for interpreter re-selection
+            failureStage = 'settingsListener';
             context.subscriptions.push(
                 registerInterpreterSettingsChangeListener(envManagers, projectManager, nativeFinder, api),
             );
 
-            sendTelemetryEvent(EventNames.EXTENSION_MANAGER_REGISTRATION_DURATION, start.elapsedTime);
+            sendTelemetryEvent(EventNames.EXTENSION_MANAGER_REGISTRATION_DURATION, start.elapsedTime, {
+                result: 'success',
+            });
+            clearHangWatchdog();
             try {
                 await terminalManager.initialize(api);
                 sendManagerSelectionTelemetry(projectManager);
@@ -570,11 +598,16 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
                 traceError('Post-initialization tasks failed:', postInitError);
             }
         } catch (error) {
+            clearHangWatchdog();
             traceError('Failed to initialize environment managers:', error);
             sendTelemetryEvent(
                 EventNames.EXTENSION_MANAGER_REGISTRATION_DURATION,
                 start.elapsedTime,
-                undefined,
+                {
+                    result: 'error',
+                    failureStage,
+                    errorType: classifyError(error),
+                },
                 error instanceof Error ? error : undefined,
             );
             // Show a user-friendly error message

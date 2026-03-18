@@ -6,6 +6,7 @@ import * as path from 'path';
 import * as sinon from 'sinon';
 import { ConfigurationChangeEvent, Uri, WorkspaceConfiguration, WorkspaceFolder } from 'vscode';
 import { PythonEnvironment, PythonEnvironmentApi, PythonProject } from '../../api';
+import * as windowApis from '../../common/window.apis';
 import * as workspaceApis from '../../common/workspace.apis';
 import {
     applyInitialEnvironmentSelection,
@@ -660,6 +661,62 @@ suite('Interpreter Selection - applyInitialEnvironmentSelection', () => {
         assert.strictEqual(callArgs[0], 'global', 'First arg should be "global"');
         assert.strictEqual(callArgs[2], false, 'shouldPersistSettings should be false');
     });
+
+    test('should not show warning when defaultInterpreterPath with ${workspaceFolder} is used in workspace scope (issue #1316)', async () => {
+        // Scenario from issue #1316: workspace settings.json has
+        //   "python.defaultInterpreterPath": "${workspaceFolder}/python-embedded/python.exe"
+        // The per-folder chain resolves it correctly, but the global chain cannot.
+        // The global chain should silently skip — no warning popup should be shown.
+        const workspaceFolder = { uri: testUri, name: 'test', index: 0 } as WorkspaceFolder;
+        sandbox.stub(workspaceApis, 'getWorkspaceFolders').returns([workspaceFolder]);
+        sandbox.stub(workspaceApis, 'getWorkspaceFolder').returns(workspaceFolder);
+        sandbox.stub(workspaceApis, 'getConfiguration').returns(createMockConfig([]) as WorkspaceConfiguration);
+
+        const expandedPath = path.join(testUri.fsPath, 'python-embedded', 'python.exe');
+        sandbox.stub(helpers, 'getUserConfiguredSetting').callsFake((section: string, key: string) => {
+            if (section === 'python' && key === 'defaultInterpreterPath') {
+                return '${workspaceFolder}/python-embedded/python.exe';
+            }
+            return undefined;
+        });
+
+        // For workspace scope: nativeFinder resolves the expanded path successfully
+        mockNativeFinder.resolve.resolves({
+            executable: expandedPath,
+            version: '3.12.10',
+            prefix: path.join(testUri.fsPath, 'python-embedded'),
+        });
+        const mockResolvedEnv: PythonEnvironment = {
+            envId: { id: 'embedded-env', managerId: 'ms-python.python:system' },
+            name: 'Embedded Python',
+            displayName: 'Python 3.12.10',
+            version: '3.12.10',
+            displayPath: expandedPath,
+            environmentPath: Uri.file(expandedPath),
+            sysPrefix: path.join(testUri.fsPath, 'python-embedded'),
+            execInfo: { run: { executable: expandedPath } },
+        };
+        mockApi.resolveEnvironment.resolves(mockResolvedEnv);
+
+        // Stub showWarningMessage to track if it's called
+        const showWarnStub = sandbox.stub(windowApis, 'showWarningMessage').resolves(undefined);
+
+        await applyInitialEnvironmentSelection(
+            mockEnvManagers as unknown as EnvironmentManagers,
+            mockProjectManager as unknown as PythonProjectManager,
+            mockNativeFinder as unknown as NativePythonFinder,
+            mockApi as unknown as PythonEnvironmentApi,
+        );
+
+        // The workspace folder should be set successfully
+        assert.ok(mockEnvManagers.setEnvironment.called, 'setEnvironment should be called for workspace folder');
+
+        // No warning should be shown — the global chain should silently skip ${workspaceFolder}
+        assert.ok(
+            showWarnStub.notCalled,
+            'showWarningMessage should not be called when ${workspaceFolder} is only unresolvable in global scope',
+        );
+    });
 });
 
 suite('Interpreter Selection - resolveGlobalEnvironmentByPriority', () => {
@@ -849,6 +906,33 @@ suite('Interpreter Selection - resolveGlobalEnvironmentByPriority', () => {
 
         assert.strictEqual(result.source, 'autoDiscovery');
         assert.strictEqual(result.manager.id, 'ms-python.python:system');
+    });
+
+    test('should silently skip ${workspaceFolder} in defaultInterpreterPath for global scope (issue #1316)', async () => {
+        // When defaultInterpreterPath contains ${workspaceFolder}, the global priority chain
+        // cannot resolve it (no workspace folder context). It should silently fall through
+        // to auto-discovery without generating an error that triggers a user notification.
+        sandbox.stub(workspaceApis, 'getWorkspaceFolders').returns([]);
+        sandbox.stub(workspaceApis, 'getWorkspaceFolder').returns(undefined);
+        sandbox.stub(helpers, 'getUserConfiguredSetting').callsFake((section: string, key: string) => {
+            if (section === 'python' && key === 'defaultInterpreterPath') {
+                return '${workspaceFolder}/python-embedded/python.exe';
+            }
+            return undefined;
+        });
+
+        const result = await resolveGlobalEnvironmentByPriority(
+            mockEnvManagers as unknown as EnvironmentManagers,
+            mockNativeFinder as unknown as NativePythonFinder,
+            mockApi as unknown as PythonEnvironmentApi,
+        );
+
+        // Should fall through to auto-discovery without calling nativeFinder.resolve
+        assert.strictEqual(result.source, 'autoDiscovery');
+        assert.ok(
+            mockNativeFinder.resolve.notCalled,
+            'nativeFinder.resolve should not be called with unresolved variables',
+        );
     });
 });
 

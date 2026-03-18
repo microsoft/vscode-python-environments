@@ -106,10 +106,27 @@ async function resolvePriorityChainCore(
     // PRIORITY 3: User-configured python.defaultInterpreterPath
     const userInterpreterPath = getUserConfiguredSetting<string>('python', 'defaultInterpreterPath', scope);
     if (userInterpreterPath) {
-        if (!scope && userInterpreterPath.includes('${workspaceFolder}')) {
-            traceVerbose(
-                `${logPrefix} Skipping workspace-scoped defaultInterpreterPath during global resolution: ${userInterpreterPath}`,
-            );
+        const expandedInterpreterPath = resolveVariables(userInterpreterPath, scope);
+        if (expandedInterpreterPath.includes('${')) {
+            if (scope) {
+                // Workspace scope: unresolved variables are a genuine configuration error
+                traceWarn(
+                    `${logPrefix} defaultInterpreterPath '${userInterpreterPath}' contains unresolved variables, falling back to auto-discovery`,
+                );
+                const error: SettingResolutionError = {
+                    setting: 'defaultInterpreterPath',
+                    configuredValue: userInterpreterPath,
+                    reason: l10n.t('Path contains unresolved variables'),
+                };
+                errors.push(error);
+            } else {
+                // Global scope: workspace-specific variables like ${workspaceFolder} can't resolve here.
+                // This is expected when a workspace-level setting uses workspace variables —
+                // the per-folder chain handles them correctly. Silently skip to auto-discovery.
+                traceVerbose(
+                    `${logPrefix} defaultInterpreterPath '${userInterpreterPath}' contains workspace-specific variables, skipping for global scope`,
+                );
+            }
         } else {
             const expandedInterpreterPath = resolveVariables(userInterpreterPath, scope);
             if (expandedInterpreterPath.includes('${')) {
