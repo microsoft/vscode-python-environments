@@ -279,13 +279,16 @@ suite('Integration: Python Projects', function () {
 
         // Wait for it to be set
         // Use 15s timeout - CI runners can be slow with settings persistence
+        let clearTestLastId: string | undefined;
         await waitForCondition(
             async () => {
                 const retrieved = await api.getEnvironment(project.uri);
+                clearTestLastId = retrieved?.envId?.id;
                 return retrieved !== undefined && retrieved.envId.id === env.envId.id;
             },
             15_000,
-            'Environment was not set before clearing',
+            () =>
+                `Environment was not set before clearing. Expected: ${env.envId.id} (manager: ${env.envId.managerId}), got: ${clearTestLastId ?? 'undefined'}`,
         );
 
         // Verify it was set
@@ -338,13 +341,18 @@ suite('Integration: Python Projects', function () {
 
         // Wait for it to be set
         // Use 15s timeout - CI runners can be slow with settings persistence
+        let fileTestLastId: string | undefined;
+        let fileTestLastManagerId: string | undefined;
         await waitForCondition(
             async () => {
                 const retrieved = await api.getEnvironment(project.uri);
+                fileTestLastId = retrieved?.envId?.id;
+                fileTestLastManagerId = retrieved?.envId?.managerId;
                 return retrieved !== undefined && retrieved.envId.id === env.envId.id;
             },
             15_000,
-            'Environment was not set for project',
+            () =>
+                `Environment was not set for project. Expected: ${env.envId.id} (manager: ${env.envId.managerId}), got: ${fileTestLastId ?? 'undefined'} (manager: ${fileTestLastManagerId ?? 'undefined'})`,
         );
 
         // Create a hypothetical file path inside the project

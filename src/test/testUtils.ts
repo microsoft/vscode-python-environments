@@ -48,7 +48,7 @@ export function sleep(ms: number): Promise<void> {
 export async function waitForCondition(
     condition: () => boolean | Promise<boolean>,
     timeoutMs: number = 10_000,
-    errorMessage: string = 'Condition not met within timeout',
+    errorMessage: string | (() => string) = 'Condition not met within timeout',
     pollIntervalMs: number = 100,
 ): Promise<void> {
     return new Promise<void>((resolve, reject) => {
@@ -66,7 +66,8 @@ export async function waitForCondition(
             }
 
             if (Date.now() - startTime >= timeoutMs) {
-                reject(new Error(`${errorMessage} (waited ${timeoutMs}ms)`));
+                const msg = typeof errorMessage === 'function' ? errorMessage() : errorMessage;
+                reject(new Error(`${msg} (waited ${timeoutMs}ms)`));
                 return;
             }
 
