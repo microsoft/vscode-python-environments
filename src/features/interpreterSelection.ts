@@ -128,20 +128,33 @@ async function resolvePriorityChainCore(
                 );
             }
         } else {
-            const resolved = await tryResolveInterpreterPath(nativeFinder, api, expandedInterpreterPath, envManagers);
-            if (resolved) {
-                traceVerbose(`${logPrefix} Priority 3: Using defaultInterpreterPath: ${userInterpreterPath}`);
-                return { result: resolved, errors };
+            const expandedInterpreterPath = resolveVariables(userInterpreterPath, scope);
+            if (expandedInterpreterPath.includes('${')) {
+                traceWarn(
+                    `${logPrefix} defaultInterpreterPath '${userInterpreterPath}' contains unresolved variables, falling back to auto-discovery`,
+                );
+                const error: SettingResolutionError = {
+                    setting: 'defaultInterpreterPath',
+                    configuredValue: userInterpreterPath,
+                    reason: l10n.t('Path contains unresolved variables'),
+                };
+                errors.push(error);
+            } else {
+                const resolved = await tryResolveInterpreterPath(nativeFinder, api, expandedInterpreterPath, envManagers);
+                if (resolved) {
+                    traceVerbose(`${logPrefix} Priority 3: Using defaultInterpreterPath: ${userInterpreterPath}`);
+                    return { result: resolved, errors };
+                }
+                const error: SettingResolutionError = {
+                    setting: 'defaultInterpreterPath',
+                    configuredValue: userInterpreterPath,
+                    reason: `Could not resolve interpreter path '${userInterpreterPath}'`,
+                };
+                errors.push(error);
+                traceWarn(
+                    `${logPrefix} defaultInterpreterPath '${userInterpreterPath}' unresolvable, falling back to auto-discovery`,
+                );
             }
-            const error: SettingResolutionError = {
-                setting: 'defaultInterpreterPath',
-                configuredValue: userInterpreterPath,
-                reason: `Could not resolve interpreter path '${userInterpreterPath}'`,
-            };
-            errors.push(error);
-            traceWarn(
-                `${logPrefix} defaultInterpreterPath '${userInterpreterPath}' unresolvable, falling back to auto-discovery`,
-            );
         }
     }
 
