@@ -170,46 +170,37 @@ suite('Integration: Python Projects', function () {
         const project = projects[0];
         const env = environments[0];
 
-        // Diagnostic logging for CI debugging
-        console.log(`[TEST DEBUG] Project URI: ${project.uri.fsPath}`);
-        console.log(`[TEST DEBUG] Setting environment with envId: ${env.envId.id}`);
-        console.log(`[TEST DEBUG] Environment path: ${env.environmentPath?.fsPath}`);
-        console.log(`[TEST DEBUG] Total environments available: ${environments.length}`);
-        environments.forEach((e, i) => {
-            console.log(`[TEST DEBUG]   env[${i}]: ${e.envId.id} (${e.displayName})`);
+        // Wait for the change event, then verify getEnvironment.
+        // Using an event-driven approach instead of polling avoids a race condition where
+        // setEnvironment's async settings write hasn't landed by the time getEnvironment
+        // reads back the manager from settings.
+        await new Promise<void>((resolve, reject) => {
+            const timeout = setTimeout(() => {
+                subscription.dispose();
+                reject(
+                    new Error(
+                        `onDidChangeEnvironment did not fire for project within 15s. Expected envId: ${env.envId.id}`,
+                    ),
+                );
+            }, 15_000);
+
+            const subscription = api.onDidChangeEnvironment((e) => {
+                if (e.uri?.toString() === project.uri.toString() && e.new?.envId.id === env.envId.id) {
+                    clearTimeout(timeout);
+                    subscription.dispose();
+                    resolve();
+                }
+            });
+
+            // Set environment after subscribing so we don't miss the event
+            api.setEnvironment(project.uri, env).catch((err) => {
+                clearTimeout(timeout);
+                subscription.dispose();
+                reject(err);
+            });
         });
 
-        // Set environment for project
-        await api.setEnvironment(project.uri, env);
-
-        // Track what getEnvironment returns during polling for diagnostics
-        let pollCount = 0;
-        let lastRetrievedId: string | undefined;
-        let lastRetrievedManagerId: string | undefined;
-
-        // Wait for the environment to be retrievable with the correct ID
-        // This handles async persistence across platforms
-        // Use 15s timeout - CI runners (especially macos) can be slow with settings persistence
-        await waitForCondition(
-            async () => {
-                const retrieved = await api.getEnvironment(project.uri);
-                pollCount++;
-                const retrievedId = retrieved?.envId?.id;
-                lastRetrievedManagerId = retrieved?.envId?.managerId;
-                if (retrievedId !== lastRetrievedId) {
-                    console.log(
-                        `[TEST DEBUG] Poll #${pollCount}: getEnvironment returned envId=${retrievedId ?? 'undefined'}, managerId=${lastRetrievedManagerId ?? 'undefined'}`,
-                    );
-                    lastRetrievedId = retrievedId;
-                }
-                return retrieved !== undefined && retrieved.envId.id === env.envId.id;
-            },
-            15_000,
-            () =>
-                `Environment was not set correctly. Expected envId: ${env.envId.id} (manager: ${env.envId.managerId}), last retrieved: ${lastRetrievedId ?? 'undefined'} (manager: ${lastRetrievedManagerId ?? 'undefined'}) after ${pollCount} polls`,
-        );
-
-        // Final verification
+        // Verify getEnvironment returns the correct value now that setEnvironment has fully completed
         const retrievedEnv = await api.getEnvironment(project.uri);
         assert.ok(retrievedEnv, 'Should get environment after setting');
         assert.strictEqual(retrievedEnv.envId.id, env.envId.id, 'Retrieved environment should match set environment');
