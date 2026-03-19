@@ -140,6 +140,7 @@ export enum NativePythonEnvironmentKind {
     virtualEnvWrapper = 'VirtualEnvWrapper',
     windowsStore = 'WindowsStore',
     windowsRegistry = 'WindowsRegistry',
+    winpython = 'WinPython',
 }
 
 export interface NativePythonFinder extends Disposable {
