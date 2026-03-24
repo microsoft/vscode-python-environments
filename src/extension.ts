@@ -449,9 +449,9 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
             try {
                 // Prompt for issue title
                 const title = await window.showInputBox({
-                    title: 'Report Issue - Title',
-                    prompt: 'Enter a brief title for the issue',
-                    placeHolder: 'e.g., Environment not detected, activation fails, etc.',
+                    title: l10n.t('Report Issue - Title'),
+                    prompt: l10n.t('Enter a brief title for the issue'),
+                    placeHolder: l10n.t('e.g., Environment not detected, activation fails, etc.'),
                     ignoreFocusOut: true,
                 });
 
@@ -462,9 +462,9 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
 
                 // Prompt for issue description
                 const description = await window.showInputBox({
-                    title: 'Report Issue - Description',
-                    prompt: 'Describe the issue in more detail',
-                    placeHolder: 'Provide additional context about what happened...',
+                    title: l10n.t('Report Issue - Description'),
+                    prompt: l10n.t('Describe the issue in more detail'),
+                    placeHolder: l10n.t('Provide additional context about what happened...'),
                     ignoreFocusOut: true,
                 });
 
