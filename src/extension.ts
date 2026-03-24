@@ -447,12 +447,38 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
         ),
         commands.registerCommand('python-envs.reportIssue', async () => {
             try {
+                // Prompt for issue title
+                const title = await window.showInputBox({
+                    title: 'Report Issue - Title',
+                    prompt: 'Enter a brief title for the issue',
+                    placeHolder: 'e.g., Environment not detected, activation fails, etc.',
+                    ignoreFocusOut: true,
+                });
+
+                if (!title) {
+                    // User cancelled or provided empty title
+                    return;
+                }
+
+                // Prompt for issue description
+                const description = await window.showInputBox({
+                    title: 'Report Issue - Description',
+                    prompt: 'Describe the issue in more detail',
+                    placeHolder: 'Provide additional context about what happened...',
+                    ignoreFocusOut: true,
+                });
+
+                if (!description) {
+                    // User cancelled or provided empty description
+                    return;
+                }
+
                 const issueData = await collectEnvironmentInfo(context, envManagers, projectManager);
 
                 await commands.executeCommand('workbench.action.openIssueReporter', {
                     extensionId: 'ms-python.vscode-python-envs',
-                    issueTitle: '[Python Environments] ',
-                    issueBody: `<!-- Please describe the issue you're experiencing -->\n\n<!-- The following information was automatically generated -->\n\n<details>\n<summary>Environment Information</summary>\n\n\`\`\`\n${issueData}\n\`\`\`\n\n</details>`,
+                    issueTitle: `[Python Environments] ${title}`,
+                    issueBody: `## Description\n${description}\n\n## Steps to Reproduce\n1. \n2. \n3. \n\n## Expected Behavior\n\n\n## Actual Behavior\n\n\n<!-- The following information was automatically generated -->\n\n<details>\n<summary>Environment Information</summary>\n\n\`\`\`\n${issueData}\n\`\`\`\n\n</details>`,
                 });
             } catch (error) {
                 window.showErrorMessage(`Failed to open issue reporter: ${error}`);
