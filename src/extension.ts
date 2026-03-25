@@ -571,7 +571,20 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
         context.subscriptions.push({ dispose: clearHangWatchdog });
         try {
             // This is the finder that is used by all the built in environment managers
-            const nativeFinder: NativePythonFinder = await createNativePythonFinder(outputChannel, api, context);
+            const petStart = new StopWatch();
+            let nativeFinder: NativePythonFinder;
+            try {
+                nativeFinder = await createNativePythonFinder(outputChannel, api, context);
+                sendTelemetryEvent(EventNames.PET_INIT_DURATION, petStart.elapsedTime, { result: 'success' });
+            } catch (petError) {
+                sendTelemetryEvent(
+                    EventNames.PET_INIT_DURATION,
+                    petStart.elapsedTime,
+                    { result: 'error', errorType: classifyError(petError) },
+                    petError instanceof Error ? petError : undefined,
+                );
+                throw petError;
+            }
             context.subscriptions.push(nativeFinder);
             const sysMgr = new SysPythonManager(nativeFinder, api, outputChannel);
             sysPythonManager.resolve(sysMgr);

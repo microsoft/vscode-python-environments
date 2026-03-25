@@ -74,6 +74,14 @@ export enum EventNames {
      * - reason: string ('tool_not_found')
      */
     MANAGER_REGISTRATION_SKIPPED = 'MANAGER_REGISTRATION.SKIPPED',
+    /**
+     * Telemetry event for PET (Python Environment Tools) initialization timing.
+     * Tracks how long it takes to create and start the native Python finder.
+     * Properties:
+     * - result: 'success' | 'error' | 'timeout'
+     * - errorType: string (classified error category, on failure only)
+     */
+    PET_INIT_DURATION = 'PET.INIT_DURATION',
 }
 
 // Map all events to their properties
@@ -301,5 +309,17 @@ export interface IEventNamePropertyMapping {
     [EventNames.MANAGER_REGISTRATION_SKIPPED]: {
         managerName: string;
         reason: 'tool_not_found';
+    };
+
+    /* __GDPR__
+        "pet.init_duration": {
+            "result": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "owner": "eleanorjboyd" },
+            "errorType": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "owner": "eleanorjboyd" },
+            "<duration>": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "isMeasurement": true, "owner": "eleanorjboyd" }
+        }
+    */
+    [EventNames.PET_INIT_DURATION]: {
+        result: 'success' | 'error' | 'timeout';
+        errorType?: string;
     };
 }
