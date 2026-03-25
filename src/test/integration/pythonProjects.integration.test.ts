@@ -274,30 +274,41 @@ suite('Integration: Python Projects', function () {
         const projects = api.getPythonProjects();
         const environments = await api.getEnvironments('all');
 
-        if (projects.length === 0 || environments.length === 0) {
+        if (projects.length === 0 || environments.length < 2) {
             this.skip();
             return;
         }
 
         const project = projects[0];
-        const env = environments[0];
 
-        // Set environment first
-        await api.setEnvironment(project.uri, env);
+        // Pick an environment different from the current one to guarantee a change event
+        const currentEnv = await api.getEnvironment(project.uri);
+        let env = environments[0];
+        if (currentEnv && currentEnv.envId.id === env.envId.id) {
+            env = environments[1];
+        }
 
-        // Wait for it to be set
-        // Use 15s timeout - CI runners can be slow with settings persistence
-        let clearTestLastId: string | undefined;
-        await waitForCondition(
-            async () => {
-                const retrieved = await api.getEnvironment(project.uri);
-                clearTestLastId = retrieved?.envId?.id;
-                return retrieved !== undefined && retrieved.envId.id === env.envId.id;
-            },
-            15_000,
-            () =>
-                `Environment was not set before clearing. Expected: ${env.envId.id} (manager: ${env.envId.managerId}), got: ${clearTestLastId ?? 'undefined'}`,
-        );
+        // Set environment first, using event-driven wait
+        await new Promise<void>((resolve, reject) => {
+            const timeout = setTimeout(() => {
+                subscription.dispose();
+                reject(new Error(`onDidChangeEnvironment did not fire within 15s. Expected envId: ${env.envId.id}`));
+            }, 15_000);
+
+            const subscription = api.onDidChangeEnvironment((e) => {
+                if (e.uri?.toString() === project.uri.toString() && e.new?.envId.id === env.envId.id) {
+                    clearTimeout(timeout);
+                    subscription.dispose();
+                    resolve();
+                }
+            });
+
+            api.setEnvironment(project.uri, env).catch((err) => {
+                clearTimeout(timeout);
+                subscription.dispose();
+                reject(err);
+            });
+        });
 
         // Verify it was set
         const beforeClear = await api.getEnvironment(project.uri);
@@ -336,32 +347,41 @@ suite('Integration: Python Projects', function () {
         const projects = api.getPythonProjects();
         const environments = await api.getEnvironments('all');
 
-        if (projects.length === 0 || environments.length === 0) {
+        if (projects.length === 0 || environments.length < 2) {
             this.skip();
             return;
         }
 
         const project = projects[0];
-        const env = environments[0];
 
-        // Set environment for project
-        await api.setEnvironment(project.uri, env);
+        // Pick an environment different from the current one to guarantee a change event
+        const currentEnv = await api.getEnvironment(project.uri);
+        let env = environments[0];
+        if (currentEnv && currentEnv.envId.id === env.envId.id) {
+            env = environments[1];
+        }
 
-        // Wait for it to be set
-        // Use 15s timeout - CI runners can be slow with settings persistence
-        let fileTestLastId: string | undefined;
-        let fileTestLastManagerId: string | undefined;
-        await waitForCondition(
-            async () => {
-                const retrieved = await api.getEnvironment(project.uri);
-                fileTestLastId = retrieved?.envId?.id;
-                fileTestLastManagerId = retrieved?.envId?.managerId;
-                return retrieved !== undefined && retrieved.envId.id === env.envId.id;
-            },
-            15_000,
-            () =>
-                `Environment was not set for project. Expected: ${env.envId.id} (manager: ${env.envId.managerId}), got: ${fileTestLastId ?? 'undefined'} (manager: ${fileTestLastManagerId ?? 'undefined'})`,
-        );
+        // Set environment for project, using event-driven wait
+        await new Promise<void>((resolve, reject) => {
+            const timeout = setTimeout(() => {
+                subscription.dispose();
+                reject(new Error(`onDidChangeEnvironment did not fire within 15s. Expected envId: ${env.envId.id}`));
+            }, 15_000);
+
+            const subscription = api.onDidChangeEnvironment((e) => {
+                if (e.uri?.toString() === project.uri.toString() && e.new?.envId.id === env.envId.id) {
+                    clearTimeout(timeout);
+                    subscription.dispose();
+                    resolve();
+                }
+            });
+
+            api.setEnvironment(project.uri, env).catch((err) => {
+                clearTimeout(timeout);
+                subscription.dispose();
+                reject(err);
+            });
+        });
 
         // Create a hypothetical file path inside the project
         const fileUri = vscode.Uri.joinPath(project.uri, 'some_script.py');
