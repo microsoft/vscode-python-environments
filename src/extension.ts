@@ -448,12 +448,13 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
         commands.registerCommand('python-envs.reportIssue', async () => {
             try {
                 // Prompt for issue title
-                const title = (await window.showInputBox({
+                const rawTitle = await window.showInputBox({
                     title: l10n.t('Report Issue - Title'),
                     prompt: l10n.t('Enter a brief title for the issue'),
                     placeHolder: l10n.t('e.g., Environment not detected, activation fails, etc.'),
                     ignoreFocusOut: true,
-                })).trim();
+                });
+                const title = rawTitle?.trim();
 
                 if (!title) {
                     // User cancelled or provided empty title
@@ -461,12 +462,13 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
                 }
 
                 // Prompt for issue description
-                const description = (await window.showInputBox({
+                const rawDescription = await window.showInputBox({
                     title: l10n.t('Report Issue - Description'),
                     prompt: l10n.t('Describe the issue in more detail'),
                     placeHolder: l10n.t('Provide additional context about what happened...'),
                     ignoreFocusOut: true,
-                })).trim();
+                });
+                const description = rawDescription?.trim();
 
                 if (!description) {
                     // User cancelled or provided empty description
