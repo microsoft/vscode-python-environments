@@ -228,7 +228,7 @@ export class TerminalEnvVarInjector implements Disposable {
         );
         if (result === Common.dontShowAgain) {
             await state.set(ENV_FILE_NOTIFICATION_DONT_SHOW_KEY, true);
-            traceLog('User selected "Don\'t Show Again" for env file notification');
+            traceLog(`User selected "Don't Show Again" for env file notification`);
         }
     }
 
