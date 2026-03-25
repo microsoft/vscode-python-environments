@@ -466,7 +466,7 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
                     prompt: l10n.t('Describe the issue in more detail'),
                     placeHolder: l10n.t('Provide additional context about what happened...'),
                     ignoreFocusOut: true,
-                });
+                }).trim();
 
                 if (!description) {
                     // User cancelled or provided empty description
