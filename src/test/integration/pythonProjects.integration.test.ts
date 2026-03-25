@@ -23,6 +23,45 @@ import { PythonEnvironment, PythonEnvironmentApi } from '../../api';
 import { ENVS_EXTENSION_ID } from '../constants';
 import { TestEventHandler, waitForCondition } from '../testUtils';
 
+const ENV_CHANGE_TIMEOUT_MS = 15_000;
+
+function getDifferentEnvironment(
+    environments: PythonEnvironment[],
+    currentEnv: PythonEnvironment | undefined,
+): PythonEnvironment | undefined {
+    return environments.find((env) => env.envId.id !== currentEnv?.envId.id);
+}
+
+async function setEnvironmentAndWaitForChange(
+    api: PythonEnvironmentApi,
+    projectUri: vscode.Uri,
+    env: PythonEnvironment,
+    timeoutMs = ENV_CHANGE_TIMEOUT_MS,
+): Promise<void> {
+    await new Promise<void>((resolve, reject) => {
+        let subscription: vscode.Disposable | undefined;
+        const timeout = setTimeout(() => {
+            subscription?.dispose();
+            reject(new Error(`onDidChangeEnvironment did not fire within ${timeoutMs}ms. Expected envId: ${env.envId.id}`));
+        }, timeoutMs);
+
+        subscription = api.onDidChangeEnvironment((e) => {
+            if (e.uri?.toString() === projectUri.toString() && e.new?.envId.id === env.envId.id) {
+                clearTimeout(timeout);
+                subscription?.dispose();
+                resolve();
+            }
+        });
+
+        // Set environment after subscribing so we don't miss the event.
+        api.setEnvironment(projectUri, env).catch((err) => {
+            clearTimeout(timeout);
+            subscription?.dispose();
+            reject(err);
+        });
+    });
+}
+
 suite('Integration: Python Projects', function () {
     this.timeout(60_000);
 
@@ -170,43 +209,19 @@ suite('Integration: Python Projects', function () {
         const project = projects[0];
 
         // Pick an environment different from the current one so setEnvironment
-        // actually triggers a change event.  If we pick the already-active env,
-        // the event never fires and the test times out.
+        // actually triggers a change event. If all candidates map to the same env,
+        // skip instead of hanging on an event that will never fire.
         const currentEnv = await api.getEnvironment(project.uri);
-        let env = environments[0];
-        if (currentEnv && currentEnv.envId.id === env.envId.id) {
-            env = environments[1];
+        const env = getDifferentEnvironment(environments, currentEnv);
+        if (!env) {
+            this.skip();
+            return;
         }
 
-        // Wait for the change event, then verify getEnvironment.
         // Using an event-driven approach instead of polling avoids a race condition where
         // setEnvironment's async settings write hasn't landed by the time getEnvironment
         // reads back the manager from settings.
-        await new Promise<void>((resolve, reject) => {
-            const timeout = setTimeout(() => {
-                subscription.dispose();
-                reject(
-                    new Error(
-                        `onDidChangeEnvironment did not fire for project within 15s. Expected envId: ${env.envId.id}`,
-                    ),
-                );
-            }, 15_000);
-
-            const subscription = api.onDidChangeEnvironment((e) => {
-                if (e.uri?.toString() === project.uri.toString() && e.new?.envId.id === env.envId.id) {
-                    clearTimeout(timeout);
-                    subscription.dispose();
-                    resolve();
-                }
-            });
-
-            // Set environment after subscribing so we don't miss the event
-            api.setEnvironment(project.uri, env).catch((err) => {
-                clearTimeout(timeout);
-                subscription.dispose();
-                reject(err);
-            });
-        });
+        await setEnvironmentAndWaitForChange(api, project.uri, env);
 
         // Verify getEnvironment returns the correct value now that setEnvironment has fully completed
         const retrievedEnv = await api.getEnvironment(project.uri);
@@ -231,13 +246,12 @@ suite('Integration: Python Projects', function () {
 
         const project = projects[0];
 
-        // Get current environment to pick a different one
+        // Pick an environment different from the current one so a change event is guaranteed.
         const currentEnv = await api.getEnvironment(project.uri);
-
-        // Pick an environment different from current
-        let targetEnv = environments[0];
-        if (currentEnv && currentEnv.envId.id === targetEnv.envId.id) {
-            targetEnv = environments[1];
+        const targetEnv = getDifferentEnvironment(environments, currentEnv);
+        if (!targetEnv) {
+            this.skip();
+            return;
         }
 
         // Register handler BEFORE making the change
@@ -283,32 +297,14 @@ suite('Integration: Python Projects', function () {
 
         // Pick an environment different from the current one to guarantee a change event
         const currentEnv = await api.getEnvironment(project.uri);
-        let env = environments[0];
-        if (currentEnv && currentEnv.envId.id === env.envId.id) {
-            env = environments[1];
+        const env = getDifferentEnvironment(environments, currentEnv);
+        if (!env) {
+            this.skip();
+            return;
         }
 
-        // Set environment first, using event-driven wait
-        await new Promise<void>((resolve, reject) => {
-            const timeout = setTimeout(() => {
-                subscription.dispose();
-                reject(new Error(`onDidChangeEnvironment did not fire within 15s. Expected envId: ${env.envId.id}`));
-            }, 15_000);
-
-            const subscription = api.onDidChangeEnvironment((e) => {
-                if (e.uri?.toString() === project.uri.toString() && e.new?.envId.id === env.envId.id) {
-                    clearTimeout(timeout);
-                    subscription.dispose();
-                    resolve();
-                }
-            });
-
-            api.setEnvironment(project.uri, env).catch((err) => {
-                clearTimeout(timeout);
-                subscription.dispose();
-                reject(err);
-            });
-        });
+        // Set environment first, using event-driven wait.
+        await setEnvironmentAndWaitForChange(api, project.uri, env);
 
         // Verify it was set
         const beforeClear = await api.getEnvironment(project.uri);
@@ -356,32 +352,14 @@ suite('Integration: Python Projects', function () {
 
         // Pick an environment different from the current one to guarantee a change event
         const currentEnv = await api.getEnvironment(project.uri);
-        let env = environments[0];
-        if (currentEnv && currentEnv.envId.id === env.envId.id) {
-            env = environments[1];
+        const env = getDifferentEnvironment(environments, currentEnv);
+        if (!env) {
+            this.skip();
+            return;
         }
 
-        // Set environment for project, using event-driven wait
-        await new Promise<void>((resolve, reject) => {
-            const timeout = setTimeout(() => {
-                subscription.dispose();
-                reject(new Error(`onDidChangeEnvironment did not fire within 15s. Expected envId: ${env.envId.id}`));
-            }, 15_000);
-
-            const subscription = api.onDidChangeEnvironment((e) => {
-                if (e.uri?.toString() === project.uri.toString() && e.new?.envId.id === env.envId.id) {
-                    clearTimeout(timeout);
-                    subscription.dispose();
-                    resolve();
-                }
-            });
-
-            api.setEnvironment(project.uri, env).catch((err) => {
-                clearTimeout(timeout);
-                subscription.dispose();
-                reject(err);
-            });
-        });
+        // Set environment for project, using event-driven wait.
+        await setEnvironmentAndWaitForChange(api, project.uri, env);
 
         // Create a hypothetical file path inside the project
         const fileUri = vscode.Uri.joinPath(project.uri, 'some_script.py');
