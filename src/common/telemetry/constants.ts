@@ -82,6 +82,24 @@ export enum EventNames {
      * - errorType: string (classified error category, on failure only)
      */
     PET_INIT_DURATION = 'PET.INIT_DURATION',
+    /**
+     * Telemetry event fired when applyInitialEnvironmentSelection begins.
+     * Signals that all managers are registered and env selection is starting.
+     * Properties:
+     * - registeredManagerCount: number (how many env managers registered)
+     * - workspaceFolderCount: number (how many workspace folders to process)
+     */
+    ENV_SELECTION_STARTED = 'ENV_SELECTION.STARTED',
+    /**
+     * Telemetry event fired per scope when the priority chain resolves.
+     * Properties:
+     * - scope: string ('workspace' or 'global')
+     * - prioritySource: string (which priority won: 'pythonProjects', 'defaultEnvManager', 'defaultInterpreterPath', 'autoDiscovery')
+     * - managerId: string (the winning manager's id)
+     * - path: string ('pathA' = env already resolved, 'pathB' = needed full discovery)
+     * - hasPersistedSelection: boolean (whether a persisted env path existed in workspace state)
+     */
+    ENV_SELECTION_RESULT = 'ENV_SELECTION.RESULT',
 }
 
 // Map all events to their properties
@@ -309,17 +327,5 @@ export interface IEventNamePropertyMapping {
     [EventNames.MANAGER_REGISTRATION_SKIPPED]: {
         managerName: string;
         reason: 'tool_not_found';
-    };
-
-    /* __GDPR__
-        "pet.init_duration": {
-            "result": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "owner": "eleanorjboyd" },
-            "errorType": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "owner": "eleanorjboyd" },
-            "<duration>": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "isMeasurement": true, "owner": "eleanorjboyd" }
-        }
-    */
-    [EventNames.PET_INIT_DURATION]: {
-        result: 'success' | 'error' | 'timeout';
-        errorType?: string;
     };
 }
