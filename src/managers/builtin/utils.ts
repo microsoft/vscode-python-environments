@@ -14,7 +14,7 @@ import { Common, PixiStrings, SysManagerStrings } from '../../common/localize';
 import { traceInfo, traceVerbose } from '../../common/logging';
 import { getGlobalPersistentState } from '../../common/persistentState';
 import { showInformationMessage, withProgress } from '../../common/window.apis';
-import { installExtension } from '../../common/workbenchCommands';
+import { openExtension } from '../../common/workbenchCommands';
 import {
     isNativeEnvInfo,
     NativeEnvInfo,
@@ -130,8 +130,8 @@ async function recommendPixiExtension(): Promise<void> {
     );
 
     if (result === PixiStrings.install) {
-        traceInfo(`Installing extension: ${PIXI_EXTENSION_ID}`);
-        await installExtension(PIXI_EXTENSION_ID);
+        traceInfo(`Opening extension page: ${PIXI_EXTENSION_ID}`);
+        await openExtension(PIXI_EXTENSION_ID);
     } else if (result === Common.dontAskAgain) {
         await state.set(PIXI_RECOMMEND_DONT_ASK_KEY, true);
         traceInfo('User selected "Don\'t ask again" for Pixi extension recommendation');

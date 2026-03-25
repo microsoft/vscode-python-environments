@@ -141,7 +141,7 @@ export namespace PixiStrings {
     export const pixiExtensionRecommendation = l10n.t(
         'Pixi environments were detected. Install the Pixi extension for full support including activation and environment management.',
     );
-    export const install = l10n.t('Install Pixi Extension');
+    export const install = l10n.t('Open on Marketplace');
 }
 
 export namespace CondaStrings {
