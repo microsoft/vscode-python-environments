@@ -453,7 +453,7 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
                     prompt: l10n.t('Enter a brief title for the issue'),
                     placeHolder: l10n.t('e.g., Environment not detected, activation fails, etc.'),
                     ignoreFocusOut: true,
-                });
+                }).trim();
 
                 if (!title) {
                     // User cancelled or provided empty title
