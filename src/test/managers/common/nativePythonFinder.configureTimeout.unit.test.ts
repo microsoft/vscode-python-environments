@@ -37,14 +37,12 @@ suite('getConfigureTimeoutMs', () => {
         assert.strictEqual(getConfigureTimeoutMs(1), 60_000);
     });
 
-    test('doubles again on second retry (120s)', () => {
-        assert.strictEqual(getConfigureTimeoutMs(2), 120_000);
-    });
-
-    test('caps at REFRESH_TIMEOUT_MS (120s) for higher retries', () => {
-        // 30_000 * 2^3 = 240_000, but capped at 120_000
-        assert.strictEqual(getConfigureTimeoutMs(3), 120_000);
-        assert.strictEqual(getConfigureTimeoutMs(10), 120_000);
+    test('caps at MAX_CONFIGURE_TIMEOUT_MS (60s) for higher retries', () => {
+        // 30_000 * 2^2 = 120_000, but capped at 60_000
+        assert.strictEqual(getConfigureTimeoutMs(2), 60_000);
+        // 30_000 * 2^3 = 240_000, but capped at 60_000
+        assert.strictEqual(getConfigureTimeoutMs(3), 60_000);
+        assert.strictEqual(getConfigureTimeoutMs(10), 60_000);
     });
 });
 

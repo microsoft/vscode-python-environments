@@ -17,21 +17,23 @@ import { noop } from './utils';
 
 // Timeout constants for JSON-RPC requests (in milliseconds)
 const CONFIGURE_TIMEOUT_MS = 30_000; // 30 seconds for configuration
-const REFRESH_TIMEOUT_MS = 120_000; // 2 minutes for full refresh
+const MAX_CONFIGURE_TIMEOUT_MS = 60_000; // Max configure timeout after retries (60s)
+const REFRESH_TIMEOUT_MS = 30_000; // 30 seconds for full refresh (with 1 retry = 60s max)
 const RESOLVE_TIMEOUT_MS = 30_000; // 30 seconds for single resolve
 
 // Restart/recovery constants
 const MAX_RESTART_ATTEMPTS = 3;
 const RESTART_BACKOFF_BASE_MS = 1_000; // 1 second base, exponential: 1s, 2s, 4s
 const MAX_CONFIGURE_TIMEOUTS_BEFORE_KILL = 2; // Kill on the 2nd consecutive timeout
+const MAX_REFRESH_RETRIES = 1; // Retry refresh once after timeout
 
 /**
  * Computes the configure timeout with exponential backoff.
  * @param retryCount Number of consecutive configure timeouts so far
- * @returns Timeout in milliseconds: 30s, 60s, 120s, ... capped at REFRESH_TIMEOUT_MS
+ * @returns Timeout in milliseconds: 30s, 60s, capped at MAX_CONFIGURE_TIMEOUT_MS (60s)
  */
 export function getConfigureTimeoutMs(retryCount: number): number {
-    return Math.min(CONFIGURE_TIMEOUT_MS * Math.pow(2, retryCount), REFRESH_TIMEOUT_MS);
+    return Math.min(CONFIGURE_TIMEOUT_MS * Math.pow(2, retryCount), MAX_CONFIGURE_TIMEOUT_MS);
 }
 
 /**
@@ -563,6 +565,41 @@ class NativePythonFinderImpl implements NativePythonFinder {
     }
 
     private async doRefresh(options?: NativePythonEnvironmentKind | Uri[]): Promise<NativeInfo[]> {
+        let lastError: unknown;
+
+        for (let attempt = 0; attempt <= MAX_REFRESH_RETRIES; attempt++) {
+            try {
+                return await this.doRefreshAttempt(options, attempt);
+            } catch (ex) {
+                lastError = ex;
+
+                // Only retry on timeout errors
+                if (ex instanceof RpcTimeoutError && ex.method !== 'configure') {
+                    if (attempt < MAX_REFRESH_RETRIES) {
+                        this.outputChannel.warn(
+                            `[pet] Refresh timed out (attempt ${attempt + 1}/${MAX_REFRESH_RETRIES + 1}), restarting and retrying...`,
+                        );
+                        // Kill and restart for retry
+                        this.killProcess();
+                        this.processExited = true;
+                        continue;
+                    }
+                    // Final attempt failed
+                    this.outputChannel.error(`[pet] Refresh failed after ${MAX_REFRESH_RETRIES + 1} attempts`);
+                }
+                // Non-timeout errors or final timeout - rethrow
+                throw ex;
+            }
+        }
+
+        // Should not reach here, but TypeScript needs this
+        throw lastError;
+    }
+
+    private async doRefreshAttempt(
+        options: NativePythonEnvironmentKind | Uri[] | undefined,
+        attempt: number,
+    ): Promise<NativeInfo[]> {
         await this.ensureProcessRunning();
         const disposables: Disposable[] = [];
         const unresolved: Promise<void>[] = [];
@@ -610,6 +647,9 @@ class NativePythonFinderImpl implements NativePythonFinder {
 
             // Reset restart attempts on successful refresh
             this.restartAttempts = 0;
+            if (attempt > 0) {
+                this.outputChannel.info(`[pet] Refresh succeeded on retry attempt ${attempt + 1}`);
+            }
         } catch (ex) {
             // On refresh timeout (not configure — configure handles its own timeout),
             // kill the hung process so next request triggers restart
