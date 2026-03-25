@@ -50,6 +50,38 @@ export enum EventNames {
      */
     ENVIRONMENT_DISCOVERY = 'ENVIRONMENT_DISCOVERY',
     MANAGER_READY_TIMEOUT = 'MANAGER_READY.TIMEOUT',
+    /**
+     * Telemetry event for individual manager registration failure.
+     * Fires once per manager that fails during registration (inside safeRegister).
+     * Properties:
+     * - managerName: string (e.g. 'system', 'conda', 'pyenv', 'pipenv', 'poetry', 'shellStartupVars')
+     * - errorType: string (classified error category from classifyError)
+     */
+    MANAGER_REGISTRATION_FAILED = 'MANAGER_REGISTRATION.FAILED',
+    /**
+     * Telemetry event fired when the setup block appears to be hung.
+     * A watchdog timer fires after a deadline; if the setup completes normally,
+     * the timer is cancelled and this event never fires.
+     * Properties:
+     * - failureStage: string (which phase was in progress when the watchdog fired)
+     */
+    SETUP_HANG_DETECTED = 'SETUP.HANG_DETECTED',
+    /**
+     * Telemetry event for when a manager skips registration because its tool was not found.
+     * This is an expected outcome (not an error) and is distinct from MANAGER_REGISTRATION_FAILED.
+     * Properties:
+     * - managerName: string (e.g. 'conda', 'pyenv', 'pipenv', 'poetry')
+     * - reason: string ('tool_not_found')
+     */
+    MANAGER_REGISTRATION_SKIPPED = 'MANAGER_REGISTRATION.SKIPPED',
+    /**
+     * Telemetry event for PET (Python Environment Tools) initialization timing.
+     * Tracks how long it takes to create and start the native Python finder.
+     * Properties:
+     * - result: 'success' | 'error' | 'timeout'
+     * - errorType: string (classified error category, on failure only)
+     */
+    PET_INIT_DURATION = 'PET.INIT_DURATION',
 }
 
 // Map all events to their properties
@@ -62,14 +94,22 @@ export interface IEventNamePropertyMapping {
     [EventNames.EXTENSION_ACTIVATION_DURATION]: never | undefined;
     /* __GDPR__
        "extension.manager_registration_duration": {
-           "duration" : { "classification": "SystemMetaData", "purpose": "FeatureInsight", "owner": "eleanorjboyd" }
+           "duration" : { "classification": "SystemMetaData", "purpose": "FeatureInsight", "owner": "eleanorjboyd" },
+           "result" : { "classification": "SystemMetaData", "purpose": "FeatureInsight", "owner": "StellaHuang95" },
+           "failureStage" : { "classification": "SystemMetaData", "purpose": "FeatureInsight", "owner": "StellaHuang95" },
+           "errorType" : { "classification": "SystemMetaData", "purpose": "FeatureInsight", "owner": "StellaHuang95" }
        }
     */
-    [EventNames.EXTENSION_MANAGER_REGISTRATION_DURATION]: never | undefined;
+    [EventNames.EXTENSION_MANAGER_REGISTRATION_DURATION]: {
+        result: 'success' | 'error';
+        failureStage?: string;
+        errorType?: string;
+    };
 
     /* __GDPR__
         "environment_manager.registered": {
-            "managerId" : { "classification": "SystemMetaData", "purpose": "FeatureInsight", "owner": "eleanorjboyd" }
+            "managerId" : { "classification": "SystemMetaData", "purpose": "FeatureInsight", "owner": "eleanorjboyd" },
+            "<duration>": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "isMeasurement": true, "owner": "eleanorjboyd" }
         }
     */
     [EventNames.ENVIRONMENT_MANAGER_REGISTERED]: {
@@ -237,5 +277,49 @@ export interface IEventNamePropertyMapping {
     [EventNames.MANAGER_READY_TIMEOUT]: {
         managerId: string;
         managerKind: 'environment' | 'package';
+    };
+
+    /* __GDPR__
+        "manager_registration.failed": {
+            "managerName": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "owner": "StellaHuang95" },
+            "errorType": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "owner": "StellaHuang95" }
+        }
+    */
+    [EventNames.MANAGER_REGISTRATION_FAILED]: {
+        managerName: string;
+        errorType: string;
+    };
+
+    /* __GDPR__
+        "setup.hang_detected": {
+            "failureStage": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "owner": "StellaHuang95" },
+            "<duration>": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "isMeasurement": true, "owner": "StellaHuang95" }
+        }
+    */
+    [EventNames.SETUP_HANG_DETECTED]: {
+        failureStage: string;
+    };
+
+    /* __GDPR__
+        "manager_registration.skipped": {
+            "managerName": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "owner": "StellaHuang95" },
+            "reason": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "owner": "StellaHuang95" }
+        }
+    */
+    [EventNames.MANAGER_REGISTRATION_SKIPPED]: {
+        managerName: string;
+        reason: 'tool_not_found';
+    };
+
+    /* __GDPR__
+        "pet.init_duration": {
+            "result": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "owner": "eleanorjboyd" },
+            "errorType": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "owner": "eleanorjboyd" },
+            "<duration>": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "isMeasurement": true, "owner": "eleanorjboyd" }
+        }
+    */
+    [EventNames.PET_INIT_DURATION]: {
+        result: 'success' | 'error' | 'timeout';
+        errorType?: string;
     };
 }

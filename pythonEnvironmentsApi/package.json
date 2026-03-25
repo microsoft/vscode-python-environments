@@ -1,0 +1,41 @@
+{
+    "name": "@vscode/python-environments",
+    "description": "An API facade for the Python Environments extension in VS Code",
+    "version": "1.0.0",
+    "author": {
+        "name": "Microsoft Corporation"
+    },
+    "keywords": [
+        "Python",
+        "VSCode",
+        "API",
+        "Environments"
+    ],
+    "main": "./out/main.js",
+    "types": "./out/main.d.ts",
+    "engines": {
+        "node": ">=22.21.1",
+        "vscode": "^1.110.0"
+    },
+    "license": "MIT",
+    "homepage": "https://github.com/microsoft/vscode-python-environments/tree/main/pythonEnvironmentsApi",
+    "repository": {
+        "type": "git",
+        "url": "https://github.com/microsoft/vscode-python-environments"
+    },
+    "bugs": {
+        "url": "https://github.com/microsoft/vscode-python-environments/issues"
+    },
+    "scripts": {
+        "prepublishOnly": "echo \"⛔ Can only publish from a secure pipeline ⛔\" && node -e \"process.exitCode = 1\"",
+        "prepack": "npm run all:publish",
+        "all:publish": "git clean -xfd . && npm install && npm run compile",
+        "compile": "tsc -b ./tsconfig.json",
+        "clean": "node -e \"const fs = require('fs'); fs.rmSync('./out', { recursive: true, force: true });\""
+    },
+    "devDependencies": {
+        "@types/node": "^22.0.0",
+        "@types/vscode": "^1.99.0",
+        "typescript": "^5.1.3"
+    }
+}

@@ -166,13 +166,20 @@ export class SysPythonManager implements EnvironmentManager {
             const pw = this.api.getPythonProject(scope);
             if (!pw) {
                 this.log.warn(
-                    `Unable to set environment for ${scope.fsPath}: Not a python project, folder or PEP723 script.`,
-                    this.api.getPythonProjects().map((p) => p.uri.fsPath),
+                    `[SYS_SET] Unable to set environment for ${scope.fsPath}: Not a python project. ` +
+                        `Known projects: [${this.api
+                            .getPythonProjects()
+                            .map((p) => p.uri.fsPath)
+                            .join(', ')}]`,
                 );
                 return;
             }
 
             const normalizedPwPath = normalizePath(pw.uri.fsPath);
+            this.log.info(
+                `[SYS_SET] scope=${scope.fsPath}, project=${pw.uri.fsPath}, ` +
+                    `normalizedKey=${normalizedPwPath}, env=${environment?.envId?.id ?? 'undefined'}`,
+            );
             if (environment) {
                 this.fsPathToEnv.set(normalizedPwPath, environment);
             } else {
@@ -297,16 +304,28 @@ export class SysPythonManager implements EnvironmentManager {
     }
 
     private fromEnvMap(uri: Uri): PythonEnvironment | undefined {
+        const normalizedUri = normalizePath(uri.fsPath);
         // Find environment directly using the URI mapping
-        const env = this.fsPathToEnv.get(normalizePath(uri.fsPath));
+        const env = this.fsPathToEnv.get(normalizedUri);
         if (env) {
             return env;
         }
 
         // Find environment using the Python project for the Uri
         const project = this.api.getPythonProject(uri);
-        if (project) {
-            return this.fsPathToEnv.get(normalizePath(project.uri.fsPath));
+        const projectKey = project ? normalizePath(project.uri.fsPath) : undefined;
+        const projectEnv = projectKey ? this.fsPathToEnv.get(projectKey) : undefined;
+
+        this.log.info(
+            `[SYS_GET] uri=${uri.fsPath}, normalizedKey=${normalizedUri}, ` +
+                `project=${project?.uri?.fsPath ?? 'none'}, projectKey=${projectKey ?? 'none'}, ` +
+                `mapKeys=[${Array.from(this.fsPathToEnv.keys()).join(', ')}], ` +
+                `directHit=${!!env}, projectHit=${!!projectEnv}, ` +
+                `fallbackToGlobal=${!projectEnv}, globalEnv=${this.globalEnv?.envId?.id ?? 'none'}`,
+        );
+
+        if (projectEnv) {
+            return projectEnv;
         }
 
         return this.globalEnv;

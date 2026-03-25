@@ -1,0 +1,224 @@
+name: $(Date:yyyyMMdd)$(Rev:.r)
+
+trigger: none
+pr: none
+
+resources:
+  repositories:
+    - repository: MicroBuildTemplate
+      type: git
+      name: 1ESPipelineTemplates/MicroBuildTemplate
+      ref: refs/tags/release
+
+parameters:
+  - name: quality
+    displayName: 📦 Release Quality
+    type: string
+    default: stable
+    values:
+      - stable
+      - preview
+
+  - name: publishPackage
+    displayName: 🚀 Publish npm
+    type: boolean
+    default: false
+
+  - name: publishToConsumptionFeed
+    displayName: 📡 Publish to msft_consumption feed
+    type: boolean
+    default: false
+
+  - name: buildSteps
+    type: stepList
+    default:
+      - task: NodeTool@0
+        inputs:
+          versionSpec: '22.21.1'
+        displayName: Select Node version
+
+      - script: npm install
+        workingDirectory: $(Build.SourcesDirectory)/pythonEnvironmentsApi
+        displayName: Install package dependencies
+
+      - script: npm run compile
+        workingDirectory: $(Build.SourcesDirectory)/pythonEnvironmentsApi
+        displayName: Compile TypeScript
+
+      - script: npm pack --ignore-scripts
+        workingDirectory: $(Build.SourcesDirectory)/pythonEnvironmentsApi
+        displayName: Pack npm package
+
+variables:
+  - name: TeamName
+    value: vscode-python-environments
+  - name: PackageName
+    value: '@vscode/python-environments'
+  - name: PackageDir
+    value: pythonEnvironmentsApi
+  - name: npmTag
+    ${{ if eq(parameters.quality, 'preview') }}:
+      value: next
+    ${{ else }}:
+      value: latest
+  - name: AzureArtifactsFeedUrl
+    value: 'https://pkgs.dev.azure.com/azure-public/vside/_packaging/python-environments/npm/registry/'
+  # Same URL without the https:// prefix (used in .npmrc auth lines)
+  - name: AzureArtifactsFeedUrlNoProtocol
+    value: 'pkgs.dev.azure.com/azure-public/vside/_packaging/python-environments/npm/registry/'
+  # Managed Identity service connection for Azure Artifacts auth (shared with Pylance)
+  - name: AzureServiceConnection
+    value: 'PylanceSecureVsIdePublishWithManagedIdentity'
+  - name: ConsumptionFeedUrl
+    value: 'https://pkgs.dev.azure.com/azure-public/vside/_packaging/msft_consumption/npm/registry/'
+  - name: ConsumptionFeedUrlNoProtocol
+    value: 'pkgs.dev.azure.com/azure-public/vside/_packaging/msft_consumption/npm/registry/'
+
+extends:
+  template: azure-pipelines/MicroBuild.1ES.Official.yml@MicroBuildTemplate
+  parameters:
+    sdl:
+      sourceAnalysisPool: VSEngSS-MicroBuild2022-1ES
+      codeSignValidation:
+        enabled: true
+      sbom:
+        enabled: true
+    pool:
+      name: AzurePipelines-EO
+      image: 1ESPT-Ubuntu22.04
+      os: linux
+
+    customBuildTags:
+      - ES365AIMigrationTooling
+
+    stages:
+      - stage: Build
+        displayName: Build & Pack
+        jobs:
+          - job: BuildPackage
+            displayName: Build npm package
+            templateContext:
+              outputs:
+                - output: pipelineArtifact
+                  targetPath: $(Build.ArtifactStagingDirectory)
+                  artifactName: npm-package
+            steps:
+              - ${{ each step in parameters.buildSteps }}:
+                  - ${{ step }}
+
+              - task: CopyFiles@2
+                displayName: Copy package tarball to staging
+                inputs:
+                  sourceFolder: $(Build.SourcesDirectory)/pythonEnvironmentsApi
+                  contents: '*.tgz'
+                  targetFolder: $(Build.ArtifactStagingDirectory)
+
+      - stage: Publish
+        displayName: Publish to Azure Artifacts
+        dependsOn: Build
+        condition: and(succeeded(), eq('${{ parameters.publishPackage }}', 'true'))
+        jobs:
+          - job: PublishPackage
+            displayName: Publish $(PackageName)
+            templateContext:
+              type: releaseJob
+              isProduction: true
+              inputs:
+                - input: pipelineArtifact
+                  artifactName: npm-package
+                  targetPath: $(Pipeline.Workspace)/npm-package
+            steps:
+              - checkout: none
+
+              - task: NodeTool@0
+                inputs:
+                  versionSpec: '22.21.1'
+                displayName: Select Node version
+
+              # Acquire a short-lived AAD token via Managed Identity (no stored secrets)
+              # SEE https://eng.ms/docs/cloud-ai-platform/devdiv/one-engineering-system-1es/1es-docs/1es-security-configuration/configuration-guides/pat-burndown-guidance
+              - task: AzureCLI@2
+                displayName: Acquire AAD token via Managed Identity
+                inputs:
+                  azureSubscription: '$(AzureServiceConnection)'
+                  scriptType: 'pscore'
+                  scriptLocation: 'inlineScript'
+                  inlineScript: |
+                    $token = az account get-access-token --query accessToken --resource 499b84ac-1321-427f-aa17-267ca6975798 -o tsv
+                    Write-Host "##vso[task.setvariable variable=AzdoToken;issecret=true]$token"
+
+              - powershell: |
+                  @"
+                  registry=$(AzureArtifactsFeedUrl)
+                  always-auth=true
+                  "@ | Out-File -FilePath .npmrc
+
+                  @"
+                  ; begin auth token
+                  //$(AzureArtifactsFeedUrlNoProtocol):username=VssSessionToken
+                  //$(AzureArtifactsFeedUrlNoProtocol):_authToken=$env:AZDO_TOKEN
+                  //$(AzureArtifactsFeedUrlNoProtocol):email=not-used@example.com
+                  ; end auth token
+                  "@ | Out-File -FilePath $HOME/.npmrc
+                env:
+                  AZDO_TOKEN: $(AzdoToken)
+                displayName: Create .npmrc files
+
+              - powershell: |
+                  $tgz = Get-ChildItem "$(Pipeline.Workspace)/npm-package/*.tgz" | Select-Object -First 1
+                  if (-not $tgz) {
+                      Write-Error "No .tgz file found in $(Pipeline.Workspace)/npm-package/"
+                      exit 1
+                  }
+                  Write-Host "Publishing: $($tgz.FullName)"
+                  if ("$(npmTag)" -eq "next") {
+                      npm publish $tgz.FullName --registry $(AzureArtifactsFeedUrl) --tag next --ignore-scripts
+                  } else {
+                      npm publish $tgz.FullName --registry $(AzureArtifactsFeedUrl) --ignore-scripts
+                  }
+                displayName: npm publish (${{ parameters.quality }})
+
+      - stage: PublishConsumption
+        displayName: Publish package to msft_consumption feed
+        dependsOn: Publish
+        condition: and(not(failed()), eq('${{ parameters.publishToConsumptionFeed }}', 'true'))
+        jobs:
+          - job: PullToConsumption
+            displayName: Pull $(PackageName) to msft_consumption
+            steps:
+              - checkout: none
+
+              - task: NodeTool@0
+                inputs:
+                  versionSpec: '22.21.1'
+                displayName: Select Node version
+
+              - task: AzureCLI@2
+                displayName: Acquire AAD token via Managed Identity
+                inputs:
+                  azureSubscription: '$(AzureServiceConnection)'
+                  scriptType: 'pscore'
+                  scriptLocation: 'inlineScript'
+                  inlineScript: |
+                    $token = az account get-access-token --query accessToken --resource 499b84ac-1321-427f-aa17-267ca6975798 -o tsv
+                    Write-Host "##vso[task.setvariable variable=AzdoToken;issecret=true]$token"
+
+              - powershell: |
+                  @"
+                  registry=$(ConsumptionFeedUrl)
+                  always-auth=true
+                  "@ | Out-File -FilePath .npmrc
+
+                  @"
+                  ; begin auth token
+                  //$(ConsumptionFeedUrlNoProtocol):username=VssSessionToken
+                  //$(ConsumptionFeedUrlNoProtocol):_authToken=$env:AZDO_TOKEN
+                  //$(ConsumptionFeedUrlNoProtocol):email=not-used@example.com
+                  ; end auth token
+                  "@ | Out-File -FilePath $HOME/.npmrc
+                env:
+                  AZDO_TOKEN: $(AzdoToken)
+                displayName: Create .npmrc files
+
+              - script: npm i -g $(PackageName)@$(npmTag) --registry $(ConsumptionFeedUrl)
+                displayName: Pull to msft_consumption
