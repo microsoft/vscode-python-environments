@@ -42,7 +42,9 @@ async function setEnvironmentAndWaitForChange(
         let subscription: vscode.Disposable | undefined;
         const timeout = setTimeout(() => {
             subscription?.dispose();
-            reject(new Error(`onDidChangeEnvironment did not fire within ${timeoutMs}ms. Expected envId: ${env.envId.id}`));
+            reject(
+                new Error(`onDidChangeEnvironment did not fire within ${timeoutMs}ms. Expected envId: ${env.envId.id}`),
+            );
         }, timeoutMs);
 
         subscription = api.onDidChangeEnvironment((e) => {
