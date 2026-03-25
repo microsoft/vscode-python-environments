@@ -40,7 +40,7 @@ import {
     pickPackageManager,
     pickWorkspaceFolder,
 } from '../common/pickers/managers';
-import { pickProject, pickProjectMany } from '../common/pickers/projects';
+import { pickProject, pickProjectMany, pickProjectWithCurrentFile, ADD_PROJECT_ACTION, CURRENT_FILE_ACTION } from '../common/pickers/projects';
 import { isWindows } from '../common/utils/platformUtils';
 import { handlePythonPath } from '../common/utils/pythonPath';
 import {
@@ -350,10 +350,41 @@ export async function setEnvironmentCommand(
         try {
             const projects = wm.getProjects();
             if (projects.length > 0) {
-                const selected = await pickProjectMany(projects);
-                if (selected && selected.length > 0) {
-                    const uris = selected.map((p) => p.uri);
-                    await setEnvironmentCommand(uris, em, wm);
+                // Check if the active editor has a Python file open
+                const activeEditor = activeTextEditor();
+                const activeFileUri =
+                    activeEditor?.document?.languageId === 'python' &&
+                    activeEditor.document.uri.scheme === 'file' &&
+                    !activeEditor.document.isUntitled
+                        ? activeEditor.document.uri
+                        : undefined;
+
+                if (activeFileUri) {
+                    // Show enriched picker with current file options
+                    const result = await pickProjectWithCurrentFile(projects, activeFileUri);
+                    if (result) {
+                        if (result.action === CURRENT_FILE_ACTION) {
+                            await setEnvironmentCommand([result.fileUri], em, wm);
+                        } else if (result.action === ADD_PROJECT_ACTION) {
+                            const parentUri = Uri.file(path.dirname(result.fileUri.fsPath));
+                            await executeCommand('python-envs.addPythonProjectGivenResource', parentUri);
+                            // Find the newly created project and open environment picker
+                            const newProject = wm.get(parentUri);
+                            if (newProject) {
+                                await setEnvironmentCommand([newProject.uri], em, wm);
+                            }
+                        } else {
+                            const uris = result.projects.map((p) => p.uri);
+                            await setEnvironmentCommand(uris, em, wm);
+                        }
+                    }
+                } else {
+                    // No active Python file; use standard multi-select project picker
+                    const selected = await pickProjectMany(projects);
+                    if (selected && selected.length > 0) {
+                        const uris = selected.map((p) => p.uri);
+                        await setEnvironmentCommand(uris, em, wm);
+                    }
                 }
             } else {
                 const globalEnvManager = em.getEnvironmentManager(undefined);

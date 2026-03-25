@@ -4,9 +4,11 @@ import * as typeMoq from 'typemoq';
 import { Uri } from 'vscode';
 import { PythonEnvironment, PythonProject } from '../../api';
 import * as commandApi from '../../common/command.api';
+import * as envPickerApi from '../../common/pickers/environments';
 import * as managerApi from '../../common/pickers/managers';
 import * as projectApi from '../../common/pickers/projects';
-import { createAnyEnvironmentCommand, revealEnvInManagerView } from '../../features/envCommands';
+import * as windowApis from '../../common/window.apis';
+import { createAnyEnvironmentCommand, revealEnvInManagerView, setEnvironmentCommand } from '../../features/envCommands';
 import { EnvManagerView } from '../../features/views/envManagersView';
 import { ProjectEnvironment, ProjectItem } from '../../features/views/treeViewItems';
 import { EnvironmentManagers, InternalEnvironmentManager, PythonProjectManager } from '../../internal.api';
@@ -222,5 +224,227 @@ suite('Reveal Env In Manager View Command Tests', () => {
         // Assert
         assert.ok(executeCommandStub.calledOnceWith('env-managers.focus'), 'Should focus the env-managers view');
         managerView.verify((m) => m.reveal(environment), typeMoq.Times.once());
+    });
+});
+
+suite('Set Environment Command - Current File Tests', () => {
+    let em: typeMoq.IMock<EnvironmentManagers>;
+    let wm: typeMoq.IMock<PythonProjectManager>;
+    let manager: typeMoq.IMock<InternalEnvironmentManager>;
+    let env: typeMoq.IMock<PythonEnvironment>;
+    let activeTextEditorStub: sinon.SinonStub;
+    let pickProjectWithCurrentFileStub: sinon.SinonStub;
+    let pickProjectManyStub: sinon.SinonStub;
+    let pickEnvironmentStub: sinon.SinonStub;
+    let executeCommandStub: sinon.SinonStub;
+
+    const project: PythonProject = {
+        uri: Uri.file('/workspace/project1'),
+        name: 'project1',
+    };
+    const activeFileUri = Uri.file('/workspace/project1/main.py');
+
+    setup(() => {
+        manager = typeMoq.Mock.ofType<InternalEnvironmentManager>();
+        manager.setup((m) => m.id).returns(() => 'test');
+        manager.setup((m) => m.displayName).returns(() => 'Test Manager');
+
+        env = typeMoq.Mock.ofType<PythonEnvironment>();
+        env.setup((e) => e.envId).returns(() => ({ id: 'env1', managerId: 'test' }));
+        setupNonThenable(env);
+
+        em = typeMoq.Mock.ofType<EnvironmentManagers>();
+        em.setup((e) => e.managers).returns(() => [manager.object]);
+        em.setup((e) => e.getProjectEnvManagers(typeMoq.It.isAny())).returns(() => [manager.object]);
+
+        wm = typeMoq.Mock.ofType<PythonProjectManager>();
+
+        activeTextEditorStub = sinon.stub(windowApis, 'activeTextEditor');
+        pickProjectWithCurrentFileStub = sinon.stub(projectApi, 'pickProjectWithCurrentFile');
+        pickProjectManyStub = sinon.stub(projectApi, 'pickProjectMany');
+        pickEnvironmentStub = sinon.stub(envPickerApi, 'pickEnvironment');
+        executeCommandStub = sinon.stub(commandApi, 'executeCommand');
+    });
+
+    teardown(() => {
+        sinon.restore();
+    });
+
+    test('should use pickProjectWithCurrentFile when active editor has a Python file', async () => {
+        // Mock active editor with a Python file
+        activeTextEditorStub.returns({
+            document: {
+                languageId: 'python',
+                uri: activeFileUri,
+                isUntitled: false,
+            },
+        });
+        wm.setup((w) => w.getProjects(typeMoq.It.isAny())).returns(() => [project]);
+        pickProjectWithCurrentFileStub.resolves(undefined); // User cancels
+
+        await setEnvironmentCommand(undefined, em.object, wm.object);
+
+        assert.ok(
+            pickProjectWithCurrentFileStub.calledOnce,
+            'pickProjectWithCurrentFile should be called when Python file is active',
+        );
+        assert.ok(pickProjectManyStub.notCalled, 'pickProjectMany should not be called when Python file is active');
+    });
+
+    test('should use pickProjectMany when no active editor', async () => {
+        activeTextEditorStub.returns(undefined);
+        wm.setup((w) => w.getProjects(typeMoq.It.isAny())).returns(() => [project]);
+        pickProjectManyStub.resolves(undefined);
+
+        await setEnvironmentCommand(undefined, em.object, wm.object);
+
+        assert.ok(pickProjectManyStub.calledOnce, 'pickProjectMany should be called when no active editor');
+        assert.ok(
+            pickProjectWithCurrentFileStub.notCalled,
+            'pickProjectWithCurrentFile should not be called when no active editor',
+        );
+    });
+
+    test('should use pickProjectMany when active editor has non-Python file', async () => {
+        activeTextEditorStub.returns({
+            document: {
+                languageId: 'javascript',
+                uri: Uri.file('/workspace/project1/index.js'),
+                isUntitled: false,
+            },
+        });
+        wm.setup((w) => w.getProjects(typeMoq.It.isAny())).returns(() => [project]);
+        pickProjectManyStub.resolves(undefined);
+
+        await setEnvironmentCommand(undefined, em.object, wm.object);
+
+        assert.ok(
+            pickProjectManyStub.calledOnce,
+            'pickProjectMany should be called for non-Python files',
+        );
+        assert.ok(
+            pickProjectWithCurrentFileStub.notCalled,
+            'pickProjectWithCurrentFile should not be called for non-Python files',
+        );
+    });
+
+    test('should handle "Set for current file" action by passing file URI', async () => {
+        activeTextEditorStub.returns({
+            document: {
+                languageId: 'python',
+                uri: activeFileUri,
+                isUntitled: false,
+            },
+        });
+        wm.setup((w) => w.getProjects(typeMoq.It.isAny())).returns(() => [project]);
+
+        pickProjectWithCurrentFileStub.resolves({
+            action: 'currentFile',
+            fileUri: activeFileUri,
+        });
+
+        // The setEnvironmentCommand will be called recursively with [activeFileUri]
+        // which triggers the Uri[] branch that calls pickEnvironment
+        manager.setup((m) => m.get(typeMoq.It.isAny())).returns(() => Promise.resolve(undefined));
+        pickEnvironmentStub.resolves(env.object);
+        em.setup((e) => e.setEnvironments(typeMoq.It.isAny(), typeMoq.It.isAny())).returns(() => Promise.resolve());
+
+        await setEnvironmentCommand(undefined, em.object, wm.object);
+
+        assert.ok(pickEnvironmentStub.calledOnce, 'pickEnvironment should be called after selecting current file');
+    });
+
+    test('should handle "Add current file as project" action', async () => {
+        activeTextEditorStub.returns({
+            document: {
+                languageId: 'python',
+                uri: activeFileUri,
+                isUntitled: false,
+            },
+        });
+        wm.setup((w) => w.getProjects(typeMoq.It.isAny())).returns(() => [project]);
+
+        pickProjectWithCurrentFileStub.resolves({
+            action: 'addProject',
+            fileUri: activeFileUri,
+        });
+
+        // Mock executeCommand for addPythonProjectGivenResource
+        executeCommandStub.resolves();
+
+        // Mock finding the new project after creation
+        const newProject: PythonProject = {
+            uri: Uri.file('/workspace/project1'),
+            name: 'project1',
+        };
+        wm.setup((w) => w.get(typeMoq.It.isAny())).returns(() => newProject);
+
+        // After project is created, the env picker will be shown
+        manager.setup((m) => m.get(typeMoq.It.isAny())).returns(() => Promise.resolve(undefined));
+        pickEnvironmentStub.resolves(env.object);
+        em.setup((e) => e.setEnvironments(typeMoq.It.isAny(), typeMoq.It.isAny())).returns(() => Promise.resolve());
+
+        await setEnvironmentCommand(undefined, em.object, wm.object);
+
+        assert.ok(
+            executeCommandStub.calledWith('python-envs.addPythonProjectGivenResource', sinon.match.any),
+            'Should call addPythonProjectGivenResource command',
+        );
+        assert.ok(
+            pickEnvironmentStub.calledOnce,
+            'pickEnvironment should be called after creating the project',
+        );
+    });
+
+    test('should handle project selection from enriched picker', async () => {
+        activeTextEditorStub.returns({
+            document: {
+                languageId: 'python',
+                uri: activeFileUri,
+                isUntitled: false,
+            },
+        });
+        wm.setup((w) => w.getProjects(typeMoq.It.isAny())).returns(() => [project]);
+
+        pickProjectWithCurrentFileStub.resolves({
+            action: 'projects',
+            projects: [project],
+        });
+
+        // After project is selected, the env picker will be shown
+        manager.setup((m) => m.get(typeMoq.It.isAny())).returns(() => Promise.resolve(undefined));
+        pickEnvironmentStub.resolves(env.object);
+        em.setup((e) => e.setEnvironments(typeMoq.It.isAny(), typeMoq.It.isAny())).returns(() => Promise.resolve());
+
+        await setEnvironmentCommand(undefined, em.object, wm.object);
+
+        assert.ok(
+            pickEnvironmentStub.calledOnce,
+            'pickEnvironment should be called after selecting a project',
+        );
+    });
+
+    test('should not show current file options when file scheme is not file', async () => {
+        activeTextEditorStub.returns({
+            document: {
+                languageId: 'python',
+                uri: Uri.parse('untitled:Untitled-1'),
+                scheme: 'untitled',
+                isUntitled: true,
+            },
+        });
+        wm.setup((w) => w.getProjects(typeMoq.It.isAny())).returns(() => [project]);
+        pickProjectManyStub.resolves(undefined);
+
+        await setEnvironmentCommand(undefined, em.object, wm.object);
+
+        assert.ok(
+            pickProjectManyStub.calledOnce,
+            'pickProjectMany should be called for untitled files',
+        );
+        assert.ok(
+            pickProjectWithCurrentFileStub.notCalled,
+            'pickProjectWithCurrentFile should not be called for untitled files',
+        );
     });
 });

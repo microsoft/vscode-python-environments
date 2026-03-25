@@ -65,6 +65,10 @@ export namespace Pickers {
     export namespace Project {
         export const selectProject = l10n.t('Select a project, folder or script');
         export const selectProjects = l10n.t('Select one or more projects, folders or scripts');
+        export const setForCurrentFile = l10n.t('Set for current file');
+        export const addCurrentFileAsProject = l10n.t('Add current file as project...');
+        export const currentFileSection = l10n.t('Current File');
+        export const projectsSection = l10n.t('Projects');
     }
 
     export namespace pyProject {
