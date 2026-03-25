@@ -162,13 +162,21 @@ suite('Integration: Python Projects', function () {
 
         const environments = await api.getEnvironments('all');
 
-        if (environments.length === 0) {
+        if (environments.length < 2) {
             this.skip();
             return;
         }
 
         const project = projects[0];
-        const env = environments[0];
+
+        // Pick an environment different from the current one so setEnvironment
+        // actually triggers a change event.  If we pick the already-active env,
+        // the event never fires and the test times out.
+        const currentEnv = await api.getEnvironment(project.uri);
+        let env = environments[0];
+        if (currentEnv && currentEnv.envId.id === env.envId.id) {
+            env = environments[1];
+        }
 
         // Wait for the change event, then verify getEnvironment.
         // Using an event-driven approach instead of polling avoids a race condition where
