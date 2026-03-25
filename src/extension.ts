@@ -461,12 +461,12 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
                 }
 
                 // Prompt for issue description
-                const description = await window.showInputBox({
+                const description = (await window.showInputBox({
                     title: l10n.t('Report Issue - Description'),
                     prompt: l10n.t('Describe the issue in more detail'),
                     placeHolder: l10n.t('Provide additional context about what happened...'),
                     ignoreFocusOut: true,
-                }).trim();
+                })).trim();
 
                 if (!description) {
                     // User cancelled or provided empty description
