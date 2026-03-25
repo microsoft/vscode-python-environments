@@ -2,6 +2,7 @@
 // Licensed under the MIT License.
 
 import * as fse from 'fs-extra';
+import * as os from 'os';
 import * as path from 'path';
 import { traceError, traceInfo, traceVerbose } from '../../common/logging';
 import { isWindows } from '../../common/utils/platformUtils';
@@ -17,6 +18,20 @@ export interface ShellSourcingScripts {
     sh?: string;
     /** Windows CMD batch file (activate.bat) */
     cmd?: string;
+    /** Fish shell initialization script (conda.fish) */
+    fish?: string;
+}
+
+/**
+ * Tracks whether `conda init <shell>` has been run for each shell type.
+ * When true, the shell's profile/config file contains the conda initialization block,
+ * meaning bare `conda` will be available as a shell function when that shell starts.
+ */
+export interface ShellCondaInitStatus {
+    bash?: boolean;
+    zsh?: boolean;
+    fish?: boolean;
+    pwsh?: boolean;
 }
 
 /**
@@ -37,6 +52,7 @@ export class CondaSourcingStatus {
         public isActiveOnLaunch?: boolean,
         public globalSourcingScript?: string,
         public shellSourcingScripts?: ShellSourcingScripts,
+        public shellInitStatus?: ShellCondaInitStatus,
     ) {}
 
     /**
@@ -59,6 +75,7 @@ export class CondaSourcingStatus {
                 scripts.ps1 && `PowerShell: ${scripts.ps1}`,
                 scripts.sh && `Bash/sh: ${scripts.sh}`,
                 scripts.cmd && `CMD: ${scripts.cmd}`,
+                scripts.fish && `Fish: ${scripts.fish}`,
             ].filter(Boolean);
 
             if (entries.length > 0) {
@@ -72,6 +89,13 @@ export class CondaSourcingStatus {
             }
         } else {
             lines.push('└─ No Shell-specific Sourcing Scripts Found');
+        }
+
+        if (this.shellInitStatus) {
+            const initEntries = (['bash', 'zsh', 'fish', 'pwsh'] as const)
+                .map((s) => `${s}: ${this.shellInitStatus![s] ? '✓' : '✗'}`)
+                .join(', ');
+            lines.push(`├─ Shell conda init status: ${initEntries}`);
         }
 
         return lines.join('\n');
@@ -116,6 +140,9 @@ export async function constructCondaSourcingStatus(condaPath: string): Promise<C
     // find and save all of the shell specific sourcing scripts
     sourcingStatus.shellSourcingScripts = await findShellSourcingScripts(sourcingStatus);
 
+    // check shell profile files to see if `conda init <shell>` has been run
+    sourcingStatus.shellInitStatus = await checkCondaInitInShellProfiles();
+
     return sourcingStatus;
 }
 
@@ -148,6 +175,7 @@ export async function findShellSourcingScripts(sourcingStatus: CondaSourcingStat
     let ps1Script: string | undefined;
     let shScript: string | undefined;
     let cmdActivate: string | undefined;
+    let fishScript: string | undefined;
 
     try {
         // Search for PowerShell hook script (conda-hook.ps1)
@@ -178,6 +206,15 @@ export async function findShellSourcingScripts(sourcingStatus: CondaSourcingStat
         } catch (err) {
             logs.push(`  Error during CMD script search: ${err instanceof Error ? err.message : 'Unknown error'}`);
         }
+
+        // Search for Fish shell script (conda.fish)
+        logs.push('\nSearching for Fish shell script...');
+        try {
+            fishScript = await getCondaFishPath(sourcingStatus.condaFolder);
+            logs.push(`  Path: ${fishScript ?? '✗ Not found'}`);
+        } catch (err) {
+            logs.push(`  Error during Fish script search: ${err instanceof Error ? err.message : 'Unknown error'}`);
+        }
     } catch (error) {
         logs.push(`\nCritical error during script search: ${error instanceof Error ? error.message : 'Unknown error'}`);
     } finally {
@@ -185,13 +222,87 @@ export async function findShellSourcingScripts(sourcingStatus: CondaSourcingStat
         logs.push(`  PowerShell: ${ps1Script ? '✓' : '✗'}`);
         logs.push(`  Shell: ${shScript ? '✓' : '✗'}`);
         logs.push(`  CMD: ${cmdActivate ? '✓' : '✗'}`);
+        logs.push(`  Fish: ${fishScript ? '✓' : '✗'}`);
         logs.push('============================');
 
         // Log everything at once
         traceVerbose(logs.join('\n'));
     }
 
-    return { ps1: ps1Script, sh: shScript, cmd: cmdActivate };
+    return { ps1: ps1Script, sh: shScript, cmd: cmdActivate, fish: fishScript };
+}
+
+/**
+ * Checks shell profile/config files to determine if `conda init <shell>` has been run.
+ *
+ * When `conda init <shell>` is run, it adds a `# >>> conda initialize >>>` block to the
+ * shell's profile. If that block is present, then any new terminal of that shell type will
+ * have `conda` available as a shell function, and bare `conda activate` will work.
+ *
+ * For Fish, `conda init fish` may either modify `config.fish` or drop a file in
+ * `~/.config/fish/conf.d/`, so both locations are checked.
+ *
+ * @param homeDir Optional home directory override (defaults to os.homedir(), useful for testing)
+ * @returns Status object indicating which shells have conda initialized
+ */
+export async function checkCondaInitInShellProfiles(homeDir?: string): Promise<ShellCondaInitStatus> {
+    const home = homeDir ?? os.homedir();
+    const status: ShellCondaInitStatus = {};
+    const logs: string[] = ['=== Checking shell profiles for conda init ==='];
+
+    const checks: Array<{ shell: keyof ShellCondaInitStatus; files: string[] }> = [
+        {
+            shell: 'bash',
+            files: [path.join(home, '.bashrc'), path.join(home, '.bash_profile')],
+        },
+        {
+            shell: 'zsh',
+            files: [path.join(home, '.zshrc')],
+        },
+        {
+            shell: 'fish',
+            files: [
+                path.join(process.env.XDG_CONFIG_HOME || path.join(home, '.config'), 'fish', 'config.fish'),
+                path.join(process.env.XDG_CONFIG_HOME || path.join(home, '.config'), 'fish', 'conf.d', 'conda.fish'),
+            ],
+        },
+        {
+            shell: 'pwsh',
+            files: [
+                path.join(
+                    process.env.XDG_CONFIG_HOME || path.join(home, '.config'),
+                    'powershell',
+                    'Microsoft.PowerShell_profile.ps1',
+                ),
+                path.join(process.env.XDG_CONFIG_HOME || path.join(home, '.config'), 'powershell', 'profile.ps1'),
+            ],
+        },
+    ];
+
+    await Promise.all(
+        checks.map(async ({ shell, files }) => {
+            for (const filePath of files) {
+                try {
+                    if (await fse.pathExists(filePath)) {
+                        const content = await fse.readFile(filePath, 'utf-8');
+                        if (content.includes('conda initialize')) {
+                            status[shell] = true;
+                            logs.push(`  ${shell}: ✓ conda init found in ${filePath}`);
+                            return;
+                        }
+                    }
+                } catch {
+                    // File not readable, skip
+                }
+            }
+            logs.push(`  ${shell}: ✗ conda init not found`);
+        }),
+    );
+
+    logs.push('============================');
+    traceVerbose(logs.join('\n'));
+
+    return status;
 }
 
 /**
@@ -306,6 +417,24 @@ async function getCondaShPath(condaFolder: string): Promise<string | undefined> 
     })();
 
     return shPathPromise;
+}
+
+/**
+ * Returns the path to conda.fish given a conda installation folder.
+ *
+ * Searches for conda.fish in these locations (relative to the conda root):
+ * - etc/fish/conf.d/conda.fish
+ * - shell/etc/fish/conf.d/conda.fish
+ * - Library/etc/fish/conf.d/conda.fish
+ */
+export async function getCondaFishPath(condaFolder: string): Promise<string | undefined> {
+    const locations = [
+        path.join(condaFolder, 'etc', 'fish', 'conf.d', 'conda.fish'),
+        path.join(condaFolder, 'shell', 'etc', 'fish', 'conf.d', 'conda.fish'),
+        path.join(condaFolder, 'Library', 'etc', 'fish', 'conf.d', 'conda.fish'),
+    ];
+
+    return findFileInLocations(locations, 'conda.fish');
 }
 
 /**
