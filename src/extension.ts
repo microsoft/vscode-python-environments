@@ -10,7 +10,7 @@ import {
     window,
 } from 'vscode';
 import { PythonEnvironment, PythonEnvironmentApi, PythonProjectCreator } from './api';
-import { ENVS_EXTENSION_ID } from './common/constants';
+import { ENVS_EXTENSION_ID, SYSTEM_MANAGER_ID, VENV_MANAGER_ID } from './common/constants';
 import { ensureCorrectVersion } from './common/extVersion';
 import { registerLogger, traceError, traceInfo, traceWarn } from './common/logging';
 import { clearPersistentState, setPersistentState } from './common/persistentState';
@@ -582,7 +582,21 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
                 safeRegister('shellStartupVars', shellStartupVarsMgr.initialize()),
             ]);
 
+            // Pre-warm system and venv manager caches before initial environment selection.
+            await Promise.all([
+                (
+                    envManagers.getEnvironmentManager(SYSTEM_MANAGER_ID)?.getEnvironments('all') ?? Promise.resolve()
+                ).catch((err) => {
+                    traceWarn('[pre-warm] System manager cache warm-up failed:', err);
+                }),
+                (envManagers.getEnvironmentManager(VENV_MANAGER_ID)?.getEnvironments('all') ?? Promise.resolve()).catch(
+                    (err) => {
+                        traceWarn('[pre-warm] Venv manager cache warm-up failed:', err);
+                    },
+                ),
+            ]);
             failureStage = 'envSelection';
+
             await applyInitialEnvironmentSelection(envManagers, projectManager, nativeFinder, api);
 
             // Register manager-agnostic terminal watcher for package-modifying commands
