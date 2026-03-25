@@ -82,19 +82,25 @@ export function getCondaPathSetting(): string | undefined {
 }
 
 export async function getCondaForWorkspace(fsPath: string): Promise<string | undefined> {
-    if (process.env.CONDA_PREFIX) {
-        return process.env.CONDA_PREFIX;
-    }
-
+    // Check persisted user selection first so explicit choices survive restarts
     const state = await getWorkspacePersistentState();
     const data: { [key: string]: string } | undefined = await state.get(CONDA_WORKSPACE_KEY);
     if (data) {
         try {
-            return data[fsPath];
+            const saved = data[fsPath];
+            if (saved) {
+                return saved;
+            }
         } catch {
-            return undefined;
+            // fall through to CONDA_PREFIX fallback
         }
     }
+
+    // Fall back to CONDA_PREFIX only when no explicit selection exists
+    if (process.env.CONDA_PREFIX) {
+        return process.env.CONDA_PREFIX;
+    }
+
     return undefined;
 }
 
