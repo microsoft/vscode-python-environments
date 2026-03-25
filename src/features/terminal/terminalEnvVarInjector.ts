@@ -7,14 +7,18 @@ import {
     Disposable,
     EnvironmentVariableScope,
     GlobalEnvironmentVariableCollection,
-    window,
     workspace,
     WorkspaceFolder,
 } from 'vscode';
-import { traceError, traceVerbose } from '../../common/logging';
+import { Common } from '../../common/localize';
+import { traceError, traceLog, traceVerbose } from '../../common/logging';
+import { getGlobalPersistentState } from '../../common/persistentState';
 import { resolveVariables } from '../../common/utils/internalVariables';
+import { showInformationMessage } from '../../common/window.apis';
 import { getConfiguration, getWorkspaceFolder } from '../../common/workspace.apis';
 import { EnvVarManager } from '../execution/envVariableManager';
+
+export const ENV_FILE_NOTIFICATION_DONT_SHOW_KEY = 'python-envs:terminal:ENV_FILE_NOTIFICATION_DONT_SHOW';
 
 /**
  * Manages injection of workspace-specific environment variables into VS Code terminals
@@ -65,9 +69,9 @@ export class TerminalEnvVarInjector implements Disposable {
 
                 // Only show notification when env vars change and we have an env file but injection is disabled
                 if (!useEnvFile && envFilePath) {
-                    window.showInformationMessage(
-                        'An environment file is configured but terminal environment injection is disabled. Enable "python.terminal.useEnvFile" to use environment variables from .env files in terminals.',
-                    );
+                    this.showEnvFileNotification().catch((error) => {
+                        traceError('Failed to show env file notification:', error);
+                    });
                 }
 
                 if (args.changeType === 2) {
@@ -205,6 +209,26 @@ export class TerminalEnvVarInjector implements Disposable {
                 `TerminalEnvVarInjector: Error injecting environment variables for workspace ${workspaceUri.fsPath}:`,
                 error,
             );
+        }
+    }
+
+    /**
+     * Show a notification about env file injection being disabled, with a "Don't Show Again" option.
+     */
+    private async showEnvFileNotification(): Promise<void> {
+        const state = await getGlobalPersistentState();
+        const dontShow = await state.get<boolean>(ENV_FILE_NOTIFICATION_DONT_SHOW_KEY);
+        if (dontShow) {
+            return;
+        }
+
+        const result = await showInformationMessage(
+            'An environment file is configured but terminal environment injection is disabled. Enable "python.terminal.useEnvFile" to use environment variables from .env files in terminals.',
+            Common.dontShowAgain,
+        );
+        if (result === Common.dontShowAgain) {
+            await state.set(ENV_FILE_NOTIFICATION_DONT_SHOW_KEY, true);
+            traceLog('User selected "Don\'t Show Again" for env file notification');
         }
     }
 
