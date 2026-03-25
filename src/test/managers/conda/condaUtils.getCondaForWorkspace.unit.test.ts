@@ -91,4 +91,17 @@ suite('Conda Utils - getCondaForWorkspace prioritization', () => {
 
         assert.strictEqual(result, userSelectedEnv);
     });
+
+    test('Returns persisted empty string without falling back to CONDA_PREFIX', async () => {
+        const workspacePath = '/home/user/project';
+        process.env.CONDA_PREFIX = '/home/user/miniconda3';
+
+        mockState.get.withArgs(CONDA_WORKSPACE_KEY).resolves({
+            [workspacePath]: '',
+        });
+
+        const result = await getCondaForWorkspace(workspacePath);
+
+        assert.strictEqual(result, '');
+    });
 });
