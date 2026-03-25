@@ -328,4 +328,16 @@ export interface IEventNamePropertyMapping {
         managerName: string;
         reason: 'tool_not_found';
     };
+
+    /* __GDPR__
+        "pet.init_duration": {
+            "result": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "owner": "eleanorjboyd" },
+            "errorType": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "owner": "eleanorjboyd" },
+            "<duration>": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "isMeasurement": true, "owner": "eleanorjboyd" }
+        }
+    */
+    [EventNames.PET_INIT_DURATION]: {
+        result: 'success' | 'error' | 'timeout';
+        errorType?: string;
+    };
 }
