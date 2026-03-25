@@ -63,10 +63,10 @@ export async function clearVenvCache(): Promise<void> {
 export async function getVenvForWorkspace(fsPath: string): Promise<string | undefined> {
     // Check persisted user selection first — this should always take priority
     // over process.env.VIRTUAL_ENV so that explicit selections survive reload.
-    const state = await getWorkspacePersistentState();
-    const data: { [key: string]: string } | undefined = await state.get(VENV_WORKSPACE_KEY);
-    if (data) {
-        try {
+    try {
+        const state = await getWorkspacePersistentState();
+        const data: { [key: string]: string } | undefined = await state.get(VENV_WORKSPACE_KEY);
+        if (data) {
             const envPath = data[fsPath];
             if (envPath && (await fsapi.pathExists(envPath))) {
                 return envPath;
@@ -74,14 +74,17 @@ export async function getVenvForWorkspace(fsPath: string): Promise<string | unde
             if (envPath) {
                 await setVenvForWorkspace(fsPath, undefined);
             }
-        } catch {
-            // fall through to VIRTUAL_ENV check
         }
+    } catch {
+        // fall through to VIRTUAL_ENV check
     }
 
     // Fall back to VIRTUAL_ENV only if it points to a path inside this workspace.
-    if (process.env.VIRTUAL_ENV && normalizePath(process.env.VIRTUAL_ENV).startsWith(normalizePath(fsPath))) {
-        return process.env.VIRTUAL_ENV;
+    if (process.env.VIRTUAL_ENV) {
+        const rel = path.relative(fsPath, process.env.VIRTUAL_ENV);
+        if (rel === '' || (!rel.startsWith('..') && !path.isAbsolute(rel))) {
+            return process.env.VIRTUAL_ENV;
+        }
     }
 
     return undefined;

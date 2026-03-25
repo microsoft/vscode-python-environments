@@ -6,6 +6,96 @@ import * as sinon from 'sinon';
 import * as persistentState from '../../../common/persistentState';
 import { getVenvForWorkspace, VENV_WORKSPACE_KEY } from '../../../managers/builtin/venvUtils';
 
+/**
+ * Helper that replicates the VIRTUAL_ENV subpath check from getVenvForWorkspace
+ * using a specific path module, allowing cross-platform verification.
+ */
+function isVenvInsideWorkspace(
+    fsPath: string,
+    virtualEnv: string,
+    pathModule: typeof path.posix | typeof path.win32,
+): boolean {
+    const rel = pathModule.relative(fsPath, virtualEnv);
+    return rel === '' || (!rel.startsWith('..') && !pathModule.isAbsolute(rel));
+}
+
+suite('VIRTUAL_ENV subpath check - cross-platform', () => {
+    suite('POSIX paths', () => {
+        const p = path.posix;
+
+        test('venv inside workspace should match', () => {
+            assert.strictEqual(isVenvInsideWorkspace('/proj/app', '/proj/app/.venv', p), true);
+        });
+
+        test('venv deeply nested inside workspace should match', () => {
+            assert.strictEqual(isVenvInsideWorkspace('/proj/app', '/proj/app/sub/dir/.venv', p), true);
+        });
+
+        test('venv equal to workspace should match', () => {
+            assert.strictEqual(isVenvInsideWorkspace('/proj/app', '/proj/app', p), true);
+        });
+
+        test('sibling with shared prefix should NOT match', () => {
+            assert.strictEqual(isVenvInsideWorkspace('/proj/app', '/proj/app2/.venv', p), false);
+        });
+
+        test('venv in completely different location should NOT match', () => {
+            assert.strictEqual(isVenvInsideWorkspace('/proj/app', '/other/place/.venv', p), false);
+        });
+
+        test('parent directory should NOT match', () => {
+            assert.strictEqual(isVenvInsideWorkspace('/proj/app', '/proj/.venv', p), false);
+        });
+    });
+
+    suite('Windows paths', () => {
+        const p = path.win32;
+
+        test('venv inside workspace should match', () => {
+            assert.strictEqual(isVenvInsideWorkspace('C:\\proj\\app', 'C:\\proj\\app\\.venv', p), true);
+        });
+
+        test('venv deeply nested inside workspace should match', () => {
+            assert.strictEqual(isVenvInsideWorkspace('C:\\proj\\app', 'C:\\proj\\app\\sub\\dir\\.venv', p), true);
+        });
+
+        test('venv equal to workspace should match', () => {
+            assert.strictEqual(isVenvInsideWorkspace('C:\\proj\\app', 'C:\\proj\\app', p), true);
+        });
+
+        test('sibling with shared prefix should NOT match', () => {
+            assert.strictEqual(isVenvInsideWorkspace('C:\\proj\\app', 'C:\\proj\\app2\\.venv', p), false);
+        });
+
+        test('venv on a different drive should NOT match', () => {
+            assert.strictEqual(isVenvInsideWorkspace('C:\\proj\\app', 'D:\\proj\\app\\.venv', p), false);
+        });
+
+        test('parent directory should NOT match', () => {
+            assert.strictEqual(isVenvInsideWorkspace('C:\\proj\\app', 'C:\\proj\\.venv', p), false);
+        });
+
+        test('case-insensitive drive letters should match', () => {
+            // path.win32.relative handles case-insensitive drive letters
+            assert.strictEqual(isVenvInsideWorkspace('c:\\proj\\app', 'C:\\proj\\app\\.venv', p), true);
+        });
+
+        test('UNC path inside workspace should match', () => {
+            assert.strictEqual(
+                isVenvInsideWorkspace('\\\\server\\share\\proj', '\\\\server\\share\\proj\\.venv', p),
+                true,
+            );
+        });
+
+        test('UNC path sibling should NOT match', () => {
+            assert.strictEqual(
+                isVenvInsideWorkspace('\\\\server\\share\\proj', '\\\\server\\share\\proj2\\.venv', p),
+                false,
+            );
+        });
+    });
+});
+
 suite('getVenvForWorkspace', () => {
     let mockState: {
         get: sinon.SinonStub;
@@ -162,5 +252,42 @@ suite('getVenvForWorkspace', () => {
         await getVenvForWorkspace(workspacePath);
 
         assert.ok(!mockState.set.called, 'Should not call set when there is no stale entry to clear');
+    });
+
+    test('should fall back to VIRTUAL_ENV when state.get rejects', async () => {
+        const workspacePath = path.join(tmpDir, 'projectA');
+        const virtualEnvPath = path.join(workspacePath, '.venv');
+        await fse.ensureDir(virtualEnvPath);
+        process.env.VIRTUAL_ENV = virtualEnvPath;
+
+        mockState.get.withArgs(VENV_WORKSPACE_KEY).rejects(new Error('storage corrupted'));
+
+        const result = await getVenvForWorkspace(workspacePath);
+        assert.strictEqual(result, virtualEnvPath, 'Should fall back to VIRTUAL_ENV when state.get rejects');
+    });
+
+    test('should fall back to VIRTUAL_ENV when getWorkspacePersistentState rejects', async () => {
+        const workspacePath = path.join(tmpDir, 'projectA');
+        const virtualEnvPath = path.join(workspacePath, '.venv');
+        await fse.ensureDir(virtualEnvPath);
+        process.env.VIRTUAL_ENV = virtualEnvPath;
+
+        getWorkspacePersistentStateStub.rejects(new Error('persistent state unavailable'));
+
+        const result = await getVenvForWorkspace(workspacePath);
+        assert.strictEqual(result, virtualEnvPath, 'Should fall back to VIRTUAL_ENV when persistent state fails');
+    });
+
+    test('should NOT use VIRTUAL_ENV for sibling path with shared prefix', async () => {
+        const projectA = path.join(tmpDir, 'app');
+        const siblingVenv = path.join(tmpDir, 'app2', '.venv');
+        await fse.ensureDir(projectA);
+        await fse.ensureDir(siblingVenv);
+        process.env.VIRTUAL_ENV = siblingVenv;
+
+        mockState.get.withArgs(VENV_WORKSPACE_KEY).resolves(undefined);
+
+        const result = await getVenvForWorkspace(projectA);
+        assert.strictEqual(result, undefined, 'Should NOT match sibling path with shared prefix');
     });
 });
