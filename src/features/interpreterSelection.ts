@@ -321,7 +321,7 @@ export async function applyInitialEnvironmentSelection(
                 scope: 'workspace',
                 prioritySource: result.source,
                 managerId: result.manager.id,
-                path: isPathA ? 'envPreResolved' : 'managerDiscovery',
+                resolutionPath: isPathA ? 'envPreResolved' : 'managerDiscovery',
                 hasPersistedSelection: env !== undefined,
             });
 
@@ -352,7 +352,7 @@ export async function applyInitialEnvironmentSelection(
             scope: 'global',
             prioritySource: result.source,
             managerId: result.manager.id,
-            path: isPathA ? 'envPreResolved' : 'managerDiscovery',
+            resolutionPath: isPathA ? 'envPreResolved' : 'managerDiscovery',
             hasPersistedSelection: env !== undefined,
         });
 

@@ -96,7 +96,7 @@ export enum EventNames {
      * - scope: string ('workspace' or 'global')
      * - prioritySource: string (which priority won: 'pythonProjects', 'defaultEnvManager', 'defaultInterpreterPath', 'autoDiscovery')
      * - managerId: string (the winning manager's id)
-     * - path: string ('pathA' = env already resolved, 'pathB' = needed full discovery)
+     * - resolutionPath: string ('envPreResolved' = env already resolved, 'managerDiscovery' = needed full discovery)
      * - hasPersistedSelection: boolean (whether a persisted env path existed in workspace state)
      */
     ENV_SELECTION_RESULT = 'ENV_SELECTION.RESULT',
@@ -359,7 +359,7 @@ export interface IEventNamePropertyMapping {
             "scope": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "owner": "eleanorjboyd" },
             "prioritySource": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "owner": "eleanorjboyd" },
             "managerId": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "owner": "eleanorjboyd" },
-            "path": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "owner": "eleanorjboyd" },
+            "resolutionPath": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "owner": "eleanorjboyd" },
             "hasPersistedSelection": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "owner": "eleanorjboyd" }
         }
     */
@@ -367,7 +367,7 @@ export interface IEventNamePropertyMapping {
         scope: string;
         prioritySource: string;
         managerId: string;
-        path: string;
+        resolutionPath: string;
         hasPersistedSelection: boolean;
     };
 }
