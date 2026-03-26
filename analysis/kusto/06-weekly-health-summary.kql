@@ -1,0 +1,50 @@
+// Query 6 — Weekly Report: Full Health Summary
+// One-stop query for weekly health check. Run every Monday.
+// Returns one row with all key numbers: activations, setup results, manager failures, hangs.
+let endDate = startofday(now()-1d);
+let startDate = endDate - 7d;
+let totalActivations = toscalar(
+    RawEventsVSCodeExt
+    | where ServerTimestamp > startDate and ServerTimestamp < endDate
+    | where EventName == "ms-python.vscode-python-envs/extension.activation_duration"
+    | where ExtensionVersion != ""
+    | extend _minor = toint(extract("^1\\.(\\d+)", 1, ExtensionVersion)), _patch = tolong(extract("^1\\.\\d+\\.(\\d+)", 1, ExtensionVersion))
+    | where _minor > 23 or (_minor == 23 and _patch >= 10781012)
+    | summarize dcount(VSCodeMachineId)
+);
+let setupResults = RawEventsVSCodeExt
+| where ServerTimestamp > startDate and ServerTimestamp < endDate
+| where EventName == "ms-python.vscode-python-envs/extension.manager_registration_duration"
+| where ExtensionVersion != ""
+| extend _minor = toint(extract("^1\\.(\\d+)", 1, ExtensionVersion)), _patch = tolong(extract("^1\\.\\d+\\.(\\d+)", 1, ExtensionVersion))
+| where _minor > 23 or (_minor == 23 and _patch >= 10781012)
+| where isnotempty(tostring(Properties.result))
+| summarize 
+    SetupSuccess = dcountif(VSCodeMachineId, tostring(Properties.result) == "success"),
+    SetupError = dcountif(VSCodeMachineId, tostring(Properties.result) == "error");
+let managerFailures = RawEventsVSCodeExt
+| where ServerTimestamp > startDate and ServerTimestamp < endDate
+| where EventName == "ms-python.vscode-python-envs/manager_registration.failed"
+| where ExtensionVersion != ""
+| extend _minor = toint(extract("^1\\.(\\d+)", 1, ExtensionVersion)), _patch = tolong(extract("^1\\.\\d+\\.(\\d+)", 1, ExtensionVersion))
+| where _minor > 23 or (_minor == 23 and _patch >= 10781012)
+| summarize ManagerFailures = count(), ManagerFailMachines = dcount(VSCodeMachineId);
+let hangs = RawEventsVSCodeExt
+| where ServerTimestamp > startDate and ServerTimestamp < endDate
+| where EventName == "ms-python.vscode-python-envs/setup.hang_detected"
+| where ExtensionVersion != ""
+| extend _minor = toint(extract("^1\\.(\\d+)", 1, ExtensionVersion)), _patch = tolong(extract("^1\\.\\d+\\.(\\d+)", 1, ExtensionVersion))
+| where _minor > 23 or (_minor == 23 and _patch >= 10781012)
+| summarize Hangs = count(), HangMachines = dcount(VSCodeMachineId);
+setupResults | extend _k = 1
+| join (managerFailures | extend _k = 1) on _k
+| join (hangs | extend _k = 1) on _k
+| project 
+    TotalActivations = totalActivations,
+    SetupSuccess,
+    SetupError,
+    SetupSuccessRate = round(todouble(SetupSuccess) / todouble(SetupSuccess + SetupError) * 100, 1),
+    ManagerFailures,
+    ManagerFailMachines,
+    Hangs,
+    HangMachines

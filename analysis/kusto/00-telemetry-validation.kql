@@ -1,0 +1,228 @@
+// =============================================================================
+// TELEMETRY VALIDATION
+// Checks that PR #1365 telemetry events are arriving with correct properties.
+// Each query is self-contained — just copy-paste into Azure Data Explorer.
+// =============================================================================
+
+
+// =============================================================================
+// CHECK 0: UniqueMachines with Telemetry Changes
+// Shows unique machines per version for builds >= 1.23.10781012 (all stable + pre-release).
+// Use this to confirm the latest pre-release build has real users.
+// =============================================================================
+let filtered = RawEventsVSCodeExt
+| where ServerTimestamp > ago(7d)
+| where ExtensionName == "ms-python.vscode-python-envs"
+| where ExtensionVersion != ""
+| extend _minor = toint(extract("^1\\.(\\d+)", 1, ExtensionVersion)), _patch = tolong(extract("^1\\.\\d+\\.(\\d+)", 1, ExtensionVersion))
+| where _minor > 23 or (_minor == 23 and _patch >= 10781012);
+filtered
+| summarize UniqueMachines = dcount(VSCodeMachineId) by ExtensionVersion
+| extend TotalUniqueMachines = toscalar(filtered | summarize dcount(VSCodeMachineId))
+| order by UniqueMachines desc;
+
+
+// =============================================================================
+// CHECK 1: Are all 4 events arriving? (3 new + 1 enhanced)
+// Expected: at least 1 row per event. If any row shows 0, that event is broken.
+// Broken down by extension version so you can confirm the new build is reporting.
+// =============================================================================
+let allEvents = datatable(EventName: string) [
+    "ms-python.vscode-python-envs/manager_registration.failed",
+    "ms-python.vscode-python-envs/manager_registration.skipped",
+    "ms-python.vscode-python-envs/setup.hang_detected",
+    "ms-python.vscode-python-envs/extension.manager_registration_duration"
+];
+let observed = RawEventsVSCodeExt
+| where ServerTimestamp > ago(7d)
+| where EventName in (
+    "ms-python.vscode-python-envs/manager_registration.failed",
+    "ms-python.vscode-python-envs/manager_registration.skipped",
+    "ms-python.vscode-python-envs/setup.hang_detected",
+    "ms-python.vscode-python-envs/extension.manager_registration_duration"
+)
+| extend ExtVersion = tostring(Properties["common.extversion"])
+| extend _minor = toint(extract("^1\\.(\\d+)", 1, ExtVersion)), _patch = tolong(extract("^1\\.\\d+\\.(\\d+)", 1, ExtVersion))
+| where _minor > 23 or (_minor == 23 and _patch >= 10781012)
+| summarize EventCount = count(), UniqueMachines = dcount(VSCodeMachineId) by EventName, ExtVersion;
+allEvents
+| join kind=leftouter observed on EventName
+| project 
+    EventName, 
+    ExtVersion = coalesce(ExtVersion, ""),
+    EventCount = coalesce(EventCount, 0), 
+    UniqueMachines = coalesce(UniqueMachines, 0),
+    Status = iff(coalesce(EventCount, 0) > 0, "✅ RECEIVING DATA", "⚠️ NO DATA YET")
+| order by EventName asc, ExtVersion desc;
+
+
+// =============================================================================
+// CHECK 2: Enhanced event — does "result" property exist?
+// The existing event previously had only "duration". Now it should have "result".
+// Expected: rows with result = "success" (should be the majority) and maybe a few "error".
+//           If result is empty/"", the property isn't being sent correctly.
+// =============================================================================
+RawEventsVSCodeExt
+| where ServerTimestamp > ago(7d)
+| where EventName == "ms-python.vscode-python-envs/extension.manager_registration_duration"
+| extend ExtVersion = tostring(Properties["common.extversion"])
+| extend _minor = toint(extract("^1\\.(\\d+)", 1, ExtVersion)), _patch = tolong(extract("^1\\.\\d+\\.(\\d+)", 1, ExtVersion))
+| where _minor > 23 or (_minor == 23 and _patch >= 10781012)
+| summarize 
+    TotalEvents = count(),
+    HasResult = countif(isnotempty(tostring(Properties.result))),
+    ResultSuccess = countif(tostring(Properties.result) == "success"),
+    ResultError = countif(tostring(Properties.result) == "error"),
+    HasDuration = countif(todouble(Properties.duration) > 0)
+| extend 
+    ResultPopulatedPct = round(todouble(HasResult) / todouble(TotalEvents) * 100, 1),
+    ErrorPct = round(todouble(ResultError) / todouble(HasResult) * 100, 2),
+    Status = iff(HasResult == TotalEvents, "✅ ALL EVENTS HAVE result", "⚠️ SOME EVENTS MISSING result");
+
+
+// =============================================================================
+// CHECK 3: MANAGER_REGISTRATION.SKIPPED — property validation
+// Expected: managerName in {conda, pyenv, pipenv, poetry}, reason = "tool_not_found"
+//           These should be common — most users don't have all 4 tools.
+// =============================================================================
+let totalMachines = toscalar(
+    RawEventsVSCodeExt
+    | where ServerTimestamp > ago(7d)
+    | where ExtensionName == "ms-python.vscode-python-envs"
+    | where ExtensionVersion != ""
+    | extend _minor = toint(extract("^1\\.(\\d+)", 1, ExtensionVersion)), _patch = tolong(extract("^1\\.\\d+\\.(\\d+)", 1, ExtensionVersion))
+    | where _minor > 23 or (_minor == 23 and _patch >= 10781012)
+    | summarize dcount(VSCodeMachineId)
+);
+RawEventsVSCodeExt
+| where ServerTimestamp > ago(7d)
+| where EventName == "ms-python.vscode-python-envs/manager_registration.skipped"
+| extend ExtVersion = tostring(Properties["common.extversion"])
+| extend _minor = toint(extract("^1\\.(\\d+)", 1, ExtVersion)), _patch = tolong(extract("^1\\.\\d+\\.(\\d+)", 1, ExtVersion))
+| where _minor > 23 or (_minor == 23 and _patch >= 10781012)
+| summarize 
+    EventCount = count(),
+    UniqueMachines = dcount(VSCodeMachineId)
+    by ManagerName = tostring(Properties.managername), Reason = tostring(Properties.reason)
+| extend TotalUniqueMachines = totalMachines
+| extend MachinePct = round(todouble(UniqueMachines) / todouble(TotalUniqueMachines) * 100, 1)
+| order by EventCount desc;
+
+
+// =============================================================================
+// CHECK 4: MANAGER_REGISTRATION.FAILED — property validation
+// Expected: managerName in {system, conda, pyenv, pipenv, poetry, shellStartupVars}
+//           errorType in {spawn_timeout, spawn_enoent, permission_denied, canceled, parse_error, unknown}
+//           This may have 0 rows if no one hit errors — that's fine.
+//
+// errorType reference (from errorClassifier.ts):
+//   spawn_timeout    — tool process started but hung or didn't respond in time
+//   spawn_enoent     — OS couldn't find the executable (ENOENT: not installed or not on PATH)
+//   permission_denied — OS returned EACCES/EPERM (exists but no permission to run)
+//   canceled         — operation was stopped (user closed VS Code, workspace changed, CancellationToken fired)
+//   parse_error      — tool ran but returned unparseable output (malformed JSON, unexpected format)
+//   unknown          — didn't match any known pattern (catch-all for unexpected errors)
+// =============================================================================
+let totalMachines = toscalar(
+    RawEventsVSCodeExt
+    | where ServerTimestamp > ago(7d)
+    | where ExtensionName == "ms-python.vscode-python-envs"
+    | where ExtensionVersion != ""
+    | extend _minor = toint(extract("^1\\.(\\d+)", 1, ExtensionVersion)), _patch = tolong(extract("^1\\.\\d+\\.(\\d+)", 1, ExtensionVersion))
+    | where _minor > 23 or (_minor == 23 and _patch >= 10781012)
+    | summarize dcount(VSCodeMachineId)
+);
+RawEventsVSCodeExt
+| where ServerTimestamp > ago(7d)
+| where EventName == "ms-python.vscode-python-envs/manager_registration.failed"
+| extend ExtVersion = tostring(Properties["common.extversion"])
+| extend _minor = toint(extract("^1\\.(\\d+)", 1, ExtVersion)), _patch = tolong(extract("^1\\.\\d+\\.(\\d+)", 1, ExtVersion))
+| where _minor > 23 or (_minor == 23 and _patch >= 10781012)
+| summarize 
+    EventCount = count(),
+    UniqueMachines = dcount(VSCodeMachineId)
+    by ManagerName = tostring(Properties.managername), ErrorType = tostring(Properties.errortype)
+| extend TotalUniqueMachines = totalMachines
+| extend MachinePct = round(todouble(UniqueMachines) / todouble(TotalUniqueMachines) * 100, 1)
+| order by EventCount desc;
+
+
+// =============================================================================
+// CHECK 5: SETUP.HANG_DETECTED — property validation
+// Expected: failureStage in {nativeFinder, managerRegistration, envSelection, terminalWatcher, settingsListener}
+//           This should have very few or 0 rows (hangs are rare). 0 is normal.
+// =============================================================================
+let totalMachines = toscalar(
+    RawEventsVSCodeExt
+    | where ServerTimestamp > ago(7d)
+    | where ExtensionName == "ms-python.vscode-python-envs"
+    | where ExtensionVersion != ""
+    | extend _minor = toint(extract("^1\\.(\\d+)", 1, ExtensionVersion)), _patch = tolong(extract("^1\\.\\d+\\.(\\d+)", 1, ExtensionVersion))
+    | where _minor > 23 or (_minor == 23 and _patch >= 10781012)
+    | summarize dcount(VSCodeMachineId)
+);
+RawEventsVSCodeExt
+| where ServerTimestamp > ago(7d)
+| where EventName == "ms-python.vscode-python-envs/setup.hang_detected"
+| extend ExtVersion = tostring(Properties["common.extversion"])
+| extend _minor = toint(extract("^1\\.(\\d+)", 1, ExtVersion)), _patch = tolong(extract("^1\\.\\d+\\.(\\d+)", 1, ExtVersion))
+| where _minor > 23 or (_minor == 23 and _patch >= 10781012)
+| summarize 
+    EventCount = count(),
+    UniqueMachines = dcount(VSCodeMachineId)
+    by FailureStage = tostring(Properties.failurestage)
+| extend TotalUniqueMachines = totalMachines
+| extend MachinePct = round(todouble(UniqueMachines) / todouble(TotalUniqueMachines) * 100, 1)
+| order by EventCount desc;
+
+
+// =============================================================================
+// CHECK 6: Registered vs Skipped — unique machine counts per manager
+// For each manager that can be skipped, compare registered vs skipped machine counts.
+// If a manager shows 0 registered AND 0 skipped, the telemetry path may be broken.
+// =============================================================================
+let totalMachines = toscalar(
+    RawEventsVSCodeExt
+    | where ServerTimestamp > ago(7d)
+    | where ExtensionName == "ms-python.vscode-python-envs"
+    | where ExtensionVersion != ""
+    | extend _minor = toint(extract("^1\\.(\\d+)", 1, ExtensionVersion)), _patch = tolong(extract("^1\\.\\d+\\.(\\d+)", 1, ExtensionVersion))
+    | where _minor > 23 or (_minor == 23 and _patch >= 10781012)
+    | summarize dcount(VSCodeMachineId)
+);
+let skipped = RawEventsVSCodeExt
+| where ServerTimestamp > ago(7d)
+| where EventName == "ms-python.vscode-python-envs/manager_registration.skipped"
+| extend ExtVersion = tostring(Properties["common.extversion"])
+| extend _minor = toint(extract("^1\\.(\\d+)", 1, ExtVersion)), _patch = tolong(extract("^1\\.\\d+\\.(\\d+)", 1, ExtVersion))
+| where _minor > 23 or (_minor == 23 and _patch >= 10781012)
+| summarize SkippedMachines = dcount(VSCodeMachineId) by Manager = tostring(Properties.managername);
+let registered = RawEventsVSCodeExt
+| where ServerTimestamp > ago(7d)
+| where EventName == "ms-python.vscode-python-envs/environment_manager.registered"
+| extend ExtVersion = tostring(Properties["common.extversion"])
+| extend _minor = toint(extract("^1\\.(\\d+)", 1, ExtVersion)), _patch = tolong(extract("^1\\.\\d+\\.(\\d+)", 1, ExtVersion))
+| where _minor > 23 or (_minor == 23 and _patch >= 10781012)
+| extend RawManagerId = tostring(Properties.managerid)
+| where RawManagerId has_any ("conda", "pyenv", "pipenv", "poetry")
+| extend Manager = case(
+    RawManagerId has "conda", "conda",
+    RawManagerId has "pyenv", "pyenv",
+    RawManagerId has "pipenv", "pipenv",
+    RawManagerId has "poetry", "poetry",
+    RawManagerId)
+| summarize RegisteredMachines = dcount(VSCodeMachineId) by Manager;
+skipped
+| join kind=fullouter registered on Manager
+| project 
+    Manager = coalesce(Manager, Manager1),
+    RegisteredMachines = coalesce(RegisteredMachines, 0),
+    SkippedMachines = coalesce(SkippedMachines, 0),
+    TotalUniqueMachines = totalMachines
+| extend 
+    RegisteredPct = round(todouble(RegisteredMachines) / todouble(TotalUniqueMachines) * 100, 1),
+    SkippedPct = round(todouble(SkippedMachines) / todouble(TotalUniqueMachines) * 100, 1)
+| order by Manager asc;
+
+
+

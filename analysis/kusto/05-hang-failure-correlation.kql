@@ -1,0 +1,26 @@
+// Query 5 — Hang + Failure Correlation
+// Do hangs always result in failures, or do some self-recover?
+// If most hangs recover → just slow machines. If most also fail → real deadlock or crash.
+let endDate = startofday(now()-1d);
+let hangMachines = RawEventsVSCodeExt
+| where ServerTimestamp > endDate-28d and ServerTimestamp < endDate
+| where EventName == "ms-python.vscode-python-envs/setup.hang_detected"
+| extend ExtVersion = tostring(Properties["common.extversion"])
+| extend _minor = toint(extract("^1\\.(\\d+)", 1, ExtVersion)), _patch = tolong(extract("^1\\.\\d+\\.(\\d+)", 1, ExtVersion))
+| where _minor > 23 or (_minor == 23 and _patch >= 10781012)
+| distinct VSCodeMachineId;
+let failedMachines = RawEventsVSCodeExt
+| where ServerTimestamp > endDate-28d and ServerTimestamp < endDate
+| where EventName == "ms-python.vscode-python-envs/extension.manager_registration_duration"
+| extend ExtVersion = tostring(Properties["common.extversion"])
+| extend _minor = toint(extract("^1\\.(\\d+)", 1, ExtVersion)), _patch = tolong(extract("^1\\.\\d+\\.(\\d+)", 1, ExtVersion))
+| where _minor > 23 or (_minor == 23 and _patch >= 10781012)
+| where tostring(Properties.result) == "error"
+| distinct VSCodeMachineId;
+let totalHangs = toscalar(hangMachines | count);
+let hangAndFail = hangMachines | join kind=inner failedMachines on VSCodeMachineId | count;
+let hangOnly = toscalar(hangMachines | join kind=leftanti failedMachines on VSCodeMachineId | count);
+print 
+    TotalHangMachines = totalHangs,
+    HangAndFailed = toscalar(hangAndFail),
+    HangButRecovered = hangOnly

@@ -1,0 +1,38 @@
+// Query 2 — Manager Availability: What Tools Do Users Have Installed?
+// For each manager, counts: registered (tool found), skipped (tool not found), failed (crashed).
+// InstalledRate shows what % of users actually have each tool.
+let endDate = startofday(now()-1d);
+let skipped = RawEventsVSCodeExt
+| where ServerTimestamp > endDate-28d and ServerTimestamp < endDate
+| where EventName == "ms-python.vscode-python-envs/manager_registration.skipped"
+| extend ExtVersion = tostring(Properties["common.extversion"])
+| extend _minor = toint(extract("^1\\.(\\d+)", 1, ExtVersion)), _patch = tolong(extract("^1\\.\\d+\\.(\\d+)", 1, ExtVersion))
+| where _minor > 23 or (_minor == 23 and _patch >= 10781012)
+| summarize SkippedMachines = dcount(VSCodeMachineId) by ManagerName = tostring(Properties.managername);
+let registered = RawEventsVSCodeExt
+| where ServerTimestamp > endDate-28d and ServerTimestamp < endDate
+| where EventName == "ms-python.vscode-python-envs/environment_manager.registered"
+| extend ExtVersion = tostring(Properties["common.extversion"])
+| extend _minor = toint(extract("^1\\.(\\d+)", 1, ExtVersion)), _patch = tolong(extract("^1\\.\\d+\\.(\\d+)", 1, ExtVersion))
+| where _minor > 23 or (_minor == 23 and _patch >= 10781012)
+| extend RawManagerId = tostring(Properties.managerid)
+| extend ManagerName = extract("[^:]+$", 0, RawManagerId)
+| summarize RegisteredMachines = dcount(VSCodeMachineId) by ManagerName;
+let failed = RawEventsVSCodeExt
+| where ServerTimestamp > endDate-28d and ServerTimestamp < endDate
+| where EventName == "ms-python.vscode-python-envs/manager_registration.failed"
+| extend ExtVersion = tostring(Properties["common.extversion"])
+| extend _minor = toint(extract("^1\\.(\\d+)", 1, ExtVersion)), _patch = tolong(extract("^1\\.\\d+\\.(\\d+)", 1, ExtVersion))
+| where _minor > 23 or (_minor == 23 and _patch >= 10781012)
+| summarize FailedMachines = dcount(VSCodeMachineId) by ManagerName = tostring(Properties.managername);
+skipped 
+| join kind=fullouter registered on ManagerName
+| join kind=fullouter failed on ManagerName
+| project 
+    Manager = coalesce(ManagerName, ManagerName1, ManagerName2),
+    Registered = coalesce(RegisteredMachines, 0),
+    Skipped = coalesce(SkippedMachines, 0),
+    Failed = coalesce(FailedMachines, 0)
+| extend Total = Registered + Skipped + Failed
+| extend InstalledRate = iff(Total > 0, round(todouble(Registered) / todouble(Total) * 100, 1), 0.0)
+| order by Total desc

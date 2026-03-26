@@ -1,0 +1,30 @@
+// Query 4 — Error Type Distribution Across All Failures
+// Combines errors from overall setup and individual managers, grouped by error type.
+// Action depends on results:
+//   spawn_timeout → native finder or tool is too slow
+//   spawn_enoent → binary path wrong or not on PATH
+//   permission_denied → file system permission issue
+//   parse_error → a tool returned unexpected output
+//   unknown → needs deeper investigation
+let endDate = startofday(now()-1d);
+let setupErrors = RawEventsVSCodeExt
+| where ServerTimestamp > endDate-28d and ServerTimestamp < endDate
+| where EventName == "ms-python.vscode-python-envs/extension.manager_registration_duration"
+| extend ExtVersion = tostring(Properties["common.extversion"])
+| extend _minor = toint(extract("^1\\.(\\d+)", 1, ExtVersion)), _patch = tolong(extract("^1\\.\\d+\\.(\\d+)", 1, ExtVersion))
+| where _minor > 23 or (_minor == 23 and _patch >= 10781012)
+| where tostring(Properties.result) == "error"
+| project ErrorType = tostring(Properties.errortype), Source = "setup_overall", VSCodeMachineId;
+let managerErrors = RawEventsVSCodeExt
+| where ServerTimestamp > endDate-28d and ServerTimestamp < endDate
+| where EventName == "ms-python.vscode-python-envs/manager_registration.failed"
+| extend ExtVersion = tostring(Properties["common.extversion"])
+| extend _minor = toint(extract("^1\\.(\\d+)", 1, ExtVersion)), _patch = tolong(extract("^1\\.\\d+\\.(\\d+)", 1, ExtVersion))
+| where _minor > 23 or (_minor == 23 and _patch >= 10781012)
+| project ErrorType = tostring(Properties.errortype), Source = "individual_manager", VSCodeMachineId;
+union setupErrors, managerErrors
+| summarize 
+    EventCount = count(),
+    AffectedMachines = dcount(VSCodeMachineId)
+    by ErrorType, Source
+| order by AffectedMachines desc

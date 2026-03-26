@@ -1,0 +1,20 @@
+// Query 3 — Daily Trend: Are Failures Increasing or Decreasing?
+// Day-by-day trend of setup results. Check this after shipping a new version.
+// A sudden SuccessRate drop means a regression; a rise means a fix is working.
+let endDate = startofday(now()-1d);
+RawEventsVSCodeExt
+| where ServerTimestamp > endDate-14d and ServerTimestamp < endDate
+| where EventName == "ms-python.vscode-python-envs/extension.manager_registration_duration"
+| extend ExtVersion = tostring(Properties["common.extversion"])
+| extend _minor = toint(extract("^1\\.(\\d+)", 1, ExtVersion)), _patch = tolong(extract("^1\\.\\d+\\.(\\d+)", 1, ExtVersion))
+| where _minor > 23 or (_minor == 23 and _patch >= 10781012)
+| extend Day = startofday(ServerTimestamp)
+| extend Result = tostring(Properties.result)
+| where Result in ("success", "error")
+| summarize 
+    SuccessCount = countif(Result == "success"),
+    ErrorCount = countif(Result == "error")
+    by Day
+| extend TotalCount = SuccessCount + ErrorCount
+| extend SuccessRate = round(todouble(SuccessCount) / todouble(TotalCount) * 100, 1)
+| order by Day asc
