@@ -56,6 +56,7 @@ export enum EventNames {
      * Properties:
      * - managerName: string (e.g. 'system', 'conda', 'pyenv', 'pipenv', 'poetry', 'shellStartupVars')
      * - errorType: string (classified error category from classifyError)
+     * - failureStage: string (hierarchical stage indicator, e.g. 'getPipenv:nativeFinderRefresh')
      */
     MANAGER_REGISTRATION_FAILED = 'MANAGER_REGISTRATION.FAILED',
     /**
@@ -282,12 +283,14 @@ export interface IEventNamePropertyMapping {
     /* __GDPR__
         "manager_registration.failed": {
             "managerName": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "owner": "StellaHuang95" },
-            "errorType": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "owner": "StellaHuang95" }
+            "errorType": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "owner": "StellaHuang95" },
+            "failureStage": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "owner": "StellaHuang95" }
         }
     */
     [EventNames.MANAGER_REGISTRATION_FAILED]: {
         managerName: string;
         errorType: string;
+        failureStage: string;
     };
 
     /* __GDPR__
