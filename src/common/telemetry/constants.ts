@@ -340,4 +340,34 @@ export interface IEventNamePropertyMapping {
         result: 'success' | 'error' | 'timeout';
         errorType?: string;
     };
+
+    /* __GDPR__
+        "env_selection.started": {
+            "registeredManagerCount": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "isMeasurement": true, "owner": "eleanorjboyd" },
+            "registeredManagerIds": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "owner": "eleanorjboyd" },
+            "workspaceFolderCount": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "isMeasurement": true, "owner": "eleanorjboyd" }
+        }
+    */
+    [EventNames.ENV_SELECTION_STARTED]: {
+        registeredManagerCount: number;
+        registeredManagerIds: string;
+        workspaceFolderCount: number;
+    };
+
+    /* __GDPR__
+        "env_selection.result": {
+            "scope": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "owner": "eleanorjboyd" },
+            "prioritySource": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "owner": "eleanorjboyd" },
+            "managerId": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "owner": "eleanorjboyd" },
+            "path": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "owner": "eleanorjboyd" },
+            "hasPersistedSelection": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "owner": "eleanorjboyd" }
+        }
+    */
+    [EventNames.ENV_SELECTION_RESULT]: {
+        scope: string;
+        prioritySource: string;
+        managerId: string;
+        path: string;
+        hasPersistedSelection: boolean;
+    };
 }
