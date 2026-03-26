@@ -216,6 +216,9 @@ export namespace ActivationStrings {
         Commands.viewLogs,
     );
     export const activatingEnvironment = l10n.t('Activating environment');
+    export const envFileInjectionDisabled = l10n.t(
+        'An environment file is configured but terminal environment injection is disabled. Enable "python.terminal.useEnvFile" to use environment variables from .env files in terminals.',
+    );
 }
 
 export namespace UvInstallStrings {

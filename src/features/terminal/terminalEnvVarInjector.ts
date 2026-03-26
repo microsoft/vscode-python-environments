@@ -10,7 +10,7 @@ import {
     workspace,
     WorkspaceFolder,
 } from 'vscode';
-import { Common } from '../../common/localize';
+import { ActivationStrings, Common } from '../../common/localize';
 import { traceError, traceLog, traceVerbose } from '../../common/logging';
 import { getGlobalPersistentState } from '../../common/persistentState';
 import { resolveVariables } from '../../common/utils/internalVariables';
@@ -223,7 +223,7 @@ export class TerminalEnvVarInjector implements Disposable {
         }
 
         const result = await showInformationMessage(
-            'An environment file is configured but terminal environment injection is disabled. Enable "python.terminal.useEnvFile" to use environment variables from .env files in terminals.',
+            ActivationStrings.envFileInjectionDisabled,
             Common.dontShowAgain,
         );
         if (result === Common.dontShowAgain) {
