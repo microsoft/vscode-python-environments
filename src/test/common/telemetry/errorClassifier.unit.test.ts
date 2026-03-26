@@ -64,5 +64,62 @@ suite('Error Classifier', () => {
         test('should classify unrecognized errors as unknown', () => {
             assert.strictEqual(classifyError(new Error('something went wrong')), 'unknown');
         });
+
+        test('should classify PET restart failure as pet_crash', () => {
+            assert.strictEqual(
+                classifyError(
+                    new Error(
+                        'Python Environment Tools (PET) failed after 3 restart attempts. Check the Output panel.',
+                    ),
+                ),
+                'pet_crash',
+            );
+        });
+
+        test('should classify PET currently restarting as pet_crash', () => {
+            assert.strictEqual(
+                classifyError(new Error('Python Environment Tools (PET) is currently restarting. Please try again.')),
+                'pet_crash',
+            );
+        });
+
+        test('should classify PET stdio failure as pet_crash', () => {
+            assert.strictEqual(classifyError(new Error('Failed to create stdio streams for PET process')), 'pet_crash');
+        });
+
+        test('should classify missing PET binary as pet_not_found', () => {
+            assert.strictEqual(classifyError(new Error('Python extension not found')), 'pet_not_found');
+        });
+
+        test('should classify wrapped spawn ENOENT as spawn_enoent', () => {
+            assert.strictEqual(classifyError(new Error('Error spawning conda: spawn conda ENOENT')), 'spawn_enoent');
+        });
+
+        test('should classify wrapped spawn EACCES as permission_denied', () => {
+            assert.strictEqual(
+                classifyError(new Error('Error spawning python: spawn python EACCES')),
+                'permission_denied',
+            );
+        });
+
+        test('should classify wrapped spawn with other cause as spawn_error', () => {
+            assert.strictEqual(classifyError(new Error('Error spawning uv: some unexpected failure')), 'spawn_error');
+        });
+
+        test('should classify non-zero exit code failures as tool_exec_failed', () => {
+            assert.strictEqual(
+                classifyError(new Error('Failed to run "conda info --envs --json":\n conda not initialized')),
+                'tool_exec_failed',
+            );
+            assert.strictEqual(classifyError(new Error('Failed to run uv pip install numpy')), 'tool_exec_failed');
+            assert.strictEqual(classifyError(new Error('Failed to run poetry install')), 'tool_exec_failed');
+        });
+
+        test('should classify invalid data type errors as parse_error', () => {
+            assert.strictEqual(
+                classifyError(new Error('conda info returned invalid data type: string')),
+                'parse_error',
+            );
+        });
     });
 });
