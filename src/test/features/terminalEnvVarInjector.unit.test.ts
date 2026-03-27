@@ -13,9 +13,15 @@ import {
     WorkspaceFolder,
     workspace,
 } from 'vscode';
+import { Common } from '../../common/localize';
+import * as persistentState from '../../common/persistentState';
+import * as windowApis from '../../common/window.apis';
 import * as workspaceApis from '../../common/workspace.apis';
 import { EnvVarManager } from '../../features/execution/envVariableManager';
-import { TerminalEnvVarInjector } from '../../features/terminal/terminalEnvVarInjector';
+import {
+    ENV_FILE_NOTIFICATION_DONT_SHOW_KEY,
+    TerminalEnvVarInjector,
+} from '../../features/terminal/terminalEnvVarInjector';
 
 interface MockScopedCollection {
     clear: sinon.SinonStub;
@@ -305,6 +311,127 @@ suite('TerminalEnvVarInjector', () => {
                     // Ignore
                 }
             }
+        });
+    });
+
+    suite('env file notification with Don\'t Show Again', () => {
+        let envChangeCallback: ((args: { uri?: Uri; changeType: number }) => void) | undefined;
+        let mockState: { get: sinon.SinonStub; set: sinon.SinonStub; clear: sinon.SinonStub };
+        let showInfoMessageStub: sinon.SinonStub;
+
+        setup(() => {
+            mockState = {
+                get: sinon.stub(),
+                set: sinon.stub().resolves(),
+                clear: sinon.stub().resolves(),
+            };
+            sinon.stub(persistentState, 'getGlobalPersistentState').resolves(mockState);
+            showInfoMessageStub = sinon.stub(windowApis, 'showInformationMessage');
+
+            // Capture the onDidChangeEnvironmentVariables listener
+            envVarManager.reset();
+            envVarManager
+                .setup((m) => m.onDidChangeEnvironmentVariables)
+                .returns(() => {
+                    return (listener: (args: { uri?: Uri; changeType: number }) => void): Disposable => {
+                        envChangeCallback = listener;
+                        return new Disposable(() => {});
+                    };
+                });
+            envVarManager
+                .setup((m) => m.getEnvironmentVariables(typeMoq.It.isAny()))
+                .returns(() => Promise.resolve({}));
+
+            sinon.stub(workspaceApis, 'getWorkspaceFolder').returns(testWorkspaceFolder);
+        });
+
+        test('should show notification with Don\'t Show Again button when env file configured but injection disabled', async () => {
+            getConfigurationStub.returns(
+                createMockConfig({ useEnvFile: false, envFilePath: '${workspaceFolder}/.env' }) as WorkspaceConfiguration,
+            );
+            mockState.get.resolves(false);
+            showInfoMessageStub.resolves(undefined);
+
+            injector = new TerminalEnvVarInjector(envVarCollection.object, envVarManager.object);
+            await new Promise((resolve) => setTimeout(resolve, 50));
+
+            assert.ok(envChangeCallback, 'Event handler should be registered');
+            envChangeCallback!({ uri: Uri.file(testWorkspacePath), changeType: 1 });
+            await new Promise((resolve) => setTimeout(resolve, 50));
+
+            assert.ok(showInfoMessageStub.calledOnce, 'Should show notification');
+            assert.ok(
+                showInfoMessageStub.calledWith(sinon.match.string, Common.dontShowAgain),
+                'Should include Don\'t Show Again button',
+            );
+        });
+
+        test('should not show notification when Don\'t Show Again was previously selected', async () => {
+            getConfigurationStub.returns(
+                createMockConfig({ useEnvFile: false, envFilePath: '${workspaceFolder}/.env' }) as WorkspaceConfiguration,
+            );
+            mockState.get.resolves(true);
+
+            injector = new TerminalEnvVarInjector(envVarCollection.object, envVarManager.object);
+            await new Promise((resolve) => setTimeout(resolve, 50));
+
+            assert.ok(envChangeCallback, 'Event handler should be registered');
+            envChangeCallback!({ uri: Uri.file(testWorkspacePath), changeType: 1 });
+            await new Promise((resolve) => setTimeout(resolve, 50));
+
+            assert.ok(showInfoMessageStub.notCalled, 'Should not show notification when dismissed');
+        });
+
+        test('should persist preference when Don\'t Show Again is clicked', async () => {
+            getConfigurationStub.returns(
+                createMockConfig({ useEnvFile: false, envFilePath: '${workspaceFolder}/.env' }) as WorkspaceConfiguration,
+            );
+            mockState.get.resolves(false);
+            showInfoMessageStub.resolves(Common.dontShowAgain);
+
+            injector = new TerminalEnvVarInjector(envVarCollection.object, envVarManager.object);
+            await new Promise((resolve) => setTimeout(resolve, 50));
+
+            assert.ok(envChangeCallback, 'Event handler should be registered');
+            envChangeCallback!({ uri: Uri.file(testWorkspacePath), changeType: 1 });
+            await new Promise((resolve) => setTimeout(resolve, 50));
+
+            assert.ok(
+                mockState.set.calledWith(ENV_FILE_NOTIFICATION_DONT_SHOW_KEY, true),
+                'Should persist Don\'t Show Again preference',
+            );
+        });
+
+        test('should not show notification when useEnvFile is true', async () => {
+            getConfigurationStub.returns(
+                createMockConfig({ useEnvFile: true, envFilePath: '${workspaceFolder}/.env' }) as WorkspaceConfiguration,
+            );
+            mockState.get.resolves(false);
+
+            injector = new TerminalEnvVarInjector(envVarCollection.object, envVarManager.object);
+            await new Promise((resolve) => setTimeout(resolve, 50));
+
+            assert.ok(envChangeCallback, 'Event handler should be registered');
+            envChangeCallback!({ uri: Uri.file(testWorkspacePath), changeType: 1 });
+            await new Promise((resolve) => setTimeout(resolve, 50));
+
+            assert.ok(showInfoMessageStub.notCalled, 'Should not show notification when useEnvFile is true');
+        });
+
+        test('should not show notification when no envFile is configured', async () => {
+            getConfigurationStub.returns(
+                createMockConfig({ useEnvFile: false }) as WorkspaceConfiguration,
+            );
+            mockState.get.resolves(false);
+
+            injector = new TerminalEnvVarInjector(envVarCollection.object, envVarManager.object);
+            await new Promise((resolve) => setTimeout(resolve, 50));
+
+            assert.ok(envChangeCallback, 'Event handler should be registered');
+            envChangeCallback!({ uri: Uri.file(testWorkspacePath), changeType: 1 });
+            await new Promise((resolve) => setTimeout(resolve, 50));
+
+            assert.ok(showInfoMessageStub.notCalled, 'Should not show notification when no envFile configured');
         });
     });
 });

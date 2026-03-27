@@ -15,6 +15,7 @@ export namespace Common {
     export const ok = l10n.t('Ok');
     export const quickCreate = l10n.t('Quick Create');
     export const installPython = l10n.t('Install Python');
+    export const dontShowAgain = l10n.t("Don't Show Again");
     export const dontAskAgain = l10n.t("Don't ask again");
 }
 
@@ -223,6 +224,9 @@ export namespace ActivationStrings {
         Commands.viewLogs,
     );
     export const activatingEnvironment = l10n.t('Activating environment');
+    export const envFileInjectionDisabled = l10n.t(
+        'An environment file is configured but terminal environment injection is disabled. Enable "python.terminal.useEnvFile" to use environment variables from .env files in terminals.',
+    );
 }
 
 export namespace UvInstallStrings {
