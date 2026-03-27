@@ -607,6 +607,7 @@ export async function createTerminalCommand(
     tm: TerminalManager,
 ): Promise<Terminal | undefined> {
     const pythonProjects = api.getPythonProjects();
+    // If no context is provided, or there are multiple projects, prompt the user to select a project for the terminal's cwd
     if (context === undefined || pythonProjects.length > 0) {
         const pw = await pickProject(pythonProjects);
         if (pw) {
