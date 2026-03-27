@@ -6,6 +6,9 @@ import { commands, ConfigurationChangeEvent, Disposable, l10n, Uri } from 'vscod
 import { PythonEnvironment, PythonEnvironmentApi } from '../api';
 import { SYSTEM_MANAGER_ID, VENV_MANAGER_ID } from '../common/constants';
 import { traceError, traceInfo, traceVerbose, traceWarn } from '../common/logging';
+import { StopWatch } from '../common/stopWatch';
+import { EventNames } from '../common/telemetry/constants';
+import { sendTelemetryEvent } from '../common/telemetry/sender';
 import { resolveVariables } from '../common/utils/internalVariables';
 import { showWarningMessage } from '../common/window.apis';
 import {
@@ -140,7 +143,12 @@ async function resolvePriorityChainCore(
                 };
                 errors.push(error);
             } else {
-                const resolved = await tryResolveInterpreterPath(nativeFinder, api, expandedInterpreterPath, envManagers);
+                const resolved = await tryResolveInterpreterPath(
+                    nativeFinder,
+                    api,
+                    expandedInterpreterPath,
+                    envManagers,
+                );
                 if (resolved) {
                     traceVerbose(`${logPrefix} Priority 3: Using defaultInterpreterPath: ${userInterpreterPath}`);
                     return { result: resolved, errors };
@@ -275,16 +283,25 @@ export async function applyInitialEnvironmentSelection(
     projectManager: PythonProjectManager,
     nativeFinder: NativePythonFinder,
     api: PythonEnvironmentApi,
+    activationToReadyDurationMs?: number,
 ): Promise<void> {
     const folders = getWorkspaceFolders() ?? [];
     traceInfo(
         `[interpreterSelection] Applying initial environment selection for ${folders.length} workspace folder(s)`,
     );
 
+    // Checkpoint 1: env selection starting — managers are registered
+    sendTelemetryEvent(EventNames.ENV_SELECTION_STARTED, activationToReadyDurationMs, {
+        registeredManagerCount: envManagers.managers.length,
+        registeredManagerIds: envManagers.managers.map((m) => m.id).join(','),
+        workspaceFolderCount: folders.length,
+    });
+
     const allErrors: SettingResolutionError[] = [];
 
     for (const folder of folders) {
         try {
+            const scopeStopWatch = new StopWatch();
             const { result, errors } = await resolvePriorityChainCore(
                 folder.uri,
                 envManagers,
@@ -294,8 +311,19 @@ export async function applyInitialEnvironmentSelection(
             );
             allErrors.push(...errors);
 
+            // Checkpoint 2: priority chain resolved — which path?
+            const isPathA = result.environment !== undefined;
+
             // Get the specific environment if not already resolved
             const env = result.environment ?? (await result.manager.get(folder.uri));
+
+            sendTelemetryEvent(EventNames.ENV_SELECTION_RESULT, scopeStopWatch.elapsedTime, {
+                scope: 'workspace',
+                prioritySource: result.source,
+                managerId: result.manager.id,
+                resolutionPath: isPathA ? 'envPreResolved' : 'managerDiscovery',
+                hasPersistedSelection: env !== undefined,
+            });
 
             // Cache only — NO settings.json write (shouldPersistSettings = false)
             await envManagers.setEnvironment(folder.uri, env, false);
@@ -311,11 +339,22 @@ export async function applyInitialEnvironmentSelection(
     // Also apply initial selection for global scope (no workspace folder)
     // This ensures defaultInterpreterPath is respected even without a workspace
     try {
+        const globalStopWatch = new StopWatch();
         const { result, errors } = await resolvePriorityChainCore(undefined, envManagers, undefined, nativeFinder, api);
         allErrors.push(...errors);
 
+        const isPathA = result.environment !== undefined;
+
         // Get the specific environment if not already resolved
         const env = result.environment ?? (await result.manager.get(undefined));
+
+        sendTelemetryEvent(EventNames.ENV_SELECTION_RESULT, globalStopWatch.elapsedTime, {
+            scope: 'global',
+            prioritySource: result.source,
+            managerId: result.manager.id,
+            resolutionPath: isPathA ? 'envPreResolved' : 'managerDiscovery',
+            hasPersistedSelection: env !== undefined,
+        });
 
         // Cache only — NO settings.json write (shouldPersistSettings = false)
         await envManagers.setEnvironments('global', env, false);

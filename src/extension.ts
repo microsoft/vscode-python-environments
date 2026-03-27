@@ -611,7 +611,7 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
             ]);
 
             failureStage = 'envSelection';
-            await applyInitialEnvironmentSelection(envManagers, projectManager, nativeFinder, api);
+            await applyInitialEnvironmentSelection(envManagers, projectManager, nativeFinder, api, start.elapsedTime);
 
             // Register manager-agnostic terminal watcher for package-modifying commands
             failureStage = 'terminalWatcher';
