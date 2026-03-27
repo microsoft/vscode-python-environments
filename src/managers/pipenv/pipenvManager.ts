@@ -15,6 +15,7 @@ import {
     SetEnvironmentScope,
 } from '../../api';
 import { PipenvStrings } from '../../common/localize';
+import { traceError, traceWarn } from '../../common/logging';
 import { createDeferred, Deferred } from '../../common/utils/deferred';
 import { normalizePath } from '../../common/utils/pathUtils';
 import { withProgress } from '../../common/window.apis';
@@ -255,6 +256,50 @@ export class PipenvManager implements EnvironmentManager {
     }
 
     async get(scope: GetEnvironmentScope): Promise<PythonEnvironment | undefined> {
+        // Fast path: if init hasn't completed yet and we have a persisted env, resolve it
+        // directly without waiting for full discovery
+        if ((!this._initialized || !this._initialized.completed) && scope instanceof Uri) {
+            const project = this.api.getPythonProject(scope);
+            const fsPath = project?.uri.fsPath ?? scope.fsPath;
+            const persistedPath = await getPipenvForWorkspace(fsPath);
+
+            if (persistedPath) {
+                try {
+                    const resolved = await resolvePipenvPath(persistedPath, this.nativeFinder, this.api, this);
+                    if (resolved) {
+                        // Ensure full init is running in background (may already be in progress)
+                        if (!this._initialized) {
+                            this._initialized = createDeferred();
+                            withProgress(
+                                { location: ProgressLocation.Window, title: PipenvStrings.pipenvDiscovering },
+                                async () => {
+                                    this.collection = await refreshPipenv(false, this.nativeFinder, this.api, this);
+                                    await this.loadEnvMap();
+                                    this._onDidChangeEnvironments.fire(
+                                        this.collection.map((e) => ({
+                                            environment: e,
+                                            kind: EnvironmentChangeKind.add,
+                                        })),
+                                    );
+                                },
+                            ).then(
+                                () => this._initialized!.resolve(),
+                                (err) => {
+                                    traceError(`[pipenv] Background initialization failed: ${err}`);
+                                    this._initialized!.resolve();
+                                },
+                            );
+                        }
+                        return resolved;
+                    }
+                } catch (err) {
+                    traceWarn(
+                        `[pipenv] Fast path resolve failed for '${persistedPath}', falling back to full init: ${err}`,
+                    );
+                }
+            }
+        }
+
         await this.initialize();
 
         if (scope === undefined) {
