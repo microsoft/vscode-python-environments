@@ -126,6 +126,7 @@ export function isNativeEnvInfo(info: NativeInfo): info is NativeEnvInfo {
 export enum NativePythonEnvironmentKind {
     conda = 'Conda',
     homebrew = 'Homebrew',
+    pixi = 'Pixi',
     pyenv = 'Pyenv',
     globalPaths = 'GlobalPaths',
     pyenvVirtualEnv = 'PyenvVirtualEnv',

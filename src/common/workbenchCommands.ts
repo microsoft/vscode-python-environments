@@ -10,3 +10,7 @@ export async function installExtension(
 ): Promise<void> {
     await commands.executeCommand('workbench.extensions.installExtension', extensionId, options);
 }
+
+export async function openExtension(extensionId: string): Promise<void> {
+    await commands.executeCommand('extension.open', extensionId);
+}
