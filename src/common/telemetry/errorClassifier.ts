@@ -63,6 +63,13 @@ export function classifyError(ex: unknown): DiscoveryErrorType {
     if (msg.includes('timed out') || msg.includes('timeout')) {
         return 'spawn_timeout';
     }
+
+    // CLI command execution failures — checked before parse_error because command args
+    // may contain words like "json" (e.g., 'Failed to run "conda info --envs --json"')
+    if (msg.includes('failed to run') || msg.includes('error spawning')) {
+        return 'command_failed';
+    }
+
     if (msg.includes('parse') || msg.includes('unexpected token') || msg.includes('json')) {
         return 'parse_error';
     }
@@ -71,12 +78,6 @@ export function classifyError(ex: unknown): DiscoveryErrorType {
     // "Poetry executable not found"
     if (msg.includes('not found')) {
         return 'tool_not_found';
-    }
-
-    // CLI command execution failures — e.g., 'Failed to run "conda ..."',
-    // "Failed to run poetry ...", "Error spawning conda: ..."
-    if (msg.includes('failed to run') || msg.includes('error spawning')) {
-        return 'command_failed';
     }
 
     // PET process crash/hang recovery failures — e.g., "PET is currently restarting",
