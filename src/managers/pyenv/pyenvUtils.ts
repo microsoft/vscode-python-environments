@@ -112,70 +112,90 @@ export async function setPyenvForWorkspaces(fsPath: string[], envPath: string | 
 }
 
 export async function getPyenv(native?: NativePythonFinder): Promise<string | undefined> {
-    if (pyenvPath) {
-        if (await fs.exists(untildify(pyenvPath))) {
-            return untildify(pyenvPath);
-        }
-        pyenvPath = undefined;
-    }
-
-    const state = await getWorkspacePersistentState();
-    const storedPath = await state.get<string>(PYENV_PATH_KEY);
-    if (storedPath) {
-        if (await fs.exists(untildify(storedPath))) {
-            pyenvPath = storedPath;
-            traceInfo(`Using pyenv from persistent state: ${pyenvPath}`);
-            return untildify(pyenvPath);
-        }
-        await state.set(PYENV_PATH_KEY, undefined);
-    }
-
-    // pyenv-win provides pyenv.bat, not pyenv.exe
-    // See: https://github.com/pyenv-win/pyenv-win
-    const pyenvBin = isWindows() ? 'pyenv.bat' : 'pyenv';
-    const pyenvRoot = process.env.PYENV_ROOT;
-    if (pyenvRoot) {
-        const pyenvPath = path.join(pyenvRoot, 'bin', pyenvBin);
-        if (await fs.exists(pyenvPath)) {
-            return pyenvPath;
-        }
-    }
-
-    const home = getUserHomeDir();
-    if (home) {
-        const pyenvPath = path.join(home, '.pyenv', 'bin', pyenvBin);
-        if (await fs.exists(pyenvPath)) {
-            return pyenvPath;
+    let stage = 'checkCache';
+    try {
+        if (pyenvPath) {
+            stage = 'validateCachePath';
+            if (await fs.exists(untildify(pyenvPath))) {
+                return untildify(pyenvPath);
+            }
+            pyenvPath = undefined;
         }
 
-        if (isWindows()) {
-            const pyenvPathWin = path.join(home, '.pyenv', 'pyenv-win', 'bin', pyenvBin);
-            if (await fs.exists(pyenvPathWin)) {
-                return pyenvPathWin;
+        stage = 'getPersistentState';
+        const state = await getWorkspacePersistentState();
+        stage = 'checkPersistentState';
+        const storedPath = await state.get<string>(PYENV_PATH_KEY);
+        if (storedPath) {
+            stage = 'validatePersistentStatePath';
+            if (await fs.exists(untildify(storedPath))) {
+                pyenvPath = storedPath;
+                traceInfo(`Using pyenv from persistent state: ${pyenvPath}`);
+                return untildify(pyenvPath);
+            }
+            await state.set(PYENV_PATH_KEY, undefined);
+        }
+
+        // pyenv-win provides pyenv.bat, not pyenv.exe
+        // See: https://github.com/pyenv-win/pyenv-win
+        const pyenvBin = isWindows() ? 'pyenv.bat' : 'pyenv';
+        stage = 'checkPyenvRoot';
+        const pyenvRoot = process.env.PYENV_ROOT;
+        if (pyenvRoot) {
+            const pyenvPath = path.join(pyenvRoot, 'bin', pyenvBin);
+            stage = 'validatePyenvRootPath';
+            if (await fs.exists(pyenvPath)) {
+                return pyenvPath;
             }
         }
-    }
 
-    pyenvPath = await findPyenv();
-    if (pyenvPath) {
-        return pyenvPath;
-    }
+        stage = 'checkHomeDir';
+        const home = getUserHomeDir();
+        if (home) {
+            const pyenvPath = path.join(home, '.pyenv', 'bin', pyenvBin);
+            stage = 'validateHomeDirPath';
+            if (await fs.exists(pyenvPath)) {
+                return pyenvPath;
+            }
 
-    if (native) {
-        const data = await native.refresh(false);
-        const managers = data
-            .filter((e) => !isNativeEnvInfo(e))
-            .map((e) => e as NativeEnvManagerInfo)
-            .filter((e) => e.tool.toLowerCase() === 'pyenv');
-        if (managers.length > 0) {
-            pyenvPath = managers[0].executable;
-            traceInfo(`Using pyenv from native finder: ${pyenvPath}`);
-            await state.set(PYENV_PATH_KEY, pyenvPath);
+            if (isWindows()) {
+                stage = 'validateHomeDirPathWin';
+                const pyenvPathWin = path.join(home, '.pyenv', 'pyenv-win', 'bin', pyenvBin);
+                if (await fs.exists(pyenvPathWin)) {
+                    return pyenvPathWin;
+                }
+            }
+        }
+
+        stage = 'pathLookup';
+        pyenvPath = await findPyenv();
+        if (pyenvPath) {
             return pyenvPath;
         }
-    }
 
-    return undefined;
+        stage = 'nativeFinderRefresh';
+        if (native) {
+            const data = await native.refresh(false);
+            stage = 'filterNativeFinderResults';
+            const managers = data
+                .filter((e) => !isNativeEnvInfo(e))
+                .map((e) => e as NativeEnvManagerInfo)
+                .filter((e) => e.tool.toLowerCase() === 'pyenv');
+            if (managers.length > 0) {
+                pyenvPath = managers[0].executable;
+                traceInfo(`Using pyenv from native finder: ${pyenvPath}`);
+                stage = 'persistNativeFinderResult';
+                await state.set(PYENV_PATH_KEY, pyenvPath);
+                return pyenvPath;
+            }
+        }
+
+        return undefined;
+    } catch (ex) {
+        const err = ex instanceof Error ? ex : new Error(String(ex));
+        (err as Error & { failureStage?: string }).failureStage = `getPyenv:${stage}`;
+        throw err;
+    }
 }
 
 function nativeToPythonEnv(

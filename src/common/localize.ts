@@ -16,6 +16,7 @@ export namespace Common {
     export const quickCreate = l10n.t('Quick Create');
     export const installPython = l10n.t('Install Python');
     export const dontShowAgain = l10n.t("Don't Show Again");
+    export const dontAskAgain = l10n.t("Don't ask again");
 }
 
 export namespace WorkbenchStrings {
@@ -137,6 +138,13 @@ export namespace SysManagerStrings {
     export const packageRefreshError = l10n.t('Error refreshing packages');
 }
 
+export namespace PixiStrings {
+    export const pixiExtensionRecommendation = l10n.t(
+        'Pixi environments were detected. Install the Pixi extension for full support including activation and environment management.',
+    );
+    export const install = l10n.t('Open on Marketplace');
+}
+
 export namespace CondaStrings {
     export const condaManager = l10n.t('Manages Conda environments');
     export const condaDiscovering = l10n.t('Discovering Conda environments');
@@ -244,7 +252,6 @@ export namespace UvInstallStrings {
     export const uvInstallRestartRequired = l10n.t(
         'uv was installed but may not be available in the current terminal. Please restart VS Code or open a new terminal and try again.',
     );
-    export const dontAskAgain = l10n.t("Don't ask again");
     export const clickToInstallPython = l10n.t('No Python found, click to install');
     export const selectPythonVersion = l10n.t('Select Python version to install');
     export const installed = l10n.t('installed');

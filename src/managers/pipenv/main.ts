@@ -17,17 +17,22 @@ export async function registerPipenvFeatures(
     disposables: Disposable[],
     projectManager: PythonProjectManager,
 ): Promise<void> {
+    let stage = 'getPythonApi';
     const api: PythonEnvironmentApi = await getPythonApi();
 
     try {
+        stage = 'getPipenv';
         const pipenv = await getPipenv(nativeFinder);
 
         // Register the manager if the CLI is found, or if there are existing pipenv environments.
         // This allows users with existing pipenv environments to still see and use them.
+        stage = 'hasPipenvEnvironments';
         const hasPipenvEnvs = !pipenv && (await hasPipenvEnvironments(nativeFinder));
 
         if (pipenv || hasPipenvEnvs) {
+            stage = 'createManager';
             const mgr = new PipenvManager(nativeFinder, api);
+            stage = 'registerManager';
             disposables.push(mgr, api.registerEnvironmentManager(mgr));
             if (!pipenv) {
                 traceInfo(
@@ -45,6 +50,7 @@ export async function registerPipenvFeatures(
             await notifyMissingManagerIfDefault('ms-python.python:pipenv', projectManager, api);
         }
     } catch (ex) {
+        const failureStage = (ex as Error & { failureStage?: string })?.failureStage ?? stage;
         traceInfo(
             'Pipenv not found, turning off pipenv features. If you have pipenv installed in a non-standard location, set the "python.pipenvPath" setting.',
             ex,
@@ -52,6 +58,7 @@ export async function registerPipenvFeatures(
         sendTelemetryEvent(EventNames.MANAGER_REGISTRATION_FAILED, undefined, {
             managerName: 'pipenv',
             errorType: classifyError(ex),
+            failureStage,
         });
         await notifyMissingManagerIfDefault('ms-python.python:pipenv', projectManager, api);
     }

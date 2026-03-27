@@ -16,13 +16,17 @@ export async function registerPyenvFeatures(
     disposables: Disposable[],
     projectManager: PythonProjectManager,
 ): Promise<void> {
+    let stage = 'getPythonApi';
     const api: PythonEnvironmentApi = await getPythonApi();
 
     try {
+        stage = 'getPyenv';
         const pyenv = await getPyenv(nativeFinder);
 
         if (pyenv) {
+            stage = 'createManager';
             const mgr = new PyEnvManager(nativeFinder, api);
+            stage = 'registerManager';
             disposables.push(mgr, api.registerEnvironmentManager(mgr));
         } else {
             traceInfo('Pyenv not found, turning off pyenv features.');
@@ -33,10 +37,12 @@ export async function registerPyenvFeatures(
             await notifyMissingManagerIfDefault('ms-python.python:pyenv', projectManager, api);
         }
     } catch (ex) {
+        const failureStage = (ex as Error & { failureStage?: string })?.failureStage ?? stage;
         traceInfo('Pyenv not found, turning off pyenv features.', ex);
         sendTelemetryEvent(EventNames.MANAGER_REGISTRATION_FAILED, undefined, {
             managerName: 'pyenv',
             errorType: classifyError(ex),
+            failureStage,
         });
         await notifyMissingManagerIfDefault('ms-python.python:pyenv', projectManager, api);
     }

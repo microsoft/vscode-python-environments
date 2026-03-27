@@ -56,10 +56,18 @@ export async function clearPipenvCache(): Promise<void> {
  * This allows the manager to be registered even if the CLI is not found.
  */
 export async function hasPipenvEnvironments(nativeFinder: NativePythonFinder): Promise<boolean> {
-    const data = await nativeFinder.refresh(false);
-    return data
-        .filter((e) => isNativeEnvInfo(e))
-        .some((e) => (e as NativeEnvInfo).kind === NativePythonEnvironmentKind.pipenv);
+    let stage = 'nativeFinderRefresh';
+    try {
+        const data = await nativeFinder.refresh(false);
+        stage = 'filterPipenvEnvs';
+        return data
+            .filter((e) => isNativeEnvInfo(e))
+            .some((e) => (e as NativeEnvInfo).kind === NativePythonEnvironmentKind.pipenv);
+    } catch (ex) {
+        const err = ex instanceof Error ? ex : new Error(String(ex));
+        (err as Error & { failureStage?: string }).failureStage = `hasPipenvEnvironments:${stage}`;
+        throw err;
+    }
 }
 
 function getPipenvPathFromSettings(): string | undefined {
@@ -68,61 +76,78 @@ function getPipenvPathFromSettings(): string | undefined {
 }
 
 export async function getPipenv(native?: NativePythonFinder): Promise<string | undefined> {
-    // Priority 1: Settings (if explicitly set and valid)
-    const settingPath = getPipenvPathFromSettings();
-    if (settingPath) {
-        if (await fs.exists(untildify(settingPath))) {
-            traceInfo(`Using pipenv from settings: ${settingPath}`);
-            return untildify(settingPath);
+    let stage = 'checkSettings';
+    try {
+        // Priority 1: Settings (if explicitly set and valid)
+        const settingPath = getPipenvPathFromSettings();
+        if (settingPath) {
+            stage = 'validateSettingsPath';
+            if (await fs.exists(untildify(settingPath))) {
+                traceInfo(`Using pipenv from settings: ${settingPath}`);
+                return untildify(settingPath);
+            }
+            traceInfo(`Pipenv path from settings does not exist: ${settingPath}`);
         }
-        traceInfo(`Pipenv path from settings does not exist: ${settingPath}`);
-    }
 
-    // Priority 2: In-memory cache
-    if (pipenvPath) {
-        if (await fs.exists(untildify(pipenvPath))) {
-            return untildify(pipenvPath);
+        // Priority 2: In-memory cache
+        stage = 'checkCache';
+        if (pipenvPath) {
+            stage = 'validateCachePath';
+            if (await fs.exists(untildify(pipenvPath))) {
+                return untildify(pipenvPath);
+            }
+            pipenvPath = undefined;
         }
-        pipenvPath = undefined;
-    }
 
-    // Priority 3: Persistent state
-    const state = await getWorkspacePersistentState();
-    const storedPath = await state.get<string>(PIPENV_PATH_KEY);
-    if (storedPath) {
-        if (await fs.exists(untildify(storedPath))) {
-            pipenvPath = storedPath;
-            traceInfo(`Using pipenv from persistent state: ${pipenvPath}`);
-            return untildify(pipenvPath);
+        // Priority 3: Persistent state
+        stage = 'getPersistentState';
+        const state = await getWorkspacePersistentState();
+        stage = 'checkPersistentState';
+        const storedPath = await state.get<string>(PIPENV_PATH_KEY);
+        if (storedPath) {
+            stage = 'validatePersistentStatePath';
+            if (await fs.exists(untildify(storedPath))) {
+                pipenvPath = storedPath;
+                traceInfo(`Using pipenv from persistent state: ${pipenvPath}`);
+                return untildify(pipenvPath);
+            }
+            await state.set(PIPENV_PATH_KEY, undefined);
         }
-        await state.set(PIPENV_PATH_KEY, undefined);
-    }
 
-    // Priority 4: PATH lookup
-    const foundPipenv = await findPipenv();
-    if (foundPipenv) {
-        pipenvPath = foundPipenv;
-        traceInfo(`Found pipenv in PATH: ${foundPipenv}`);
-        return foundPipenv;
-    }
-
-    // Priority 5: Native finder as fallback
-    if (native) {
-        const data = await native.refresh(false);
-        const managers = data
-            .filter((e) => !isNativeEnvInfo(e))
-            .map((e) => e as NativeEnvManagerInfo)
-            .filter((e) => e.tool.toLowerCase() === 'pipenv');
-        if (managers.length > 0) {
-            pipenvPath = managers[0].executable;
-            traceInfo(`Using pipenv from native finder: ${pipenvPath}`);
-            await state.set(PIPENV_PATH_KEY, pipenvPath);
-            return pipenvPath;
+        // Priority 4: PATH lookup
+        stage = 'pathLookup';
+        const foundPipenv = await findPipenv();
+        if (foundPipenv) {
+            pipenvPath = foundPipenv;
+            traceInfo(`Found pipenv in PATH: ${foundPipenv}`);
+            return foundPipenv;
         }
-    }
 
-    traceInfo('Pipenv not found');
-    return undefined;
+        // Priority 5: Native finder as fallback
+        stage = 'nativeFinderRefresh';
+        if (native) {
+            const data = await native.refresh(false);
+            stage = 'filterNativeFinderResults';
+            const managers = data
+                .filter((e) => !isNativeEnvInfo(e))
+                .map((e) => e as NativeEnvManagerInfo)
+                .filter((e) => e.tool.toLowerCase() === 'pipenv');
+            if (managers.length > 0) {
+                pipenvPath = managers[0].executable;
+                traceInfo(`Using pipenv from native finder: ${pipenvPath}`);
+                stage = 'persistNativeFinderResult';
+                await state.set(PIPENV_PATH_KEY, pipenvPath);
+                return pipenvPath;
+            }
+        }
+
+        traceInfo('Pipenv not found');
+        return undefined;
+    } catch (ex) {
+        const err = ex instanceof Error ? ex : new Error(String(ex));
+        (err as Error & { failureStage?: string }).failureStage = `getPipenv:${stage}`;
+        throw err;
+    }
 }
 
 async function nativeToPythonEnv(
