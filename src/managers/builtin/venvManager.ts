@@ -35,6 +35,7 @@ import { createDeferred, Deferred } from '../../common/utils/deferred';
 import { normalizePath } from '../../common/utils/pathUtils';
 import { showErrorMessage, showInformationMessage, withProgress } from '../../common/window.apis';
 import { findParentIfFile } from '../../features/envCommands';
+import { tryFastPathGet } from '../common/fastPath';
 import { NativePythonFinder } from '../common/nativePythonFinder';
 import { getLatest, shortVersion, sortEnvironments } from '../common/utils';
 import { promptInstallPythonViaUv } from './uvPythonInstaller';
@@ -366,42 +367,20 @@ export class VenvManager implements EnvironmentManager {
     }
 
     async get(scope: GetEnvironmentScope): Promise<PythonEnvironment | undefined> {
-        // Fast path: if init hasn't completed yet and we have a persisted env, resolve it
-        // directly without waiting for full discovery
-        if ((!this._initialized || !this._initialized.completed) && scope instanceof Uri) {
-            const project = this.api.getPythonProject(scope);
-            const fsPath = project?.uri.fsPath ?? scope.fsPath;
-            const persistedPath = await getVenvForWorkspace(fsPath);
-
-            if (persistedPath) {
-                try {
-                    const resolved = await resolveVenvPythonEnvironmentPath(
-                        persistedPath,
-                        this.nativeFinder,
-                        this.api,
-                        this,
-                        this.baseManager,
-                    );
-                    if (resolved) {
-                        // Ensure full init is running in background (may already be in progress)
-                        if (!this._initialized) {
-                            this._initialized = createDeferred();
-                            this.internalRefresh(undefined, false, VenvManagerStrings.venvInitialize).then(
-                                () => this._initialized!.resolve(),
-                                (err) => {
-                                    traceError(`[venv] Background initialization failed: ${err}`);
-                                    this._initialized!.resolve();
-                                },
-                            );
-                        }
-                        return resolved;
-                    }
-                } catch (err) {
-                    traceWarn(
-                        `[venv] Fast path resolve failed for '${persistedPath}', falling back to full init: ${err}`,
-                    );
-                }
+        const fastResult = await tryFastPathGet({
+            initialized: this._initialized,
+            scope,
+            label: 'venv',
+            getProjectFsPath: (s) => this.api.getPythonProject(s)?.uri.fsPath ?? s.fsPath,
+            getPersistedPath: (fsPath) => getVenvForWorkspace(fsPath),
+            resolve: (p) => resolveVenvPythonEnvironmentPath(p, this.nativeFinder, this.api, this, this.baseManager),
+            startBackgroundInit: () => this.internalRefresh(undefined, false, VenvManagerStrings.venvInitialize),
+        });
+        if (fastResult) {
+            if (fastResult.newDeferred) {
+                this._initialized = fastResult.newDeferred;
             }
+            return fastResult.env;
         }
 
         await this.initialize();

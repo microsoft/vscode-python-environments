@@ -16,10 +16,11 @@ import {
     SetEnvironmentScope,
 } from '../../api';
 import { PyenvStrings } from '../../common/localize';
-import { traceError, traceInfo, traceWarn } from '../../common/logging';
+import { traceError, traceInfo } from '../../common/logging';
 import { createDeferred, Deferred } from '../../common/utils/deferred';
 import { normalizePath } from '../../common/utils/pathUtils';
 import { withProgress } from '../../common/window.apis';
+import { tryFastPathGet } from '../common/fastPath';
 import { NativePythonFinder } from '../common/nativePythonFinder';
 import { getLatest } from '../common/utils';
 import {
@@ -142,48 +143,30 @@ export class PyEnvManager implements EnvironmentManager, Disposable {
     }
 
     async get(scope: GetEnvironmentScope): Promise<PythonEnvironment | undefined> {
-        // Fast path: if init hasn't completed yet and we have a persisted env, resolve it
-        // directly without waiting for full discovery
-        if ((!this._initialized || !this._initialized.completed) && scope instanceof Uri) {
-            const project = this.api.getPythonProject(scope);
-            const fsPath = project?.uri.fsPath ?? scope.fsPath;
-            const persistedPath = await getPyenvForWorkspace(fsPath);
-
-            if (persistedPath) {
-                try {
-                    const resolved = await resolvePyenvPath(persistedPath, this.nativeFinder, this.api, this);
-                    if (resolved) {
-                        // Ensure full init is running in background (may already be in progress)
-                        if (!this._initialized) {
-                            this._initialized = createDeferred();
-                            withProgress(
-                                { location: ProgressLocation.Window, title: PyenvStrings.pyenvDiscovering },
-                                async () => {
-                                    this.collection = await refreshPyenv(false, this.nativeFinder, this.api, this);
-                                    await this.loadEnvMap();
-                                    this._onDidChangeEnvironments.fire(
-                                        this.collection.map((e) => ({
-                                            environment: e,
-                                            kind: EnvironmentChangeKind.add,
-                                        })),
-                                    );
-                                },
-                            ).then(
-                                () => this._initialized!.resolve(),
-                                (err) => {
-                                    traceError(`[pyenv] Background initialization failed: ${err}`);
-                                    this._initialized!.resolve();
-                                },
-                            );
-                        }
-                        return resolved;
-                    }
-                } catch (err) {
-                    traceWarn(
-                        `[pyenv] Fast path resolve failed for '${persistedPath}', falling back to full init: ${err}`,
+        const fastResult = await tryFastPathGet({
+            initialized: this._initialized,
+            scope,
+            label: 'pyenv',
+            getProjectFsPath: (s) => this.api.getPythonProject(s)?.uri.fsPath ?? s.fsPath,
+            getPersistedPath: (fsPath) => getPyenvForWorkspace(fsPath),
+            resolve: (p) => resolvePyenvPath(p, this.nativeFinder, this.api, this),
+            startBackgroundInit: () =>
+                withProgress({ location: ProgressLocation.Window, title: PyenvStrings.pyenvDiscovering }, async () => {
+                    this.collection = await refreshPyenv(false, this.nativeFinder, this.api, this);
+                    await this.loadEnvMap();
+                    this._onDidChangeEnvironments.fire(
+                        this.collection.map((e) => ({
+                            environment: e,
+                            kind: EnvironmentChangeKind.add,
+                        })),
                     );
-                }
+                }),
+        });
+        if (fastResult) {
+            if (fastResult.newDeferred) {
+                this._initialized = fastResult.newDeferred;
             }
+            return fastResult.env;
         }
 
         await this.initialize();

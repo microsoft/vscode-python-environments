@@ -18,9 +18,9 @@ import {
     SetEnvironmentScope,
 } from '../../api';
 import { SysManagerStrings } from '../../common/localize';
-import { traceError, traceWarn } from '../../common/logging';
 import { createDeferred, Deferred } from '../../common/utils/deferred';
 import { normalizePath } from '../../common/utils/pathUtils';
+import { tryFastPathGet } from '../common/fastPath';
 import { NativePythonFinder } from '../common/nativePythonFinder';
 import { getLatest } from '../common/utils';
 import {
@@ -146,41 +146,20 @@ export class SysPythonManager implements EnvironmentManager {
     }
 
     async get(scope: GetEnvironmentScope): Promise<PythonEnvironment | undefined> {
-        // Fast path: if init hasn't completed yet and we have a persisted env, resolve it
-        // directly without waiting for full discovery
-        if ((!this._initialized || !this._initialized.completed) && scope instanceof Uri) {
-            const project = this.api.getPythonProject(scope);
-            const fsPath = project?.uri.fsPath ?? scope.fsPath;
-            const persistedPath = await getSystemEnvForWorkspace(fsPath);
-
-            if (persistedPath) {
-                try {
-                    const resolved = await resolveSystemPythonEnvironmentPath(
-                        persistedPath,
-                        this.nativeFinder,
-                        this.api,
-                        this,
-                    );
-                    if (resolved) {
-                        // Ensure full init is running in background (may already be in progress)
-                        if (!this._initialized) {
-                            this._initialized = createDeferred();
-                            this.internalRefresh(false, SysManagerStrings.sysManagerDiscovering).then(
-                                () => this._initialized!.resolve(),
-                                (err) => {
-                                    traceError(`[system] Background initialization failed: ${err}`);
-                                    this._initialized!.resolve();
-                                },
-                            );
-                        }
-                        return resolved;
-                    }
-                } catch (err) {
-                    traceWarn(
-                        `[system] Fast path resolve failed for '${persistedPath}', falling back to full init: ${err}`,
-                    );
-                }
+        const fastResult = await tryFastPathGet({
+            initialized: this._initialized,
+            scope,
+            label: 'system',
+            getProjectFsPath: (s) => this.api.getPythonProject(s)?.uri.fsPath ?? s.fsPath,
+            getPersistedPath: (fsPath) => getSystemEnvForWorkspace(fsPath),
+            resolve: (p) => resolveSystemPythonEnvironmentPath(p, this.nativeFinder, this.api, this),
+            startBackgroundInit: () => this.internalRefresh(false, SysManagerStrings.sysManagerDiscovering),
+        });
+        if (fastResult) {
+            if (fastResult.newDeferred) {
+                this._initialized = fastResult.newDeferred;
             }
+            return fastResult.env;
         }
 
         await this.initialize();
