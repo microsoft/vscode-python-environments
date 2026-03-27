@@ -23,6 +23,47 @@ import { PythonEnvironment, PythonEnvironmentApi } from '../../api';
 import { ENVS_EXTENSION_ID } from '../constants';
 import { TestEventHandler, waitForCondition } from '../testUtils';
 
+const ENV_CHANGE_TIMEOUT_MS = 15_000;
+
+function getDifferentEnvironment(
+    environments: PythonEnvironment[],
+    currentEnv: PythonEnvironment | undefined,
+): PythonEnvironment | undefined {
+    return environments.find((env) => env.envId.id !== currentEnv?.envId.id);
+}
+
+async function setEnvironmentAndWaitForChange(
+    api: PythonEnvironmentApi,
+    projectUri: vscode.Uri,
+    env: PythonEnvironment,
+    timeoutMs = ENV_CHANGE_TIMEOUT_MS,
+): Promise<void> {
+    await new Promise<void>((resolve, reject) => {
+        let subscription: vscode.Disposable | undefined;
+        const timeout = setTimeout(() => {
+            subscription?.dispose();
+            reject(
+                new Error(`onDidChangeEnvironment did not fire within ${timeoutMs}ms. Expected envId: ${env.envId.id}`),
+            );
+        }, timeoutMs);
+
+        subscription = api.onDidChangeEnvironment((e) => {
+            if (e.uri?.toString() === projectUri.toString() && e.new?.envId.id === env.envId.id) {
+                clearTimeout(timeout);
+                subscription?.dispose();
+                resolve();
+            }
+        });
+
+        // Set environment after subscribing so we don't miss the event.
+        api.setEnvironment(projectUri, env).catch((err) => {
+            clearTimeout(timeout);
+            subscription?.dispose();
+            reject(err);
+        });
+    });
+}
+
 suite('Integration: Python Projects', function () {
     this.timeout(60_000);
 
@@ -162,54 +203,29 @@ suite('Integration: Python Projects', function () {
 
         const environments = await api.getEnvironments('all');
 
-        if (environments.length === 0) {
+        if (environments.length < 2) {
             this.skip();
             return;
         }
 
         const project = projects[0];
-        const env = environments[0];
 
-        // Diagnostic logging for CI debugging
-        console.log(`[TEST DEBUG] Project URI: ${project.uri.fsPath}`);
-        console.log(`[TEST DEBUG] Setting environment with envId: ${env.envId.id}`);
-        console.log(`[TEST DEBUG] Environment path: ${env.environmentPath?.fsPath}`);
-        console.log(`[TEST DEBUG] Total environments available: ${environments.length}`);
-        environments.forEach((e, i) => {
-            console.log(`[TEST DEBUG]   env[${i}]: ${e.envId.id} (${e.displayName})`);
-        });
+        // Pick an environment different from the current one so setEnvironment
+        // actually triggers a change event. If all candidates map to the same env,
+        // skip instead of hanging on an event that will never fire.
+        const currentEnv = await api.getEnvironment(project.uri);
+        const env = getDifferentEnvironment(environments, currentEnv);
+        if (!env) {
+            this.skip();
+            return;
+        }
 
-        // Set environment for project
-        await api.setEnvironment(project.uri, env);
+        // Using an event-driven approach instead of polling avoids a race condition where
+        // setEnvironment's async settings write hasn't landed by the time getEnvironment
+        // reads back the manager from settings.
+        await setEnvironmentAndWaitForChange(api, project.uri, env);
 
-        // Track what getEnvironment returns during polling for diagnostics
-        let pollCount = 0;
-        let lastRetrievedId: string | undefined;
-        let lastRetrievedManagerId: string | undefined;
-
-        // Wait for the environment to be retrievable with the correct ID
-        // This handles async persistence across platforms
-        // Use 15s timeout - CI runners (especially macos) can be slow with settings persistence
-        await waitForCondition(
-            async () => {
-                const retrieved = await api.getEnvironment(project.uri);
-                pollCount++;
-                const retrievedId = retrieved?.envId?.id;
-                lastRetrievedManagerId = retrieved?.envId?.managerId;
-                if (retrievedId !== lastRetrievedId) {
-                    console.log(
-                        `[TEST DEBUG] Poll #${pollCount}: getEnvironment returned envId=${retrievedId ?? 'undefined'}, managerId=${lastRetrievedManagerId ?? 'undefined'}`,
-                    );
-                    lastRetrievedId = retrievedId;
-                }
-                return retrieved !== undefined && retrieved.envId.id === env.envId.id;
-            },
-            15_000,
-            () =>
-                `Environment was not set correctly. Expected envId: ${env.envId.id} (manager: ${env.envId.managerId}), last retrieved: ${lastRetrievedId ?? 'undefined'} (manager: ${lastRetrievedManagerId ?? 'undefined'}) after ${pollCount} polls`,
-        );
-
-        // Final verification
+        // Verify getEnvironment returns the correct value now that setEnvironment has fully completed
         const retrievedEnv = await api.getEnvironment(project.uri);
         assert.ok(retrievedEnv, 'Should get environment after setting');
         assert.strictEqual(retrievedEnv.envId.id, env.envId.id, 'Retrieved environment should match set environment');
@@ -232,13 +248,12 @@ suite('Integration: Python Projects', function () {
 
         const project = projects[0];
 
-        // Get current environment to pick a different one
+        // Pick an environment different from the current one so a change event is guaranteed.
         const currentEnv = await api.getEnvironment(project.uri);
-
-        // Pick an environment different from current
-        let targetEnv = environments[0];
-        if (currentEnv && currentEnv.envId.id === targetEnv.envId.id) {
-            targetEnv = environments[1];
+        const targetEnv = getDifferentEnvironment(environments, currentEnv);
+        if (!targetEnv) {
+            this.skip();
+            return;
         }
 
         // Register handler BEFORE making the change
@@ -275,30 +290,23 @@ suite('Integration: Python Projects', function () {
         const projects = api.getPythonProjects();
         const environments = await api.getEnvironments('all');
 
-        if (projects.length === 0 || environments.length === 0) {
+        if (projects.length === 0 || environments.length < 2) {
             this.skip();
             return;
         }
 
         const project = projects[0];
-        const env = environments[0];
 
-        // Set environment first
-        await api.setEnvironment(project.uri, env);
+        // Pick an environment different from the current one to guarantee a change event
+        const currentEnv = await api.getEnvironment(project.uri);
+        const env = getDifferentEnvironment(environments, currentEnv);
+        if (!env) {
+            this.skip();
+            return;
+        }
 
-        // Wait for it to be set
-        // Use 15s timeout - CI runners can be slow with settings persistence
-        let clearTestLastId: string | undefined;
-        await waitForCondition(
-            async () => {
-                const retrieved = await api.getEnvironment(project.uri);
-                clearTestLastId = retrieved?.envId?.id;
-                return retrieved !== undefined && retrieved.envId.id === env.envId.id;
-            },
-            15_000,
-            () =>
-                `Environment was not set before clearing. Expected: ${env.envId.id} (manager: ${env.envId.managerId}), got: ${clearTestLastId ?? 'undefined'}`,
-        );
+        // Set environment first, using event-driven wait.
+        await setEnvironmentAndWaitForChange(api, project.uri, env);
 
         // Verify it was set
         const beforeClear = await api.getEnvironment(project.uri);
@@ -337,32 +345,23 @@ suite('Integration: Python Projects', function () {
         const projects = api.getPythonProjects();
         const environments = await api.getEnvironments('all');
 
-        if (projects.length === 0 || environments.length === 0) {
+        if (projects.length === 0 || environments.length < 2) {
             this.skip();
             return;
         }
 
         const project = projects[0];
-        const env = environments[0];
 
-        // Set environment for project
-        await api.setEnvironment(project.uri, env);
+        // Pick an environment different from the current one to guarantee a change event
+        const currentEnv = await api.getEnvironment(project.uri);
+        const env = getDifferentEnvironment(environments, currentEnv);
+        if (!env) {
+            this.skip();
+            return;
+        }
 
-        // Wait for it to be set
-        // Use 15s timeout - CI runners can be slow with settings persistence
-        let fileTestLastId: string | undefined;
-        let fileTestLastManagerId: string | undefined;
-        await waitForCondition(
-            async () => {
-                const retrieved = await api.getEnvironment(project.uri);
-                fileTestLastId = retrieved?.envId?.id;
-                fileTestLastManagerId = retrieved?.envId?.managerId;
-                return retrieved !== undefined && retrieved.envId.id === env.envId.id;
-            },
-            15_000,
-            () =>
-                `Environment was not set for project. Expected: ${env.envId.id} (manager: ${env.envId.managerId}), got: ${fileTestLastId ?? 'undefined'} (manager: ${fileTestLastManagerId ?? 'undefined'})`,
-        );
+        // Set environment for project, using event-driven wait.
+        await setEnvironmentAndWaitForChange(api, project.uri, env);
 
         // Create a hypothetical file path inside the project
         const fileUri = vscode.Uri.joinPath(project.uri, 'some_script.py');
