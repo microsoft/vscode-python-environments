@@ -3,6 +3,7 @@ import assert from 'assert';
 import * as sinon from 'sinon';
 import { Uri } from 'vscode';
 import { PythonEnvironment, PythonEnvironmentApi } from '../../../api';
+import { isWindows } from '../../../common/utils/platformUtils';
 import { PythonEnvironmentImpl } from '../../../internal.api';
 import { CondaEnvManager } from '../../../managers/conda/condaEnvManager';
 import { NativePythonFinder } from '../.././../managers/common/nativePythonFinder';
@@ -177,8 +178,10 @@ suite('CondaEnvManager - findEnvironmentByPath', () => {
     });
 
     // --- Windows-style paths ---
+    // Uri.file() lowercases drive letters on non-Windows, causing path mismatches
+    // with normalizePath which only lowercases on Windows. Skip on Linux/macOS.
 
-    test('Works with Windows-style backslash paths', () => {
+    (isWindows() ? test : test.skip)('Works with Windows-style backslash paths', () => {
         const base = makeEnv('base', 'C:\\Users\\user\\miniconda3', '3.12.0');
         const named = makeEnv('torch', 'C:\\Users\\user\\miniconda3\\envs\\torch', '3.13.0');
 
@@ -188,7 +191,7 @@ suite('CondaEnvManager - findEnvironmentByPath', () => {
         assert.strictEqual(result, base, 'Should return base on Windows paths');
     });
 
-    test('Windows: exact match on named env path', () => {
+    (isWindows() ? test : test.skip)('Windows: exact match on named env path', () => {
         const base = makeEnv('base', 'C:\\Users\\user\\miniconda3', '3.12.0');
         const named = makeEnv('myenv', 'C:\\Users\\user\\miniconda3\\envs\\myenv', '3.11.0');
 
