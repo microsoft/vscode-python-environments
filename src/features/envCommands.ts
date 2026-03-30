@@ -30,7 +30,6 @@ import { removePythonProjectSetting, setEnvironmentManager, setPackageManager } 
 
 import { executeCommand } from '../common/command.api';
 import { clipboardWriteText } from '../common/env.apis';
-import { } from '../common/errors/utils';
 import { Pickers } from '../common/localize';
 import { pickEnvironment } from '../common/pickers/environments';
 import {
