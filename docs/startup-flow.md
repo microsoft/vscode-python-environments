@@ -68,15 +68,29 @@ python environments extension begins activation
          c. a persisted env path exists in workspace state for this scope (folder Uri)
 
        FAST PATH (run if above three conditions are true):
-         1. read persisted path 
-         2. `resolve(persistedPath)` 
+         **Race-condition safety (runs before any await):**
+         1. if `_initialized` doesn't exist yet:
+            - create deferred and **register immediately** via `setInitialized()` callback
+            - this blocks concurrent callers from spawning duplicate background inits
+            - kick off `startBackgroundInit()` as fire-and-forget
+         2. get project fsPath: `getProjectFsPathForScope(api, scope)` 
+            - prefers resolved project path if available, falls back to scope.fsPath
+            - shared across all managers to avoid lambda duplication
+         3. read persisted path 
+         4. `resolve(persistedPath)` 
             1. failure → see SLOW PATH
-            2. successful → return env immediately AND
-         3. if `_initialized` deferred doesn't exist yet:
-            - create one, kick off `startBackgroundInit()` as fire-and-forget
+            2. successful → return env immediately (background init continues in parallel)
+         **Failure recovery (in startBackgroundInit error handler):**
+         - if background init throws: `setInitialized(undefined)` — clear deferred so next `get()` call retries init
 
        SLOW PATH — fast path conditions not met, or fast path failed:
-         4. `initialize()` — lazy, once-only per manager (guarded by deferred)
+         4. `initialize()` — lazy, once-only per manager (guarded by `_initialized` deferred)
+            **Once-only guarantee:**
+            - first caller creates `_initialized` deferred (if not already created by fast path)
+            - concurrent callers see the existing deferred and await it instead of re-running init
+            - deferred is **not cleared on failure** here (unlike in fast-path background handler)
+              so only one init attempt runs, but subsequent calls still await the same failed init
+            **Note:** In the fast path, if background init fails, the deferred is cleared to allow retry
             a. `nativeFinder.refresh(hardRefresh=false)`:
                → internally calls `handleSoftRefresh()` → computes cache key from options
                  - on reload: cache is empty (Map was destroyed) → cache miss
