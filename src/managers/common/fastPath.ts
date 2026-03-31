@@ -39,10 +39,7 @@ export interface FastPathResult {
 /**
  * Gets the fsPath for a scope by preferring the resolved project path when available.
  */
-export function getProjectFsPathForScope(
-    api: Pick<PythonEnvironmentApi, 'getPythonProject'>,
-    scope: Uri,
-): string {
+export function getProjectFsPathForScope(api: Pick<PythonEnvironmentApi, 'getPythonProject'>, scope: Uri): string {
     return api.getPythonProject(scope)?.uri.fsPath ?? scope.fsPath;
 }
 
@@ -90,7 +87,9 @@ export async function tryFastPathGet(opts: FastPathOptions): Promise<FastPathRes
                 return { env: resolved };
             }
         } catch (err) {
-            traceWarn(`[${opts.label}] Fast path resolve failed for '${persistedPath}', falling back to full init: ${err}`);
+            traceWarn(
+                `[${opts.label}] Fast path resolve failed for '${persistedPath}', falling back to full init: ${err}`,
+            );
         }
     }
 
