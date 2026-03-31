@@ -1,0 +1,20 @@
+// Query 2 — Error Type × Failure Stage Matrix (28 days)
+// Cross-tabulates errorType (what kind of error) with failureStage (where it happened).
+// This is the key diagnostic view: e.g., "connection_error at nativeFinderRefresh" means
+// PET process dies during native finder, while "tool_not_found at pathLookup" means the
+// tool binary wasn't on PATH. Prioritize cells with the highest AffectedMachines.
+let endDate = startofday(now()-1d);
+RawEventsVSCodeExt
+| where ServerTimestamp > endDate-28d and ServerTimestamp < endDate
+| where EventName == "ms-python.vscode-python-envs/manager_registration.failed"
+| extend ExtVersion = tostring(Properties["common.extversion"])
+| extend _minor = toint(extract("^1\\.(\\d+)", 1, ExtVersion)), _patch = tolong(extract("^1\\.\\d+\\.(\\d+)", 1, ExtVersion))
+| where _minor > 23 or (_minor == 23 and _patch >= 10781012)
+| extend ManagerName = tostring(Properties.managername)
+| extend ErrorType = tostring(Properties.errortype)
+| extend FailureStage = tostring(Properties.failurestage)
+| summarize
+    FailureCount = count(),
+    AffectedMachines = dcount(VSCodeMachineId)
+    by ManagerName, ErrorType, FailureStage
+| order by AffectedMachines desc, ManagerName asc

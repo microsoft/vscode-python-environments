@@ -6,7 +6,7 @@
 
 
 // =============================================================================
-// CHECK 0: UniqueMachines with Telemetry Changes
+// CHECK 0: UniqueMachines with new telemetry
 // Shows unique machines per version for builds >= 1.23.10781012 (all stable + pre-release).
 // Use this to confirm the latest pre-release build has real users.
 // =============================================================================
@@ -23,9 +23,7 @@ filtered
 
 
 // =============================================================================
-// CHECK 1: Are all 4 events arriving? (3 new + 1 enhanced)
-// Expected: at least 1 row per event. If any row shows 0, that event is broken.
-// Broken down by extension version so you can confirm the new build is reporting.
+// CHECK 1: Are all 4 events arriving? (Only versions with ⚠️ NO DATA YET are displayed)
 // =============================================================================
 let allEvents = datatable(EventName: string) [
     "ms-python.vscode-python-envs/manager_registration.failed",
@@ -53,11 +51,12 @@ allEvents
     EventCount = coalesce(EventCount, 0), 
     UniqueMachines = coalesce(UniqueMachines, 0),
     Status = iff(coalesce(EventCount, 0) > 0, "✅ RECEIVING DATA", "⚠️ NO DATA YET")
+| where Status == "⚠️ NO DATA YET"
 | order by EventName asc, ExtVersion desc;
 
 
 // =============================================================================
-// CHECK 2: Enhanced event — does "result" property exist?
+// CHECK 2: MANAGER_REGISTRATION_DURATION event success rate
 // The existing event previously had only "duration". Now it should have "result".
 // Expected: rows with result = "success" (should be the majority) and maybe a few "error".
 //           If result is empty/"", the property isn't being sent correctly.
@@ -81,7 +80,7 @@ RawEventsVSCodeExt
 
 
 // =============================================================================
-// CHECK 3: MANAGER_REGISTRATION.SKIPPED — property validation
+// CHECK 3: MANAGER_REGISTRATION.SKIPPED (Percentage of users don't have each tool)
 // Expected: managerName in {conda, pyenv, pipenv, poetry}, reason = "tool_not_found"
 //           These should be common — most users don't have all 4 tools.
 // =============================================================================
@@ -100,10 +99,12 @@ RawEventsVSCodeExt
 | extend ExtVersion = tostring(Properties["common.extversion"])
 | extend _minor = toint(extract("^1\\.(\\d+)", 1, ExtVersion)), _patch = tolong(extract("^1\\.\\d+\\.(\\d+)", 1, ExtVersion))
 | where _minor > 23 or (_minor == 23 and _patch >= 10781012)
+| extend ManagerName = tostring(Properties.managername), Reason = tostring(Properties.reason)
+| where isnotempty(ManagerName) and isnotempty(Reason)
 | summarize 
     EventCount = count(),
     UniqueMachines = dcount(VSCodeMachineId)
-    by ManagerName = tostring(Properties.managername), Reason = tostring(Properties.reason)
+    by ManagerName, Reason
 | extend TotalUniqueMachines = totalMachines
 | extend MachinePct = round(todouble(UniqueMachines) / todouble(TotalUniqueMachines) * 100, 1)
 | order by EventCount desc;

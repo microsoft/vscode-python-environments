@@ -1,0 +1,18 @@
+// Query 1 — Registration Failure Stage Breakdown per Manager (28 days)
+// For each manager that failed, shows WHICH stage in the registration flow broke.
+// failureStage is hierarchical: "getPipenv:nativeFinderRefresh", "constructCondaSourcingStatus", etc.
+// High counts at a specific stage → that code path is the priority fix target.
+let endDate = startofday(now()-1d);
+RawEventsVSCodeExt
+| where ServerTimestamp > endDate-28d and ServerTimestamp < endDate
+| where EventName == "ms-python.vscode-python-envs/manager_registration.failed"
+| extend ExtVersion = tostring(Properties["common.extversion"])
+| extend _minor = toint(extract("^1\\.(\\d+)", 1, ExtVersion)), _patch = tolong(extract("^1\\.\\d+\\.(\\d+)", 1, ExtVersion))
+| where _minor > 23 or (_minor == 23 and _patch >= 10781012)
+| extend ManagerName = tostring(Properties.managername)
+| extend FailureStage = tostring(Properties.failurestage)
+| summarize
+    FailureCount = count(),
+    AffectedMachines = dcount(VSCodeMachineId)
+    by ManagerName, FailureStage
+| order by ManagerName asc, AffectedMachines desc
