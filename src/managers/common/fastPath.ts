@@ -66,15 +66,21 @@ export async function tryFastPathGet(opts: FastPathOptions): Promise<FastPathRes
         deferred = createDeferred<void>();
         opts.setInitialized(deferred);
         const deferredRef = deferred;
-        Promise.resolve(opts.startBackgroundInit()).then(
-            () => deferredRef.resolve(),
-            (err) => {
-                traceError(`[${opts.label}] Background initialization failed: ${err}`);
-                // Allow subsequent get()/initialize() calls to retry after a background init failure.
-                opts.setInitialized(undefined);
-                deferredRef.resolve();
-            },
-        );
+        try {
+            Promise.resolve(opts.startBackgroundInit()).then(
+                () => deferredRef.resolve(),
+                (err) => {
+                    traceError(`[${opts.label}] Background initialization failed:`, err);
+                    // Allow subsequent get()/initialize() calls to retry after a background init failure.
+                    opts.setInitialized(undefined);
+                    deferredRef.resolve();
+                },
+            );
+        } catch (syncErr) {
+            traceError(`[${opts.label}] Background initialization threw synchronously:`, syncErr);
+            opts.setInitialized(undefined);
+            deferredRef.resolve();
+        }
     }
 
     const fsPath = opts.getProjectFsPath(opts.scope);
@@ -87,9 +93,7 @@ export async function tryFastPathGet(opts: FastPathOptions): Promise<FastPathRes
                 return { env: resolved };
             }
         } catch (err) {
-            traceWarn(
-                `[${opts.label}] Fast path resolve failed for '${persistedPath}', falling back to full init: ${err}`,
-            );
+            traceWarn(`[${opts.label}] Fast path resolve failed for '${persistedPath}', falling back to full init:`, err);
         }
     }
 

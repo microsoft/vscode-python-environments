@@ -62,24 +62,25 @@ python environments extension begins activation
        → falls through to `await result.manager.get(scope)`
 
        **--- inner fork: fast path vs slow path (tryFastPathGet in fastPath.ts) ---**
-       three conditions checked:
+      Conditions checked before entering fast path:
          a. `_initialized` deferred is undefined (never created) OR has not yet completed
          b. scope is a `Uri` (not global/undefined)
-         c. a persisted env path exists in workspace state for this scope (folder Uri)
 
-       FAST PATH (run if above three conditions are true):
+         FAST PATH (background init kickoff + optional early return):
          **Race-condition safety (runs before any await):**
          1. if `_initialized` doesn't exist yet:
             - create deferred and **register immediately** via `setInitialized()` callback
             - this blocks concurrent callers from spawning duplicate background inits
-            - kick off `startBackgroundInit()` as fire-and-forget
+              - kick off `startBackgroundInit()` as fire-and-forget
+                 - this happens as soon as (a) and (b) are true, **even if** no persisted path exists
          2. get project fsPath: `getProjectFsPathForScope(api, scope)` 
             - prefers resolved project path if available, falls back to scope.fsPath
             - shared across all managers to avoid lambda duplication
-         3. read persisted path 
-         4. `resolve(persistedPath)` 
-            1. failure → see SLOW PATH
-            2. successful → return env immediately (background init continues in parallel)
+           3. read persisted path (only if scope is a `Uri`; may return undefined)
+           4. if a persisted path exists:
+              - attempt `resolve(persistedPath)`
+              - failure (no env, mismatched manager, etc.) → fall through to SLOW PATH
+              - success → return env immediately (background init continues in parallel)
          **Failure recovery (in startBackgroundInit error handler):**
          - if background init throws: `setInitialized(undefined)` — clear deferred so next `get()` call retries init
 

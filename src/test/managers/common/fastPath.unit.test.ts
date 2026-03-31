@@ -187,4 +187,26 @@ suite('tryFastPathGet', () => {
 
         assert.ok(result, 'Should resolve successfully with Thenable init');
     });
+
+    test('synchronous background init failure resets initialized for retry', async () => {
+        const startBackgroundInit = sinon.stub().throws(new Error('init crashed sync'));
+        const { opts, setInitialized } = createOpts({ startBackgroundInit });
+        const result = await tryFastPathGet(opts);
+
+        assert.ok(result, 'Should still return resolved env even when background init throws synchronously');
+        assert.ok(
+            setInitialized.called,
+            'Should set initialized before attempting background init even when it throws synchronously',
+        );
+
+        // Allow any background init error handling to run.
+        await new Promise((resolve) => setImmediate(resolve));
+
+        const lastCallArg = setInitialized.lastCall.args[0] as unknown;
+        assert.strictEqual(
+            lastCallArg,
+            undefined,
+            'Should clear initialized after synchronous background init failure',
+        );
+    });
 });
