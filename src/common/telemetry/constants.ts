@@ -56,6 +56,7 @@ export enum EventNames {
      * Properties:
      * - managerName: string (e.g. 'system', 'conda', 'pyenv', 'pipenv', 'poetry', 'shellStartupVars')
      * - errorType: string (classified error category from classifyError)
+     * - failureStage: string (hierarchical stage indicator, e.g. 'getPipenv:nativeFinderRefresh')
      */
     MANAGER_REGISTRATION_FAILED = 'MANAGER_REGISTRATION.FAILED',
     /**
@@ -82,6 +83,24 @@ export enum EventNames {
      * - errorType: string (classified error category, on failure only)
      */
     PET_INIT_DURATION = 'PET.INIT_DURATION',
+    /**
+     * Telemetry event fired when applyInitialEnvironmentSelection begins.
+     * Signals that all managers are registered and env selection is starting.
+     * Properties:
+     * - registeredManagerCount: number (how many env managers registered)
+     * - workspaceFolderCount: number (how many workspace folders to process)
+     */
+    ENV_SELECTION_STARTED = 'ENV_SELECTION.STARTED',
+    /**
+     * Telemetry event fired per scope when the priority chain resolves.
+     * Properties:
+     * - scope: string ('workspace' or 'global')
+     * - prioritySource: string (which priority won: 'pythonProjects', 'defaultEnvManager', 'defaultInterpreterPath', 'autoDiscovery')
+     * - managerId: string (the winning manager's id)
+     * - resolutionPath: string ('envPreResolved' = env already resolved, 'managerDiscovery' = needed full discovery)
+     * - hasPersistedSelection: boolean (whether a persisted env path existed in workspace state)
+     */
+    ENV_SELECTION_RESULT = 'ENV_SELECTION.RESULT',
 }
 
 // Map all events to their properties
@@ -282,12 +301,14 @@ export interface IEventNamePropertyMapping {
     /* __GDPR__
         "manager_registration.failed": {
             "managerName": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "owner": "StellaHuang95" },
-            "errorType": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "owner": "StellaHuang95" }
+            "errorType": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "owner": "StellaHuang95" },
+            "failureStage": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "owner": "StellaHuang95" }
         }
     */
     [EventNames.MANAGER_REGISTRATION_FAILED]: {
         managerName: string;
         errorType: string;
+        failureStage: string;
     };
 
     /* __GDPR__
@@ -321,5 +342,35 @@ export interface IEventNamePropertyMapping {
     [EventNames.PET_INIT_DURATION]: {
         result: 'success' | 'error' | 'timeout';
         errorType?: string;
+    };
+
+    /* __GDPR__
+        "env_selection.started": {
+            "registeredManagerCount": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "isMeasurement": true, "owner": "eleanorjboyd" },
+            "registeredManagerIds": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "owner": "eleanorjboyd" },
+            "workspaceFolderCount": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "isMeasurement": true, "owner": "eleanorjboyd" }
+        }
+    */
+    [EventNames.ENV_SELECTION_STARTED]: {
+        registeredManagerCount: number;
+        registeredManagerIds: string;
+        workspaceFolderCount: number;
+    };
+
+    /* __GDPR__
+        "env_selection.result": {
+            "scope": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "owner": "eleanorjboyd" },
+            "prioritySource": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "owner": "eleanorjboyd" },
+            "managerId": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "owner": "eleanorjboyd" },
+            "resolutionPath": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "owner": "eleanorjboyd" },
+            "hasPersistedSelection": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "owner": "eleanorjboyd" }
+        }
+    */
+    [EventNames.ENV_SELECTION_RESULT]: {
+        scope: string;
+        prioritySource: string;
+        managerId: string;
+        resolutionPath: string;
+        hasPersistedSelection: boolean;
     };
 }

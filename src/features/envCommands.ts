@@ -30,7 +30,6 @@ import { removePythonProjectSetting, setEnvironmentManager, setPackageManager } 
 
 import { executeCommand } from '../common/command.api';
 import { clipboardWriteText } from '../common/env.apis';
-import {} from '../common/errors/utils';
 import { Pickers } from '../common/localize';
 import { pickEnvironment } from '../common/pickers/environments';
 import {
@@ -606,8 +605,10 @@ export async function createTerminalCommand(
     api: PythonEnvironmentApi,
     tm: TerminalManager,
 ): Promise<Terminal | undefined> {
-    if (context === undefined) {
-        const pw = await pickProject(api.getPythonProjects());
+    const pythonProjects = api.getPythonProjects();
+    // If no context is provided, or there are multiple projects, prompt the user to select a project for the terminal's cwd
+    if (context === undefined || pythonProjects.length > 0) {
+        const pw = await pickProject(pythonProjects);
         if (pw) {
             const env = await api.getEnvironment(pw.uri);
             const cwd = await findParentIfFile(pw.uri.fsPath);
@@ -641,7 +642,7 @@ export async function createTerminalCommand(
         }
     } else if (context instanceof PythonEnvTreeItem) {
         const view = context as PythonEnvTreeItem;
-        const pw = await pickProject(api.getPythonProjects());
+        const pw = await pickProject(pythonProjects);
         if (pw) {
             const cwd = await findParentIfFile(pw.uri.fsPath);
             const terminal = await tm.create(view.environment, { cwd });

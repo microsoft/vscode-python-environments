@@ -16,9 +16,14 @@ export async function safeRegister(name: string, task: Promise<void>): Promise<v
         await task;
     } catch (error) {
         traceError(`Failed to register ${name} features:`, error);
+        const failureStage =
+            error instanceof Error
+                ? ((error as Error & { failureStage?: string }).failureStage ?? 'unknown')
+                : 'unknown';
         sendTelemetryEvent(EventNames.MANAGER_REGISTRATION_FAILED, undefined, {
             managerName: name,
             errorType: classifyError(error),
+            failureStage,
         });
     }
 }

@@ -1,5 +1,7 @@
 import assert from 'node:assert';
 import { CancellationError } from 'vscode';
+import * as rpc from 'vscode-jsonrpc/node';
+import { BaseError } from '../../../common/errors/types';
 import { classifyError } from '../../../common/telemetry/errorClassifier';
 import { RpcTimeoutError } from '../../../managers/common/nativePythonFinder';
 
@@ -63,6 +65,65 @@ suite('Error Classifier', () => {
 
         test('should classify unrecognized errors as unknown', () => {
             assert.strictEqual(classifyError(new Error('something went wrong')), 'unknown');
+        });
+
+        test('should classify ConnectionError as connection_error', () => {
+            assert.strictEqual(
+                classifyError(new rpc.ConnectionError(rpc.ConnectionErrors.Closed, 'Connection closed')),
+                'connection_error',
+            );
+            assert.strictEqual(
+                classifyError(new rpc.ConnectionError(rpc.ConnectionErrors.Disposed, 'Connection disposed')),
+                'connection_error',
+            );
+        });
+
+        test('should classify ResponseError as rpc_error', () => {
+            assert.strictEqual(classifyError(new rpc.ResponseError(-32600, 'Invalid request')), 'rpc_error');
+            assert.strictEqual(classifyError(new rpc.ResponseError(-32601, 'Method not found')), 'rpc_error');
+        });
+
+        test('should classify BaseError subclasses as already_registered', () => {
+            // Using a concrete subclass to test (BaseError is abstract)
+            class TestRegisteredError extends BaseError {
+                constructor(message: string) {
+                    super('InvalidArgument', message);
+                }
+            }
+            assert.strictEqual(
+                classifyError(new TestRegisteredError('Environment manager with id test already registered')),
+                'already_registered',
+            );
+        });
+
+        test('should classify "not found" messages as tool_not_found', () => {
+            assert.strictEqual(classifyError(new Error('Conda not found')), 'tool_not_found');
+            assert.strictEqual(classifyError(new Error('Python extension not found')), 'tool_not_found');
+            assert.strictEqual(classifyError(new Error('Poetry executable not found')), 'tool_not_found');
+        });
+
+        test('should classify command execution failures as command_failed', () => {
+            assert.strictEqual(
+                classifyError(new Error('Failed to run "conda info --envs --json":\n some error')),
+                'command_failed',
+            );
+            assert.strictEqual(classifyError(new Error('Failed to run poetry install')), 'command_failed');
+            assert.strictEqual(classifyError(new Error('Error spawning conda: ENOENT')), 'command_failed');
+        });
+
+        test('should classify PET process crash/restart errors as process_crash', () => {
+            assert.strictEqual(
+                classifyError(new Error('Python Environment Tools (PET) is currently restarting. Please try again.')),
+                'process_crash',
+            );
+            assert.strictEqual(
+                classifyError(new Error('Python Environment Tools (PET) failed after 3 restart attempts.')),
+                'process_crash',
+            );
+            assert.strictEqual(
+                classifyError(new Error('Failed to create stdio streams for PET process')),
+                'process_crash',
+            );
         });
     });
 });
