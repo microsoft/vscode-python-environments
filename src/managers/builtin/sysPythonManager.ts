@@ -20,7 +20,7 @@ import {
 import { SysManagerStrings } from '../../common/localize';
 import { createDeferred, Deferred } from '../../common/utils/deferred';
 import { normalizePath } from '../../common/utils/pathUtils';
-import { tryFastPathGet } from '../common/fastPath';
+import { getProjectFsPathForScope, tryFastPathGet } from '../common/fastPath';
 import { NativePythonFinder } from '../common/nativePythonFinder';
 import { getLatest } from '../common/utils';
 import {
@@ -148,17 +148,17 @@ export class SysPythonManager implements EnvironmentManager {
     async get(scope: GetEnvironmentScope): Promise<PythonEnvironment | undefined> {
         const fastResult = await tryFastPathGet({
             initialized: this._initialized,
+            setInitialized: (deferred) => {
+                this._initialized = deferred;
+            },
             scope,
             label: 'system',
-            getProjectFsPath: (s) => this.api.getPythonProject(s)?.uri.fsPath ?? s.fsPath,
+            getProjectFsPath: (s) => getProjectFsPathForScope(this.api, s),
             getPersistedPath: (fsPath) => getSystemEnvForWorkspace(fsPath),
             resolve: (p) => resolveSystemPythonEnvironmentPath(p, this.nativeFinder, this.api, this),
             startBackgroundInit: () => this.internalRefresh(false, SysManagerStrings.sysManagerDiscovering),
         });
         if (fastResult) {
-            if (fastResult.newDeferred) {
-                this._initialized = fastResult.newDeferred;
-            }
             return fastResult.env;
         }
 

@@ -24,7 +24,7 @@ import { traceError } from '../../common/logging';
 import { createDeferred, Deferred } from '../../common/utils/deferred';
 import { normalizePath } from '../../common/utils/pathUtils';
 import { showErrorMessage, showInformationMessage, withProgress } from '../../common/window.apis';
-import { tryFastPathGet } from '../common/fastPath';
+import { getProjectFsPathForScope, tryFastPathGet } from '../common/fastPath';
 import { NativePythonFinder } from '../common/nativePythonFinder';
 import { CondaSourcingStatus } from './condaSourcingUtils';
 import {
@@ -263,9 +263,12 @@ export class CondaEnvManager implements EnvironmentManager, Disposable {
     async get(scope: GetEnvironmentScope): Promise<PythonEnvironment | undefined> {
         const fastResult = await tryFastPathGet({
             initialized: this._initialized,
+            setInitialized: (deferred) => {
+                this._initialized = deferred;
+            },
             scope,
             label: 'conda',
-            getProjectFsPath: (s) => this.api.getPythonProject(s)?.uri.fsPath ?? s.fsPath,
+            getProjectFsPath: (s) => getProjectFsPathForScope(this.api, s),
             getPersistedPath: (fsPath) => getCondaForWorkspace(fsPath),
             resolve: (p) => resolveCondaPath(p, this.nativeFinder, this.api, this.log, this),
             startBackgroundInit: () =>
@@ -281,9 +284,6 @@ export class CondaEnvManager implements EnvironmentManager, Disposable {
                 }),
         });
         if (fastResult) {
-            if (fastResult.newDeferred) {
-                this._initialized = fastResult.newDeferred;
-            }
             return fastResult.env;
         }
 

@@ -2,7 +2,7 @@
 // Licensed under the MIT License.
 
 import { Uri } from 'vscode';
-import { GetEnvironmentScope, PythonEnvironment } from '../../api';
+import { GetEnvironmentScope, PythonEnvironment, PythonEnvironmentApi } from '../../api';
 import { traceError, traceWarn } from '../../common/logging';
 import { createDeferred, Deferred } from '../../common/utils/deferred';
 
@@ -12,6 +12,8 @@ import { createDeferred, Deferred } from '../../common/utils/deferred';
 export interface FastPathOptions {
     /** The current _initialized deferred (may be undefined if init hasn't started). */
     initialized: Deferred<void> | undefined;
+    /** Updates the manager's _initialized deferred. */
+    setInitialized: (initialized: Deferred<void> | undefined) => void;
     /** The scope passed to get(). */
     scope: GetEnvironmentScope;
     /** Label for log messages, e.g. 'venv', 'conda'. */
@@ -32,8 +34,16 @@ export interface FastPathOptions {
 export interface FastPathResult {
     /** The resolved environment. */
     env: PythonEnvironment;
-    /** A new deferred if one was created (caller must assign to _initialized). */
-    newDeferred?: Deferred<void>;
+}
+
+/**
+ * Gets the fsPath for a scope by preferring the resolved project path when available.
+ */
+export function getProjectFsPathForScope(
+    api: Pick<PythonEnvironmentApi, 'getPythonProject'>,
+    scope: Uri,
+): string {
+    return api.getPythonProject(scope)?.uri.fsPath ?? scope.fsPath;
 }
 
 /**
@@ -45,35 +55,44 @@ export interface FastPathResult {
  * to fall through to the normal init path.
  */
 export async function tryFastPathGet(opts: FastPathOptions): Promise<FastPathResult | undefined> {
-    if ((!opts.initialized || !opts.initialized.completed) && opts.scope instanceof Uri) {
-        const fsPath = opts.getProjectFsPath(opts.scope);
-        const persistedPath = await opts.getPersistedPath(fsPath);
+    if (!(opts.scope instanceof Uri)) {
+        return undefined;
+    }
 
-        if (persistedPath) {
-            try {
-                const resolved = await opts.resolve(persistedPath);
-                if (resolved) {
-                    let newDeferred: Deferred<void> | undefined;
-                    // Ensure full init is running in background (may already be in progress)
-                    if (!opts.initialized) {
-                        newDeferred = createDeferred();
-                        const deferred = newDeferred;
-                        Promise.resolve(opts.startBackgroundInit()).then(
-                            () => deferred.resolve(),
-                            (err) => {
-                                traceError(`[${opts.label}] Background initialization failed: ${err}`);
-                                deferred.resolve();
-                            },
-                        );
-                    }
-                    return { env: resolved, newDeferred };
-                }
-            } catch (err) {
-                traceWarn(
-                    `[${opts.label}] Fast path resolve failed for '${persistedPath}', falling back to full init: ${err}`,
-                );
+    if (opts.initialized?.completed) {
+        return undefined;
+    }
+
+    let deferred = opts.initialized;
+    if (!deferred) {
+        // Register deferred before any await to avoid concurrent callers starting duplicate inits.
+        deferred = createDeferred<void>();
+        opts.setInitialized(deferred);
+        const deferredRef = deferred;
+        Promise.resolve(opts.startBackgroundInit()).then(
+            () => deferredRef.resolve(),
+            (err) => {
+                traceError(`[${opts.label}] Background initialization failed: ${err}`);
+                // Allow subsequent get()/initialize() calls to retry after a background init failure.
+                opts.setInitialized(undefined);
+                deferredRef.resolve();
+            },
+        );
+    }
+
+    const fsPath = opts.getProjectFsPath(opts.scope);
+    const persistedPath = await opts.getPersistedPath(fsPath);
+
+    if (persistedPath) {
+        try {
+            const resolved = await opts.resolve(persistedPath);
+            if (resolved) {
+                return { env: resolved };
             }
+        } catch (err) {
+            traceWarn(`[${opts.label}] Fast path resolve failed for '${persistedPath}', falling back to full init: ${err}`);
         }
     }
+
     return undefined;
 }

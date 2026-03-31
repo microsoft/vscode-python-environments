@@ -18,7 +18,7 @@ import { PipenvStrings } from '../../common/localize';
 import { createDeferred, Deferred } from '../../common/utils/deferred';
 import { normalizePath } from '../../common/utils/pathUtils';
 import { withProgress } from '../../common/window.apis';
-import { tryFastPathGet } from '../common/fastPath';
+import { getProjectFsPathForScope, tryFastPathGet } from '../common/fastPath';
 import { NativePythonFinder } from '../common/nativePythonFinder';
 import {
     clearPipenvCache,
@@ -258,9 +258,12 @@ export class PipenvManager implements EnvironmentManager {
     async get(scope: GetEnvironmentScope): Promise<PythonEnvironment | undefined> {
         const fastResult = await tryFastPathGet({
             initialized: this._initialized,
+            setInitialized: (deferred) => {
+                this._initialized = deferred;
+            },
             scope,
             label: 'pipenv',
-            getProjectFsPath: (s) => this.api.getPythonProject(s)?.uri.fsPath ?? s.fsPath,
+            getProjectFsPath: (s) => getProjectFsPathForScope(this.api, s),
             getPersistedPath: (fsPath) => getPipenvForWorkspace(fsPath),
             resolve: (p) => resolvePipenvPath(p, this.nativeFinder, this.api, this),
             startBackgroundInit: () =>
@@ -279,9 +282,6 @@ export class PipenvManager implements EnvironmentManager {
                 ),
         });
         if (fastResult) {
-            if (fastResult.newDeferred) {
-                this._initialized = fastResult.newDeferred;
-            }
             return fastResult.env;
         }
 
