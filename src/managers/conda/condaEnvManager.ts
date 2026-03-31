@@ -513,10 +513,17 @@ export class CondaEnvManager implements EnvironmentManager, Disposable {
 
     private findEnvironmentByPath(fsPath: string): PythonEnvironment | undefined {
         const normalized = normalizePath(fsPath);
+
+        // Prefer exact match first to avoid ambiguous parent/grandparent collisions.
+        // E.g. base env at /miniconda3 must not be confused with a named env at
+        // /miniconda3/envs/<name> whose grandparent is also /miniconda3.
+        const exact = this.collection.find((e) => normalizePath(e.environmentPath.fsPath) === normalized);
+        if (exact) {
+            return exact;
+        }
+
         return this.collection.find((e) => {
-            const n = normalizePath(e.environmentPath.fsPath);
             return (
-                n === normalized ||
                 normalizePath(path.dirname(e.environmentPath.fsPath)) === normalized ||
                 normalizePath(path.dirname(path.dirname(e.environmentPath.fsPath))) === normalized
             );
