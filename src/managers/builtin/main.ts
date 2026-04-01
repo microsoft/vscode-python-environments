@@ -42,18 +42,22 @@ export async function registerSystemPythonFeatures(
     );
 
     const packageDebouncedRefresh = createSimpleDebounce(500, async () => {
-        // Get all projects and refresh their packages
         const projects = await api.getPythonProjects();
-        for (const project of projects) {
-            const env = await api.getEnvironment(project.uri);
-            if (env) {
+        await Promise.all(
+            projects.map(async (project) => {
+                const env = await api.getEnvironment(project.uri);
+                if (!env) {
+                    return;
+                }
                 try {
                     await api.refreshPackages(env);
                 } catch (ex) {
-                    log.error(`Failed to refresh packages for environment ${env.envId}: ${ex instanceof Error ? ex.message : String(ex)}`);
+                    log.error(
+                        `Failed to refresh packages for environment ${env.envId}: ${ex instanceof Error ? ex.message : String(ex)}`,
+                    );
                 }
-            }
-        }
+            }),
+        );
     });
     const packageWatcher = createFileSystemWatcher(
         '**/site-packages/*.dist-info/METADATA', 
