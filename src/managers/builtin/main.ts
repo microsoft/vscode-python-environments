@@ -50,7 +50,7 @@ export async function registerSystemPythonFeatures(
                 try {
                     await api.refreshPackages(env);
                 } catch (ex) {
-                    log.error(`Failed to refresh packages for environment ${env.id}: ${ex instanceof Error ? ex.message : String(ex)}`);
+                    log.error(`Failed to refresh packages for environment ${env.envId}: ${ex instanceof Error ? ex.message : String(ex)}`);
                 }
             }
         }
