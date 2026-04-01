@@ -18,6 +18,7 @@ import { PipenvStrings } from '../../common/localize';
 import { createDeferred, Deferred } from '../../common/utils/deferred';
 import { normalizePath } from '../../common/utils/pathUtils';
 import { withProgress } from '../../common/window.apis';
+import { getProjectFsPathForScope, tryFastPathGet } from '../common/fastPath';
 import { NativePythonFinder } from '../common/nativePythonFinder';
 import {
     clearPipenvCache,
@@ -255,6 +256,35 @@ export class PipenvManager implements EnvironmentManager {
     }
 
     async get(scope: GetEnvironmentScope): Promise<PythonEnvironment | undefined> {
+        const fastResult = await tryFastPathGet({
+            initialized: this._initialized,
+            setInitialized: (deferred) => {
+                this._initialized = deferred;
+            },
+            scope,
+            label: 'pipenv',
+            getProjectFsPath: (s) => getProjectFsPathForScope(this.api, s),
+            getPersistedPath: (fsPath) => getPipenvForWorkspace(fsPath),
+            resolve: (p) => resolvePipenvPath(p, this.nativeFinder, this.api, this),
+            startBackgroundInit: () =>
+                withProgress(
+                    { location: ProgressLocation.Window, title: PipenvStrings.pipenvDiscovering },
+                    async () => {
+                        this.collection = await refreshPipenv(false, this.nativeFinder, this.api, this);
+                        await this.loadEnvMap();
+                        this._onDidChangeEnvironments.fire(
+                            this.collection.map((e) => ({
+                                environment: e,
+                                kind: EnvironmentChangeKind.add,
+                            })),
+                        );
+                    },
+                ),
+        });
+        if (fastResult) {
+            return fastResult.env;
+        }
+
         await this.initialize();
 
         if (scope === undefined) {

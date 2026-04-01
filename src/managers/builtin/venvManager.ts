@@ -35,6 +35,7 @@ import { createDeferred, Deferred } from '../../common/utils/deferred';
 import { normalizePath } from '../../common/utils/pathUtils';
 import { showErrorMessage, showInformationMessage, withProgress } from '../../common/window.apis';
 import { findParentIfFile } from '../../features/envCommands';
+import { getProjectFsPathForScope, tryFastPathGet } from '../common/fastPath';
 import { NativePythonFinder } from '../common/nativePythonFinder';
 import { getLatest, shortVersion, sortEnvironments } from '../common/utils';
 import { promptInstallPythonViaUv } from './uvPythonInstaller';
@@ -366,6 +367,22 @@ export class VenvManager implements EnvironmentManager {
     }
 
     async get(scope: GetEnvironmentScope): Promise<PythonEnvironment | undefined> {
+        const fastResult = await tryFastPathGet({
+            initialized: this._initialized,
+            setInitialized: (deferred) => {
+                this._initialized = deferred;
+            },
+            scope,
+            label: 'venv',
+            getProjectFsPath: (s) => getProjectFsPathForScope(this.api, s),
+            getPersistedPath: (fsPath) => getVenvForWorkspace(fsPath),
+            resolve: (p) => resolveVenvPythonEnvironmentPath(p, this.nativeFinder, this.api, this, this.baseManager),
+            startBackgroundInit: () => this.internalRefresh(undefined, false, VenvManagerStrings.venvInitialize),
+        });
+        if (fastResult) {
+            return fastResult.env;
+        }
+
         await this.initialize();
 
         if (!scope) {
