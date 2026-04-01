@@ -144,8 +144,66 @@ RawEventsVSCodeExt
     UniqueMachines = dcount(VSCodeMachineId)
     by ManagerName = tostring(Properties.managername), ErrorType = tostring(Properties.errortype)
 | extend TotalUniqueMachines = totalMachines
-| extend MachinePct = round(todouble(UniqueMachines) / todouble(TotalUniqueMachines) * 100, 1)
+| extend MachinePct = round(todouble(UniqueMachines) / todouble(TotalUniqueMachines) * 100, 2)
 | order by EventCount desc;
+
+
+// =============================================================================
+// CHECK 4a: SPAWN_TIMEOUT failures broken down by manager × extension version
+// Shows whether spawn_timeout is improving or worsening across versions.
+// If a new version shows higher MachinePct → that release regressed timeout handling.
+// =============================================================================
+let totalByVersion = RawEventsVSCodeExt
+| where ServerTimestamp > ago(7d)
+| where ExtensionName == "ms-python.vscode-python-envs"
+| where ExtensionVersion != ""
+| extend _minor = toint(extract("^1\\.(\\d+)", 1, ExtensionVersion)), _patch = tolong(extract("^1\\.\\d+\\.(\\d+)", 1, ExtensionVersion))
+| where _minor > 23 or (_minor == 23 and _patch >= 10781012)
+| summarize TotalMachines = dcount(VSCodeMachineId) by ExtVersion = ExtensionVersion;
+RawEventsVSCodeExt
+| where ServerTimestamp > ago(7d)
+| where EventName == "ms-python.vscode-python-envs/manager_registration.failed"
+| extend ExtVersion = tostring(Properties["common.extversion"])
+| extend _minor = toint(extract("^1\\.(\\d+)", 1, ExtVersion)), _patch = tolong(extract("^1\\.\\d+\\.(\\d+)", 1, ExtVersion))
+| where _minor > 23 or (_minor == 23 and _patch >= 10781012)
+| where tostring(Properties.errortype) == "spawn_timeout"
+| summarize
+    EventCount = count(),
+    UniqueMachines = dcount(VSCodeMachineId)
+    by ManagerName = tostring(Properties.managername), ExtVersion
+| join kind=inner totalByVersion on ExtVersion
+| extend MachinePct = round(todouble(UniqueMachines) / todouble(TotalMachines) * 100, 2)
+| project ManagerName, ExtVersion, EventCount, UniqueMachines, TotalMachines, MachinePct
+| order by ManagerName asc, ExtVersion desc;
+
+
+// =============================================================================
+// CHECK 4b: UNKNOWN failures broken down by manager × extension version
+// Shows whether unknown errors are improving or worsening across versions.
+// High counts in the latest version → new unclassified error paths need investigation.
+// =============================================================================
+let totalByVersion = RawEventsVSCodeExt
+| where ServerTimestamp > ago(7d)
+| where ExtensionName == "ms-python.vscode-python-envs"
+| where ExtensionVersion != ""
+| extend _minor = toint(extract("^1\\.(\\d+)", 1, ExtensionVersion)), _patch = tolong(extract("^1\\.\\d+\\.(\\d+)", 1, ExtensionVersion))
+| where _minor > 23 or (_minor == 23 and _patch >= 10781012)
+| summarize TotalMachines = dcount(VSCodeMachineId) by ExtVersion = ExtensionVersion;
+RawEventsVSCodeExt
+| where ServerTimestamp > ago(7d)
+| where EventName == "ms-python.vscode-python-envs/manager_registration.failed"
+| extend ExtVersion = tostring(Properties["common.extversion"])
+| extend _minor = toint(extract("^1\\.(\\d+)", 1, ExtVersion)), _patch = tolong(extract("^1\\.\\d+\\.(\\d+)", 1, ExtVersion))
+| where _minor > 23 or (_minor == 23 and _patch >= 10781012)
+| where tostring(Properties.errortype) == "unknown"
+| summarize
+    EventCount = count(),
+    UniqueMachines = dcount(VSCodeMachineId)
+    by ManagerName = tostring(Properties.managername), ExtVersion
+| join kind=inner totalByVersion on ExtVersion
+| extend MachinePct = round(todouble(UniqueMachines) / todouble(TotalMachines) * 100, 2)
+| project ManagerName, ExtVersion, EventCount, UniqueMachines, TotalMachines, MachinePct
+| order by ManagerName asc, ExtVersion desc;
 
 
 // =============================================================================
