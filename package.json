@@ -124,7 +124,7 @@
                 "python-envs.workspaceSearchPaths": {
                     "type": "array",
                     "description": "%python-envs.workspaceSearchPaths.description%",
-                    "default": ["./**/.venv"],
+                    "default": [],
                     "scope": "resource",
                     "items": {
                         "type": "string"
