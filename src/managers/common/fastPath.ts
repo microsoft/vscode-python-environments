@@ -3,7 +3,7 @@
 
 import { Uri } from 'vscode';
 import { GetEnvironmentScope, PythonEnvironment, PythonEnvironmentApi } from '../../api';
-import { traceError, traceWarn } from '../../common/logging';
+import { traceError, traceVerbose, traceWarn } from '../../common/logging';
 import { createDeferred, Deferred } from '../../common/utils/deferred';
 
 /**
@@ -62,7 +62,6 @@ export async function tryFastPathGet(opts: FastPathOptions): Promise<FastPathRes
 
     let deferred = opts.initialized;
     if (!deferred) {
-        // Register deferred before any await to avoid concurrent callers starting duplicate inits.
         deferred = createDeferred<void>();
         opts.setInitialized(deferred);
         const deferredRef = deferred;
@@ -93,8 +92,13 @@ export async function tryFastPathGet(opts: FastPathOptions): Promise<FastPathRes
                 return { env: resolved };
             }
         } catch (err) {
-            traceWarn(`[${opts.label}] Fast path resolve failed for '${persistedPath}', falling back to full init:`, err);
+            traceWarn(
+                `[${opts.label}] Fast path resolve failed for '${persistedPath}', falling back to full init:`,
+                err,
+            );
         }
+    } else {
+        traceVerbose(`[${opts.label}] Fast path: no persisted path, falling through to slow path`);
     }
 
     return undefined;

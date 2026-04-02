@@ -24,9 +24,10 @@ import { sendTelemetryEvent } from '../../common/telemetry/sender';
 import { createDeferred, Deferred } from '../../common/utils/deferred';
 import { normalizePath } from '../../common/utils/pathUtils';
 import { withProgress } from '../../common/window.apis';
+import { PythonProjectManager } from '../../internal.api';
 import { getProjectFsPathForScope, tryFastPathGet } from '../common/fastPath';
 import { NativePythonFinder } from '../common/nativePythonFinder';
-import { getLatest } from '../common/utils';
+import { getLatest, notifyMissingManagerIfDefault } from '../common/utils';
 import {
     clearPyenvCache,
     getPyenv,
@@ -54,6 +55,7 @@ export class PyEnvManager implements EnvironmentManager, Disposable {
     constructor(
         private readonly nativeFinder: NativePythonFinder,
         private readonly api: PythonEnvironmentApi,
+        private readonly projectManager?: PythonProjectManager,
     ) {
         this.name = 'pyenv';
         this.displayName = 'PyEnv';
@@ -78,7 +80,6 @@ export class PyEnvManager implements EnvironmentManager, Disposable {
         if (this._initialized) {
             return this._initialized.promise;
         }
-
         this._initialized = createDeferred();
         const stopWatch = new StopWatch();
         let result: 'success' | 'tool_not_found' | 'error' = 'success';
@@ -87,10 +88,10 @@ export class PyEnvManager implements EnvironmentManager, Disposable {
         let errorType: string | undefined;
 
         try {
-            // Check if tool is findable before PET refresh (settings/cache/PATH only, no PET)
+            // Check if tool is findable before PET refresh (no settings for pyenv path)
             const preRefreshTool = await getPyenv();
             if (preRefreshTool) {
-                toolSource = 'path';
+                toolSource = 'local';
             }
 
             await withProgress(
@@ -118,10 +119,14 @@ export class PyEnvManager implements EnvironmentManager, Disposable {
 
             if (toolSource === 'none') {
                 result = 'tool_not_found';
+                if (this.projectManager) {
+                    await notifyMissingManagerIfDefault('ms-python.python:pyenv', this.projectManager, this.api);
+                }
             }
         } catch (ex) {
             result = 'error';
             errorType = classifyError(ex);
+            traceError('Pyenv lazy initialization failed', ex);
         } finally {
             sendTelemetryEvent(EventNames.MANAGER_LAZY_INIT, stopWatch.elapsedTime, {
                 managerName: 'pyenv',

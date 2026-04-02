@@ -601,9 +601,9 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
                     'conda',
                     registerCondaFeatures(nativeFinder, context.subscriptions, outputChannel, projectManager),
                 ),
-                safeRegister('pyenv', registerPyenvFeatures(nativeFinder, context.subscriptions)),
-                safeRegister('pipenv', registerPipenvFeatures(nativeFinder, context.subscriptions)),
-                safeRegister('poetry', registerPoetryFeatures(nativeFinder, context.subscriptions, outputChannel)),
+                safeRegister('pyenv', registerPyenvFeatures(nativeFinder, context.subscriptions, projectManager)),
+                safeRegister('pipenv', registerPipenvFeatures(nativeFinder, context.subscriptions, projectManager)),
+                safeRegister('poetry', registerPoetryFeatures(nativeFinder, context.subscriptions, outputChannel, projectManager)),
                 safeRegister('shellStartupVars', shellStartupVarsMgr.initialize()),
             ]);
 

@@ -109,7 +109,7 @@ export enum EventNames {
      * - managerName: string (e.g. 'pipenv', 'poetry', 'pyenv')
      * - result: 'success' | 'tool_not_found' | 'error'
      * - envCount: number (environments discovered)
-     * - toolSource: string (how the CLI was found: 'settings', 'cache', 'persistentState', 'path', 'pet', 'none')
+     * - toolSource: string (how the CLI was found: 'settings', 'local', 'pet', 'none')
      * - errorType: string (classified error category, on failure only)
      */
     MANAGER_LAZY_INIT = 'MANAGER.LAZY_INIT',

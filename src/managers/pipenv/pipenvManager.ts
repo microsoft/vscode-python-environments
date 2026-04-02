@@ -1,4 +1,4 @@
-import { EventEmitter, MarkdownString, ProgressLocation, Uri } from 'vscode';
+import { Disposable, EventEmitter, MarkdownString, ProgressLocation, Uri, workspace } from 'vscode';
 import {
     DidChangeEnvironmentEventArgs,
     DidChangeEnvironmentsEventArgs,
@@ -15,6 +15,7 @@ import {
     SetEnvironmentScope,
 } from '../../api';
 import { PipenvStrings } from '../../common/localize';
+import { traceError, traceInfo } from '../../common/logging';
 import { StopWatch } from '../../common/stopWatch';
 import { EventNames } from '../../common/telemetry/constants';
 import { classifyError } from '../../common/telemetry/errorClassifier';
@@ -22,8 +23,10 @@ import { sendTelemetryEvent } from '../../common/telemetry/sender';
 import { createDeferred, Deferred } from '../../common/utils/deferred';
 import { normalizePath } from '../../common/utils/pathUtils';
 import { withProgress } from '../../common/window.apis';
+import { PythonProjectManager } from '../../internal.api';
 import { getProjectFsPathForScope, tryFastPathGet } from '../common/fastPath';
 import { NativePythonFinder } from '../common/nativePythonFinder';
+import { notifyMissingManagerIfDefault } from '../common/utils';
 import {
     clearPipenvCache,
     getPipenv,
@@ -36,7 +39,7 @@ import {
     setPipenvForWorkspaces,
 } from './pipenvUtils';
 
-export class PipenvManager implements EnvironmentManager {
+export class PipenvManager implements EnvironmentManager, Disposable {
     private collection: PythonEnvironment[] = [];
     private fsPathToEnv: Map<string, PythonEnvironment> = new Map();
     private globalEnv: PythonEnvironment | undefined;
@@ -59,6 +62,7 @@ export class PipenvManager implements EnvironmentManager {
     constructor(
         public readonly nativeFinder: NativePythonFinder,
         public readonly api: PythonEnvironmentApi,
+        private readonly projectManager?: PythonProjectManager,
     ) {
         this.name = 'pipenv';
         this.displayName = 'Pipenv';
@@ -77,7 +81,6 @@ export class PipenvManager implements EnvironmentManager {
         if (this._initialized) {
             return this._initialized.promise;
         }
-
         this._initialized = createDeferred();
         const stopWatch = new StopWatch();
         let result: 'success' | 'tool_not_found' | 'error' = 'success';
@@ -87,9 +90,10 @@ export class PipenvManager implements EnvironmentManager {
 
         try {
             // Check if tool is findable before PET refresh (settings/cache/PATH only, no PET)
+            const hasExplicitSetting = !!workspace.getConfiguration('python').get<string>('pipenvPath');
             const preRefreshTool = await getPipenv();
             if (preRefreshTool) {
-                toolSource = 'path';
+                toolSource = hasExplicitSetting ? 'settings' : 'local';
             }
 
             await withProgress(
@@ -117,10 +121,14 @@ export class PipenvManager implements EnvironmentManager {
 
             if (toolSource === 'none') {
                 result = 'tool_not_found';
+                if (this.projectManager) {
+                    await notifyMissingManagerIfDefault('ms-python.python:pipenv', this.projectManager, this.api);
+                }
             }
         } catch (ex) {
             result = 'error';
             errorType = classifyError(ex);
+            traceError('Pipenv lazy initialization failed', ex);
         } finally {
             sendTelemetryEvent(EventNames.MANAGER_LAZY_INIT, stopWatch.elapsedTime, {
                 managerName: 'pipenv',
@@ -171,6 +179,7 @@ export class PipenvManager implements EnvironmentManager {
                 title: PipenvStrings.pipenvRefreshing,
             },
             async () => {
+                traceInfo('Refreshing Pipenv Environments');
                 const oldCollection = [...this.collection];
                 this.collection = await refreshPipenv(hardRefresh, this.nativeFinder, this.api, this);
                 await this.loadEnvMap();
