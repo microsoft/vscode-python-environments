@@ -1,49 +1,19 @@
 import { Disposable } from 'vscode';
 import { PythonEnvironmentApi } from '../../api';
 import { traceInfo } from '../../common/logging';
-import { EventNames } from '../../common/telemetry/constants';
-import { classifyError } from '../../common/telemetry/errorClassifier';
-import { sendTelemetryEvent } from '../../common/telemetry/sender';
 import { getPythonApi } from '../../features/pythonApi';
 import { PythonProjectManager } from '../../internal.api';
 import { NativePythonFinder } from '../common/nativePythonFinder';
-import { notifyMissingManagerIfDefault } from '../common/utils';
 import { PyEnvManager } from './pyenvManager';
-import { getPyenv } from './pyenvUtils';
 
 export async function registerPyenvFeatures(
     nativeFinder: NativePythonFinder,
     disposables: Disposable[],
     projectManager: PythonProjectManager,
 ): Promise<void> {
-    let stage = 'getPythonApi';
     const api: PythonEnvironmentApi = await getPythonApi();
 
-    try {
-        stage = 'getPyenv';
-        const pyenv = await getPyenv(nativeFinder);
-
-        if (pyenv) {
-            stage = 'createManager';
-            const mgr = new PyEnvManager(nativeFinder, api);
-            stage = 'registerManager';
-            disposables.push(mgr, api.registerEnvironmentManager(mgr));
-        } else {
-            traceInfo('Pyenv not found, turning off pyenv features.');
-            sendTelemetryEvent(EventNames.MANAGER_REGISTRATION_SKIPPED, undefined, {
-                managerName: 'pyenv',
-                reason: 'tool_not_found',
-            });
-            await notifyMissingManagerIfDefault('ms-python.python:pyenv', projectManager, api);
-        }
-    } catch (ex) {
-        const failureStage = (ex as Error & { failureStage?: string })?.failureStage ?? stage;
-        traceInfo('Pyenv not found, turning off pyenv features.', ex);
-        sendTelemetryEvent(EventNames.MANAGER_REGISTRATION_FAILED, undefined, {
-            managerName: 'pyenv',
-            errorType: classifyError(ex),
-            failureStage,
-        });
-        await notifyMissingManagerIfDefault('ms-python.python:pyenv', projectManager, api);
-    }
+    traceInfo('Registering pyenv manager (environments will be discovered lazily)');
+    const mgr = new PyEnvManager(nativeFinder, api, projectManager);
+    disposables.push(mgr, api.registerEnvironmentManager(mgr));
 }

@@ -19,104 +19,79 @@ python environments extension begins activation
 **ASYNC (setImmediate callback, still in extension.ts):**
 1. spawn PET process (`createNativePythonFinder`)
    1. sets up a JSON-RPC connection to it over stdin/stdout
-2. register all built-in managers + shell env init in parallel (Promise.all):
-   - `shellStartupVarsMgr.initialize()`
-   - for each manager (system, conda, pyenv, pipenv, poetry):
-     1. check if tool exists (e.g. `getConda(nativeFinder)` asks PET for the conda binary)
-     2. if tool not found → log, return early (manager not registered)
-     3. if tool found → create manager, call `api.registerEnvironmentManager(manager)`
-        - this adds it to the `EnvironmentManagers` map
-        - fires `onDidChangeEnvironmentManager` → `ManagerReady` deferred resolves for this manager
-3. all registrations complete (Promise.all resolves)
+2. register all built-in managers in parallel (Promise.all):
+   - system: create SysPythonManager + VenvManager + PipPackageManager, register immediately (✅ NO PET call, sets up file watcher)
+   - conda: `getConda(nativeFinder)` checks settings → cache → persistent state → PATH
+   - pyenv & pipenv & poetry: create PyEnvManager, register immediately
+     - ✅ NO PET call — always registers unconditionally (lazy discovery)
+   - shellStartupVars: initialize
+   - all managers fire `onDidChangeEnvironmentManager` → ManagerReady resolves
+3. all registrations complete (Promise.all resolves) — fast, typically milliseconds
+
 
 **--- gate point: `applyInitialEnvironmentSelection` ---**
 
-   📊 TELEMETRY: ENV_SELECTION.STARTED { duration (activation→here), registeredManagerCount, registeredManagerIds, workspaceFolderCount }
+   📊 TELEMETRY: ENV_SELECTION.STARTED { duration, registeredManagerCount, registeredManagerIds, workspaceFolderCount }
 
-1. for each workspace folder + global scope (no workspace case), run `resolvePriorityChainCore` to find manager:
-   - P1: pythonProjects[] setting → specific manager for this project
-   - P2: user-configured defaultEnvManager setting
-   - P3: user-configured python.defaultInterpreterPath → nativeFinder.resolve(path)
-   - P4: auto-discovery → try venv manager, fall back to system python
-     - for workspace scope: call `venvManager.get(scope)`
-       - if venv found (local .venv/venv) → use venv manager with that env
-       - if no local venv → venv manager may still return its `globalEnv` (system Python)
-       - if venvManager.get returns undefined → fall back to system python manager
-     - for global scope: use system python manager directly
+**Step 1 — pick a manager** (`resolvePriorityChainCore`, per workspace folder + global):
 
-2. get the environment from the winning priority level:
+| Priority | Source | Returns |
+|----------|--------|---------|
+| P1 | `pythonProjects[]` setting | manager only |
+| P2 | `defaultEnvManager` setting | manager only |
+| P3 | `python.defaultInterpreterPath` → `nativeFinder.resolve(path)` | manager **+ environment** |
+| P4 | auto-discovery: venv → system python fallback | manager only |
 
-   --- fork point: `result.environment ?? await result.manager.get(folder.uri)` ---
-   left side truthy = envPreResolved | left side undefined = managerDiscovery
+**Step 2 — get the environment** (`result.environment ?? await result.manager.get(scope)`):
 
-   envPreResolved — P3 won (interpreter → manager):
-     `resolvePriorityChainCore` calls `tryResolveInterpreterPath()`:
-       1. `nativeFinder.resolve(path)` — single PET call, resolves just this one binary
-       2. find which manager owns the resolved env (by managerId)
-       3. return { manager, environment } — BOTH are known
-     → result.environment is set → the `??` short-circuits
-     → no `manager.get()` called, no `initialize()`, no full discovery
+- **If P3 won:** environment is already resolved → done, no `get()` call needed.
+- **Otherwise:** calls `manager.get(scope)`, which has two internal paths:
 
-   managerDiscovery — P1, P2, or P4 won (manager → interpreter):
-     `resolvePriorityChainCore` returns { manager, environment: undefined }
-       → falls through to `await result.manager.get(scope)`
+  **Fast path** (`tryFastPathGet` in `fastPath.ts`) — entered when `_initialized` hasn't completed and scope is a `Uri`:
+  1. Synchronously create `_initialized` deferred + kick off `startBackgroundInit()` (fire-and-forget full PET discovery)
+  2. Read persisted env path from workspace state
+  3. If persisted path exists → `resolve(path)` → return immediately (background init continues in parallel)
+  4. If no persisted path or resolve fails → fall through to slow path
+  - *On background init failure:* clears `_initialized` so next `get()` retries
 
-       **--- inner fork: fast path vs slow path (tryFastPathGet in fastPath.ts) ---**
-      Conditions checked before entering fast path:
-         a. `_initialized` deferred is undefined (never created) OR has not yet completed
-         b. scope is a `Uri` (not global/undefined)
+  **Slow path** — fast path skipped or failed:
+  1. `initialize()` — lazy, once-only (guarded by `_initialized` deferred, concurrent callers await it)
+     - `nativeFinder.refresh(false)` → PET scan (cached across managers after first call)
+     - Filter results to this manager's type → populate `collection`
+     - `loadEnvMap()` → match persisted paths against discovered envs
+  2. Look up scope in `fsPathToEnv` → return matched env
 
-         FAST PATH (background init kickoff + optional early return):
-         **Race-condition safety (runs before any await):**
-         1. if `_initialized` doesn't exist yet:
-            - create deferred and **register immediately** via `setInitialized()` callback
-            - this blocks concurrent callers from spawning duplicate background inits
-              - kick off `startBackgroundInit()` as fire-and-forget
-                 - this happens as soon as (a) and (b) are true, **even if** no persisted path exists
-         2. get project fsPath: `getProjectFsPathForScope(api, scope)` 
-            - prefers resolved project path if available, falls back to scope.fsPath
-            - shared across all managers to avoid lambda duplication
-           3. read persisted path (only if scope is a `Uri`; may return undefined)
-           4. if a persisted path exists:
-              - attempt `resolve(persistedPath)`
-              - failure (no env, mismatched manager, etc.) → fall through to SLOW PATH
-              - success → return env immediately (background init continues in parallel)
-         **Failure recovery (in startBackgroundInit error handler):**
-         - if background init throws: `setInitialized(undefined)` — clear deferred so next `get()` call retries init
+   📊 TELEMETRY: ENV_SELECTION.RESULT (per scope) { duration, scope, prioritySource, managerId, path, hasPersistedSelection }
 
-       SLOW PATH — fast path conditions not met, or fast path failed:
-         4. `initialize()` — lazy, once-only per manager (guarded by `_initialized` deferred)
-            **Once-only guarantee:**
-            - first caller creates `_initialized` deferred (if not already created by fast path)
-            - concurrent callers see the existing deferred and await it instead of re-running init
-            - deferred is **not cleared on failure** here (unlike in fast-path background handler)
-              so only one init attempt runs, but subsequent calls still await the same failed init
-            **Note:** In the fast path, if background init fails, the deferred is cleared to allow retry
-            a. `nativeFinder.refresh(hardRefresh=false)`:
-               → internally calls `handleSoftRefresh()` → computes cache key from options
-                 - on reload: cache is empty (Map was destroyed) → cache miss
-                 - falls through to `handleHardRefresh()`
-               → `handleHardRefresh()` adds request to WorkerPool queue (concurrency 1):
-                   1. run `configure()` to setup PET search paths
-                   2. run `refresh` — PET scans filesystem
-                      - PET may use its own on-disk cache
-                   3. returns NativeInfo[] (all envs of all types)
-                      - result stored in in-memory cache so subsequent managers get instant cache hit
-            b. filter results to this manager's env type (e.g. conda filters to kind=conda)
-            c. convert NativeEnvInfo → PythonEnvironment objects → populate collection
-            d. `loadEnvMap()` — reads persisted env path from workspace state
-               → matches path against PET discovery results
-               → populates `fsPathToEnv` map
-         5. look up scope in `fsPathToEnv` → return the matched env
+**Step 3 — done:**
+- env cached in memory (no settings.json write)
+- available via `api.getEnvironment(scope)`
 
-   📊 TELEMETRY: ENV_SELECTION.RESULT (per scope) { duration (priority chain + manager.get), scope, prioritySource, managerId, path, hasPersistedSelection }
+   📊 TELEMETRY: EXTENSION.MANAGER_REGISTRATION_DURATION { duration, result, failureStage?, errorType? }
 
-3. env is cached in memory (no settings.json write)
-4. Python extension / status bar can now get the selected env via `api.getEnvironment(scope)`
+---
 
-   📊 TELEMETRY: EXTENSION.MANAGER_REGISTRATION_DURATION { duration (activation→here), result, failureStage?, errorType? }
+### Other entry points to `initialize()`
 
-**POST-INIT:**
+All three trigger `initialize()` lazily (once-only, guarded by `_initialized` deferred). After the first call completes, subsequent calls are no-ops.
+
+**`manager.get(scope)`** — environment selection (Step 2 above):
+- Called during `applyInitialEnvironmentSelection` or when settings change triggers re-selection
+- Fast path may resolve immediately; slow path awaits `initialize()`
+
+**`manager.getEnvironments(scope)`** — sidebar / listing:
+- Called when user expands a manager node in the Python environments panel
+- Also called by any API consumer requesting the full environment list
+- If PET cache populated from earlier `get()` → instant hit; otherwise warm PET call
+
+**`manager.resolve(context)`** — path resolution:
+- Called when resolving a specific Python binary path to check if it belongs to this manager
+- Used by `tryResolveInterpreterPath()` in the priority chain (P3) and by external API consumers
+- Awaits `initialize()`, then delegates to manager-specific resolve (e.g., `resolvePipenvPath`)
+
+---
+
+POST-INIT:
 1. register terminal package watcher
 2. register settings change listener (`registerInterpreterSettingsChangeListener`) — re-runs priority chain if settings change
 3.  initialize terminal manager
