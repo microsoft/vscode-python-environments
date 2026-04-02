@@ -603,7 +603,10 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
                 ),
                 safeRegister('pyenv', registerPyenvFeatures(nativeFinder, context.subscriptions, projectManager)),
                 safeRegister('pipenv', registerPipenvFeatures(nativeFinder, context.subscriptions, projectManager)),
-                safeRegister('poetry', registerPoetryFeatures(nativeFinder, context.subscriptions, outputChannel, projectManager)),
+                safeRegister(
+                    'poetry',
+                    registerPoetryFeatures(nativeFinder, context.subscriptions, outputChannel, projectManager),
+                ),
                 safeRegister('shellStartupVars', shellStartupVarsMgr.initialize()),
             ]);
 

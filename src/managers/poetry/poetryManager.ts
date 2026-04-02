@@ -24,9 +24,9 @@ import { sendTelemetryEvent } from '../../common/telemetry/sender';
 import { createDeferred, Deferred } from '../../common/utils/deferred';
 import { normalizePath } from '../../common/utils/pathUtils';
 import { withProgress } from '../../common/window.apis';
+import { PythonProjectManager } from '../../internal.api';
 import { NativePythonFinder } from '../common/nativePythonFinder';
 import { getLatest, notifyMissingManagerIfDefault } from '../common/utils';
-import { PythonProjectManager } from '../../internal.api';
 import {
     clearPoetryCache,
     getPoetry,
