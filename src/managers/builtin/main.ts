@@ -27,17 +27,52 @@ export async function registerSystemPythonFeatures(
     const venvDebouncedRefresh = createSimpleDebounce(500, () => {
         venvManager.watcherRefresh();
     });
-    const watcher = createFileSystemWatcher('{**/activate}', false, true, false);
+    const activationWatcher = createFileSystemWatcher('{**/activate}', false, true, false);
     disposables.push(
-        watcher,
-        watcher.onDidCreate(() => {
+        activationWatcher,
+        activationWatcher.onDidCreate(() => {
             venvDebouncedRefresh.trigger();
         }),
-        watcher.onDidDelete(() => {
+        activationWatcher.onDidDelete(() => {
             venvDebouncedRefresh.trigger();
         }),
         onDidDeleteFiles(() => {
             venvDebouncedRefresh.trigger();
+        }),
+    );
+
+    const packageDebouncedRefresh = createSimpleDebounce(500, async () => {
+        const projects = await api.getPythonProjects();
+        await Promise.all(
+            projects.map(async (project) => {
+                const env = await api.getEnvironment(project.uri);
+                if (!env) {
+                    return;
+                }
+                try {
+                    await api.refreshPackages(env);
+                } catch (ex) {
+                    log.error(
+                        `Failed to refresh packages for environment ${env.envId}: ${ex instanceof Error ? ex.message : String(ex)}`,
+                    );
+                }
+            }),
+        );
+    });
+    const packageWatcher = createFileSystemWatcher(
+        '**/site-packages/*.dist-info/METADATA', 
+        false, // don't ignore create events    (pip install)
+        true,  // ignore change events          (content changes in METADATA don't affect package list)
+        false  // don't ignore delete events    (pip uninstall)
+    );
+    disposables.push(
+        packageDebouncedRefresh,
+        packageWatcher,
+        packageWatcher.onDidCreate(() => {
+            packageDebouncedRefresh.trigger();
+        }),
+        packageWatcher.onDidDelete(() => {
+            packageDebouncedRefresh.trigger();
         }),
     );
 }
