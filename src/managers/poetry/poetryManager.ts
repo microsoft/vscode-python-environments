@@ -17,13 +17,13 @@ import {
 } from '../../api';
 import { PoetryStrings } from '../../common/localize';
 import { traceError, traceInfo } from '../../common/logging';
-import { createDeferred, Deferred } from '../../common/utils/deferred';
-import { normalizePath } from '../../common/utils/pathUtils';
-import { withProgress } from '../../common/window.apis';
 import { StopWatch } from '../../common/stopWatch';
 import { EventNames } from '../../common/telemetry/constants';
 import { classifyError } from '../../common/telemetry/errorClassifier';
 import { sendTelemetryEvent } from '../../common/telemetry/sender';
+import { createDeferred, Deferred } from '../../common/utils/deferred';
+import { normalizePath } from '../../common/utils/pathUtils';
+import { withProgress } from '../../common/window.apis';
 import { NativePythonFinder } from '../common/nativePythonFinder';
 import { getLatest } from '../common/utils';
 import {
