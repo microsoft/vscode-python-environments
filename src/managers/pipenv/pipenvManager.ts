@@ -15,6 +15,10 @@ import {
     SetEnvironmentScope,
 } from '../../api';
 import { PipenvStrings } from '../../common/localize';
+import { StopWatch } from '../../common/stopWatch';
+import { EventNames } from '../../common/telemetry/constants';
+import { classifyError } from '../../common/telemetry/errorClassifier';
+import { sendTelemetryEvent } from '../../common/telemetry/sender';
 import { createDeferred, Deferred } from '../../common/utils/deferred';
 import { normalizePath } from '../../common/utils/pathUtils';
 import { withProgress } from '../../common/window.apis';
@@ -22,6 +26,7 @@ import { getProjectFsPathForScope, tryFastPathGet } from '../common/fastPath';
 import { NativePythonFinder } from '../common/nativePythonFinder';
 import {
     clearPipenvCache,
+    getPipenv,
     getPipenvForGlobal,
     getPipenvForWorkspace,
     refreshPipenv,
@@ -74,8 +79,19 @@ export class PipenvManager implements EnvironmentManager {
         }
 
         this._initialized = createDeferred();
+        const stopWatch = new StopWatch();
+        let result: 'success' | 'tool_not_found' | 'error' = 'success';
+        let envCount = 0;
+        let toolSource = 'none';
+        let errorType: string | undefined;
 
         try {
+            // Check if tool is findable before PET refresh (settings/cache/PATH only, no PET)
+            const preRefreshTool = await getPipenv();
+            if (preRefreshTool) {
+                toolSource = 'path';
+            }
+
             await withProgress(
                 {
                     location: ProgressLocation.Window,
@@ -90,7 +106,29 @@ export class PipenvManager implements EnvironmentManager {
                     );
                 },
             );
+
+            envCount = this.collection.length;
+
+            // If tool wasn't found via local lookup, check if refresh discovered it via PET
+            if (!preRefreshTool) {
+                const postRefreshTool = await getPipenv();
+                toolSource = postRefreshTool ? 'pet' : 'none';
+            }
+
+            if (toolSource === 'none') {
+                result = 'tool_not_found';
+            }
+        } catch (ex) {
+            result = 'error';
+            errorType = classifyError(ex);
         } finally {
+            sendTelemetryEvent(EventNames.MANAGER_LAZY_INIT, stopWatch.elapsedTime, {
+                managerName: 'pipenv',
+                result,
+                envCount,
+                toolSource,
+                errorType,
+            });
             this._initialized.resolve();
         }
     }

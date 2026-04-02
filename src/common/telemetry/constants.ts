@@ -101,6 +101,18 @@ export enum EventNames {
      * - hasPersistedSelection: boolean (whether a persisted env path existed in workspace state)
      */
     ENV_SELECTION_RESULT = 'ENV_SELECTION.RESULT',
+    /**
+     * Telemetry event fired when a lazily-registered manager completes its first initialization.
+     * Replaces MANAGER_REGISTRATION_SKIPPED and MANAGER_REGISTRATION_FAILED for managers
+     * that now register unconditionally (pipenv, poetry, pyenv).
+     * Properties:
+     * - managerName: string (e.g. 'pipenv', 'poetry', 'pyenv')
+     * - result: 'success' | 'tool_not_found' | 'error'
+     * - envCount: number (environments discovered)
+     * - toolSource: string (how the CLI was found: 'settings', 'cache', 'persistentState', 'path', 'pet', 'none')
+     * - errorType: string (classified error category, on failure only)
+     */
+    MANAGER_LAZY_INIT = 'MANAGER.LAZY_INIT',
 }
 
 // Map all events to their properties
@@ -372,5 +384,23 @@ export interface IEventNamePropertyMapping {
         managerId: string;
         resolutionPath: string;
         hasPersistedSelection: boolean;
+    };
+
+    /* __GDPR__
+        "manager.lazy_init": {
+            "managerName": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "owner": "eleanorjboyd" },
+            "result": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "owner": "eleanorjboyd" },
+            "envCount": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "isMeasurement": true, "owner": "eleanorjboyd" },
+            "toolSource": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "owner": "eleanorjboyd" },
+            "errorType": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "owner": "eleanorjboyd" },
+            "<duration>": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "isMeasurement": true, "owner": "eleanorjboyd" }
+        }
+    */
+    [EventNames.MANAGER_LAZY_INIT]: {
+        managerName: string;
+        result: 'success' | 'tool_not_found' | 'error';
+        envCount: number;
+        toolSource: string;
+        errorType?: string;
     };
 }
