@@ -76,8 +76,8 @@ export interface InternalDidChangeEnvironmentsEventArgs {
 }
 
 export interface EnvironmentManagers extends Disposable {
-    registerEnvironmentManager(manager: EnvironmentManager): Disposable;
-    registerPackageManager(manager: PackageManager): Disposable;
+    registerEnvironmentManager(manager: EnvironmentManager, options?: { extensionId?: string }): Disposable;
+    registerPackageManager(manager: PackageManager, options?: { extensionId?: string }): Disposable;
 
     /**
      * This event is fired when any environment manager changes its collection of environments.
