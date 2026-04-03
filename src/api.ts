@@ -390,6 +390,12 @@ export interface EnvironmentManager {
      * @param scope - The scope within which to create the environment.
      * @param options - Optional parameters for creating the Python environment.
      * @returns A promise that resolves to the created Python environment, or undefined if creation failed.
+     *
+     * @remarks
+     * Called when the user:
+     * - Runs the "Python: Create Environment" command (which prompts for a manager to use).
+     * - Clicks the "+" button on an environment manager in the Python Environments view.
+     * - Creates a new environment as part of the new Python package project creation wizard.
      */
     create?(scope: CreateEnvironmentScope, options?: CreateEnvironmentOptions): Promise<PythonEnvironment | undefined>;
 
@@ -397,6 +403,10 @@ export interface EnvironmentManager {
      * Removes the specified Python environment.
      * @param environment - The Python environment to remove.
      * @returns A promise that resolves when the environment is removed.
+     *
+     * @remarks
+     * Called when the user right-clicks an environment in the Python Environments tree view and selects
+     * "Delete Environment".
      */
     remove?(environment: PythonEnvironment): Promise<void>;
 
@@ -404,6 +414,9 @@ export interface EnvironmentManager {
      * Refreshes the list of Python environments within the specified scope.
      * @param scope - The scope within which to refresh environments.
      * @returns A promise that resolves when the refresh is complete.
+     *
+     * @remarks
+     * Called when the user clicks the refresh button in the Python Environments view title bar.
      */
     refresh(scope: RefreshEnvironmentsScope): Promise<void>;
 
@@ -411,6 +424,12 @@ export interface EnvironmentManager {
      * Retrieves a list of Python environments within the specified scope.
      * @param scope - The scope within which to retrieve environments.
      * @returns A promise that resolves to an array of Python environments.
+     *
+     * @remarks
+     * Called when:
+     * - The user expands an environment manager node in the Python Environments tree view.
+     * - The user opens the environment picker to select an interpreter.
+     * - Internally after {@link EnvironmentManager.refresh} completes, to count discovered environments.
      */
     getEnvironments(scope: GetEnvironmentsScope): Promise<PythonEnvironment[]>;
 
@@ -424,6 +443,14 @@ export interface EnvironmentManager {
      * @param scope - The scope within which to set the environment.
      * @param environment - The Python environment to set. If undefined, the environment is unset.
      * @returns A promise that resolves when the environment is set.
+     *
+     * @remarks
+     * Called when the user:
+     * - Selects an environment in the environment picker or clicks the checkmark button in the tree view.
+     * - Creates a new environment and the extension auto-selects it.
+     *
+     * Also called at extension startup during initial environment selection to cache the active
+     * environment, and when a Python project is removed (with `environment` set to `undefined`).
      */
     set(scope: SetEnvironmentScope, environment?: PythonEnvironment): Promise<void>;
 
@@ -431,6 +458,15 @@ export interface EnvironmentManager {
      * Retrieves the current Python environment within the specified scope.
      * @param scope - The scope within which to retrieve the environment.
      * @returns A promise that resolves to the current Python environment, or undefined if none is set.
+     *
+     * @remarks
+     * Called when:
+     * - The extension starts up, during initial environment selection for each workspace folder and global scope.
+     * - After {@link EnvironmentManager.set}, to confirm the new active environment and fire change events.
+     * - A terminal is opened or a command is run, to determine which Python environment to activate.
+     * - The user runs a Python file ("Run in Terminal", "Run as Task"), to get the interpreter.
+     * - The environment picker needs to display the currently selected (recommended) environment.
+     * - Auto-discovery checks if a local venv already exists for a workspace folder.
      */
     get(scope: GetEnvironmentScope): Promise<PythonEnvironment | undefined>;
 
@@ -450,6 +486,12 @@ export interface EnvironmentManager {
      *
      * @param context - The context for resolving the environment, which can be a {@link PythonEnvironment} or a {@link Uri}.
      * @returns A promise that resolves to the fully detailed {@link PythonEnvironment}, or `undefined` if the environment cannot be resolved.
+     *
+     * @remarks
+     * Called when:
+     * - The user browses for and selects a Python interpreter path via the file picker.
+     * - The user has `python.defaultInterpreterPath` configured and the extension resolves it at startup.
+     * - Before running a Python script ("Run in Terminal", "Run as Task"), to obtain full execution info.
      */
     resolve(context: ResolveEnvironmentContext): Promise<PythonEnvironment | undefined>;
 
@@ -457,6 +499,9 @@ export interface EnvironmentManager {
      * Clears the environment manager's cache.
      *
      * @returns A promise that resolves when the cache is cleared.
+     *
+     * @remarks
+     * Called when the user runs the "Python: Clear Cache" command from the Command Palette.
      */
     clearCache?(): Promise<void>;
 }
