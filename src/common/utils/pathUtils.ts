@@ -58,7 +58,8 @@ function getComparisonKey(uri: Uri): string {
 }
 
 export function normalizePath(fsPath: string): string {
-    return path.resolve(fsPath);
+    const resolvedPath = path.resolve(fsPath);
+    return isWindows() ? resolvedPath.toLowerCase() : resolvedPath;
 }
 
 export function getResourceUri(resourcePath: string, root?: string): Uri | undefined {
