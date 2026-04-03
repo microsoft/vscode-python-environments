@@ -842,10 +842,14 @@ export interface PythonEnvironmentManagerRegistrationApi {
      * Register an environment manager implementation.
      *
      * @param manager Environment Manager implementation to register.
+     * @param options Optional registration options.
+     * @param options.extensionId The extension ID of the calling extension. This is used as a fallback when
+     * automatic extension detection fails, such as during F5 debugging where the extension's file path
+     * does not contain its marketplace ID. If automatic detection succeeds, this value is ignored.
      * @returns A disposable that can be used to unregister the environment manager.
      * @see {@link EnvironmentManager}
      */
-    registerEnvironmentManager(manager: EnvironmentManager): Disposable;
+    registerEnvironmentManager(manager: EnvironmentManager, options?: { extensionId?: string }): Disposable;
 }
 
 export interface PythonEnvironmentItemApi {
@@ -947,10 +951,14 @@ export interface PythonPackageManagerRegistrationApi {
      * Register a package manager implementation.
      *
      * @param manager Package Manager implementation to register.
+     * @param options Optional registration options.
+     * @param options.extensionId The extension ID of the calling extension. This is used as a fallback when
+     * automatic extension detection fails, such as during F5 debugging where the extension's file path
+     * does not contain its marketplace ID. If automatic detection succeeds, this value is ignored.
      * @returns A disposable that can be used to unregister the package manager.
      * @see {@link PackageManager}
      */
-    registerPackageManager(manager: PackageManager): Disposable;
+    registerPackageManager(manager: PackageManager, options?: { extensionId?: string }): Disposable;
 }
 
 export interface PythonPackageGetterApi {
