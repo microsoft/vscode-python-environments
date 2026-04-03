@@ -295,7 +295,16 @@ export async function getProjectInstallable(
                     const p = api.getPythonProject(uri)?.uri.fsPath;
                     return p && fsPaths.includes(p);
                 })
-                .sort();
+                .sort((a, b) => {
+                    // Sort by path depth (shallowest first) so top-level files like
+                    // requirements.txt appear before deeply nested ones.
+                    const depthA = a.fsPath.split(path.sep).length;
+                    const depthB = b.fsPath.split(path.sep).length;
+                    if (depthA !== depthB) {
+                        return depthA - depthB;
+                    }
+                    return a.fsPath.localeCompare(b.fsPath);
+                });
 
             await Promise.all(
                 filtered.map(async (uri) => {
