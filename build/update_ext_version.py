@@ -79,6 +79,18 @@ def main(package_json: pathlib.Path, argv: Sequence[str]) -> None:
         )
 
     print(f"Updating build FROM: {package['version']}")
+
+    # Pre-release without --build-id: version is managed by the CI template
+    # (standardizedVersioning). Just strip suffix if publishing.
+    if not args.release and not args.build_id:
+        if args.for_publishing and len(suffix):
+            package["version"] = ".".join((major, minor, micro))
+        print(f"Updating build TO: {package['version']}")
+        package_json.write_text(
+            json.dumps(package, indent=4, ensure_ascii=False) + "\n", encoding="utf-8"
+        )
+        return
+
     if args.build_id:
         # If build id is provided it should fall within the 0-INT32 max range
         # that the max allowed value for publishing to the Marketplace.
@@ -88,9 +100,6 @@ def main(package_json: pathlib.Path, argv: Sequence[str]) -> None:
         package["version"] = ".".join((major, minor, str(args.build_id)))
     elif args.release:
         package["version"] = ".".join((major, minor, micro))
-    else:
-        # micro version only updated for pre-release.
-        package["version"] = ".".join((major, minor, micro_build_number()))
 
     if not args.for_publishing and not args.release and len(suffix):
         package["version"] += "-" + suffix
