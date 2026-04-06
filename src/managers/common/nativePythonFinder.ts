@@ -435,7 +435,7 @@ class NativePythonFinderImpl implements NativePythonFinder {
         this.connection.dispose();
     }
 
-    private getRefreshOptions(options?: NativePythonEnvironmentKind | Uri[]): RefreshOptions | undefined {
+    private getRefreshOptions(options?: NativePythonEnvironmentKind | Uri[]): RefreshOptions {
         // Note: venvFolders is also fetched in getAllExtraSearchPaths() for configure().
         // This duplication is intentional: when searchPaths is provided to the native finder,
         // it may override (not supplement) the configured environmentDirectories.
@@ -452,8 +452,8 @@ class NativePythonFinderImpl implements NativePythonFinder {
                 return { searchPaths: uriSearchPaths };
             }
         }
-        // return undefined to use configured defaults (for nativeFinder refresh)
-        return undefined;
+        // return empty object to use configured defaults (for nativeFinder refresh)
+        return {};
     }
 
     private start(): rpc.MessageConnection {
