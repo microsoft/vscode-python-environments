@@ -336,14 +336,14 @@ export class VenvManager implements EnvironmentManager {
                     environment: env,
                 }));
 
-                this.collection = await findVirtualEnvironments(
+                this.collection = (await findVirtualEnvironments(
                     hardRefresh,
                     this.nativeFinder,
                     this.api,
                     this.log,
                     this,
                     scope ? [scope] : undefined,
-                );
+                )) ?? [];
                 await this.loadEnvMap();
 
                 const added = this.collection.map((env) => ({ environment: env, kind: EnvironmentChangeKind.add }));

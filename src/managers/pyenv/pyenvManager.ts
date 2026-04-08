@@ -100,7 +100,7 @@ export class PyEnvManager implements EnvironmentManager, Disposable {
                     title: PyenvStrings.pyenvDiscovering,
                 },
                 async () => {
-                    this.collection = await refreshPyenv(false, this.nativeFinder, this.api, this);
+                    this.collection = (await refreshPyenv(false, this.nativeFinder, this.api, this)) ?? [];
                     await this.loadEnvMap();
 
                     this._onDidChangeEnvironments.fire(
@@ -170,7 +170,7 @@ export class PyEnvManager implements EnvironmentManager, Disposable {
                 async () => {
                     traceInfo('Refreshing Pyenv Environments');
                     const discard = this.collection.map((c) => c);
-                    this.collection = await refreshPyenv(true, this.nativeFinder, this.api, this);
+                    this.collection = (await refreshPyenv(true, this.nativeFinder, this.api, this)) ?? [];
 
                     await this.loadEnvMap();
 
@@ -198,7 +198,7 @@ export class PyEnvManager implements EnvironmentManager, Disposable {
             resolve: (p) => resolvePyenvPath(p, this.nativeFinder, this.api, this),
             startBackgroundInit: () =>
                 withProgress({ location: ProgressLocation.Window, title: PyenvStrings.pyenvDiscovering }, async () => {
-                    this.collection = await refreshPyenv(false, this.nativeFinder, this.api, this);
+                    this.collection = (await refreshPyenv(false, this.nativeFinder, this.api, this)) ?? [];
                     await this.loadEnvMap();
                     this._onDidChangeEnvironments.fire(
                         this.collection.map((e) => ({
