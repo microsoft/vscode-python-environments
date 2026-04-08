@@ -100,7 +100,7 @@ export class PoetryManager implements EnvironmentManager, Disposable {
                     title: PoetryStrings.poetryDiscovering,
                 },
                 async () => {
-                    this.collection = await refreshPoetry(false, this.nativeFinder, this.api, this);
+                    this.collection = (await refreshPoetry(false, this.nativeFinder, this.api, this)) ?? [];
                     await this.loadEnvMap();
 
                     this._onDidChangeEnvironments.fire(
@@ -172,7 +172,7 @@ export class PoetryManager implements EnvironmentManager, Disposable {
                 async () => {
                     traceInfo('Refreshing Poetry Environments');
                     const discard = this.collection.map((c) => c);
-                    this.collection = await refreshPoetry(true, this.nativeFinder, this.api, this);
+                    this.collection = (await refreshPoetry(true, this.nativeFinder, this.api, this)) ?? [];
 
                     await this.loadEnvMap();
 

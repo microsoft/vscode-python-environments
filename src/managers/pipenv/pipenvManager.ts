@@ -102,7 +102,7 @@ export class PipenvManager implements EnvironmentManager, Disposable {
                     title: PipenvStrings.pipenvDiscovering,
                 },
                 async () => {
-                    this.collection = await refreshPipenv(false, this.nativeFinder, this.api, this);
+                    this.collection = (await refreshPipenv(false, this.nativeFinder, this.api, this)) ?? [];
                     await this.loadEnvMap();
 
                     this._onDidChangeEnvironments.fire(
@@ -181,7 +181,7 @@ export class PipenvManager implements EnvironmentManager, Disposable {
             async () => {
                 traceInfo('Refreshing Pipenv Environments');
                 const oldCollection = [...this.collection];
-                this.collection = await refreshPipenv(hardRefresh, this.nativeFinder, this.api, this);
+                this.collection = (await refreshPipenv(hardRefresh, this.nativeFinder, this.api, this)) ?? [];
                 await this.loadEnvMap();
 
                 // Fire change events for environments that were added or removed
@@ -317,7 +317,7 @@ export class PipenvManager implements EnvironmentManager, Disposable {
                 withProgress(
                     { location: ProgressLocation.Window, title: PipenvStrings.pipenvDiscovering },
                     async () => {
-                        this.collection = await refreshPipenv(false, this.nativeFinder, this.api, this);
+                        this.collection = (await refreshPipenv(false, this.nativeFinder, this.api, this)) ?? [];
                         await this.loadEnvMap();
                         this._onDidChangeEnvironments.fire(
                             this.collection.map((e) => ({
