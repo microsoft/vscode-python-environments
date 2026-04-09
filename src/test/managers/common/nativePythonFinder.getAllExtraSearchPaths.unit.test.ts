@@ -588,6 +588,8 @@ suite('getAllExtraSearchPaths Integration Tests', () => {
             const result = await getAllExtraSearchPaths();
 
             // Assert - relative paths resolved only against their own folder
+            // .replace(/\\/g, '/') mirrors the normalization getAllExtraSearchPaths() applies to all
+            // returned paths, so results always use forward slashes regardless of platform.
             const expected1 = path.resolve(workspace1.fsPath, 'envs').replace(/\\/g, '/');
             const expected2 = path.resolve(workspace2.fsPath, 'venvs').replace(/\\/g, '/');
             const wrong1In2 = path.resolve(workspace2.fsPath, 'envs').replace(/\\/g, '/');
