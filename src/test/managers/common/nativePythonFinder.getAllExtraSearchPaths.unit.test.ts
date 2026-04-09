@@ -1,4 +1,5 @@
 import assert from 'node:assert';
+import * as path from 'node:path';
 import * as sinon from 'sinon';
 import { Uri } from 'vscode';
 import * as logging from '../../../common/logging';
@@ -587,23 +588,20 @@ suite('getAllExtraSearchPaths Integration Tests', () => {
             const result = await getAllExtraSearchPaths();
 
             // Assert - relative paths resolved only against their own folder
+            const expected1 = path.resolve(workspace1.fsPath, 'envs').replace(/\\/g, '/');
+            const expected2 = path.resolve(workspace2.fsPath, 'venvs').replace(/\\/g, '/');
+            const wrong1In2 = path.resolve(workspace2.fsPath, 'envs').replace(/\\/g, '/');
+            const wrong2In1 = path.resolve(workspace1.fsPath, 'venvs').replace(/\\/g, '/');
+
             assert.strictEqual(result.length, 2, 'Should have exactly 2 paths (one per folder)');
+            assert.ok(result.includes(expected1), 'project1/envs should come from project1 config');
+            assert.ok(result.includes(expected2), 'project2/venvs should come from project2 config');
             assert.ok(
-                result.some((p) => p.includes('project1') && p.endsWith('/envs')),
-                'project1/envs should come from project1 config',
-            );
-            assert.ok(
-                result.some((p) => p.includes('project2') && p.endsWith('/venvs')),
-                'project2/venvs should come from project2 config',
-            );
-            // project1 relative path must NOT be resolved against project2
-            assert.ok(
-                !result.some((p) => p.includes('project2') && p.endsWith('/envs')),
+                !result.includes(wrong1In2),
                 'project1 relative path should not be resolved against project2',
             );
-            // project2 relative path must NOT be resolved against project1
             assert.ok(
-                !result.some((p) => p.includes('project1') && p.endsWith('/venvs')),
+                !result.includes(wrong2In1),
                 'project2 relative path should not be resolved against project1',
             );
         });
