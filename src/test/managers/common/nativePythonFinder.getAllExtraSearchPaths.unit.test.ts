@@ -480,6 +480,134 @@ suite('getAllExtraSearchPaths Integration Tests', () => {
             assert.ok(mockTraceWarn.called, 'Should warn about missing workspace folders');
         });
 
+        test('Multi-root workspace - each folder reads its own workspaceSearchPaths', async () => {
+            // Mock → Two folders with different folder-level workspaceSearchPaths
+            const workspace1 = Uri.file('/workspace/project1');
+            const workspace2 = Uri.file('/workspace/project2');
+
+            // Create separate config objects for each folder
+            const envConfig1: MockWorkspaceConfig = {
+                get: sinon.stub(),
+                inspect: sinon.stub(),
+                update: sinon.stub(),
+            };
+            const envConfig2: MockWorkspaceConfig = {
+                get: sinon.stub(),
+                inspect: sinon.stub(),
+                update: sinon.stub(),
+            };
+
+            envConfig1.inspect.withArgs('globalSearchPaths').returns({ globalValue: [] });
+            envConfig1.inspect.withArgs('workspaceSearchPaths').returns({
+                workspaceFolderValue: ['/envs/project1'],
+            });
+
+            envConfig2.inspect.withArgs('globalSearchPaths').returns({ globalValue: [] });
+            envConfig2.inspect.withArgs('workspaceSearchPaths').returns({
+                workspaceFolderValue: ['/envs/project2'],
+            });
+
+            // Return folder-specific configs based on the scope URI passed to getConfiguration
+            mockGetConfiguration.callsFake((section: string, scope?: unknown) => {
+                if (section === 'python') {
+                    return pythonConfig;
+                }
+                if (section === 'python-envs') {
+                    if (scope && (scope as Uri).fsPath === workspace1.fsPath) {
+                        return envConfig1;
+                    }
+                    if (scope && (scope as Uri).fsPath === workspace2.fsPath) {
+                        return envConfig2;
+                    }
+                    return envConfig; // fallback for unscoped calls
+                }
+                throw new Error(`Unexpected configuration section: ${section}`);
+            });
+
+            pythonConfig.get.withArgs('venvPath').returns(undefined);
+            pythonConfig.get.withArgs('venvFolders').returns(undefined);
+            mockGetWorkspaceFolders.returns([{ uri: workspace1 }, { uri: workspace2 }]);
+
+            // Run
+            const result = await getAllExtraSearchPaths();
+
+            // Assert - each folder's workspaceSearchPaths is read independently
+            assert.ok(result.includes('/envs/project1'), 'Should include project1 env path');
+            assert.ok(result.includes('/envs/project2'), 'Should include project2 env path');
+            assert.strictEqual(result.length, 2, 'Should have exactly 2 paths (one per folder)');
+        });
+
+        test('Multi-root workspace - relative paths resolved against the correct folder', async () => {
+            // Mock → Two folders, each with a relative workspaceSearchPaths
+            const workspace1 = Uri.file('/workspace/project1');
+            const workspace2 = Uri.file('/workspace/project2');
+
+            const envConfig1: MockWorkspaceConfig = {
+                get: sinon.stub(),
+                inspect: sinon.stub(),
+                update: sinon.stub(),
+            };
+            const envConfig2: MockWorkspaceConfig = {
+                get: sinon.stub(),
+                inspect: sinon.stub(),
+                update: sinon.stub(),
+            };
+
+            envConfig1.inspect.withArgs('globalSearchPaths').returns({ globalValue: [] });
+            envConfig1.inspect.withArgs('workspaceSearchPaths').returns({
+                workspaceFolderValue: ['envs'],
+            });
+
+            envConfig2.inspect.withArgs('globalSearchPaths').returns({ globalValue: [] });
+            envConfig2.inspect.withArgs('workspaceSearchPaths').returns({
+                workspaceFolderValue: ['venvs'],
+            });
+
+            mockGetConfiguration.callsFake((section: string, scope?: unknown) => {
+                if (section === 'python') {
+                    return pythonConfig;
+                }
+                if (section === 'python-envs') {
+                    if (scope && (scope as Uri).fsPath === workspace1.fsPath) {
+                        return envConfig1;
+                    }
+                    if (scope && (scope as Uri).fsPath === workspace2.fsPath) {
+                        return envConfig2;
+                    }
+                    return envConfig;
+                }
+                throw new Error(`Unexpected configuration section: ${section}`);
+            });
+
+            pythonConfig.get.withArgs('venvPath').returns(undefined);
+            pythonConfig.get.withArgs('venvFolders').returns(undefined);
+            mockGetWorkspaceFolders.returns([{ uri: workspace1 }, { uri: workspace2 }]);
+
+            // Run
+            const result = await getAllExtraSearchPaths();
+
+            // Assert - relative paths resolved only against their own folder
+            assert.strictEqual(result.length, 2, 'Should have exactly 2 paths (one per folder)');
+            assert.ok(
+                result.some((p) => p.includes('project1') && p.endsWith('/envs')),
+                'project1/envs should come from project1 config',
+            );
+            assert.ok(
+                result.some((p) => p.includes('project2') && p.endsWith('/venvs')),
+                'project2/venvs should come from project2 config',
+            );
+            // project1 relative path must NOT be resolved against project2
+            assert.ok(
+                !result.some((p) => p.includes('project2') && p.endsWith('/envs')),
+                'project1 relative path should not be resolved against project2',
+            );
+            // project2 relative path must NOT be resolved against project1
+            assert.ok(
+                !result.some((p) => p.includes('project1') && p.endsWith('/venvs')),
+                'project2 relative path should not be resolved against project1',
+            );
+        });
+
         test('Empty and whitespace paths are skipped', async () => {
             // Mock → Mix of valid and invalid paths
             pythonConfig.get.withArgs('venvPath').returns(undefined);
