@@ -9,6 +9,9 @@ import { spawnProcess } from '../../common/childProcess.apis';
 import { ENVS_EXTENSION_ID, PYTHON_EXTENSION_ID } from '../../common/constants';
 import { getExtension } from '../../common/extension.apis';
 import { traceError, traceVerbose, traceWarn } from '../../common/logging';
+import { StopWatch } from '../../common/stopWatch';
+import { EventNames } from '../../common/telemetry/constants';
+import { sendTelemetryEvent } from '../../common/telemetry/sender';
 import { untildify, untildifyArray } from '../../common/utils/pathUtils';
 import { isWindows } from '../../common/utils/platformUtils';
 import { createRunningWorkerPool, WorkerPool } from '../../common/utils/workerPool';
@@ -20,6 +23,9 @@ const CONFIGURE_TIMEOUT_MS = 30_000; // 30 seconds for configuration
 const MAX_CONFIGURE_TIMEOUT_MS = 60_000; // Max configure timeout after retries (60s)
 const REFRESH_TIMEOUT_MS = 30_000; // 30 seconds for full refresh (with 1 retry = 60s max)
 const RESOLVE_TIMEOUT_MS = 30_000; // 30 seconds for single resolve
+
+// CLI fallback timeout: generous budget since it's a full process spawn doing a full scan
+const CLI_FALLBACK_TIMEOUT_MS = 120_000; // 2 minutes
 
 // Restart/recovery constants
 const MAX_RESTART_ATTEMPTS = 3;
@@ -245,28 +251,37 @@ class NativePythonFinderImpl implements NativePythonFinder {
     }
 
     public async resolve(executable: string): Promise<NativeEnvInfo> {
-        await this.ensureProcessRunning();
         try {
-            await this.configure();
-            const environment = await sendRequestWithTimeout<NativeEnvInfo>(
-                this.connection,
-                'resolve',
-                { executable },
-                RESOLVE_TIMEOUT_MS,
-            );
+            await this.ensureProcessRunning();
+            try {
+                await this.configure();
+                const environment = await sendRequestWithTimeout<NativeEnvInfo>(
+                    this.connection,
+                    'resolve',
+                    { executable },
+                    RESOLVE_TIMEOUT_MS,
+                );
 
-            this.outputChannel.info(`Resolved Python Environment ${environment.executable}`);
-            // Reset restart attempts on successful request
-            this.restartAttempts = 0;
-            return environment;
+                this.outputChannel.info(`Resolved Python Environment ${environment.executable}`);
+                // Reset restart attempts on successful request
+                this.restartAttempts = 0;
+                return environment;
+            } catch (ex) {
+                // On resolve timeout or connection error (not configure — configure handles its own timeout),
+                // kill the hung process so next request triggers restart
+                if ((ex instanceof RpcTimeoutError && ex.method !== 'configure') || ex instanceof rpc.ConnectionError) {
+                    const reason = ex instanceof rpc.ConnectionError ? 'crashed' : 'timed out';
+                    this.outputChannel.warn(`[pet] Resolve request ${reason}, killing process for restart`);
+                    this.killProcess();
+                    this.processExited = true;
+                }
+                throw ex;
+            }
         } catch (ex) {
-            // On resolve timeout or connection error (not configure — configure handles its own timeout),
-            // kill the hung process so next request triggers restart
-            if ((ex instanceof RpcTimeoutError && ex.method !== 'configure') || ex instanceof rpc.ConnectionError) {
-                const reason = ex instanceof rpc.ConnectionError ? 'crashed' : 'timed out';
-                this.outputChannel.warn(`[pet] Resolve request ${reason}, killing process for restart`);
-                this.killProcess();
-                this.processExited = true;
+            // If the server mode is fully exhausted, fall back to the CLI JSON mode
+            if (this.isServerExhausted()) {
+                this.outputChannel.warn('[pet] Server mode exhausted, falling back to JSON CLI for resolve');
+                return this.resolveViaJsonCli(executable);
             }
             throw ex;
         }
@@ -592,12 +607,20 @@ class NativePythonFinderImpl implements NativePythonFinder {
                     // Final attempt failed
                     this.outputChannel.error(`[pet] Refresh failed after ${MAX_REFRESH_RETRIES + 1} attempts`);
                 }
-                // Non-retryable errors or final attempt - rethrow
+                // Non-timeout errors or final timeout — check if server is fully exhausted
+                if (this.isServerExhausted()) {
+                    this.outputChannel.warn('[pet] Server mode exhausted, falling back to JSON CLI for refresh');
+                    return this.refreshViaJsonCli(options);
+                }
                 throw ex;
             }
         }
 
         // Should not reach here, but TypeScript needs this
+        if (this.isServerExhausted()) {
+            this.outputChannel.warn('[pet] Server mode exhausted, falling back to JSON CLI for refresh (final)');
+            return this.refreshViaJsonCli(options);
+        }
         throw lastError;
     }
 
@@ -680,17 +703,7 @@ class NativePythonFinderImpl implements NativePythonFinder {
      * Must be invoked when ever there are changes to any data related to the configuration details.
      */
     private async configure() {
-        // Get all extra search paths including legacy settings and new searchPaths
-        const extraSearchPaths = await getAllExtraSearchPaths();
-
-        const options: ConfigurationOptions = {
-            workspaceDirectories: this.api.getPythonProjects().map((item) => item.uri.fsPath),
-            environmentDirectories: extraSearchPaths,
-            condaExecutable: getPythonSettingAndUntildify<string>('condaPath'),
-            pipenvExecutable: getPythonSettingAndUntildify<string>('pipenvPath'),
-            poetryExecutable: getPythonSettingAndUntildify<string>('poetryPath'),
-            cacheDirectory: this.cacheDirectory?.fsPath,
-        };
+        const options = await this.buildConfigurationOptions();
         // No need to send a configuration request if there are no changes.
         if (this.lastConfiguration && this.configurationEquals(options, this.lastConfiguration)) {
             this.outputChannel.debug('[pet] configure: No changes detected, skipping configuration update.');
@@ -736,6 +749,213 @@ class NativePythonFinderImpl implements NativePythonFinder {
     }
 
     /**
+     * Builds the current ConfigurationOptions from VS Code settings and the active workspace.
+     * Extracted from configure() so the CLI fallback can build the same config.
+     */
+    private async buildConfigurationOptions(): Promise<ConfigurationOptions> {
+        // Get all extra search paths including legacy settings and new searchPaths
+        const extraSearchPaths = await getAllExtraSearchPaths();
+        return {
+            workspaceDirectories: this.api.getPythonProjects().map((item) => item.uri.fsPath),
+            environmentDirectories: extraSearchPaths,
+            condaExecutable: getPythonSettingAndUntildify<string>('condaPath'),
+            pipenvExecutable: getPythonSettingAndUntildify<string>('pipenvPath'),
+            poetryExecutable: getPythonSettingAndUntildify<string>('poetryPath'),
+            cacheDirectory: this.cacheDirectory?.fsPath,
+        };
+    }
+
+    /**
+     * Returns true when all server restart attempts have been exhausted.
+     * Used to decide whether to fall back to CLI mode.
+     */
+    private isServerExhausted(): boolean {
+        return this.restartAttempts >= MAX_RESTART_ATTEMPTS && (this.startFailed || this.processExited);
+    }
+
+    /**
+     * Spawns the PET binary with the given args and collects its stdout.
+     * Uses direct spawn (not shell) to avoid injection risks from user-supplied paths.
+     * Kills the process after `timeoutMs` to prevent hangs.
+     *
+     * @param args Arguments to pass to the PET binary.
+     * @param timeoutMs Maximum time to wait for the process to complete.
+     * @returns The stdout string.
+     */
+    private runPetCliProcess(args: string[], timeoutMs: number): Promise<string> {
+        return new Promise((resolve, reject) => {
+            const proc = spawnProcess(this.toolPath, args, { stdio: 'pipe' });
+            let stdout = '';
+
+            const timer = setTimeout(() => {
+                try {
+                    proc.kill('SIGTERM');
+                    // Force kill after a short grace period if still running
+                    setTimeout(() => {
+                        if (proc.exitCode === null) {
+                            proc.kill('SIGKILL');
+                        }
+                    }, 500);
+                } catch {
+                    // Ignore kill errors
+                }
+                reject(new Error(`PET CLI process timed out after ${timeoutMs}ms`));
+            }, timeoutMs);
+
+            proc.stdout.on('data', (data: Buffer) => {
+                stdout += data.toString();
+            });
+            proc.stderr.on('data', (data: Buffer) => {
+                // PET writes diagnostics/logs to stderr in --json mode; surface them as debug
+                this.outputChannel.debug(`[pet CLI] ${data.toString().trimEnd()}`);
+            });
+            proc.on('close', (code) => {
+                clearTimeout(timer);
+                // If the process failed and produced no output, reject so caller gets a clear error
+                if (code !== 0 && stdout.trim().length === 0) {
+                    reject(new Error(`PET CLI process exited with code ${code}`));
+                    return;
+                }
+                resolve(stdout);
+            });
+            proc.on('error', (err) => {
+                clearTimeout(timer);
+                reject(err);
+            });
+        });
+    }
+
+    /**
+     * Fallback environment refresh using `pet find --json`.
+     * Invoked when the JSON-RPC server mode is exhausted after all restart attempts.
+     * Spawns PET as a one-shot subprocess and parses the JSON output.
+     *
+     * @param options Optional kind filter or URI search paths (same semantics as refresh()).
+     * @returns NativeInfo[] containing managers and environments, same as server mode.
+     */
+    private async refreshViaJsonCli(options?: NativePythonEnvironmentKind | Uri[]): Promise<NativeInfo[]> {
+        const config = await this.buildConfigurationOptions();
+        // venvFolders must be included explicitly as search paths when options is Uri[],
+        // mirroring getRefreshOptions() server-mode behaviour (searchPaths may override environmentDirectories).
+        const venvFolders = getPythonSettingAndUntildify<string[]>('venvFolders') ?? [];
+        const args = buildFindCliArgs(config, options, venvFolders);
+
+        this.outputChannel.info(`[pet] JSON CLI fallback refresh: ${this.toolPath} ${args.join(' ')}`);
+        const stopWatch = new StopWatch();
+
+        let stdout: string;
+        try {
+            stdout = await this.runPetCliProcess(args, CLI_FALLBACK_TIMEOUT_MS);
+        } catch (ex) {
+            sendTelemetryEvent(EventNames.PET_JSON_CLI_FALLBACK, stopWatch.elapsedTime, {
+                operation: 'refresh',
+                result: 'error',
+            });
+            this.outputChannel.error('[pet] JSON CLI fallback refresh failed:', ex);
+            throw ex;
+        }
+
+        let parsed: { managers: NativeEnvManagerInfo[]; environments: NativeEnvInfo[] };
+        try {
+            parsed = parseRefreshCliOutput(stdout);
+        } catch {
+            sendTelemetryEvent(EventNames.PET_JSON_CLI_FALLBACK, stopWatch.elapsedTime, {
+                operation: 'refresh',
+                result: 'error',
+            });
+            this.outputChannel.error('[pet] JSON CLI fallback: Failed to parse find output:', stdout.slice(0, 500));
+            throw new Error('Failed to parse PET find --json output');
+        }
+
+        const nativeInfo: NativeInfo[] = [];
+
+        for (const manager of parsed.managers ?? []) {
+            this.outputChannel.info(`[pet CLI] Discovered manager: (${manager.tool}) ${manager.executable}`);
+            nativeInfo.push(manager);
+        }
+
+        for (const env of parsed.environments ?? []) {
+            if (env.executable && (!env.version || !env.prefix)) {
+                // Environment has an executable but incomplete metadata — resolve individually
+                try {
+                    const resolved = await this.resolveViaJsonCli(env.executable);
+                    this.outputChannel.info(`[pet CLI] Resolved env: ${resolved.executable}`);
+                    nativeInfo.push(resolved);
+                } catch {
+                    // If resolve fails, still include the partial env so nothing is silently dropped
+                    this.outputChannel.warn(
+                        `[pet CLI] Could not resolve incomplete env, using partial data: ${env.executable}`,
+                    );
+                    nativeInfo.push(env);
+                }
+            } else {
+                this.outputChannel.info(`[pet CLI] Discovered env: ${env.executable ?? env.prefix}`);
+                nativeInfo.push(env);
+            }
+        }
+
+        sendTelemetryEvent(EventNames.PET_JSON_CLI_FALLBACK, stopWatch.elapsedTime, {
+            operation: 'refresh',
+            result: 'success',
+        });
+        return nativeInfo;
+    }
+
+    /**
+     * Fallback environment resolution using `pet resolve <exe> --json`.
+     * Invoked when the JSON-RPC server mode is exhausted after all restart attempts.
+     *
+     * @param executable Path to the Python executable to resolve.
+     * @returns The resolved NativeEnvInfo.
+     * @throws Error if PET cannot identify the environment or if the output cannot be parsed.
+     */
+    private async resolveViaJsonCli(executable: string): Promise<NativeEnvInfo> {
+        const args = ['resolve', executable, '--json'];
+        if (this.cacheDirectory) {
+            args.push('--cache-directory', this.cacheDirectory.fsPath);
+        }
+
+        this.outputChannel.info(`[pet] JSON CLI fallback resolve: ${this.toolPath} ${args.join(' ')}`);
+        const stopWatch = new StopWatch();
+
+        let stdout: string;
+        try {
+            stdout = await this.runPetCliProcess(args, CLI_FALLBACK_TIMEOUT_MS);
+        } catch (ex) {
+            sendTelemetryEvent(EventNames.PET_JSON_CLI_FALLBACK, stopWatch.elapsedTime, {
+                operation: 'resolve',
+                result: 'error',
+            });
+            throw ex;
+        }
+
+        let parsed: NativeEnvInfo;
+        try {
+            parsed = parseResolveCliOutput(stdout.trim(), executable);
+        } catch (ex) {
+            sendTelemetryEvent(EventNames.PET_JSON_CLI_FALLBACK, stopWatch.elapsedTime, {
+                operation: 'resolve',
+                result: 'error',
+            });
+            if (ex instanceof SyntaxError) {
+                this.outputChannel.error(
+                    '[pet] JSON CLI fallback: Failed to parse resolve output:',
+                    stdout.slice(0, 200),
+                );
+                throw new Error(`Failed to parse PET resolve --json output for ${executable}`);
+            }
+            // "not found" (null) or other parse error
+            throw ex;
+        }
+
+        sendTelemetryEvent(EventNames.PET_JSON_CLI_FALLBACK, stopWatch.elapsedTime, {
+            operation: 'resolve',
+            result: 'success',
+        });
+        return parsed;
+    }
+
+    /**
      * Compares two ConfigurationOptions objects for equality.
      * Uses property-by-property comparison to avoid issues with JSON.stringify
      * (property order, undefined values serialization).
@@ -776,7 +996,7 @@ class NativePythonFinderImpl implements NativePythonFinder {
     }
 }
 
-type ConfigurationOptions = {
+export type ConfigurationOptions = {
     workspaceDirectories: string[];
     environmentDirectories: string[];
     condaExecutable: string | undefined;
@@ -784,6 +1004,114 @@ type ConfigurationOptions = {
     poetryExecutable: string | undefined;
     cacheDirectory?: string;
 };
+
+/**
+ * Parses the stdout of `pet find --json` into a structured result.
+ * Returns `{ managers, environments }` arrays (each may be empty).
+ *
+ * @param stdout Raw stdout from `pet find --json`.
+ * @returns Parsed result object.
+ * @throws SyntaxError if `stdout` is not valid JSON or not the expected object shape.
+ */
+export function parseRefreshCliOutput(stdout: string): {
+    managers: NativeEnvManagerInfo[];
+    environments: NativeEnvInfo[];
+} {
+    // May throw SyntaxError on malformed JSON — callers must handle
+    const parsed = JSON.parse(stdout);
+    if (typeof parsed !== 'object' || parsed === null) {
+        throw new SyntaxError('PET find --json output is not a JSON object');
+    }
+    return {
+        managers: Array.isArray(parsed.managers) ? parsed.managers : [],
+        environments: Array.isArray(parsed.environments) ? parsed.environments : [],
+    };
+}
+
+/**
+ * Parses the stdout of `pet resolve <exe> --json` into a single environment info object.
+ *
+ * @param stdout Raw stdout from `pet resolve --json` (trimmed).
+ * @param executable The executable that was resolved (used in error messages).
+ * @returns The parsed `NativeEnvInfo`.
+ * @throws Error if `stdout` is `"null"` (environment not found) or malformed JSON.
+ */
+export function parseResolveCliOutput(stdout: string, executable: string): NativeEnvInfo {
+    // May throw SyntaxError on malformed JSON — callers must handle
+    const parsed: NativeEnvInfo | null = JSON.parse(stdout);
+    if (parsed === null) {
+        throw new Error(`PET could not identify environment for executable: ${executable}`);
+    }
+    return parsed;
+}
+
+/**
+ * Builds the CLI arguments array for a `pet find --json` invocation.
+ * This is exported for testability.
+ *
+ * @param config The configuration options (workspace dirs, tool paths, cache dir, env dirs).
+ * @param options Optional refresh options: a kind filter string or an array of URIs to search.
+ * @param venvFolders Additional virtual environment folder paths to include when searching
+ *   URI-based paths (needed because searchPaths may override environmentDirectories in PET).
+ * @returns The args array to pass to the PET binary (after 'find --json').
+ */
+export function buildFindCliArgs(
+    config: ConfigurationOptions,
+    options?: NativePythonEnvironmentKind | Uri[],
+    venvFolders: string[] = [],
+): string[] {
+    const args: string[] = ['find', '--json'];
+
+    if (options) {
+        if (typeof options === 'string') {
+            // NativePythonEnvironmentKind — filter by environment kind.
+            // In server mode, `build_refresh_config` keeps the configured workspace dirs when
+            // search_kind is set, so workspace-scoped envs of that kind (e.g. Venv) are found.
+            // Mirror that here by passing workspace dirs as positional search paths.
+            args.push('--kind', options);
+            for (const dir of config.workspaceDirectories) {
+                args.push(dir);
+            }
+        } else if (Array.isArray(options)) {
+            // Uri[] — these become the positional search paths (overriding workspace dirs).
+            // In server mode, `build_refresh_config` sets search_scope = Workspace, which causes
+            // find_and_report_envs to skip all global discovery phases (locators, PATH, global venvs)
+            // and only search the provided paths. Mirror that with --workspace.
+            args.push('--workspace');
+            for (const uri of options) {
+                args.push(uri.fsPath);
+            }
+            for (const folder of venvFolders) {
+                args.push(folder);
+            }
+        }
+    } else {
+        // No options: pass workspace directories as positional search paths
+        for (const dir of config.workspaceDirectories) {
+            args.push(dir);
+        }
+    }
+
+    // Always forward configuration flags
+    if (config.cacheDirectory) {
+        args.push('--cache-directory', config.cacheDirectory);
+    }
+    if (config.condaExecutable) {
+        args.push('--conda-executable', config.condaExecutable);
+    }
+    if (config.pipenvExecutable) {
+        args.push('--pipenv-executable', config.pipenvExecutable);
+    }
+    if (config.poetryExecutable) {
+        args.push('--poetry-executable', config.poetryExecutable);
+    }
+    if (config.environmentDirectories.length > 0) {
+        // PET accepts comma-separated dirs for --environment-directories
+        args.push('--environment-directories', config.environmentDirectories.join(','));
+    }
+
+    return args;
+}
 /**
  * Gets all custom virtual environment locations to look for environments from the legacy python settings (venvPath, venvFolders).
  */
