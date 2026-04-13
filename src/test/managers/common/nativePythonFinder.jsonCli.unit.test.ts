@@ -140,9 +140,18 @@ suite('buildFindCliArgs — Uri[] options', () => {
         assert.ok(!args.includes('--kind'), 'Should not include --kind');
     });
 
-    test('handles empty Uri[] with no venvFolders — only find --json --workspace', () => {
+    test('handles empty Uri[] with no venvFolders — falls back to workspace dirs, omits --workspace', () => {
+        // PET's CLI with --workspace but no positional paths falls back to CWD, not an empty search.
+        // When both options and venvFolders are empty, omit --workspace and use workspaceDirs instead.
+        const config = makeConfig({ workspaceDirectories: ['/myworkspace'] });
+        const args = buildFindCliArgs(config, []);
+        assert.ok(!args.includes('--workspace'), 'Should not include --workspace when no paths');
+        assert.ok(args.includes('/myworkspace'), 'Should fall back to workspace dirs');
+    });
+
+    test('handles empty Uri[] with no venvFolders and no workspaceDirs — only find --json', () => {
         const args = buildFindCliArgs(makeConfig(), []);
-        assert.deepStrictEqual(args, ['find', '--json', '--workspace']);
+        assert.deepStrictEqual(args, ['find', '--json']);
     });
 });
 
@@ -193,12 +202,25 @@ suite('buildFindCliArgs — configuration flags', () => {
         assert.strictEqual(args[idx + 1], '/home/user/.local/bin/poetry');
     });
 
-    test('adds --environment-directories as comma-joined string', () => {
+    test('passes each environment directory as a separate flag (not comma-joined)', () => {
         const config = makeConfig({ environmentDirectories: ['/home/.venvs', '/opt/envs'] });
         const args = buildFindCliArgs(config);
-        const idx = args.indexOf('--environment-directories');
-        assert.ok(idx >= 0, 'Should include --environment-directories');
-        assert.strictEqual(args[idx + 1], '/home/.venvs,/opt/envs', 'Dirs should be comma-joined');
+        // Each dir must appear as a separate --environment-directories flag
+        // (comma-joining breaks paths that contain commas on POSIX/Windows)
+        const flagIndices = args.reduce<number[]>(
+            (acc, a, i) => (a === '--environment-directories' ? [...acc, i] : acc),
+            [],
+        );
+        assert.strictEqual(flagIndices.length, 2, 'Should have two --environment-directories flags');
+        assert.strictEqual(args[flagIndices[0] + 1], '/home/.venvs');
+        assert.strictEqual(args[flagIndices[1] + 1], '/opt/envs');
+    });
+
+    test('paths with commas in environment-directories are passed safely (no splitting)', () => {
+        const config = makeConfig({ environmentDirectories: ['/my,path/envs', '/normal/envs'] });
+        const args = buildFindCliArgs(config);
+        assert.ok(args.includes('/my,path/envs'), 'Comma-containing path should appear as-is');
+        assert.ok(args.includes('/normal/envs'));
     });
 
     test('omits --environment-directories when array is empty', () => {
@@ -237,13 +259,12 @@ suite('buildFindCliArgs — edge cases', () => {
         assert.ok(args.includes('/path with spaces/project'));
     });
 
-    test('environmentDirectories with a single entry produces no comma', () => {
+    test('environmentDirectories with a single entry passes exactly one flag', () => {
         const config = makeConfig({ environmentDirectories: ['/only-one'] });
         const args = buildFindCliArgs(config);
         const idx = args.indexOf('--environment-directories');
         assert.ok(idx >= 0);
         assert.strictEqual(args[idx + 1], '/only-one');
-        assert.ok(!args[idx + 1].includes(','), 'Single entry should not have comma');
     });
 
     test('venvFolders are not added when options is a kind string', () => {

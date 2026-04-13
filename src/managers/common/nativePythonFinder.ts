@@ -768,9 +768,15 @@ class NativePythonFinderImpl implements NativePythonFinder {
     /**
      * Returns true when all server restart attempts have been exhausted.
      * Used to decide whether to fall back to CLI mode.
+     * Does NOT return true while a restart is in progress — the server is not exhausted
+     * if it is still mid-restart (concurrent callers must not bypass to CLI prematurely).
      */
     private isServerExhausted(): boolean {
-        return this.restartAttempts >= MAX_RESTART_ATTEMPTS && (this.startFailed || this.processExited);
+        return (
+            !this.isRestarting &&
+            this.restartAttempts >= MAX_RESTART_ATTEMPTS &&
+            (this.startFailed || this.processExited)
+        );
     }
 
     /**
@@ -786,8 +792,16 @@ class NativePythonFinderImpl implements NativePythonFinder {
         return new Promise((resolve, reject) => {
             const proc = spawnProcess(this.toolPath, args, { stdio: 'pipe' });
             let stdout = '';
+            // Guard against settling the promise more than once.
+            // The timeout handler and the 'close'/'error' handlers can both fire
+            // (e.g. timeout fires → SIGTERM sent → close event fires shortly after).
+            let settled = false;
 
             const timer = setTimeout(() => {
+                if (settled) {
+                    return;
+                }
+                settled = true;
                 try {
                     proc.kill('SIGTERM');
                     // Force kill after a short grace period if still running
@@ -810,16 +824,29 @@ class NativePythonFinderImpl implements NativePythonFinder {
                 this.outputChannel.debug(`[pet CLI] ${data.toString().trimEnd()}`);
             });
             proc.on('close', (code) => {
+                if (settled) {
+                    return;
+                }
                 clearTimeout(timer);
+                settled = true;
                 // If the process failed and produced no output, reject so caller gets a clear error
                 if (code !== 0 && stdout.trim().length === 0) {
                     reject(new Error(`PET CLI process exited with code ${code}`));
                     return;
                 }
+                if (code !== 0) {
+                    this.outputChannel.warn(
+                        `[pet CLI] Process exited with code ${code} but produced output; using output`,
+                    );
+                }
                 resolve(stdout);
             });
             proc.on('error', (err) => {
+                if (settled) {
+                    return;
+                }
                 clearTimeout(timer);
+                settled = true;
                 reject(err);
             });
         });
@@ -874,25 +901,31 @@ class NativePythonFinderImpl implements NativePythonFinder {
             nativeInfo.push(manager);
         }
 
+        // Resolve incomplete environments in parallel, mirroring doRefreshAttempt's Promise.all pattern.
+        const resolvePromises: Promise<void>[] = [];
         for (const env of parsed.environments ?? []) {
             if (env.executable && (!env.version || !env.prefix)) {
                 // Environment has an executable but incomplete metadata — resolve individually
-                try {
-                    const resolved = await this.resolveViaJsonCli(env.executable);
-                    this.outputChannel.info(`[pet CLI] Resolved env: ${resolved.executable}`);
-                    nativeInfo.push(resolved);
-                } catch {
-                    // If resolve fails, still include the partial env so nothing is silently dropped
-                    this.outputChannel.warn(
-                        `[pet CLI] Could not resolve incomplete env, using partial data: ${env.executable}`,
-                    );
-                    nativeInfo.push(env);
-                }
+                resolvePromises.push(
+                    this.resolveViaJsonCli(env.executable)
+                        .then((resolved) => {
+                            this.outputChannel.info(`[pet CLI] Resolved env: ${resolved.executable}`);
+                            nativeInfo.push(resolved);
+                        })
+                        .catch(() => {
+                            // If resolve fails, still include the partial env so nothing is silently dropped
+                            this.outputChannel.warn(
+                                `[pet CLI] Could not resolve incomplete env, using partial data: ${env.executable}`,
+                            );
+                            nativeInfo.push(env);
+                        }),
+                );
             } else {
                 this.outputChannel.info(`[pet CLI] Discovered env: ${env.executable ?? env.prefix}`);
                 nativeInfo.push(env);
             }
         }
+        await Promise.all(resolvePromises);
 
         sendTelemetryEvent(EventNames.PET_JSON_CLI_FALLBACK, stopWatch.elapsedTime, {
             operation: 'refresh',
@@ -926,6 +959,7 @@ class NativePythonFinderImpl implements NativePythonFinder {
                 operation: 'resolve',
                 result: 'error',
             });
+            this.outputChannel.error('[pet] JSON CLI fallback resolve failed:', ex);
             throw ex;
         }
 
@@ -1019,7 +1053,7 @@ export function parseRefreshCliOutput(stdout: string): {
 } {
     // May throw SyntaxError on malformed JSON — callers must handle
     const parsed = JSON.parse(stdout);
-    if (typeof parsed !== 'object' || parsed === null) {
+    if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
         throw new SyntaxError('PET find --json output is not a JSON object');
     }
     return {
@@ -1041,6 +1075,9 @@ export function parseResolveCliOutput(stdout: string, executable: string): Nativ
     const parsed: NativeEnvInfo | null = JSON.parse(stdout);
     if (parsed === null) {
         throw new Error(`PET could not identify environment for executable: ${executable}`);
+    }
+    if (typeof parsed !== 'object' || Array.isArray(parsed)) {
+        throw new SyntaxError(`PET resolve --json output is not a JSON object for ${executable}`);
     }
     return parsed;
 }
@@ -1077,12 +1114,23 @@ export function buildFindCliArgs(
             // In server mode, `build_refresh_config` sets search_scope = Workspace, which causes
             // find_and_report_envs to skip all global discovery phases (locators, PATH, global venvs)
             // and only search the provided paths. Mirror that with --workspace.
-            args.push('--workspace');
-            for (const uri of options) {
-                args.push(uri.fsPath);
-            }
-            for (const folder of venvFolders) {
-                args.push(folder);
+            //
+            // Edge case: if both options and venvFolders are empty, omit --workspace entirely.
+            // PET's CLI has no "search nothing" mode — with --workspace but no positional paths it
+            // falls back to CWD. Falling through to the workspace-dirs path is a better approximation
+            // of server-mode's empty-searchPaths behavior (which searches nothing meaningful) and
+            // avoids scanning an arbitrary directory.
+            const searchPaths = [...options.map((u) => u.fsPath), ...venvFolders];
+            if (searchPaths.length > 0) {
+                args.push('--workspace');
+                for (const p of searchPaths) {
+                    args.push(p);
+                }
+            } else {
+                // No search paths at all: fall back to workspace dirs as positional args
+                for (const dir of config.workspaceDirectories) {
+                    args.push(dir);
+                }
             }
         }
     } else {
@@ -1105,9 +1153,11 @@ export function buildFindCliArgs(
     if (config.poetryExecutable) {
         args.push('--poetry-executable', config.poetryExecutable);
     }
-    if (config.environmentDirectories.length > 0) {
-        // PET accepts comma-separated dirs for --environment-directories
-        args.push('--environment-directories', config.environmentDirectories.join(','));
+    // Pass each environment directory as a separate flag repetition.
+    // PET's --environment-directories uses value_delimiter=',' for env-var parsing, but
+    // repeating the flag on the CLI is the safe way to handle paths that contain commas.
+    for (const dir of config.environmentDirectories) {
+        args.push('--environment-directories', dir);
     }
 
     return args;
