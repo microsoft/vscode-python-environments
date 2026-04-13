@@ -40,12 +40,12 @@ import {
     setAllManagerSettings,
 } from './settings/settingHelpers';
 
-function generateId(name: string): string {
+function generateId(name: string, extensionId?: string): string {
     const newName = name.toLowerCase().replace(/[^a-zA-Z0-9-_]/g, '_');
     if (name !== newName) {
         traceVerbose(`Environment manager name "${name}"  was normalized to "${newName}"`);
     }
-    return `${getCallingExtension()}:${newName}`;
+    return `${getCallingExtension(extensionId)}:${newName}`;
 }
 
 export class PythonEnvironmentManagers implements EnvironmentManagers {
@@ -71,9 +71,9 @@ export class PythonEnvironmentManagers implements EnvironmentManagers {
 
     constructor(private readonly pm: PythonProjectManager) {}
 
-    public registerEnvironmentManager(manager: EnvironmentManager): Disposable {
+    public registerEnvironmentManager(manager: EnvironmentManager, options?: { extensionId?: string }): Disposable {
         const registrationStopWatch = new StopWatch();
-        const managerId = generateId(manager.name);
+        const managerId = generateId(manager.name, options?.extensionId);
         if (this._environmentManagers.has(managerId)) {
             const ex = new EnvironmentManagerAlreadyRegisteredError(
                 `Environment manager with id ${managerId} already registered`,
@@ -119,8 +119,8 @@ export class PythonEnvironmentManagers implements EnvironmentManagers {
         });
     }
 
-    public registerPackageManager(manager: PackageManager): Disposable {
-        const managerId = generateId(manager.name);
+    public registerPackageManager(manager: PackageManager, options?: { extensionId?: string }): Disposable {
+        const managerId = generateId(manager.name, options?.extensionId);
         if (this._packageManagers.has(managerId)) {
             const ex = new PackageManagerAlreadyRegisteredError(
                 `Package manager with id ${managerId} already registered`,
