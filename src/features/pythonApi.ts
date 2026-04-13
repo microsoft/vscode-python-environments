@@ -82,9 +82,9 @@ class PythonEnvironmentApiImpl implements PythonEnvironmentApi {
         );
     }
 
-    registerEnvironmentManager(manager: EnvironmentManager): Disposable {
+    registerEnvironmentManager(manager: EnvironmentManager, options?: { extensionId?: string }): Disposable {
         const disposables: Disposable[] = [];
-        disposables.push(this.envManagers.registerEnvironmentManager(manager));
+        disposables.push(this.envManagers.registerEnvironmentManager(manager, options));
         if (manager.onDidChangeEnvironments) {
             disposables.push(manager.onDidChangeEnvironments((e) => this._onDidChangeEnvironments.fire(e)));
         }
@@ -233,9 +233,9 @@ class PythonEnvironmentApiImpl implements PythonEnvironmentApi {
         return await handlePythonPath(context, this.envManagers.managers, projectEnvManagers);
     }
 
-    registerPackageManager(manager: PackageManager): Disposable {
+    registerPackageManager(manager: PackageManager, options?: { extensionId?: string }): Disposable {
         const disposables: Disposable[] = [];
-        disposables.push(this.envManagers.registerPackageManager(manager));
+        disposables.push(this.envManagers.registerPackageManager(manager, options));
         if (manager.onDidChangePackages) {
             disposables.push(manager.onDidChangePackages((e) => this._onDidChangePackages.fire(e)));
         }
