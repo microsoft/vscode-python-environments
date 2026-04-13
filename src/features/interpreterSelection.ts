@@ -298,6 +298,7 @@ export async function applyInitialEnvironmentSelection(
     });
 
     const allErrors: SettingResolutionError[] = [];
+    let workspaceFolderResolved = false;
 
     for (const folder of folders) {
         try {
@@ -328,6 +329,10 @@ export async function applyInitialEnvironmentSelection(
             // Cache only — NO settings.json write (shouldPersistSettings = false)
             await envManagers.setEnvironment(folder.uri, env, false);
 
+            if (env) {
+                workspaceFolderResolved = true;
+            }
+
             traceInfo(
                 `[interpreterSelection] ${folder.name}: ${env?.displayName ?? 'none'} (source: ${result.source})`,
             );
@@ -336,35 +341,72 @@ export async function applyInitialEnvironmentSelection(
         }
     }
 
-    // Also apply initial selection for global scope (no workspace folder)
-    // This ensures defaultInterpreterPath is respected even without a workspace
-    try {
-        const globalStopWatch = new StopWatch();
-        const { result, errors } = await resolvePriorityChainCore(undefined, envManagers, undefined, nativeFinder, api);
-        allErrors.push(...errors);
+    // Global scope: resolve a fallback Python environment for files opened OUTSIDE all
+    // workspace folders (e.g., /tmp/script.py). This is NOT a workspace folder — every
+    // workspace folder was already fully resolved and cached in the for-loop above,
+    // so switching between workspace folders is unaffected by whether this runs now or later.
+    //
+    // When at least one workspace folder resolved, we defer global scope to the background
+    // so it doesn't block post-selection startup (clearHangWatchdog, terminal init, telemetry).
+    // Errors inside resolveGlobalScope are handled internally:
+    //   - Setting resolution errors (bad paths, unknown managers) → notifyUserOfSettingErrors
+    //   - Unexpected crashes → logged via traceError, never silently swallowed
+    const resolveGlobalScope = async () => {
+        try {
+            const globalStopWatch = new StopWatch();
+            const { result, errors: globalErrors } = await resolvePriorityChainCore(
+                undefined,
+                envManagers,
+                undefined,
+                nativeFinder,
+                api,
+            );
 
-        const isPathA = result.environment !== undefined;
+            const isPathA = result.environment !== undefined;
+            const env = result.environment ?? (await result.manager.get(undefined));
 
-        // Get the specific environment if not already resolved
-        const env = result.environment ?? (await result.manager.get(undefined));
+            sendTelemetryEvent(EventNames.ENV_SELECTION_RESULT, globalStopWatch.elapsedTime, {
+                scope: 'global',
+                prioritySource: result.source,
+                managerId: result.manager.id,
+                resolutionPath: isPathA ? 'envPreResolved' : 'managerDiscovery',
+                hasPersistedSelection: env !== undefined,
+            });
 
-        sendTelemetryEvent(EventNames.ENV_SELECTION_RESULT, globalStopWatch.elapsedTime, {
-            scope: 'global',
-            prioritySource: result.source,
-            managerId: result.manager.id,
-            resolutionPath: isPathA ? 'envPreResolved' : 'managerDiscovery',
-            hasPersistedSelection: env !== undefined,
-        });
+            await envManagers.setEnvironments('global', env, false);
 
-        // Cache only — NO settings.json write (shouldPersistSettings = false)
-        await envManagers.setEnvironments('global', env, false);
+            traceInfo(`[interpreterSelection] global: ${env?.displayName ?? 'none'} (source: ${result.source})`);
 
-        traceInfo(`[interpreterSelection] global: ${env?.displayName ?? 'none'} (source: ${result.source})`);
-    } catch (err) {
-        traceError(`[interpreterSelection] Failed to set global environment: ${err}`);
+            if (globalErrors.length > 0) {
+                await notifyUserOfSettingErrors(globalErrors);
+            }
+        } catch (err) {
+            traceError(`[interpreterSelection] Failed to set global environment: ${err}`);
+        }
+    };
+
+    if (workspaceFolderResolved) {
+        // At least one workspace folder got a non-undefined environment (in multi-root,
+        // ANY folder succeeding is sufficient). ALL workspace folder envs are already
+        // active via setEnvironment calls in the loop — switching between folders in a
+        // multi-root workspace is not affected by deferring the global scope.
+        // Defer global scope to a background task so we don't block post-selection
+        // startup work in extension.ts (clearHangWatchdog, terminal init, telemetry).
+        // The outer .catch is a safety net — resolveGlobalScope has its own try/catch,
+        // so this only fires if the inner handler itself throws unexpectedly.
+        traceInfo('[interpreterSelection] Workspace env resolved, deferring global scope to background');
+        resolveGlobalScope().catch((err) =>
+            traceError(`[interpreterSelection] Background global scope resolution failed: ${err}`),
+        );
+    } else {
+        // Either: (a) no workspace folders are open, (b) every folder resolved with
+        // env=undefined (no Python found), or (c) every folder threw an error.
+        // In all cases the global environment is the user's primary fallback,
+        // so we must await it before returning.
+        await resolveGlobalScope();
     }
 
-    // Notify user if any settings could not be applied
+    // Notify user if any workspace-scoped settings could not be applied
     if (allErrors.length > 0) {
         await notifyUserOfSettingErrors(allErrors);
     }
