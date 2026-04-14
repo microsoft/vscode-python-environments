@@ -113,6 +113,15 @@ export enum EventNames {
      * - errorType: string (classified error category, on failure only)
      */
     MANAGER_LAZY_INIT = 'MANAGER.LAZY_INIT',
+    /**
+     * Telemetry event fired when a manager's fast path attempts to resolve
+     * a cached global environment (cross-session cache).
+     * Properties:
+     * - managerLabel: string (the manager's label, e.g. 'system')
+     * - result: 'hit' | 'miss' | 'stale' ('hit' = cached path resolved successfully,
+     *           'miss' = no cached path, 'stale' = cached path found but resolve failed)
+     */
+    GLOBAL_ENV_CACHE = 'GLOBAL_ENV.CACHE',
 }
 
 // Map all events to their properties
@@ -402,5 +411,17 @@ export interface IEventNamePropertyMapping {
         envCount: number;
         toolSource: string;
         errorType?: string;
+    };
+
+    /* __GDPR__
+        "global_env.cache": {
+            "managerLabel": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "owner": "eleanorjboyd" },
+            "result": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "owner": "eleanorjboyd" },
+            "<duration>": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "isMeasurement": true, "owner": "eleanorjboyd" }
+        }
+    */
+    [EventNames.GLOBAL_ENV_CACHE]: {
+        managerLabel: string;
+        result: 'hit' | 'miss' | 'stale';
     };
 }

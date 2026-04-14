@@ -139,6 +139,7 @@ function createManagerCases(): ManagerCase[] {
             createContext: (sandbox: sinon.SinonSandbox) => {
                 const getPersistedStub = sandbox.stub(sysCache, 'getSystemEnvForWorkspace');
                 const resolveStub = sandbox.stub(sysUtils, 'resolveSystemPythonEnvironmentPath');
+                sandbox.stub(sysCache, 'getSystemEnvForGlobal').resolves(undefined);
                 sandbox.stub(sysUtils, 'refreshPythons').resolves([]);
                 const manager = new SysPythonManager(createMockNativeFinder(), createMockApi(testUri), createMockLog());
                 return { manager, getPersistedStub, resolveStub };

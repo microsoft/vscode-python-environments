@@ -1,13 +1,14 @@
 import { ENVS_EXTENSION_ID } from '../../common/constants';
-import { getWorkspacePersistentState } from '../../common/persistentState';
+import { getGlobalPersistentState, getWorkspacePersistentState } from '../../common/persistentState';
 
 export const SYSTEM_WORKSPACE_KEY = `${ENVS_EXTENSION_ID}:system:WORKSPACE_SELECTED`;
 export const SYSTEM_GLOBAL_KEY = `${ENVS_EXTENSION_ID}:system:GLOBAL_SELECTED`;
 
 export async function clearSystemEnvCache(): Promise<void> {
-    const keys = [SYSTEM_WORKSPACE_KEY, SYSTEM_GLOBAL_KEY];
-    const state = await getWorkspacePersistentState();
-    await state.clear(keys);
+    const workspaceState = await getWorkspacePersistentState();
+    await workspaceState.clear([SYSTEM_WORKSPACE_KEY]);
+    const globalState = await getGlobalPersistentState();
+    await globalState.clear([SYSTEM_GLOBAL_KEY]);
 }
 
 export async function getSystemEnvForWorkspace(fsPath: string): Promise<string | undefined> {
@@ -48,11 +49,11 @@ export async function setSystemEnvForWorkspaces(fsPath: string[], envPath: strin
 }
 
 export async function getSystemEnvForGlobal(): Promise<string | undefined> {
-    const state = await getWorkspacePersistentState();
+    const state = await getGlobalPersistentState();
     return await state.get(SYSTEM_GLOBAL_KEY);
 }
 
 export async function setSystemEnvForGlobal(envPath: string | undefined): Promise<void> {
-    const state = await getWorkspacePersistentState();
+    const state = await getGlobalPersistentState();
     await state.set(SYSTEM_GLOBAL_KEY, envPath);
 }
