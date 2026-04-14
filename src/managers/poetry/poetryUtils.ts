@@ -118,13 +118,11 @@ export async function setPoetryForWorkspaces(fsPath: string[], envPath: string |
     await state.set(POETRY_WORKSPACE_KEY, data);
 }
 
-export async function getPoetry(native?: NativePythonFinder): Promise<string | undefined> {
-    let stage = 'checkSettings';
+export async function getPoetry(): Promise<string | undefined> {
     try {
         // Priority 1: Settings (if explicitly set and valid)
         const settingPath = getPoetryPathFromSettings();
         if (settingPath) {
-            stage = 'validateSettingsPath';
             if (await fs.exists(untildify(settingPath))) {
                 traceInfo(`Using poetry from settings: ${settingPath}`);
                 return untildify(settingPath);
@@ -133,9 +131,7 @@ export async function getPoetry(native?: NativePythonFinder): Promise<string | u
         }
 
         // Priority 2: In-memory cache
-        stage = 'checkCache';
         if (poetryPath) {
-            stage = 'validateCachePath';
             if (await fs.exists(untildify(poetryPath))) {
                 return untildify(poetryPath);
             }
@@ -143,16 +139,12 @@ export async function getPoetry(native?: NativePythonFinder): Promise<string | u
         }
 
         // Priority 3: Persistent state
-        stage = 'getPersistentState';
         const state = await getWorkspacePersistentState();
-        stage = 'checkPersistentState';
         const storedPath = await state.get<string>(POETRY_PATH_KEY);
         if (storedPath) {
-            stage = 'validatePersistentStatePath';
             if (await fs.exists(untildify(storedPath))) {
                 poetryPath = storedPath;
                 traceInfo(`Using poetry from persistent state: ${poetryPath}`);
-                // Also retrieve the virtualenvs path if we haven't already
                 if (!poetryVirtualenvsPath) {
                     getPoetryVirtualenvsPath(untildify(poetryPath)).catch((e) =>
                         traceError(`Error getting Poetry virtualenvs path: ${e}`),
@@ -164,44 +156,21 @@ export async function getPoetry(native?: NativePythonFinder): Promise<string | u
         }
 
         // Priority 4: PATH lookup
-        stage = 'pathLookup';
         poetryPath = await findPoetry();
         if (poetryPath) {
-            stage = 'setPoetryAfterPathLookup';
             await setPoetry(poetryPath);
             return poetryPath;
         }
 
         // Priority 5: Known user-install locations
-        stage = 'checkUserInstallLocations';
         const home = getUserHomeDir();
         if (home) {
             const poetryUserInstall = path.join(
                 home,
                 isWindows() ? 'AppData\\Roaming\\Python\\Scripts\\poetry.exe' : '.local/bin/poetry',
             );
-            stage = 'validateUserInstallPath';
             if (await fs.exists(poetryUserInstall)) {
                 poetryPath = poetryUserInstall;
-                stage = 'setPoetryAfterUserInstall';
-                await setPoetry(poetryPath);
-                return poetryPath;
-            }
-        }
-
-        // Priority 6: Native finder as fallback
-        stage = 'nativeFinderRefresh';
-        if (native) {
-            const data = await native.refresh(false);
-            stage = 'filterNativeFinderResults';
-            const managers = data
-                .filter((e) => !isNativeEnvInfo(e))
-                .map((e) => e as NativeEnvManagerInfo)
-                .filter((e) => e.tool.toLowerCase() === 'poetry');
-            if (managers.length > 0) {
-                poetryPath = managers[0].executable;
-                traceInfo(`Using poetry from native finder: ${poetryPath}`);
-                stage = 'setPoetryAfterNativeFinder';
                 await setPoetry(poetryPath);
                 return poetryPath;
             }
@@ -210,7 +179,7 @@ export async function getPoetry(native?: NativePythonFinder): Promise<string | u
         return undefined;
     } catch (ex) {
         const err = ex instanceof Error ? ex : new Error(String(ex));
-        (err as Error & { failureStage?: string }).failureStage = `getPoetry:${stage}`;
+        (err as Error & { failureStage?: string }).failureStage = `getPoetry`;
         throw err;
     }
 }
@@ -486,7 +455,7 @@ export async function resolvePoetryPath(
         if (e.kind !== NativePythonEnvironmentKind.poetry) {
             return undefined;
         }
-        const poetry = await getPoetry(nativeFinder);
+        const poetry = await getPoetry();
         if (!poetry) {
             traceError('Poetry not found while resolving environment');
             return undefined;

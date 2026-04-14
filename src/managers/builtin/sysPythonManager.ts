@@ -20,6 +20,7 @@ import {
 import { SysManagerStrings } from '../../common/localize';
 import { createDeferred, Deferred } from '../../common/utils/deferred';
 import { normalizePath } from '../../common/utils/pathUtils';
+import { getProjectFsPathForScope, tryFastPathGet } from '../common/fastPath';
 import { NativePythonFinder } from '../common/nativePythonFinder';
 import { getLatest } from '../common/utils';
 import {
@@ -114,7 +115,7 @@ export class SysPythonManager implements EnvironmentManager {
                 const discard = this.collection.map((c) => c);
 
                 // hit here is fine...
-                this.collection = await refreshPythons(hardRefresh, this.nativeFinder, this.api, this.log, this);
+                this.collection = (await refreshPythons(hardRefresh, this.nativeFinder, this.api, this.log, this)) ?? [];
                 await this.loadEnvMap();
 
                 const args = [
@@ -145,6 +146,22 @@ export class SysPythonManager implements EnvironmentManager {
     }
 
     async get(scope: GetEnvironmentScope): Promise<PythonEnvironment | undefined> {
+        const fastResult = await tryFastPathGet({
+            initialized: this._initialized,
+            setInitialized: (deferred) => {
+                this._initialized = deferred;
+            },
+            scope,
+            label: 'system',
+            getProjectFsPath: (s) => getProjectFsPathForScope(this.api, s),
+            getPersistedPath: (fsPath) => getSystemEnvForWorkspace(fsPath),
+            resolve: (p) => resolveSystemPythonEnvironmentPath(p, this.nativeFinder, this.api, this),
+            startBackgroundInit: () => this.internalRefresh(false, SysManagerStrings.sysManagerDiscovering),
+        });
+        if (fastResult) {
+            return fastResult.env;
+        }
+
         await this.initialize();
 
         if (scope instanceof Uri) {

@@ -28,7 +28,7 @@ function getPathFromFrame(frame: FrameData): string {
     return frame.filePath;
 }
 
-export function getCallingExtension(): string {
+export function getCallingExtension(extensionIdHint?: string): string {
     const pythonExts = [ENVS_EXTENSION_ID, PYTHON_EXTENSION_ID];
     const extensions = allExtensions();
     const otherExts = extensions.filter((ext) => !pythonExts.includes(ext.id));
@@ -92,6 +92,19 @@ export function getCallingExtension(): string {
             extensionIdCache.set(cacheKey, ext.id);
             return ext.id;
         }
+    }
+
+    // Use the provided extensionId hint as a fallback (e.g., during F5 debugging where
+    // stack-based detection fails because the file path doesn't contain the extension ID).
+    // Only accept the hint if it matches an actually loaded extension for safety.
+    if (extensionIdHint) {
+        const hintExt = extensions.find((ext) => ext.id === extensionIdHint);
+        if (hintExt) {
+            traceVerbose(`Using provided extensionId hint: ${extensionIdHint}`);
+            extensionIdCache.set(cacheKey, extensionIdHint);
+            return extensionIdHint;
+        }
+        traceWarn(`Provided extensionId hint '${extensionIdHint}' not found in loaded extensions, ignoring`);
     }
 
     // Fallback - we're likely being called from Python extension or built-in managers

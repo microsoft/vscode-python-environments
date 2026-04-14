@@ -260,10 +260,11 @@ class NativePythonFinderImpl implements NativePythonFinder {
             this.restartAttempts = 0;
             return environment;
         } catch (ex) {
-            // On resolve timeout (not configure — configure handles its own timeout),
+            // On resolve timeout or connection error (not configure — configure handles its own timeout),
             // kill the hung process so next request triggers restart
-            if (ex instanceof RpcTimeoutError && ex.method !== 'configure') {
-                this.outputChannel.warn('[pet] Resolve request timed out, killing hung process for restart');
+            if ((ex instanceof RpcTimeoutError && ex.method !== 'configure') || ex instanceof rpc.ConnectionError) {
+                const reason = ex instanceof rpc.ConnectionError ? 'crashed' : 'timed out';
+                this.outputChannel.warn(`[pet] Resolve request ${reason}, killing process for restart`);
                 this.killProcess();
                 this.processExited = true;
             }
@@ -435,7 +436,7 @@ class NativePythonFinderImpl implements NativePythonFinder {
         this.connection.dispose();
     }
 
-    private getRefreshOptions(options?: NativePythonEnvironmentKind | Uri[]): RefreshOptions | undefined {
+    private getRefreshOptions(options?: NativePythonEnvironmentKind | Uri[]): RefreshOptions {
         // Note: venvFolders is also fetched in getAllExtraSearchPaths() for configure().
         // This duplication is intentional: when searchPaths is provided to the native finder,
         // it may override (not supplement) the configured environmentDirectories.
@@ -452,8 +453,8 @@ class NativePythonFinderImpl implements NativePythonFinder {
                 return { searchPaths: uriSearchPaths };
             }
         }
-        // return undefined to use configured defaults (for nativeFinder refresh)
-        return undefined;
+        // return empty object to use configured defaults (for nativeFinder refresh)
+        return {};
     }
 
     private start(): rpc.MessageConnection {
@@ -574,11 +575,14 @@ class NativePythonFinderImpl implements NativePythonFinder {
             } catch (ex) {
                 lastError = ex;
 
-                // Only retry on timeout errors
-                if (ex instanceof RpcTimeoutError && ex.method !== 'configure') {
+                // Retry on timeout or connection errors (PET hung or crashed mid-request)
+                const isRetryable =
+                    (ex instanceof RpcTimeoutError && ex.method !== 'configure') || ex instanceof rpc.ConnectionError;
+                if (isRetryable) {
                     if (attempt < MAX_REFRESH_RETRIES) {
+                        const reason = ex instanceof rpc.ConnectionError ? 'crashed' : 'timed out';
                         this.outputChannel.warn(
-                            `[pet] Refresh timed out (attempt ${attempt + 1}/${MAX_REFRESH_RETRIES + 1}), restarting and retrying...`,
+                            `[pet] Refresh ${reason} (attempt ${attempt + 1}/${MAX_REFRESH_RETRIES + 1}), restarting and retrying...`,
                         );
                         // Kill and restart for retry
                         this.killProcess();
@@ -588,7 +592,7 @@ class NativePythonFinderImpl implements NativePythonFinder {
                     // Final attempt failed
                     this.outputChannel.error(`[pet] Refresh failed after ${MAX_REFRESH_RETRIES + 1} attempts`);
                 }
-                // Non-timeout errors or final timeout - rethrow
+                // Non-retryable errors or final attempt - rethrow
                 throw ex;
             }
         }
@@ -652,10 +656,11 @@ class NativePythonFinderImpl implements NativePythonFinder {
                 this.outputChannel.info(`[pet] Refresh succeeded on retry attempt ${attempt + 1}`);
             }
         } catch (ex) {
-            // On refresh timeout (not configure — configure handles its own timeout),
+            // On refresh timeout or connection error (not configure — configure handles its own timeout),
             // kill the hung process so next request triggers restart
-            if (ex instanceof RpcTimeoutError && ex.method !== 'configure') {
-                this.outputChannel.warn('[pet] Request timed out, killing hung process for restart');
+            if ((ex instanceof RpcTimeoutError && ex.method !== 'configure') || ex instanceof rpc.ConnectionError) {
+                const reason = ex instanceof rpc.ConnectionError ? 'crashed' : 'timed out';
+                this.outputChannel.warn(`[pet] PET process ${reason}, killing for restart`);
                 this.killProcess();
                 this.processExited = true;
             }

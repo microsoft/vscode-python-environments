@@ -5,6 +5,7 @@ import {
     CancellationToken,
     Event,
     EventEmitter,
+    l10n,
     LogOutputChannel,
     MarkdownString,
     ProgressLocation,
@@ -163,6 +164,15 @@ export class PoetryPackageManager implements PackageManager, Disposable {
         options: { install?: string[]; uninstall?: string[] },
         token?: CancellationToken,
     ): Promise<Package[]> {
+        const poetry = await getPoetry();
+        if (!poetry) {
+            throw new Error(
+                l10n.t(
+                    'Poetry executable not found. Install Poetry to manage packages, or set the "python.poetryPath" setting.',
+                ),
+            );
+        }
+
         // Handle uninstalls first
         if (options.uninstall && options.uninstall.length > 0) {
             try {
@@ -194,6 +204,15 @@ export class PoetryPackageManager implements PackageManager, Disposable {
     }
 
     private async refreshPackages(environment: PythonEnvironment): Promise<Package[]> {
+        const poetry = await getPoetry();
+        if (!poetry) {
+            throw new Error(
+                l10n.t(
+                    'Poetry executable not found. Install Poetry to manage packages, or set the "python.poetryPath" setting.',
+                ),
+            );
+        }
+
         let cwd = process.cwd();
         const projects = this.api.getPythonProjects();
         if (projects.length === 1) {

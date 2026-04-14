@@ -1,5 +1,5 @@
 import * as path from 'path';
-import { Disposable, EventEmitter, MarkdownString, ProgressLocation, Uri } from 'vscode';
+import { Disposable, EventEmitter, MarkdownString, ProgressLocation, Uri, workspace } from 'vscode';
 import {
     DidChangeEnvironmentEventArgs,
     DidChangeEnvironmentsEventArgs,
@@ -17,13 +17,19 @@ import {
 } from '../../api';
 import { PoetryStrings } from '../../common/localize';
 import { traceError, traceInfo } from '../../common/logging';
+import { StopWatch } from '../../common/stopWatch';
+import { EventNames } from '../../common/telemetry/constants';
+import { classifyError } from '../../common/telemetry/errorClassifier';
+import { sendTelemetryEvent } from '../../common/telemetry/sender';
 import { createDeferred, Deferred } from '../../common/utils/deferred';
 import { normalizePath } from '../../common/utils/pathUtils';
 import { withProgress } from '../../common/window.apis';
+import { PythonProjectManager } from '../../internal.api';
 import { NativePythonFinder } from '../common/nativePythonFinder';
-import { getLatest } from '../common/utils';
+import { getLatest, notifyMissingManagerIfDefault } from '../common/utils';
 import {
     clearPoetryCache,
+    getPoetry,
     getPoetryForGlobal,
     getPoetryForWorkspace,
     POETRY_GLOBAL,
@@ -48,6 +54,7 @@ export class PoetryManager implements EnvironmentManager, Disposable {
     constructor(
         private readonly nativeFinder: NativePythonFinder,
         private readonly api: PythonEnvironmentApi,
+        private readonly projectManager?: PythonProjectManager,
     ) {
         this.name = 'poetry';
         this.displayName = 'Poetry';
@@ -72,17 +79,28 @@ export class PoetryManager implements EnvironmentManager, Disposable {
         if (this._initialized) {
             return this._initialized.promise;
         }
-
         this._initialized = createDeferred();
+        const stopWatch = new StopWatch();
+        let result: 'success' | 'tool_not_found' | 'error' = 'success';
+        let envCount = 0;
+        let toolSource = 'none';
+        let errorType: string | undefined;
 
         try {
+            // Check if tool is findable before PET refresh (settings/cache/PATH only, no PET)
+            const hasExplicitSetting = !!workspace.getConfiguration('python').get<string>('poetryPath');
+            const preRefreshTool = await getPoetry();
+            if (preRefreshTool) {
+                toolSource = hasExplicitSetting ? 'settings' : 'local';
+            }
+
             await withProgress(
                 {
                     location: ProgressLocation.Window,
                     title: PoetryStrings.poetryDiscovering,
                 },
                 async () => {
-                    this.collection = await refreshPoetry(false, this.nativeFinder, this.api, this);
+                    this.collection = (await refreshPoetry(false, this.nativeFinder, this.api, this)) ?? [];
                     await this.loadEnvMap();
 
                     this._onDidChangeEnvironments.fire(
@@ -90,7 +108,33 @@ export class PoetryManager implements EnvironmentManager, Disposable {
                     );
                 },
             );
+
+            envCount = this.collection.length;
+
+            // If tool wasn't found via local lookup, check if refresh discovered it via PET
+            if (!preRefreshTool) {
+                const postRefreshTool = await getPoetry();
+                toolSource = postRefreshTool ? 'pet' : 'none';
+            }
+
+            if (toolSource === 'none') {
+                result = 'tool_not_found';
+                if (this.projectManager) {
+                    await notifyMissingManagerIfDefault('ms-python.python:poetry', this.projectManager, this.api);
+                }
+            }
+        } catch (ex) {
+            result = 'error';
+            errorType = classifyError(ex);
+            traceError('Poetry lazy initialization failed', ex);
         } finally {
+            sendTelemetryEvent(EventNames.MANAGER_LAZY_INIT, stopWatch.elapsedTime, {
+                managerName: 'poetry',
+                result,
+                envCount,
+                toolSource,
+                errorType,
+            });
             this._initialized.resolve();
         }
     }
@@ -128,7 +172,7 @@ export class PoetryManager implements EnvironmentManager, Disposable {
                 async () => {
                     traceInfo('Refreshing Poetry Environments');
                     const discard = this.collection.map((c) => c);
-                    this.collection = await refreshPoetry(true, this.nativeFinder, this.api, this);
+                    this.collection = (await refreshPoetry(true, this.nativeFinder, this.api, this)) ?? [];
 
                     await this.loadEnvMap();
 

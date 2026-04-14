@@ -1,4 +1,4 @@
-import { EventEmitter, MarkdownString, ProgressLocation, Uri } from 'vscode';
+import { Disposable, EventEmitter, MarkdownString, ProgressLocation, Uri, workspace } from 'vscode';
 import {
     DidChangeEnvironmentEventArgs,
     DidChangeEnvironmentsEventArgs,
@@ -15,12 +15,21 @@ import {
     SetEnvironmentScope,
 } from '../../api';
 import { PipenvStrings } from '../../common/localize';
+import { traceError, traceInfo } from '../../common/logging';
+import { StopWatch } from '../../common/stopWatch';
+import { EventNames } from '../../common/telemetry/constants';
+import { classifyError } from '../../common/telemetry/errorClassifier';
+import { sendTelemetryEvent } from '../../common/telemetry/sender';
 import { createDeferred, Deferred } from '../../common/utils/deferred';
 import { normalizePath } from '../../common/utils/pathUtils';
 import { withProgress } from '../../common/window.apis';
+import { PythonProjectManager } from '../../internal.api';
+import { getProjectFsPathForScope, tryFastPathGet } from '../common/fastPath';
 import { NativePythonFinder } from '../common/nativePythonFinder';
+import { notifyMissingManagerIfDefault } from '../common/utils';
 import {
     clearPipenvCache,
+    getPipenv,
     getPipenvForGlobal,
     getPipenvForWorkspace,
     refreshPipenv,
@@ -30,7 +39,7 @@ import {
     setPipenvForWorkspaces,
 } from './pipenvUtils';
 
-export class PipenvManager implements EnvironmentManager {
+export class PipenvManager implements EnvironmentManager, Disposable {
     private collection: PythonEnvironment[] = [];
     private fsPathToEnv: Map<string, PythonEnvironment> = new Map();
     private globalEnv: PythonEnvironment | undefined;
@@ -53,6 +62,7 @@ export class PipenvManager implements EnvironmentManager {
     constructor(
         public readonly nativeFinder: NativePythonFinder,
         public readonly api: PythonEnvironmentApi,
+        private readonly projectManager?: PythonProjectManager,
     ) {
         this.name = 'pipenv';
         this.displayName = 'Pipenv';
@@ -71,17 +81,28 @@ export class PipenvManager implements EnvironmentManager {
         if (this._initialized) {
             return this._initialized.promise;
         }
-
         this._initialized = createDeferred();
+        const stopWatch = new StopWatch();
+        let result: 'success' | 'tool_not_found' | 'error' = 'success';
+        let envCount = 0;
+        let toolSource = 'none';
+        let errorType: string | undefined;
 
         try {
+            // Check if tool is findable before PET refresh (settings/cache/PATH only, no PET)
+            const hasExplicitSetting = !!workspace.getConfiguration('python').get<string>('pipenvPath');
+            const preRefreshTool = await getPipenv();
+            if (preRefreshTool) {
+                toolSource = hasExplicitSetting ? 'settings' : 'local';
+            }
+
             await withProgress(
                 {
                     location: ProgressLocation.Window,
                     title: PipenvStrings.pipenvDiscovering,
                 },
                 async () => {
-                    this.collection = await refreshPipenv(false, this.nativeFinder, this.api, this);
+                    this.collection = (await refreshPipenv(false, this.nativeFinder, this.api, this)) ?? [];
                     await this.loadEnvMap();
 
                     this._onDidChangeEnvironments.fire(
@@ -89,7 +110,33 @@ export class PipenvManager implements EnvironmentManager {
                     );
                 },
             );
+
+            envCount = this.collection.length;
+
+            // If tool wasn't found via local lookup, check if refresh discovered it via PET
+            if (!preRefreshTool) {
+                const postRefreshTool = await getPipenv();
+                toolSource = postRefreshTool ? 'pet' : 'none';
+            }
+
+            if (toolSource === 'none') {
+                result = 'tool_not_found';
+                if (this.projectManager) {
+                    await notifyMissingManagerIfDefault('ms-python.python:pipenv', this.projectManager, this.api);
+                }
+            }
+        } catch (ex) {
+            result = 'error';
+            errorType = classifyError(ex);
+            traceError('Pipenv lazy initialization failed', ex);
         } finally {
+            sendTelemetryEvent(EventNames.MANAGER_LAZY_INIT, stopWatch.elapsedTime, {
+                managerName: 'pipenv',
+                result,
+                envCount,
+                toolSource,
+                errorType,
+            });
             this._initialized.resolve();
         }
     }
@@ -132,8 +179,9 @@ export class PipenvManager implements EnvironmentManager {
                 title: PipenvStrings.pipenvRefreshing,
             },
             async () => {
+                traceInfo('Refreshing Pipenv Environments');
                 const oldCollection = [...this.collection];
-                this.collection = await refreshPipenv(hardRefresh, this.nativeFinder, this.api, this);
+                this.collection = (await refreshPipenv(hardRefresh, this.nativeFinder, this.api, this)) ?? [];
                 await this.loadEnvMap();
 
                 // Fire change events for environments that were added or removed
@@ -255,6 +303,35 @@ export class PipenvManager implements EnvironmentManager {
     }
 
     async get(scope: GetEnvironmentScope): Promise<PythonEnvironment | undefined> {
+        const fastResult = await tryFastPathGet({
+            initialized: this._initialized,
+            setInitialized: (deferred) => {
+                this._initialized = deferred;
+            },
+            scope,
+            label: 'pipenv',
+            getProjectFsPath: (s) => getProjectFsPathForScope(this.api, s),
+            getPersistedPath: (fsPath) => getPipenvForWorkspace(fsPath),
+            resolve: (p) => resolvePipenvPath(p, this.nativeFinder, this.api, this),
+            startBackgroundInit: () =>
+                withProgress(
+                    { location: ProgressLocation.Window, title: PipenvStrings.pipenvDiscovering },
+                    async () => {
+                        this.collection = (await refreshPipenv(false, this.nativeFinder, this.api, this)) ?? [];
+                        await this.loadEnvMap();
+                        this._onDidChangeEnvironments.fire(
+                            this.collection.map((e) => ({
+                                environment: e,
+                                kind: EnvironmentChangeKind.add,
+                            })),
+                        );
+                    },
+                ),
+        });
+        if (fastResult) {
+            return fastResult.env;
+        }
+
         await this.initialize();
 
         if (scope === undefined) {

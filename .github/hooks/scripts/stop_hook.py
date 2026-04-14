@@ -110,13 +110,12 @@ def main() -> int:
         response = {
             "hookSpecificOutput": {
                 "hookEventName": "Stop",
-                "decision": "block",
+                "decision": "warn",
                 "reason": (
                     "You have uncommitted TypeScript changes. "
-                    "Before finishing, use the run-pre-commit-checks skill "
+                    "Before finishing, consider using the run-pre-commit-checks skill "
                     "or manually run: npm run lint && npm run compile-tests && npm run unittest. "
-                    "If checks pass and changes are ready, commit them. "
-                    "If this session is just research/exploration, you can proceed without committing."
+                    "Ask the user whether to commit or leave changes uncommitted."
                 ),
             }
         }
@@ -128,10 +127,10 @@ def main() -> int:
         response = {
             "hookSpecificOutput": {
                 "hookEventName": "Stop",
-                "decision": "block",
+                "decision": "warn",
                 "reason": (
                     "You have staged changes that haven't been committed. "
-                    "Either commit them with a proper message or unstage them before finishing."
+                    "Ask the user whether to commit them or leave them staged."
                 ),
             }
         }

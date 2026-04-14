@@ -9,10 +9,6 @@ import update_ext_version
 
 TEST_DATETIME = "2022-03-14 01:23:45"
 
-# The build ID is calculated via:
-#     "1" + datetime.datetime.strptime(TEST_DATETIME,"%Y-%m-%d %H:%M:%S").strftime('%j%H%M')
-EXPECTED_BUILD_ID = "10730123"
-
 
 def create_package_json(directory, version):
     """Create `package.json` in `directory` with a specified version of `version`."""
@@ -71,7 +67,7 @@ def test_invalid_args(tmp_path, version, args):
             ["--build-id", "999999999999"],
             ("1", "1", "999999999999", "rc"),
         ),
-        ("1.1.0-rc", [], ("1", "1", EXPECTED_BUILD_ID, "rc")),
+        ("1.1.0-rc", [], ("1", "1", "0", "rc")),
         (
             "1.0.0-rc",
             ["--release"],
@@ -80,7 +76,7 @@ def test_invalid_args(tmp_path, version, args):
         (
             "1.1.0-rc",
             ["--for-publishing"],
-            ("1", "1", EXPECTED_BUILD_ID, ""),
+            ("1", "1", "0", ""),
         ),
         (
             "1.0.0-rc",
@@ -95,7 +91,7 @@ def test_invalid_args(tmp_path, version, args):
         (
             "1.1.0-rc",
             [],
-            ("1", "1", EXPECTED_BUILD_ID, "rc"),
+            ("1", "1", "0", "rc"),
         ),
     ],
 )

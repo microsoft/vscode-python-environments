@@ -24,6 +24,7 @@ import { traceError } from '../../common/logging';
 import { createDeferred, Deferred } from '../../common/utils/deferred';
 import { normalizePath } from '../../common/utils/pathUtils';
 import { showErrorMessage, showInformationMessage, withProgress } from '../../common/window.apis';
+import { getProjectFsPathForScope, tryFastPathGet } from '../common/fastPath';
 import { NativePythonFinder } from '../common/nativePythonFinder';
 import { CondaSourcingStatus } from './condaSourcingUtils';
 import {
@@ -94,7 +95,7 @@ export class CondaEnvManager implements EnvironmentManager, Disposable {
                     title: CondaStrings.condaDiscovering,
                 },
                 async () => {
-                    this.collection = await refreshCondaEnvs(false, this.nativeFinder, this.api, this.log, this);
+                    this.collection = (await refreshCondaEnvs(false, this.nativeFinder, this.api, this.log, this)) ?? [];
                     await this.loadEnvMap();
 
                     this._onDidChangeEnvironments.fire(
@@ -245,7 +246,7 @@ export class CondaEnvManager implements EnvironmentManager, Disposable {
                 async () => {
                     this.log.info('Refreshing Conda Environments');
                     const discard = this.collection.map((c) => c);
-                    this.collection = await refreshCondaEnvs(true, this.nativeFinder, this.api, this.log, this);
+                    this.collection = (await refreshCondaEnvs(true, this.nativeFinder, this.api, this.log, this)) ?? [];
 
                     await this.loadEnvMap();
 
@@ -260,6 +261,32 @@ export class CondaEnvManager implements EnvironmentManager, Disposable {
         }
     }
     async get(scope: GetEnvironmentScope): Promise<PythonEnvironment | undefined> {
+        const fastResult = await tryFastPathGet({
+            initialized: this._initialized,
+            setInitialized: (deferred) => {
+                this._initialized = deferred;
+            },
+            scope,
+            label: 'conda',
+            getProjectFsPath: (s) => getProjectFsPathForScope(this.api, s),
+            getPersistedPath: (fsPath) => getCondaForWorkspace(fsPath),
+            resolve: (p) => resolveCondaPath(p, this.nativeFinder, this.api, this.log, this),
+            startBackgroundInit: () =>
+                withProgress({ location: ProgressLocation.Window, title: CondaStrings.condaDiscovering }, async () => {
+                    this.collection = (await refreshCondaEnvs(false, this.nativeFinder, this.api, this.log, this)) ?? [];
+                    await this.loadEnvMap();
+                    this._onDidChangeEnvironments.fire(
+                        this.collection.map((e) => ({
+                            environment: e,
+                            kind: EnvironmentChangeKind.add,
+                        })),
+                    );
+                }),
+        });
+        if (fastResult) {
+            return fastResult.env;
+        }
+
         await this.initialize();
         if (scope instanceof Uri) {
             let env = this.fsPathToEnv.get(normalizePath(scope.fsPath));
@@ -486,10 +513,17 @@ export class CondaEnvManager implements EnvironmentManager, Disposable {
 
     private findEnvironmentByPath(fsPath: string): PythonEnvironment | undefined {
         const normalized = normalizePath(fsPath);
+
+        // Prefer exact match first to avoid ambiguous parent/grandparent collisions.
+        // E.g. base env at /miniconda3 must not be confused with a named env at
+        // /miniconda3/envs/<name> whose grandparent is also /miniconda3.
+        const exact = this.collection.find((e) => normalizePath(e.environmentPath.fsPath) === normalized);
+        if (exact) {
+            return exact;
+        }
+
         return this.collection.find((e) => {
-            const n = normalizePath(e.environmentPath.fsPath);
             return (
-                n === normalized ||
                 normalizePath(path.dirname(e.environmentPath.fsPath)) === normalized ||
                 normalizePath(path.dirname(path.dirname(e.environmentPath.fsPath))) === normalized
             );
