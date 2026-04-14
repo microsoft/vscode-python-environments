@@ -6,6 +6,8 @@ import * as path from 'path';
 import * as sinon from 'sinon';
 import { Uri } from 'vscode';
 import { PythonEnvironment } from '../../../api';
+import { EventNames } from '../../../common/telemetry/constants';
+import * as telemetrySender from '../../../common/telemetry/sender';
 import { createDeferred } from '../../../common/utils/deferred';
 import { FastPathOptions, tryFastPathGet } from '../../../managers/common/fastPath';
 
@@ -47,20 +49,119 @@ function createOpts(overrides?: Partial<FastPathOptions>): FastPathTestOptions {
 }
 
 suite('tryFastPathGet', () => {
+    let sendTelemetryStub: sinon.SinonStub;
+
+    setup(() => {
+        sendTelemetryStub = sinon.stub(telemetrySender, 'sendTelemetryEvent');
+    });
+
+    teardown(() => {
+        sinon.restore();
+    });
+
     test('returns resolved env when persisted path exists and init not started', async () => {
         const { opts } = createOpts();
         const result = await tryFastPathGet(opts);
 
         assert.ok(result, 'Should return a result');
         assert.strictEqual(result!.env.envId.id, 'test-env');
+        assert.ok(sendTelemetryStub.notCalled, 'Should not emit global cache telemetry for workspace scope');
     });
 
-    test('returns undefined when scope is undefined', async () => {
+    test('returns undefined when scope is undefined and no getGlobalPersistedPath', async () => {
         const { opts } = createOpts({ scope: undefined });
         const result = await tryFastPathGet(opts);
 
         assert.strictEqual(result, undefined);
         assert.ok((opts.getPersistedPath as sinon.SinonStub).notCalled);
+    });
+
+    test('returns resolved env for global scope when getGlobalPersistedPath returns a path', async () => {
+        const globalPath = path.resolve('usr', 'bin', 'python3');
+        const resolve = sinon.stub().resolves(createMockEnv(globalPath));
+        const { opts } = createOpts({
+            scope: undefined,
+            getGlobalPersistedPath: sinon.stub().resolves(globalPath),
+            resolve,
+        });
+        const result = await tryFastPathGet(opts);
+
+        assert.ok(result, 'Should return a result for global scope');
+        assert.strictEqual(result!.env.envId.id, 'test-env');
+        assert.ok(resolve.calledOnceWith(globalPath), 'Should resolve the global persisted path');
+        assert.ok((opts.getPersistedPath as sinon.SinonStub).notCalled, 'Should not call workspace getPersistedPath');
+
+        // Verify cache hit telemetry
+        assert.ok(sendTelemetryStub.calledOnce, 'Should send telemetry for global cache hit');
+        const [eventName, , props] = sendTelemetryStub.firstCall.args;
+        assert.strictEqual(eventName, EventNames.GLOBAL_ENV_CACHE);
+        assert.strictEqual(props.result, 'hit');
+        assert.strictEqual(props.managerLabel, 'test');
+    });
+
+    test('returns undefined for global scope when getGlobalPersistedPath returns undefined', async () => {
+        const { opts } = createOpts({
+            scope: undefined,
+            getGlobalPersistedPath: sinon.stub().resolves(undefined),
+        });
+        const result = await tryFastPathGet(opts);
+
+        assert.strictEqual(result, undefined);
+
+        // Verify cache miss telemetry
+        assert.ok(sendTelemetryStub.calledOnce, 'Should send telemetry for global cache miss');
+        const [eventName, , props] = sendTelemetryStub.firstCall.args;
+        assert.strictEqual(eventName, EventNames.GLOBAL_ENV_CACHE);
+        assert.strictEqual(props.result, 'miss');
+    });
+
+    test('reports stale when global cached path resolves to undefined', async () => {
+        const globalPath = path.resolve('usr', 'bin', 'python3');
+        const { opts } = createOpts({
+            scope: undefined,
+            getGlobalPersistedPath: sinon.stub().resolves(globalPath),
+            resolve: sinon.stub().resolves(undefined),
+        });
+        const result = await tryFastPathGet(opts);
+
+        assert.strictEqual(result, undefined, 'Should fall through when cached env resolves to undefined');
+        assert.ok(sendTelemetryStub.calledOnce, 'Should send telemetry for stale cache');
+        const [eventName, , props] = sendTelemetryStub.firstCall.args;
+        assert.strictEqual(eventName, EventNames.GLOBAL_ENV_CACHE);
+        assert.strictEqual(props.result, 'stale');
+    });
+
+    test('returns undefined for global scope when cached path resolve fails', async () => {
+        const globalPath = path.resolve('usr', 'bin', 'python3');
+        const { opts } = createOpts({
+            scope: undefined,
+            getGlobalPersistedPath: sinon.stub().resolves(globalPath),
+            resolve: sinon.stub().rejects(new Error('python was uninstalled')),
+        });
+        const result = await tryFastPathGet(opts);
+
+        assert.strictEqual(result, undefined, 'Should fall through when cached global env is stale');
+
+        // Verify cache stale telemetry
+        assert.ok(sendTelemetryStub.calledOnce, 'Should send telemetry for stale global cache');
+        const [eventName, , props] = sendTelemetryStub.firstCall.args;
+        assert.strictEqual(eventName, EventNames.GLOBAL_ENV_CACHE);
+        assert.strictEqual(props.result, 'stale');
+    });
+
+    test('global scope fast path starts background init when initialized is undefined', async () => {
+        const globalPath = path.resolve('usr', 'bin', 'python3');
+        const startBackgroundInit = sinon.stub().resolves();
+        const { opts, setInitialized } = createOpts({
+            scope: undefined,
+            getGlobalPersistedPath: sinon.stub().resolves(globalPath),
+            startBackgroundInit,
+        });
+        const result = await tryFastPathGet(opts);
+
+        assert.ok(result, 'Should return fast-path result');
+        assert.ok(startBackgroundInit.calledOnce, 'Should start background init for global scope');
+        assert.ok(setInitialized.calledOnce, 'Should set initialized for global scope');
     });
 
     test('returns undefined when init is already completed', async () => {
