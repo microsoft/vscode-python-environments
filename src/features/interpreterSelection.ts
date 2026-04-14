@@ -299,6 +299,8 @@ export async function applyInitialEnvironmentSelection(
 
     const allErrors: SettingResolutionError[] = [];
     let workspaceFolderResolved = false;
+    let resolvedFolderCount = 0;
+    const selectionStopWatch = new StopWatch();
 
     for (const folder of folders) {
         try {
@@ -331,6 +333,7 @@ export async function applyInitialEnvironmentSelection(
 
             if (env) {
                 workspaceFolderResolved = true;
+                resolvedFolderCount++;
             }
 
             traceInfo(
@@ -410,6 +413,16 @@ export async function applyInitialEnvironmentSelection(
     if (allErrors.length > 0) {
         await notifyUserOfSettingErrors(allErrors);
     }
+
+    // Checkpoint 3: env selection function returning — duration measures blocking time only.
+    // If globalScopeDeferred=true, the global scope is still running in the background
+    // and its duration is NOT included in this measurement.
+    sendTelemetryEvent(EventNames.ENV_SELECTION_COMPLETED, selectionStopWatch.elapsedTime, {
+        globalScopeDeferred: workspaceFolderResolved,
+        workspaceFolderCount: folders.length,
+        resolvedFolderCount,
+        settingErrorCount: allErrors.length,
+    });
 }
 
 /**

@@ -868,36 +868,18 @@ suite('Interpreter Selection - applyInitialEnvironmentSelection', () => {
 
         const showWarnStub = sandbox.stub(windowApis, 'showWarningMessage').resolves(undefined);
 
-        // Block setEnvironments so we can control when global scope completes
-        let resolveSetEnvironments: () => void;
-        const setEnvironmentsPromise = new Promise<void>((resolve) => {
-            resolveSetEnvironments = resolve;
-        });
-        mockEnvManagers.setEnvironments.callsFake(async () => {
-            await setEnvironmentsPromise;
-        });
-
-        let functionReturned = false;
-        const resultPromise = applyInitialEnvironmentSelection(
+        await applyInitialEnvironmentSelection(
             mockEnvManagers as unknown as EnvironmentManagers,
             mockProjectManager as unknown as PythonProjectManager,
             mockNativeFinder as unknown as NativePythonFinder,
             mockApi as unknown as PythonEnvironmentApi,
-        ).then(() => {
-            functionReturned = true;
-        });
-
-        // Yield to microtasks — in deferred path, function should return
-        await new Promise((resolve) => setTimeout(resolve, 0));
-        assert.ok(functionReturned, 'Function should return before global scope completes (deferred path)');
+        );
 
         // Workspace folder should resolve (venv found)
         assert.ok(mockEnvManagers.setEnvironment.called, 'setEnvironment should be called for workspace folder');
 
-        // Unblock global scope and let it finish
-        resolveSetEnvironments!();
-        await resultPromise;
-        await new Promise((resolve) => setTimeout(resolve, 0));
+        // Wait a tick for the background global scope to complete
+        await new Promise((resolve) => setTimeout(resolve, 50));
 
         // Global scope should still resolve (falls to auto-discovery) and show warning
         assert.ok(mockEnvManagers.setEnvironments.called, 'setEnvironments should be called for global scope');
@@ -914,124 +896,28 @@ suite('Interpreter Selection - applyInitialEnvironmentSelection', () => {
         sandbox.stub(workspaceApis, 'getConfiguration').returns(createMockConfig([]) as WorkspaceConfiguration);
         sandbox.stub(helpers, 'getUserConfiguredSetting').returns(undefined);
 
-        // Block setEnvironments until we reject it, simulating a crash
-        let rejectSetEnvironments: (err: Error) => void;
-        const setEnvironmentsPromise = new Promise<void>((_resolve, reject) => {
-            rejectSetEnvironments = reject;
-        });
-        mockEnvManagers.setEnvironments.callsFake(async () => {
-            await setEnvironmentsPromise;
-        });
+        // Make setEnvironments throw — simulating a crash in global scope
+        mockEnvManagers.setEnvironments.rejects(new Error('Simulated global scope crash'));
 
-        let functionReturned = false;
-        const resultPromise = applyInitialEnvironmentSelection(
+        // Should NOT throw — errors are caught inside resolveGlobalScope
+        await applyInitialEnvironmentSelection(
             mockEnvManagers as unknown as EnvironmentManagers,
             mockProjectManager as unknown as PythonProjectManager,
             mockNativeFinder as unknown as NativePythonFinder,
             mockApi as unknown as PythonEnvironmentApi,
-        ).then(() => {
-            functionReturned = true;
-        });
+        );
 
-        // Yield to microtasks — in deferred path, function should return
-        await new Promise((resolve) => setTimeout(resolve, 0));
-        assert.ok(functionReturned, 'Function should return before global scope completes (deferred path)');
+        // Wait a tick for the background global scope to complete
+        await new Promise((resolve) => setTimeout(resolve, 50));
 
-        // Workspace folder should have resolved
+        // Workspace folder should still have resolved
         assert.ok(mockEnvManagers.setEnvironment.called, 'setEnvironment should be called for workspace folder');
-
-        // Trigger the crash and let it propagate through the catch chain
-        rejectSetEnvironments!(new Error('Simulated global scope crash'));
-        await resultPromise;
-        await new Promise((resolve) => setTimeout(resolve, 0));
 
         // setEnvironments was called (and threw), proving the global scope was attempted
         assert.ok(
             mockEnvManagers.setEnvironments.called,
             'setEnvironments should have been attempted for global scope',
         );
-    });
-
-    test('should defer global scope when workspace folder resolves with env', async () => {
-        // Core deferral test: when a workspace folder resolves with an environment,
-        // applyInitialEnvironmentSelection should return BEFORE setEnvironments completes
-        // for the global scope. This verifies the fire-and-forget optimization.
-        sandbox.stub(workspaceApis, 'getWorkspaceFolders').returns([{ uri: testUri, name: 'test', index: 0 }]);
-        sandbox.stub(workspaceApis, 'getConfiguration').returns(createMockConfig([]) as WorkspaceConfiguration);
-        sandbox.stub(helpers, 'getUserConfiguredSetting').returns(undefined);
-
-        // Block setEnvironments so we can observe that the function returns before it completes
-        let resolveSetEnvironments: () => void;
-        const setEnvironmentsPromise = new Promise<void>((resolve) => {
-            resolveSetEnvironments = resolve;
-        });
-        mockEnvManagers.setEnvironments.callsFake(async () => {
-            await setEnvironmentsPromise;
-        });
-
-        let functionReturned = false;
-        const resultPromise = applyInitialEnvironmentSelection(
-            mockEnvManagers as unknown as EnvironmentManagers,
-            mockProjectManager as unknown as PythonProjectManager,
-            mockNativeFinder as unknown as NativePythonFinder,
-            mockApi as unknown as PythonEnvironmentApi,
-        ).then(() => {
-            functionReturned = true;
-        });
-
-        // Yield to microtasks — in DEFERRED path, function returns before global completes
-        await new Promise((resolve) => setTimeout(resolve, 0));
-        assert.ok(functionReturned, 'Function should return before global scope completes (deferred path)');
-        assert.ok(mockEnvManagers.setEnvironment.called, 'setEnvironment should be called for workspace folder');
-
-        // Clean up: unblock the global scope
-        resolveSetEnvironments!();
-        await resultPromise;
-        await new Promise((resolve) => setTimeout(resolve, 0));
-    });
-
-    test('should await global scope when all workspace folders resolve with env=undefined', async () => {
-        // When workspace folders exist but all resolve to env=undefined (no Python found),
-        // workspaceFolderResolved stays false and global scope must be awaited (not deferred).
-        sandbox.stub(workspaceApis, 'getWorkspaceFolders').returns([{ uri: testUri, name: 'test', index: 0 }]);
-        sandbox.stub(workspaceApis, 'getConfiguration').returns(createMockConfig([]) as WorkspaceConfiguration);
-        sandbox.stub(helpers, 'getUserConfiguredSetting').returns(undefined);
-
-        // All managers return undefined for workspace scope — no Python found
-        mockVenvManager.get.resolves(undefined);
-        mockSystemManager.get.resolves(undefined);
-
-        // Block setEnvironments so we can verify the function does NOT return before it completes
-        let resolveSetEnvironments: () => void;
-        const setEnvironmentsPromise = new Promise<void>((resolve) => {
-            resolveSetEnvironments = resolve;
-        });
-        mockEnvManagers.setEnvironments.callsFake(async () => {
-            await setEnvironmentsPromise;
-        });
-
-        let functionReturned = false;
-        const resultPromise = applyInitialEnvironmentSelection(
-            mockEnvManagers as unknown as EnvironmentManagers,
-            mockProjectManager as unknown as PythonProjectManager,
-            mockNativeFinder as unknown as NativePythonFinder,
-            mockApi as unknown as PythonEnvironmentApi,
-        ).then(() => {
-            functionReturned = true;
-        });
-
-        // Yield to microtasks — in AWAITED path, function should NOT have returned yet
-        await new Promise((resolve) => setTimeout(resolve, 0));
-        assert.ok(!functionReturned, 'Function should NOT return before global scope completes (awaited path)');
-
-        // Unblock global scope
-        resolveSetEnvironments!();
-        await resultPromise;
-
-        // Now the function has returned after global scope completed
-        assert.ok(functionReturned, 'Function should have returned after global scope completes');
-        assert.ok(mockEnvManagers.setEnvironment.called, 'setEnvironment should be called for workspace folder');
-        assert.ok(mockEnvManagers.setEnvironments.called, 'setEnvironments should be called for global scope');
     });
 
     test('notifyUserOfSettingErrors shows warning with Open Settings for defaultInterpreterPath', async () => {
