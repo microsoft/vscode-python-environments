@@ -1082,7 +1082,7 @@ export async function createNamedCondaEnvironment(
         },
         async () => {
             try {
-                const bin = os.platform() === 'win32' ? 'python.exe' : 'python';
+                const bin = os.platform() === 'win32' ? 'python.exe' : path.join('bin', 'python');
                 const output = await runCondaExecutable(runArgs);
                 log.info(output);
 
@@ -1166,7 +1166,7 @@ export async function createPrefixCondaEnvironment(
             },
             async () => {
                 try {
-                    const bin = os.platform() === 'win32' ? 'python.exe' : 'python';
+                    const bin = os.platform() === 'win32' ? 'python.exe' : path.join('bin', 'python');
                     const output = await runCondaExecutable(runArgs);
                     log.info(output);
                     const version = await getVersion(prefix);
