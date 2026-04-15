@@ -26,6 +26,8 @@ const RESOLVE_TIMEOUT_MS = 30_000; // 30 seconds for single resolve
 
 // CLI fallback timeout: generous budget since it's a full process spawn doing a full scan
 const CLI_FALLBACK_TIMEOUT_MS = 120_000; // 2 minutes
+// Limit concurrent resolve subprocesses to avoid CPU/memory pressure on machines with many envs
+const CLI_RESOLVE_CONCURRENCY = 4;
 
 // Restart/recovery constants
 const MAX_RESTART_ATTEMPTS = 3;
@@ -885,13 +887,13 @@ class NativePythonFinderImpl implements NativePythonFinder {
         let parsed: { managers: NativeEnvManagerInfo[]; environments: NativeEnvInfo[] };
         try {
             parsed = parseRefreshCliOutput(stdout);
-        } catch {
+        } catch (ex) {
             sendTelemetryEvent(EventNames.PET_JSON_CLI_FALLBACK, stopWatch.elapsedTime, {
                 operation: 'refresh',
                 result: 'error',
             });
-            this.outputChannel.error('[pet] JSON CLI fallback: Failed to parse find output:', stdout.slice(0, 500));
-            throw new Error('Failed to parse PET find --json output');
+            this.outputChannel.error('[pet] JSON CLI fallback: Failed to parse find output:', stdout.slice(0, 500), ex);
+            throw new Error('Failed to parse PET find --json output', { cause: ex });
         }
 
         const nativeInfo: NativeInfo[] = [];
@@ -901,13 +903,28 @@ class NativePythonFinderImpl implements NativePythonFinder {
             nativeInfo.push(manager);
         }
 
-        // Resolve incomplete environments in parallel, mirroring doRefreshAttempt's Promise.all pattern.
-        const resolvePromises: Promise<void>[] = [];
+        // Collect environments that need individual resolve calls.
+        // Incomplete environments have an executable but are missing version or prefix.
+        const toResolve: NativeEnvInfo[] = [];
         for (const env of parsed.environments ?? []) {
             if (env.executable && (!env.version || !env.prefix)) {
-                // Environment has an executable but incomplete metadata — resolve individually
-                resolvePromises.push(
-                    this.resolveViaJsonCli(env.executable)
+                toResolve.push(env);
+            } else {
+                this.outputChannel.info(`[pet CLI] Discovered env: ${env.executable ?? env.prefix}`);
+                nativeInfo.push(env);
+            }
+        }
+
+        // Resolve incomplete environments with bounded concurrency to avoid spawning too many
+        // subprocesses at once on machines with many incomplete environments.
+        // Each resolveViaJsonCli() spawns a new OS process, unlike server mode where all resolve
+        // calls share a single long-lived process — so unbounded parallelism would cause CPU/memory
+        // pressure. Process in batches of CLI_RESOLVE_CONCURRENCY.
+        for (let i = 0; i < toResolve.length; i += CLI_RESOLVE_CONCURRENCY) {
+            const batch = toResolve.slice(i, i + CLI_RESOLVE_CONCURRENCY);
+            await Promise.all(
+                batch.map((env) =>
+                    this.resolveViaJsonCli(env.executable!)
                         .then((resolved) => {
                             this.outputChannel.info(`[pet CLI] Resolved env: ${resolved.executable}`);
                             nativeInfo.push(resolved);
@@ -919,13 +936,9 @@ class NativePythonFinderImpl implements NativePythonFinder {
                             );
                             nativeInfo.push(env);
                         }),
-                );
-            } else {
-                this.outputChannel.info(`[pet CLI] Discovered env: ${env.executable ?? env.prefix}`);
-                nativeInfo.push(env);
-            }
+                ),
+            );
         }
-        await Promise.all(resolvePromises);
 
         sendTelemetryEvent(EventNames.PET_JSON_CLI_FALLBACK, stopWatch.elapsedTime, {
             operation: 'refresh',
@@ -1090,7 +1103,8 @@ export function parseResolveCliOutput(stdout: string, executable: string): Nativ
  * @param options Optional refresh options: a kind filter string or an array of URIs to search.
  * @param venvFolders Additional virtual environment folder paths to include when searching
  *   URI-based paths (needed because searchPaths may override environmentDirectories in PET).
- * @returns The args array to pass to the PET binary (after 'find --json').
+ * @returns The args array to pass directly to the PET binary, starting with `['find', '--json']`
+ *   followed by the positional search paths and configuration flags.
  */
 export function buildFindCliArgs(
     config: ConfigurationOptions,
