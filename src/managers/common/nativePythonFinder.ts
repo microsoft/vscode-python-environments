@@ -892,8 +892,12 @@ class NativePythonFinderImpl implements NativePythonFinder {
                 operation: 'refresh',
                 result: 'error',
             });
-            this.outputChannel.error('[pet] JSON CLI fallback: Failed to parse find output:', stdout.slice(0, 500), ex);
-            throw new Error('Failed to parse PET find --json output', { cause: ex });
+            this.outputChannel.error(
+                `[pet] JSON CLI fallback: Failed to parse find output (first 500 chars): ${stdout.slice(0, 500)}`,
+                ex,
+            );
+            const cause = ex instanceof Error ? `: ${ex.message}` : '';
+            throw new Error(`Failed to parse PET find --json output${cause}`);
         }
 
         const nativeInfo: NativeInfo[] = [];
