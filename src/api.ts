@@ -393,9 +393,9 @@ export interface EnvironmentManager {
      *
      * @remarks
      * Called when the user:
-     * - Runs the "Python: Create Environment" command (which prompts for a manager to use).
-     * - Clicks the "+" button on an environment manager in the Python Environments view.
-     * - Creates a new environment as part of the new Python package project creation wizard.
+     * - Invokes the `python.createEnvironment` command (which prompts for a manager to use).
+     * - Uses the add-environment action for an environment manager in the Python Environments view.
+     * - Creates a new environment as part of a Python package project creation flow.
      */
     create?(scope: CreateEnvironmentScope, options?: CreateEnvironmentOptions): Promise<PythonEnvironment | undefined>;
 
