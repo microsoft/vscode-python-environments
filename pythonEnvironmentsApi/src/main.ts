@@ -455,8 +455,12 @@ export interface EnvironmentManager {
      * - Selects an environment in the environment picker or clicks the checkmark button in the tree view.
      * - Creates a new environment and the extension auto-selects it.
      *
-     * Also called at extension startup during initial environment selection to cache the active
-     * environment, and when a Python project is removed (with `environment` set to `undefined`).
+     * Also called at extension startup during initial environment selection to initialize or
+     * reconcile the active environment state. This startup call may pass the already-persisted or
+     * previously-selected environment; implementations should treat it as idempotent and avoid
+     * unnecessary work or side effects, including firing change events, unless the selected
+     * environment actually changes. Also called when a Python project is removed (with
+     * `environment` set to `undefined`).
      */
     set(scope: SetEnvironmentScope, environment?: PythonEnvironment): Promise<void>;
 
