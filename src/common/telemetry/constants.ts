@@ -113,6 +113,15 @@ export enum EventNames {
      * - errorType: string (classified error category, on failure only)
      */
     MANAGER_LAZY_INIT = 'MANAGER.LAZY_INIT',
+    /**
+     * Telemetry event fired when the JSON CLI fallback is used for environment discovery.
+     * Triggered when the PET JSON-RPC server mode is exhausted after all restart attempts.
+     * Properties:
+     * - operation: 'refresh' | 'resolve'
+     * - result: 'success' | 'error'
+     * - duration: number (milliseconds taken for the CLI operation)
+     */
+    PET_JSON_CLI_FALLBACK = 'PET.JSON_CLI_FALLBACK',
 }
 
 // Map all events to their properties
@@ -402,5 +411,17 @@ export interface IEventNamePropertyMapping {
         envCount: number;
         toolSource: string;
         errorType?: string;
+    };
+
+    /* __GDPR__
+        "pet.json_cli_fallback": {
+            "operation": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "owner": "StellaHuang95" },
+            "result": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "owner": "StellaHuang95" },
+            "<duration>": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "isMeasurement": true, "owner": "StellaHuang95" }
+        }
+    */
+    [EventNames.PET_JSON_CLI_FALLBACK]: {
+        operation: 'refresh' | 'resolve';
+        result: 'success' | 'error';
     };
 }
