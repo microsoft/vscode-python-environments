@@ -1233,30 +1233,38 @@ export async function getAllExtraSearchPaths(): Promise<string[]> {
     const globalSearchPaths = getGlobalSearchPaths().filter((path) => path && path.trim() !== '');
     searchDirectories.push(...globalSearchPaths);
 
-    // Get workspaceSearchPaths
-    const workspaceSearchPaths = getWorkspaceSearchPaths();
+    // Get workspaceSearchPaths — scoped per workspace folder in multi-root workspaces
+    const workspaceFolders = getWorkspaceFolders();
+    const workspaceSearchPathsPerFolder: { paths: string[]; folder?: Uri }[] = [];
 
-    // Resolve relative paths against workspace folders
-    for (const searchPath of workspaceSearchPaths) {
-        if (!searchPath || searchPath.trim() === '') {
-            continue;
+    if (workspaceFolders && workspaceFolders.length > 0) {
+        for (const folder of workspaceFolders) {
+            const paths = getWorkspaceSearchPaths(folder.uri);
+            workspaceSearchPathsPerFolder.push({ paths, folder: folder.uri });
         }
+    } else {
+        // No workspace folders — fall back to unscoped call
+        workspaceSearchPathsPerFolder.push({ paths: getWorkspaceSearchPaths() });
+    }
 
-        const trimmedPath = searchPath.trim();
+    // Resolve relative paths against the specific folder they came from
+    for (const { paths, folder } of workspaceSearchPathsPerFolder) {
+        for (const searchPath of paths) {
+            if (!searchPath || searchPath.trim() === '') {
+                continue;
+            }
 
-        if (isAbsolutePath(trimmedPath)) {
-            // Absolute path - use as is
-            searchDirectories.push(trimmedPath);
-        } else {
-            // Relative path - resolve against all workspace folders
-            const workspaceFolders = getWorkspaceFolders();
-            if (workspaceFolders) {
-                for (const workspaceFolder of workspaceFolders) {
-                    const resolvedPath = path.resolve(workspaceFolder.uri.fsPath, trimmedPath);
-                    searchDirectories.push(resolvedPath);
-                }
+            const trimmedPath = searchPath.trim();
+
+            if (isAbsolutePath(trimmedPath)) {
+                // Absolute path - use as is
+                searchDirectories.push(trimmedPath);
+            } else if (folder) {
+                // Relative path - resolve against the specific folder it came from
+                const resolvedPath = path.resolve(folder.fsPath, trimmedPath);
+                searchDirectories.push(resolvedPath);
             } else {
-                traceWarn('No workspace folders found for relative search path:', trimmedPath);
+                traceWarn('No workspace folder for relative search path:', trimmedPath);
             }
         }
     }
@@ -1298,9 +1306,9 @@ export function resetWorkspaceSearchPathsGlobalWarningFlag(): void {
  * Gets the most specific workspace-level setting available for workspaceSearchPaths.
  * Supports glob patterns which are expanded by PET.
  */
-function getWorkspaceSearchPaths(): string[] {
+function getWorkspaceSearchPaths(scope?: Uri): string[] {
     try {
-        const envConfig = getConfiguration('python-envs');
+        const envConfig = getConfiguration('python-envs', scope);
         const inspection = envConfig.inspect<string[]>('workspaceSearchPaths');
 
         if (inspection?.globalValue && !workspaceSearchPathsGlobalWarningShown) {
