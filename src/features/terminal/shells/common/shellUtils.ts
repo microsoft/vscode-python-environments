@@ -1,7 +1,9 @@
+import { Terminal } from 'vscode';
 import { PythonCommandRunConfiguration, PythonEnvironment } from '../../../../api';
 import { isWindows } from '../../../../common/utils/platformUtils';
 import { getConfiguration } from '../../../../common/workspace.apis';
 import { ShellConstants } from '../../../common/shellConstants';
+import { identifyTerminalShell } from '../../../common/shellDetector';
 import { quoteArgs } from '../../../execution/execUtils';
 
 /**
@@ -58,6 +60,7 @@ export function normalizeShellPath(filePath: string, shellType?: string): string
     }
     return filePath;
 }
+
 export function getShellActivationCommand(
     shell: string,
     environment: PythonEnvironment,
@@ -76,6 +79,7 @@ export function getShellActivationCommand(
 
     return activation;
 }
+
 export function getShellDeactivationCommand(
     shell: string,
     environment: PythonEnvironment,
@@ -159,4 +163,20 @@ export const shellIntegrationSupportedShells = [
  */
 export function shouldUseProfileActivation(shellType: string): boolean {
     return isWsl() || !shellIntegrationSupportedShells.includes(shellType);
+}
+
+/**
+ * Returns the appropriate sequence to clear the current line in the terminal based on the shell type.
+ * For PowerShell and CMD, it uses the ANSI escape code to clear the entire line and return the cursor to the start.
+ * For other shells, it uses Ctrl+U to clear from the cursor to the start of the line.
+ */
+export function getClearLineSequence(terminal: Terminal): string {
+    const shell = identifyTerminalShell(terminal);
+    switch (shell) {
+        case ShellConstants.PWSH:
+        case ShellConstants.CMD:
+            return '\x1b[2K\r'; // Clear entire line and return cursor to start
+        default:
+            return '\x15'; // Ctrl+U to clear from cursor to start of line
+    }
 }

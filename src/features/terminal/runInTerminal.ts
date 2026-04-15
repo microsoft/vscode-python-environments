@@ -1,12 +1,12 @@
 import { Terminal, TerminalShellExecution } from 'vscode';
 import { PythonEnvironment, PythonTerminalExecutionOptions } from '../../api';
+import { traceLog } from '../../common/logging';
 import { createDeferred } from '../../common/utils/deferred';
 import { onDidEndTerminalShellExecution } from '../../common/window.apis';
 import { ShellConstants } from '../common/shellConstants';
 import { identifyTerminalShell } from '../common/shellDetector';
 import { quoteArgs } from '../execution/execUtils';
-import { normalizeShellPath } from './shells/common/shellUtils';
-import { traceLog } from '../../common/logging';
+import { getClearLineSequence, normalizeShellPath } from './shells/common/shellUtils';
 
 export async function runInTerminal(
     environment: PythonEnvironment,
@@ -52,10 +52,12 @@ export async function runInTerminal(
         await deferred.promise;
     } else {
         let text = quoteArgs([executable, ...allArgs]).join(' ');
+        const clearLineSequence = getClearLineSequence(terminal);
         if (shellType === ShellConstants.PWSH && !text.startsWith('&')) {
             // PowerShell requires commands to be prefixed with '&' to run them.
             text = `& ${text}`;
         }
+        terminal.sendText(clearLineSequence, false); // Clear the line before sending the command
         terminal.sendText(`${text}\n`);
         traceLog(`runInTerminal: sendText ${text}`);
     }

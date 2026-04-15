@@ -11,6 +11,7 @@ import { PythonEnvironment } from '../../api';
 import { traceError, traceInfo, traceVerbose } from '../../common/logging';
 import { onDidEndTerminalShellExecution, onDidStartTerminalShellExecution } from '../../common/window.apis';
 import { getActivationCommand, getDeactivationCommand } from '../common/activation';
+import { getClearLineSequence } from './shells/common/shellUtils';
 import { getShellIntegrationTimeout, isTaskTerminal } from './utils';
 
 export interface DidChangeTerminalActivationStateEvent {
@@ -195,17 +196,21 @@ export class TerminalActivationImpl implements TerminalActivationInternal {
     }
 
     private activateLegacy(terminal: Terminal, environment: PythonEnvironment) {
-        const activationCommands = getActivationCommand(terminal, environment);
-        if (activationCommands) {
-            terminal.sendText(activationCommands);
+        const activationCommand = getActivationCommand(terminal, environment);
+        const clearLineSequence = getClearLineSequence(terminal);
+        if (activationCommand) {
+            terminal.sendText(clearLineSequence, false); // Clear the line before activation command
+            terminal.sendText(activationCommand);
             this.activatedTerminals.set(terminal, environment);
         }
     }
 
     private deactivateLegacy(terminal: Terminal, environment: PythonEnvironment) {
-        const deactivationCommands = getDeactivationCommand(terminal, environment);
-        if (deactivationCommands) {
-            terminal.sendText(deactivationCommands);
+        const deactivationCommand = getDeactivationCommand(terminal, environment);
+        const clearLineSequence = getClearLineSequence(terminal);
+        if (deactivationCommand) {
+            terminal.sendText(clearLineSequence, false); // Clear the line before deactivation command
+            terminal.sendText(deactivationCommand);
             this.activatedTerminals.delete(terminal);
         }
     }
