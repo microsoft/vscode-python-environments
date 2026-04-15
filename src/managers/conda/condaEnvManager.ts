@@ -311,7 +311,12 @@ export class CondaEnvManager implements EnvironmentManager, Disposable {
             : undefined;
 
         if (scope === undefined) {
+            const before = this.globalEnv;
+            this.globalEnv = checkedEnv;
             await setCondaForGlobal(checkedEnv?.environmentPath?.fsPath);
+            if (before?.envId.id !== checkedEnv?.envId.id) {
+                this._onDidChangeEnvironment.fire({ uri: undefined, old: before, new: checkedEnv });
+            }
         } else if (scope instanceof Uri) {
             const folder = this.api.getPythonProject(scope);
             const fsPath = folder?.uri?.fsPath ?? scope.fsPath;
@@ -327,12 +332,16 @@ export class CondaEnvManager implements EnvironmentManager, Disposable {
                 }
 
                 const normalizedFsPath = normalizePath(fsPath);
+                const before = this.fsPathToEnv.get(normalizedFsPath);
                 if (checkedEnv) {
                     this.fsPathToEnv.set(normalizedFsPath, checkedEnv);
                 } else {
                     this.fsPathToEnv.delete(normalizedFsPath);
                 }
                 await setCondaForWorkspace(fsPath, checkedEnv?.environmentPath.fsPath);
+                if (before?.envId.id !== checkedEnv?.envId.id) {
+                    this._onDidChangeEnvironment.fire({ uri: scope, old: before, new: checkedEnv });
+                }
             }
         } else if (Array.isArray(scope) && scope.every((u) => u instanceof Uri)) {
             const projects: PythonProject[] = [];
