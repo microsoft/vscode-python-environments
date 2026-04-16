@@ -40,10 +40,6 @@ contents (e.g. a `pyproject.toml`, `.venv`, `environment.yml`, `Pipfile`, `poetr
 
 If the bug only reproduces with certain settings, please include the relevant entries
 from your `settings.json` (user and/or workspace).
-
-Note: If a GIF or screenshot would help, consider tools like
-https://github.com/vkohaupt/vokoscreenNG, https://www.cockos.com/licecap/,
-https://github.com/phw/peek or https://www.screentogif.com/ .
 -->
 
 1. XXX
