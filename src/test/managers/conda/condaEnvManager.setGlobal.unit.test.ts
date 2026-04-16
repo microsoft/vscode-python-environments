@@ -1,29 +1,11 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import assert from 'assert';
 import * as sinon from 'sinon';
-import { Uri } from 'vscode';
-import { PythonEnvironment, PythonEnvironmentApi } from '../../../api';
-import { PythonEnvironmentImpl } from '../../../internal.api';
+import { PythonEnvironmentApi } from '../../../api';
 import { CondaEnvManager } from '../../../managers/conda/condaEnvManager';
 import * as condaUtils from '../../../managers/conda/condaUtils';
 import { NativePythonFinder } from '../../../managers/common/nativePythonFinder';
-
-function makeEnv(name: string, envPath: string, version: string = '3.12.0'): PythonEnvironment {
-    return new PythonEnvironmentImpl(
-        { id: `${name}-test`, managerId: 'ms-python.python:conda' },
-        {
-            name,
-            displayName: `${name} (${version})`,
-            displayPath: envPath,
-            version,
-            environmentPath: Uri.file(envPath),
-            sysPrefix: envPath,
-            execInfo: {
-                run: { executable: 'python' },
-            },
-        },
-    );
-}
+import { makeMockPythonEnvironment as makeEnv } from '../../mocks/pythonEnvironment';
 
 function createManager(): CondaEnvManager {
     const manager = new CondaEnvManager(
