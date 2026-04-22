@@ -290,7 +290,6 @@ export async function applyInitialEnvironmentSelection(
         `[interpreterSelection] Applying initial environment selection for ${folders.length} workspace folder(s)`,
     );
 
-    // Checkpoint 1: env selection starting — managers are registered
     sendTelemetryEvent(EventNames.ENV_SELECTION_STARTED, activationToReadyDurationMs, {
         registeredManagerCount: envManagers.managers.length,
         registeredManagerIds: envManagers.managers.map((m) => m.id).join(','),
@@ -314,17 +313,13 @@ export async function applyInitialEnvironmentSelection(
             );
             allErrors.push(...errors);
 
-            // Checkpoint 2: priority chain resolved — which path?
-            const isPathA = result.environment !== undefined;
-
-            // Get the specific environment if not already resolved
             const env = result.environment ?? (await result.manager.get(folder.uri));
 
             sendTelemetryEvent(EventNames.ENV_SELECTION_RESULT, scopeStopWatch.elapsedTime, {
                 scope: 'workspace',
                 prioritySource: result.source,
                 managerId: result.manager.id,
-                resolutionPath: isPathA ? 'envPreResolved' : 'managerDiscovery',
+                resolutionPath: result.environment ? 'envPreResolved' : 'managerDiscovery',
                 hasPersistedSelection: env !== undefined,
             });
 
@@ -344,16 +339,8 @@ export async function applyInitialEnvironmentSelection(
         }
     }
 
-    // Global scope: resolve a fallback Python environment for files opened OUTSIDE all
-    // workspace folders (e.g., /tmp/script.py). This is NOT a workspace folder — every
-    // workspace folder was already fully resolved and cached in the for-loop above,
-    // so switching between workspace folders is unaffected by whether this runs now or later.
-    //
-    // When at least one workspace folder resolved, we defer global scope to the background
-    // so it doesn't block post-selection startup (clearHangWatchdog, terminal init, telemetry).
-    // Errors inside resolveGlobalScope are handled internally:
-    //   - Setting resolution errors (bad paths, unknown managers) → notifyUserOfSettingErrors
-    //   - Unexpected crashes → logged via traceError, never silently swallowed
+    // Resolve global scope (fallback for files outside workspace folders).
+    // Deferred to background when a workspace folder already resolved.
     const resolveGlobalScope = async (): Promise<SettingResolutionError[]> => {
         try {
             const globalStopWatch = new StopWatch();
@@ -365,17 +352,17 @@ export async function applyInitialEnvironmentSelection(
                 api,
             );
 
-            const isPathA = result.environment !== undefined;
             const env = result.environment ?? (await result.manager.get(undefined));
 
             sendTelemetryEvent(EventNames.ENV_SELECTION_RESULT, globalStopWatch.elapsedTime, {
                 scope: 'global',
                 prioritySource: result.source,
                 managerId: result.manager.id,
-                resolutionPath: isPathA ? 'envPreResolved' : 'managerDiscovery',
+                resolutionPath: result.environment ? 'envPreResolved' : 'managerDiscovery',
                 hasPersistedSelection: env !== undefined,
             });
 
+            // Cache only — NO settings.json write
             await envManagers.setEnvironments('global', env, false);
 
             traceInfo(`[interpreterSelection] global: ${env?.displayName ?? 'none'} (source: ${result.source})`);
@@ -388,13 +375,7 @@ export async function applyInitialEnvironmentSelection(
     };
 
     if (workspaceFolderResolved) {
-        // At least one workspace folder got a non-undefined environment (in multi-root,
-        // ANY folder succeeding is sufficient). ALL workspace folder envs are already
-        // active via setEnvironment calls in the loop — switching between folders in a
-        // multi-root workspace is not affected by deferring the global scope.
-        // Defer global scope to a background task so we don't block post-selection
-        // startup work in extension.ts (clearHangWatchdog, terminal init, telemetry).
-        // Global errors are notified separately since we can't aggregate with workspace errors.
+        // Defer global scope so it doesn't block post-selection startup.
         traceInfo('[interpreterSelection] Workspace env resolved, deferring global scope to background');
         resolveGlobalScope()
             .then(async (globalErrors) => {
@@ -404,11 +385,7 @@ export async function applyInitialEnvironmentSelection(
             })
             .catch((err) => traceError(`[interpreterSelection] Background global scope resolution failed: ${err}`));
     } else {
-        // Either: (a) no workspace folders are open, (b) every folder resolved with
-        // env=undefined (no Python found), or (c) every folder threw an error.
-        // In all cases the global environment is the user's primary fallback,
-        // so we must await it before returning. Errors are aggregated with workspace
-        // errors so notifyUserOfSettingErrors can dedupe across both scopes.
+        // No workspace folder resolved — global scope is the primary fallback, must await.
         const globalErrors = await resolveGlobalScope();
         allErrors.push(...globalErrors);
     }
@@ -418,9 +395,7 @@ export async function applyInitialEnvironmentSelection(
         await notifyUserOfSettingErrors(allErrors);
     }
 
-    // Checkpoint 3: env selection function returning — duration measures blocking time only.
-    // If globalScopeDeferred=true, the global scope is still running in the background
-    // and its duration is NOT included in this measurement.
+    // Duration measures blocking time only (excludes deferred global scope).
     sendTelemetryEvent(EventNames.ENV_SELECTION_COMPLETED, selectionStopWatch.elapsedTime, {
         globalScopeDeferred: workspaceFolderResolved,
         workspaceFolderCount: folders.length,
