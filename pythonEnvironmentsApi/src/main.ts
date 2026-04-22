@@ -343,6 +343,14 @@ export interface QuickCreateConfig {
 
 /**
  * Interface representing an environment manager.
+ *
+ * @remarks
+ * Methods on this interface are invoked both by the Python Environments extension itself
+ * (in response to UI actions, startup, terminal activation, script execution, and so on)
+ * and directly by other extensions that consume the published API. Any "called when…"
+ * notes on individual methods list representative triggers only — they are not
+ * exhaustive, and the precise set of call sites may evolve over time. Implementations
+ * should focus on the documented contract rather than any specific caller.
  */
 export interface EnvironmentManager {
     /**
@@ -396,6 +404,11 @@ export interface EnvironmentManager {
      * @param scope - The scope within which to create the environment.
      * @param options - Optional parameters for creating the Python environment.
      * @returns A promise that resolves to the created Python environment, or undefined if creation failed.
+     *
+     * @remarks
+     * Invoked when an environment of this manager's type should be created for the given
+     * scope. Typical triggers include user-initiated environment-creation flows and
+     * programmatic creation via the API.
      */
     create?(scope: CreateEnvironmentScope, options?: CreateEnvironmentOptions): Promise<PythonEnvironment | undefined>;
 
@@ -403,6 +416,10 @@ export interface EnvironmentManager {
      * Removes the specified Python environment.
      * @param environment - The Python environment to remove.
      * @returns A promise that resolves when the environment is removed.
+     *
+     * @remarks
+     * Invoked to delete the given environment. Typical triggers include an explicit user
+     * action (such as a "Delete Environment" command) and programmatic removal via the API.
      */
     remove?(environment: PythonEnvironment): Promise<void>;
 
@@ -410,6 +427,10 @@ export interface EnvironmentManager {
      * Refreshes the list of Python environments within the specified scope.
      * @param scope - The scope within which to refresh environments.
      * @returns A promise that resolves when the refresh is complete.
+     *
+     * @remarks
+     * Forces the manager to re-discover environments for the given scope. Typically
+     * triggered by an explicit user "refresh" action.
      */
     refresh(scope: RefreshEnvironmentsScope): Promise<void>;
 
@@ -417,6 +438,10 @@ export interface EnvironmentManager {
      * Retrieves a list of Python environments within the specified scope.
      * @param scope - The scope within which to retrieve environments.
      * @returns A promise that resolves to an array of Python environments.
+     *
+     * @remarks
+     * Returns the environments known to this manager for the given scope. Called
+     * frequently by UI surfaces (tree views, pickers) and by other consumers of the API.
      */
     getEnvironments(scope: GetEnvironmentsScope): Promise<PythonEnvironment[]>;
 
@@ -430,6 +455,14 @@ export interface EnvironmentManager {
      * @param scope - The scope within which to set the environment.
      * @param environment - The Python environment to set. If undefined, the environment is unset.
      * @returns A promise that resolves when the environment is set.
+     *
+     * @remarks
+     * Invoked when the active environment for the given scope should change — for example
+     * after the user selects an environment in a picker, after a newly created environment
+     * is auto-selected, or programmatically via the API.
+     *
+     * Also invoked at extension startup to rehydrate the active environment from
+     * persisted state.
      */
     set(scope: SetEnvironmentScope, environment?: PythonEnvironment): Promise<void>;
 
@@ -437,6 +470,12 @@ export interface EnvironmentManager {
      * Retrieves the current Python environment within the specified scope.
      * @param scope - The scope within which to retrieve the environment.
      * @returns A promise that resolves to the current Python environment, or undefined if none is set.
+     *
+     * @remarks
+     * Returns the currently active environment for the given scope, or `undefined` if
+     * none is selected. Called very frequently — at startup, after {@link set}, when a
+     * terminal is opened, before running Python, by UI surfaces that display the active
+     * interpreter, and by other extensions consuming the API.
      */
     get(scope: GetEnvironmentScope): Promise<PythonEnvironment | undefined>;
 
@@ -456,6 +495,14 @@ export interface EnvironmentManager {
      *
      * @param context - The context for resolving the environment, which can be a {@link PythonEnvironment} or a {@link Uri}.
      * @returns A promise that resolves to the fully detailed {@link PythonEnvironment}, or `undefined` if the environment cannot be resolved.
+     *
+     * @remarks
+     * Called to turn a lightly-populated {@link PythonEnvironment} or a {@link Uri}
+     * pointing at an interpreter or environment folder into a fully-populated
+     * {@link PythonEnvironment} with complete {@link PythonEnvironment.execInfo}. Typical
+     * triggers include the user manually selecting an interpreter path, resolving
+     * `python.defaultInterpreterPath` at startup, and populating execution details before
+     * launching Python.
      */
     resolve(context: ResolveEnvironmentContext): Promise<PythonEnvironment | undefined>;
 
@@ -463,6 +510,12 @@ export interface EnvironmentManager {
      * Clears the environment manager's cache.
      *
      * @returns A promise that resolves when the cache is cleared.
+     *
+     * @remarks
+     * Drops any cached environment data held by the manager so that subsequent calls to
+     * {@link EnvironmentManager.getEnvironments} or {@link EnvironmentManager.get}
+     * re-discover state from disk. Typically triggered by an explicit user "clear cache"
+     * action.
      */
     clearCache?(): Promise<void>;
 }
