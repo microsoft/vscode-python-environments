@@ -873,8 +873,7 @@ suite('Interpreter Selection - applyInitialEnvironmentSelection', () => {
         const globalDone = new Promise<void>((resolve) => {
             resolveGlobalDone = resolve;
         });
-        const origSetEnvironments = mockEnvManagers.setEnvironments;
-        origSetEnvironments.callsFake(async (...args: unknown[]) => {
+        mockEnvManagers.setEnvironments.callsFake(async () => {
             resolveGlobalDone();
         });
 
@@ -913,8 +912,6 @@ suite('Interpreter Selection - applyInitialEnvironmentSelection', () => {
         const globalDone = new Promise<void>((resolve) => {
             resolveGlobalDone = resolve;
         });
-
-        // Make setEnvironments throw — simulating a crash in global scope
         mockEnvManagers.setEnvironments.callsFake(async () => {
             resolveGlobalDone();
             throw new Error('Simulated global scope crash');
