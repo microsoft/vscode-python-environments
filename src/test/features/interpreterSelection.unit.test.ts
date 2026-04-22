@@ -868,6 +868,16 @@ suite('Interpreter Selection - applyInitialEnvironmentSelection', () => {
 
         const showWarnStub = sandbox.stub(windowApis, 'showWarningMessage').resolves(undefined);
 
+        // Use a deferred promise to deterministically wait for the background global scope
+        let resolveGlobalDone!: () => void;
+        const globalDone = new Promise<void>((resolve) => {
+            resolveGlobalDone = resolve;
+        });
+        const origSetEnvironments = mockEnvManagers.setEnvironments;
+        origSetEnvironments.callsFake(async (...args: unknown[]) => {
+            resolveGlobalDone();
+        });
+
         await applyInitialEnvironmentSelection(
             mockEnvManagers as unknown as EnvironmentManagers,
             mockProjectManager as unknown as PythonProjectManager,
@@ -878,8 +888,10 @@ suite('Interpreter Selection - applyInitialEnvironmentSelection', () => {
         // Workspace folder should resolve (venv found)
         assert.ok(mockEnvManagers.setEnvironment.called, 'setEnvironment should be called for workspace folder');
 
-        // Wait a tick for the background global scope to complete
-        await new Promise((resolve) => setTimeout(resolve, 50));
+        // Wait for the background global scope to call setEnvironments
+        await globalDone;
+        // Flush microtasks so the .then() handler for notifyUserOfSettingErrors runs
+        await new Promise<void>((resolve) => process.nextTick(resolve));
 
         // Global scope should still resolve (falls to auto-discovery) and show warning
         assert.ok(mockEnvManagers.setEnvironments.called, 'setEnvironments should be called for global scope');
@@ -896,8 +908,17 @@ suite('Interpreter Selection - applyInitialEnvironmentSelection', () => {
         sandbox.stub(workspaceApis, 'getConfiguration').returns(createMockConfig([]) as WorkspaceConfiguration);
         sandbox.stub(helpers, 'getUserConfiguredSetting').returns(undefined);
 
+        // Use a deferred promise to deterministically wait for the background global scope
+        let resolveGlobalDone!: () => void;
+        const globalDone = new Promise<void>((resolve) => {
+            resolveGlobalDone = resolve;
+        });
+
         // Make setEnvironments throw — simulating a crash in global scope
-        mockEnvManagers.setEnvironments.rejects(new Error('Simulated global scope crash'));
+        mockEnvManagers.setEnvironments.callsFake(async () => {
+            resolveGlobalDone();
+            throw new Error('Simulated global scope crash');
+        });
 
         // Should NOT throw — errors are caught inside resolveGlobalScope
         await applyInitialEnvironmentSelection(
@@ -907,8 +928,10 @@ suite('Interpreter Selection - applyInitialEnvironmentSelection', () => {
             mockApi as unknown as PythonEnvironmentApi,
         );
 
-        // Wait a tick for the background global scope to complete
-        await new Promise((resolve) => setTimeout(resolve, 50));
+        // Wait for the background global scope to call setEnvironments
+        await globalDone;
+        // Flush microtasks so the catch handler runs
+        await new Promise<void>((resolve) => process.nextTick(resolve));
 
         // Workspace folder should still have resolved
         assert.ok(mockEnvManagers.setEnvironment.called, 'setEnvironment should be called for workspace folder');

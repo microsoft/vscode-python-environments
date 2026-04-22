@@ -354,7 +354,7 @@ export async function applyInitialEnvironmentSelection(
     // Errors inside resolveGlobalScope are handled internally:
     //   - Setting resolution errors (bad paths, unknown managers) → notifyUserOfSettingErrors
     //   - Unexpected crashes → logged via traceError, never silently swallowed
-    const resolveGlobalScope = async () => {
+    const resolveGlobalScope = async (): Promise<SettingResolutionError[]> => {
         try {
             const globalStopWatch = new StopWatch();
             const { result, errors: globalErrors } = await resolvePriorityChainCore(
@@ -380,11 +380,10 @@ export async function applyInitialEnvironmentSelection(
 
             traceInfo(`[interpreterSelection] global: ${env?.displayName ?? 'none'} (source: ${result.source})`);
 
-            if (globalErrors.length > 0) {
-                await notifyUserOfSettingErrors(globalErrors);
-            }
+            return globalErrors;
         } catch (err) {
             traceError(`[interpreterSelection] Failed to set global environment: ${err}`);
+            return [];
         }
     };
 
@@ -395,21 +394,26 @@ export async function applyInitialEnvironmentSelection(
         // multi-root workspace is not affected by deferring the global scope.
         // Defer global scope to a background task so we don't block post-selection
         // startup work in extension.ts (clearHangWatchdog, terminal init, telemetry).
-        // The outer .catch is a safety net — resolveGlobalScope has its own try/catch,
-        // so this only fires if the inner handler itself throws unexpectedly.
+        // Global errors are notified separately since we can't aggregate with workspace errors.
         traceInfo('[interpreterSelection] Workspace env resolved, deferring global scope to background');
-        resolveGlobalScope().catch((err) =>
-            traceError(`[interpreterSelection] Background global scope resolution failed: ${err}`),
-        );
+        resolveGlobalScope()
+            .then(async (globalErrors) => {
+                if (globalErrors.length > 0) {
+                    await notifyUserOfSettingErrors(globalErrors);
+                }
+            })
+            .catch((err) => traceError(`[interpreterSelection] Background global scope resolution failed: ${err}`));
     } else {
         // Either: (a) no workspace folders are open, (b) every folder resolved with
         // env=undefined (no Python found), or (c) every folder threw an error.
         // In all cases the global environment is the user's primary fallback,
-        // so we must await it before returning.
-        await resolveGlobalScope();
+        // so we must await it before returning. Errors are aggregated with workspace
+        // errors so notifyUserOfSettingErrors can dedupe across both scopes.
+        const globalErrors = await resolveGlobalScope();
+        allErrors.push(...globalErrors);
     }
 
-    // Notify user if any workspace-scoped settings could not be applied
+    // Notify user if any settings could not be applied (workspace + global when awaited)
     if (allErrors.length > 0) {
         await notifyUserOfSettingErrors(allErrors);
     }
