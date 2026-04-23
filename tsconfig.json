@@ -17,5 +17,5 @@
         "resolveJsonModule": true,
         "removeComments": true
     },
-    "exclude": ["examples", "pythonEnvironmentsApi"]
+    "exclude": ["examples", "api"]
 }
