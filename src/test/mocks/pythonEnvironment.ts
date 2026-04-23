@@ -67,14 +67,12 @@ export function createMockPythonEnvironment(options: MockPythonEnvironmentOption
 }
 
 /**
- * Positional shorthand for {@link createMockPythonEnvironment} used by conda
- * manager unit tests. Prefer {@link createMockPythonEnvironment} for new tests
- * that need to customize additional fields.
+ * Positional shorthand for {@link createMockPythonEnvironment} that always
+ * creates a conda environment (`managerId` = `ms-python.python:conda`).
+ * Used by conda manager unit tests. Prefer {@link createMockPythonEnvironment}
+ * for new tests that need to customize additional fields or target a different
+ * manager.
  */
-export function makeMockPythonEnvironment(
-    name: string,
-    envPath: string,
-    version: string = '3.12.0',
-): PythonEnvironment {
+export function makeMockCondaEnvironment(name: string, envPath: string, version: string = '3.12.0'): PythonEnvironment {
     return createMockPythonEnvironment({ name, envPath, version });
 }

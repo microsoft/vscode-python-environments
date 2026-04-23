@@ -7,7 +7,7 @@ import { normalizePath } from '../../../common/utils/pathUtils';
 import { CondaEnvManager } from '../../../managers/conda/condaEnvManager';
 import * as condaUtils from '../../../managers/conda/condaUtils';
 import { NativePythonFinder } from '../../../managers/common/nativePythonFinder';
-import { makeMockPythonEnvironment as makeEnv } from '../../mocks/pythonEnvironment';
+import { makeMockCondaEnvironment as makeEnv } from '../../mocks/pythonEnvironment';
 
 function createManager(apiOverrides?: Partial<PythonEnvironmentApi>): CondaEnvManager {
     const api = {

@@ -5,7 +5,7 @@ import { PythonEnvironment, PythonEnvironmentApi } from '../../../api';
 import { isWindows } from '../../../common/utils/platformUtils';
 import { CondaEnvManager } from '../../../managers/conda/condaEnvManager';
 import { NativePythonFinder } from '../.././../managers/common/nativePythonFinder';
-import { makeMockPythonEnvironment as makeEnv } from '../../mocks/pythonEnvironment';
+import { makeMockCondaEnvironment as makeEnv } from '../../mocks/pythonEnvironment';
 
 /**
  * Creates a CondaEnvManager with a given collection, bypassing initialization.
