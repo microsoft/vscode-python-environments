@@ -1,0 +1,61 @@
+name: Community Feedback Closer
+
+on:
+  schedule:
+    - cron: '30 12 * * *' # 5:30am Redmond, daily
+  workflow_dispatch:
+
+permissions:
+  issues: write
+
+jobs:
+  close-stale-feedback:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Close community feedback issues lacking upvotes
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const label = 'needs community feedback';
+            const requiredUpvotes = 7;
+            const maxAgeDays = 60;
+            const cutoffDate = new Date(Date.now() - maxAgeDays * 24 * 60 * 60 * 1000);
+
+            const issues = await github.paginate(github.rest.issues.listForRepo, {
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              labels: label,
+              state: 'open',
+              per_page: 100,
+            });
+
+            for (const issue of issues) {
+              const createdAt = new Date(issue.created_at);
+              if (createdAt > cutoffDate) {
+                core.info(`#${issue.number} is only ${Math.floor((Date.now() - createdAt) / 86400000)} days old, skipping.`);
+                continue;
+              }
+
+              const upvotes = issue.reactions?.['+1'] ?? 0;
+              if (upvotes >= requiredUpvotes) {
+                core.info(`#${issue.number} has ${upvotes} upvotes (>= ${requiredUpvotes}), keeping open.`);
+                continue;
+              }
+
+              core.info(`Closing #${issue.number} (${upvotes} upvotes, created ${issue.created_at}).`);
+
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: issue.number,
+                body: `This feature request has not received the 7 community upvotes needed to be considered for future planning within 60 days of its creation. We are closing this issue, but if the community rallies behind it in the future, we are happy to reconsider. Thank you for your feedback!\n\nHappy Coding!`,
+              });
+
+              await github.rest.issues.update({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: issue.number,
+                state: 'closed',
+                state_reason: 'not_planned',
+              });
+            }
