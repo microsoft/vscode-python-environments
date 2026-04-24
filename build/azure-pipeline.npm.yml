@@ -105,5 +105,5 @@ extends:
                   contentSource: 'Folder'
                   folderLocation: '$(Build.ArtifactStagingDirectory)'
                   waitForReleaseCompletion: true
-                  owners: 'plseng@microsoft.com'
-                  approvers: 'eduardovil@microsoft.com grwheele@microsoft.com'
+                  owners: 'grwheele@microsoft.com'
+                  approvers: 'eduardovil@microsoft.com,stellahuang@microsoft.com'
