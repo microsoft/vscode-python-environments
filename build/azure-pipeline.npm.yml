@@ -98,12 +98,16 @@ extends:
           - job: PublishPackage
             displayName: Publish npm package
             steps:
+              - download: current
+                artifact: npm-package
+                displayName: Download npm-package artifact
+
               - template: MicroBuild.Publish.yml@MicroBuildTemplate
                 parameters:
                   intent: 'PackageDistribution'
                   contentType: 'npm'
                   contentSource: 'Folder'
-                  folderLocation: '$(Build.ArtifactStagingDirectory)'
+                  folderLocation: '$(Pipeline.Workspace)/npm-package'
                   waitForReleaseCompletion: true
                   owners: 'grwheele@microsoft.com'
                   approvers: 'eduardovil@microsoft.com'
