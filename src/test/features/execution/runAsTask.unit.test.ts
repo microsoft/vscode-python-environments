@@ -1,6 +1,6 @@
 import * as assert from 'assert';
 import * as sinon from 'sinon';
-import { Task, TaskExecution, TaskPanelKind, TaskRevealKind, TaskScope, Uri, WorkspaceFolder } from 'vscode';
+import { ShellExecution, Task, TaskExecution, TaskPanelKind, TaskRevealKind, TaskScope, Uri, WorkspaceFolder } from 'vscode';
 import { PythonEnvironment, PythonTaskExecutionOptions } from '../../../api';
 import * as logging from '../../../common/logging';
 import * as tasksApi from '../../../common/tasks.apis';
