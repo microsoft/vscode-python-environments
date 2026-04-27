@@ -202,6 +202,7 @@ suite('runAsTask Tests', () => {
 
             await runAsTask(environment, options);
 
+            const taskArg = mockExecuteTask.firstCall.args[0] as Task;
             const execution = taskArg.execution as ShellExecution;
 
             assert.strictEqual(execution.command, '"uv"', 'Should quote the uv executable when required');
@@ -256,7 +257,6 @@ suite('runAsTask Tests', () => {
                 mockTraceInfo.calledWith(sinon.match(/Running as task: \/path\/to\/python --default-arg test\.py/)),
                 'Should log execution with run args',
             );
-            const taskArg = mockExecuteTask.firstCall.args[0] as Task;
             const execution = taskArg.execution as ShellExecution;
             assert.strictEqual(execution.command, '/path/to/python', 'Should keep the python executable when uv is off');
             assert.deepStrictEqual(execution.args, ['--default-arg', 'test.py'], 'Should keep the non-uv arguments');
