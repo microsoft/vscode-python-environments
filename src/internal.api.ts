@@ -29,7 +29,7 @@ import {
 } from './api';
 import { ISSUES_URL } from './common/constants';
 import { CreateEnvironmentNotSupported, RemoveEnvironmentNotSupported } from './common/errors/NotSupportedError';
-import { traceWarn } from './common/logging';
+import { traceInfo, traceWarn } from './common/logging';
 import { StopWatch } from './common/stopWatch';
 import { EventNames } from './common/telemetry/constants';
 import { sendTelemetryEvent } from './common/telemetry/sender';
@@ -206,12 +206,14 @@ export class InternalEnvironmentManager implements EnvironmentManager {
     }
 
     async refresh(options: RefreshEnvironmentsScope): Promise<void> {
+        traceInfo(`[${this.displayName}] Discovering environments...`);
         const sw = new StopWatch();
         const SLOW_DISCOVERY_THRESHOLD_MS = 15000;
         try {
             await this.manager.refresh(options);
             const envs = await this.manager.getEnvironments('all').catch(() => []);
             const duration = sw.elapsedTime;
+            traceInfo(`[${this.displayName}] Discovery complete: ${envs.length} environments found (${(duration / 1000).toFixed(1)}s)`);
             sendTelemetryEvent(EventNames.ENVIRONMENT_DISCOVERY, duration, {
                 managerId: this.id,
                 result: 'success',

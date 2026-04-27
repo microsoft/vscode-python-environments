@@ -138,6 +138,7 @@ export async function getPyenv(): Promise<string | undefined> {
         if (pyenvRoot) {
             const pyenvPath = path.join(pyenvRoot, 'bin', pyenvBin);
             if (await fs.exists(pyenvPath)) {
+                traceInfo(`Using pyenv from PYENV_ROOT: ${pyenvPath}`);
                 return pyenvPath;
             }
         }
@@ -146,12 +147,14 @@ export async function getPyenv(): Promise<string | undefined> {
         if (home) {
             const pyenvPath = path.join(home, '.pyenv', 'bin', pyenvBin);
             if (await fs.exists(pyenvPath)) {
+                traceInfo(`Using pyenv from home directory: ${pyenvPath}`);
                 return pyenvPath;
             }
 
             if (isWindows()) {
                 const pyenvPathWin = path.join(home, '.pyenv', 'pyenv-win', 'bin', pyenvBin);
                 if (await fs.exists(pyenvPathWin)) {
+                    traceInfo(`Using pyenv-win from home directory: ${pyenvPathWin}`);
                     return pyenvPathWin;
                 }
             }
@@ -159,9 +162,11 @@ export async function getPyenv(): Promise<string | undefined> {
 
         pyenvPath = await findPyenv();
         if (pyenvPath) {
+            traceInfo(`Using pyenv from PATH: ${pyenvPath}`);
             return pyenvPath;
         }
 
+        traceInfo('pyenv not found in PYENV_ROOT, home directory, or PATH');
         return undefined;
     } catch (ex) {
         const err = ex instanceof Error ? ex : new Error(String(ex));
@@ -268,6 +273,7 @@ export async function refreshPyenv(
         }
     });
 
+    traceInfo(`Pyenv discovery complete: ${collection.length} environments found`);
     return sortEnvironments(collection);
 }
 
