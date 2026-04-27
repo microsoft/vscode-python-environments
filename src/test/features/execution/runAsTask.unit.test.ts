@@ -154,6 +154,7 @@ suite('runAsTask Tests', () => {
 
             assert.strictEqual(result, mockTaskExecution, 'Should return the task execution result');
 
+            const taskArg = mockExecuteTask.firstCall.args[0] as Task;
             const execution = taskArg.execution as ShellExecution;
 
             assert.strictEqual(execution.command, 'uv', 'Should execute uv when uv mode is enabled');
@@ -201,7 +202,6 @@ suite('runAsTask Tests', () => {
 
             await runAsTask(environment, options);
 
-            const taskArg = mockExecuteTask.firstCall.args[0] as Task;
             const execution = taskArg.execution as ShellExecution;
 
             assert.strictEqual(execution.command, '"uv"', 'Should quote the uv executable when required');
