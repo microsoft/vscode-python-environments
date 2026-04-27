@@ -11,6 +11,7 @@ import { getExtension } from '../../common/extension.apis';
 import { traceError, traceVerbose, traceWarn } from '../../common/logging';
 import { StopWatch } from '../../common/stopWatch';
 import { EventNames } from '../../common/telemetry/constants';
+import { classifyError } from '../../common/telemetry/errorClassifier';
 import { sendTelemetryEvent } from '../../common/telemetry/sender';
 import { untildify, untildifyArray } from '../../common/utils/pathUtils';
 import { isWindows } from '../../common/utils/platformUtils';
@@ -253,6 +254,7 @@ class NativePythonFinderImpl implements NativePythonFinder {
     }
 
     public async resolve(executable: string): Promise<NativeEnvInfo> {
+        const sw = new StopWatch();
         try {
             await this.ensureProcessRunning();
             try {
@@ -267,6 +269,7 @@ class NativePythonFinderImpl implements NativePythonFinder {
                 this.outputChannel.info(`Resolved Python Environment ${environment.executable}`);
                 // Reset restart attempts on successful request
                 this.restartAttempts = 0;
+                sendTelemetryEvent(EventNames.PET_RESOLVE, sw.elapsedTime, { result: 'success' });
                 return environment;
             } catch (ex) {
                 // On resolve timeout or connection error (not configure — configure handles its own timeout),
@@ -280,6 +283,16 @@ class NativePythonFinderImpl implements NativePythonFinder {
                 throw ex;
             }
         } catch (ex) {
+            const errorType = classifyError(ex);
+            sendTelemetryEvent(
+                EventNames.PET_RESOLVE,
+                sw.elapsedTime,
+                {
+                    result: errorType === 'spawn_timeout' ? 'timeout' : 'error',
+                    errorType,
+                },
+                ex instanceof Error ? ex : undefined,
+            );
             // If the server mode is fully exhausted, fall back to the CLI JSON mode
             if (this.isServerExhausted()) {
                 this.outputChannel.warn('[pet] Server mode exhausted, falling back to JSON CLI for resolve');
@@ -325,6 +338,7 @@ class NativePythonFinderImpl implements NativePythonFinder {
     private async restart(): Promise<void> {
         this.isRestarting = true;
         this.restartAttempts++;
+        const attempt = this.restartAttempts;
 
         const backoffMs = RESTART_BACKOFF_BASE_MS * Math.pow(2, this.restartAttempts - 1);
         this.outputChannel.warn(
@@ -332,6 +346,7 @@ class NativePythonFinderImpl implements NativePythonFinder {
                 `waiting ${backoffMs}ms)`,
         );
 
+        const sw = new StopWatch();
         try {
             // Kill existing process if still running
             this.killProcess();
@@ -353,10 +368,17 @@ class NativePythonFinderImpl implements NativePythonFinder {
             this.connection = this.start();
 
             this.outputChannel.info('[pet] Python Environment Tools restarted successfully');
+            sendTelemetryEvent(EventNames.PET_PROCESS_RESTART, sw.elapsedTime, { attempt, result: 'success' });
 
             // Reset restart attempts on successful start (process didn't immediately fail)
             // We'll reset this only after a successful request completes
         } catch (ex) {
+            sendTelemetryEvent(
+                EventNames.PET_PROCESS_RESTART,
+                sw.elapsedTime,
+                { attempt, result: 'error', errorType: classifyError(ex) },
+                ex instanceof Error ? ex : undefined,
+            );
             this.outputChannel.error('[pet] Failed to restart Python Environment Tools:', ex);
             this.outputChannel.error(
                 '[pet] To debug, run "Python Environments: Run Python Environment Tool (PET) in Terminal" from the Command Palette.',
@@ -634,13 +656,18 @@ class NativePythonFinderImpl implements NativePythonFinder {
         const disposables: Disposable[] = [];
         const unresolved: Promise<void>[] = [];
         const nativeInfo: NativeInfo[] = [];
+        const sw = new StopWatch();
+        let unresolvedCount = 0;
         try {
             await this.configure();
             const refreshOptions = this.getRefreshOptions(options);
+            const workspaceDirCount = this.lastConfiguration?.workspaceDirectories.length ?? 0;
+            const searchPathCount = this.lastConfiguration?.environmentDirectories.length ?? 0;
             disposables.push(
                 this.connection.onNotification('environment', (data: NativeEnvInfo) => {
                     this.outputChannel.info(`Discovered env: ${data.executable || data.prefix}`);
                     if (data.executable && (!data.version || !data.prefix)) {
+                        unresolvedCount++;
                         unresolved.push(
                             sendRequestWithTimeout<NativeEnvInfo>(
                                 this.connection,
@@ -680,7 +707,29 @@ class NativePythonFinderImpl implements NativePythonFinder {
             if (attempt > 0) {
                 this.outputChannel.info(`[pet] Refresh succeeded on retry attempt ${attempt + 1}`);
             }
+
+            sendTelemetryEvent(EventNames.PET_REFRESH, sw.elapsedTime, {
+                result: 'success',
+                envCount: nativeInfo.filter((e) => isNativeEnvInfo(e)).length,
+                unresolvedCount,
+                workspaceDirCount,
+                searchPathCount,
+                attempt,
+            });
         } catch (ex) {
+            const errorType = classifyError(ex);
+            sendTelemetryEvent(
+                EventNames.PET_REFRESH,
+                sw.elapsedTime,
+                {
+                    result: errorType === 'spawn_timeout' ? 'timeout' : 'error',
+                    envCount: nativeInfo.filter((e) => isNativeEnvInfo(e)).length,
+                    unresolvedCount,
+                    attempt,
+                    errorType,
+                },
+                ex instanceof Error ? ex : undefined,
+            );
             // On refresh timeout or connection error (not configure — configure handles its own timeout),
             // kill the hung process so next request triggers restart
             if ((ex instanceof RpcTimeoutError && ex.method !== 'configure') || ex instanceof rpc.ConnectionError) {
@@ -709,6 +758,7 @@ class NativePythonFinderImpl implements NativePythonFinder {
         // No need to send a configuration request if there are no changes.
         if (this.lastConfiguration && this.configurationEquals(options, this.lastConfiguration)) {
             this.outputChannel.debug('[pet] configure: No changes detected, skipping configuration update.');
+            sendTelemetryEvent(EventNames.PET_CONFIGURE, 0, { result: 'skipped', retryCount: 0 });
             return;
         }
         this.outputChannel.info('[pet] configure: Sending configuration update:', JSON.stringify(options));
@@ -719,12 +769,33 @@ class NativePythonFinderImpl implements NativePythonFinder {
                 `[pet] configure: Using extended timeout of ${timeoutMs}ms (retry ${this.configureRetry.timeoutCount})`,
             );
         }
+        const sw = new StopWatch();
+        const retryCount = this.configureRetry.timeoutCount;
+        const workspaceDirCount = options.workspaceDirectories.length;
+        const envDirCount = options.environmentDirectories.length;
         try {
             await sendRequestWithTimeout(this.connection, 'configure', options, timeoutMs);
             // Only cache after success so failed/timed-out calls will retry
             this.lastConfiguration = options;
             this.configureRetry.onSuccess();
+            sendTelemetryEvent(EventNames.PET_CONFIGURE, sw.elapsedTime, {
+                result: 'success',
+                workspaceDirCount,
+                envDirCount,
+                retryCount,
+            });
         } catch (ex) {
+            sendTelemetryEvent(
+                EventNames.PET_CONFIGURE,
+                sw.elapsedTime,
+                {
+                    result: ex instanceof RpcTimeoutError ? 'timeout' : 'error',
+                    workspaceDirCount,
+                    envDirCount,
+                    retryCount,
+                },
+                ex instanceof Error ? ex : undefined,
+            );
             // Clear cached config so the next call retries instead of short-circuiting via configurationEquals
             this.lastConfiguration = undefined;
             if (ex instanceof RpcTimeoutError) {

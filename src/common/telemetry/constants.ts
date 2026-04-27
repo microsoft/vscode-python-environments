@@ -122,6 +122,42 @@ export enum EventNames {
      * - duration: number (milliseconds taken for the CLI operation)
      */
     PET_JSON_CLI_FALLBACK = 'PET.JSON_CLI_FALLBACK',
+    /**
+     * Telemetry event for a PET refresh attempt (the core discovery RPC call).
+     * Properties:
+     * - result: 'success' | 'timeout' | 'error'
+     * - envCount: number (environments returned via notifications)
+     * - unresolvedCount: number (envs that needed follow-up resolve calls)
+     * - workspaceDirCount: number (workspace directories sent in configure)
+     * - searchPathCount: number (extra search paths sent in configure)
+     * - attempt: number (0 = first try, 1 = retry)
+     * - errorType: string (classified error category, on failure only)
+     */
+    PET_REFRESH = 'PET.REFRESH',
+    /**
+     * Telemetry event for a PET configure RPC call.
+     * Properties:
+     * - result: 'success' | 'timeout' | 'error' | 'skipped'
+     * - workspaceDirCount: number
+     * - envDirCount: number (environmentDirectories count)
+     * - retryCount: number (consecutive timeout count from ConfigureRetryState)
+     */
+    PET_CONFIGURE = 'PET.CONFIGURE',
+    /**
+     * Telemetry event for PET process restart attempts.
+     * Properties:
+     * - attempt: number (1-based restart attempt number)
+     * - result: 'success' | 'error'
+     * - errorType: string (classified error category, on failure only)
+     */
+    PET_PROCESS_RESTART = 'PET.PROCESS_RESTART',
+    /**
+     * Telemetry event for PET resolve calls (single-env resolution).
+     * Properties:
+     * - result: 'success' | 'timeout' | 'error'
+     * - errorType: string (classified error category, on failure only)
+     */
+    PET_RESOLVE = 'PET.RESOLVE',
 }
 
 // Map all events to their properties
@@ -423,5 +459,69 @@ export interface IEventNamePropertyMapping {
     [EventNames.PET_JSON_CLI_FALLBACK]: {
         operation: 'refresh' | 'resolve';
         result: 'success' | 'error';
+    };
+
+    /* __GDPR__
+        "pet.refresh": {
+            "result": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "owner": "eleanorjboyd" },
+            "envCount": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "isMeasurement": true, "owner": "eleanorjboyd" },
+            "unresolvedCount": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "isMeasurement": true, "owner": "eleanorjboyd" },
+            "workspaceDirCount": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "isMeasurement": true, "owner": "eleanorjboyd" },
+            "searchPathCount": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "isMeasurement": true, "owner": "eleanorjboyd" },
+            "attempt": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "isMeasurement": true, "owner": "eleanorjboyd" },
+            "errorType": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "owner": "eleanorjboyd" },
+            "<duration>": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "isMeasurement": true, "owner": "eleanorjboyd" }
+        }
+    */
+    [EventNames.PET_REFRESH]: {
+        result: 'success' | 'timeout' | 'error';
+        envCount?: number;
+        unresolvedCount?: number;
+        workspaceDirCount?: number;
+        searchPathCount?: number;
+        attempt: number;
+        errorType?: string;
+    };
+
+    /* __GDPR__
+        "pet.configure": {
+            "result": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "owner": "eleanorjboyd" },
+            "workspaceDirCount": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "isMeasurement": true, "owner": "eleanorjboyd" },
+            "envDirCount": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "isMeasurement": true, "owner": "eleanorjboyd" },
+            "retryCount": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "isMeasurement": true, "owner": "eleanorjboyd" },
+            "<duration>": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "isMeasurement": true, "owner": "eleanorjboyd" }
+        }
+    */
+    [EventNames.PET_CONFIGURE]: {
+        result: 'success' | 'timeout' | 'error' | 'skipped';
+        workspaceDirCount?: number;
+        envDirCount?: number;
+        retryCount: number;
+    };
+
+    /* __GDPR__
+        "pet.process_restart": {
+            "attempt": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "isMeasurement": true, "owner": "eleanorjboyd" },
+            "result": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "owner": "eleanorjboyd" },
+            "errorType": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "owner": "eleanorjboyd" },
+            "<duration>": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "isMeasurement": true, "owner": "eleanorjboyd" }
+        }
+    */
+    [EventNames.PET_PROCESS_RESTART]: {
+        attempt: number;
+        result: 'success' | 'error';
+        errorType?: string;
+    };
+
+    /* __GDPR__
+        "pet.resolve": {
+            "result": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "owner": "eleanorjboyd" },
+            "errorType": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "owner": "eleanorjboyd" },
+            "<duration>": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "isMeasurement": true, "owner": "eleanorjboyd" }
+        }
+    */
+    [EventNames.PET_RESOLVE]: {
+        result: 'success' | 'timeout' | 'error';
+        errorType?: string;
     };
 }
