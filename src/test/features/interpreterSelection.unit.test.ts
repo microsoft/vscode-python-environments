@@ -5,12 +5,13 @@ import * as assert from 'assert';
 import * as path from 'path';
 import * as sinon from 'sinon';
 import { ConfigurationChangeEvent, Uri, WorkspaceConfiguration, WorkspaceFolder } from 'vscode';
-import { PythonEnvironment, PythonEnvironmentApi, PythonProject } from '../../api';
+import { PythonEnvironment, PythonEnvironmentApi, PythonProject, SetEnvironmentScope } from '../../api';
 import * as windowApis from '../../common/window.apis';
 import * as workspaceApis from '../../common/workspace.apis';
 import {
     applyInitialEnvironmentSelection,
     registerInterpreterSettingsChangeListener,
+    resetSettingWarnings,
     resolveEnvironmentByPriority,
     resolveGlobalEnvironmentByPriority,
 } from '../../features/interpreterSelection';
@@ -552,6 +553,7 @@ suite('Interpreter Selection - applyInitialEnvironmentSelection', () => {
 
     setup(() => {
         sandbox = sinon.createSandbox();
+        resetSettingWarnings();
 
         mockVenvManager = {
             id: 'ms-python.python:venv',
@@ -716,6 +718,255 @@ suite('Interpreter Selection - applyInitialEnvironmentSelection', () => {
             showWarnStub.notCalled,
             'showWarningMessage should not be called when ${workspaceFolder} is only unresolvable in global scope',
         );
+    });
+
+    test('should catch and continue when workspace folder resolution throws', async () => {
+        // When manager.get() throws for a folder, the error should be caught
+        // and the function should still complete (falling through to awaited global scope).
+        sandbox.stub(workspaceApis, 'getWorkspaceFolders').returns([{ uri: testUri, name: 'test', index: 0 }]);
+        sandbox.stub(workspaceApis, 'getConfiguration').returns(createMockConfig([]) as WorkspaceConfiguration);
+        sandbox.stub(helpers, 'getUserConfiguredSetting').returns(undefined);
+
+        // Make venvManager.get() throw for the workspace folder
+        mockVenvManager.get.rejects(new Error('Simulated venv discovery failure'));
+        // systemManager.get() throws for workspace scope but succeeds for global scope
+        mockSystemManager.get.callsFake((scope: Uri | undefined) => {
+            if (scope) {
+                return Promise.reject(new Error('Simulated system discovery failure'));
+            }
+            return Promise.resolve(undefined);
+        });
+
+        // Should NOT throw — the per-folder catch block handles it
+        await applyInitialEnvironmentSelection(
+            mockEnvManagers as unknown as EnvironmentManagers,
+            mockProjectManager as unknown as PythonProjectManager,
+            mockNativeFinder as unknown as NativePythonFinder,
+            mockApi as unknown as PythonEnvironmentApi,
+        );
+
+        // setEnvironment should NOT have been called for the failed folder
+        assert.ok(
+            mockEnvManagers.setEnvironment.notCalled,
+            'setEnvironment should not be called when folder resolution throws',
+        );
+
+        // Global scope should still be resolved (awaited, since no workspace folder succeeded)
+        assert.ok(
+            mockEnvManagers.setEnvironments.called,
+            'setEnvironments should still be called for global scope after folder failure',
+        );
+    });
+
+    test('should continue processing remaining folders when one folder throws', async () => {
+        // In multi-root: if folder 1's resolution throws (e.g., setEnvironment fails),
+        // the error is caught and folder 2 should still be processed.
+        const uri1 = Uri.file('/workspace1');
+        const uri2 = Uri.file('/workspace2');
+        sandbox.stub(workspaceApis, 'getWorkspaceFolders').returns([
+            { uri: uri1, name: 'workspace1', index: 0 },
+            { uri: uri2, name: 'workspace2', index: 1 },
+        ]);
+        sandbox.stub(workspaceApis, 'getConfiguration').returns(createMockConfig([]) as WorkspaceConfiguration);
+        sandbox.stub(helpers, 'getUserConfiguredSetting').returns(undefined);
+
+        // setEnvironment throws for folder 1 only, succeeds for folder 2
+        mockEnvManagers.setEnvironment.callsFake((scope: SetEnvironmentScope) => {
+            if (scope && !Array.isArray(scope) && scope.fsPath === uri1.fsPath) {
+                return Promise.reject(new Error('Folder 1 setEnvironment failure'));
+            }
+            return Promise.resolve();
+        });
+
+        await applyInitialEnvironmentSelection(
+            mockEnvManagers as unknown as EnvironmentManagers,
+            mockProjectManager as unknown as PythonProjectManager,
+            mockNativeFinder as unknown as NativePythonFinder,
+            mockApi as unknown as PythonEnvironmentApi,
+        );
+
+        // setEnvironment should be called for both folders (folder 1 threw, folder 2 succeeded)
+        assert.strictEqual(
+            mockEnvManagers.setEnvironment.callCount,
+            2,
+            'setEnvironment should be attempted for both folders',
+        );
+        // Folder 2 succeeded — verify it was called with the correct URI
+        const secondCallUri = mockEnvManagers.setEnvironment.secondCall.args[0] as Uri;
+        assert.strictEqual(secondCallUri.fsPath, uri2.fsPath, 'Second call should be for folder 2');
+    });
+
+    test('should show warning when pythonProjects references unregistered manager', async () => {
+        // Priority 1 error path: pythonProjects[] names a manager that isn't registered.
+        // Should fall through to auto-discovery and show a warning.
+        const workspaceFolder = { uri: testUri, name: 'test', index: 0 } as WorkspaceFolder;
+        sandbox.stub(workspaceApis, 'getWorkspaceFolders').returns([workspaceFolder]);
+        sandbox.stub(workspaceApis, 'getWorkspaceFolder').returns(workspaceFolder);
+        sandbox
+            .stub(workspaceApis, 'getConfiguration')
+            .returns(
+                createMockConfig([{ path: '.', envManager: 'ms-python.python:nonexistent' }]) as WorkspaceConfiguration,
+            );
+        sandbox.stub(helpers, 'getUserConfiguredSetting').returns(undefined);
+
+        mockProjectManager.get.returns({ uri: testUri, name: 'test' } as PythonProject);
+
+        const showWarnStub = sandbox.stub(windowApis, 'showWarningMessage').resolves(undefined);
+
+        await applyInitialEnvironmentSelection(
+            mockEnvManagers as unknown as EnvironmentManagers,
+            mockProjectManager as unknown as PythonProjectManager,
+            mockNativeFinder as unknown as NativePythonFinder,
+            mockApi as unknown as PythonEnvironmentApi,
+        );
+
+        // Should still set the environment (falls through to auto-discovery)
+        assert.ok(mockEnvManagers.setEnvironment.called, 'setEnvironment should be called via fallback');
+
+        // Should show a warning about the unregistered manager
+        assert.ok(showWarnStub.called, 'showWarningMessage should be called for unregistered pythonProjects manager');
+    });
+
+    test('should show warning when defaultEnvManager references unregistered manager', async () => {
+        // Priority 2 error path: defaultEnvManager names a manager that isn't registered.
+        sandbox.stub(workspaceApis, 'getWorkspaceFolders').returns([{ uri: testUri, name: 'test', index: 0 }]);
+        sandbox.stub(workspaceApis, 'getConfiguration').returns(createMockConfig([]) as WorkspaceConfiguration);
+        sandbox.stub(helpers, 'getUserConfiguredSetting').callsFake((section: string, key: string) => {
+            if (section === 'python-envs' && key === 'defaultEnvManager') {
+                return 'ms-python.python:nonexistent';
+            }
+            return undefined;
+        });
+
+        const showWarnStub = sandbox.stub(windowApis, 'showWarningMessage').resolves(undefined);
+
+        await applyInitialEnvironmentSelection(
+            mockEnvManagers as unknown as EnvironmentManagers,
+            mockProjectManager as unknown as PythonProjectManager,
+            mockNativeFinder as unknown as NativePythonFinder,
+            mockApi as unknown as PythonEnvironmentApi,
+        );
+
+        // Should still set the environment (falls through to auto-discovery)
+        assert.ok(mockEnvManagers.setEnvironment.called, 'setEnvironment should be called via fallback');
+
+        // Should show a warning about the unregistered manager
+        assert.ok(showWarnStub.called, 'showWarningMessage should be called for unregistered defaultEnvManager');
+    });
+
+    test('should handle global scope errors when deferred to background', async () => {
+        // When workspace folder resolves but global scope has setting errors,
+        // notifyUserOfSettingErrors should still be called from the background task.
+        sandbox.stub(workspaceApis, 'getWorkspaceFolders').returns([{ uri: testUri, name: 'test', index: 0 }]);
+        sandbox.stub(workspaceApis, 'getConfiguration').returns(createMockConfig([]) as WorkspaceConfiguration);
+
+        // Global scope gets a defaultEnvManager that doesn't exist → produces a SettingResolutionError
+        sandbox.stub(helpers, 'getUserConfiguredSetting').callsFake((section: string, key: string, scope?: Uri) => {
+            if (!scope && section === 'python-envs' && key === 'defaultEnvManager') {
+                return 'ms-python.python:nonexistent-global';
+            }
+            return undefined;
+        });
+
+        const showWarnStub = sandbox.stub(windowApis, 'showWarningMessage').resolves(undefined);
+
+        // Use a deferred promise to deterministically wait for the background global scope
+        let resolveGlobalDone!: () => void;
+        const globalDone = new Promise<void>((resolve) => {
+            resolveGlobalDone = resolve;
+        });
+        mockEnvManagers.setEnvironments.callsFake(async () => {
+            resolveGlobalDone();
+        });
+
+        await applyInitialEnvironmentSelection(
+            mockEnvManagers as unknown as EnvironmentManagers,
+            mockProjectManager as unknown as PythonProjectManager,
+            mockNativeFinder as unknown as NativePythonFinder,
+            mockApi as unknown as PythonEnvironmentApi,
+        );
+
+        // Workspace folder should resolve (venv found)
+        assert.ok(mockEnvManagers.setEnvironment.called, 'setEnvironment should be called for workspace folder');
+
+        // Wait for the background global scope to call setEnvironments
+        await globalDone;
+        // Flush microtasks so the .then() handler for notifyUserOfSettingErrors runs
+        await new Promise<void>((resolve) => process.nextTick(resolve));
+
+        // Global scope should still resolve (falls to auto-discovery) and show warning
+        assert.ok(mockEnvManagers.setEnvironments.called, 'setEnvironments should be called for global scope');
+        assert.ok(
+            showWarnStub.called,
+            'showWarningMessage should be called for global scope setting error even when deferred',
+        );
+    });
+
+    test('should handle global scope crash when deferred to background', async () => {
+        // When workspace folder resolves but global scope crashes (resolveGlobalScope catch block),
+        // the error should be logged and not propagate.
+        sandbox.stub(workspaceApis, 'getWorkspaceFolders').returns([{ uri: testUri, name: 'test', index: 0 }]);
+        sandbox.stub(workspaceApis, 'getConfiguration').returns(createMockConfig([]) as WorkspaceConfiguration);
+        sandbox.stub(helpers, 'getUserConfiguredSetting').returns(undefined);
+
+        // Use a deferred promise to deterministically wait for the background global scope
+        let resolveGlobalDone!: () => void;
+        const globalDone = new Promise<void>((resolve) => {
+            resolveGlobalDone = resolve;
+        });
+        mockEnvManagers.setEnvironments.callsFake(async () => {
+            resolveGlobalDone();
+            throw new Error('Simulated global scope crash');
+        });
+
+        // Should NOT throw — errors are caught inside resolveGlobalScope
+        await applyInitialEnvironmentSelection(
+            mockEnvManagers as unknown as EnvironmentManagers,
+            mockProjectManager as unknown as PythonProjectManager,
+            mockNativeFinder as unknown as NativePythonFinder,
+            mockApi as unknown as PythonEnvironmentApi,
+        );
+
+        // Wait for the background global scope to call setEnvironments
+        await globalDone;
+        // Flush microtasks so the catch handler runs
+        await new Promise<void>((resolve) => process.nextTick(resolve));
+
+        // Workspace folder should still have resolved
+        assert.ok(mockEnvManagers.setEnvironment.called, 'setEnvironment should be called for workspace folder');
+
+        // setEnvironments was called (and threw), proving the global scope was attempted
+        assert.ok(
+            mockEnvManagers.setEnvironments.called,
+            'setEnvironments should have been attempted for global scope',
+        );
+    });
+
+    test('notifyUserOfSettingErrors shows warning with Open Settings for defaultInterpreterPath', async () => {
+        // Trigger the defaultInterpreterPath error branch of notifyUserOfSettingErrors.
+        sandbox.stub(workspaceApis, 'getWorkspaceFolders').returns([{ uri: testUri, name: 'test', index: 0 }]);
+        sandbox.stub(workspaceApis, 'getConfiguration').returns(createMockConfig([]) as WorkspaceConfiguration);
+        sandbox.stub(helpers, 'getUserConfiguredSetting').callsFake((section: string, key: string) => {
+            if (section === 'python' && key === 'defaultInterpreterPath') {
+                return '/nonexistent/python';
+            }
+            return undefined;
+        });
+        // nativeFinder.resolve fails — path can't be resolved
+        mockNativeFinder.resolve.rejects(new Error('Not found'));
+
+        const showWarnStub = sandbox.stub(windowApis, 'showWarningMessage').resolves(undefined);
+
+        await applyInitialEnvironmentSelection(
+            mockEnvManagers as unknown as EnvironmentManagers,
+            mockProjectManager as unknown as PythonProjectManager,
+            mockNativeFinder as unknown as NativePythonFinder,
+            mockApi as unknown as PythonEnvironmentApi,
+        );
+
+        assert.ok(showWarnStub.called, 'showWarningMessage should be called for unresolvable defaultInterpreterPath');
+        const warningMessage = showWarnStub.firstCall.args[0] as string;
+        assert.ok(warningMessage.includes('/nonexistent/python'), 'Warning message should include the configured path');
     });
 });
 

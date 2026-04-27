@@ -290,7 +290,6 @@ export async function applyInitialEnvironmentSelection(
         `[interpreterSelection] Applying initial environment selection for ${folders.length} workspace folder(s)`,
     );
 
-    // Checkpoint 1: env selection starting — managers are registered
     sendTelemetryEvent(EventNames.ENV_SELECTION_STARTED, activationToReadyDurationMs, {
         registeredManagerCount: envManagers.managers.length,
         registeredManagerIds: envManagers.managers.map((m) => m.id).join(','),
@@ -298,6 +297,9 @@ export async function applyInitialEnvironmentSelection(
     });
 
     const allErrors: SettingResolutionError[] = [];
+    let workspaceFolderResolved = false;
+    let resolvedFolderCount = 0;
+    const selectionStopWatch = new StopWatch();
 
     for (const folder of folders) {
         try {
@@ -311,22 +313,23 @@ export async function applyInitialEnvironmentSelection(
             );
             allErrors.push(...errors);
 
-            // Checkpoint 2: priority chain resolved — which path?
-            const isPathA = result.environment !== undefined;
-
-            // Get the specific environment if not already resolved
             const env = result.environment ?? (await result.manager.get(folder.uri));
 
             sendTelemetryEvent(EventNames.ENV_SELECTION_RESULT, scopeStopWatch.elapsedTime, {
                 scope: 'workspace',
                 prioritySource: result.source,
                 managerId: result.manager.id,
-                resolutionPath: isPathA ? 'envPreResolved' : 'managerDiscovery',
+                resolutionPath: result.environment ? 'envPreResolved' : 'managerDiscovery',
                 hasPersistedSelection: env !== undefined,
             });
 
             // Cache only — NO settings.json write (shouldPersistSettings = false)
             await envManagers.setEnvironment(folder.uri, env, false);
+
+            if (env) {
+                workspaceFolderResolved = true;
+                resolvedFolderCount++;
+            }
 
             traceInfo(
                 `[interpreterSelection] ${folder.name}: ${env?.displayName ?? 'none'} (source: ${result.source})`,
@@ -336,49 +339,94 @@ export async function applyInitialEnvironmentSelection(
         }
     }
 
-    // Also apply initial selection for global scope (no workspace folder)
-    // This ensures defaultInterpreterPath is respected even without a workspace
-    try {
-        const globalStopWatch = new StopWatch();
-        const { result, errors } = await resolvePriorityChainCore(undefined, envManagers, undefined, nativeFinder, api);
-        allErrors.push(...errors);
+    // Resolve global scope (fallback for files outside workspace folders).
+    // Deferred to background when a workspace folder already resolved.
+    const resolveGlobalScope = async (): Promise<SettingResolutionError[]> => {
+        try {
+            const globalStopWatch = new StopWatch();
+            const { result, errors: globalErrors } = await resolvePriorityChainCore(
+                undefined,
+                envManagers,
+                undefined,
+                nativeFinder,
+                api,
+            );
 
-        const isPathA = result.environment !== undefined;
+            const env = result.environment ?? (await result.manager.get(undefined));
 
-        // Get the specific environment if not already resolved
-        const env = result.environment ?? (await result.manager.get(undefined));
+            sendTelemetryEvent(EventNames.ENV_SELECTION_RESULT, globalStopWatch.elapsedTime, {
+                scope: 'global',
+                prioritySource: result.source,
+                managerId: result.manager.id,
+                resolutionPath: result.environment ? 'envPreResolved' : 'managerDiscovery',
+                hasPersistedSelection: env !== undefined,
+            });
 
-        sendTelemetryEvent(EventNames.ENV_SELECTION_RESULT, globalStopWatch.elapsedTime, {
-            scope: 'global',
-            prioritySource: result.source,
-            managerId: result.manager.id,
-            resolutionPath: isPathA ? 'envPreResolved' : 'managerDiscovery',
-            hasPersistedSelection: env !== undefined,
-        });
+            // Cache only — NO settings.json write
+            await envManagers.setEnvironments('global', env, false);
 
-        // Cache only — NO settings.json write (shouldPersistSettings = false)
-        await envManagers.setEnvironments('global', env, false);
+            traceInfo(`[interpreterSelection] global: ${env?.displayName ?? 'none'} (source: ${result.source})`);
 
-        traceInfo(`[interpreterSelection] global: ${env?.displayName ?? 'none'} (source: ${result.source})`);
-    } catch (err) {
-        traceError(`[interpreterSelection] Failed to set global environment: ${err}`);
+            return globalErrors;
+        } catch (err) {
+            traceError(`[interpreterSelection] Failed to set global environment: ${err}`);
+            return [];
+        }
+    };
+
+    if (workspaceFolderResolved) {
+        // Defer global scope so it doesn't block post-selection startup.
+        traceInfo('[interpreterSelection] Workspace env resolved, deferring global scope to background');
+        resolveGlobalScope()
+            .then(async (globalErrors) => {
+                if (globalErrors.length > 0) {
+                    await notifyUserOfSettingErrors(globalErrors);
+                }
+            })
+            .catch((err) => traceError(`[interpreterSelection] Background global scope resolution failed: ${err}`));
+    } else {
+        // No workspace folder resolved — global scope is the primary fallback, must await.
+        const globalErrors = await resolveGlobalScope();
+        allErrors.push(...globalErrors);
     }
 
-    // Notify user if any settings could not be applied
+    // Notify user if any settings could not be applied (workspace + global when awaited)
     if (allErrors.length > 0) {
         await notifyUserOfSettingErrors(allErrors);
     }
+
+    // Duration measures blocking time only (excludes deferred global scope).
+    sendTelemetryEvent(EventNames.ENV_SELECTION_COMPLETED, selectionStopWatch.elapsedTime, {
+        globalScopeDeferred: workspaceFolderResolved,
+        workspaceFolderCount: folders.length,
+        resolvedFolderCount,
+        settingErrorCount: allErrors.length,
+    });
 }
 
 /**
  * Notify the user when their configured settings could not be applied.
  * Shows a warning message with an option to open settings.
+ * Tracks already-warned settings to avoid duplicate dialogs (e.g., when
+ * the same user-level misconfiguration is hit by both workspace and
+ * deferred global scope resolution).
  */
+const warnedSettings = new Set<string>();
+
+export function resetSettingWarnings(): void {
+    warnedSettings.clear();
+}
+
 async function notifyUserOfSettingErrors(errors: SettingResolutionError[]): Promise<void> {
     // Group errors by setting type to avoid spamming the user
     const uniqueSettings = [...new Set(errors.map((e) => e.setting))];
 
     for (const setting of uniqueSettings) {
+        if (warnedSettings.has(setting)) {
+            continue;
+        }
+        warnedSettings.add(setting);
+
         const settingErrors = errors.filter((e) => e.setting === setting);
         const firstError = settingErrors[0];
 

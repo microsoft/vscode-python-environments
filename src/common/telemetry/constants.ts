@@ -102,6 +102,16 @@ export enum EventNames {
      */
     ENV_SELECTION_RESULT = 'ENV_SELECTION.RESULT',
     /**
+     * Telemetry event fired when applyInitialEnvironmentSelection returns.
+     * Duration measures the blocking time (excludes deferred global scope).
+     * Properties:
+     * - globalScopeDeferred: boolean (true = global scope fired in background, false = awaited)
+     * - workspaceFolderCount: number (total workspace folders)
+     * - resolvedFolderCount: number (folders that resolved with a non-undefined env)
+     * - settingErrorCount: number (user-configured settings that could not be applied)
+     */
+    ENV_SELECTION_COMPLETED = 'ENV_SELECTION.COMPLETED',
+    /**
      * Telemetry event fired when a lazily-registered manager completes its first initialization.
      * Replaces MANAGER_REGISTRATION_SKIPPED and MANAGER_REGISTRATION_FAILED for managers
      * that now register unconditionally (pipenv, poetry, pyenv).
@@ -429,6 +439,21 @@ export interface IEventNamePropertyMapping {
         managerId: string;
         resolutionPath: string;
         hasPersistedSelection: boolean;
+    };
+
+    /* __GDPR__
+        "env_selection.completed": {
+            "globalScopeDeferred": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "owner": "eleanorjboyd" },
+            "workspaceFolderCount": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "isMeasurement": true, "owner": "eleanorjboyd" },
+            "resolvedFolderCount": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "isMeasurement": true, "owner": "eleanorjboyd" },
+            "settingErrorCount": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "isMeasurement": true, "owner": "eleanorjboyd" }
+        }
+    */
+    [EventNames.ENV_SELECTION_COMPLETED]: {
+        globalScopeDeferred: boolean;
+        workspaceFolderCount: number;
+        resolvedFolderCount: number;
+        settingErrorCount: number;
     };
 
     /* __GDPR__
