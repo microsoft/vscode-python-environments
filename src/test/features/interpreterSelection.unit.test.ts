@@ -11,6 +11,7 @@ import * as workspaceApis from '../../common/workspace.apis';
 import {
     applyInitialEnvironmentSelection,
     registerInterpreterSettingsChangeListener,
+    resetSettingWarnings,
     resolveEnvironmentByPriority,
     resolveGlobalEnvironmentByPriority,
 } from '../../features/interpreterSelection';
@@ -552,6 +553,7 @@ suite('Interpreter Selection - applyInitialEnvironmentSelection', () => {
 
     setup(() => {
         sandbox = sinon.createSandbox();
+        resetSettingWarnings();
 
         mockVenvManager = {
             id: 'ms-python.python:venv',

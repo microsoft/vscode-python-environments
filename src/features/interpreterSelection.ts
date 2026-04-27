@@ -407,12 +407,26 @@ export async function applyInitialEnvironmentSelection(
 /**
  * Notify the user when their configured settings could not be applied.
  * Shows a warning message with an option to open settings.
+ * Tracks already-warned settings to avoid duplicate dialogs (e.g., when
+ * the same user-level misconfiguration is hit by both workspace and
+ * deferred global scope resolution).
  */
+const warnedSettings = new Set<string>();
+
+export function resetSettingWarnings(): void {
+    warnedSettings.clear();
+}
+
 async function notifyUserOfSettingErrors(errors: SettingResolutionError[]): Promise<void> {
     // Group errors by setting type to avoid spamming the user
     const uniqueSettings = [...new Set(errors.map((e) => e.setting))];
 
     for (const setting of uniqueSettings) {
+        if (warnedSettings.has(setting)) {
+            continue;
+        }
+        warnedSettings.add(setting);
+
         const settingErrors = errors.filter((e) => e.setting === setting);
         const firstError = settingErrors[0];
 
