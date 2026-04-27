@@ -7,6 +7,7 @@ import * as tasksApi from '../../../common/tasks.apis';
 import * as workspaceApis from '../../../common/workspace.apis';
 import * as execUtils from '../../../features/execution/execUtils';
 import { runAsTask } from '../../../features/execution/runAsTask';
+import * as builtinHelpers from '../../../managers/builtin/helpers';
 
 suite('runAsTask Tests', () => {
     let mockTraceInfo: sinon.SinonStub;
@@ -14,6 +15,7 @@ suite('runAsTask Tests', () => {
     let mockExecuteTask: sinon.SinonStub;
     let mockGetWorkspaceFolder: sinon.SinonStub;
     let mockQuoteStringIfNecessary: sinon.SinonStub;
+    let mockShouldUseUv: sinon.SinonStub;
 
     setup(() => {
         mockTraceInfo = sinon.stub(logging, 'traceInfo');
@@ -21,6 +23,7 @@ suite('runAsTask Tests', () => {
         mockExecuteTask = sinon.stub(tasksApi, 'executeTask');
         mockGetWorkspaceFolder = sinon.stub(workspaceApis, 'getWorkspaceFolder');
         mockQuoteStringIfNecessary = sinon.stub(execUtils, 'quoteStringIfNecessary');
+        mockShouldUseUv = sinon.stub(builtinHelpers, 'shouldUseUv').resolves(false);
     });
 
     teardown(() => {
@@ -111,6 +114,61 @@ suite('runAsTask Tests', () => {
 
             // Verify no warnings
             assert.ok(mockTraceWarn.notCalled, 'Should not log warnings for valid environment');
+        });
+
+        test('should use uv run when uv mode applies', async () => {
+            const environment: PythonEnvironment = {
+                envId: { id: 'test-env', managerId: 'test-manager' },
+                name: 'Test Environment',
+                displayName: 'Test Environment',
+                shortDisplayName: 'TestEnv',
+                displayPath: '/path/to/env',
+                version: '3.9.0',
+                environmentPath: Uri.file('/path/to/env'),
+                execInfo: {
+                    run: {
+                        executable: '/path/to/python',
+                        args: ['--default'],
+                    },
+                    activatedRun: {
+                        executable: '/activated/python',
+                        args: ['--activated'],
+                    },
+                },
+                sysPrefix: '/path/to/env',
+            };
+
+            const options: PythonTaskExecutionOptions = {
+                name: 'UV Task',
+                args: ['script.py', '--arg1'],
+            };
+
+            const mockTaskExecution = {} as TaskExecution;
+
+            mockGetWorkspaceFolder.returns(undefined);
+            mockShouldUseUv.withArgs(undefined, environment.environmentPath.fsPath).resolves(true);
+            mockQuoteStringIfNecessary.withArgs('uv').returns('uv');
+            mockExecuteTask.resolves(mockTaskExecution);
+
+            const result = await runAsTask(environment, options);
+
+            assert.strictEqual(result, mockTaskExecution, 'Should return the task execution result');
+
+            const taskArg = mockExecuteTask.firstCall.args[0] as Task;
+            const execution = taskArg.execution as ShellExecution;
+
+            assert.strictEqual(execution.command, 'uv', 'Should execute uv when uv mode is enabled');
+            assert.deepStrictEqual(
+                execution.args,
+                ['run', '--python', '/activated/python', '--activated', 'script.py', '--arg1'],
+                'Should prepend uv run arguments before the file arguments',
+            );
+            assert.ok(
+                mockTraceInfo.calledWith(
+                    sinon.match(/Running as task: uv run --python \/activated\/python --activated script\.py --arg1/),
+                ),
+                'Should log the uv run command',
+            );
         });
 
         test('should create and execute task with regular run configuration when no activatedRun', async () => {

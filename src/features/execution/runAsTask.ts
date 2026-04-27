@@ -12,6 +12,7 @@ import { PythonEnvironment, PythonTaskExecutionOptions } from '../../api';
 import { traceInfo, traceWarn } from '../../common/logging';
 import { executeTask } from '../../common/tasks.apis';
 import { getWorkspaceFolder } from '../../common/workspace.apis';
+import { shouldUseUv } from '../../managers/builtin/helpers';
 import { quoteStringIfNecessary } from './execUtils';
 
 function getWorkspaceFolderOrDefault(uri?: Uri): WorkspaceFolder | TaskScope {
@@ -31,11 +32,19 @@ export async function runAsTask(
         traceWarn('No Python executable found in environment; falling back to "python".');
         executable = 'python';
     }
-    // Check and quote the executable path if necessary
-    executable = quoteStringIfNecessary(executable);
 
     const args = environment.execInfo?.activatedRun?.args ?? environment.execInfo?.run.args ?? [];
     const allArgs = [...args, ...options.args];
+    const useUv = await shouldUseUv(undefined, environment.environmentPath.fsPath);
+
+    if (useUv) {
+        allArgs.unshift('--python', executable);
+        allArgs.unshift('run');
+        executable = 'uv';
+    }
+
+    // Check and quote the executable path if necessary
+    executable = quoteStringIfNecessary(executable);
     traceInfo(`Running as task: ${executable} ${allArgs.join(' ')}`);
 
     const task = new Task(
