@@ -35,7 +35,7 @@ export async function runAsTask(
 
     const args = environment.execInfo?.activatedRun?.args ?? environment.execInfo?.run.args ?? [];
     const allArgs = [...args, ...options.args];
-    const useUv = await shouldUseUv(undefined, environment.environmentPath.fsPath);
+    const useUv = await shouldUseUv(undefined, environment.environmentPath.fsPath, options.project?.uri);
 
     if (useUv) {
         allArgs.unshift('--python', executable);

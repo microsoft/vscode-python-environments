@@ -1,4 +1,4 @@
-import { CancellationError, CancellationToken, LogOutputChannel } from 'vscode';
+import { CancellationError, CancellationToken, ConfigurationScope, LogOutputChannel } from 'vscode';
 import { spawnProcess } from '../../common/childProcess.apis';
 import { EventNames } from '../../common/telemetry/constants';
 import { sendTelemetryEvent } from '../../common/telemetry/sender';
@@ -40,7 +40,7 @@ export async function isUvInstalled(log?: LogOutputChannel): Promise<boolean> {
  * @param envPath - Optional environment path to check against UV environments list
  * @returns True if uv should be used, false otherwise. For UV environments, returns true if uv is installed. For other environments, checks the 'python-envs.alwaysUseUv' setting and uv availability.
  */
-export async function shouldUseUv(log?: LogOutputChannel, envPath?: string): Promise<boolean> {
+export async function shouldUseUv(log?: LogOutputChannel, envPath?: string, scope?: ConfigurationScope): Promise<boolean> {
     if (envPath) {
         // always use uv if the given environment is stored as a uv env
         const uvEnvs = await getUvEnvironments();
@@ -50,7 +50,7 @@ export async function shouldUseUv(log?: LogOutputChannel, envPath?: string): Pro
     }
 
     // For other environments, check the user setting
-    const config = getConfiguration('python-envs');
+    const config = getConfiguration('python-envs', scope);
     const alwaysUseUv = config.get<boolean>('alwaysUseUv', true);
 
     if (alwaysUseUv) {

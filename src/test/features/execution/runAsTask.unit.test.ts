@@ -171,6 +171,48 @@ suite('runAsTask Tests', () => {
             );
         });
 
+        test('should quote uv executable when needed', async () => {
+            const environment: PythonEnvironment = {
+                envId: { id: 'test-env', managerId: 'test-manager' },
+                name: 'Test Environment',
+                displayName: 'Test Environment',
+                displayPath: '/path/to/env',
+                version: '3.9.0',
+                environmentPath: Uri.file('/path/to/env'),
+                execInfo: {
+                    run: {
+                        executable: '/path/to/python',
+                        args: [],
+                    },
+                },
+                sysPrefix: '/path/to/env',
+            };
+
+            const options: PythonTaskExecutionOptions = {
+                name: 'Quoted UV Task',
+                args: ['script.py'],
+            };
+
+            const mockTaskExecution = {} as TaskExecution;
+
+            mockGetWorkspaceFolder.returns(undefined);
+            mockShouldUseUv.withArgs(undefined, environment.environmentPath.fsPath, undefined).resolves(true);
+            mockQuoteStringIfNecessary.withArgs('uv').returns('"uv"');
+            mockExecuteTask.resolves(mockTaskExecution);
+
+            await runAsTask(environment, options);
+
+            const taskArg = mockExecuteTask.firstCall.args[0] as Task;
+            const execution = taskArg.execution as ShellExecution;
+
+            assert.strictEqual(execution.command, '"uv"', 'Should quote the uv executable when required');
+            assert.deepStrictEqual(
+                execution.args,
+                ['run', '--python', '/path/to/python', 'script.py'],
+                'Should preserve uv arguments when quoting the executable',
+            );
+        });
+
         test('should create and execute task with regular run configuration when no activatedRun', async () => {
             // Mock - Environment without activatedRun
             const environment: PythonEnvironment = {
@@ -197,6 +239,7 @@ suite('runAsTask Tests', () => {
             const mockTaskExecution = {} as TaskExecution;
 
             mockGetWorkspaceFolder.withArgs(undefined).returns(undefined);
+            mockShouldUseUv.withArgs(undefined, environment.environmentPath.fsPath, undefined).resolves(false);
             mockQuoteStringIfNecessary.withArgs('/path/to/python').returns('/path/to/python');
             mockExecuteTask.resolves(mockTaskExecution);
 
@@ -214,6 +257,10 @@ suite('runAsTask Tests', () => {
                 mockTraceInfo.calledWith(sinon.match(/Running as task: \/path\/to\/python --default-arg test\.py/)),
                 'Should log execution with run args',
             );
+            const taskArg = mockExecuteTask.firstCall.args[0] as Task;
+            const execution = taskArg.execution as ShellExecution;
+            assert.strictEqual(execution.command, '/path/to/python', 'Should keep the python executable when uv is off');
+            assert.deepStrictEqual(execution.args, ['--default-arg', 'test.py'], 'Should keep the non-uv arguments');
         });
 
         test('should handle custom reveal option', async () => {
