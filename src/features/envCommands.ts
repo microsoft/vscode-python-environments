@@ -153,6 +153,7 @@ export async function createEnvironmentCommand(
         if (projects.length === 0) {
             const env = await manager.create('global', undefined);
             if (env) {
+                traceInfo(`Environment created: ${env.displayName}`);
                 await em.setEnvironments('global', env);
             }
             return env;
@@ -162,6 +163,7 @@ export async function createEnvironmentCommand(
                 const scope = selected.length === 0 ? 'global' : selected.map((p) => p.uri);
                 const env = await manager.create(scope, undefined);
                 if (env) {
+                    traceInfo(`Environment created: ${env.displayName}`);
                     await em.setEnvironmentsIfUnset(scope, env);
                 }
                 return env;
@@ -216,6 +218,9 @@ export async function createAnyEnvironmentCommand(
         const manager = em.managers.find((m) => m.id === managerId);
         if (manager) {
             const env = await manager.create('global', { ...options });
+            if (env) {
+                traceInfo(`Environment created: ${env.displayName}`);
+            }
             if (select && env) {
                 await manager.set(undefined, env);
             }
@@ -270,6 +275,9 @@ export async function createAnyEnvironmentCommand(
                     selected.map((p) => p.uri),
                     { ...options, quickCreate },
                 );
+                if (env) {
+                    traceInfo(`Environment created: ${env.displayName}`);
+                }
                 if (select && env) {
                     await em.setEnvironments(
                         selected.map((p) => p.uri),
@@ -739,12 +747,12 @@ export async function copyPathToClipboard(item: unknown): Promise<void> {
     if (item instanceof ProjectItem) {
         const projectPath = item.project.uri.fsPath;
         await clipboardWriteText(projectPath);
-        traceInfo(`Copied project path to clipboard: ${projectPath}`);
+        traceVerbose(`Copied project path to clipboard: ${projectPath}`);
     } else if (item instanceof ProjectEnvironment || item instanceof PythonEnvTreeItem) {
         const run = item.environment.execInfo.run;
         const envPath = run.executable;
         await clipboardWriteText(envPath);
-        traceInfo(`Copied environment path to clipboard: ${envPath}`);
+        traceVerbose(`Copied environment path to clipboard: ${envPath}`);
     } else {
         traceVerbose(`Invalid context for copy path to clipboard: ${item}`);
     }

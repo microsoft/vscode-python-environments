@@ -169,11 +169,9 @@ export async function logDiscoverySummary(envManagers: EnvironmentManagers): Pro
         try {
             const envs = await manager.getEnvironments('all');
             totalEnvCount += envs.length;
-            if (envs.length > 0) {
-                managerSummaries.push(`${manager.displayName}: ${envs.length}`);
-            }
+            managerSummaries.push(`${manager.displayName}: ${envs.length}`);
         } catch {
-            // Discovery errors are already logged by InternalEnvironmentManager.refresh()
+            managerSummaries.push(`${manager.displayName}: error`);
         }
     }
 
