@@ -3,9 +3,11 @@ import * as assert from 'assert';
 import * as path from 'path';
 import * as sinon from 'sinon';
 import { ConfigurationTarget, Uri, WorkspaceFolder } from 'vscode';
+import * as persistentState from '../../../common/persistentState';
 import * as workspaceApis from '../../../common/workspace.apis';
 import {
     addPythonProjectSetting,
+    migrateGlobalDefaultEnvManagerSetting,
     setAllManagerSettings,
     setEnvironmentManager,
     setPackageManager,
@@ -602,5 +604,122 @@ suite('Setting Helpers - Empty Path Migration', () => {
             assert.strictEqual(projects[0].path, '.', 'Path should be fixed to "." not empty string');
             assert.strictEqual(projects[0].envManager, CONDA_MANAGER_ID, 'envManager should be updated');
         });
+    });
+});
+
+suite('Setting Helpers - migrateGlobalDefaultEnvManagerSetting', () => {
+    const SYSTEM_MANAGER_ID = 'ms-python.python:system';
+    let sandbox: sinon.SinonSandbox;
+
+    setup(() => {
+        sandbox = sinon.createSandbox();
+    });
+
+    teardown(() => {
+        sandbox.restore();
+    });
+
+    function createMockPersistentState(data: Record<string, unknown> = {}) {
+        const store: Record<string, unknown> = { ...data };
+        return {
+            get: async <T>(key: string): Promise<T | undefined> => store[key] as T | undefined,
+            set: async <T>(key: string, value: T): Promise<void> => {
+                store[key] = value;
+            },
+            clear: async (): Promise<void> => {
+                Object.keys(store).forEach((k) => delete store[k]);
+            },
+        };
+    }
+
+    test('should remove system defaultEnvManager from global settings on first run', async () => {
+        const mockState = createMockPersistentState();
+        sandbox.stub(persistentState, 'getGlobalPersistentState').resolves(mockState);
+
+        const updateCalls: Array<{ key: string; value: unknown; target: ConfigurationTarget }> = [];
+        const mockConfig = {
+            get: () => undefined,
+            has: () => false,
+            inspect: (key: string) => {
+                if (key === 'defaultEnvManager') {
+                    return { globalValue: SYSTEM_MANAGER_ID };
+                }
+                return undefined;
+            },
+            update: (key: string, value: unknown, target: ConfigurationTarget) => {
+                updateCalls.push({ key, value, target });
+                return Promise.resolve();
+            },
+        };
+        sandbox.stub(workspaceApis, 'getConfiguration').returns(mockConfig as any);
+
+        await migrateGlobalDefaultEnvManagerSetting();
+
+        const removal = updateCalls.find(
+            (c) => c.key === 'defaultEnvManager' && c.target === ConfigurationTarget.Global,
+        );
+        assert.ok(removal, 'Should remove defaultEnvManager from Global settings');
+        assert.strictEqual(removal!.value, undefined, 'Should set to undefined to remove');
+
+        // Verify migration flag was set
+        const migrated = await mockState.get<boolean>('globalSettingsMigration.systemEnvManagerRemoved');
+        assert.strictEqual(migrated, true, 'Should set migration flag');
+    });
+
+    test('should not remove if globalValue is not system', async () => {
+        const mockState = createMockPersistentState();
+        sandbox.stub(persistentState, 'getGlobalPersistentState').resolves(mockState);
+
+        const updateCalls: Array<{ key: string; value: unknown; target: ConfigurationTarget }> = [];
+        const mockConfig = {
+            get: () => undefined,
+            has: () => false,
+            inspect: (key: string) => {
+                if (key === 'defaultEnvManager') {
+                    return { globalValue: 'ms-python.python:venv' };
+                }
+                return undefined;
+            },
+            update: (key: string, value: unknown, target: ConfigurationTarget) => {
+                updateCalls.push({ key, value, target });
+                return Promise.resolve();
+            },
+        };
+        sandbox.stub(workspaceApis, 'getConfiguration').returns(mockConfig as any);
+
+        await migrateGlobalDefaultEnvManagerSetting();
+
+        const removal = updateCalls.find(
+            (c) => c.key === 'defaultEnvManager' && c.target === ConfigurationTarget.Global,
+        );
+        assert.strictEqual(removal, undefined, 'Should NOT remove non-system values');
+    });
+
+    test('should not run migration if already migrated', async () => {
+        const mockState = createMockPersistentState({
+            'globalSettingsMigration.systemEnvManagerRemoved': true,
+        });
+        sandbox.stub(persistentState, 'getGlobalPersistentState').resolves(mockState);
+
+        const updateCalls: Array<{ key: string; value: unknown; target: ConfigurationTarget }> = [];
+        const mockConfig = {
+            get: () => undefined,
+            has: () => false,
+            inspect: (key: string) => {
+                if (key === 'defaultEnvManager') {
+                    return { globalValue: SYSTEM_MANAGER_ID };
+                }
+                return undefined;
+            },
+            update: (key: string, value: unknown, target: ConfigurationTarget) => {
+                updateCalls.push({ key, value, target });
+                return Promise.resolve();
+            },
+        };
+        sandbox.stub(workspaceApis, 'getConfiguration').returns(mockConfig as any);
+
+        await migrateGlobalDefaultEnvManagerSetting();
+
+        assert.strictEqual(updateCalls.length, 0, 'Should not write any settings if already migrated');
     });
 });

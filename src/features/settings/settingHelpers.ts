@@ -1,8 +1,9 @@
 import * as path from 'path';
 import { ConfigurationScope, ConfigurationTarget, Uri, WorkspaceConfiguration, WorkspaceFolder } from 'vscode';
 import { PythonProject } from '../../api';
-import { DEFAULT_ENV_MANAGER_ID, DEFAULT_PACKAGE_MANAGER_ID } from '../../common/constants';
+import { DEFAULT_ENV_MANAGER_ID, DEFAULT_PACKAGE_MANAGER_ID, SYSTEM_MANAGER_ID } from '../../common/constants';
 import { traceError, traceInfo, traceWarn } from '../../common/logging';
+import { getGlobalPersistentState } from '../../common/persistentState';
 import * as workspaceApis from '../../common/workspace.apis';
 import { PythonProjectManager, PythonProjectSettings } from '../../internal.api';
 
@@ -571,4 +572,35 @@ export function getSettingUserScope<T>(section: string, key: string): T | undefi
         return inspect.globalValue;
     }
     return undefined;
+}
+
+const MIGRATION_KEY = 'globalSettingsMigration.systemEnvManagerRemoved';
+
+/**
+ * One-time migration: removes `defaultEnvManager` from User (global) settings if it was
+ * set to `system` by the extension. This was an unintentional side effect of a bug where
+ * the extension wrote to User scope when no workspace was open. Having `system` at the
+ * User level causes all workspaces to ignore local .venv environments.
+ *
+ * See: https://github.com/microsoft/vscode-python-environments/issues/1468
+ */
+export async function migrateGlobalDefaultEnvManagerSetting(): Promise<void> {
+    const state = await getGlobalPersistentState();
+    const alreadyMigrated = await state.get<boolean>(MIGRATION_KEY);
+    if (alreadyMigrated) {
+        return;
+    }
+
+    const config = workspaceApis.getConfiguration('python-envs', undefined);
+    const inspect = config.inspect<string>('defaultEnvManager');
+
+    if (inspect?.globalValue === SYSTEM_MANAGER_ID) {
+        await config.update('defaultEnvManager', undefined, ConfigurationTarget.Global);
+        traceInfo(
+            `[migration] Removed 'python-envs.defaultEnvManager: ${SYSTEM_MANAGER_ID}' from User settings ` +
+                `(was set unintentionally by a previous version). See https://github.com/microsoft/vscode-python-environments/issues/1468`,
+        );
+    }
+
+    await state.set(MIGRATION_KEY, true);
 }

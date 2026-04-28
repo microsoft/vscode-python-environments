@@ -71,6 +71,7 @@ import {
 import { PythonProjectManagerImpl } from './features/projectManager';
 import { getPythonApi, setPythonApi } from './features/pythonApi';
 import { registerCompletionProvider } from './features/settings/settingCompletions';
+import { migrateGlobalDefaultEnvManagerSetting } from './features/settings/settingHelpers';
 import { setActivateMenuButtonContext } from './features/terminal/activateMenuButton';
 import { normalizeShellPath } from './features/terminal/shells/common/shellUtils';
 import {
@@ -156,6 +157,9 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
 
     // Setup the persistent state for the extension.
     setPersistentState(context);
+
+    // One-time migration: remove system defaultEnvManager from User settings if set by bug
+    await migrateGlobalDefaultEnvManagerSetting();
 
     const statusBar = new PythonStatusBarImpl();
     context.subscriptions.push(statusBar);
