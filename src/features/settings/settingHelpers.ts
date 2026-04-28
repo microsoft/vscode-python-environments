@@ -195,18 +195,6 @@ export async function setAllManagerSettings(edits: EditAllManagerSettings[]): Pr
         }
     });
 
-    const config = workspaceApis.getConfiguration('python-envs', undefined);
-    edits
-        .filter((e) => !e.project)
-        .forEach((e) => {
-            if (config.get('defaultEnvManager') !== e.envManager) {
-                promises.push(config.update('defaultEnvManager', e.envManager, ConfigurationTarget.Global));
-            }
-            if (config.get('defaultPackageManager') !== e.packageManager) {
-                promises.push(config.update('defaultPackageManager', e.packageManager, ConfigurationTarget.Global));
-            }
-        });
-
     await Promise.all(promises);
 }
 
@@ -268,15 +256,6 @@ export async function setEnvironmentManager(edits: EditEnvManagerSettings[]): Pr
             promises.push(config.update('pythonProjects', overrides, ConfigurationTarget.Workspace));
         }
     });
-
-    const config = workspaceApis.getConfiguration('python-envs', undefined);
-    edits
-        .filter((e) => !e.project)
-        .forEach((e) => {
-            if (config.get('defaultEnvManager') !== e.envManager) {
-                promises.push(config.update('defaultEnvManager', e.envManager, ConfigurationTarget.Global));
-            }
-        });
 
     await Promise.all(promises);
 }
@@ -342,15 +321,6 @@ export async function setPackageManager(edits: EditPackageManagerSettings[]): Pr
             promises.push(config.update('pythonProjects', overrides, ConfigurationTarget.Workspace));
         }
     });
-
-    const config = workspaceApis.getConfiguration('python-envs', undefined);
-    edits
-        .filter((e) => !e.project)
-        .forEach((e) => {
-            if (config.get('defaultPackageManager') !== e.packageManager) {
-                promises.push(config.update('defaultPackageManager', e.packageManager, ConfigurationTarget.Global));
-            }
-        });
 
     await Promise.all(promises);
 }
