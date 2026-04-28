@@ -3,6 +3,7 @@ import * as assert from 'assert';
 import * as path from 'path';
 import * as sinon from 'sinon';
 import { ConfigurationTarget, Uri, WorkspaceFolder } from 'vscode';
+import * as logging from '../../../common/logging';
 import * as workspaceApis from '../../../common/workspace.apis';
 import {
     addPythonProjectSetting,
@@ -22,12 +23,8 @@ function getTestWorkspacePath(): string {
 }
 
 /**
- * These tests verify that settings ARE written when the value changes,
- * regardless of whether it's the default/system manager or not.
- *
- * Note: These tests focus on the global settings path (project=undefined) because
- * workspace-scoped tests would require mocking workspace.getWorkspaceFolder which
- * cannot be easily stubbed in unit tests.
+ * These tests verify that manager edits without a project do not write settings
+ * and are logged explicitly as ignored global edits.
  */
 suite('Setting Helpers - Settings Write Behavior', () => {
     const SYSTEM_MANAGER_ID = 'ms-python.python:system';
@@ -35,7 +32,7 @@ suite('Setting Helpers - Settings Write Behavior', () => {
     const PIP_MANAGER_ID = 'ms-python.python:pip';
     const CONDA_MANAGER_ID = 'ms-python.python:conda';
 
-    let updateCalls: Array<{ key: string; value: unknown; target: ConfigurationTarget }>;
+    let updateCalls: Array<{ key: string; value: unknown; target: boolean | ConfigurationTarget | undefined }>;
 
     setup(() => {
         updateCalls = [];
@@ -46,7 +43,7 @@ suite('Setting Helpers - Settings Write Behavior', () => {
     });
 
     /**
-     * Creates a mock WorkspaceConfiguration that tracks update calls
+     * Creates a mock WorkspaceConfiguration that tracks update calls.
      */
     function createMockConfig(options: {
         defaultEnvManagerGlobalValue?: string;
@@ -99,7 +96,7 @@ suite('Setting Helpers - Settings Write Behavior', () => {
             updateCalls.push({
                 key: section,
                 value,
-                target: configurationTarget as ConfigurationTarget,
+                target: configurationTarget,
             });
             return Promise.resolve();
         };
@@ -113,6 +110,7 @@ suite('Setting Helpers - Settings Write Behavior', () => {
                 currentEnvManager: VENV_MANAGER_ID,
             });
             sinon.stub(workspaceApis, 'getConfiguration').returns(mockConfig);
+            const traceVerboseStub = sinon.stub(logging, 'traceVerbose');
 
             await setAllManagerSettings([
                 {
@@ -122,10 +120,12 @@ suite('Setting Helpers - Settings Write Behavior', () => {
                 },
             ]);
 
-            const envManagerUpdates = updateCalls.filter(
-                (c) => c.key === 'defaultEnvManager' && c.target === ConfigurationTarget.Global,
+            const envManagerUpdates = updateCalls.filter((c) => c.key === 'defaultEnvManager');
+            assert.strictEqual(envManagerUpdates.length, 0, 'Should never write defaultEnvManager for global edits');
+            sinon.assert.calledWithMatch(
+                traceVerboseStub,
+                '[setAllManagerSettings] Ignoring 1 edit(s) without a project because python-envs does not persist manager defaults to User/global settings.',
             );
-            assert.strictEqual(envManagerUpdates.length, 0, 'Should never write to user/global settings');
         });
 
         test('should NOT write global defaultPackageManager even when value differs from current', async () => {
@@ -143,10 +143,12 @@ suite('Setting Helpers - Settings Write Behavior', () => {
                 },
             ]);
 
-            const pkgManagerUpdates = updateCalls.filter(
-                (c) => c.key === 'defaultPackageManager' && c.target === ConfigurationTarget.Global,
+            const pkgManagerUpdates = updateCalls.filter((c) => c.key === 'defaultPackageManager');
+            assert.strictEqual(
+                pkgManagerUpdates.length,
+                0,
+                'Should never write defaultPackageManager for global edits',
             );
-            assert.strictEqual(pkgManagerUpdates.length, 0, 'Should never write to user/global settings');
         });
     });
 
@@ -156,6 +158,7 @@ suite('Setting Helpers - Settings Write Behavior', () => {
                 currentEnvManager: VENV_MANAGER_ID,
             });
             sinon.stub(workspaceApis, 'getConfiguration').returns(mockConfig);
+            const traceVerboseStub = sinon.stub(logging, 'traceVerbose');
 
             await setEnvironmentManager([
                 {
@@ -164,10 +167,12 @@ suite('Setting Helpers - Settings Write Behavior', () => {
                 },
             ]);
 
-            const envManagerUpdates = updateCalls.filter(
-                (c) => c.key === 'defaultEnvManager' && c.target === ConfigurationTarget.Global,
+            const envManagerUpdates = updateCalls.filter((c) => c.key === 'defaultEnvManager');
+            assert.strictEqual(envManagerUpdates.length, 0, 'Should never write defaultEnvManager for global edits');
+            sinon.assert.calledWithMatch(
+                traceVerboseStub,
+                '[setEnvironmentManager] Ignoring 1 edit(s) without a project because python-envs does not persist manager defaults to User/global settings.',
             );
-            assert.strictEqual(envManagerUpdates.length, 0, 'Should never write to user/global settings');
         });
     });
 
@@ -177,6 +182,7 @@ suite('Setting Helpers - Settings Write Behavior', () => {
                 currentPkgManager: PIP_MANAGER_ID,
             });
             sinon.stub(workspaceApis, 'getConfiguration').returns(mockConfig);
+            const traceVerboseStub = sinon.stub(logging, 'traceVerbose');
 
             await setPackageManager([
                 {
@@ -185,10 +191,16 @@ suite('Setting Helpers - Settings Write Behavior', () => {
                 },
             ]);
 
-            const pkgManagerUpdates = updateCalls.filter(
-                (c) => c.key === 'defaultPackageManager' && c.target === ConfigurationTarget.Global,
+            const pkgManagerUpdates = updateCalls.filter((c) => c.key === 'defaultPackageManager');
+            assert.strictEqual(
+                pkgManagerUpdates.length,
+                0,
+                'Should never write defaultPackageManager for global edits',
             );
-            assert.strictEqual(pkgManagerUpdates.length, 0, 'Should never write to user/global settings');
+            sinon.assert.calledWithMatch(
+                traceVerboseStub,
+                '[setPackageManager] Ignoring 1 edit(s) without a project because python-envs does not persist manager defaults to User/global settings.',
+            );
         });
     });
 });
@@ -210,7 +222,7 @@ suite('Setting Helpers - Empty Path Bug Fix', () => {
         index: 0,
     };
 
-    let updateCalls: Array<{ key: string; value: unknown; target: ConfigurationTarget }>;
+    let updateCalls: Array<{ key: string; value: unknown; target: boolean | ConfigurationTarget | undefined }>;
 
     setup(() => {
         updateCalls = [];
@@ -248,7 +260,7 @@ suite('Setting Helpers - Empty Path Bug Fix', () => {
             updateCalls.push({
                 key: section,
                 value,
-                target: configurationTarget as ConfigurationTarget,
+                target: configurationTarget,
             });
             return Promise.resolve();
         };
