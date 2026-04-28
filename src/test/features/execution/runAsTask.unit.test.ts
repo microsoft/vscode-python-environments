@@ -476,6 +476,285 @@ suite('runAsTask Tests', () => {
         });
     });
 
+    suite('UV Mode Scenarios', () => {
+        test('should pass project URI as scope to shouldUseUv', async () => {
+            // Mock - Verify per-folder setting precedence by passing project.uri as the scope
+            const projectUri = Uri.file('/workspace/project');
+            const environment: PythonEnvironment = {
+                envId: { id: 'test-env', managerId: 'test-manager' },
+                name: 'Test Environment',
+                displayName: 'Test Environment',
+                displayPath: '/path/to/env',
+                version: '3.9.0',
+                environmentPath: Uri.file('/path/to/env'),
+                execInfo: {
+                    run: { executable: '/path/to/python', args: [] },
+                },
+                sysPrefix: '/path/to/env',
+            };
+
+            const options: PythonTaskExecutionOptions = {
+                name: 'Scoped Task',
+                args: ['script.py'],
+                project: { name: 'Test Project', uri: projectUri },
+            };
+
+            mockGetWorkspaceFolder.withArgs(projectUri).returns(undefined);
+            mockShouldUseUv.resolves(false);
+            mockQuoteStringIfNecessary.withArgs('/path/to/python').returns('/path/to/python');
+            mockExecuteTask.resolves({} as TaskExecution);
+
+            // Run
+            await runAsTask(environment, options);
+
+            // Assert - shouldUseUv was called with the project URI as the third (scope) argument
+            assert.ok(
+                mockShouldUseUv.calledWith(undefined, environment.environmentPath.fsPath, projectUri),
+                'Should pass project URI as the scope argument to shouldUseUv',
+            );
+        });
+
+        test('should pass undefined scope to shouldUseUv when project is not provided', async () => {
+            // Mock - No project means no scope, so shouldUseUv resolves the user/global setting
+            const environment: PythonEnvironment = {
+                envId: { id: 'test-env', managerId: 'test-manager' },
+                name: 'Test Environment',
+                displayName: 'Test Environment',
+                displayPath: '/path/to/env',
+                version: '3.9.0',
+                environmentPath: Uri.file('/path/to/env'),
+                execInfo: {
+                    run: { executable: '/path/to/python', args: [] },
+                },
+                sysPrefix: '/path/to/env',
+            };
+
+            const options: PythonTaskExecutionOptions = {
+                name: 'No-Scope Task',
+                args: ['script.py'],
+            };
+
+            mockGetWorkspaceFolder.returns(undefined);
+            mockShouldUseUv.resolves(false);
+            mockQuoteStringIfNecessary.withArgs('/path/to/python').returns('/path/to/python');
+            mockExecuteTask.resolves({} as TaskExecution);
+
+            // Run
+            await runAsTask(environment, options);
+
+            // Assert - third argument is explicitly undefined when project is missing
+            assert.ok(
+                mockShouldUseUv.calledWith(undefined, environment.environmentPath.fsPath, undefined),
+                'Should pass undefined scope when no project is provided',
+            );
+        });
+
+        test('should fall back to run.executable in --python when activatedRun is missing under uv', async () => {
+            // Mock - Env has only run, no activatedRun; uv mode is on
+            const environment: PythonEnvironment = {
+                envId: { id: 'test-env', managerId: 'test-manager' },
+                name: 'Test Environment',
+                displayName: 'Test Environment',
+                displayPath: '/path/to/env',
+                version: '3.9.0',
+                environmentPath: Uri.file('/path/to/env'),
+                execInfo: {
+                    run: { executable: '/path/to/python', args: ['-X', 'utf8'] },
+                },
+                sysPrefix: '/path/to/env',
+            };
+
+            const options: PythonTaskExecutionOptions = {
+                name: 'Fallback Run UV Task',
+                args: ['script.py'],
+            };
+
+            mockGetWorkspaceFolder.returns(undefined);
+            mockShouldUseUv.resolves(true);
+            mockQuoteStringIfNecessary.withArgs('uv').returns('uv');
+            mockExecuteTask.resolves({} as TaskExecution);
+
+            // Run
+            await runAsTask(environment, options);
+
+            // Assert
+            const taskArg = mockExecuteTask.firstCall.args[0] as Task;
+            const execution = taskArg.execution as ShellExecution;
+            assert.strictEqual(execution.command, 'uv', 'Should execute uv when uv mode is enabled');
+            assert.deepStrictEqual(
+                execution.args,
+                ['run', '--python', '/path/to/python', '-X', 'utf8', 'script.py'],
+                'Should use run.executable as --python value and preserve run.args',
+            );
+        });
+
+        test('should use python literal under uv when execInfo is missing', async () => {
+            // Mock - No execInfo at all; we fall back to the literal "python" and still run via uv
+            const environment: PythonEnvironment = {
+                envId: { id: 'test-env', managerId: 'test-manager' },
+                name: 'Test Environment',
+                displayName: 'Test Environment',
+                displayPath: '/path/to/env',
+                version: '3.9.0',
+                environmentPath: Uri.file('/path/to/env'),
+                sysPrefix: '/path/to/env',
+            } as PythonEnvironment;
+
+            const options: PythonTaskExecutionOptions = {
+                name: 'No ExecInfo UV Task',
+                args: ['script.py'],
+            };
+
+            mockGetWorkspaceFolder.returns(undefined);
+            mockShouldUseUv.resolves(true);
+            mockQuoteStringIfNecessary.withArgs('uv').returns('uv');
+            mockExecuteTask.resolves({} as TaskExecution);
+
+            // Run
+            await runAsTask(environment, options);
+
+            // Assert - warns about missing executable AND wraps the literal "python" under uv
+            assert.ok(
+                mockTraceWarn.calledWith('No Python executable found in environment; falling back to "python".'),
+                'Should warn about missing executable',
+            );
+            const taskArg = mockExecuteTask.firstCall.args[0] as Task;
+            const execution = taskArg.execution as ShellExecution;
+            assert.strictEqual(execution.command, 'uv', 'Should execute uv even when execInfo is missing');
+            assert.deepStrictEqual(
+                execution.args,
+                ['run', '--python', 'python', 'script.py'],
+                'Should pass the literal "python" fallback as the --python argument',
+            );
+        });
+
+        test('should preserve a Windows-style python path verbatim as --python argument under uv', async () => {
+            // Mock - Windows backslash path; the python path now flows as a uv argument, not the executable
+            const winPython = 'C:\\Users\\me\\.venv\\Scripts\\python.exe';
+            const environment: PythonEnvironment = {
+                envId: { id: 'test-env', managerId: 'test-manager' },
+                name: 'Test Environment',
+                displayName: 'Test Environment',
+                displayPath: 'C:\\Users\\me\\.venv',
+                version: '3.11.0',
+                environmentPath: Uri.file(winPython),
+                execInfo: {
+                    run: { executable: winPython, args: [] },
+                },
+                sysPrefix: 'C:\\Users\\me\\.venv',
+            };
+
+            const options: PythonTaskExecutionOptions = {
+                name: 'Windows UV Task',
+                args: ['script.py'],
+            };
+
+            mockGetWorkspaceFolder.returns(undefined);
+            mockShouldUseUv.resolves(true);
+            mockQuoteStringIfNecessary.withArgs('uv').returns('uv');
+            mockExecuteTask.resolves({} as TaskExecution);
+
+            // Run
+            await runAsTask(environment, options);
+
+            // Assert - the --python value matches the input path string (not quoted via quoteStringIfNecessary)
+            const taskArg = mockExecuteTask.firstCall.args[0] as Task;
+            const execution = taskArg.execution as ShellExecution;
+            assert.strictEqual(execution.command, 'uv', 'Should execute uv when uv mode is enabled');
+            assert.deepStrictEqual(
+                execution.args,
+                ['run', '--python', winPython, 'script.py'],
+                'Should preserve the Windows-style path verbatim as the --python value',
+            );
+            // quoteStringIfNecessary should not be called for the python path under uv (only for the executable)
+            assert.ok(
+                !mockQuoteStringIfNecessary.calledWith(winPython),
+                'Should not quote the python path when it is a uv argument',
+            );
+        });
+
+        test('should append user args after env activated args under uv', async () => {
+            // Mock - Env supplies activatedRun.args; ensure ordering: run --python <py> <env-args> <user-args>
+            const environment: PythonEnvironment = {
+                envId: { id: 'test-env', managerId: 'test-manager' },
+                name: 'Test Environment',
+                displayName: 'Test Environment',
+                displayPath: '/path/to/env',
+                version: '3.9.0',
+                environmentPath: Uri.file('/path/to/env'),
+                execInfo: {
+                    run: { executable: '/path/to/python', args: ['--default'] },
+                    activatedRun: {
+                        executable: '/activated/python',
+                        args: ['-X', 'utf8'],
+                    },
+                },
+                sysPrefix: '/path/to/env',
+            };
+
+            const options: PythonTaskExecutionOptions = {
+                name: 'Args Order UV Task',
+                args: ['script.py', '--user-arg'],
+            };
+
+            mockGetWorkspaceFolder.returns(undefined);
+            mockShouldUseUv.resolves(true);
+            mockQuoteStringIfNecessary.withArgs('uv').returns('uv');
+            mockExecuteTask.resolves({} as TaskExecution);
+
+            // Run
+            await runAsTask(environment, options);
+
+            // Assert
+            const taskArg = mockExecuteTask.firstCall.args[0] as Task;
+            const execution = taskArg.execution as ShellExecution;
+            assert.deepStrictEqual(
+                execution.args,
+                ['run', '--python', '/activated/python', '-X', 'utf8', 'script.py', '--user-arg'],
+                'Env activated args should sit between --python and the user args',
+            );
+        });
+
+        test('should pass user args containing flags through to python under uv (regression guard)', async () => {
+            // Mock - The run button only ever appends a file path, but API callers can pass arbitrary args.
+            // This guards the contract that user args land after the script positional and are NOT consumed by uv.
+            const environment: PythonEnvironment = {
+                envId: { id: 'test-env', managerId: 'test-manager' },
+                name: 'Test Environment',
+                displayName: 'Test Environment',
+                displayPath: '/path/to/env',
+                version: '3.9.0',
+                environmentPath: Uri.file('/path/to/env'),
+                execInfo: {
+                    run: { executable: '/path/to/python', args: [] },
+                },
+                sysPrefix: '/path/to/env',
+            };
+
+            const options: PythonTaskExecutionOptions = {
+                name: 'Flag Args UV Task',
+                args: ['script.py', '--user-flag', 'value'],
+            };
+
+            mockGetWorkspaceFolder.returns(undefined);
+            mockShouldUseUv.resolves(true);
+            mockQuoteStringIfNecessary.withArgs('uv').returns('uv');
+            mockExecuteTask.resolves({} as TaskExecution);
+
+            // Run
+            await runAsTask(environment, options);
+
+            // Assert - the user flag appears after the script path (i.e. it goes to python, not uv).
+            const taskArg = mockExecuteTask.firstCall.args[0] as Task;
+            const execution = taskArg.execution as ShellExecution;
+            assert.deepStrictEqual(
+                execution.args,
+                ['run', '--python', '/path/to/python', 'script.py', '--user-flag', 'value'],
+                'User args should be appended after --python <path> in the order provided',
+            );
+        });
+    });
+
     suite('Workspace Resolution', () => {
         test('should use workspace folder when project URI is provided', async () => {
             // Mock - Test workspace resolution
