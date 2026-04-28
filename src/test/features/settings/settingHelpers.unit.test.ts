@@ -108,7 +108,7 @@ suite('Setting Helpers - Settings Write Behavior', () => {
     }
 
     suite('setAllManagerSettings - Global Settings', () => {
-        test('should write global defaultEnvManager when value differs from current', async () => {
+        test('should NOT write global defaultEnvManager even when value differs from current', async () => {
             const mockConfig = createMockConfig({
                 currentEnvManager: VENV_MANAGER_ID,
             });
@@ -125,31 +125,10 @@ suite('Setting Helpers - Settings Write Behavior', () => {
             const envManagerUpdates = updateCalls.filter(
                 (c) => c.key === 'defaultEnvManager' && c.target === ConfigurationTarget.Global,
             );
-            assert.strictEqual(envManagerUpdates.length, 1, 'Should write global defaultEnvManager when value differs');
-            assert.strictEqual(envManagerUpdates[0].value, SYSTEM_MANAGER_ID);
+            assert.strictEqual(envManagerUpdates.length, 0, 'Should never write to user/global settings');
         });
 
-        test('should NOT write global defaultEnvManager when value is same as current', async () => {
-            const mockConfig = createMockConfig({
-                currentEnvManager: SYSTEM_MANAGER_ID,
-            });
-            sinon.stub(workspaceApis, 'getConfiguration').returns(mockConfig);
-
-            await setAllManagerSettings([
-                {
-                    project: undefined,
-                    envManager: SYSTEM_MANAGER_ID,
-                    packageManager: PIP_MANAGER_ID,
-                },
-            ]);
-
-            const envManagerUpdates = updateCalls.filter(
-                (c) => c.key === 'defaultEnvManager' && c.target === ConfigurationTarget.Global,
-            );
-            assert.strictEqual(envManagerUpdates.length, 0, 'Should NOT write when value is same as current');
-        });
-
-        test('should write global defaultPackageManager when value differs from current', async () => {
+        test('should NOT write global defaultPackageManager even when value differs from current', async () => {
             const mockConfig = createMockConfig({
                 currentEnvManager: VENV_MANAGER_ID,
                 currentPkgManager: PIP_MANAGER_ID,
@@ -167,17 +146,12 @@ suite('Setting Helpers - Settings Write Behavior', () => {
             const pkgManagerUpdates = updateCalls.filter(
                 (c) => c.key === 'defaultPackageManager' && c.target === ConfigurationTarget.Global,
             );
-            assert.strictEqual(
-                pkgManagerUpdates.length,
-                1,
-                'Should write global defaultPackageManager when value differs',
-            );
-            assert.strictEqual(pkgManagerUpdates[0].value, CONDA_MANAGER_ID);
+            assert.strictEqual(pkgManagerUpdates.length, 0, 'Should never write to user/global settings');
         });
     });
 
     suite('setEnvironmentManager - Global Settings', () => {
-        test('should write when value differs from current', async () => {
+        test('should NOT write to global even when value differs from current', async () => {
             const mockConfig = createMockConfig({
                 currentEnvManager: VENV_MANAGER_ID,
             });
@@ -193,31 +167,12 @@ suite('Setting Helpers - Settings Write Behavior', () => {
             const envManagerUpdates = updateCalls.filter(
                 (c) => c.key === 'defaultEnvManager' && c.target === ConfigurationTarget.Global,
             );
-            assert.strictEqual(envManagerUpdates.length, 1, 'Should write global defaultEnvManager when value differs');
-        });
-
-        test('should NOT write when value is same as current', async () => {
-            const mockConfig = createMockConfig({
-                currentEnvManager: SYSTEM_MANAGER_ID,
-            });
-            sinon.stub(workspaceApis, 'getConfiguration').returns(mockConfig);
-
-            await setEnvironmentManager([
-                {
-                    project: undefined,
-                    envManager: SYSTEM_MANAGER_ID,
-                },
-            ]);
-
-            const envManagerUpdates = updateCalls.filter(
-                (c) => c.key === 'defaultEnvManager' && c.target === ConfigurationTarget.Global,
-            );
-            assert.strictEqual(envManagerUpdates.length, 0, 'Should NOT write when value is same');
+            assert.strictEqual(envManagerUpdates.length, 0, 'Should never write to user/global settings');
         });
     });
 
     suite('setPackageManager - Global Settings', () => {
-        test('should write when value differs from current', async () => {
+        test('should NOT write to global even when value differs from current', async () => {
             const mockConfig = createMockConfig({
                 currentPkgManager: PIP_MANAGER_ID,
             });
@@ -233,30 +188,7 @@ suite('Setting Helpers - Settings Write Behavior', () => {
             const pkgManagerUpdates = updateCalls.filter(
                 (c) => c.key === 'defaultPackageManager' && c.target === ConfigurationTarget.Global,
             );
-            assert.strictEqual(
-                pkgManagerUpdates.length,
-                1,
-                'Should write global defaultPackageManager when value differs',
-            );
-        });
-
-        test('should NOT write when value is same as current', async () => {
-            const mockConfig = createMockConfig({
-                currentPkgManager: PIP_MANAGER_ID,
-            });
-            sinon.stub(workspaceApis, 'getConfiguration').returns(mockConfig);
-
-            await setPackageManager([
-                {
-                    project: undefined,
-                    packageManager: PIP_MANAGER_ID,
-                },
-            ]);
-
-            const pkgManagerUpdates = updateCalls.filter(
-                (c) => c.key === 'defaultPackageManager' && c.target === ConfigurationTarget.Global,
-            );
-            assert.strictEqual(pkgManagerUpdates.length, 0, 'Should NOT write when value is same');
+            assert.strictEqual(pkgManagerUpdates.length, 0, 'Should never write to user/global settings');
         });
     });
 });
