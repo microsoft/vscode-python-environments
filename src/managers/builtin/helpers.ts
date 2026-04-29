@@ -36,9 +36,15 @@ export async function isUvInstalled(log?: LogOutputChannel): Promise<boolean> {
 
 /**
  * Determines if uv should be used for managing a virtual environment.
- * @param log - Optional log output channel for logging operations
- * @param envPath - Optional environment path to check against UV environments list
- * @returns True if uv should be used, false otherwise. For UV environments, returns true if uv is installed. For other environments, checks the 'python-envs.alwaysUseUv' setting and uv availability.
+ * @param log - Optional log output channel for logging operations.
+ * @param envPath - Optional environment path to check against the known uv environments list.
+ * @param scope - Optional configuration scope used when reading the `python-envs.alwaysUseUv` setting.
+ * Pass the relevant project or workspace-folder `Uri` when available so VS Code resolves settings
+ * using normal precedence: workspace folder, then workspace, then user/global. If omitted, the
+ * user/global value is used unless VS Code can infer a broader scope.
+ * @returns True if uv should be used, false otherwise. For uv-managed environments, returns true
+ * if uv is installed. For other environments, checks the `python-envs.alwaysUseUv` setting for
+ * the provided scope and uv availability.
  */
 export async function shouldUseUv(log?: LogOutputChannel, envPath?: string, scope?: ConfigurationScope): Promise<boolean> {
     if (envPath) {

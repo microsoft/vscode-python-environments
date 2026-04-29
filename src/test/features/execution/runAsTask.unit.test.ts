@@ -715,6 +715,49 @@ suite('runAsTask Tests', () => {
             );
         });
 
+        test('should strip surrounding quotes from executable before passing as --python to uv (regression guard)', async () => {
+            // Mock - executable is already quoted (e.g. from a shell-escape step or a provider that returns
+            // a quoted path).  uv must receive the raw path without the surrounding quotes or it fails to
+            // locate the interpreter.
+            const quotedPython = '"C:\\Program Files\\Python311\\python.exe"';
+            const unquotedPython = 'C:\\Program Files\\Python311\\python.exe';
+            const environment: PythonEnvironment = {
+                envId: { id: 'test-env', managerId: 'test-manager' },
+                name: 'Test Environment',
+                displayName: 'Test Environment',
+                displayPath: 'C:\\Program Files\\Python311',
+                version: '3.11.0',
+                environmentPath: Uri.file(unquotedPython),
+                execInfo: {
+                    run: { executable: quotedPython, args: [] },
+                },
+                sysPrefix: 'C:\\Program Files\\Python311',
+            };
+
+            const options: PythonTaskExecutionOptions = {
+                name: 'Quoted Python UV Task',
+                args: ['script.py'],
+            };
+
+            mockGetWorkspaceFolder.returns(undefined);
+            mockShouldUseUv.resolves(true);
+            mockQuoteStringIfNecessary.withArgs('uv').returns('uv');
+            mockExecuteTask.resolves({} as TaskExecution);
+
+            // Run
+            await runAsTask(environment, options);
+
+            // Assert - the --python value must be the unquoted path so uv can resolve it
+            const taskArg = mockExecuteTask.firstCall.args[0] as Task;
+            const execution = taskArg.execution as ShellExecution;
+            assert.strictEqual(execution.command, 'uv', 'Should execute uv when uv mode is enabled');
+            assert.deepStrictEqual(
+                execution.args,
+                ['run', '--python', unquotedPython, 'script.py'],
+                'Should strip surrounding quotes from the python path before passing to uv --python',
+            );
+        });
+
         test('should pass user args containing flags through to python under uv (regression guard)', async () => {
             // Mock - The run button only ever appends a file path, but API callers can pass arbitrary args.
             // This guards the contract that user args land after the script positional and are NOT consumed by uv.

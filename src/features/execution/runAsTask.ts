@@ -38,7 +38,14 @@ export async function runAsTask(
     const useUv = await shouldUseUv(undefined, environment.environmentPath.fsPath, options.project?.uri);
 
     if (useUv) {
-        allArgs.unshift('--python', executable);
+        // Strip surrounding quotes before passing as --python value; uv receives the raw path
+        // and shell-quoting the argument value causes it to fail to resolve the interpreter.
+        // (cf. runInBackground.ts which strips quotes for the same reason before spawn)
+        let pythonArg = executable;
+        if (pythonArg.startsWith('"') && pythonArg.endsWith('"')) {
+            pythonArg = pythonArg.substring(1, pythonArg.length - 1);
+        }
+        allArgs.unshift('--python', pythonArg);
         allArgs.unshift('run');
         executable = 'uv';
     }
