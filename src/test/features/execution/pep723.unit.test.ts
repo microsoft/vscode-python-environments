@@ -1,13 +1,18 @@
 import * as assert from 'assert';
 import * as sinon from 'sinon';
-import * as fse from 'fs-extra';
 import { isPep723Script } from '../../../features/execution/pep723';
 
 suite('isPep723Script Tests', () => {
     let readFileStub: sinon.SinonStub;
 
     setup(() => {
-        readFileStub = sinon.stub(fse, 'readFile');
+        // TypeScript compiles `import * as fse from 'fs-extra'` into a namespace wrapper whose
+        // properties are non-configurable getters — sinon cannot stub them directly.  The actual
+        // `require('fs-extra')` object has writable/configurable properties AND the namespace
+        // wrapper's getters delegate to it, so stubbing the real module object is intercepted by
+        // the source-under-test as well.
+        // eslint-disable-next-line @typescript-eslint/no-require-imports
+        readFileStub = sinon.stub(require('fs-extra'), 'readFile');
     });
 
     teardown(() => {
