@@ -59,7 +59,7 @@ export class ProjectView implements TreeDataProvider<ProjectTreeItem> {
             this.projectManager.onDidChangeProjects(() => {
                 this.debouncedUpdateProject.trigger();
             }),
-            this.envManagers.onDidChangeEnvironment(() => {
+            this.envManagers.onDidChangeManagerEnvironment(() => {
                 this.debouncedUpdateProject.trigger();
             }),
             this.envManagers.onDidChangeEnvironments(() => {

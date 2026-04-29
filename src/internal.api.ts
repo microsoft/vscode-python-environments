@@ -32,8 +32,8 @@ import { CreateEnvironmentNotSupported, RemoveEnvironmentNotSupported } from './
 import { traceWarn } from './common/logging';
 import { StopWatch } from './common/stopWatch';
 import { EventNames } from './common/telemetry/constants';
-import { sendTelemetryEvent } from './common/telemetry/sender';
 import { classifyError } from './common/telemetry/errorClassifier';
+import { sendTelemetryEvent } from './common/telemetry/sender';
 
 export type EnvironmentManagerScope = undefined | string | Uri | PythonEnvironment;
 export type PackageManagerScope = undefined | string | Uri | PythonEnvironment | Package;
@@ -86,20 +86,19 @@ export interface EnvironmentManagers extends Disposable {
     onDidChangeEnvironments: Event<InternalDidChangeEnvironmentsEventArgs>;
 
     /**
-     * This event is fired when an environment manager changes the environment for
-     * a particular scope (global, uri, workspace, etc). This can be any environment manager even if it is not the
-     * one selected by the user for the workspace. It is also fired if the change
-     * involves unselected to selected or selected to unselected.
+     * Fires when ANY registered environment manager reports a selection change for a scope,
+     * regardless of whether that manager is the one currently selected by the user.
+     * Use this for UI refresh (e.g., status bar updates) that should react to all manager activity.
      */
-    onDidChangeEnvironment: Event<DidChangeEnvironmentEventArgs>;
+    onDidChangeManagerEnvironment: Event<DidChangeEnvironmentEventArgs>;
 
     /**
-     * This event is fired when a selected environment manager changes the environment
-     * for a particular scope (global, uri, workspace, etc). This is also only fired if
-     * the previous and current environments are different. It is also fired if the change
-     * involves unselected to selected or selected to unselected.
+     * Fires only when the *selected* (active) environment for a scope actually changes.
+     * This is the authoritative "the user's environment changed" event. Consumers that
+     * need to react to the effective interpreter (terminal activation, language server,
+     * Python API clients) should use this event.
      */
-    onDidChangeEnvironmentFiltered: Event<DidChangeEnvironmentEventArgs>;
+    onDidChangeActiveEnvironment: Event<DidChangeEnvironmentEventArgs>;
     onDidChangePackages: Event<InternalDidChangePackagesEventArgs>;
 
     onDidChangeEnvironmentManager: Event<DidChangeEnvironmentManagerEventArgs>;
@@ -137,6 +136,7 @@ export interface EnvironmentManagers extends Disposable {
     ): Promise<void>;
     setEnvironmentsIfUnset(scope: Uri[] | string, environment?: PythonEnvironment): Promise<void>;
     getEnvironment(scope: GetEnvironmentScope): Promise<PythonEnvironment | undefined>;
+    refreshEnvironment(scope: GetEnvironmentScope): Promise<void>;
 
     getProjectEnvManagers(uris: Uri[]): InternalEnvironmentManager[];
 }
