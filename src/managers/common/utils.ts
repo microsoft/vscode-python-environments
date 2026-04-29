@@ -183,14 +183,11 @@ export async function getShellActivationCommands(binDir: string): Promise<{
     shellActivation.set(ShellConstants.KSH, [{ executable: '.', args: [path.join(binDir, `activate`)] }]);
     shellDeactivation.set(ShellConstants.KSH, [{ executable: 'deactivate' }]);
 
-    // Use readdir to find the actual ps1 filename with correct casing.
-    // pathExists with a hardcoded name fails on case-insensitive filesystems (Windows)
-    // where 'activate.ps1' created by the user would match 'Activate.ps1' in the check,
-    // causing the returned path to have the wrong case.
-    const dirFiles = await fs.readdir(binDir).catch(() => [] as string[]);
-    const ps1File = dirFiles.find((f) => f.toLowerCase() === 'activate.ps1');
-    if (ps1File) {
-        shellActivation.set(ShellConstants.PWSH, buildPwshActivationCommands(path.join(binDir, ps1File)));
+    if (await fs.pathExists(path.join(binDir, 'Activate.ps1'))) {
+        shellActivation.set(ShellConstants.PWSH, buildPwshActivationCommands(path.join(binDir, 'Activate.ps1')));
+        shellDeactivation.set(ShellConstants.PWSH, [{ executable: 'deactivate' }]);
+    } else if (await fs.pathExists(path.join(binDir, 'activate.ps1'))) {
+        shellActivation.set(ShellConstants.PWSH, buildPwshActivationCommands(path.join(binDir, 'activate.ps1')));
         shellDeactivation.set(ShellConstants.PWSH, [{ executable: 'deactivate' }]);
     }
 
