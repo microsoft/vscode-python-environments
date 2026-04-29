@@ -110,7 +110,7 @@ suite('getShellActivationCommands', () => {
             assert.strictEqual(pwshActivation[0].executable, '&');
             assert.ok(pwshActivation[0].args);
             assert.ok(
-                pwshActivation[0].args[0].endsWith('activate.ps1'),
+                pwshActivation[0].args[0].toLowerCase().endsWith('activate.ps1'),
                 `Expected path ending with activate.ps1, got: ${pwshActivation[0].args[0]}`,
             );
         });
