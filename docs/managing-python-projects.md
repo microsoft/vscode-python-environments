@@ -211,6 +211,8 @@ You can set default managers that apply to all projects without explicit overrid
 }
 ```
 
+> **Important**: The extension never writes settings to the User (global) scope. All extension-managed settings are written at the Workspace or Workspace Folder level only. This prevents the extension from setting values that persist across unrelated projects and cause unexpected interference (see [#1468](https://github.com/microsoft/vscode-python-environments/issues/1468)). If a user wants a user-level default, they can set it manually in their User `settings.json`.
+
 ## Working with Multi-Root Workspaces
 
 Multi-root workspaces contain multiple top-level folders. The extension handles these seamlessly:
