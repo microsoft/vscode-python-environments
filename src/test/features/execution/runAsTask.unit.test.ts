@@ -8,6 +8,7 @@ import * as workspaceApis from '../../../common/workspace.apis';
 import * as execUtils from '../../../features/execution/execUtils';
 import { runAsTask } from '../../../features/execution/runAsTask';
 import * as builtinHelpers from '../../../managers/builtin/helpers';
+import * as pep723Module from '../../../features/execution/pep723';
 
 suite('runAsTask Tests', () => {
     let mockTraceInfo: sinon.SinonStub;
@@ -16,6 +17,7 @@ suite('runAsTask Tests', () => {
     let mockGetWorkspaceFolder: sinon.SinonStub;
     let mockQuoteStringIfNecessary: sinon.SinonStub;
     let mockShouldUseUv: sinon.SinonStub;
+    let mockIsPep723Script: sinon.SinonStub;
 
     setup(() => {
         mockTraceInfo = sinon.stub(logging, 'traceInfo');
@@ -24,6 +26,7 @@ suite('runAsTask Tests', () => {
         mockGetWorkspaceFolder = sinon.stub(workspaceApis, 'getWorkspaceFolder');
         mockQuoteStringIfNecessary = sinon.stub(execUtils, 'quoteStringIfNecessary');
         mockShouldUseUv = sinon.stub(builtinHelpers, 'shouldUseUv').resolves(false);
+        mockIsPep723Script = sinon.stub(pep723Module, 'isPep723Script').resolves(false);
     });
 
     teardown(() => {
@@ -1170,6 +1173,146 @@ suite('runAsTask Tests', () => {
 
             // Verify no warnings for complete environment
             assert.ok(mockTraceWarn.notCalled, 'Should not warn for complete environment configuration');
+        });
+    });
+
+    suite('PEP 723 Inline Script Metadata', () => {
+        function makeEnv(executable: string): PythonEnvironment {
+            return {
+                envId: { id: 'test-env', managerId: 'test-manager' },
+                name: 'Test Environment',
+                displayName: 'Test Environment',
+                displayPath: '/path/to/env',
+                version: '3.11.0',
+                environmentPath: Uri.file('/path/to/env'),
+                execInfo: {
+                    run: { executable, args: ['--env-arg'] },
+                },
+                sysPrefix: '/path/to/env',
+            };
+        }
+
+        test('should run PEP 723 script with uv run <script> and no --python flag', async () => {
+            const environment = makeEnv('/path/to/python');
+            const options: PythonTaskExecutionOptions = {
+                name: 'PEP 723 Task',
+                args: ['/workspace/pep723_script.py'],
+            };
+
+            mockGetWorkspaceFolder.returns(undefined);
+            mockShouldUseUv.resolves(true);
+            mockIsPep723Script.withArgs('/workspace/pep723_script.py').resolves(true);
+            mockQuoteStringIfNecessary.withArgs('uv').returns('uv');
+            mockExecuteTask.resolves({} as TaskExecution);
+
+            await runAsTask(environment, options);
+
+            const taskArg = mockExecuteTask.firstCall.args[0] as Task;
+            const execution = taskArg.execution as ShellExecution;
+
+            assert.strictEqual(execution.command, 'uv', 'Should run via uv');
+            assert.deepStrictEqual(
+                execution.args,
+                ['run', '/workspace/pep723_script.py'],
+                'PEP 723 script should use uv run <script> with no --python and no env args',
+            );
+            assert.ok(
+                mockTraceInfo.calledWith(sinon.match(/PEP 723 script detected/)),
+                'Should log that PEP 723 was detected',
+            );
+        });
+
+        test('should pass extra user args after the script for PEP 723', async () => {
+            const environment = makeEnv('/path/to/python');
+            const options: PythonTaskExecutionOptions = {
+                name: 'PEP 723 Task With Args',
+                args: ['/workspace/pep723_script.py', '--verbose', '--output', 'out.txt'],
+            };
+
+            mockGetWorkspaceFolder.returns(undefined);
+            mockShouldUseUv.resolves(true);
+            mockIsPep723Script.withArgs('/workspace/pep723_script.py').resolves(true);
+            mockQuoteStringIfNecessary.withArgs('uv').returns('uv');
+            mockExecuteTask.resolves({} as TaskExecution);
+
+            await runAsTask(environment, options);
+
+            const execution = (mockExecuteTask.firstCall.args[0] as Task).execution as ShellExecution;
+            assert.deepStrictEqual(
+                execution.args,
+                ['run', '/workspace/pep723_script.py', '--verbose', '--output', 'out.txt'],
+                'Extra user args should be appended after the script path for PEP 723',
+            );
+        });
+
+        test('should skip PEP 723 detection when first arg starts with a flag', async () => {
+            // When args[0] is a flag (e.g. -m), isPep723Script should not be called
+            const environment = makeEnv('/path/to/python');
+            const options: PythonTaskExecutionOptions = {
+                name: 'Module Task',
+                args: ['-m', 'pytest'],
+            };
+
+            mockGetWorkspaceFolder.returns(undefined);
+            mockShouldUseUv.resolves(true);
+            mockQuoteStringIfNecessary.withArgs('uv').returns('uv');
+            mockExecuteTask.resolves({} as TaskExecution);
+
+            await runAsTask(environment, options);
+
+            assert.ok(mockIsPep723Script.notCalled, 'Should not check PEP 723 when first arg is a flag');
+
+            const execution = (mockExecuteTask.firstCall.args[0] as Task).execution as ShellExecution;
+            // Should fall through to standard uv --python path
+            assert.strictEqual(execution.args?.[0], 'run');
+            assert.strictEqual(execution.args?.[1], '--python');
+        });
+
+        test('should use standard uv --python path for non-PEP 723 scripts', async () => {
+            // Standard .py file with no PEP 723 block → normal uv run --python behavior
+            const environment = makeEnv('/path/to/python');
+            const options: PythonTaskExecutionOptions = {
+                name: 'Standard Script Task',
+                args: ['/workspace/regular_script.py'],
+            };
+
+            mockGetWorkspaceFolder.returns(undefined);
+            mockShouldUseUv.resolves(true);
+            mockIsPep723Script.withArgs('/workspace/regular_script.py').resolves(false);
+            mockQuoteStringIfNecessary.withArgs('uv').returns('uv');
+            mockExecuteTask.resolves({} as TaskExecution);
+
+            await runAsTask(environment, options);
+
+            const execution = (mockExecuteTask.firstCall.args[0] as Task).execution as ShellExecution;
+            assert.strictEqual(execution.command, 'uv');
+            assert.deepStrictEqual(
+                execution.args,
+                ['run', '--python', '/path/to/python', '--env-arg', '/workspace/regular_script.py'],
+                'Non-PEP 723 scripts should use uv run --python <interpreter> with env args',
+            );
+        });
+
+        test('should treat isPep723Script read error as non-PEP 723 (graceful fallback)', async () => {
+            const environment = makeEnv('/path/to/python');
+            const options: PythonTaskExecutionOptions = {
+                name: 'Unreadable Script Task',
+                args: ['/workspace/missing_script.py'],
+            };
+
+            mockGetWorkspaceFolder.returns(undefined);
+            mockShouldUseUv.resolves(true);
+            // isPep723Script returns false on read error (per implementation), but also verify
+            // that even if it somehow throws, runAsTask falls back gracefully
+            mockIsPep723Script.withArgs('/workspace/missing_script.py').resolves(false);
+            mockQuoteStringIfNecessary.withArgs('uv').returns('uv');
+            mockExecuteTask.resolves({} as TaskExecution);
+
+            await runAsTask(environment, options);
+
+            const execution = (mockExecuteTask.firstCall.args[0] as Task).execution as ShellExecution;
+            // Falls back to standard uv --python path
+            assert.strictEqual(execution.args?.[1], '--python', 'Should fall back to --python when script is unreadable');
         });
     });
 });

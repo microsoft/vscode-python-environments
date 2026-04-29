@@ -14,6 +14,7 @@ import { executeTask } from '../../common/tasks.apis';
 import { getWorkspaceFolder } from '../../common/workspace.apis';
 import { shouldUseUv } from '../../managers/builtin/helpers';
 import { quoteStringIfNecessary } from './execUtils';
+import { isPep723Script } from './pep723';
 
 function getWorkspaceFolderOrDefault(uri?: Uri): WorkspaceFolder | TaskScope {
     const workspace = uri ? getWorkspaceFolder(uri) : undefined;
@@ -33,21 +34,34 @@ export async function runAsTask(
         executable = 'python';
     }
 
-    const args = environment.execInfo?.activatedRun?.args ?? environment.execInfo?.run.args ?? [];
-    const allArgs = [...args, ...options.args];
+    const envArgs = environment.execInfo?.activatedRun?.args ?? environment.execInfo?.run.args ?? [];
     const useUv = await shouldUseUv(undefined, environment.environmentPath.fsPath, options.project?.uri);
 
+    let allArgs: string[];
     if (useUv) {
-        // Strip surrounding quotes before passing as --python value; uv receives the raw path
-        // and shell-quoting the argument value causes it to fail to resolve the interpreter.
-        // (cf. runInBackground.ts which strips quotes for the same reason before spawn)
-        let pythonArg = executable;
-        if (pythonArg.startsWith('"') && pythonArg.endsWith('"')) {
-            pythonArg = pythonArg.substring(1, pythonArg.length - 1);
+        // Detect whether the first user argument is a PEP 723 self-contained script.
+        // A PEP 723 script declares its own Python version and dependencies inline, so
+        // uv manages the environment entirely — we must NOT pin a `--python` interpreter
+        // or inject env-specific args, as that would override the script's own requirements.
+        const candidateScript =
+            options.args.length > 0 && !options.args[0].startsWith('-') ? options.args[0] : undefined;
+        const pep723 = candidateScript ? await isPep723Script(candidateScript) : false;
+
+        if (pep723) {
+            // PEP 723: `uv run <script> [userArgs]` — uv picks the interpreter itself
+            traceInfo(`PEP 723 script detected: ${candidateScript}. Running with uv without --python.`);
+            allArgs = ['run', ...options.args];
+        } else {
+            // Standard script: pin the saved interpreter via --python
+            let pythonArg = executable;
+            if (pythonArg.startsWith('"') && pythonArg.endsWith('"')) {
+                pythonArg = pythonArg.substring(1, pythonArg.length - 1);
+            }
+            allArgs = ['run', '--python', pythonArg, ...envArgs, ...options.args];
         }
-        allArgs.unshift('--python', pythonArg);
-        allArgs.unshift('run');
         executable = 'uv';
+    } else {
+        allArgs = [...envArgs, ...options.args];
     }
 
     // Check and quote the executable path if necessary
