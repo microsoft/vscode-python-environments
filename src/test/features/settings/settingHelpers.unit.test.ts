@@ -3,6 +3,7 @@ import * as assert from 'assert';
 import * as path from 'path';
 import * as sinon from 'sinon';
 import { ConfigurationTarget, Uri, WorkspaceFolder } from 'vscode';
+import * as logging from '../../../common/logging';
 import * as workspaceApis from '../../../common/workspace.apis';
 import {
     addPythonProjectSetting,
@@ -22,12 +23,8 @@ function getTestWorkspacePath(): string {
 }
 
 /**
- * These tests verify that settings ARE written when the value changes,
- * regardless of whether it's the default/system manager or not.
- *
- * Note: These tests focus on the global settings path (project=undefined) because
- * workspace-scoped tests would require mocking workspace.getWorkspaceFolder which
- * cannot be easily stubbed in unit tests.
+ * These tests verify that manager edits without a project do not write settings
+ * and are logged explicitly as ignored global edits.
  */
 suite('Setting Helpers - Settings Write Behavior', () => {
     const SYSTEM_MANAGER_ID = 'ms-python.python:system';
@@ -35,7 +32,7 @@ suite('Setting Helpers - Settings Write Behavior', () => {
     const PIP_MANAGER_ID = 'ms-python.python:pip';
     const CONDA_MANAGER_ID = 'ms-python.python:conda';
 
-    let updateCalls: Array<{ key: string; value: unknown; target: ConfigurationTarget }>;
+    let updateCalls: Array<{ key: string; value: unknown; target: boolean | ConfigurationTarget | undefined }>;
 
     setup(() => {
         updateCalls = [];
@@ -46,7 +43,7 @@ suite('Setting Helpers - Settings Write Behavior', () => {
     });
 
     /**
-     * Creates a mock WorkspaceConfiguration that tracks update calls
+     * Creates a mock WorkspaceConfiguration that tracks update calls.
      */
     function createMockConfig(options: {
         defaultEnvManagerGlobalValue?: string;
@@ -99,7 +96,7 @@ suite('Setting Helpers - Settings Write Behavior', () => {
             updateCalls.push({
                 key: section,
                 value,
-                target: configurationTarget as ConfigurationTarget,
+                target: configurationTarget,
             });
             return Promise.resolve();
         };
@@ -108,11 +105,12 @@ suite('Setting Helpers - Settings Write Behavior', () => {
     }
 
     suite('setAllManagerSettings - Global Settings', () => {
-        test('should write global defaultEnvManager when value differs from current', async () => {
+        test('should NOT write global defaultEnvManager even when value differs from current', async () => {
             const mockConfig = createMockConfig({
                 currentEnvManager: VENV_MANAGER_ID,
             });
             sinon.stub(workspaceApis, 'getConfiguration').returns(mockConfig);
+            const traceVerboseStub = sinon.stub(logging, 'traceVerbose');
 
             await setAllManagerSettings([
                 {
@@ -122,34 +120,15 @@ suite('Setting Helpers - Settings Write Behavior', () => {
                 },
             ]);
 
-            const envManagerUpdates = updateCalls.filter(
-                (c) => c.key === 'defaultEnvManager' && c.target === ConfigurationTarget.Global,
+            const envManagerUpdates = updateCalls.filter((c) => c.key === 'defaultEnvManager');
+            assert.strictEqual(envManagerUpdates.length, 0, 'Should never write defaultEnvManager for global edits');
+            sinon.assert.calledWithMatch(
+                traceVerboseStub,
+                '[setAllManagerSettings] Ignoring 1 edit(s) without a project because python-envs does not persist manager defaults to User/global settings.',
             );
-            assert.strictEqual(envManagerUpdates.length, 1, 'Should write global defaultEnvManager when value differs');
-            assert.strictEqual(envManagerUpdates[0].value, SYSTEM_MANAGER_ID);
         });
 
-        test('should NOT write global defaultEnvManager when value is same as current', async () => {
-            const mockConfig = createMockConfig({
-                currentEnvManager: SYSTEM_MANAGER_ID,
-            });
-            sinon.stub(workspaceApis, 'getConfiguration').returns(mockConfig);
-
-            await setAllManagerSettings([
-                {
-                    project: undefined,
-                    envManager: SYSTEM_MANAGER_ID,
-                    packageManager: PIP_MANAGER_ID,
-                },
-            ]);
-
-            const envManagerUpdates = updateCalls.filter(
-                (c) => c.key === 'defaultEnvManager' && c.target === ConfigurationTarget.Global,
-            );
-            assert.strictEqual(envManagerUpdates.length, 0, 'Should NOT write when value is same as current');
-        });
-
-        test('should write global defaultPackageManager when value differs from current', async () => {
+        test('should NOT write global defaultPackageManager even when value differs from current', async () => {
             const mockConfig = createMockConfig({
                 currentEnvManager: VENV_MANAGER_ID,
                 currentPkgManager: PIP_MANAGER_ID,
@@ -164,24 +143,22 @@ suite('Setting Helpers - Settings Write Behavior', () => {
                 },
             ]);
 
-            const pkgManagerUpdates = updateCalls.filter(
-                (c) => c.key === 'defaultPackageManager' && c.target === ConfigurationTarget.Global,
-            );
+            const pkgManagerUpdates = updateCalls.filter((c) => c.key === 'defaultPackageManager');
             assert.strictEqual(
                 pkgManagerUpdates.length,
-                1,
-                'Should write global defaultPackageManager when value differs',
+                0,
+                'Should never write defaultPackageManager for global edits',
             );
-            assert.strictEqual(pkgManagerUpdates[0].value, CONDA_MANAGER_ID);
         });
     });
 
     suite('setEnvironmentManager - Global Settings', () => {
-        test('should write when value differs from current', async () => {
+        test('should NOT write to global even when value differs from current', async () => {
             const mockConfig = createMockConfig({
                 currentEnvManager: VENV_MANAGER_ID,
             });
             sinon.stub(workspaceApis, 'getConfiguration').returns(mockConfig);
+            const traceVerboseStub = sinon.stub(logging, 'traceVerbose');
 
             await setEnvironmentManager([
                 {
@@ -190,38 +167,22 @@ suite('Setting Helpers - Settings Write Behavior', () => {
                 },
             ]);
 
-            const envManagerUpdates = updateCalls.filter(
-                (c) => c.key === 'defaultEnvManager' && c.target === ConfigurationTarget.Global,
+            const envManagerUpdates = updateCalls.filter((c) => c.key === 'defaultEnvManager');
+            assert.strictEqual(envManagerUpdates.length, 0, 'Should never write defaultEnvManager for global edits');
+            sinon.assert.calledWithMatch(
+                traceVerboseStub,
+                '[setEnvironmentManager] Ignoring 1 edit(s) without a project because python-envs does not persist manager defaults to User/global settings.',
             );
-            assert.strictEqual(envManagerUpdates.length, 1, 'Should write global defaultEnvManager when value differs');
-        });
-
-        test('should NOT write when value is same as current', async () => {
-            const mockConfig = createMockConfig({
-                currentEnvManager: SYSTEM_MANAGER_ID,
-            });
-            sinon.stub(workspaceApis, 'getConfiguration').returns(mockConfig);
-
-            await setEnvironmentManager([
-                {
-                    project: undefined,
-                    envManager: SYSTEM_MANAGER_ID,
-                },
-            ]);
-
-            const envManagerUpdates = updateCalls.filter(
-                (c) => c.key === 'defaultEnvManager' && c.target === ConfigurationTarget.Global,
-            );
-            assert.strictEqual(envManagerUpdates.length, 0, 'Should NOT write when value is same');
         });
     });
 
     suite('setPackageManager - Global Settings', () => {
-        test('should write when value differs from current', async () => {
+        test('should NOT write to global even when value differs from current', async () => {
             const mockConfig = createMockConfig({
                 currentPkgManager: PIP_MANAGER_ID,
             });
             sinon.stub(workspaceApis, 'getConfiguration').returns(mockConfig);
+            const traceVerboseStub = sinon.stub(logging, 'traceVerbose');
 
             await setPackageManager([
                 {
@@ -230,33 +191,16 @@ suite('Setting Helpers - Settings Write Behavior', () => {
                 },
             ]);
 
-            const pkgManagerUpdates = updateCalls.filter(
-                (c) => c.key === 'defaultPackageManager' && c.target === ConfigurationTarget.Global,
-            );
+            const pkgManagerUpdates = updateCalls.filter((c) => c.key === 'defaultPackageManager');
             assert.strictEqual(
                 pkgManagerUpdates.length,
-                1,
-                'Should write global defaultPackageManager when value differs',
+                0,
+                'Should never write defaultPackageManager for global edits',
             );
-        });
-
-        test('should NOT write when value is same as current', async () => {
-            const mockConfig = createMockConfig({
-                currentPkgManager: PIP_MANAGER_ID,
-            });
-            sinon.stub(workspaceApis, 'getConfiguration').returns(mockConfig);
-
-            await setPackageManager([
-                {
-                    project: undefined,
-                    packageManager: PIP_MANAGER_ID,
-                },
-            ]);
-
-            const pkgManagerUpdates = updateCalls.filter(
-                (c) => c.key === 'defaultPackageManager' && c.target === ConfigurationTarget.Global,
+            sinon.assert.calledWithMatch(
+                traceVerboseStub,
+                '[setPackageManager] Ignoring 1 edit(s) without a project because python-envs does not persist manager defaults to User/global settings.',
             );
-            assert.strictEqual(pkgManagerUpdates.length, 0, 'Should NOT write when value is same');
         });
     });
 });
@@ -278,7 +222,7 @@ suite('Setting Helpers - Empty Path Bug Fix', () => {
         index: 0,
     };
 
-    let updateCalls: Array<{ key: string; value: unknown; target: ConfigurationTarget }>;
+    let updateCalls: Array<{ key: string; value: unknown; target: boolean | ConfigurationTarget | undefined }>;
 
     setup(() => {
         updateCalls = [];
@@ -316,7 +260,7 @@ suite('Setting Helpers - Empty Path Bug Fix', () => {
             updateCalls.push({
                 key: section,
                 value,
-                target: configurationTarget as ConfigurationTarget,
+                target: configurationTarget,
             });
             return Promise.resolve();
         };
