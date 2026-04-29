@@ -2,7 +2,7 @@ import * as path from 'path';
 import { ConfigurationScope, ConfigurationTarget, Uri, WorkspaceConfiguration, WorkspaceFolder } from 'vscode';
 import { PythonProject } from '../../api';
 import { DEFAULT_ENV_MANAGER_ID, DEFAULT_PACKAGE_MANAGER_ID } from '../../common/constants';
-import { traceError, traceInfo, traceWarn } from '../../common/logging';
+import { traceError, traceInfo, traceVerbose, traceWarn } from '../../common/logging';
 import * as workspaceApis from '../../common/workspace.apis';
 import { PythonProjectManager, PythonProjectSettings } from '../../internal.api';
 
@@ -81,8 +81,16 @@ export function getDefaultPkgManagerSetting(
     return defaultManager;
 }
 
+function traceIgnoredGlobalManagerEdits(functionName: string, count: number): void {
+    if (count > 0) {
+        traceVerbose(
+            `[${functionName}] Ignoring ${count} edit(s) without a project because python-envs does not persist manager defaults to User/global settings.`,
+        );
+    }
+}
+
 export interface EditAllManagerSettings {
-    // undefined means global
+    // Edits without a project are ignored; python-envs does not persist manager defaults to User/global settings.
     project?: PythonProject;
     envManager: string;
     packageManager: string;
@@ -95,24 +103,25 @@ interface EditAllManagerSettingsInternal {
 export async function setAllManagerSettings(edits: EditAllManagerSettings[]): Promise<void> {
     const noWorkspace: EditAllManagerSettingsInternal[] = [];
     const workspaces = new Map<WorkspaceFolder, EditAllManagerSettingsInternal[]>();
-    edits
-        .filter((e) => !!e.project)
-        .map((e) => e as EditAllManagerSettingsInternal)
-        .forEach((e) => {
-            const w = workspaceApis.getWorkspaceFolder(e.project.uri);
-            if (w) {
-                workspaces.set(w, [
-                    ...(workspaces.get(w) || []),
-                    { project: e.project, envManager: e.envManager, packageManager: e.packageManager },
-                ]);
-            } else {
-                noWorkspace.push({ project: e.project, envManager: e.envManager, packageManager: e.packageManager });
-            }
-        });
+    const projectEdits = edits.filter((e): e is EditAllManagerSettingsInternal => !!e.project);
+    traceIgnoredGlobalManagerEdits('setAllManagerSettings', edits.length - projectEdits.length);
+    projectEdits.forEach((e) => {
+        const w = workspaceApis.getWorkspaceFolder(e.project.uri);
+        if (w) {
+            workspaces.set(w, [
+                ...(workspaces.get(w) || []),
+                { project: e.project, envManager: e.envManager, packageManager: e.packageManager },
+            ]);
+        } else {
+            noWorkspace.push({ project: e.project, envManager: e.envManager, packageManager: e.packageManager });
+        }
+    });
 
     noWorkspace.forEach((e) => {
         if (e.project) {
-            traceInfo(`Unable to find workspace for ${e.project.uri.fsPath}, will use global settings for this.`);
+            traceInfo(
+                `Unable to find workspace for ${e.project.uri.fsPath}, skipping settings update because no User/global fallback is written.`,
+            );
         }
     });
 
@@ -195,23 +204,11 @@ export async function setAllManagerSettings(edits: EditAllManagerSettings[]): Pr
         }
     });
 
-    const config = workspaceApis.getConfiguration('python-envs', undefined);
-    edits
-        .filter((e) => !e.project)
-        .forEach((e) => {
-            if (config.get('defaultEnvManager') !== e.envManager) {
-                promises.push(config.update('defaultEnvManager', e.envManager, ConfigurationTarget.Global));
-            }
-            if (config.get('defaultPackageManager') !== e.packageManager) {
-                promises.push(config.update('defaultPackageManager', e.packageManager, ConfigurationTarget.Global));
-            }
-        });
-
     await Promise.all(promises);
 }
 
 export interface EditEnvManagerSettings {
-    // undefined means global
+    // Edits without a project are ignored; python-envs does not persist manager defaults to User/global settings.
     project?: PythonProject;
     envManager: string;
 }
@@ -222,17 +219,16 @@ interface EditEnvManagerSettingsInternal {
 export async function setEnvironmentManager(edits: EditEnvManagerSettings[]): Promise<void> {
     const noWorkspace: EditEnvManagerSettingsInternal[] = [];
     const workspaces = new Map<WorkspaceFolder, EditEnvManagerSettingsInternal[]>();
-    edits
-        .filter((e) => !!e.project)
-        .map((e) => e as EditEnvManagerSettingsInternal)
-        .forEach((e) => {
-            const w = workspaceApis.getWorkspaceFolder(e.project.uri);
-            if (w) {
-                workspaces.set(w, [...(workspaces.get(w) || []), { project: e.project, envManager: e.envManager }]);
-            } else {
-                noWorkspace.push({ project: e.project, envManager: e.envManager });
-            }
-        });
+    const projectEdits = edits.filter((e): e is EditEnvManagerSettingsInternal => !!e.project);
+    traceIgnoredGlobalManagerEdits('setEnvironmentManager', edits.length - projectEdits.length);
+    projectEdits.forEach((e) => {
+        const w = workspaceApis.getWorkspaceFolder(e.project.uri);
+        if (w) {
+            workspaces.set(w, [...(workspaces.get(w) || []), { project: e.project, envManager: e.envManager }]);
+        } else {
+            noWorkspace.push({ project: e.project, envManager: e.envManager });
+        }
+    });
 
     noWorkspace.forEach((e) => {
         if (e.project) {
@@ -269,20 +265,11 @@ export async function setEnvironmentManager(edits: EditEnvManagerSettings[]): Pr
         }
     });
 
-    const config = workspaceApis.getConfiguration('python-envs', undefined);
-    edits
-        .filter((e) => !e.project)
-        .forEach((e) => {
-            if (config.get('defaultEnvManager') !== e.envManager) {
-                promises.push(config.update('defaultEnvManager', e.envManager, ConfigurationTarget.Global));
-            }
-        });
-
     await Promise.all(promises);
 }
 
 export interface EditPackageManagerSettings {
-    // undefined means global
+    // Edits without a project are ignored; python-envs does not persist manager defaults to User/global settings.
     project?: PythonProject;
     packageManager: string;
 }
@@ -293,20 +280,16 @@ interface EditPackageManagerSettingsInternal {
 export async function setPackageManager(edits: EditPackageManagerSettings[]): Promise<void> {
     const noWorkspace: EditPackageManagerSettingsInternal[] = [];
     const workspaces = new Map<WorkspaceFolder, EditPackageManagerSettingsInternal[]>();
-    edits
-        .filter((e) => !!e.project)
-        .map((e) => e as EditPackageManagerSettingsInternal)
-        .forEach((e) => {
-            const w = workspaceApis.getWorkspaceFolder(e.project.uri);
-            if (w) {
-                workspaces.set(w, [
-                    ...(workspaces.get(w) || []),
-                    { project: e.project, packageManager: e.packageManager },
-                ]);
-            } else {
-                noWorkspace.push({ project: e.project, packageManager: e.packageManager });
-            }
-        });
+    const projectEdits = edits.filter((e): e is EditPackageManagerSettingsInternal => !!e.project);
+    traceIgnoredGlobalManagerEdits('setPackageManager', edits.length - projectEdits.length);
+    projectEdits.forEach((e) => {
+        const w = workspaceApis.getWorkspaceFolder(e.project.uri);
+        if (w) {
+            workspaces.set(w, [...(workspaces.get(w) || []), { project: e.project, packageManager: e.packageManager }]);
+        } else {
+            noWorkspace.push({ project: e.project, packageManager: e.packageManager });
+        }
+    });
 
     noWorkspace.forEach((e) => {
         if (e.project) {
@@ -342,15 +325,6 @@ export async function setPackageManager(edits: EditPackageManagerSettings[]): Pr
             promises.push(config.update('pythonProjects', overrides, ConfigurationTarget.Workspace));
         }
     });
-
-    const config = workspaceApis.getConfiguration('python-envs', undefined);
-    edits
-        .filter((e) => !e.project)
-        .forEach((e) => {
-            if (config.get('defaultPackageManager') !== e.packageManager) {
-                promises.push(config.update('defaultPackageManager', e.packageManager, ConfigurationTarget.Global));
-            }
-        });
 
     await Promise.all(promises);
 }

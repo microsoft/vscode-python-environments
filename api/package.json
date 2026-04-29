@@ -18,7 +18,7 @@
         "vscode": "^1.110.0"
     },
     "license": "MIT",
-    "homepage": "https://github.com/microsoft/vscode-python-environments/tree/main/pythonEnvironmentsApi",
+    "homepage": "https://github.com/microsoft/vscode-python-environments/tree/main/api",
     "repository": {
         "type": "git",
         "url": "https://github.com/microsoft/vscode-python-environments"
