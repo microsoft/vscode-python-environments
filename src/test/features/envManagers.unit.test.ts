@@ -145,10 +145,26 @@ suite('PythonEnvironmentManagers - getEnvironment', () => {
         assert.ok(getStub.calledOnce, 'Should delegate to manager.get()');
     });
 
-    test('should return undefined when no manager is found for scope', async () => {
-        // No managers registered for this scope
+    test('should return undefined when no managers are registered', async () => {
+        // No managers registered at all — size === 0 guard fires
         const result = await envManagers.getEnvironment(Uri.file('/some/unknown/path'));
         assert.strictEqual(result, undefined);
+    });
+
+    test('should return undefined when settings point to an unregistered manager', async () => {
+        // Register a 'conda' manager, but the config stub returns 'ms-python.python:system'
+        // as the defaultEnvManager. getEnvironmentManager will look up 'ms-python.python:system'
+        // in the map, find nothing, check the cache (empty), and return undefined.
+        // This exercises the fallback path in getEnvironmentManager beyond the size === 0 guard.
+        const getStub = sandbox.stub().resolves(env311);
+        registerFakeManager('ms-python.python:conda', getStub);
+
+        const result = await envManagers.getEnvironment(Uri.file('/some/unrelated/path'));
+        assert.strictEqual(
+            result,
+            undefined,
+            'Should return undefined when settings point to an unregistered manager and cache is empty',
+        );
     });
 
     test('setEnvironment should still fire change events and update cache', async () => {
@@ -290,6 +306,11 @@ suite('PythonEnvironmentManagers - refreshEnvironment', () => {
         assert.strictEqual(changeEvents.length, 1, 'refreshEnvironment should fire change event');
         assert.strictEqual(changeEvents[0].old?.envId.id, 'system-311');
         assert.strictEqual(changeEvents[0].new?.envId.id, 'system-314');
+
+        // Verify the cache was updated: a second refresh with the same env must NOT fire again
+        await envManagers.refreshEnvironment(undefined);
+        await new Promise((resolve) => setImmediate(resolve));
+        assert.strictEqual(changeEvents.length, 1, 'Second refresh with same env should NOT fire a second event');
     });
 
     test('should NOT fire change event when manager reports same environment', async () => {
