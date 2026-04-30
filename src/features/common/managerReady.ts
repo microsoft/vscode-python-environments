@@ -55,7 +55,9 @@ export function withManagerTimeout(
                     managerKind: kind,
                 });
                 deferred.resolve();
-                promptInstallExtensionIfMissing(managerId);
+                void promptInstallExtensionIfMissing(managerId).catch((err) => {
+                    traceError(`Failed to prompt installation for manager extension "${managerId}".`, err);
+                });
             }
         }, MANAGER_READY_TIMEOUT_MS);
 
@@ -75,8 +77,10 @@ export function withManagerTimeout(
 /**
  * Shows an install prompt only if the extension for the given manager ID
  * is genuinely not available. Called after the timeout expires, giving the
- * extension host ample time to initialize.
+ * extension host ample time to initialize. Deduplicated per extension ID
+ * so each missing extension only prompts once per session.
  */
+const prompted: Set<string> = new Set();
 async function promptInstallExtensionIfMissing(managerId: string): Promise<void> {
     const extId = getExtensionId(managerId);
     if (!extId) {
@@ -87,17 +91,34 @@ async function promptInstallExtensionIfMissing(managerId: string): Promise<void>
     const ext = getExtension(extId);
     if (ext) {
         // Extension is installed but the manager never registered — don't prompt to install.
-        // This can happen if the extension activated but failed to register its manager.
-        traceWarn(
-            `Extension ${extId} is installed but manager "${managerId}" never registered. ` +
-                `The extension may have failed during activation or manager registration.`,
-        );
+        // Attempt activation as a recovery step since the extension host is reliable at this point.
+        if (!ext.isActive) {
+            traceWarn(
+                `Extension ${extId} is installed but manager "${managerId}" never registered. Attempting activation...`,
+            );
+            try {
+                await ext.activate();
+                traceInfo(`Extension ${extId} activated post-timeout for manager "${managerId}".`);
+            } catch (err) {
+                traceError(`Failed to activate extension ${extId} post-timeout for: ${managerId}`, err);
+            }
+        } else {
+            traceWarn(
+                `Extension ${extId} is installed and active but manager "${managerId}" never registered. ` +
+                    `The extension may have failed during manager registration.`,
+            );
+        }
         return;
     }
 
+    if (prompted.has(extId)) {
+        return;
+    }
+    prompted.add(extId);
+
     traceError(`Extension for manager ${managerId} is not installed. Looked up extId="${extId}" via getExtension().`);
     const result = await showErrorMessage(
-        l10n.t(`Do you want to install extension {0} to enable {1} support.`, extId, managerId),
+        l10n.t(`Do you want to install extension {0} to enable {1} support?`, extId, managerId),
         WorkbenchStrings.installExtension,
     );
     if (result === WorkbenchStrings.installExtension) {
@@ -284,6 +305,7 @@ export function createManagerReady(em: EnvironmentManagers, pm: PythonProjectMan
  */
 export function _resetManagerReadyForTesting(): void {
     _deferred = createDeferred<ManagerReady>();
+    prompted.clear();
 }
 
 export async function waitForEnvManager(uris?: Uri[]): Promise<void> {
