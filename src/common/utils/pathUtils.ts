@@ -58,11 +58,8 @@ function getComparisonKey(uri: Uri): string {
 }
 
 export function normalizePath(fsPath: string): string {
-    const path1 = fsPath.replace(/\\/g, '/');
-    if (isWindows()) {
-        return path1.toLowerCase();
-    }
-    return path1;
+    const resolvedPath = path.resolve(fsPath).replace(/\\/g, '/');
+    return isWindows() ? resolvedPath.toLowerCase() : resolvedPath;
 }
 
 export function getResourceUri(resourcePath: string, root?: string): Uri | undefined {
@@ -71,9 +68,8 @@ export function getResourceUri(resourcePath: string, root?: string): Uri | undef
             return undefined;
         }
 
-        const normalizedPath = normalizePath(resourcePath);
-        if (normalizedPath.includes('://')) {
-            return Uri.parse(normalizedPath);
+        if (resourcePath.includes('://')) {
+            return Uri.parse(resourcePath);
         }
 
         if (!path.isAbsolute(resourcePath) && root) {
