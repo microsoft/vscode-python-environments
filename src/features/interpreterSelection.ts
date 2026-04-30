@@ -396,12 +396,20 @@ export async function applyInitialEnvironmentSelection(
     }
 
     // Duration measures blocking time only (excludes deferred global scope).
-    sendTelemetryEvent(EventNames.ENV_SELECTION_COMPLETED, selectionStopWatch.elapsedTime, {
-        globalScopeDeferred: workspaceFolderResolved,
-        workspaceFolderCount: folders.length,
-        resolvedFolderCount,
-        settingErrorCount: allErrors.length,
-    });
+    // Numeric values are sent via the measures argument; pass them as properties
+    // causes them to be dropped by the telemetry pipeline.
+    sendTelemetryEvent(
+        EventNames.ENV_SELECTION_COMPLETED,
+        {
+            duration: selectionStopWatch.elapsedTime,
+            workspaceFolderCount: folders.length,
+            resolvedFolderCount,
+            settingErrorCount: allErrors.length,
+        },
+        {
+            globalScopeDeferred: workspaceFolderResolved,
+        },
+    );
 }
 
 /**

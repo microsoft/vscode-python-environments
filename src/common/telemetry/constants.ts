@@ -106,6 +106,8 @@ export enum EventNames {
      * Duration measures the blocking time (excludes deferred global scope).
      * Properties:
      * - globalScopeDeferred: boolean (true = global scope fired in background, false = awaited)
+     * Measures (sent in the `measures` arg because of `isMeasurement: true` in GDPR):
+     * - duration: number (ms)
      * - workspaceFolderCount: number (total workspace folders)
      * - resolvedFolderCount: number (folders that resolved with a non-undefined env)
      * - settingErrorCount: number (user-configured settings that could not be applied)
@@ -451,9 +453,6 @@ export interface IEventNamePropertyMapping {
     */
     [EventNames.ENV_SELECTION_COMPLETED]: {
         globalScopeDeferred: boolean;
-        workspaceFolderCount: number;
-        resolvedFolderCount: number;
-        settingErrorCount: number;
     };
 
     /* __GDPR__
