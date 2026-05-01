@@ -1,6 +1,9 @@
 import * as assert from 'assert';
 import * as sinon from 'sinon';
+import { Terminal } from 'vscode';
+import * as windowApis from '../../../common/window.apis';
 import * as workspaceApis from '../../../common/workspace.apis';
+import * as shellDetector from '../../../features/common/shellDetector';
 import {
     ACT_TYPE_COMMAND,
     ACT_TYPE_OFF,
@@ -8,6 +11,7 @@ import {
     AutoActivationType,
     getAutoActivationType,
     shouldActivateInCurrentTerminal,
+    waitForShellIntegration,
 } from '../../../features/terminal/utils';
 
 interface MockWorkspaceConfig {
@@ -543,5 +547,156 @@ suite('Terminal Utils - shouldActivateInCurrentTerminal', () => {
             false,
             'Any explicit false at any scope should return false, regardless of higher-precedence true values',
         );
+    });
+});
+
+suite('Terminal Utils - waitForShellIntegration', () => {
+    let mockGetConfiguration: sinon.SinonStub;
+    let identifyTerminalShellStub: sinon.SinonStub;
+    let onDidChangeTerminalShellIntegrationStub: sinon.SinonStub;
+    let onDidWriteTerminalDataStub: sinon.SinonStub;
+
+    function setupLongTimeoutConfig() {
+        // Make the timeout effectively infinite so tests resolve via the listener,
+        // not the timer. Avoids flakiness while keeping the race code paths exercised.
+        const config = {
+            get: sinon.stub(),
+            inspect: sinon.stub(),
+            update: sinon.stub(),
+        };
+        config.get.withArgs('shellIntegration.timeout').returns(60_000);
+        config.get.withArgs('shellIntegration.enabled', true).returns(true);
+        mockGetConfiguration.withArgs('terminal.integrated').returns(config);
+    }
+
+    setup(() => {
+        mockGetConfiguration = sinon.stub(workspaceApis, 'getConfiguration');
+        identifyTerminalShellStub = sinon.stub(shellDetector, 'identifyTerminalShell');
+        onDidChangeTerminalShellIntegrationStub = sinon.stub(windowApis, 'onDidChangeTerminalShellIntegration');
+        onDidWriteTerminalDataStub = sinon.stub(windowApis, 'onDidWriteTerminalData');
+
+        // Default: dispose-only fake event registrations. Tests that need to fire
+        // events override these via .callsFake.
+        const fakeDisposable = { dispose: () => undefined };
+        onDidChangeTerminalShellIntegrationStub.returns(fakeDisposable);
+        onDidWriteTerminalDataStub.returns(fakeDisposable);
+    });
+
+    teardown(() => {
+        sinon.restore();
+    });
+
+    test('returns false immediately when terminal is undefined', async () => {
+        const result = await waitForShellIntegration(undefined);
+
+        assert.strictEqual(result, false);
+        sinon.assert.notCalled(identifyTerminalShellStub);
+        sinon.assert.notCalled(onDidChangeTerminalShellIntegrationStub);
+    });
+
+    test('returns true immediately when terminal.shellIntegration is already set', async () => {
+        const terminal = { shellIntegration: {} } as unknown as Terminal;
+
+        const result = await waitForShellIntegration(terminal);
+
+        assert.strictEqual(result, true);
+        sinon.assert.notCalled(identifyTerminalShellStub);
+        sinon.assert.notCalled(onDidChangeTerminalShellIntegrationStub);
+    });
+
+    test('returns false immediately for nu without registering event listeners', async () => {
+        const terminal = {} as Terminal;
+        identifyTerminalShellStub.returns('nu');
+
+        const result = await waitForShellIntegration(terminal);
+
+        assert.strictEqual(result, false);
+        sinon.assert.calledOnce(identifyTerminalShellStub);
+        sinon.assert.notCalled(onDidChangeTerminalShellIntegrationStub);
+        sinon.assert.notCalled(onDidWriteTerminalDataStub);
+    });
+
+    test('returns false immediately for cmd', async () => {
+        const terminal = {} as Terminal;
+        identifyTerminalShellStub.returns('cmd');
+
+        const result = await waitForShellIntegration(terminal);
+
+        assert.strictEqual(result, false);
+        sinon.assert.notCalled(onDidChangeTerminalShellIntegrationStub);
+    });
+
+    test('returns false immediately for csh / tcsh / ksh / xonsh', async () => {
+        const unsupported = ['csh', 'tcsh', 'ksh', 'xonsh'];
+        for (const shell of unsupported) {
+            identifyTerminalShellStub.resetHistory();
+            identifyTerminalShellStub.returns(shell);
+            onDidChangeTerminalShellIntegrationStub.resetHistory();
+
+            const result = await waitForShellIntegration({} as Terminal);
+
+            assert.strictEqual(result, false, `expected false for shell '${shell}'`);
+            sinon.assert.notCalled(onDidChangeTerminalShellIntegrationStub);
+        }
+    });
+
+    test('falls through to event race for bash (supported shell)', async () => {
+        setupLongTimeoutConfig();
+        const terminal = {} as Terminal;
+        identifyTerminalShellStub.returns('bash');
+
+        let listenerRef: ((e: { terminal: Terminal }) => void) | undefined;
+        onDidChangeTerminalShellIntegrationStub.callsFake((listener: (e: { terminal: Terminal }) => void) => {
+            listenerRef = listener;
+            return { dispose: () => undefined };
+        });
+
+        const racePromise = waitForShellIntegration(terminal);
+        // Yield once so the Promise.race body has a chance to register listeners.
+        await new Promise<void>((r) => setImmediate(r));
+        assert.ok(listenerRef, 'shell integration listener should be registered');
+        listenerRef!({ terminal });
+
+        const result = await racePromise;
+        assert.strictEqual(result, true);
+        sinon.assert.calledOnce(onDidChangeTerminalShellIntegrationStub);
+    });
+
+    test('falls through to event race when shell type is unknown', async () => {
+        setupLongTimeoutConfig();
+        const terminal = {} as Terminal;
+        identifyTerminalShellStub.returns('unknown');
+
+        let listenerRef: ((e: { terminal: Terminal }) => void) | undefined;
+        onDidChangeTerminalShellIntegrationStub.callsFake((listener: (e: { terminal: Terminal }) => void) => {
+            listenerRef = listener;
+            return { dispose: () => undefined };
+        });
+
+        const racePromise = waitForShellIntegration(terminal);
+        await new Promise<void>((r) => setImmediate(r));
+        listenerRef!({ terminal });
+
+        const result = await racePromise;
+        assert.strictEqual(result, true);
+    });
+
+    test('falls through to event race when identifyTerminalShell throws', async () => {
+        setupLongTimeoutConfig();
+        const terminal = {} as Terminal;
+        identifyTerminalShellStub.throws(new Error('detection failed'));
+
+        let listenerRef: ((e: { terminal: Terminal }) => void) | undefined;
+        onDidChangeTerminalShellIntegrationStub.callsFake((listener: (e: { terminal: Terminal }) => void) => {
+            listenerRef = listener;
+            return { dispose: () => undefined };
+        });
+
+        const racePromise = waitForShellIntegration(terminal);
+        await new Promise<void>((r) => setImmediate(r));
+        listenerRef!({ terminal });
+
+        const result = await racePromise;
+        assert.strictEqual(result, true, 'should not regress when detection throws');
     });
 });
