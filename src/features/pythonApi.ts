@@ -30,7 +30,7 @@ import {
     ResolveEnvironmentContext,
     SetEnvironmentScope,
 } from '../api';
-import { traceInfo } from '../common/logging';
+import { traceError, traceInfo } from '../common/logging';
 import { pickEnvironmentManager } from '../common/pickers/managers';
 import { createDeferred } from '../common/utils/deferred';
 import { checkUri } from '../common/utils/pathUtils';
@@ -91,12 +91,14 @@ class PythonEnvironmentApiImpl implements PythonEnvironmentApi {
         if (manager.onDidChangeEnvironment) {
             disposables.push(
                 manager.onDidChangeEnvironment((e) => {
-                    setImmediate(async () => {
+                    setImmediate(() => {
                         // Refresh the central cache for this scope. This ensures that only the
                         // *selected* manager's changes propagate (refreshEnvironment checks
                         // getEnvironmentManager(scope) internally). It updates the cache and
                         // fires onDidChangeActiveEnvironment, which the Python API listens to.
-                        await this.envManagers.refreshEnvironment(e.uri);
+                        this.envManagers.refreshEnvironment(e.uri).catch((err) =>
+                            traceError('Failed to refresh environment on change:', err),
+                        );
                     });
                 }),
             );

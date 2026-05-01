@@ -184,6 +184,8 @@ export class PythonEnvironmentManagers implements EnvironmentManagers {
         this._onDidChangeEnvironmentManager.dispose();
         this._onDidChangePackageManager.dispose();
         this._onDidChangeEnvironments.dispose();
+        this._onDidChangeManagerEnvironment.dispose();
+        this._onDidChangeActiveEnvironment.dispose();
         this._onDidChangePackages.dispose();
     }
 
