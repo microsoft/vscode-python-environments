@@ -17,7 +17,26 @@ Thank you for your interest in contributing to the Python Environments extension
    cd vscode-python-environments
    ```
 
-2. **Create a Python virtual environment** 
+2. **Create a Python virtual environment**
+
+   A Python virtual environment is important for development because it isolates the Python dependencies used for testing and development from your system Python installation. This ensures reproducible builds and prevents conflicts with other projects.
+
+   ```bash
+   # Create the virtual environment
+   python -m venv .venv
+
+   # Activate it (Linux/macOS)
+   source .venv/bin/activate
+
+   # Activate it (Windows - Command Prompt)
+   .venv\Scripts\activate.bat
+
+   # Activate it (Windows - PowerShell)
+   .venv\Scripts\Activate.ps1
+   ```
+
+   > **Note:** Keep the virtual environment activated while developing. The extension uses this environment for running Python-related tests and for environment discovery during development.
+
 
 3. **Install dependencies**
    ```bash
