@@ -508,13 +508,13 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
         window.onDidChangeActiveTextEditor(async () => {
             updateViewsAndStatus(statusBar, workspaceView, managerView, api);
         }),
-        envManagers.onDidChangeEnvironment(async () => {
+        envManagers.onDidChangeManagerEnvironment(async () => {
             updateViewsAndStatus(statusBar, workspaceView, managerView, api);
         }),
         envManagers.onDidChangeEnvironments(async () => {
             updateViewsAndStatus(statusBar, workspaceView, managerView, api);
         }),
-        envManagers.onDidChangeEnvironmentFiltered(async (e) => {
+        envManagers.onDidChangeActiveEnvironment(async (e) => {
             managerView.environmentChanged(e);
             const location = e.uri?.fsPath ?? 'global';
             traceInfo(

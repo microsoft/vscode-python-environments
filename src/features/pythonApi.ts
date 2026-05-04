@@ -1,35 +1,40 @@
-import { Uri, Disposable, Event, EventEmitter, Terminal, TaskExecution } from 'vscode';
+import { Disposable, Event, EventEmitter, TaskExecution, Terminal, Uri } from 'vscode';
 import {
-    PythonEnvironmentApi,
-    PythonEnvironment,
-    EnvironmentManager,
-    PackageManager,
+    CreateEnvironmentOptions,
+    CreateEnvironmentScope,
     DidChangeEnvironmentEventArgs,
     DidChangeEnvironmentsEventArgs,
+    DidChangeEnvironmentVariablesEventArgs,
+    DidChangePackagesEventArgs,
     DidChangePythonProjectsEventArgs,
+    EnvironmentManager,
+    GetEnvironmentScope,
     GetEnvironmentsScope,
     Package,
-    PythonEnvironmentInfo,
-    PythonProject,
-    RefreshEnvironmentsScope,
-    DidChangePackagesEventArgs,
-    PythonEnvironmentId,
-    CreateEnvironmentScope,
-    SetEnvironmentScope,
-    GetEnvironmentScope,
-    PackageInfo,
     PackageId,
-    PythonProjectCreator,
-    ResolveEnvironmentContext,
+    PackageInfo,
     PackageManagementOptions,
-    PythonProcess,
-    PythonTaskExecutionOptions,
-    PythonTerminalExecutionOptions,
+    PackageManager,
     PythonBackgroundRunOptions,
+    PythonEnvironment,
+    PythonEnvironmentApi,
+    PythonEnvironmentId,
+    PythonEnvironmentInfo,
+    PythonProcess,
+    PythonProject,
+    PythonProjectCreator,
+    PythonTaskExecutionOptions,
     PythonTerminalCreateOptions,
-    DidChangeEnvironmentVariablesEventArgs,
-    CreateEnvironmentOptions,
+    PythonTerminalExecutionOptions,
+    RefreshEnvironmentsScope,
+    ResolveEnvironmentContext,
+    SetEnvironmentScope,
 } from '../api';
+import { traceError, traceInfo } from '../common/logging';
+import { pickEnvironmentManager } from '../common/pickers/managers';
+import { createDeferred } from '../common/utils/deferred';
+import { checkUri } from '../common/utils/pathUtils';
+import { handlePythonPath } from '../common/utils/pythonPath';
 import {
     EnvironmentManagers,
     InternalEnvironmentManager,
@@ -38,17 +43,12 @@ import {
     PythonPackageImpl,
     PythonProjectManager,
 } from '../internal.api';
-import { createDeferred } from '../common/utils/deferred';
-import { traceInfo } from '../common/logging';
-import { pickEnvironmentManager } from '../common/pickers/managers';
-import { handlePythonPath } from '../common/utils/pythonPath';
-import { TerminalManager } from './terminal/terminalManager';
-import { runAsTask } from './execution/runAsTask';
-import { runInTerminal } from './terminal/runInTerminal';
-import { runInBackground } from './execution/runInBackground';
-import { EnvVarManager } from './execution/envVariableManager';
-import { checkUri } from '../common/utils/pathUtils';
 import { waitForAllEnvManagers, waitForEnvManager, waitForEnvManagerId } from './common/managerReady';
+import { EnvVarManager } from './execution/envVariableManager';
+import { runAsTask } from './execution/runAsTask';
+import { runInBackground } from './execution/runInBackground';
+import { runInTerminal } from './terminal/runInTerminal';
+import { TerminalManager } from './terminal/terminalManager';
 
 class PythonEnvironmentApiImpl implements PythonEnvironmentApi {
     private readonly _onDidChangeEnvironments = new EventEmitter<DidChangeEnvironmentsEventArgs>();
@@ -71,7 +71,7 @@ class PythonEnvironmentApiImpl implements PythonEnvironmentApi {
             this._onDidChangePythonProjects,
             this._onDidChangePackages,
             this._onDidChangeEnvironmentVariables,
-            this.envManagers.onDidChangeEnvironmentFiltered((e) => {
+            this.envManagers.onDidChangeActiveEnvironment((e) => {
                 this._onDidChangeEnvironment.fire(e);
                 const location = e.uri?.fsPath ?? 'global';
                 traceInfo(
@@ -91,14 +91,14 @@ class PythonEnvironmentApiImpl implements PythonEnvironmentApi {
         if (manager.onDidChangeEnvironment) {
             disposables.push(
                 manager.onDidChangeEnvironment((e) => {
-                    setImmediate(async () => {
-                        // This will ensure that we use the right manager and only trigger the event
-                        // if the user selected manager decided to change the environment.
-                        // This ensures that if a unselected manager changes environment and raises events
-                        // we don't trigger the Python API event which can cause issues with the consumers.
-                        // This will trigger onDidChangeEnvironmentFiltered event in envManagers, which the Python
-                        // API listens to, and re-triggers the onDidChangeEnvironment event.
-                        await this.envManagers.getEnvironment(e.uri);
+                    setImmediate(() => {
+                        // Refresh the central cache for this scope. This ensures that only the
+                        // *selected* manager's changes propagate (refreshEnvironment checks
+                        // getEnvironmentManager(scope) internally). It updates the cache and
+                        // fires onDidChangeActiveEnvironment, which the Python API listens to.
+                        this.envManagers.refreshEnvironment(e.uri).catch((err) =>
+                            traceError('Failed to refresh environment on change:', err),
+                        );
                     });
                 }),
             );
