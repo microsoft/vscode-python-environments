@@ -395,9 +395,7 @@ export async function applyInitialEnvironmentSelection(
         await notifyUserOfSettingErrors(allErrors);
     }
 
-    // Duration measures blocking time only (excludes deferred global scope).
-    // Numeric values are sent via the measures argument; pass them as properties
-    // causes them to be dropped by the telemetry pipeline.
+    // Numeric values must go via the measures argument (properties are dropped).
     sendTelemetryEvent(
         EventNames.ENV_SELECTION_COMPLETED,
         {

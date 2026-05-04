@@ -65,6 +65,9 @@ export enum EventNames {
      * the timer is cancelled and this event never fires.
      * Properties:
      * - failureStage: string (which phase was in progress when the watchdog fired)
+     * Measures:
+     * - duration: total elapsed since activation
+     * - stageDuration: elapsed in the current stage
      */
     SETUP_HANG_DETECTED = 'SETUP.HANG_DETECTED',
     /**
@@ -103,14 +106,10 @@ export enum EventNames {
     ENV_SELECTION_RESULT = 'ENV_SELECTION.RESULT',
     /**
      * Telemetry event fired when applyInitialEnvironmentSelection returns.
-     * Duration measures the blocking time (excludes deferred global scope).
      * Properties:
-     * - globalScopeDeferred: boolean (true = global scope fired in background, false = awaited)
-     * Measures (sent in the `measures` arg because of `isMeasurement: true` in GDPR):
-     * - duration: number (ms)
-     * - workspaceFolderCount: number (total workspace folders)
-     * - resolvedFolderCount: number (folders that resolved with a non-undefined env)
-     * - settingErrorCount: number (user-configured settings that could not be applied)
+     * - globalScopeDeferred: boolean (true = global scope fired in background)
+     * Measures:
+     * - duration, workspaceFolderCount, resolvedFolderCount, settingErrorCount
      */
     ENV_SELECTION_COMPLETED = 'ENV_SELECTION.COMPLETED',
     /**
@@ -383,7 +382,8 @@ export interface IEventNamePropertyMapping {
     /* __GDPR__
         "setup.hang_detected": {
             "failureStage": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "owner": "StellaHuang95" },
-            "<duration>": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "isMeasurement": true, "owner": "StellaHuang95" }
+            "<duration>": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "isMeasurement": true, "owner": "StellaHuang95" },
+            "<stageDuration>": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "isMeasurement": true, "owner": "eleanorjboyd" }
         }
     */
     [EventNames.SETUP_HANG_DETECTED]: {
