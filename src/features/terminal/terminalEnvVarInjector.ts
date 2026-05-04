@@ -48,7 +48,7 @@ export class TerminalEnvVarInjector implements Disposable {
                 if (!args.uri) {
                     // No specific URI, reload all workspaces
                     this.updateEnvironmentVariables().catch((error) => {
-                        traceError('Failed to update environment variables:', error);
+                        traceError('Failed to update environment variables (global reload):', error);
                     });
                     return;
                 }
@@ -57,7 +57,7 @@ export class TerminalEnvVarInjector implements Disposable {
                 if (!affectedWorkspace) {
                     // No workspace folder found for this URI, reloading all workspaces
                     this.updateEnvironmentVariables().catch((error) => {
-                        traceError('Failed to update environment variables:', error);
+                        traceError('Failed to update environment variables (no workspace folder for URI):', error);
                     });
                     return;
                 }
@@ -79,7 +79,7 @@ export class TerminalEnvVarInjector implements Disposable {
                     this.clearWorkspaceVariables(affectedWorkspace);
                 } else {
                     this.updateEnvironmentVariables(affectedWorkspace).catch((error) => {
-                        traceError('Failed to update environment variables:', error);
+                        traceError(`Failed to update environment variables for workspace: ${affectedWorkspace?.name}`, error);
                     });
                 }
             }),
@@ -93,7 +93,7 @@ export class TerminalEnvVarInjector implements Disposable {
                         'TerminalEnvVarInjector: python.envFile or python.terminal.useEnvFile setting changed, updating environment variables',
                     );
                     this.updateEnvironmentVariables().catch((error) => {
-                        traceError('Failed to update environment variables:', error);
+                        traceError('Failed to update environment variables (settings change):', error);
                     });
                 }
             }),

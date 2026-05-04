@@ -331,8 +331,8 @@ suite('getAllExtraSearchPaths Integration Tests', () => {
             assert.deepStrictEqual(result, []);
             // Check that error was logged with key terms - don't be brittle about exact wording
             assert(
-                mockTraceError.calledWith(sinon.match(/workspaceSearchPaths.*global.*level/i)),
-                'Should log error about incorrect setting level',
+                mockTraceWarn.calledWith(sinon.match(/workspaceSearchPaths.*global.*level/i)),
+                'Should log warning about incorrect setting level',
             );
         });
 
@@ -350,8 +350,8 @@ suite('getAllExtraSearchPaths Integration Tests', () => {
             await getAllExtraSearchPaths();
             await getAllExtraSearchPaths();
 
-            // Assert - error should only be logged once, not three times
-            const matchingCalls = mockTraceError
+            // Assert - warning should only be logged once, not three times
+            const matchingCalls = mockTraceWarn
                 .getCalls()
                 .filter((call: sinon.SinonSpyCall) =>
                     /workspaceSearchPaths.*global.*level/i.test(String(call.args[0])),
@@ -359,7 +359,7 @@ suite('getAllExtraSearchPaths Integration Tests', () => {
             assert.strictEqual(
                 matchingCalls.length,
                 1,
-                `Expected exactly 1 error about workspaceSearchPaths global level, got ${matchingCalls.length}`,
+                `Expected exactly 1 warning about workspaceSearchPaths global level, got ${matchingCalls.length}`,
             );
         });
 

@@ -1384,7 +1384,7 @@ function getWorkspaceSearchPaths(scope?: Uri): string[] {
 
         if (inspection?.globalValue && !workspaceSearchPathsGlobalWarningShown) {
             workspaceSearchPathsGlobalWarningShown = true;
-            traceError(
+            traceWarn(
                 'python-envs.workspaceSearchPaths is set at the user/global level, but this setting can only be set at the workspace or workspace folder level.',
             );
         }

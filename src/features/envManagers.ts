@@ -15,7 +15,7 @@ import {
     EnvironmentManagerAlreadyRegisteredError,
     PackageManagerAlreadyRegisteredError,
 } from '../common/errors/AlreadyRegisteredError';
-import { traceError, traceVerbose } from '../common/logging';
+import { traceError, traceInfo, traceVerbose } from '../common/logging';
 import { StopWatch } from '../common/stopWatch';
 import { EventNames } from '../common/telemetry/constants';
 import { sendTelemetryEvent } from '../common/telemetry/sender';
@@ -336,6 +336,10 @@ export class PythonEnvironmentManagers implements EnvironmentManagers {
             return;
         }
         await manager.set(scope, environment);
+        traceInfo(
+            `[setEnvironment] env=${environment?.displayName ?? 'none'} (${environment?.envId?.id ?? 'undefined'}), ` +
+                `scope=${scope instanceof Uri ? scope.fsPath : scope ?? 'global'}, manager=${manager.id}`,
+        );
 
         const project = scope ? this.pm.get(scope) : undefined;
         // Only persist to settings when explicitly requested
@@ -351,11 +355,8 @@ export class PythonEnvironmentManagers implements EnvironmentManagers {
                 ]);
             }
             traceVerbose(
-                `[setEnvironment] scope=${scope instanceof Uri ? scope.fsPath : scope}, ` +
-                    `env=${environment?.envId?.id ?? 'undefined'}, manager=${manager.id}, ` +
-                    `project=${project?.uri?.toString() ?? 'none'}, ` +
-                    `packageManager=${this.getPackageManager(environment)?.id ?? 'UNDEFINED'}, ` +
-                    `settingsPersisted=${!!(project && this.getPackageManager(environment))}`,
+                `[setEnvironment] Settings persisted: project=${project?.uri?.toString() ?? 'none'}, ` +
+                    `packageManager=${this.getPackageManager(environment)?.id ?? 'UNDEFINED'}`,
             );
         }
 

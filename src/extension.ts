@@ -573,10 +573,12 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
         context.subscriptions.push({ dispose: clearHangWatchdog });
         try {
             // This is the finder that is used by all the built in environment managers
+            traceInfo('Initializing Python environment tool (native finder)...');
             const petStart = new StopWatch();
             let nativeFinder: NativePythonFinder;
             try {
                 nativeFinder = await createNativePythonFinder(outputChannel, api, context);
+                traceInfo(`Python environment tool initialized (${(petStart.elapsedTime / 1000).toFixed(1)}s)`);
                 sendTelemetryEvent(EventNames.PET_INIT_DURATION, petStart.elapsedTime, { result: 'success' });
             } catch (petError) {
                 sendTelemetryEvent(
@@ -592,6 +594,7 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
             sysPythonManager.resolve(sysMgr);
             // Each manager registers independently — one failure must not block the others.
             failureStage = 'managerRegistration';
+            traceInfo('Registering environment managers...');
             await Promise.all([
                 safeRegister(
                     'system',
@@ -609,9 +612,12 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
                 ),
                 safeRegister('shellStartupVars', shellStartupVarsMgr.initialize()),
             ]);
+            traceInfo('Environment managers registered.');
 
             failureStage = 'envSelection';
+            traceInfo('Applying initial environment selection...');
             await applyInitialEnvironmentSelection(envManagers, projectManager, nativeFinder, api, start.elapsedTime);
+            traceInfo('Initial environment selection applied.');
 
             // Register manager-agnostic terminal watcher for package-modifying commands
             failureStage = 'terminalWatcher';
@@ -627,6 +633,7 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
                 result: 'success',
             });
             clearHangWatchdog();
+            traceInfo(`Extension setup complete (${(start.elapsedTime / 1000).toFixed(1)}s total)`);
             try {
                 await terminalManager.initialize(api);
                 sendManagerSelectionTelemetry(projectManager);

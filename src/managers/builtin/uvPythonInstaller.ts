@@ -10,7 +10,7 @@ import {
 } from 'vscode';
 import { spawnProcess } from '../../common/childProcess.apis';
 import { Common, UvInstallStrings } from '../../common/localize';
-import { traceError, traceInfo, traceLog } from '../../common/logging';
+import { traceError, traceInfo, traceLog, traceWarn } from '../../common/logging';
 import { getGlobalPersistentState } from '../../common/persistentState';
 import { executeTask, onDidEndTaskProcess } from '../../common/tasks.apis';
 import { EventNames } from '../../common/telemetry/constants';
@@ -82,7 +82,7 @@ async function getUvInstallCommand(): Promise<{ executable: string; args: string
     }
 
     // Default to curl and let it fail with a clear error if neither is available
-    traceError('Neither curl nor wget found, attempting curl anyway');
+    traceWarn('Neither curl nor wget found, attempting curl anyway');
     return {
         executable: 'sh',
         args: ['-c', 'curl -LsSf https://astral.sh/uv/install.sh | sh'],
