@@ -95,7 +95,8 @@ export class CondaEnvManager implements EnvironmentManager, Disposable {
                     title: CondaStrings.condaDiscovering,
                 },
                 async () => {
-                    this.collection = (await refreshCondaEnvs(false, this.nativeFinder, this.api, this.log, this)) ?? [];
+                    this.collection =
+                        (await refreshCondaEnvs(false, this.nativeFinder, this.api, this.log, this)) ?? [];
                     await this.loadEnvMap();
 
                     this._onDidChangeEnvironments.fire(
@@ -273,7 +274,8 @@ export class CondaEnvManager implements EnvironmentManager, Disposable {
             resolve: (p) => resolveCondaPath(p, this.nativeFinder, this.api, this.log, this),
             startBackgroundInit: () =>
                 withProgress({ location: ProgressLocation.Window, title: CondaStrings.condaDiscovering }, async () => {
-                    this.collection = (await refreshCondaEnvs(false, this.nativeFinder, this.api, this.log, this)) ?? [];
+                    this.collection =
+                        (await refreshCondaEnvs(false, this.nativeFinder, this.api, this.log, this)) ?? [];
                     await this.loadEnvMap();
                     this._onDidChangeEnvironments.fire(
                         this.collection.map((e) => ({
