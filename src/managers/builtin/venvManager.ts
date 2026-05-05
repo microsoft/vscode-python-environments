@@ -336,14 +336,15 @@ export class VenvManager implements EnvironmentManager {
                     environment: env,
                 }));
 
-                this.collection = (await findVirtualEnvironments(
-                    hardRefresh,
-                    this.nativeFinder,
-                    this.api,
-                    this.log,
-                    this,
-                    scope ? [scope] : undefined,
-                )) ?? [];
+                this.collection =
+                    (await findVirtualEnvironments(
+                        hardRefresh,
+                        this.nativeFinder,
+                        this.api,
+                        this.log,
+                        this,
+                        scope ? [scope] : undefined,
+                    )) ?? [];
                 await this.loadEnvMap();
 
                 const added = this.collection.map((env) => ({ environment: env, kind: EnvironmentChangeKind.add }));
@@ -500,10 +501,6 @@ export class VenvManager implements EnvironmentManager {
         );
         if (resolved) {
             if (resolved.envId.managerId === `${PYTHON_EXTENSION_ID}:venv`) {
-                // This is just like finding a new environment or creating a new one.
-                // Add it to collection, and trigger the added event.
-                this.addEnvironment(resolved, true);
-
                 // We should only return the resolved env if it is a venv.
                 // Fall through an return undefined if it is not a venv
                 return resolved;
