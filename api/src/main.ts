@@ -896,9 +896,8 @@ export interface PythonEnvironmentManagerRegistrationApi {
      *
      * @param manager Environment Manager implementation to register.
      * @param options Optional registration options.
-     * @param options.extensionId The extension ID of the calling extension. This is used as a fallback when
-     * automatic extension detection fails, such as during F5 debugging where the extension's file path
-     * does not contain its marketplace ID. If automatic detection succeeds, this value is ignored.
+     * @param options.extensionId The extension ID of the calling extension. When this is not specified,
+     * or when the specified extension cannot be found, the extension ID will be automatically detected.
      * @returns A disposable that can be used to unregister the environment manager.
      * @see {@link EnvironmentManager}
      */
@@ -1005,9 +1004,8 @@ export interface PythonPackageManagerRegistrationApi {
      *
      * @param manager Package Manager implementation to register.
      * @param options Optional registration options.
-     * @param options.extensionId The extension ID of the calling extension. This is used as a fallback when
-     * automatic extension detection fails, such as during F5 debugging where the extension's file path
-     * does not contain its marketplace ID. If automatic detection succeeds, this value is ignored.
+     * @param options.extensionId The extension ID of the calling extension. When this is not specified,
+     * or when the specified extension cannot be found, the extension ID will be automatically detected.
      * @returns A disposable that can be used to unregister the package manager.
      * @see {@link PackageManager}
      */
