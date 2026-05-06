@@ -182,6 +182,23 @@ interface RefreshOptions {
     searchPaths?: string[];
 }
 
+/** Performance breakdown sent by PET via the `telemetry` notification after a refresh. */
+interface RefreshPerformance {
+    total: number;
+    /** Phase name (Locators | Path | GlobalVirtualEnvs | Workspaces) → wall-clock ms */
+    breakdown: Record<string, number>;
+    /** Locator name (Conda | WindowsRegistry | …) → wall-clock ms; only ran locators are present */
+    locators: Record<string, number>;
+}
+
+/** Params shape of the PET `telemetry` JSON-RPC notification. */
+interface PetTelemetryNotification {
+    event: string;
+    data: {
+        refreshPerformance?: RefreshPerformance;
+    };
+}
+
 /**
  * Error thrown when a JSON-RPC request times out.
  */
@@ -673,6 +690,7 @@ class NativePythonFinderImpl implements NativePythonFinder {
         const nativeInfo: NativeInfo[] = [];
         const sw = new StopWatch();
         let unresolvedCount = 0;
+        let refreshPerf: RefreshPerformance | undefined;
         try {
             await this.configure();
             const refreshOptions = this.getRefreshOptions(options);
@@ -708,6 +726,11 @@ class NativePythonFinderImpl implements NativePythonFinder {
                     this.outputChannel.info(`Discovered manager: (${data.tool}) ${data.executable}`);
                     nativeInfo.push(data);
                 }),
+                this.connection.onNotification('telemetry', (notification: PetTelemetryNotification) => {
+                    if (notification?.event === 'RefreshPerformance' && notification.data?.refreshPerformance) {
+                        refreshPerf = notification.data.refreshPerformance;
+                    }
+                }),
             );
             await sendRequestWithTimeout<{ duration: number }>(
                 this.connection,
@@ -730,6 +753,15 @@ class NativePythonFinderImpl implements NativePythonFinder {
                 workspaceDirCount,
                 searchPathCount,
                 attempt,
+                // Per-phase breakdown from PET's RefreshPerformance notification.
+                // Breakdown phases run in parallel so their sum may exceed total (wall-clock).
+                breakdownLocators: refreshPerf?.breakdown['Locators'],
+                breakdownPath: refreshPerf?.breakdown['Path'],
+                breakdownGlobalVirtualEnvs: refreshPerf?.breakdown['GlobalVirtualEnvs'],
+                breakdownWorkspaces: refreshPerf?.breakdown['Workspaces'],
+                // Per-locator timing serialized as JSON; platform-dependent keys (e.g. WindowsRegistry, Conda).
+                // Query in Kusto with: parse_json(Properties.locatorsJson)
+                locatorsJson: refreshPerf ? JSON.stringify(refreshPerf.locators) : undefined,
             });
         } catch (ex) {
             const errorType = classifyError(ex);

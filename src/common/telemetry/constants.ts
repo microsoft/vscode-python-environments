@@ -518,6 +518,11 @@ export interface IEventNamePropertyMapping {
             "searchPathCount": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "isMeasurement": true, "owner": "eleanorjboyd" },
             "attempt": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "isMeasurement": true, "owner": "eleanorjboyd" },
             "errorType": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "owner": "eleanorjboyd" },
+            "breakdownLocators": { "classification": "SystemMetaData", "purpose": "PerformanceAndHealth", "isMeasurement": true, "owner": "eleanorjboyd" },
+            "breakdownPath": { "classification": "SystemMetaData", "purpose": "PerformanceAndHealth", "isMeasurement": true, "owner": "eleanorjboyd" },
+            "breakdownGlobalVirtualEnvs": { "classification": "SystemMetaData", "purpose": "PerformanceAndHealth", "isMeasurement": true, "owner": "eleanorjboyd" },
+            "breakdownWorkspaces": { "classification": "SystemMetaData", "purpose": "PerformanceAndHealth", "isMeasurement": true, "owner": "eleanorjboyd" },
+            "locatorsJson": { "classification": "SystemMetaData", "purpose": "PerformanceAndHealth", "owner": "eleanorjboyd" },
             "<duration>": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "isMeasurement": true, "owner": "eleanorjboyd" }
         }
     */
@@ -529,6 +534,16 @@ export interface IEventNamePropertyMapping {
         searchPathCount?: number;
         attempt: number;
         errorType?: string;
+        /** ms spent in the Locators phase (runs locator plugins). From PET RefreshPerformance.breakdown. */
+        breakdownLocators?: number;
+        /** ms spent walking PATH entries. From PET RefreshPerformance.breakdown. */
+        breakdownPath?: number;
+        /** ms spent scanning global virtual-env dirs. From PET RefreshPerformance.breakdown. */
+        breakdownGlobalVirtualEnvs?: number;
+        /** ms spent scanning workspace dirs. From PET RefreshPerformance.breakdown. */
+        breakdownWorkspaces?: number;
+        /** JSON-serialized Record<locatorName, ms>. Query with parse_json() in Kusto. From PET RefreshPerformance.locators. */
+        locatorsJson?: string;
     };
 
     /* __GDPR__
