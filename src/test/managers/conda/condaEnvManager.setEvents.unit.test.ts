@@ -2,29 +2,12 @@
 import assert from 'assert';
 import * as sinon from 'sinon';
 import { Uri } from 'vscode';
-import { DidChangeEnvironmentEventArgs, PythonEnvironment, PythonEnvironmentApi, PythonProject } from '../../../api';
+import { DidChangeEnvironmentEventArgs, PythonEnvironmentApi, PythonProject } from '../../../api';
 import { normalizePath } from '../../../common/utils/pathUtils';
-import { PythonEnvironmentImpl } from '../../../internal.api';
 import { CondaEnvManager } from '../../../managers/conda/condaEnvManager';
 import * as condaUtils from '../../../managers/conda/condaUtils';
 import { NativePythonFinder } from '../../../managers/common/nativePythonFinder';
-
-function makeEnv(name: string, envPath: string, version: string = '3.12.0'): PythonEnvironment {
-    return new PythonEnvironmentImpl(
-        { id: `${name}-test`, managerId: 'ms-python.python:conda' },
-        {
-            name,
-            displayName: `${name} (${version})`,
-            displayPath: envPath,
-            version,
-            environmentPath: Uri.file(envPath),
-            sysPrefix: envPath,
-            execInfo: {
-                run: { executable: 'python' },
-            },
-        },
-    );
-}
+import { makeMockCondaEnvironment as makeEnv } from '../../mocks/pythonEnvironment';
 
 function createManager(apiOverrides?: Partial<PythonEnvironmentApi>): CondaEnvManager {
     const api = {
