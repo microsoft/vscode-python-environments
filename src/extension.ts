@@ -508,13 +508,13 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
         window.onDidChangeActiveTextEditor(async () => {
             updateViewsAndStatus(statusBar, workspaceView, managerView, api);
         }),
-        envManagers.onDidChangeEnvironment(async () => {
+        envManagers.onDidChangeManagerEnvironment(async () => {
             updateViewsAndStatus(statusBar, workspaceView, managerView, api);
         }),
         envManagers.onDidChangeEnvironments(async () => {
             updateViewsAndStatus(statusBar, workspaceView, managerView, api);
         }),
-        envManagers.onDidChangeEnvironmentFiltered(async (e) => {
+        envManagers.onDidChangeActiveEnvironment(async (e) => {
             managerView.environmentChanged(e);
             const location = e.uri?.fsPath ?? 'global';
             traceInfo(
@@ -552,6 +552,7 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
      */
     setImmediate(async () => {
         let failureStage = 'nativeFinder';
+        const stageWatch = new StopWatch();
         // Watchdog: fires if setup hasn't completed within 120s, indicating a likely hang
         const SETUP_HANG_TIMEOUT_MS = 120_000;
         let hangWatchdogActive = true;
@@ -568,7 +569,11 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
             }
             hangWatchdogActive = false;
             traceError(`Setup appears hung during stage: ${failureStage}`);
-            sendTelemetryEvent(EventNames.SETUP_HANG_DETECTED, start.elapsedTime, { failureStage });
+            sendTelemetryEvent(
+                EventNames.SETUP_HANG_DETECTED,
+                { duration: start.elapsedTime, stageDuration: stageWatch.elapsedTime },
+                { failureStage },
+            );
         }, SETUP_HANG_TIMEOUT_MS);
         context.subscriptions.push({ dispose: clearHangWatchdog });
         try {
@@ -592,6 +597,7 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
             sysPythonManager.resolve(sysMgr);
             // Each manager registers independently — one failure must not block the others.
             failureStage = 'managerRegistration';
+            stageWatch.reset();
             await Promise.all([
                 safeRegister(
                     'system',
@@ -611,14 +617,17 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
             ]);
 
             failureStage = 'envSelection';
+            stageWatch.reset();
             await applyInitialEnvironmentSelection(envManagers, projectManager, nativeFinder, api, start.elapsedTime);
 
             // Register manager-agnostic terminal watcher for package-modifying commands
             failureStage = 'terminalWatcher';
+            stageWatch.reset();
             registerTerminalPackageWatcher(api, terminalActivation, outputChannel, context.subscriptions);
 
             // Register listener for interpreter settings changes for interpreter re-selection
             failureStage = 'settingsListener';
+            stageWatch.reset();
             context.subscriptions.push(
                 registerInterpreterSettingsChangeListener(envManagers, projectManager, nativeFinder, api),
             );

@@ -42,6 +42,7 @@ interface ManagerCase {
     name: string;
     managerId: string;
     persistedPath: string;
+    supportsGlobalScope?: boolean;
     createContext: (sandbox: sinon.SinonSandbox) => ManagerCaseContext;
 }
 
@@ -136,9 +137,11 @@ function createManagerCases(): ManagerCase[] {
             name: 'SysPythonManager',
             managerId: 'ms-python.python:system',
             persistedPath: path.resolve('test', 'bin', 'python3'),
+            supportsGlobalScope: true,
             createContext: (sandbox: sinon.SinonSandbox) => {
                 const getPersistedStub = sandbox.stub(sysCache, 'getSystemEnvForWorkspace');
                 const resolveStub = sandbox.stub(sysUtils, 'resolveSystemPythonEnvironmentPath');
+                sandbox.stub(sysCache, 'getSystemEnvForGlobal').resolves(undefined);
                 sandbox.stub(sysUtils, 'refreshPythons').resolves([]);
                 const manager = new SysPythonManager(createMockNativeFinder(), createMockApi(testUri), createMockLog());
                 return { manager, getPersistedStub, resolveStub };
@@ -217,7 +220,12 @@ function runSharedFastPathTests(managerCase: ManagerCase, getSandbox: () => sino
 
         await manager.get(undefined);
 
-        assert.ok(getPersistedStub.notCalled);
+        // For managers that support global scope, the workspace getPersistedPath may be
+        // called by background init (loadEnvMap), so we only assert notCalled for managers
+        // that skip the fast path entirely when scope is undefined.
+        if (!managerCase.supportsGlobalScope) {
+            assert.ok(getPersistedStub.notCalled);
+        }
     });
 
     test('skip fast path: already initialized', async () => {

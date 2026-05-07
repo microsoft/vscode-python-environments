@@ -65,6 +65,9 @@ export enum EventNames {
      * the timer is cancelled and this event never fires.
      * Properties:
      * - failureStage: string (which phase was in progress when the watchdog fired)
+     * Measures:
+     * - duration: total elapsed since activation
+     * - stageDuration: elapsed in the current stage
      */
     SETUP_HANG_DETECTED = 'SETUP.HANG_DETECTED',
     /**
@@ -103,12 +106,10 @@ export enum EventNames {
     ENV_SELECTION_RESULT = 'ENV_SELECTION.RESULT',
     /**
      * Telemetry event fired when applyInitialEnvironmentSelection returns.
-     * Duration measures the blocking time (excludes deferred global scope).
      * Properties:
-     * - globalScopeDeferred: boolean (true = global scope fired in background, false = awaited)
-     * - workspaceFolderCount: number (total workspace folders)
-     * - resolvedFolderCount: number (folders that resolved with a non-undefined env)
-     * - settingErrorCount: number (user-configured settings that could not be applied)
+     * - globalScopeDeferred: boolean (true = global scope fired in background)
+     * Measures:
+     * - duration, workspaceFolderCount, resolvedFolderCount, settingErrorCount
      */
     ENV_SELECTION_COMPLETED = 'ENV_SELECTION.COMPLETED',
     /**
@@ -123,6 +124,15 @@ export enum EventNames {
      * - errorType: string (classified error category, on failure only)
      */
     MANAGER_LAZY_INIT = 'MANAGER.LAZY_INIT',
+    /**
+     * Telemetry event fired when a manager's fast path attempts to resolve
+     * a cached global environment (cross-session cache).
+     * Properties:
+     * - managerLabel: string (the manager's label, e.g. 'system')
+     * - result: 'hit' | 'miss' | 'stale' ('hit' = cached path resolved successfully,
+     *           'miss' = no cached path, 'stale' = cached path found but resolve failed)
+     */
+    GLOBAL_ENV_CACHE = 'GLOBAL_ENV.CACHE',
     /**
      * Telemetry event fired when the JSON CLI fallback is used for environment discovery.
      * Triggered when the PET JSON-RPC server mode is exhausted after all restart attempts.
@@ -381,7 +391,8 @@ export interface IEventNamePropertyMapping {
     /* __GDPR__
         "setup.hang_detected": {
             "failureStage": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "owner": "StellaHuang95" },
-            "<duration>": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "isMeasurement": true, "owner": "StellaHuang95" }
+            "<duration>": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "isMeasurement": true, "owner": "eleanorjboyd" },
+            "<stageDuration>": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "isMeasurement": true, "owner": "eleanorjboyd" }
         }
     */
     [EventNames.SETUP_HANG_DETECTED]: {
@@ -451,9 +462,6 @@ export interface IEventNamePropertyMapping {
     */
     [EventNames.ENV_SELECTION_COMPLETED]: {
         globalScopeDeferred: boolean;
-        workspaceFolderCount: number;
-        resolvedFolderCount: number;
-        settingErrorCount: number;
     };
 
     /* __GDPR__
@@ -472,6 +480,18 @@ export interface IEventNamePropertyMapping {
         envCount: number;
         toolSource: string;
         errorType?: string;
+    };
+
+    /* __GDPR__
+        "global_env.cache": {
+            "managerLabel": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "owner": "eleanorjboyd" },
+            "result": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "owner": "eleanorjboyd" },
+            "<duration>": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "isMeasurement": true, "owner": "eleanorjboyd" }
+        }
+    */
+    [EventNames.GLOBAL_ENV_CACHE]: {
+        managerLabel: string;
+        result: 'hit' | 'miss' | 'stale';
     };
 
     /* __GDPR__

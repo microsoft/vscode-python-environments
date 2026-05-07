@@ -80,6 +80,42 @@ suite('getShellActivationCommands', () => {
         });
     });
 
+    suite('PowerShell activation on non-Windows omits Set-ExecutionPolicy', () => {
+        test('Activate.ps1 (capitalized) on non-Windows has only the activation command', async () => {
+            isWindowsStub.returns(false);
+            await fs.writeFile(path.join(tmpDir, 'Activate.ps1'), '');
+
+            const result = await getShellActivationCommands(tmpDir);
+            const pwshActivation = result.shellActivation.get(ShellConstants.PWSH);
+
+            assert.ok(pwshActivation, 'PowerShell activation should be defined');
+            assert.strictEqual(pwshActivation.length, 1, 'Should have only 1 command: activate (no Set-ExecutionPolicy)');
+            assert.strictEqual(pwshActivation[0].executable, '&');
+            assert.ok(pwshActivation[0].args);
+            assert.ok(
+                pwshActivation[0].args[0].endsWith('Activate.ps1'),
+                `Expected path ending with Activate.ps1, got: ${pwshActivation[0].args[0]}`,
+            );
+        });
+
+        test('activate.ps1 (lowercase) on non-Windows has only the activation command', async () => {
+            isWindowsStub.returns(false);
+            await fs.writeFile(path.join(tmpDir, 'activate.ps1'), '');
+
+            const result = await getShellActivationCommands(tmpDir);
+            const pwshActivation = result.shellActivation.get(ShellConstants.PWSH);
+
+            assert.ok(pwshActivation, 'PowerShell activation should be defined');
+            assert.strictEqual(pwshActivation.length, 1, 'Should have only 1 command: activate (no Set-ExecutionPolicy)');
+            assert.strictEqual(pwshActivation[0].executable, '&');
+            assert.ok(pwshActivation[0].args);
+            assert.ok(
+                pwshActivation[0].args[0].toLowerCase().endsWith('activate.ps1'),
+                `Expected path ending with activate.ps1, got: ${pwshActivation[0].args[0]}`,
+            );
+        });
+    });
+
     suite('No PowerShell activation when Activate.ps1 is absent', () => {
         test('No pwsh activation when no ps1 file exists', async () => {
             isWindowsStub.returns(true);

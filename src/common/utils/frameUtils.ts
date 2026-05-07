@@ -22,15 +22,28 @@ function getFrameData(): FrameData[] {
 }
 
 function getPathFromFrame(frame: FrameData): string {
-    if (frame.filePath && frame.filePath.startsWith('file://')) {
+    if (frame.filePath?.startsWith('file://')) {
         return Uri.parse(frame.filePath).fsPath;
     }
     return frame.filePath;
 }
 
-export function getCallingExtension(extensionIdHint?: string): string {
+export function getCallingExtension(extensionId?: string): string {
     const pythonExts = [ENVS_EXTENSION_ID, PYTHON_EXTENSION_ID];
     const extensions = allExtensions();
+    
+    // Use the provided extensionId when available.
+    // Only accept if it matches an actually loaded extension so we can always return something.
+    if (extensionId) {
+        const hintExt = extensions.find((ext) => ext.id === extensionId);
+        if (hintExt) {
+            traceVerbose(`Using provided extensionId: ${extensionId}`);
+            return extensionId;
+        }
+        traceWarn(`Provided extensionId '${extensionId}' not found in loaded extensions, ignoring`);
+    }
+
+    // Search the stack as a fallback when no extensionId is provided
     const otherExts = extensions.filter((ext) => !pythonExts.includes(ext.id));
     const frames = getFrameData();
 
@@ -92,19 +105,6 @@ export function getCallingExtension(extensionIdHint?: string): string {
             extensionIdCache.set(cacheKey, ext.id);
             return ext.id;
         }
-    }
-
-    // Use the provided extensionId hint as a fallback (e.g., during F5 debugging where
-    // stack-based detection fails because the file path doesn't contain the extension ID).
-    // Only accept the hint if it matches an actually loaded extension for safety.
-    if (extensionIdHint) {
-        const hintExt = extensions.find((ext) => ext.id === extensionIdHint);
-        if (hintExt) {
-            traceVerbose(`Using provided extensionId hint: ${extensionIdHint}`);
-            extensionIdCache.set(cacheKey, extensionIdHint);
-            return extensionIdHint;
-        }
-        traceWarn(`Provided extensionId hint '${extensionIdHint}' not found in loaded extensions, ignoring`);
     }
 
     // Fallback - we're likely being called from Python extension or built-in managers

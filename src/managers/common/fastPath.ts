@@ -4,6 +4,9 @@
 import { Uri } from 'vscode';
 import { GetEnvironmentScope, PythonEnvironment, PythonEnvironmentApi } from '../../api';
 import { traceError, traceVerbose, traceWarn } from '../../common/logging';
+import { StopWatch } from '../../common/stopWatch';
+import { EventNames } from '../../common/telemetry/constants';
+import { sendTelemetryEvent } from '../../common/telemetry/sender';
 import { createDeferred, Deferred } from '../../common/utils/deferred';
 
 /**
@@ -26,6 +29,8 @@ export interface FastPathOptions {
     resolve: (persistedPath: string) => Promise<PythonEnvironment | undefined>;
     /** Starts background initialization (full discovery). Returns a promise that completes when init is done. */
     startBackgroundInit: () => Promise<void> | Thenable<void>;
+    /** Optional: reads the persisted env path for global scope (when scope is undefined). */
+    getGlobalPersistedPath?: () => Promise<string | undefined>;
 }
 
 /**
@@ -52,7 +57,10 @@ export function getProjectFsPathForScope(api: Pick<PythonEnvironmentApi, 'getPyt
  * to fall through to the normal init path.
  */
 export async function tryFastPathGet(opts: FastPathOptions): Promise<FastPathResult | undefined> {
-    if (!(opts.scope instanceof Uri)) {
+    const isGlobalScope = !(opts.scope instanceof Uri);
+
+    // Global scope is only supported when the caller provides getGlobalPersistedPath
+    if (isGlobalScope && !opts.getGlobalPersistedPath) {
         return undefined;
     }
 
@@ -82,23 +90,66 @@ export async function tryFastPathGet(opts: FastPathOptions): Promise<FastPathRes
         }
     }
 
-    const fsPath = opts.getProjectFsPath(opts.scope);
-    const persistedPath = await opts.getPersistedPath(fsPath);
+    // Look up the persisted path — either from workspace cache or global cache
+    if (isGlobalScope) {
+        // Safe: guarded by the early return above
+        const getGlobalPersistedPath = opts.getGlobalPersistedPath as () => Promise<string | undefined>;
 
-    if (persistedPath) {
-        try {
-            const resolved = await opts.resolve(persistedPath);
-            if (resolved) {
-                return { env: resolved };
+        // Track end-to-end cross-session cache performance for global scope, including persisted-path lookup.
+        const cacheStopWatch = new StopWatch();
+        const persistedPath = await getGlobalPersistedPath();
+
+        if (persistedPath) {
+            try {
+                const resolved = await opts.resolve(persistedPath);
+                if (resolved) {
+                    sendTelemetryEvent(EventNames.GLOBAL_ENV_CACHE, cacheStopWatch.elapsedTime, {
+                        managerLabel: opts.label,
+                        result: 'hit',
+                    });
+                    return { env: resolved };
+                }
+                // Cached path found but resolve returned undefined (e.g., Python was uninstalled)
+                sendTelemetryEvent(EventNames.GLOBAL_ENV_CACHE, cacheStopWatch.elapsedTime, {
+                    managerLabel: opts.label,
+                    result: 'stale',
+                });
+            } catch (err) {
+                sendTelemetryEvent(EventNames.GLOBAL_ENV_CACHE, cacheStopWatch.elapsedTime, {
+                    managerLabel: opts.label,
+                    result: 'stale',
+                });
+                traceWarn(
+                    `[${opts.label}] Fast path resolve failed for '${persistedPath}', falling back to full init:`,
+                    err,
+                );
             }
-        } catch (err) {
-            traceWarn(
-                `[${opts.label}] Fast path resolve failed for '${persistedPath}', falling back to full init:`,
-                err,
-            );
+        } else {
+            sendTelemetryEvent(EventNames.GLOBAL_ENV_CACHE, cacheStopWatch.elapsedTime, {
+                managerLabel: opts.label,
+                result: 'miss',
+            });
+            traceVerbose(`[${opts.label}] Fast path: no persisted path, falling through to slow path`);
         }
     } else {
-        traceVerbose(`[${opts.label}] Fast path: no persisted path, falling through to slow path`);
+        const scope = opts.scope as Uri;
+        const persistedPath = await opts.getPersistedPath(opts.getProjectFsPath(scope));
+
+        if (persistedPath) {
+            try {
+                const resolved = await opts.resolve(persistedPath);
+                if (resolved) {
+                    return { env: resolved };
+                }
+            } catch (err) {
+                traceWarn(
+                    `[${opts.label}] Fast path resolve failed for '${persistedPath}', falling back to full init:`,
+                    err,
+                );
+            }
+        } else {
+            traceVerbose(`[${opts.label}] Fast path: no persisted path, falling through to slow path`);
+        }
     }
 
     return undefined;
