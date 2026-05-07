@@ -280,6 +280,12 @@
                 "icon": "$(trash)"
             },
             {
+                "command": "python-envs.managePackageVersion",
+                "title": "%python-envs.managePackageVersion.title%",
+                "category": "Python Envs",
+                "icon": "$(gear)"
+            },
+            {
                 "command": "python-envs.copyEnvPath",
                 "title": "%python-envs.copyEnvPath.title%",
                 "category": "Python Envs",
@@ -512,6 +518,11 @@
                     "when": "view == env-managers && viewItem =~ /.*pythonBrokenEnvironment.*/ && viewItem =~ /.*copied.*/"
                 },
                 {
+                    "command": "python-envs.managePackageVersion",
+                    "group": "inline",
+                    "when": "view == env-managers && viewItem == python-package"
+                },
+                {
                     "command": "python-envs.uninstallPackage",
                     "group": "inline",
                     "when": "view == env-managers && viewItem == python-package"
@@ -552,6 +563,11 @@
                 {
                     "command": "python-envs.revealProjectInExplorer",
                     "when": "view == python-projects && viewItem =~ /.*python-workspace.*/"
+                },
+                {
+                    "command": "python-envs.managePackageVersion",
+                    "group": "inline",
+                    "when": "view == python-projects && viewItem == python-package"
                 },
                 {
                     "command": "python-envs.uninstallPackage",
