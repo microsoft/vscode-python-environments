@@ -10,6 +10,7 @@ import {
     Disposable,
     Event,
     EventEmitter,
+    ExtensionTerminalOptions,
     Progress,
     Terminal,
     TerminalOptions,
@@ -615,5 +616,151 @@ suite('TerminalManager - initialize() with activateEnvInCurrentTerminal', () => 
             1,
             'Should activate via command fallback when shell setup reports not setup',
         );
+    });
+});
+
+suite('TerminalManager - initialize() skips pseudoterminals', () => {
+    let terminalActivation: TestTerminalActivation;
+    let terminalManager: TerminalManagerImpl;
+    let mockGetAutoActivationType: sinon.SinonStub;
+    let mockShouldActivateInCurrentTerminal: sinon.SinonStub;
+    let mockTerminals: sinon.SinonStub;
+    let mockGetEnvironmentForTerminal: sinon.SinonStub;
+
+    const createMockTerminal = (name: string, options?: TerminalOptions | ExtensionTerminalOptions): Terminal =>
+        ({
+            name,
+            creationOptions: options ?? ({} as TerminalOptions),
+            shellIntegration: undefined,
+            show: sinon.stub(),
+            sendText: sinon.stub(),
+        }) as unknown as Terminal;
+
+    const createMockEnvironment = (): PythonEnvironment => ({
+        envId: { id: 'test-env-id', managerId: 'test-manager' },
+        name: 'Test Environment',
+        displayName: 'Test Environment',
+        shortDisplayName: 'TestEnv',
+        displayPath: '/path/to/env',
+        version: '3.9.0',
+        environmentPath: Uri.file('/path/to/python'),
+        sysPrefix: '/path/to/env',
+        execInfo: {
+            run: { executable: '/path/to/python' },
+            activation: [{ executable: '/path/to/activate' }],
+        },
+    });
+
+    setup(() => {
+        terminalActivation = new TestTerminalActivation();
+
+        mockGetAutoActivationType = sinon.stub(terminalUtils, 'getAutoActivationType');
+        mockShouldActivateInCurrentTerminal = sinon.stub(terminalUtils, 'shouldActivateInCurrentTerminal');
+        mockGetEnvironmentForTerminal = sinon.stub(terminalUtils, 'getEnvironmentForTerminal');
+        sinon.stub(terminalUtils, 'waitForShellIntegration').resolves(false);
+        sinon.stub(activationUtils, 'isActivatableEnvironment').returns(true);
+        sinon.stub(shellDetector, 'identifyTerminalShell').returns('bash');
+
+        sinon.stub(windowApis, 'createTerminal').callsFake(() => createMockTerminal('new'));
+        sinon.stub(windowApis, 'onDidOpenTerminal').returns(new Disposable(() => {}));
+        sinon.stub(windowApis, 'onDidCloseTerminal').returns(new Disposable(() => {}));
+        sinon.stub(windowApis, 'onDidChangeWindowState').returns(new Disposable(() => {}));
+        sinon.stub(windowApis, 'activeTerminal').returns(undefined);
+
+        mockTerminals = sinon.stub(windowApis, 'terminals');
+
+        sinon.stub(windowApis, 'withProgress').callsFake(async (_options, task) => {
+            const mockProgress = { report: () => {} };
+            const mockToken = {
+                isCancellationRequested: false,
+                onCancellationRequested: () => new Disposable(() => {}),
+            };
+            return task(mockProgress as never, mockToken as never);
+        });
+        sinon.stub(workspaceApis, 'onDidChangeConfiguration').returns(new Disposable(() => {}));
+    });
+
+    teardown(() => {
+        sinon.restore();
+        terminalActivation.dispose();
+    });
+
+    test('initialize skips pseudoterminals and activates regular terminals (ACT_TYPE_COMMAND)', async () => {
+        const regularTerminal = createMockTerminal('regular');
+        const pseudoTerminal = createMockTerminal('pseudo', {
+            name: 'pseudo',
+            pty: { open: () => {}, close: () => {} },
+        } as unknown as ExtensionTerminalOptions);
+        const env = createMockEnvironment();
+
+        mockGetAutoActivationType.returns(terminalUtils.ACT_TYPE_COMMAND);
+        mockShouldActivateInCurrentTerminal.returns(true);
+        mockTerminals.returns([regularTerminal, pseudoTerminal]);
+        mockGetEnvironmentForTerminal.resolves(env);
+
+        terminalManager = new TerminalManagerImpl(terminalActivation, [], []);
+        await terminalManager.initialize({} as never);
+
+        assert.strictEqual(
+            terminalActivation.activateCalls,
+            1,
+            'Should only activate the regular terminal, not the pseudoterminal',
+        );
+    });
+
+    test('initialize skips pseudoterminals in shell startup fallback path (ACT_TYPE_SHELL)', async () => {
+        const regularTerminal = createMockTerminal('regular');
+        const pseudoTerminal = createMockTerminal('pseudo', {
+            name: 'pseudo',
+            pty: { open: () => {}, close: () => {} },
+        } as unknown as ExtensionTerminalOptions);
+        const env = createMockEnvironment();
+
+        const mockShellProvider: ShellStartupScriptProvider = {
+            name: 'bash-test',
+            shellType: 'bash',
+            isSetup: sinon.stub().resolves(ShellSetupState.NotSetup),
+            setupScripts: sinon.stub().resolves(ShellScriptEditState.NotEdited),
+            teardownScripts: sinon.stub().resolves(ShellScriptEditState.NotEdited),
+            clearCache: sinon.stub().resolves(),
+        };
+        sinon.stub(shellUtils, 'getShellIntegrationEnabledCache').resolves(false);
+        sinon.stub(shellUtils, 'shouldUseProfileActivation').returns(false);
+
+        mockGetAutoActivationType.returns(terminalUtils.ACT_TYPE_SHELL);
+        mockShouldActivateInCurrentTerminal.returns(true);
+        mockTerminals.returns([regularTerminal, pseudoTerminal]);
+        mockGetEnvironmentForTerminal.resolves(env);
+
+        terminalManager = new TerminalManagerImpl(terminalActivation, [], [mockShellProvider]);
+        await terminalManager.initialize({} as never);
+
+        assert.strictEqual(
+            terminalActivation.activateCalls,
+            1,
+            'Should only activate the regular terminal via command fallback, not the pseudoterminal',
+        );
+    });
+
+    test('initialize skips all terminals when only pseudoterminals exist (ACT_TYPE_COMMAND)', async () => {
+        const pseudo1 = createMockTerminal('pseudo1', {
+            name: 'pseudo1',
+            pty: { open: () => {}, close: () => {} },
+        } as unknown as ExtensionTerminalOptions);
+        const pseudo2 = createMockTerminal('pseudo2', {
+            name: 'pseudo2',
+            pty: { open: () => {}, close: () => {} },
+        } as unknown as ExtensionTerminalOptions);
+        const env = createMockEnvironment();
+
+        mockGetAutoActivationType.returns(terminalUtils.ACT_TYPE_COMMAND);
+        mockShouldActivateInCurrentTerminal.returns(true);
+        mockTerminals.returns([pseudo1, pseudo2]);
+        mockGetEnvironmentForTerminal.resolves(env);
+
+        terminalManager = new TerminalManagerImpl(terminalActivation, [], []);
+        await terminalManager.initialize({} as never);
+
+        assert.strictEqual(terminalActivation.activateCalls, 0, 'Should not activate any pseudoterminals');
     });
 });
