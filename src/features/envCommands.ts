@@ -46,6 +46,7 @@ import {
     activeTextEditor,
     showErrorMessage,
     showInformationMessage,
+    showInputBox,
     showOpenDialog,
     withProgress,
 } from '../common/window.apis';
@@ -320,6 +321,30 @@ export async function handlePackageUninstall(context: unknown, em: EnvironmentMa
         return;
     }
     traceError(`Invalid context for uninstall command: ${typeof context}`);
+}
+
+export async function handlePackageVersionManagement(context: unknown, em: EnvironmentManagers) {
+    if (context instanceof PackageTreeItem || context instanceof ProjectPackage) {
+        const pkg = context.pkg;
+        const environment = context instanceof ProjectPackage ? context.parent.environment : context.parent.environment;
+        const packageManager = em.getPackageManager(environment);
+
+        const version = await showInputBox({
+            title: l10n.t('Manage Package Version'),
+            prompt: l10n.t('Enter the version for {0}', pkg.name),
+            value: pkg.version,
+            placeHolder: l10n.t('e.g. 1.2.3'),
+        });
+
+        if (version === undefined) {
+            return;
+        }
+
+        await packageManager?.manage(environment, {
+            install: [`${pkg.name}==${version}`],
+            uninstall: [],
+        });
+    }
 }
 
 export async function setEnvironmentCommand(
