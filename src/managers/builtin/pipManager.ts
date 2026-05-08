@@ -1,3 +1,4 @@
+import * as semver from 'semver';
 import {
     CancellationError,
     Disposable,
@@ -19,6 +20,7 @@ import {
     PythonEnvironment,
     PythonEnvironmentApi,
 } from '../../api';
+import { runPython, runUV, shouldUseUv } from './helpers';
 import { getWorkspacePackagesToInstall } from './pipUtils';
 import { managePackages, refreshPackages } from './utils';
 import { VenvManager } from './venvManager';
@@ -131,8 +133,83 @@ export class PipPackageManager implements PackageManager, Disposable {
         return this.packages.get(environment.envId.id);
     }
 
+    async getVersion(environment: PythonEnvironment): Promise<semver.SemVer | undefined> {
+        try {
+            const useUv = await shouldUseUv(this.log, environment.environmentPath.fsPath);
+            if (useUv) {
+                const result = await runUV(['--version'], undefined, this.log);
+                // "uv X.Y.Z"
+                const match = result.match(/^uv\s+(\d+\.\d+(?:\.\d+)*)/);
+                return match ? (semver.coerce(match[1]) ?? undefined) : undefined;
+            }
+            const result = await runPython(
+                environment.execInfo?.run?.executable ?? 'python',
+                ['-m', 'pip', '--version'],
+                undefined,
+                this.log,
+            );
+            // "pip X.Y.Z from /path/to/pip (python X.Y)"
+            const match = result.match(/^pip\s+(\d+\.\d+(?:\.\d+)*)/);
+            return match ? (semver.coerce(match[1]) ?? undefined) : undefined;
+        } catch {
+            return undefined;
+        }
+    }
+
+    async getAvailableVersions(packageName: string, environment: PythonEnvironment): Promise<string[] | undefined> {
+        try {
+            const python = environment.execInfo?.run?.executable;
+            if (!python) {
+                return undefined;
+            }
+
+            const useUv = await shouldUseUv(this.log, environment.environmentPath.fsPath);
+            if (useUv) {
+                // uv does not have a way to get available versions of a package, so we return undefined to indicate that this information is not available.
+                return undefined;
+            }
+
+            // `pip index versions` command was added in pip 21.2.0, so we need to check the version before trying to use it.
+            const pipVersion = await this.getVersion(environment);
+            if (pipVersion && semver.gte(pipVersion, '21.2.0')) {
+                const output = await runPython(
+                    python,
+                    ['-m', 'pip', 'index', 'versions', packageName, '--json'],
+                    undefined,
+                    this.log,
+                );
+                return parsePipIndexVersionsJson(output);
+            }
+
+            return undefined;
+        } catch {
+            return undefined;
+        }
+    }
+
     dispose(): void {
         this._onDidChangePackages.dispose();
         this.packages.clear();
+    }
+}
+
+/**
+ * Parses JSON output from `pip index versions <package> --json`.
+ * Expected format: { "name": "...", "versions": ["1.2.3", "1.2.2", ...] }
+ */
+export function parsePipIndexVersionsJson(output: string): string[] | undefined {
+    // Only capture output between braces
+    const match = output.match(/{[\s\S]*}/);
+    if (!match) {
+        return undefined;
+    }
+    try {
+        const parsed = JSON.parse(match[0]);
+        if (parsed && Array.isArray(parsed.versions) && parsed.versions.length > 0) {
+            return parsed.versions;
+        }
+        return undefined;
+    } catch {
+        return undefined;
     }
 }

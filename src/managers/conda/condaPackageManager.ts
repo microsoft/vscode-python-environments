@@ -1,3 +1,4 @@
+import * as semver from 'semver';
 import {
     CancellationError,
     Disposable,
@@ -20,7 +21,7 @@ import {
 import { showErrorMessageWithLogs } from '../../common/errors/utils';
 import { CondaStrings } from '../../common/localize';
 import { withProgress } from '../../common/window.apis';
-import { getCommonCondaPackagesToInstall, managePackages, refreshPackages } from './condaUtils';
+import { getCommonCondaPackagesToInstall, managePackages, refreshPackages, runCondaExecutable } from './condaUtils';
 
 function getChanges(before: Package[], after: Package[]): { kind: PackageChangeKind; pkg: Package }[] {
     const changes: { kind: PackageChangeKind; pkg: Package }[] = [];
@@ -120,6 +121,34 @@ export class CondaPackageManager implements PackageManager, Disposable {
             await this.refresh(environment);
         }
         return this.packages.get(environment.envId.id);
+    }
+
+    async getVersion(_environment: PythonEnvironment): Promise<semver.SemVer | undefined> {
+        try {
+            const output = await runCondaExecutable(['--version'], this.log);
+            // "conda X.Y.Z"
+            const match = output.match(/conda\s+(\d+\.\d+(?:\.\d+)*)/i);
+            return match ? semver.coerce(match[1]) ?? undefined : undefined;
+        } catch {
+            return undefined;
+        }
+    }
+
+    async getAvailableVersions(packageName: string, _environment: PythonEnvironment): Promise<string[] | undefined> {
+        try {
+            const output = await runCondaExecutable(['search', packageName, '--json'], this.log);
+            const parsed = JSON.parse(output);
+            if (parsed && typeof parsed === 'object' && Array.isArray(parsed[packageName])) {
+                const versions: string[] = parsed[packageName]
+                    .map((entry: { version?: string }) => entry.version)
+                    .filter((v: unknown): v is string => typeof v === 'string');
+                // Deduplicate and return newest first
+                return [...new Set(versions)].reverse();
+            }
+            return undefined;
+        } catch {
+            return undefined;
+        }
     }
 
     dispose() {

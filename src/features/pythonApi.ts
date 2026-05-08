@@ -1,3 +1,4 @@
+import * as semver from 'semver';
 import { Disposable, Event, EventEmitter, TaskExecution, Terminal, Uri } from 'vscode';
 import {
     CreateEnvironmentOptions,
@@ -266,6 +267,25 @@ class PythonEnvironmentApiImpl implements PythonEnvironmentApi {
         return manager.getPackages(context);
     }
     onDidChangePackages: Event<DidChangePackagesEventArgs> = this._onDidChangePackages.event;
+
+    async getPackageManagerVersion(environment: PythonEnvironment): Promise<semver.SemVer | undefined> {
+        await waitForEnvManagerId([environment.envId.managerId]);
+        const manager = this.envManagers.getPackageManager(environment);
+        if (!manager) {
+            return undefined;
+        }
+        return manager.getVersion(environment);
+    }
+
+    async getAvailableVersions(packageName: string, environment: PythonEnvironment): Promise<string[] | undefined> {
+        await waitForEnvManagerId([environment.envId.managerId]);
+        const manager = this.envManagers.getPackageManager(environment);
+        if (!manager) {
+            return undefined;
+        }
+        return manager.getAvailableVersions(packageName, environment);
+    }
+
     createPackageItem(info: PackageInfo, environment: PythonEnvironment, manager: PackageManager): Package {
         const mgr = this.envManagers.packageManagers.find((m) => m.equals(manager));
         if (!mgr) {
