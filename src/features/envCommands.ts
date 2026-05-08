@@ -316,7 +316,7 @@ export async function handlePackageUninstall(context: unknown, em: EnvironmentMa
             }
         }
         const moduleName = context.pkg.name;
-        const environment = context instanceof ProjectPackage ? context.parent.environment : context.parent.environment;
+        const environment = context.parent.environment;
         const packageManager = em.getPackageManager(environment);
         await packageManager?.manage(environment, { uninstall: [moduleName], install: [] });
         return;
@@ -327,7 +327,7 @@ export async function handlePackageUninstall(context: unknown, em: EnvironmentMa
 export async function handlePackageVersionManagement(context: unknown, em: EnvironmentManagers) {
     if (context instanceof PackageTreeItem || context instanceof ProjectPackage) {
         const pkg = context.pkg;
-        const environment = context instanceof ProjectPackage ? context.parent.environment : context.parent.environment;
+        const environment = context.parent.environment;
         const packageManager = em.getPackageManager(environment);
 
         const version = await showInputBox({
@@ -346,7 +346,7 @@ export async function handlePackageVersionManagement(context: unknown, em: Envir
             },
         });
 
-        if (version === undefined) {
+        if (version === undefined || version === pkg.version) {
             return;
         }
 
