@@ -50,6 +50,7 @@ import {
     showOpenDialog,
     withProgress,
 } from '../common/window.apis';
+import { PEP440_VERSION_REGEX } from '../managers/builtin/pipUtils';
 import { runAsTask } from './execution/runAsTask';
 import { runInTerminal } from './terminal/runInTerminal';
 import { TerminalManager } from './terminal/terminalManager';
@@ -326,6 +327,15 @@ export async function handlePackageVersionManagement(context: unknown, em: Envir
             prompt: l10n.t('Enter the version for {0}', pkg.name),
             value: pkg.version,
             placeHolder: l10n.t('e.g. 1.2.3'),
+            validateInput: (value) => {
+                if (value.length === 0) {
+                    return l10n.t('Version cannot be empty');
+                }
+                if (!PEP440_VERSION_REGEX.test(value)) {
+                    return l10n.t('Invalid PEP 440 version: {0}', value);
+                }
+                return undefined;
+            },
         });
 
         if (version === undefined) {
