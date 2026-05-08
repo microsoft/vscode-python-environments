@@ -1,3 +1,4 @@
+import * as semver from 'semver';
 import * as fsapi from 'fs-extra';
 import * as path from 'path';
 import {
@@ -27,7 +28,7 @@ import { showErrorMessage, showInputBox, withProgress } from '../../common/windo
 import { normalizePackageName } from '../builtin/utils';
 import { updatePackagesAndNotify } from '../common/packageChanges';
 import { PoetryManager } from './poetryManager';
-import { getPoetry } from './poetryUtils';
+import { getPoetry, getPoetryVersion } from './poetryUtils';
 
 export class PoetryPackageManager implements PackageManager, Disposable {
     private readonly _onDidChangePackages = new EventEmitter<DidChangePackagesEventArgs>();
@@ -147,6 +148,22 @@ export class PoetryPackageManager implements PackageManager, Disposable {
             return packages;
         }
         return this.packages.get(environment.envId.id);
+    }
+
+    async getVersion(_environment: PythonEnvironment): Promise<semver.SemVer | undefined> {
+        const poetry = await getPoetry();
+        if (!poetry) {
+            return undefined;
+        }
+        const versionStr = await getPoetryVersion(poetry);
+        return versionStr ? semver.coerce(versionStr) ?? undefined : undefined;
+    }
+
+    async getAvailableVersions(_packageName: string, _environment: PythonEnvironment): Promise<string[] | undefined> {
+        // Poetry doesn't have a native "list available versions" command.
+        // Poetry 2.x supports `poetry search` but it was disabled on PyPI.
+        // Return undefined to indicate this manager doesn't support version listing.
+        return undefined;
     }
 
     dispose(): void {

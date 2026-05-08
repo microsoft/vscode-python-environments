@@ -1,3 +1,4 @@
+import * as semver from 'semver';
 import { CancellationError, Disposable, Event, LogOutputChannel, MarkdownString, Uri } from 'vscode';
 import {
     CreateEnvironmentOptions,
@@ -390,6 +391,16 @@ export class InternalPackageManager implements PackageManager {
 
     equals(other: PackageManager): boolean {
         return this.manager === other;
+    }
+
+    getVersion(environment: PythonEnvironment): Promise<semver.SemVer | undefined> {
+        return this.manager.getVersion ? this.manager.getVersion(environment) : Promise.resolve(undefined);
+    }
+
+    getAvailableVersions(packageName: string, environment: PythonEnvironment): Promise<string[] | undefined> {
+        return this.manager.getAvailableVersions
+            ? this.manager.getAvailableVersions(packageName, environment)
+            : Promise.resolve(undefined);
     }
 }
 
