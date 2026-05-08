@@ -6,6 +6,45 @@ import { createDeferred } from '../../common/utils/deferred';
 import { getConfiguration } from '../../common/workspace.apis';
 import { getUvEnvironments } from './uvEnvironments';
 
+/**
+ * Result of running a process, capturing all output regardless of exit code.
+ */
+export interface ProcessResult {
+    stdout: string;
+    stderr: string;
+    exitCode: number | null;
+}
+
+/**
+ * Runs a process and captures stdout/stderr regardless of exit code.
+ * Unlike runPython/runUV, this never rejects on non-zero exit codes.
+ */
+export function runProcessCaptureAll(
+    command: string,
+    args: string[],
+    log?: LogOutputChannel,
+    cwd?: string,
+): Promise<ProcessResult> {
+    log?.info(`Running: ${command} ${args.join(' ')}`);
+    return new Promise<ProcessResult>((resolve) => {
+        const proc = spawnProcess(command, args, { cwd });
+        let stdout = '';
+        let stderr = '';
+        proc.stdout?.on('data', (data) => {
+            stdout += data.toString('utf-8');
+        });
+        proc.stderr?.on('data', (data) => {
+            stderr += data.toString('utf-8');
+        });
+        proc.on('error', () => {
+            resolve({ stdout, stderr, exitCode: -1 });
+        });
+        proc.on('close', (code) => {
+            resolve({ stdout, stderr, exitCode: code });
+        });
+    });
+}
+
 let available = createDeferred<boolean>();
 
 /**
