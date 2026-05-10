@@ -13,8 +13,7 @@
     ],
     "exports": {
         "import": "./out/esm/main.js",
-        "require": "./out/cjs/main.js",
-        "types": "./out/types/main.d.ts"
+        "require": "./out/cjs/main.js"
     },
     "engines": {
         "node": ">=22.21.1",
