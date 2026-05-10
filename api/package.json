@@ -11,8 +11,11 @@
         "API",
         "Environments"
     ],
-    "main": "./out/main.js",
-    "types": "./out/main.d.ts",
+    "exports": {
+        "import": "./out/esm/main.js",
+        "require": "./out/cjs/main.js",
+        "types": "./out/types/main.d.ts"
+    },
     "engines": {
         "node": ">=22.21.1",
         "vscode": "^1.110.0"
@@ -30,7 +33,9 @@
         "prepublishOnly": "echo \"⛔ Can only publish from a secure pipeline ⛔\" && node -e \"process.exitCode = 1\"",
         "prepack": "npm run all:publish",
         "all:publish": "git clean -xfd . && npm install && npm run compile",
-        "compile": "tsc -b ./tsconfig.json",
+        "compile": "npm run compile:cjs && npm run compile:esm",
+        "compile:cjs": "tsc -b ./tsconfig.cjs.json",
+        "compile:esm": "tsc -b ./tsconfig.esm.json",
         "clean": "node -e \"const fs = require('fs'); fs.rmSync('./out', { recursive: true, force: true });\""
     },
     "devDependencies": {
