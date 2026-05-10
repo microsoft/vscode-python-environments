@@ -37,6 +37,9 @@
     "bugs": {
         "url": "https://github.com/microsoft/vscode-python-environments/issues"
     },
+    "workspaces": [
+        "api"
+    ],
     "main": "./dist/extension.js",
     "l10n": "./l10n",
     "icon": "icon.png",
@@ -124,7 +127,10 @@
                 "python-envs.workspaceSearchPaths": {
                     "type": "array",
                     "description": "%python-envs.workspaceSearchPaths.description%",
-                    "default": [".venv", "*/.venv"],
+                    "default": [
+                        ".venv",
+                        "*/.venv"
+                    ],
                     "scope": "resource",
                     "items": {
                         "type": "string"
