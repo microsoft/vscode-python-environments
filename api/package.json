@@ -12,8 +12,14 @@
         "Environments"
     ],
     "exports": {
-        "import": "./out/esm/main.js",
-        "require": "./out/cjs/main.js"
+        "import": {
+            "types": "./out/esm/main.d.ts",
+            "default": "./out/esm/main.js"
+        },
+        "require": {
+            "types": "./out/cjs/main.d.ts",
+            "default": "./out/cjs/main.js"
+        }
     },
     "engines": {
         "node": ">=22.21.1",
