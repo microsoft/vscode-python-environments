@@ -36,6 +36,7 @@
     },
     "scripts": {
         "prepublishOnly": "echo \"⛔ Can only publish from a secure pipeline ⛔\" && node -e \"process.exitCode = 1\"",
+        "preinstall": "npm run all:publish",
         "prepack": "npm run all:publish",
         "all:publish": "git clean -xfd . && npm install && npm run compile",
         "compile": "npm run compile:cjs && npm run compile:esm",
