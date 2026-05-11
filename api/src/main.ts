@@ -1,7 +1,6 @@
 // Copyright (c) Microsoft Corporation. All rights reserved.
 // Licensed under the MIT License.
 
-import type * as semver from 'semver';
 import {
     Disposable,
     Event,
@@ -21,6 +20,8 @@ import {
  * This is the public API for other extensions to interact with the Python Environments extension.
  */
 
+export type { Pep440Version } from '@renovatebot/pep440';
+import type { Pep440Version } from '@renovatebot/pep440';
 /**
  * The path to an icon, or a theme-specific configuration of icons.
  */
@@ -698,7 +699,7 @@ export interface PackageManager {
      * @param environment - The Python environment context.
      * @returns A promise that resolves to a SemVer object, or `undefined` if not available.
      */
-    getVersion?(environment: PythonEnvironment): Promise<semver.SemVer | undefined>;
+    getVersion?(environment: PythonEnvironment): Promise<Pep440Version | undefined>;
 
     /**
      * Retrieves the list of available versions for a given package.
@@ -707,7 +708,7 @@ export interface PackageManager {
      * @returns A promise that resolves to an array of version strings (newest first),
      *          or `undefined` if this manager does not support version listing.
      */
-    getAvailableVersions?(packageName: string, environment: PythonEnvironment): Promise<semver.SemVer[] | undefined>;
+    getAvailableVersions?(packageName: string, environment: PythonEnvironment): Promise<Pep440Version[] | undefined>;
 }
 
 /**
@@ -1076,14 +1077,14 @@ export interface PythonPackageManagementApi {
     managePackages(environment: PythonEnvironment, options: PackageManagementOptions): Promise<void>;
 }
 
-export interface PythonPackageVersionApi {
+export interface Pep440VersionApi {
     /**
      * Get the version of the package manager tool associated with the given environment.
      *
      * @param environment The Python Environment whose package manager version is requested.
      * @returns The SemVer version of the package manager tool, or `undefined` if not available.
      */
-    getPackageManagerVersion(environment: PythonEnvironment): Promise<semver.SemVer | undefined>;
+    getPackageManagerVersion(environment: PythonEnvironment): Promise<Pep440Version | undefined>;
 
     /**
      * Get the list of available versions for a package from the package manager
@@ -1093,7 +1094,7 @@ export interface PythonPackageVersionApi {
      * @param environment The Python Environment context for the lookup.
      * @returns An array of version strings (newest first), or `undefined` if not supported.
      */
-    getAvailableVersions(packageName: string, environment: PythonEnvironment): Promise<semver.SemVer[] | undefined>;
+    getAvailableVersions(packageName: string, environment: PythonEnvironment): Promise<Pep440Version[] | undefined>;
 }
 
 export interface PythonPackageManagerApi
@@ -1102,7 +1103,7 @@ export interface PythonPackageManagerApi
         PythonPackageGetterApi,
         PythonPackageManagementApi,
         PythonPackageItemApi,
-        PythonPackageVersionApi {}
+        Pep440VersionApi {}
 
 export interface PythonProjectCreationApi {
     /**

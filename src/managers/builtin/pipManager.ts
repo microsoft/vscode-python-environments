@@ -1,4 +1,5 @@
-import * as semver from 'semver';
+import { compare, explain as parse, rcompare } from '@renovatebot/pep440';
+import type { Pep440Version } from '@renovatebot/pep440';
 import {
     CancellationError,
     Disposable,
@@ -133,14 +134,14 @@ export class PipPackageManager implements PackageManager, Disposable {
         return this.packages.get(environment.envId.id);
     }
 
-    async getVersion(environment: PythonEnvironment): Promise<semver.SemVer | undefined> {
+    async getVersion(environment: PythonEnvironment): Promise<Pep440Version | undefined> {
         try {
             const useUv = await shouldUseUv(this.log, environment.environmentPath.fsPath);
             if (useUv) {
                 const result = await runUV(['--version'], undefined, this.log);
                 // "uv X.Y.Z"
                 const match = result.match(/^uv\s+(\d+\.\d+(?:\.\d+)*)/);
-                return match ? (semver.coerce(match[1]) ?? undefined) : undefined;
+                return match ? parse(match[1]) ?? undefined : undefined;
             }
             const result = await runPython(
                 environment.execInfo?.run?.executable ?? 'python',
@@ -150,13 +151,13 @@ export class PipPackageManager implements PackageManager, Disposable {
             );
             // "pip X.Y.Z from /path/to/pip (python X.Y)"
             const match = result.match(/^pip\s+(\d+\.\d+(?:\.\d+)*)/);
-            return match ? (semver.coerce(match[1]) ?? undefined) : undefined;
+            return match ? parse(match[1]) ?? undefined : undefined;
         } catch {
             return undefined;
         }
     }
 
-    async getAvailableVersions(packageName: string, environment: PythonEnvironment): Promise<semver.SemVer[] | undefined> {
+    async getAvailableVersions(packageName: string, environment: PythonEnvironment): Promise<Pep440Version[] | undefined> {
         try {
             const python = environment.execInfo?.run?.executable;
             if (!python) {
@@ -176,7 +177,7 @@ export class PipPackageManager implements PackageManager, Disposable {
 
             // pip >= 21.2.0 - use `pip index versions <package> --json` to get available versions in a machine readable format.
             const pipVersion = await this.getVersion(environment);
-            if (pipVersion && semver.gte(pipVersion, '21.2.0')) {
+            if (pipVersion && compare(pipVersion.public, '21.2.0') >= 0) {
                 const output = await runPython(
                     python,
                     ['-m', 'pip', 'index', 'versions', packageName, '--json'],
@@ -187,7 +188,7 @@ export class PipPackageManager implements PackageManager, Disposable {
             }
 
             // pip <= 20.3.4 - use `pip install <package>==__invalid__` to get available versions from error message.
-            if (pipVersion && semver.lte(pipVersion, '20.3.4')) {
+            if (pipVersion && compare(pipVersion.public, '20.3.4') <= 0) {
                 const result = await runProcessCaptureAll(
                     python,
                     ['-m', 'pip', 'install', `${packageName}==__invalid__`],
@@ -215,14 +216,15 @@ export class PipPackageManager implements PackageManager, Disposable {
  *   No matching distribution found for <package>==__invalid__
  * ```
  */
-export function parsePipInstallVersions(output: string): semver.SemVer[] | undefined {
+export function parsePipInstallVersions(output: string): Pep440Version[] | undefined {
     const match = output.match(/from versions:\s*([^\)]+)\)/);
     if (match && match[1]) {
         return match[1]
             .split(',')
             .filter((v) => !!v.trim())
-            .map((v) => semver.coerce(v.trim()) as semver.SemVer)
-            .sort((a, b) => semver.rcompare(a, b));
+            .map((v) => parse(v.trim()))
+            .filter((v): v is Pep440Version => v !== null)
+            .sort((a, b) => rcompare(a.public, b.public));
     }
 }
 
@@ -230,7 +232,7 @@ export function parsePipInstallVersions(output: string): semver.SemVer[] | undef
  * Parses JSON output from `pip index versions <package> --json`.
  * Expected format: { "name": "...", "versions": ["1.2.3", "1.2.2", ...] }
  */
-export function parsePipIndexVersionsJson(output: string): semver.SemVer[] | undefined {
+export function parsePipIndexVersionsJson(output: string): Pep440Version[] | undefined {
     // Only capture output between braces
     const match = output.match(/{[\s\S]*}/);
     if (!match) {
@@ -241,8 +243,9 @@ export function parsePipIndexVersionsJson(output: string): semver.SemVer[] | und
         if (parsed && Array.isArray(parsed.versions) && parsed.versions.length > 0) {
             return (parsed.versions as string[])
                 .filter((v) => !!v.trim())
-                .map((v) => semver.coerce(v) as semver.SemVer)
-                .sort((a, b) => semver.rcompare(a, b));
+                .map((v) => parse(v))
+                .filter((v): v is Pep440Version => v !== null)
+                .sort((a, b) => rcompare(a.public, b.public));
         }
         return undefined;
     } catch {
