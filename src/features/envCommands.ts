@@ -352,7 +352,7 @@ export async function handlePackageVersionManagement(context: unknown, em: Envir
         if (availableVersions && availableVersions.length > 0) {
             const items = availableVersions.map((v) => ({
                 label: v,
-                description: v === pkg.version ? '$(check)' : undefined,
+                description: v === pkg.version ? `$(check) ${l10n.t('Installed')}` : undefined,
             }));
 
             const selected = await showQuickPick(items, {
