@@ -157,16 +157,15 @@ export class CondaPackageManager implements PackageManager, Disposable {
         }
     }
 
-    async getAvailableVersions(packageName: string, _environment: PythonEnvironment): Promise<string[] | undefined> {
+    async getAvailableVersions(packageName: string, _environment: PythonEnvironment): Promise<semver.SemVer[] | undefined> {
         try {
             const output = await runCondaExecutable(['search', packageName, '--json'], this.log);
             const parsed = JSON.parse(output);
             if (parsed && typeof parsed === 'object' && Array.isArray(parsed[packageName])) {
-                const versions: string[] = parsed[packageName]
-                    .map((entry: { version?: string }) => entry.version)
-                    .filter((v: unknown): v is string => typeof v === 'string');
-                // Deduplicate and return newest first
-                return [...new Set(versions)].reverse();
+                return parsed[packageName]
+                    .filter((entry: { version?: string }) => !!entry.version?.trim())
+                    .map((entry: { version?: string }) => semver.coerce(entry.version) as semver.SemVer)
+                    .sort((a: semver.SemVer, b: semver.SemVer) => semver.rcompare(a, b));
             }
             return undefined;
         } catch {

@@ -157,7 +157,7 @@ export class PoetryPackageManager implements PackageManager, Disposable {
         return versionStr ? semver.coerce(versionStr) ?? undefined : undefined;
     }
 
-    async getAvailableVersions(_packageName: string, _environment: PythonEnvironment): Promise<string[] | undefined> {
+    async getAvailableVersions(_packageName: string, _environment: PythonEnvironment): Promise<semver.SemVer[] | undefined> {
         // Poetry doesn't have a native "list available versions" command.
         // Poetry 2.x supports `poetry search` but it was disabled on PyPI.
         // Return undefined to indicate this manager doesn't support version listing.
