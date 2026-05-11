@@ -1,4 +1,5 @@
 import assert from 'assert';
+import * as semver from 'semver';
 import { parsePipIndexVersionsJson } from '../../../managers/builtin/pipManager';
 
 suite('Pip Version Parsing', () => {
@@ -6,13 +7,13 @@ suite('Pip Version Parsing', () => {
         test('parses valid JSON with versions array', () => {
             const output = JSON.stringify({ name: 'requests', versions: ['2.31.0', '2.30.0', '2.29.0'] });
             const versions = parsePipIndexVersionsJson(output);
-            assert.deepStrictEqual(versions, ['2.31.0', '2.30.0', '2.29.0']);
+            assert.deepStrictEqual(versions, ['2.31.0', '2.30.0', '2.29.0'].map((v) => semver.coerce(v)));
         });
 
         test('parses output with a single version', () => {
             const output = JSON.stringify({ name: 'my-package', versions: ['1.0.0'] });
             const versions = parsePipIndexVersionsJson(output);
-            assert.deepStrictEqual(versions, ['1.0.0']);
+            assert.deepStrictEqual(versions, [semver.coerce('1.0.0')]);
         });
 
         test('returns undefined for empty versions array', () => {

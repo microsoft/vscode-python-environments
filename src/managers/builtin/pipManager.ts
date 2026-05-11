@@ -156,7 +156,7 @@ export class PipPackageManager implements PackageManager, Disposable {
         }
     }
 
-    async getAvailableVersions(packageName: string, environment: PythonEnvironment): Promise<string[] | undefined> {
+    async getAvailableVersions(packageName: string, environment: PythonEnvironment): Promise<semver.SemVer[] | undefined> {
         try {
             const python = environment.execInfo?.run?.executable;
             if (!python) {
@@ -215,13 +215,14 @@ export class PipPackageManager implements PackageManager, Disposable {
  *   No matching distribution found for <package>==__invalid__
  * ```
  */
-export function parsePipInstallVersions(output: string): string[] | undefined {
+export function parsePipInstallVersions(output: string): semver.SemVer[] | undefined {
     const match = output.match(/from versions:\s*([^\)]+)\)/);
     if (match && match[1]) {
         return match[1]
             .split(',')
-            .map((v) => v.trim())
-            .filter((v) => v.length > 0);
+            .filter((v) => !!v.trim())
+            .map((v) => semver.coerce(v.trim()) as semver.SemVer)
+            .sort((a, b) => semver.rcompare(a, b));
     }
 }
 
@@ -229,7 +230,7 @@ export function parsePipInstallVersions(output: string): string[] | undefined {
  * Parses JSON output from `pip index versions <package> --json`.
  * Expected format: { "name": "...", "versions": ["1.2.3", "1.2.2", ...] }
  */
-export function parsePipIndexVersionsJson(output: string): string[] | undefined {
+export function parsePipIndexVersionsJson(output: string): semver.SemVer[] | undefined {
     // Only capture output between braces
     const match = output.match(/{[\s\S]*}/);
     if (!match) {
@@ -238,7 +239,10 @@ export function parsePipIndexVersionsJson(output: string): string[] | undefined 
     try {
         const parsed = JSON.parse(match[0]);
         if (parsed && Array.isArray(parsed.versions) && parsed.versions.length > 0) {
-            return parsed.versions;
+            return (parsed.versions as string[])
+                .filter((v) => !!v.trim())
+                .map((v) => semver.coerce(v) as semver.SemVer)
+                .sort((a, b) => semver.rcompare(a, b));
         }
         return undefined;
     } catch {
