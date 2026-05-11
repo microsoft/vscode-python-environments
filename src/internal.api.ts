@@ -397,7 +397,7 @@ export class InternalPackageManager implements PackageManager {
         return this.manager.getVersion ? this.manager.getVersion(environment) : Promise.resolve(undefined);
     }
 
-    getAvailableVersions(packageName: string, environment: PythonEnvironment): Promise<string[] | undefined> {
+    getAvailableVersions(packageName: string, environment: PythonEnvironment): Promise<semver.SemVer[] | undefined> {
         return this.manager.getAvailableVersions
             ? this.manager.getAvailableVersions(packageName, environment)
             : Promise.resolve(undefined);

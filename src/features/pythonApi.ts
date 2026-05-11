@@ -278,7 +278,7 @@ class PythonEnvironmentApiImpl implements PythonEnvironmentApi {
         return manager.getVersion(environment);
     }
 
-    async getAvailableVersions(packageName: string, environment: PythonEnvironment): Promise<string[] | undefined> {
+    async getAvailableVersions(packageName: string, environment: PythonEnvironment): Promise<semver.SemVer[] | undefined> {
         await waitForEnvManagerId([environment.envId.managerId]);
         const manager = this.envManagers.getPackageManager(environment);
         if (!manager) {
