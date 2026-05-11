@@ -199,4 +199,39 @@ suite('Pip Utils - getProjectInstallable', () => {
         assert.ok(firstResult.uri, 'Should have a URI');
         assert.ok(firstResult.uri.fsPath.startsWith(workspacePath), 'Should be in workspace directory');
     });
+
+    test('should sort shallower files before deeper ones', async () => {
+        // Arrange: Use the shared workspacePath from setup() so paths are platform-safe.
+        const workspacePath = Uri.file('/test/path/root').fsPath;
+        const rootReqPath = path.join(workspacePath, 'requirements.txt');
+        const subdirReqPath = path.join(workspacePath, 'subdir', 'dev-requirements.txt');
+        const deepReqPath = path.join(workspacePath, 'deep', 'nested', 'sub', 'requirements.txt');
+
+        // Return files at different depths, with deeper ones discovered first.
+        findFilesStub.callsFake((pattern: string) => {
+            if (pattern === '**/*requirements*.txt') {
+                return Promise.resolve([Uri.file(deepReqPath), Uri.file(subdirReqPath)]);
+            } else if (pattern === '*requirements*.txt') {
+                return Promise.resolve([Uri.file(rootReqPath)]);
+            } else if (pattern === '**/requirements/*.txt') {
+                return Promise.resolve([]);
+            } else if (pattern === '**/pyproject.toml') {
+                return Promise.resolve([]);
+            }
+            return Promise.resolve([]);
+        });
+
+        // Act
+        const projects = [{ name: 'workspace', uri: Uri.file(workspacePath) }];
+        const result = (await getProjectInstallable(mockApi as PythonEnvironmentApi, projects)).installables;
+
+        // Assert: order by fsPath so the two `requirements.txt` files are unambiguous.
+        assert.strictEqual(result.length, 3);
+        const fsPaths = result.map((r) => r.uri!.fsPath);
+        assert.deepStrictEqual(
+            fsPaths,
+            [rootReqPath, subdirReqPath, deepReqPath],
+            'Files should be ordered by depth relative to the project root',
+        );
+    });
 });
