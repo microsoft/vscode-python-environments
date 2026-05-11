@@ -162,9 +162,9 @@ export class PipPackageManager implements PackageManager, Disposable {
                 return undefined;
             }
 
+            // uv - Run pip through pipx
             const useUv = await shouldUseUv(this.log, environment.environmentPath.fsPath);
             if (useUv) {
-                // use uvx
                 const output = await runUV(
                     ['tool', 'run', 'pip', 'index', 'versions', packageName, '--json'],
                     undefined,
@@ -173,7 +173,7 @@ export class PipPackageManager implements PackageManager, Disposable {
                 return parsePipIndexVersionsJson(output);
             }
 
-            // `pip index versions` command was added in pip 21.2.0, so we need to check the version before trying to use it.
+            // pip >= 21.2.0 - use `pip index versions <package> --json` to get available versions in a machine readable format.
             const pipVersion = await this.getVersion(environment);
             if (pipVersion && semver.gte(pipVersion, '21.2.0')) {
                 const output = await runPython(
@@ -185,7 +185,7 @@ export class PipPackageManager implements PackageManager, Disposable {
                 return parsePipIndexVersionsJson(output);
             }
 
-            // `pip install <package>==__invalid__` returns a list of available version in pip 20.3.4 and earlier.
+            // pip <= 20.3.4 - use `pip install <package>==__invalid__` to get available versions from error message.
             if (pipVersion && semver.lte(pipVersion, '20.3.4')) {
                 const output = await runPython(
                     python,
