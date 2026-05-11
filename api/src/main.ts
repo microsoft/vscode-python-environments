@@ -747,7 +747,7 @@ export interface PackageManager {
      * @returns A promise that resolves to an array of version strings (newest first),
      *          or `undefined` if this manager does not support version listing.
      */
-    getAvailableVersions?(packageName: string, environment: PythonEnvironment): Promise<string[] | undefined>;
+    getAvailableVersions?(packageName: string, environment: PythonEnvironment): Promise<semver.SemVer[] | undefined>;
 }
 
 /**
@@ -1145,7 +1145,7 @@ export interface PythonPackageVersionApi {
      * @param environment The Python Environment context for the lookup.
      * @returns An array of version strings (newest first), or `undefined` if not supported.
      */
-    getAvailableVersions(packageName: string, environment: PythonEnvironment): Promise<string[] | undefined>;
+    getAvailableVersions(packageName: string, environment: PythonEnvironment): Promise<semver.SemVer[] | undefined>;
 }
 
 export interface PythonPackageManagerApi
