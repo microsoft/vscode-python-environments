@@ -20,7 +20,7 @@ import {
     PythonEnvironment,
     PythonEnvironmentApi,
 } from '../../api';
-import { runPython, runUV, shouldUseUv } from './helpers';
+import { runProcessCaptureAll, runPython, runUV, shouldUseUv } from './helpers';
 import { getWorkspacePackagesToInstall } from './pipUtils';
 import { managePackages, refreshPackages } from './utils';
 import { VenvManager } from './venvManager';
@@ -188,13 +188,12 @@ export class PipPackageManager implements PackageManager, Disposable {
 
             // pip <= 20.3.4 - use `pip install <package>==__invalid__` to get available versions from error message.
             if (pipVersion && semver.lte(pipVersion, '20.3.4')) {
-                const output = await runPython(
+                const result = await runProcessCaptureAll(
                     python,
                     ['-m', 'pip', 'install', `${packageName}==__invalid__`],
-                    undefined,
                     this.log,
                 );
-                return parsePipInstallVersions(output);
+                return parsePipInstallVersions(result.stdout + result.stderr);
             }
         } catch {
             return undefined;
