@@ -164,8 +164,13 @@ export class PipPackageManager implements PackageManager, Disposable {
 
             const useUv = await shouldUseUv(this.log, environment.environmentPath.fsPath);
             if (useUv) {
-                // uv does not have a way to get available versions of a package, so we return undefined to indicate that this information is not available.
-                return undefined;
+                // use uvx
+                const output = await runUV(
+                    ['tool', 'run', 'pip', 'index', 'versions', packageName, '--json'],
+                    undefined,
+                    this.log,
+                );
+                return parsePipIndexVersionsJson(output);
             }
 
             // `pip index versions` command was added in pip 21.2.0, so we need to check the version before trying to use it.
@@ -180,7 +185,16 @@ export class PipPackageManager implements PackageManager, Disposable {
                 return parsePipIndexVersionsJson(output);
             }
 
-            return undefined;
+            // `pip install <package>==__invalid__` returns a list of available version in pip 20.3.4 and earlier.
+            if (pipVersion && semver.lte(pipVersion, '20.3.4')) {
+                const output = await runPython(
+                    python,
+                    ['-m', 'pip', 'install', `${packageName}==__invalid__`],
+                    undefined,
+                    this.log,
+                );
+                return parsePipInstallVersions(output);
+            }
         } catch {
             return undefined;
         }
@@ -200,6 +214,25 @@ export class PipPackageManager implements PackageManager, Disposable {
     async getDirectPackageNames(environment: PythonEnvironment): Promise<Set<string> | undefined> {
         const data = await refreshPipDirectPackageNames(environment, this.log);
         return data ? new Set(data.map(normalizePackageName)) : undefined;
+    }
+}
+
+/**
+ * Parses the output of `pip install <package>==__invalid__` to extract available versions.
+ * Expected output format:
+ * ```
+ * Collecting <package>==__invalid__
+ *   Could not find a version that satisfies the requirement <package>==__invalid__ (from versions: 1.2.3, 1.2.2, ...)
+ *   No matching distribution found for <package>==__invalid__
+ * ```
+ */
+export function parsePipInstallVersions(output: string): string[] | undefined {
+    const match = output.match(/from versions:\s*([^\)]+)\)/);
+    if (match && match[1]) {
+        return match[1]
+            .split(',')
+            .map((v) => v.trim())
+            .filter((v) => v.length > 0);
     }
 }
 
