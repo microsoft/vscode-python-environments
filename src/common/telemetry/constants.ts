@@ -87,6 +87,15 @@ export enum EventNames {
      */
     PET_INIT_DURATION = 'PET.INIT_DURATION',
     /**
+     * Telemetry event fired once per activation reporting the version of the bundled
+     * PET (Python Environment Tools) binary in use. Used to slice other PET telemetry
+     * by binary version when investigating regressions/improvements.
+     * Properties:
+     * - version: string (e.g. '0.1.0' from `pet --version`; 'unknown' if the lookup failed)
+     * - source: 'envs_extension' | 'python_extension' (which extension shipped the binary)
+     */
+    PET_VERSION = 'PET.VERSION',
+    /**
      * Telemetry event fired when applyInitialEnvironmentSelection begins.
      * Signals that all managers are registered and env selection is starting.
      * Properties:
@@ -398,8 +407,14 @@ export interface IEventNamePropertyMapping {
     */
     [EventNames.SETUP_HANG_DETECTED]: {
         failureStage: string;
-        /** Whether the global Python scope search was deferred to background at time of hang. undefined = hang fired before env-selection stage. */
-        globalScopeDeferred: boolean | undefined;
+        /**
+         * State of the global Python scope search at the time of hang:
+         * - 'deferred': workspace env resolved and global scope was pushed to background.
+         * - 'not_deferred': no workspace env resolved, global scope was awaited as primary fallback.
+         * - 'unknown': hang fired before the env-selection stage reached the global-scope decision
+         *   (i.e. before/during env selection, prior to the workspace-resolution branch).
+         */
+        globalScopeDeferred: 'deferred' | 'not_deferred' | 'unknown';
     };
 
     /* __GDPR__
@@ -423,6 +438,19 @@ export interface IEventNamePropertyMapping {
     [EventNames.PET_INIT_DURATION]: {
         result: 'success' | 'error' | 'timeout';
         errorType?: string;
+    };
+
+    /* __GDPR__
+        "pet.version": {
+            "version": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "owner": "eleanorjboyd" },
+            "source": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "owner": "eleanorjboyd" }
+        }
+    */
+    [EventNames.PET_VERSION]: {
+        /** Version string reported by `pet --version` (e.g. '0.1.0'), or 'unknown' if the lookup failed. */
+        version: string;
+        /** Which extension shipped the PET binary that's being used. */
+        source: 'envs_extension' | 'python_extension';
     };
 
     /* __GDPR__

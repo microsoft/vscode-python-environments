@@ -96,7 +96,12 @@ import { collectEnvironmentInfo, getEnvManagerAndPackageManagerConfigLevels, run
 import { EnvironmentManagers, ProjectCreators, PythonProjectManager } from './internal.api';
 import { registerSystemPythonFeatures } from './managers/builtin/main';
 import { SysPythonManager } from './managers/builtin/sysPythonManager';
-import { createNativePythonFinder, NativePythonFinder } from './managers/common/nativePythonFinder';
+import {
+    createNativePythonFinder,
+    getNativePythonToolsPathAndSource,
+    getNativePythonToolsVersion,
+    NativePythonFinder,
+} from './managers/common/nativePythonFinder';
 import { IDisposable } from './managers/common/types';
 import { registerCondaFeatures } from './managers/conda/main';
 import { registerPipenvFeatures } from './managers/pipenv/main';
@@ -555,7 +560,7 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
         const stageWatch = new StopWatch();
         // Mutable ref so the hang watchdog can report whether global scope was deferred
         // even if it fires mid-envSelection before applyInitialEnvironmentSelection returns.
-        const globalScopeDeferredRef: { value: boolean | undefined } = { value: undefined };
+        const globalScopeDeferredRef: { value: 'deferred' | 'not_deferred' | 'unknown' } = { value: 'unknown' };
         // Watchdog: fires if setup hasn't completed within 120s, indicating a likely hang
         const SETUP_HANG_TIMEOUT_MS = 120_000;
         let hangWatchdogActive = true;
@@ -586,6 +591,19 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
             try {
                 nativeFinder = await createNativePythonFinder(outputChannel, api, context);
                 sendTelemetryEvent(EventNames.PET_INIT_DURATION, petStart.elapsedTime, { result: 'success' });
+                // Fire-and-forget: report the bundled PET binary version so other PET telemetry
+                // can be sliced by version. Don't block activation on this.
+                void getNativePythonToolsPathAndSource()
+                    .then(async ({ toolPath, source }) => {
+                        const version = await getNativePythonToolsVersion(toolPath);
+                        sendTelemetryEvent(EventNames.PET_VERSION, undefined, { version, source });
+                    })
+                    .catch(() => {
+                        sendTelemetryEvent(EventNames.PET_VERSION, undefined, {
+                            version: 'unknown',
+                            source: 'python_extension',
+                        });
+                    });
             } catch (petError) {
                 sendTelemetryEvent(
                     EventNames.PET_INIT_DURATION,

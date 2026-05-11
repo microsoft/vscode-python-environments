@@ -284,7 +284,7 @@ export async function applyInitialEnvironmentSelection(
     nativeFinder: NativePythonFinder,
     api: PythonEnvironmentApi,
     activationToReadyDurationMs?: number,
-    globalScopeDeferredRef?: { value: boolean | undefined },
+    globalScopeDeferredRef?: { value: 'deferred' | 'not_deferred' | 'unknown' },
 ): Promise<void> {
     const folders = getWorkspaceFolders() ?? [];
     traceInfo(
@@ -379,7 +379,7 @@ export async function applyInitialEnvironmentSelection(
         // Defer global scope so it doesn't block post-selection startup.
         traceInfo('[interpreterSelection] Workspace env resolved, deferring global scope to background');
         if (globalScopeDeferredRef) {
-            globalScopeDeferredRef.value = true;
+            globalScopeDeferredRef.value = 'deferred';
         }
         resolveGlobalScope()
             .then(async (globalErrors) => {
@@ -391,7 +391,7 @@ export async function applyInitialEnvironmentSelection(
     } else {
         // No workspace folder resolved — global scope is the primary fallback, must await.
         if (globalScopeDeferredRef) {
-            globalScopeDeferredRef.value = false;
+            globalScopeDeferredRef.value = 'not_deferred';
         }
         const globalErrors = await resolveGlobalScope();
         allErrors.push(...globalErrors);

@@ -85,12 +85,21 @@ export class ConfigureRetryState {
     }
 }
 
+export type NativePythonToolsSource = 'envs_extension' | 'python_extension';
+
 export async function getNativePythonToolsPath(): Promise<string> {
+    return (await getNativePythonToolsPathAndSource()).toolPath;
+}
+
+export async function getNativePythonToolsPathAndSource(): Promise<{
+    toolPath: string;
+    source: NativePythonToolsSource;
+}> {
     const envsExt = getExtension(ENVS_EXTENSION_ID);
     if (envsExt) {
         const petPath = path.join(envsExt.extensionPath, 'python-env-tools', 'bin', isWindows() ? 'pet.exe' : 'pet');
         if (await fs.pathExists(petPath)) {
-            return petPath;
+            return { toolPath: petPath, source: 'envs_extension' };
         }
     }
 
@@ -99,7 +108,54 @@ export async function getNativePythonToolsPath(): Promise<string> {
         throw new Error('Python extension not found');
     }
 
-    return path.join(python.extensionPath, 'python-env-tools', 'bin', isWindows() ? 'pet.exe' : 'pet');
+    return {
+        toolPath: path.join(python.extensionPath, 'python-env-tools', 'bin', isWindows() ? 'pet.exe' : 'pet'),
+        source: 'python_extension',
+    };
+}
+
+/**
+ * Runs `pet --version` and returns the parsed version string (e.g. '0.1.0').
+ * Returns 'unknown' if the command fails, times out, or the output can't be parsed.
+ */
+export async function getNativePythonToolsVersion(toolPath: string, timeoutMs: number = 5_000): Promise<string> {
+    return new Promise<string>((resolve) => {
+        let settled = false;
+        const settle = (value: string) => {
+            if (settled) {
+                return;
+            }
+            settled = true;
+            resolve(value);
+        };
+        try {
+            const proc = spawnProcess(toolPath, ['--version'], { stdio: 'pipe' });
+            let stdout = '';
+            const timer = setTimeout(() => {
+                try {
+                    proc.kill('SIGTERM');
+                } catch {
+                    // ignore
+                }
+                settle('unknown');
+            }, timeoutMs);
+            proc.stdout?.on('data', (data: Buffer) => {
+                stdout += data.toString();
+            });
+            proc.on('error', () => {
+                clearTimeout(timer);
+                settle('unknown');
+            });
+            proc.on('close', () => {
+                clearTimeout(timer);
+                // Output looks like "pet 0.1.0\n" — extract the version token.
+                const match = stdout.match(/\b\d+\.\d+\.\d+\S*/);
+                settle(match ? match[0] : 'unknown');
+            });
+        } catch {
+            settle('unknown');
+        }
+    });
 }
 
 export interface NativeEnvInfo {
@@ -545,20 +601,23 @@ class NativePythonFinderImpl implements NativePythonFinder {
             // Handle process exit - mark as exited so pending requests fail fast
             this.proc.on('exit', (code, signal) => {
                 this.processExited = true;
-                if (code !== 0) {
+                // Preserve a more-specific reason (e.g. rpc_*) if one was already recorded before the kill.
+                if (this.processExitReason === undefined) {
                     this.processExitReason = `process_exit:${code ?? 'null'}:${signal ?? 'none'}`;
+                }
+                if (code !== 0) {
                     this.outputChannel.error(
                         `[pet] Python Environment Tools exited unexpectedly with code ${code}, signal ${signal}`,
                     );
-                } else {
-                    this.processExitReason = 'process_exit:0';
                 }
             });
 
             // Handle process errors (e.g., ENOENT if executable not found)
             this.proc.on('error', (err) => {
                 this.processExited = true;
-                this.processExitReason = 'process_error';
+                if (this.processExitReason === undefined) {
+                    this.processExitReason = 'process_error';
+                }
                 this.outputChannel.error('[pet] Process error:', err);
             });
 
