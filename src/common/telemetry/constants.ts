@@ -60,11 +60,12 @@ export enum EventNames {
      */
     MANAGER_REGISTRATION_FAILED = 'MANAGER_REGISTRATION.FAILED',
     /**
-     * Telemetry event fired when the setup block appears to be hung.
-     * A watchdog timer fires after a deadline; if the setup completes normally,
-     * the timer is cancelled and this event never fires.
+     * Watchdog event fired when setup appears hung. Cancelled if setup completes normally.
      * Properties:
-     * - failureStage: string (which phase was in progress when the watchdog fired)
+     * - failureStage: which phase was in progress when the watchdog fired
+     * - globalScopeDeferred: distinguishes a real foreground hang from the benign 120s
+     *   background global-scope scan. String union (not boolean) because the sender drops
+     *   undefined. Values: 'deferred' | 'not_deferred' | 'unknown'.
      * Measures:
      * - duration: total elapsed since activation
      * - stageDuration: elapsed in the current stage
@@ -87,12 +88,11 @@ export enum EventNames {
      */
     PET_INIT_DURATION = 'PET.INIT_DURATION',
     /**
-     * Telemetry event fired once per activation reporting the version of the bundled
-     * PET (Python Environment Tools) binary in use. Used to slice other PET telemetry
-     * by binary version when investigating regressions/improvements.
+     * Fired once per activation. Lets us slice every other PET event by which binary
+     * version was running — important since PET evolves independently of the extension.
      * Properties:
-     * - version: string (e.g. '0.1.0' from `pet --version`; 'unknown' if the lookup failed)
-     * - source: 'envs_extension' | 'python_extension' (which extension shipped the binary)
+     * - version: output of `pet --version` (e.g. '0.1.0'), or 'unknown' on failure/timeout
+     * - source: 'envs_extension' | 'python_extension' — which extension shipped the binary
      */
     PET_VERSION = 'PET.VERSION',
     /**
@@ -155,12 +155,16 @@ export enum EventNames {
      * Telemetry event for a PET refresh attempt (the core discovery RPC call).
      * Properties:
      * - result: 'success' | 'timeout' | 'error'
-     * - envCount: number (environments returned via notifications)
-     * - unresolvedCount: number (envs that needed follow-up resolve calls)
-     * - workspaceDirCount: number (workspace directories sent in configure)
-     * - searchPathCount: number (extra search paths sent in configure)
-     * - attempt: number (0 = first try, 1 = retry)
-     * - errorType: string (classified error category, on failure only)
+     * - envCount, unresolvedCount, workspaceDirCount, searchPathCount: number
+     * - attempt: 0 = first try, 1 = retry
+     * - errorType: classified error category, on failure only
+     * - locatorsJson: JSON-serialized Record<locatorName, ms>. Locator set is platform-dependent
+     *   so a flat blob is more practical than a fixed schema. Parse with parse_json() in Kusto.
+     * Measures (numeric; phases run in parallel so sum may exceed total wall-clock):
+     * - breakdownLocators: ms in locator plugins
+     * - breakdownPathEnv: ms scanning PATH env var entries (not a file path)
+     * - breakdownGlobalVirtualEnvs: ms scanning global virtualenv dirs
+     * - breakdownWorkspaces: ms scanning workspace dirs
      */
     PET_REFRESH = 'PET.REFRESH',
     /**
@@ -175,9 +179,15 @@ export enum EventNames {
     /**
      * Telemetry event for PET process restart attempts.
      * Properties:
-     * - attempt: number (1-based restart attempt number)
+     * - attempt: 1-based restart attempt number
      * - result: 'success' | 'error'
-     * - errorType: string (classified error category, on failure only)
+     * - errorType: classified error category, on failure only
+     * - triggerReason: why the restart was needed (lets us separate crashes from
+     *   timeout-induced kills; the most specific reason wins — rpc_* recorded before a
+     *   kill is not overwritten by the subsequent exit event). Values:
+     *     rpc_connection_error | rpc_resolve_timeout | rpc_refresh_timeout |
+     *     rpc_configure_timeout | process_exit:<code>:<signal> | process_error |
+     *     start_failed | unknown
      */
     PET_PROCESS_RESTART = 'PET.PROCESS_RESTART',
     /**
@@ -408,11 +418,10 @@ export interface IEventNamePropertyMapping {
     [EventNames.SETUP_HANG_DETECTED]: {
         failureStage: string;
         /**
-         * State of the global Python scope search at the time of hang:
-         * - 'deferred': workspace env resolved and global scope was pushed to background.
-         * - 'not_deferred': no workspace env resolved, global scope was awaited as primary fallback.
-         * - 'unknown': hang fired before the env-selection stage reached the global-scope decision
-         *   (i.e. before/during env selection, prior to the workspace-resolution branch).
+         * Distinguishes a real foreground hang from the benign 120s background global-scope scan.
+         * - 'deferred':     workspace env resolved; global scope ran in background.
+         * - 'not_deferred': no workspace env; global scope was awaited as primary fallback.
+         * - 'unknown':      hang fired before env-selection reached the global-scope decision.
          */
         globalScopeDeferred: 'deferred' | 'not_deferred' | 'unknown';
     };
@@ -547,7 +556,7 @@ export interface IEventNamePropertyMapping {
             "attempt": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "isMeasurement": true, "owner": "eleanorjboyd" },
             "errorType": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "owner": "eleanorjboyd" },
             "breakdownLocators": { "classification": "SystemMetaData", "purpose": "PerformanceAndHealth", "isMeasurement": true, "owner": "eleanorjboyd" },
-            "breakdownPath": { "classification": "SystemMetaData", "purpose": "PerformanceAndHealth", "isMeasurement": true, "owner": "eleanorjboyd" },
+            "breakdownPathEnv": { "classification": "SystemMetaData", "purpose": "PerformanceAndHealth", "isMeasurement": true, "owner": "eleanorjboyd" },
             "breakdownGlobalVirtualEnvs": { "classification": "SystemMetaData", "purpose": "PerformanceAndHealth", "isMeasurement": true, "owner": "eleanorjboyd" },
             "breakdownWorkspaces": { "classification": "SystemMetaData", "purpose": "PerformanceAndHealth", "isMeasurement": true, "owner": "eleanorjboyd" },
             "locatorsJson": { "classification": "SystemMetaData", "purpose": "PerformanceAndHealth", "owner": "eleanorjboyd" },
@@ -562,15 +571,16 @@ export interface IEventNamePropertyMapping {
         searchPathCount?: number;
         attempt: number;
         errorType?: string;
-        /** ms spent in the Locators phase (runs locator plugins). From PET RefreshPerformance.breakdown. */
+        // breakdown* fields go through the measures payload (numeric); listed here for GDPR only.
+        /** ms in the Locators phase. */
         breakdownLocators?: number;
-        /** ms spent walking PATH entries. From PET RefreshPerformance.breakdown. */
-        breakdownPath?: number;
-        /** ms spent scanning global virtual-env dirs. From PET RefreshPerformance.breakdown. */
+        /** ms walking PATH env var entries (not a file path). */
+        breakdownPathEnv?: number;
+        /** ms scanning global virtual-env dirs. */
         breakdownGlobalVirtualEnvs?: number;
-        /** ms spent scanning workspace dirs. From PET RefreshPerformance.breakdown. */
+        /** ms scanning workspace dirs. */
         breakdownWorkspaces?: number;
-        /** JSON-serialized Record<locatorName, ms>. Query with parse_json() in Kusto. From PET RefreshPerformance.locators. */
+        /** JSON-serialized Record<locatorName, ms>. Parse with parse_json() in Kusto. */
         locatorsJson?: string;
     };
 
@@ -603,7 +613,13 @@ export interface IEventNamePropertyMapping {
         attempt: number;
         result: 'success' | 'error';
         errorType?: string;
-        /** Why the PET process needed restarting: process_exit:<code>:<signal>, process_error, rpc_connection_error, rpc_refresh_timeout, rpc_resolve_timeout, rpc_configure_timeout, start_failed, or unknown */
+        /**
+         * Why the restart was needed. The most specific reason wins (an rpc_* value recorded
+         * before the kill is not overwritten by the subsequent exit/error event).
+         * Values: rpc_connection_error | rpc_resolve_timeout | rpc_refresh_timeout |
+         * rpc_configure_timeout | process_exit:<code>:<signal> | process_error |
+         * start_failed | unknown.
+         */
         triggerReason: string;
     };
 

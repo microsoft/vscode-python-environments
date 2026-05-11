@@ -134,6 +134,16 @@ export async function getNativePythonToolsVersion(toolPath: string, timeoutMs: n
             const timer = setTimeout(() => {
                 try {
                     proc.kill('SIGTERM');
+                    // Force kill after a short grace period if still running.
+                    setTimeout(() => {
+                        if (proc.exitCode === null) {
+                            try {
+                                proc.kill('SIGKILL');
+                            } catch {
+                                // ignore
+                            }
+                        }
+                    }, 500);
                 } catch {
                     // ignore
                 }
@@ -805,23 +815,33 @@ class NativePythonFinderImpl implements NativePythonFinder {
                 this.outputChannel.info(`[pet] Refresh succeeded on retry attempt ${attempt + 1}`);
             }
 
-            sendTelemetryEvent(EventNames.PET_REFRESH, sw.elapsedTime, {
-                result: 'success',
-                envCount: nativeInfo.filter((e) => isNativeEnvInfo(e)).length,
-                unresolvedCount,
-                workspaceDirCount,
-                searchPathCount,
-                attempt,
-                // Per-phase breakdown from PET's RefreshPerformance notification.
-                // Breakdown phases run in parallel so their sum may exceed total (wall-clock).
-                breakdownLocators: refreshPerf?.breakdown['Locators'],
-                breakdownPath: refreshPerf?.breakdown['Path'],
-                breakdownGlobalVirtualEnvs: refreshPerf?.breakdown['GlobalVirtualEnvs'],
-                breakdownWorkspaces: refreshPerf?.breakdown['Workspaces'],
-                // Per-locator timing serialized as JSON; platform-dependent keys (e.g. WindowsRegistry, Conda).
-                // Query in Kusto with: parse_json(Properties.locatorsJson)
-                locatorsJson: refreshPerf ? JSON.stringify(refreshPerf.locators) : undefined,
-            });
+            sendTelemetryEvent(
+                EventNames.PET_REFRESH,
+                {
+                    duration: sw.elapsedTime,
+                    ...(refreshPerf?.breakdown['Locators'] !== undefined && {
+                        breakdownLocators: refreshPerf.breakdown['Locators'],
+                    }),
+                    ...(refreshPerf?.breakdown['Path'] !== undefined && {
+                        breakdownPathEnv: refreshPerf.breakdown['Path'],
+                    }),
+                    ...(refreshPerf?.breakdown['GlobalVirtualEnvs'] !== undefined && {
+                        breakdownGlobalVirtualEnvs: refreshPerf.breakdown['GlobalVirtualEnvs'],
+                    }),
+                    ...(refreshPerf?.breakdown['Workspaces'] !== undefined && {
+                        breakdownWorkspaces: refreshPerf.breakdown['Workspaces'],
+                    }),
+                },
+                {
+                    result: 'success',
+                    envCount: nativeInfo.filter((e) => isNativeEnvInfo(e)).length,
+                    unresolvedCount,
+                    workspaceDirCount,
+                    searchPathCount,
+                    attempt,
+                    locatorsJson: refreshPerf ? JSON.stringify(refreshPerf.locators) : undefined,
+                },
+            );
         } catch (ex) {
             const errorType = classifyError(ex);
             sendTelemetryEvent(
