@@ -89,3 +89,12 @@ export function onDidSaveTextDocument(
 ): Disposable {
     return workspace.onDidSaveTextDocument(listener, thisArgs, disposables);
 }
+
+/**
+ * Snapshot of the text documents VS Code has already opened. Useful
+ * for extensions activated by `onLanguage:*` events, which miss the
+ * `onDidOpenTextDocument` fired for the activating document.
+ */
+export function getOpenTextDocuments(): readonly TextDocument[] {
+    return workspace.textDocuments;
+}
