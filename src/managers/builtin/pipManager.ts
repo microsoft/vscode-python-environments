@@ -219,12 +219,13 @@ export class PipPackageManager implements PackageManager, Disposable {
 export function parsePipInstallVersions(output: string): Pep440Version[] | undefined {
     const match = output.match(/from versions:\s*([^\)]+)\)/);
     if (match && match[1]) {
-        return match[1]
+        const versions = match[1]
             .split(',')
             .filter((v) => !!v.trim())
             .map((v) => parse(v.trim()))
             .filter((v): v is Pep440Version => v !== null)
             .sort((a, b) => rcompare(a.public, b.public));
+        return versions.length > 0 ? versions : undefined;
     }
 }
 
