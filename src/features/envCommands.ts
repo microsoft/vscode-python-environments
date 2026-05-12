@@ -387,6 +387,8 @@ export async function handlePackageVersionManagement(context: unknown, em: Envir
             install: [packageManager.formatInstallSpec(pkg.name, version)],
             uninstall: [],
         });
+    } else {
+        traceError(`Invalid context for manage package version command: ${typeof context}`);
     }
 }
 
