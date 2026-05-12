@@ -172,6 +172,11 @@ export class PoetryPackageManager implements PackageManager, Disposable {
         return undefined;
     }
 
+    formatInstallSpec(packageName: string, version: string): string {
+        // Poetry uses `package@version` syntax for version-pinned installs
+        return `${packageName}@${version}`;
+    }
+
     dispose(): void {
         this._onDidChangePackages.dispose();
         this.packages.clear();
