@@ -712,7 +712,6 @@
         "@types/glob": "^8.1.0",
         "@types/mocha": "^10.0.1",
         "@types/node": "^22.15.1",
-        "@types/semver": "^7.7.1",
         "@types/sinon": "^17.0.3",
         "@types/stack-trace": "0.0.29",
         "@types/vscode": "^1.99.0",
@@ -739,7 +738,6 @@
         "@vscode/test-cli": "^0.0.10",
         "dotenv": "^16.4.5",
         "fs-extra": "^11.2.0",
-        "semver": "^7.8.0",
         "stack-trace": "0.0.10",
         "vscode-jsonrpc": "^9.0.0-next.5",
         "which": "^4.0.0"
