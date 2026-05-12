@@ -29,6 +29,7 @@ import {
 } from './api';
 import { ISSUES_URL } from './common/constants';
 import { CreateEnvironmentNotSupported, RemoveEnvironmentNotSupported } from './common/errors/NotSupportedError';
+import { InlineScriptMetadata } from './common/inlineScriptMetadata';
 import { traceWarn } from './common/logging';
 import { StopWatch } from './common/stopWatch';
 import { EventNames } from './common/telemetry/constants';
@@ -465,6 +466,18 @@ export class PythonProjectsImpl implements PythonProject {
     description?: string;
     tooltip?: string | MarkdownString;
     iconPath?: IconPath;
+
+    /**
+     * Parsed inline script metadata (PEP 723) for `.py` script
+     * projects, cached on the project after the lazy detector has
+     * read it. `undefined` for folder projects and for `.py` files
+     * that do not declare a `# /// script` block.
+     *
+     * Internal-only: not exposed on the public `PythonProject`
+     * interface. Consumers access it via an explicit `instanceof
+     * PythonProjectsImpl` guard so the cast stays in one place.
+     */
+    inlineScriptMetadata?: InlineScriptMetadata;
 
     constructor(
         name: string,

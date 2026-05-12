@@ -8,6 +8,7 @@ import {
     FileRenameEvent,
     FileSystemWatcher,
     GlobPattern,
+    TextDocument,
     Uri,
     workspace,
     WorkspaceConfiguration,
@@ -71,4 +72,20 @@ export function onDidRenameFiles(
     disposables?: Disposable[],
 ): Disposable {
     return workspace.onDidRenameFiles(listener, thisArgs, disposables);
+}
+
+export function onDidOpenTextDocument(
+    listener: (e: TextDocument) => any,
+    thisArgs?: any,
+    disposables?: Disposable[],
+): Disposable {
+    return workspace.onDidOpenTextDocument(listener, thisArgs, disposables);
+}
+
+export function onDidSaveTextDocument(
+    listener: (e: TextDocument) => any,
+    thisArgs?: any,
+    disposables?: Disposable[],
+): Disposable {
+    return workspace.onDidSaveTextDocument(listener, thisArgs, disposables);
 }

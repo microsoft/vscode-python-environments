@@ -124,7 +124,10 @@
                 "python-envs.workspaceSearchPaths": {
                     "type": "array",
                     "description": "%python-envs.workspaceSearchPaths.description%",
-                    "default": [".venv", "*/.venv"],
+                    "default": [
+                        ".venv",
+                        "*/.venv"
+                    ],
                     "scope": "resource",
                     "items": {
                         "type": "string"
@@ -135,6 +138,15 @@
                     "description": "%python-envs.alwaysUseUv.description%",
                     "default": true,
                     "scope": "machine"
+                },
+                "python-envs.useInlineScriptMetadata": {
+                    "type": "boolean",
+                    "description": "%python-envs.useInlineScriptMetadata.description%",
+                    "default": false,
+                    "scope": "window",
+                    "tags": [
+                        "experimental"
+                    ]
                 }
             }
         },

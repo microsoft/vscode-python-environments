@@ -39,6 +39,7 @@ import { getConfiguration, getWorkspaceFolders } from './common/workspace.apis';
 import { createManagerReady } from './features/common/managerReady';
 import { AutoFindProjects } from './features/creators/autoFindProjects';
 import { ExistingProjects } from './features/creators/existingProjects';
+import { InlineScriptDetector } from './features/creators/inlineScriptDetector';
 import { NewPackageProject } from './features/creators/newPackageProject';
 import { NewScriptProject } from './features/creators/newScriptProject';
 import { ProjectCreatorsImpl } from './features/creators/projectCreators';
@@ -64,6 +65,7 @@ import {
 } from './features/envCommands';
 import { PythonEnvironmentManagers } from './features/envManagers';
 import { EnvVarManager, PythonEnvVariableManager } from './features/execution/envVariableManager';
+import { InlineScriptLazyDetector } from './features/inlineScriptLazyDetector';
 import {
     applyInitialEnvironmentSelection,
     registerInterpreterSettingsChangeListener,
@@ -203,7 +205,17 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
         projectCreators.registerPythonProjectCreator(new AutoFindProjects(projectManager)),
         projectCreators.registerPythonProjectCreator(new NewPackageProject(envManagers, projectManager)),
         projectCreators.registerPythonProjectCreator(new NewScriptProject(projectManager)),
+        projectCreators.registerPythonProjectCreator(new InlineScriptDetector(projectManager)),
     );
+
+    // Lazy on-open / on-save detector for `.py` files that declare
+    // inline script metadata (PEP 723). The detector subscribes
+    // unconditionally, but every event is gated through the
+    // experimental `python-envs.useInlineScriptMetadata` setting so
+    // there is no work done while the feature is off.
+    const inlineScriptLazyDetector = new InlineScriptLazyDetector(projectManager);
+    inlineScriptLazyDetector.activate();
+    context.subscriptions.push(inlineScriptLazyDetector);
 
     setPythonApi(envManagers, projectManager, projectCreators, terminalManager, envVarManager);
     const api = await getPythonApi();

@@ -3,7 +3,7 @@
 
 import * as tomljs from '@iarna/toml';
 import * as fs from 'fs/promises';
-import { Uri } from 'vscode';
+import { ConfigurationScope, Uri, workspace } from 'vscode';
 import { traceVerbose, traceWarn } from './logging';
 
 /**
@@ -395,4 +395,25 @@ function compareReleases(a: readonly number[], b: readonly number[]): number {
         }
     }
     return 0;
+}
+
+/**
+ * Configuration section and key for the single user-facing setting that
+ * gates the inline-script-metadata feature.
+ */
+const SETTING_SECTION = 'python-envs';
+const SETTING_KEY = 'useInlineScriptMetadata';
+
+/**
+ * Returns `true` when the inline-script-metadata feature is enabled
+ * for the given scope. The setting is window-scoped, so callers may
+ * pass a `Uri` to resolve a workspace-folder-aware view of the
+ * configuration, or `undefined` to read the window-level value.
+ *
+ * Every consumer of inline-script-metadata behavior — detection, env
+ * creation, watcher — MUST gate its work through this helper so that
+ * disabling the setting makes the feature invisible.
+ */
+export function isInlineScriptMetadataEnabled(scope?: ConfigurationScope): boolean {
+    return workspace.getConfiguration(SETTING_SECTION, scope).get<boolean>(SETTING_KEY, false);
 }
