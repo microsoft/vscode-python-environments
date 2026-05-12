@@ -390,6 +390,12 @@ export class InternalPackageManager implements PackageManager {
             ? this.manager.getAvailableVersions(packageName, environment)
             : Promise.resolve(undefined);
     }
+
+    formatInstallSpec(packageName: string, version: string): string {
+        return this.manager.formatInstallSpec
+            ? this.manager.formatInstallSpec(packageName, version)
+            : `${packageName}==${version}`;
+    }
 }
 
 export interface PythonProjectManager extends Disposable {
