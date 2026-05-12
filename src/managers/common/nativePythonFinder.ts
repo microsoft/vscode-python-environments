@@ -85,12 +85,21 @@ export class ConfigureRetryState {
     }
 }
 
+export type NativePythonToolsSource = 'envs_extension' | 'python_extension';
+
 export async function getNativePythonToolsPath(): Promise<string> {
+    return (await getNativePythonToolsPathAndSource()).toolPath;
+}
+
+export async function getNativePythonToolsPathAndSource(): Promise<{
+    toolPath: string;
+    source: NativePythonToolsSource;
+}> {
     const envsExt = getExtension(ENVS_EXTENSION_ID);
     if (envsExt) {
         const petPath = path.join(envsExt.extensionPath, 'python-env-tools', 'bin', isWindows() ? 'pet.exe' : 'pet');
         if (await fs.pathExists(petPath)) {
-            return petPath;
+            return { toolPath: petPath, source: 'envs_extension' };
         }
     }
 
@@ -99,7 +108,64 @@ export async function getNativePythonToolsPath(): Promise<string> {
         throw new Error('Python extension not found');
     }
 
-    return path.join(python.extensionPath, 'python-env-tools', 'bin', isWindows() ? 'pet.exe' : 'pet');
+    return {
+        toolPath: path.join(python.extensionPath, 'python-env-tools', 'bin', isWindows() ? 'pet.exe' : 'pet'),
+        source: 'python_extension',
+    };
+}
+
+/**
+ * Runs `pet --version` and returns the parsed version string (e.g. '0.1.0').
+ * Returns 'unknown' if the command fails, times out, or the output can't be parsed.
+ */
+export async function getNativePythonToolsVersion(toolPath: string, timeoutMs: number = 5_000): Promise<string> {
+    return new Promise<string>((resolve) => {
+        let settled = false;
+        const settle = (value: string) => {
+            if (settled) {
+                return;
+            }
+            settled = true;
+            resolve(value);
+        };
+        try {
+            const proc = spawnProcess(toolPath, ['--version'], { stdio: 'pipe' });
+            let stdout = '';
+            const timer = setTimeout(() => {
+                try {
+                    proc.kill('SIGTERM');
+                    // Force kill after a short grace period if still running.
+                    setTimeout(() => {
+                        if (proc.exitCode === null) {
+                            try {
+                                proc.kill('SIGKILL');
+                            } catch {
+                                // ignore
+                            }
+                        }
+                    }, 500);
+                } catch {
+                    // ignore
+                }
+                settle('unknown');
+            }, timeoutMs);
+            proc.stdout?.on('data', (data: Buffer) => {
+                stdout += data.toString();
+            });
+            proc.on('error', () => {
+                clearTimeout(timer);
+                settle('unknown');
+            });
+            proc.on('close', () => {
+                clearTimeout(timer);
+                // Output looks like "pet 0.1.0\n" — extract the version token.
+                const match = stdout.match(/\b\d+\.\d+\.\d+\S*/);
+                settle(match ? match[0] : 'unknown');
+            });
+        } catch {
+            settle('unknown');
+        }
+    });
 }
 
 export interface NativeEnvInfo {
@@ -182,6 +248,23 @@ interface RefreshOptions {
     searchPaths?: string[];
 }
 
+/** Performance breakdown sent by PET via the `telemetry` notification after a refresh. */
+interface RefreshPerformance {
+    total: number;
+    /** Phase name (Locators | Path | GlobalVirtualEnvs | Workspaces) → wall-clock ms */
+    breakdown: Record<string, number>;
+    /** Locator name (Conda | WindowsRegistry | …) → wall-clock ms; only ran locators are present */
+    locators: Record<string, number>;
+}
+
+/** Params shape of the PET `telemetry` JSON-RPC notification. */
+interface PetTelemetryNotification {
+    event: string;
+    data: {
+        refreshPerformance?: RefreshPerformance;
+    };
+}
+
 /**
  * Error thrown when a JSON-RPC request times out.
  */
@@ -237,6 +320,7 @@ class NativePythonFinderImpl implements NativePythonFinder {
     private startFailed: boolean = false;
     private restartAttempts: number = 0;
     private isRestarting: boolean = false;
+    private processExitReason: string | undefined = undefined;
     private readonly configureRetry = new ConfigureRetryState();
 
     constructor(
@@ -279,6 +363,8 @@ class NativePythonFinderImpl implements NativePythonFinder {
                     this.outputChannel.warn(`[pet] Resolve request ${reason}, killing process for restart`);
                     this.killProcess();
                     this.processExited = true;
+                    this.processExitReason =
+                        ex instanceof rpc.ConnectionError ? 'rpc_connection_error' : 'rpc_resolve_timeout';
                 }
                 throw ex;
             }
@@ -339,6 +425,7 @@ class NativePythonFinderImpl implements NativePythonFinder {
         this.isRestarting = true;
         this.restartAttempts++;
         const attempt = this.restartAttempts;
+        const triggerReason = this.processExitReason ?? (this.startFailed ? 'start_failed' : 'unknown');
 
         const backoffMs = RESTART_BACKOFF_BASE_MS * Math.pow(2, this.restartAttempts - 1);
         this.outputChannel.warn(
@@ -361,6 +448,7 @@ class NativePythonFinderImpl implements NativePythonFinder {
             // Reset state flags
             this.processExited = false;
             this.startFailed = false;
+            this.processExitReason = undefined;
             this.lastConfiguration = undefined; // Force reconfiguration
             this.configureRetry.reset();
 
@@ -368,7 +456,11 @@ class NativePythonFinderImpl implements NativePythonFinder {
             this.connection = this.start();
 
             this.outputChannel.info('[pet] Python Environment Tools restarted successfully');
-            sendTelemetryEvent(EventNames.PET_PROCESS_RESTART, sw.elapsedTime, { attempt, result: 'success' });
+            sendTelemetryEvent(EventNames.PET_PROCESS_RESTART, sw.elapsedTime, {
+                attempt,
+                result: 'success',
+                triggerReason,
+            });
 
             // Reset restart attempts on successful start (process didn't immediately fail)
             // We'll reset this only after a successful request completes
@@ -376,7 +468,7 @@ class NativePythonFinderImpl implements NativePythonFinder {
             sendTelemetryEvent(
                 EventNames.PET_PROCESS_RESTART,
                 sw.elapsedTime,
-                { attempt, result: 'error', errorType: classifyError(ex) },
+                { attempt, result: 'error', errorType: classifyError(ex), triggerReason },
                 ex instanceof Error ? ex : undefined,
             );
             this.outputChannel.error('[pet] Failed to restart Python Environment Tools:', ex);
@@ -519,6 +611,10 @@ class NativePythonFinderImpl implements NativePythonFinder {
             // Handle process exit - mark as exited so pending requests fail fast
             this.proc.on('exit', (code, signal) => {
                 this.processExited = true;
+                // Preserve a more-specific reason (e.g. rpc_*) if one was already recorded before the kill.
+                if (this.processExitReason === undefined) {
+                    this.processExitReason = `process_exit:${code ?? 'null'}:${signal ?? 'none'}`;
+                }
                 if (code !== 0) {
                     this.outputChannel.error(
                         `[pet] Python Environment Tools exited unexpectedly with code ${code}, signal ${signal}`,
@@ -529,6 +625,9 @@ class NativePythonFinderImpl implements NativePythonFinder {
             // Handle process errors (e.g., ENOENT if executable not found)
             this.proc.on('error', (err) => {
                 this.processExited = true;
+                if (this.processExitReason === undefined) {
+                    this.processExitReason = 'process_error';
+                }
                 this.outputChannel.error('[pet] Process error:', err);
             });
 
@@ -626,6 +725,8 @@ class NativePythonFinderImpl implements NativePythonFinder {
                         // Kill and restart for retry
                         this.killProcess();
                         this.processExited = true;
+                        this.processExitReason =
+                            ex instanceof rpc.ConnectionError ? 'rpc_connection_error' : 'rpc_refresh_timeout';
                         continue;
                     }
                     // Final attempt failed
@@ -658,6 +759,7 @@ class NativePythonFinderImpl implements NativePythonFinder {
         const nativeInfo: NativeInfo[] = [];
         const sw = new StopWatch();
         let unresolvedCount = 0;
+        let refreshPerf: RefreshPerformance | undefined;
         try {
             await this.configure();
             const refreshOptions = this.getRefreshOptions(options);
@@ -693,6 +795,11 @@ class NativePythonFinderImpl implements NativePythonFinder {
                     this.outputChannel.info(`Discovered manager: (${data.tool}) ${data.executable}`);
                     nativeInfo.push(data);
                 }),
+                this.connection.onNotification('telemetry', (notification: PetTelemetryNotification) => {
+                    if (notification?.event === 'RefreshPerformance' && notification.data?.refreshPerformance) {
+                        refreshPerf = notification.data.refreshPerformance;
+                    }
+                }),
             );
             await sendRequestWithTimeout<{ duration: number }>(
                 this.connection,
@@ -708,14 +815,33 @@ class NativePythonFinderImpl implements NativePythonFinder {
                 this.outputChannel.info(`[pet] Refresh succeeded on retry attempt ${attempt + 1}`);
             }
 
-            sendTelemetryEvent(EventNames.PET_REFRESH, sw.elapsedTime, {
-                result: 'success',
-                envCount: nativeInfo.filter((e) => isNativeEnvInfo(e)).length,
-                unresolvedCount,
-                workspaceDirCount,
-                searchPathCount,
-                attempt,
-            });
+            sendTelemetryEvent(
+                EventNames.PET_REFRESH,
+                {
+                    duration: sw.elapsedTime,
+                    ...(refreshPerf?.breakdown['Locators'] !== undefined && {
+                        breakdownLocators: refreshPerf.breakdown['Locators'],
+                    }),
+                    ...(refreshPerf?.breakdown['Path'] !== undefined && {
+                        breakdownPathEnv: refreshPerf.breakdown['Path'],
+                    }),
+                    ...(refreshPerf?.breakdown['GlobalVirtualEnvs'] !== undefined && {
+                        breakdownGlobalVirtualEnvs: refreshPerf.breakdown['GlobalVirtualEnvs'],
+                    }),
+                    ...(refreshPerf?.breakdown['Workspaces'] !== undefined && {
+                        breakdownWorkspaces: refreshPerf.breakdown['Workspaces'],
+                    }),
+                },
+                {
+                    result: 'success',
+                    envCount: nativeInfo.filter((e) => isNativeEnvInfo(e)).length,
+                    unresolvedCount,
+                    workspaceDirCount,
+                    searchPathCount,
+                    attempt,
+                    locatorsJson: refreshPerf ? JSON.stringify(refreshPerf.locators) : undefined,
+                },
+            );
         } catch (ex) {
             const errorType = classifyError(ex);
             sendTelemetryEvent(
@@ -737,6 +863,8 @@ class NativePythonFinderImpl implements NativePythonFinder {
                 this.outputChannel.warn(`[pet] PET process ${reason}, killing for restart`);
                 this.killProcess();
                 this.processExited = true;
+                this.processExitReason =
+                    ex instanceof rpc.ConnectionError ? 'rpc_connection_error' : 'rpc_refresh_timeout';
             }
             this.outputChannel.error('[pet] Error refreshing', ex);
             throw ex;
@@ -806,6 +934,7 @@ class NativePythonFinderImpl implements NativePythonFinder {
                     );
                     this.killProcess();
                     this.processExited = true;
+                    this.processExitReason = 'rpc_configure_timeout';
                 } else {
                     this.outputChannel.warn(
                         `[pet] Configure request timed out (attempt ${this.configureRetry.timeoutCount}/${MAX_CONFIGURE_TIMEOUTS_BEFORE_KILL}), ` +
