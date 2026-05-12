@@ -28,6 +28,7 @@ const META_B: ism.InlineScriptMetadata = {
 
 suite('InlineScriptDetector (creator)', () => {
     let findFilesStub: sinon.SinonStub;
+    let getWorkspaceFoldersStub: sinon.SinonStub;
     let showErrorStub: sinon.SinonStub;
     let showQuickPickStub: sinon.SinonStub;
     let readMetadataStub: sinon.SinonStub;
@@ -37,6 +38,11 @@ suite('InlineScriptDetector (creator)', () => {
     setup(() => {
         findFilesStub = sinon.stub(wapi, 'findFiles');
         findFilesStub.resolves([]);
+
+        getWorkspaceFoldersStub = sinon.stub(wapi, 'getWorkspaceFolders');
+        // Default: no workspace folders open. Multi-root tests
+        // override this.
+        getWorkspaceFoldersStub.returns(undefined);
 
         showErrorStub = sinon.stub(winapi, 'showErrorMessage');
         showErrorStub.resolves(undefined);
@@ -188,6 +194,69 @@ suite('InlineScriptDetector (creator)', () => {
         const result = await detector.create();
         assert.ok(result && result.length === 1);
         pm.verify((p) => p.add(typmoq.It.isAny()), typmoq.Times.once());
+    });
+
+    test('multi-root: bails early when feature is disabled in every open folder', async () => {
+        const folderA = Uri.file(path.resolve('/wsA'));
+        const folderB = Uri.file(path.resolve('/wsB'));
+        getWorkspaceFoldersStub.returns([
+            { uri: folderA, name: 'wsA', index: 0 },
+            { uri: folderB, name: 'wsB', index: 1 },
+        ]);
+        // Disabled in every folder AND at the no-scope level.
+        isEnabledStub.returns(false);
+
+        const detector = new InlineScriptDetector(pm.object);
+        const result = await detector.create();
+        await waitForImmediate();
+        assert.strictEqual(result, undefined);
+        assert.ok(findFilesStub.notCalled, 'should not scan when no folder has the feature enabled');
+        assert.ok(showErrorStub.calledOnce);
+    });
+
+    test('multi-root: scans when feature is enabled in at least one folder, filters candidates by per-folder setting', async () => {
+        const folderA = Uri.file(path.resolve('/wsA'));
+        const folderB = Uri.file(path.resolve('/wsB'));
+        const scriptA = Uri.file(path.resolve('/wsA/a.py'));
+        const scriptB = Uri.file(path.resolve('/wsB/b.py'));
+        getWorkspaceFoldersStub.returns([
+            { uri: folderA, name: 'wsA', index: 0 },
+            { uri: folderB, name: 'wsB', index: 1 },
+        ]);
+
+        // Per-folder setting: enabled for wsA, disabled for wsB and
+        // the no-scope read (window-level).
+        isEnabledStub.callsFake((scope?: Uri) => {
+            if (!scope) {
+                return false;
+            }
+            return scope.fsPath.startsWith(folderA.fsPath);
+        });
+
+        // findFiles returns one candidate from each folder.
+        findFilesStub.resolves([scriptA, scriptB]);
+        readMetadataStub.withArgs(sinon.match((u: Uri) => u.toString() === scriptA.toString())).resolves(META_A);
+        readMetadataStub.withArgs(sinon.match((u: Uri) => u.toString() === scriptB.toString())).resolves(META_B);
+
+        // Capture what the picker is shown.
+        let pickerItems: Array<{ uri: Uri }> = [];
+        showQuickPickStub.callsFake(async (items: Array<{ label: string; uri: Uri }>) => {
+            pickerItems = items;
+            return items;
+        });
+
+        const detector = new InlineScriptDetector(pm.object);
+        const result = await detector.create();
+
+        assert.ok(result && result.length === 1, 'only the enabled-folder script should be offered');
+        assert.strictEqual(result![0].uri.toString(), scriptA.toString());
+        assert.strictEqual(pickerItems.length, 1, 'picker should only contain the enabled-folder script');
+        assert.strictEqual(pickerItems[0].uri.toString(), scriptA.toString());
+        // The disabled-folder candidate must not have been read.
+        assert.ok(
+            readMetadataStub.neverCalledWith(sinon.match((u: Uri) => u.toString() === scriptB.toString())),
+            'should not read metadata for files in disabled folders',
+        );
     });
 });
 

@@ -143,7 +143,7 @@
                     "type": "boolean",
                     "description": "%python-envs.useInlineScriptMetadata.description%",
                     "default": false,
-                    "scope": "window",
+                    "scope": "resource",
                     "tags": [
                         "experimental"
                     ]

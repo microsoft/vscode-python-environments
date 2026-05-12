@@ -406,13 +406,16 @@ const SETTING_KEY = 'useInlineScriptMetadata';
 
 /**
  * Returns `true` when the inline-script-metadata feature is enabled
- * for the given scope. The setting is window-scoped, so callers may
- * pass a `Uri` to resolve a workspace-folder-aware view of the
- * configuration, or `undefined` to read the window-level value.
+ * for the given scope. The setting is `resource`-scoped, so callers
+ * SHOULD pass a `Uri` (typically the script's URI or a workspace
+ * folder URI) to get a workspace-folder-aware view of the
+ * configuration. Passing `undefined` falls back to the workspace /
+ * user value with no folder context.
  *
  * Every consumer of inline-script-metadata behavior — detection, env
  * creation, watcher — MUST gate its work through this helper so that
- * disabling the setting makes the feature invisible.
+ * disabling the setting (globally or in a specific folder) makes the
+ * feature invisible for that scope.
  */
 export function isInlineScriptMetadataEnabled(scope?: ConfigurationScope): boolean {
     return workspace.getConfiguration(SETTING_SECTION, scope).get<boolean>(SETTING_KEY, false);

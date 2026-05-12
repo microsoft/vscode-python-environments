@@ -12,7 +12,7 @@ import {
 import { InlineScriptStrings } from '../../common/localize';
 import { traceInfo, traceVerbose } from '../../common/logging';
 import { showErrorMessage, showQuickPickWithButtons } from '../../common/window.apis';
-import { findFiles } from '../../common/workspace.apis';
+import { findFiles, getWorkspaceFolders } from '../../common/workspace.apis';
 import { PythonProjectManager, PythonProjectsImpl } from '../../internal.api';
 
 /**
@@ -57,11 +57,13 @@ export class InlineScriptDetector implements PythonProjectCreator {
     constructor(private readonly pm: PythonProjectManager) {}
 
     public async create(_options?: PythonProjectCreatorOptions): Promise<PythonProject[] | undefined> {
-        if (!isInlineScriptMetadataEnabled()) {
-            // The feature is gated behind the experimental setting.
-            // If the creator is somehow invoked while disabled (e.g.
-            // toggled mid-session), fail gracefully rather than
-            // performing the scan.
+        // The feature is gated behind the experimental setting, which
+        // is `resource`-scoped — so in a multi-root workspace it may
+        // be on in some folders and off in others. Bail early only if
+        // it is off everywhere (no folder has it enabled, and the
+        // window-level fallback is also off). Per-folder filtering of
+        // discovered candidates happens further down.
+        if (!isAnyFolderEnabled()) {
             setImmediate(() => {
                 showErrorMessage(InlineScriptStrings.noScriptsFound);
             });
@@ -76,12 +78,19 @@ export class InlineScriptDetector implements PythonProjectCreator {
             return undefined;
         }
 
-        // Filter out scripts that are already registered as a project
-        // with the exact same URI. Folder-scoped projects that happen
-        // to contain this script are intentionally NOT filtered out:
-        // a `.py` file with inline metadata is its own project and
-        // sits alongside its enclosing folder project.
+        // Filter out:
+        // (a) candidates inside a workspace folder where the user has
+        //     disabled the feature (resource-scoped setting), and
+        // (b) scripts that are already registered as a project with
+        //     the exact same URI. Folder-scoped projects that happen
+        //     to contain this script are intentionally NOT filtered
+        //     out: a `.py` file with inline metadata is its own
+        //     project and sits alongside its enclosing folder
+        //     project.
         const fresh = candidates.filter((uri) => {
+            if (!isInlineScriptMetadataEnabled(uri)) {
+                return false;
+            }
             const existing = this.pm.get(uri);
             if (!existing) {
                 return true;
@@ -89,7 +98,10 @@ export class InlineScriptDetector implements PythonProjectCreator {
             return path.normalize(existing.uri.fsPath) !== path.normalize(uri.fsPath);
         });
         if (fresh.length === 0) {
-            traceInfo(`InlineScriptDetector: all ${candidates.length} candidate .py files are already registered.`);
+            traceInfo(
+                `InlineScriptDetector: no fresh candidates after filtering ${candidates.length} .py file(s) ` +
+                    `(disabled folders or already-registered).`,
+            );
             setImmediate(() => {
                 showErrorMessage(InlineScriptStrings.noScriptsFound);
             });
@@ -149,6 +161,21 @@ export class InlineScriptDetector implements PythonProjectCreator {
         await this.pm.add(projects);
         return projects;
     }
+}
+
+/**
+ * Returns `true` when the inline-script-metadata feature is enabled
+ * in at least one open workspace folder (or, if no folders are open,
+ * at the window / user level). The setting is `resource`-scoped, so a
+ * window-level read alone would miss folder-only opt-ins in a
+ * multi-root workspace.
+ */
+function isAnyFolderEnabled(): boolean {
+    const folders = getWorkspaceFolders() ?? [];
+    if (folders.length === 0) {
+        return isInlineScriptMetadataEnabled();
+    }
+    return folders.some((f) => isInlineScriptMetadataEnabled(f.uri));
 }
 
 /**
