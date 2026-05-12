@@ -743,6 +743,19 @@ export interface PackageManager {
      *          or `undefined` if this manager does not support version listing.
      */
     getAvailableVersions?(packageName: string, environment: PythonEnvironment): Promise<Pep440Version[] | undefined>;
+
+    /**
+     * Formats a versioned install specification for this package manager.
+     *
+     * Different package managers use different syntax (e.g. pip uses `name==version`,
+     * conda uses `name=version`). Implement this method to return the correct format.
+     * When absent, callers should default to `name==version`.
+     *
+     * @param packageName - The name of the package.
+     * @param version - The version string.
+     * @returns The install specification string (e.g. `"requests==2.31.0"` or `"requests=2.31.0"`).
+     */
+    formatInstallSpec?(packageName: string, version: string): string;
 }
 
 /**

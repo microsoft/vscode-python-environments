@@ -152,6 +152,11 @@ export class CondaPackageManager implements PackageManager, Disposable {
         return this.packages.get(environment.envId.id);
     }
 
+    formatInstallSpec(packageName: string, version: string): string {
+        // conda match spec syntax uses a single `=` for version pinning
+        return `${packageName}=${version}`;
+    }
+
     async getVersion(_environment: PythonEnvironment): Promise<Pep440Version | undefined> {
         try {
             const output = await runCondaExecutable(['--version'], this.log);

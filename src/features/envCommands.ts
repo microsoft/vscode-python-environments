@@ -384,7 +384,7 @@ export async function handlePackageVersionManagement(context: unknown, em: Envir
         }
 
         await packageManager.manage(environment, {
-            install: [`${pkg.name}==${version}`],
+            install: [packageManager.formatInstallSpec(pkg.name, version)],
             uninstall: [],
         });
     }
