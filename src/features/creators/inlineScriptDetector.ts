@@ -11,7 +11,7 @@ import {
 } from '../../common/inlineScriptMetadata';
 import { InlineScriptStrings } from '../../common/localize';
 import { traceInfo, traceVerbose } from '../../common/logging';
-import { showErrorMessage, showQuickPickWithButtons } from '../../common/window.apis';
+import { showInformationMessage, showQuickPickWithButtons } from '../../common/window.apis';
 import { findFiles, getWorkspaceFolders } from '../../common/workspace.apis';
 import { PythonProjectManager, PythonProjectsImpl } from '../../internal.api';
 
@@ -65,7 +65,7 @@ export class InlineScriptDetector implements PythonProjectCreator {
         // discovered candidates happens further down.
         if (!isAnyFolderEnabled()) {
             setImmediate(() => {
-                showErrorMessage(InlineScriptStrings.noScriptsFound);
+                showInformationMessage(InlineScriptStrings.noScriptsFound);
             });
             return undefined;
         }
@@ -73,20 +73,26 @@ export class InlineScriptDetector implements PythonProjectCreator {
         const candidates = await findFiles(SCRIPT_INCLUDE, SCRIPT_EXCLUDE, MAX_SCRIPTS_TO_SCAN);
         if (!candidates || candidates.length === 0) {
             setImmediate(() => {
-                showErrorMessage(InlineScriptStrings.noScriptsFound);
+                showInformationMessage(InlineScriptStrings.noScriptsFound);
             });
             return undefined;
         }
 
         // Filter out:
-        // (a) candidates inside a workspace folder where the user has
-        //     disabled the feature (resource-scoped setting), and
-        // (b) scripts that are already registered as a project with
-        //     the exact same URI. Folder-scoped projects that happen
-        //     to contain this script are intentionally NOT filtered
-        //     out: a `.py` file with inline metadata is its own
-        //     project and sits alongside its enclosing folder
-        //     project.
+        //  (a) candidates inside a workspace folder where the user has
+        //      disabled the feature (resource-scoped setting), and
+        //  (b) scripts that are already registered as a project with
+        //      the exact same URI. Folder-scoped projects that happen
+        //      to contain this script are intentionally NOT filtered
+        //      out: a `.py` file with inline metadata is its own
+        //      project and sits alongside its enclosing folder
+        //      project.
+        //
+        // URI identity uses `uri.toString()` to match the equality
+        // check used by `InlineScriptLazyDetector` — keeping the two
+        // detectors agreed on what "the same project" means avoids
+        // Windows drive-letter / trailing-separator divergence that a
+        // raw `path.normalize` comparison can produce.
         const fresh = candidates.filter((uri) => {
             if (!isInlineScriptMetadataEnabled(uri)) {
                 return false;
@@ -95,7 +101,7 @@ export class InlineScriptDetector implements PythonProjectCreator {
             if (!existing) {
                 return true;
             }
-            return path.normalize(existing.uri.fsPath) !== path.normalize(uri.fsPath);
+            return existing.uri.toString() !== uri.toString();
         });
         if (fresh.length === 0) {
             traceInfo(
@@ -103,7 +109,7 @@ export class InlineScriptDetector implements PythonProjectCreator {
                     `(disabled folders or already-registered).`,
             );
             setImmediate(() => {
-                showErrorMessage(InlineScriptStrings.noScriptsFound);
+                showInformationMessage(InlineScriptStrings.noScriptsFound);
             });
             return undefined;
         }
@@ -115,7 +121,7 @@ export class InlineScriptDetector implements PythonProjectCreator {
         if (withMetadata.length === 0) {
             traceInfo(`InlineScriptDetector: scanned ${fresh.length} .py files, none declared inline metadata.`);
             setImmediate(() => {
-                showErrorMessage(InlineScriptStrings.noScriptsFound);
+                showInformationMessage(InlineScriptStrings.noScriptsFound);
             });
             return undefined;
         }

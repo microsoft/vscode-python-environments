@@ -42,13 +42,18 @@ export const MAX_HEADER_BYTES = 8 * 1024;
  * Canonical block regex from the PEP 723 spec, translated to JavaScript
  * (Python's `(?P<name>...)` becomes `(?<name>...)` in JS). The flag
  * combination `gm` is required so `^` / `$` anchor on line boundaries
- * and so the engine can iterate multiple candidate blocks.
+ * and so `String.prototype.matchAll` can iterate every candidate block.
  *
  * Important: this regex assumes line endings have already been
  * normalized to `\n`. In Python's `re` module `.` matches `\r`, but in
  * JavaScript it does not, so a literal CRLF file would behave
  * inconsistently against this pattern. `readInlineScriptMetadata`
  * normalizes line endings before applying the regex.
+ *
+ * The pattern is consumed exclusively via `text.matchAll(BLOCK_RE)`,
+ * which constructs a fresh iterator each call and does NOT mutate the
+ * regex's `lastIndex`. Do not call `BLOCK_RE.exec` directly — that
+ * would reintroduce the stateful-lastIndex footgun.
  */
 const BLOCK_RE = /^# \/\/\/ (?<type>[a-zA-Z0-9-]+)$\s(?<content>(^#(| .*)$\s)+)^# \/\/\/$/gm;
 
@@ -84,18 +89,17 @@ export function readInlineScriptMetadata(scriptText: string): InlineScriptMetada
 
     // Collect ALL matches first so we can detect the "multiple script
     // blocks" error case the spec requires us to surface.
-    BLOCK_RE.lastIndex = 0;
-    const scriptMatches: RegExpExecArray[] = [];
-    let m: RegExpExecArray | null;
-    while ((m = BLOCK_RE.exec(text)) !== null) {
+    //
+    // `matchAll` constructs a fresh iterator and does not mutate the
+    // shared `BLOCK_RE.lastIndex`, so this loop is re-entrant and safe
+    // even if a caller (or an exception) ever interrupts a previous
+    // pass.
+    const scriptMatches: RegExpMatchArray[] = [];
+    for (const m of text.matchAll(BLOCK_RE)) {
         // Per spec, tools MUST NOT read non-standardized block types.
         // The only standardized type today is `script`.
         if (m.groups?.type === 'script') {
             scriptMatches.push(m);
-        }
-        // Defensive: zero-width match would cause an infinite loop.
-        if (m.index === BLOCK_RE.lastIndex) {
-            BLOCK_RE.lastIndex += 1;
         }
     }
 
@@ -112,6 +116,10 @@ export function readInlineScriptMetadata(scriptText: string): InlineScriptMetada
 
     const match = scriptMatches[0];
     const rawContent = match.groups!.content;
+    // `index` is always populated for matches produced by
+    // `matchAll(regex)` when `regex` has the `g` flag, but the
+    // TypeScript lib type still marks it optional. Pin it locally.
+    const matchStart = match.index!;
 
     // Validate each content line and reconstruct the TOML payload,
     // applying the spec's content-extraction rule:
@@ -197,7 +205,7 @@ export function readInlineScriptMetadata(scriptText: string): InlineScriptMetada
     // Range end: position immediately AFTER the closing `# ///` line's
     // newline. The regex's `$` anchor stops before the newline, so we
     // step over it explicitly when present.
-    let end = match.index + match[0].length;
+    let end = matchStart + match[0].length;
     if (text.charAt(end) === '\n') {
         end += 1;
     }
@@ -206,7 +214,7 @@ export function readInlineScriptMetadata(scriptText: string): InlineScriptMetada
         requiresPython,
         dependencies,
         tool,
-        range: { start: match.index, end },
+        range: { start: matchStart, end },
     };
 }
 

@@ -29,7 +29,7 @@ const META_B: ism.InlineScriptMetadata = {
 suite('InlineScriptDetector (creator)', () => {
     let findFilesStub: sinon.SinonStub;
     let getWorkspaceFoldersStub: sinon.SinonStub;
-    let showErrorStub: sinon.SinonStub;
+    let showInfoStub: sinon.SinonStub;
     let showQuickPickStub: sinon.SinonStub;
     let readMetadataStub: sinon.SinonStub;
     let isEnabledStub: sinon.SinonStub;
@@ -44,8 +44,12 @@ suite('InlineScriptDetector (creator)', () => {
         // override this.
         getWorkspaceFoldersStub.returns(undefined);
 
-        showErrorStub = sinon.stub(winapi, 'showErrorMessage');
-        showErrorStub.resolves(undefined);
+        // The "no scripts found" message is informational — the scan
+        // worked, it just produced an empty result — so the creator
+        // uses `showInformationMessage`. Stubbing it lets tests assert
+        // the toast is surfaced without involving real VS Code UI.
+        showInfoStub = sinon.stub(winapi, 'showInformationMessage');
+        showInfoStub.resolves(undefined);
 
         showQuickPickStub = sinon.stub(winapi, 'showQuickPickWithButtons');
         showQuickPickStub.resolves(undefined);
@@ -70,14 +74,14 @@ suite('InlineScriptDetector (creator)', () => {
         return new Promise((resolve) => setImmediate(resolve));
     }
 
-    test('returns undefined and shows error when feature is disabled', async () => {
+    test('returns undefined and shows info toast when feature is disabled', async () => {
         isEnabledStub.returns(false);
         const detector = new InlineScriptDetector(pm.object);
         const result = await detector.create();
         await waitForImmediate();
         assert.strictEqual(result, undefined);
         assert.ok(findFilesStub.notCalled, 'should not scan when feature is disabled');
-        assert.ok(showErrorStub.calledOnce, 'should show "no scripts found" error');
+        assert.ok(showInfoStub.calledOnce, 'should show "no scripts found" info toast');
     });
 
     test('returns undefined when findFiles returns no candidates', async () => {
@@ -86,7 +90,7 @@ suite('InlineScriptDetector (creator)', () => {
         const result = await detector.create();
         await waitForImmediate();
         assert.strictEqual(result, undefined);
-        assert.ok(showErrorStub.calledOnce);
+        assert.ok(showInfoStub.calledOnce);
     });
 
     test('returns undefined when every candidate is already registered with the same URI', async () => {
@@ -101,7 +105,7 @@ suite('InlineScriptDetector (creator)', () => {
         await waitForImmediate();
         assert.strictEqual(result, undefined);
         assert.ok(readMetadataStub.notCalled, 'should not read metadata when nothing is fresh');
-        assert.ok(showErrorStub.calledOnce);
+        assert.ok(showInfoStub.calledOnce);
     });
 
     test('keeps candidate when only a folder project (different URI) contains it', async () => {
@@ -122,7 +126,7 @@ suite('InlineScriptDetector (creator)', () => {
         assert.ok(showQuickPickStub.calledOnce, 'should present picker');
     });
 
-    test('returns undefined and shows error when no candidate has metadata', async () => {
+    test('returns undefined and shows info toast when no candidate has metadata', async () => {
         const uri = Uri.file(path.resolve('/ws/plain.py'));
         findFilesStub.resolves([uri]);
         readMetadataStub.resolves(undefined);
@@ -132,7 +136,7 @@ suite('InlineScriptDetector (creator)', () => {
         await waitForImmediate();
         assert.strictEqual(result, undefined);
         assert.ok(showQuickPickStub.notCalled, 'should not show picker when no metadata found');
-        assert.ok(showErrorStub.calledOnce);
+        assert.ok(showInfoStub.calledOnce);
     });
 
     test('returns undefined when the user cancels the picker', async () => {
@@ -211,7 +215,7 @@ suite('InlineScriptDetector (creator)', () => {
         await waitForImmediate();
         assert.strictEqual(result, undefined);
         assert.ok(findFilesStub.notCalled, 'should not scan when no folder has the feature enabled');
-        assert.ok(showErrorStub.calledOnce);
+        assert.ok(showInfoStub.calledOnce);
     });
 
     test('multi-root: scans when feature is enabled in at least one folder, filters candidates by per-folder setting', async () => {

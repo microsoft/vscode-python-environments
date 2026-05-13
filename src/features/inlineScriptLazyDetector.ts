@@ -46,6 +46,11 @@ export class InlineScriptLazyDetector implements Disposable {
     // In-flight reads keyed by `uri.toString()` so rapid open+save
     // doesn't double-process the same file.
     private readonly inFlight = new Map<string, Promise<void>>();
+    // Flips to `true` in `dispose()`. Guards async continuations
+    // inside `processOnce` so an in-flight read that completes after
+    // disposal does not register a project on a detector the host
+    // has already torn down.
+    private disposed = false;
 
     constructor(private readonly projectManager: PythonProjectManager) {}
 
@@ -125,6 +130,7 @@ export class InlineScriptLazyDetector implements Disposable {
     }
 
     public dispose(): void {
+        this.disposed = true;
         this.subscriptions.forEach((s) => s.dispose());
         this.subscriptions.length = 0;
         this.inFlight.clear();
@@ -159,10 +165,46 @@ export class InlineScriptLazyDetector implements Disposable {
         const existing = this.inFlight.get(key);
         if (existing) {
             // A previous open/save is still in flight for the same
-            // URI. Wait for it and skip; that read's result is
-            // authoritative.
-            await existing;
-            return;
+            // URI. For an `open` trigger the previous read's result is
+            // authoritative — the file hasn't changed since it was
+            // opened — so we coalesce and bail.
+            //
+            // A `save` trigger means the file content may have
+            // changed since the in-flight read started reading, so the
+            // cached metadata could already be stale. Wait for the
+            // in-flight read to settle, then re-enqueue a fresh read
+            // to pick up the new content. This is safe even if the
+            // in-flight work itself was a save: the re-enqueued read
+            // will simply observe the latest on-disk content.
+            if (trigger !== 'save') {
+                await existing;
+                return;
+            }
+            try {
+                await existing;
+            } catch {
+                // The in-flight work owns its own error handling. We
+                // only awaited it to serialize against it; failures
+                // are not our concern here.
+            }
+            if (this.disposed) {
+                return;
+            }
+            // Re-check the gate in case the URI is no longer eligible
+            // (the workspace folder was removed, the setting was
+            // toggled off, etc.) between the original event and now.
+            if (!shouldHandleUri(uri) || !isInlineScriptMetadataEnabled(uri)) {
+                return;
+            }
+            // Fall through to enqueue a fresh read below. The previous
+            // in-flight entry has already been removed by its own
+            // `finally`.
+            if (this.inFlight.has(key)) {
+                // A third event raced in and is already handling the
+                // refresh. Defer to it.
+                await this.inFlight.get(key);
+                return;
+            }
         }
         const work = this.processOnce(uri, trigger).finally(() => {
             this.inFlight.delete(key);
@@ -180,6 +222,14 @@ export class InlineScriptLazyDetector implements Disposable {
             // errors internally. This catch is a defensive net for
             // unexpected synchronous throws (e.g. malformed URI).
             traceWarn(`inlineScriptLazyDetector: unexpected error while reading ${uri.fsPath}:`, err);
+            return;
+        }
+
+        // The detector may have been disposed while the read was
+        // outstanding. Bail before touching `projectManager` so we
+        // never register (or mutate) a project on a torn-down
+        // detector.
+        if (this.disposed) {
             return;
         }
 

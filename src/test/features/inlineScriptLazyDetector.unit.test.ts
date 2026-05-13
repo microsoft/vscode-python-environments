@@ -238,23 +238,104 @@ suite('InlineScriptLazyDetector', () => {
         detector.dispose();
     });
 
-    test('coalesces concurrent open + save for the same URI', async () => {
+    test('coalesces concurrent open + save: open is deduped, save forces a re-read', async () => {
         const uri = Uri.file(path.resolve('/ws/race.py'));
-        // First call resolves with metadata, second would too if it
-        // were made — but we expect coalescing to avoid the second
-        // call entirely.
-        readMetadataStub.resolves(VALID_METADATA);
-        projectManager.setup((pm) => pm.get(typmoq.It.isAny())).returns(() => undefined);
+        // First call resolves with the \"open-time\" metadata, second call
+        // (triggered by the save) resolves with the \"save-time\"
+        // metadata. The save MUST trigger a fresh read after the open
+        // completes \u2014 dropping it would cache stale data when the
+        // user edited the file between the open and save events.
+        const openTime: ism.InlineScriptMetadata = {
+            requiresPython: '>=3.10',
+            dependencies: ['old'],
+            tool: undefined,
+            range: { start: 0, end: 20 },
+        };
+        const saveTime: ism.InlineScriptMetadata = {
+            requiresPython: '>=3.12',
+            dependencies: ['new'],
+            tool: undefined,
+            range: { start: 0, end: 24 },
+        };
+        readMetadataStub.onFirstCall().resolves(openTime);
+        readMetadataStub.onSecondCall().resolves(saveTime);
+
+        // After the first add(), the second pass should see the
+        // project already exists and refresh metadata on it instead
+        // of calling add() again. Capture the project that gets added
+        // so we can assert its metadata reflects the SAVE read.
+        let added: PythonProjectsImpl | undefined;
+        projectManager.reset();
+        projectManager
+            .setup((pm) => pm.get(typmoq.It.isAny()))
+            .returns(() => added)
+            .verifiable(typmoq.Times.atLeastOnce());
+        projectManager
+            .setup((pm) => pm.add(typmoq.It.isAny()))
+            .callback((arg: PythonProject | PythonProject[]) => {
+                added = (Array.isArray(arg) ? arg[0] : arg) as PythonProjectsImpl;
+            })
+            .returns(() => Promise.resolve());
 
         const detector = new InlineScriptLazyDetector(projectManager.object);
         detector.activate();
         await Promise.all([fireOpen(uri), fireSave(uri)]);
 
-        // The read may still be invoked once for the leading event;
-        // the second is coalesced.
-        assert.ok(readMetadataStub.callCount === 1, `expected exactly one read, got ${readMetadataStub.callCount}`);
+        assert.strictEqual(
+            readMetadataStub.callCount,
+            2,
+            `expected two reads (one per event, save re-reads), got ${readMetadataStub.callCount}`,
+        );
+        projectManager.verify((pm) => pm.add(typmoq.It.isAny()), typmoq.Times.once());
+        assert.ok(added, 'open-side processOnce should have registered the project');
+        assert.deepStrictEqual(
+            added!.inlineScriptMetadata,
+            saveTime,
+            'cached metadata must reflect the SAVE-time read, not the OPEN-time read',
+        );
+        detector.dispose();
+    });
+
+    test('concurrent open + open coalesces to a single read', async () => {
+        const uri = Uri.file(path.resolve('/ws/dedup.py'));
+        readMetadataStub.resolves(VALID_METADATA);
+        projectManager.setup((pm) => pm.get(typmoq.It.isAny())).returns(() => undefined);
+
+        const detector = new InlineScriptLazyDetector(projectManager.object);
+        detector.activate();
+        await Promise.all([fireOpen(uri), fireOpen(uri)]);
+
+        // Two opens for the same URI \u2014 the second waits on the first
+        // and does not re-read (the file content cannot have changed
+        // between two opens).
+        assert.strictEqual(readMetadataStub.callCount, 1, 'open+open should coalesce to a single read');
         projectManager.verify((pm) => pm.add(typmoq.It.isAny()), typmoq.Times.once());
         detector.dispose();
+    });
+
+    test('dispose() during an in-flight read prevents post-disposal project registration', async () => {
+        const uri = Uri.file(path.resolve('/ws/disposed.py'));
+        let resolveRead: ((meta: ism.InlineScriptMetadata) => void) | undefined;
+        readMetadataStub.returns(
+            new Promise<ism.InlineScriptMetadata>((resolve) => {
+                resolveRead = resolve;
+            }),
+        );
+        projectManager.setup((pm) => pm.get(typmoq.It.isAny())).returns(() => undefined);
+
+        const detector = new InlineScriptLazyDetector(projectManager.object);
+        detector.activate();
+        // Kick off the open without awaiting it; the read is parked
+        // on our manual resolver above.
+        const inFlight = openListener!(makeDoc(uri)) as Promise<void> | undefined;
+        // Tear the detector down BEFORE the read settles.
+        detector.dispose();
+        // Now let the in-flight read complete with metadata. Without
+        // the disposed guard this would call `projectManager.add()`
+        // on a torn-down detector.
+        resolveRead!(VALID_METADATA);
+        await inFlight;
+        projectManager.verify((pm) => pm.add(typmoq.It.isAny()), typmoq.Times.never());
     });
 
     // ---------- B1 / B2: catch-up replay over `getOpenTextDocuments` ----------
