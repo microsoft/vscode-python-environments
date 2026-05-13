@@ -722,4 +722,27 @@ suite('Setting Helpers - migrateGlobalDefaultEnvManagerSetting', () => {
 
         assert.strictEqual(updateCalls.length, 0, 'Should not write any settings if already migrated');
     });
+
+    test('should not set migration flag if update throws (so we retry next activation)', async () => {
+        const mockState = createMockPersistentState();
+        sandbox.stub(persistentState, 'getGlobalPersistentState').resolves(mockState);
+
+        const mockConfig = {
+            get: () => undefined,
+            has: () => false,
+            inspect: (key: string) => {
+                if (key === 'defaultEnvManager') {
+                    return { globalValue: SYSTEM_MANAGER_ID };
+                }
+                return undefined;
+            },
+            update: () => Promise.reject(new Error('settings.json read-only')),
+        };
+        sandbox.stub(workspaceApis, 'getConfiguration').returns(mockConfig as any);
+
+        await migrateGlobalDefaultEnvManagerSetting();
+
+        const migrated = await mockState.get<boolean>('globalSettingsMigration.systemEnvManagerRemoved');
+        assert.notStrictEqual(migrated, true, 'Should NOT set migration flag when removal fails');
+    });
 });

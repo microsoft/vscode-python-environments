@@ -168,6 +168,17 @@ export enum EventNames {
      * - errorType: string (classified error category, on failure only)
      */
     PET_RESOLVE = 'PET.RESOLVE',
+    /**
+     * Telemetry event for the one-time migration that removes a stale
+     * `python-envs.defaultEnvManager: system` value from User (global) settings.
+     * Fires only on the activation when the migration actually runs (not on subsequent runs).
+     * Properties:
+     * - outcome: 'removed' (was set to system, removed successfully)
+     *          | 'not_set' (no global value of system found, nothing to do)
+     *          | 'failed' (attempted removal threw)
+     * - errorType: string (only when outcome === 'failed')
+     */
+    MIGRATION_SYSTEM_ENV_MANAGER = 'MIGRATION.SYSTEM_ENV_MANAGER',
 }
 
 // Map all events to their properties
@@ -547,6 +558,17 @@ export interface IEventNamePropertyMapping {
     */
     [EventNames.PET_RESOLVE]: {
         result: 'success' | 'timeout' | 'error';
+        errorType?: string;
+    };
+
+    /* __GDPR__
+        "migration.system_env_manager": {
+            "outcome": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "owner": "eleanorjboyd" },
+            "errorType": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "owner": "eleanorjboyd" }
+        }
+    */
+    [EventNames.MIGRATION_SYSTEM_ENV_MANAGER]: {
+        outcome: 'removed' | 'not_set' | 'failed';
         errorType?: string;
     };
 }

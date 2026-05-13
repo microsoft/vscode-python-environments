@@ -4,6 +4,8 @@ import { PythonProject } from '../../api';
 import { DEFAULT_ENV_MANAGER_ID, DEFAULT_PACKAGE_MANAGER_ID, SYSTEM_MANAGER_ID } from '../../common/constants';
 import { traceError, traceInfo, traceWarn } from '../../common/logging';
 import { getGlobalPersistentState } from '../../common/persistentState';
+import { EventNames } from '../../common/telemetry/constants';
+import { sendTelemetryEvent } from '../../common/telemetry/sender';
 import * as workspaceApis from '../../common/workspace.apis';
 import { PythonProjectManager, PythonProjectSettings } from '../../internal.api';
 
@@ -595,11 +597,26 @@ export async function migrateGlobalDefaultEnvManagerSetting(): Promise<void> {
     const inspect = config.inspect<string>('defaultEnvManager');
 
     if (inspect?.globalValue === SYSTEM_MANAGER_ID) {
-        await config.update('defaultEnvManager', undefined, ConfigurationTarget.Global);
+        try {
+            await config.update('defaultEnvManager', undefined, ConfigurationTarget.Global);
+        } catch (err) {
+            // Don't mark migration done; we'll retry on a future activation.
+            traceWarn(
+                `[migration] Failed to remove 'python-envs.defaultEnvManager: ${SYSTEM_MANAGER_ID}' from User settings: ${err}`,
+            );
+            sendTelemetryEvent(EventNames.MIGRATION_SYSTEM_ENV_MANAGER, undefined, {
+                outcome: 'failed',
+                errorType: err instanceof Error ? err.name : typeof err,
+            });
+            return;
+        }
         traceInfo(
             `[migration] Removed 'python-envs.defaultEnvManager: ${SYSTEM_MANAGER_ID}' from User settings ` +
                 `(was set unintentionally by a previous version). See https://github.com/microsoft/vscode-python-environments/issues/1468`,
         );
+        sendTelemetryEvent(EventNames.MIGRATION_SYSTEM_ENV_MANAGER, undefined, { outcome: 'removed' });
+    } else {
+        sendTelemetryEvent(EventNames.MIGRATION_SYSTEM_ENV_MANAGER, undefined, { outcome: 'not_set' });
     }
 
     await state.set(MIGRATION_KEY, true);
