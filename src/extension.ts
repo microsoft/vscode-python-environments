@@ -163,11 +163,14 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
     // Setup the persistent state for the extension.
     setPersistentState(context);
 
-    // One-time migration: remove system defaultEnvManager from User settings if set by bug.
-    // Fire-and-forget so we don't add to startup latency; failures are logged inside.
-    migrateGlobalDefaultEnvManagerSetting().catch((err) =>
-        traceError(`[migration] migrateGlobalDefaultEnvManagerSetting threw: ${err}`),
-    );
+    // One-time migration: remove `system` defaultEnvManager from User settings if a previous
+    // version wrote it there (bug #1468). Awaited so the migration deterministically affects
+    // initial environment selection on the very first activation after upgrade.
+    try {
+        await migrateGlobalDefaultEnvManagerSetting();
+    } catch (err) {
+        traceError(`[migration] migrateGlobalDefaultEnvManagerSetting threw: ${err}`);
+    }
 
     const statusBar = new PythonStatusBarImpl();
     context.subscriptions.push(statusBar);

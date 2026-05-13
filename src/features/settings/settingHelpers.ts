@@ -583,10 +583,39 @@ export function getSettingUserScope<T>(section: string, key: string): T | undefi
 const MIGRATION_KEY = 'globalSettingsMigration.systemEnvManagerRemoved';
 
 /**
+ * Returns true if any user-scope slot of the inspection result equals `value`.
+ * For window-scoped settings VS Code may populate `globalRemoteValue` and/or
+ * `globalLocalValue` in addition to `globalValue` depending on context.
+ */
+function userScopeHasValue(inspect: { globalValue?: string } | undefined, value: string): boolean {
+    if (!inspect) {
+        return false;
+    }
+    const record = inspect as Record<string, unknown>;
+    if (record.globalRemoteValue === value) {
+        return true;
+    }
+    if (record.globalLocalValue === value) {
+        return true;
+    }
+    if (inspect.globalValue === value) {
+        return true;
+    }
+    return false;
+}
+
+/**
  * One-time migration: removes `defaultEnvManager` from User (global) settings if it was
  * set to `system` by the extension. This was an unintentional side effect of a bug where
  * the extension wrote to User scope when no workspace was open. Having `system` at the
  * User level causes all workspaces to ignore local .venv environments.
+ *
+ * Because `python-envs.defaultEnvManager` is a window-scoped setting, the stale value can
+ * land in any of `globalValue`, `globalLocalValue`, or `globalRemoteValue` depending on
+ * which context (local vs remote) hit the bug. We check all three, attempt removal via
+ * `ConfigurationTarget.Global` (which clears the slot for the current context), then
+ * re-inspect. If any user-scope slot still holds the stale value we do NOT mark the
+ * migration complete, so a future activation in the other context can finish the job.
  *
  * See: https://github.com/microsoft/vscode-python-environments/issues/1468
  */
@@ -600,28 +629,43 @@ export async function migrateGlobalDefaultEnvManagerSetting(): Promise<void> {
     const config = workspaceApis.getConfiguration('python-envs', undefined);
     const inspect = config.inspect<string>('defaultEnvManager');
 
-    if (inspect?.globalValue === SYSTEM_MANAGER_ID) {
-        try {
-            await config.update('defaultEnvManager', undefined, ConfigurationTarget.Global);
-        } catch (err) {
-            // Don't mark migration done; we'll retry on a future activation.
-            traceWarn(
-                `[migration] Failed to remove 'python-envs.defaultEnvManager: ${SYSTEM_MANAGER_ID}' from User settings: ${err}`,
-            );
-            sendTelemetryEvent(EventNames.MIGRATION_SYSTEM_ENV_MANAGER, undefined, {
-                outcome: 'failed',
-                errorType: err instanceof Error ? err.name : typeof err,
-            });
-            return;
-        }
-        traceInfo(
-            `[migration] Removed 'python-envs.defaultEnvManager: ${SYSTEM_MANAGER_ID}' from User settings ` +
-                `(was set unintentionally by a previous version). See https://github.com/microsoft/vscode-python-environments/issues/1468`,
-        );
-        sendTelemetryEvent(EventNames.MIGRATION_SYSTEM_ENV_MANAGER, undefined, { outcome: 'removed' });
-    } else {
+    if (!userScopeHasValue(inspect, SYSTEM_MANAGER_ID)) {
         sendTelemetryEvent(EventNames.MIGRATION_SYSTEM_ENV_MANAGER, undefined, { outcome: 'not_set' });
+        await state.set(MIGRATION_KEY, true);
+        return;
     }
 
+    try {
+        await config.update('defaultEnvManager', undefined, ConfigurationTarget.Global);
+    } catch (err) {
+        // Don't mark migration done; we'll retry on a future activation.
+        traceWarn(
+            `[migration] Failed to remove 'python-envs.defaultEnvManager: ${SYSTEM_MANAGER_ID}' from User settings: ${err}`,
+        );
+        sendTelemetryEvent(EventNames.MIGRATION_SYSTEM_ENV_MANAGER, undefined, {
+            outcome: 'failed',
+            errorType: err instanceof Error ? err.name : typeof err,
+        });
+        return;
+    }
+
+    // Re-inspect: `update(Global)` only clears the current context's slot. If another
+    // context's slot (local vs remote) still holds the stale value, leave the flag unset
+    // so the next activation in that context can clear it.
+    const after = config.inspect<string>('defaultEnvManager');
+    if (userScopeHasValue(after, SYSTEM_MANAGER_ID)) {
+        traceInfo(
+            `[migration] Partially removed 'python-envs.defaultEnvManager: ${SYSTEM_MANAGER_ID}' from User settings; ` +
+                `another context still has it set. Will retry on next activation.`,
+        );
+        sendTelemetryEvent(EventNames.MIGRATION_SYSTEM_ENV_MANAGER, undefined, { outcome: 'partial' });
+        return;
+    }
+
+    traceInfo(
+        `[migration] Removed 'python-envs.defaultEnvManager: ${SYSTEM_MANAGER_ID}' from User settings ` +
+            `(was set unintentionally by a previous version). See https://github.com/microsoft/vscode-python-environments/issues/1468`,
+    );
+    sendTelemetryEvent(EventNames.MIGRATION_SYSTEM_ENV_MANAGER, undefined, { outcome: 'removed' });
     await state.set(MIGRATION_KEY, true);
 }

@@ -202,8 +202,9 @@ export enum EventNames {
      * `python-envs.defaultEnvManager: system` value from User (global) settings.
      * Fires only on the activation when the migration actually runs (not on subsequent runs).
      * Properties:
-     * - outcome: 'removed' (was set to system, removed successfully)
-     *          | 'not_set' (no global value of system found, nothing to do)
+     * - outcome: 'removed' (was set to system, all user-scope slots cleared)
+     *          | 'partial' (cleared current context's slot but another user-scope slot still has it; will retry)
+     *          | 'not_set' (no user-scope slot of system found, nothing to do)
      *          | 'failed' (attempted removal threw)
      * - errorType: string (only when outcome === 'failed')
      */
@@ -653,7 +654,7 @@ export interface IEventNamePropertyMapping {
         }
     */
     [EventNames.MIGRATION_SYSTEM_ENV_MANAGER]: {
-        outcome: 'removed' | 'not_set' | 'failed';
+        outcome: 'removed' | 'partial' | 'not_set' | 'failed';
         errorType?: string;
     };
 }
