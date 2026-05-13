@@ -71,6 +71,7 @@ import {
 import { PythonProjectManagerImpl } from './features/projectManager';
 import { getPythonApi, setPythonApi } from './features/pythonApi';
 import { registerCompletionProvider } from './features/settings/settingCompletions';
+import { migrateGlobalDefaultEnvManagerSetting } from './features/settings/settingHelpers';
 import { setActivateMenuButtonContext } from './features/terminal/activateMenuButton';
 import { normalizeShellPath } from './features/terminal/shells/common/shellUtils';
 import {
@@ -161,6 +162,15 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
 
     // Setup the persistent state for the extension.
     setPersistentState(context);
+
+    // One-time migration: remove `system` defaultEnvManager from User settings if a previous
+    // version wrote it there (bug #1468). Awaited so the migration deterministically affects
+    // initial environment selection on the very first activation after upgrade.
+    try {
+        await migrateGlobalDefaultEnvManagerSetting();
+    } catch (err) {
+        traceError(`[migration] migrateGlobalDefaultEnvManagerSetting threw: ${err}`);
+    }
 
     const statusBar = new PythonStatusBarImpl();
     context.subscriptions.push(statusBar);
