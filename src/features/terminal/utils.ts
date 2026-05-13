@@ -1,10 +1,13 @@
 import * as path from 'path';
 import { Disposable, env, tasks, Terminal, TerminalOptions, Uri } from 'vscode';
 import { PythonEnvironment, PythonProject, PythonProjectEnvironmentApi, PythonProjectGetterApi } from '../../api';
+import { traceVerbose } from '../../common/logging';
 import { timeout } from '../../common/utils/asyncUtils';
 import { createSimpleDebounce } from '../../common/utils/debounce';
 import { onDidChangeTerminalShellIntegration, onDidWriteTerminalData } from '../../common/window.apis';
 import { getConfiguration, getWorkspaceFolders } from '../../common/workspace.apis';
+import { identifyTerminalShell } from '../common/shellDetector';
+import { shellIntegrationSupportedShells } from './shells/common/shellUtils';
 
 export const SHELL_INTEGRATION_TIMEOUT = 500; // 0.5 seconds
 
@@ -24,10 +27,26 @@ export function getShellIntegrationTimeout(): number {
 }
 
 /**
- * Three conditions in a Promise.race:
- * 1. Timeout based on VS Code's terminal.integrated.shellIntegration.timeout setting
- * 2. Shell integration becoming available (window.onDidChangeTerminalShellIntegration event)
- * 3. Detection of common prompt patterns in terminal output
+ * Waits for shell integration to be ready on the given terminal, up to a timeout.
+ *
+ * Returns:
+ * - `true`  if shell integration is (or becomes) available.
+ * - `false` if the timeout is hit, a common prompt pattern is detected, the terminal
+ *           is undefined, or the shell is known not to support shell integration.
+ *
+ * Behavior:
+ * 1. Returns `true` immediately if `terminal.shellIntegration` is already set.
+ * 2. Returns `false` immediately when the shell type is identified and is NOT in
+ *    {@link shellIntegrationSupportedShells} (e.g. `nu`, `cmd`, `csh`, `tcsh`,
+ *    `ksh`, `xonsh`). VS Code does not provide shell integration for these
+ *    shells, so waiting up to 5s for an event that will never fire only delays
+ *    the fallback `terminal.sendText` activation.
+ *    If shell detection throws or returns `'unknown'`, we fall through to the
+ *    race below to preserve previous behavior.
+ * 3. Otherwise races three conditions:
+ *    a. Timeout based on VS Code's `terminal.integrated.shellIntegration.timeout` setting.
+ *    b. Shell integration becoming available (`window.onDidChangeTerminalShellIntegration`).
+ *    c. Detection of common prompt patterns in terminal output.
  */
 export async function waitForShellIntegration(terminal?: Terminal): Promise<boolean> {
     if (!terminal) {
@@ -35,6 +54,17 @@ export async function waitForShellIntegration(terminal?: Terminal): Promise<bool
     }
     if (terminal.shellIntegration) {
         return true;
+    }
+
+    // Skip the wait for shells that VS Code does not provide shell integration for.
+    try {
+        const shellType = identifyTerminalShell(terminal);
+        if (shellType !== 'unknown' && !shellIntegrationSupportedShells.includes(shellType)) {
+            traceVerbose(`Shell '${shellType}' does not support shell integration; skipping wait.`);
+            return false;
+        }
+    } catch {
+        // Detection failed — preserve original behavior by falling through to the race.
     }
 
     const timeoutMs = getShellIntegrationTimeout();

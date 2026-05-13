@@ -51,23 +51,42 @@ function generateId(name: string, extensionId?: string): string {
 export class PythonEnvironmentManagers implements EnvironmentManagers {
     private _environmentManagers: Map<string, InternalEnvironmentManager> = new Map();
     private _packageManagers: Map<string, InternalPackageManager> = new Map();
-    private readonly _previousEnvironments = new Map<string, PythonEnvironment | undefined>();
+
+    /**
+     * The last environment announced as "active" for each scope.
+     * Keyed by project URI string or 'global'.
+     *
+     * Used for: (1) change detection before firing onDidChangeActiveEnvironment,
+     *           (2) fallback manager routing when no explicit setting exists.
+     *
+     * Only mutated by setEnvironment() / setEnvironments() / refreshEnvironment().
+     */
+    private readonly _activeSelection = new Map<string, PythonEnvironment | undefined>();
 
     private _onDidChangeEnvironmentManager = new EventEmitter<DidChangeEnvironmentManagerEventArgs>();
     private _onDidChangePackageManager = new EventEmitter<DidChangePackageManagerEventArgs>();
     private _onDidChangeEnvironments = new EventEmitter<InternalDidChangeEnvironmentsEventArgs>();
-    private _onDidChangeEnvironment = new EventEmitter<DidChangeEnvironmentEventArgs>();
-    private _onDidChangeEnvironmentFiltered = new EventEmitter<DidChangeEnvironmentEventArgs>();
+
+    /** Fires when ANY manager reports a selection change, regardless of whether that manager is selected. */
+    private _onDidChangeManagerEnvironment = new EventEmitter<DidChangeEnvironmentEventArgs>();
+
+    /** Fires when the active (selected) environment for a scope actually changes. */
+    private _onDidChangeActiveEnvironment = new EventEmitter<DidChangeEnvironmentEventArgs>();
     private _onDidChangePackages = new EventEmitter<InternalDidChangePackagesEventArgs>();
 
     public onDidChangeEnvironmentManager: Event<DidChangeEnvironmentManagerEventArgs> =
         this._onDidChangeEnvironmentManager.event;
     public onDidChangePackageManager: Event<DidChangePackageManagerEventArgs> = this._onDidChangePackageManager.event;
     public onDidChangeEnvironments: Event<InternalDidChangeEnvironmentsEventArgs> = this._onDidChangeEnvironments.event;
-    public onDidChangeEnvironment: Event<DidChangeEnvironmentEventArgs> = this._onDidChangeEnvironment.event;
+
+    /** Fires when any registered manager reports a change — even if that manager is not the selected one. */
+    public onDidChangeManagerEnvironment: Event<DidChangeEnvironmentEventArgs> =
+        this._onDidChangeManagerEnvironment.event;
     public onDidChangePackages: Event<InternalDidChangePackagesEventArgs> = this._onDidChangePackages.event;
-    public onDidChangeEnvironmentFiltered: Event<DidChangeEnvironmentEventArgs> =
-        this._onDidChangeEnvironmentFiltered.event;
+
+    /** Fires only when the *selected* manager's environment for a scope actually changes. */
+    public onDidChangeActiveEnvironment: Event<DidChangeEnvironmentEventArgs> =
+        this._onDidChangeActiveEnvironment.event;
 
     constructor(private readonly pm: PythonProjectManager) {}
 
@@ -99,7 +118,7 @@ export class PythonEnvironmentManagers implements EnvironmentManagers {
                     return;
                 }
 
-                setImmediate(() => this._onDidChangeEnvironment.fire(e));
+                setImmediate(() => this._onDidChangeManagerEnvironment.fire(e));
             }),
         );
 
@@ -165,6 +184,8 @@ export class PythonEnvironmentManagers implements EnvironmentManagers {
         this._onDidChangeEnvironmentManager.dispose();
         this._onDidChangePackageManager.dispose();
         this._onDidChangeEnvironments.dispose();
+        this._onDidChangeManagerEnvironment.dispose();
+        this._onDidChangeActiveEnvironment.dispose();
         this._onDidChangePackages.dispose();
     }
 
@@ -196,7 +217,7 @@ export class PythonEnvironmentManagers implements EnvironmentManagers {
             // Fall back to cached environment's manager if no user-configured settings
             const project = context ? this.pm.get(context) : undefined;
             const key = project ? project.uri.toString() : 'global';
-            const cachedEnv = this._previousEnvironments.get(key);
+            const cachedEnv = this._activeSelection.get(key);
             if (cachedEnv) {
                 const cachedManager = this._environmentManagers.get(cachedEnv.envId.managerId);
                 if (cachedManager) {
@@ -339,11 +360,11 @@ export class PythonEnvironmentManagers implements EnvironmentManagers {
         }
 
         const key = project ? project.uri.toString() : 'global';
-        const oldEnv = this._previousEnvironments.get(key);
+        const oldEnv = this._activeSelection.get(key);
         if (oldEnv?.envId.id !== environment?.envId.id) {
-            this._previousEnvironments.set(key, environment);
+            this._activeSelection.set(key, environment);
             setImmediate(() =>
-                this._onDidChangeEnvironmentFiltered.fire({ uri: project?.uri, new: environment, old: oldEnv }),
+                this._onDidChangeActiveEnvironment.fire({ uri: project?.uri, new: environment, old: oldEnv }),
             );
         }
     }
@@ -393,9 +414,9 @@ export class PythonEnvironmentManagers implements EnvironmentManagers {
 
                     const project = this.pm.get(uri);
                     const key = project ? project.uri.toString() : 'global';
-                    const oldEnv = this._previousEnvironments.get(key);
+                    const oldEnv = this._activeSelection.get(key);
                     if (oldEnv?.envId.id !== environment?.envId.id) {
-                        this._previousEnvironments.set(key, environment);
+                        this._activeSelection.set(key, environment);
                         events.push({ uri: project?.uri, new: environment, old: oldEnv });
                     }
                 });
@@ -411,9 +432,9 @@ export class PythonEnvironmentManagers implements EnvironmentManagers {
                     });
                 }
 
-                const oldEnv = this._previousEnvironments.get('global');
+                const oldEnv = this._activeSelection.get('global');
                 if (oldEnv?.envId.id !== environment?.envId.id) {
-                    this._previousEnvironments.set('global', environment);
+                    this._activeSelection.set('global', environment);
                     events.push({ uri: undefined, new: environment, old: oldEnv });
                 }
             }
@@ -422,7 +443,7 @@ export class PythonEnvironmentManagers implements EnvironmentManagers {
             if (shouldPersistSettings) {
                 await setAllManagerSettings(settings);
             }
-            setImmediate(() => events.forEach((e) => this._onDidChangeEnvironmentFiltered.fire(e)));
+            setImmediate(() => events.forEach((e) => this._onDidChangeActiveEnvironment.fire(e)));
         } else {
             const promises: Promise<void>[] = [];
             const events: DidChangeEnvironmentEventArgs[] = [];
@@ -439,9 +460,9 @@ export class PythonEnvironmentManagers implements EnvironmentManagers {
                             // events. But it ensures that we always get the latest environment at the time of this call.
                             const newEnv = await manager.get(uri);
                             const key = project ? project.uri.toString() : 'global';
-                            const oldEnv = this._previousEnvironments.get(key);
+                            const oldEnv = this._activeSelection.get(key);
                             if (oldEnv?.envId.id !== newEnv?.envId.id) {
-                                this._previousEnvironments.set(key, newEnv);
+                                this._activeSelection.set(key, newEnv);
                                 events.push({ uri: project?.uri, new: newEnv, old: oldEnv });
                             }
                         };
@@ -457,9 +478,9 @@ export class PythonEnvironmentManagers implements EnvironmentManagers {
                         // Always get the new first, then compare with the old. This has minor impact on the ordering of
                         // events. But it ensures that we always get the latest environment at the time of this call.
                         const newEnv = await manager.get(undefined);
-                        const oldEnv = this._previousEnvironments.get('global');
+                        const oldEnv = this._activeSelection.get('global');
                         if (oldEnv?.envId.id !== newEnv?.envId.id) {
-                            this._previousEnvironments.set('global', newEnv);
+                            this._activeSelection.set('global', newEnv);
                             events.push({ uri: undefined, new: newEnv, old: oldEnv });
                         }
                     };
@@ -467,7 +488,7 @@ export class PythonEnvironmentManagers implements EnvironmentManagers {
                 }
             }
             await Promise.all(promises);
-            setImmediate(() => events.forEach((e) => this._onDidChangeEnvironmentFiltered.fire(e)));
+            setImmediate(() => events.forEach((e) => this._onDidChangeActiveEnvironment.fire(e)));
         }
     }
 
@@ -503,8 +524,9 @@ export class PythonEnvironmentManagers implements EnvironmentManagers {
     /**
      * Gets the current Python environment for the given scope URI or undefined for 'global'.
      *
-     * This method queries the appropriate environment manager for the latest environment for the scope.
-     * It also updates the internal cache and fires an event if the environment has changed since last check.
+     * This is a pure read: it queries the environment manager but does NOT update the
+     * internal selection cache or fire change events. Selection state is only mutated
+     * through setEnvironment() / setEnvironments() / refreshEnvironment().
      *
      * @param scope The scope to get the environment.
      * @returns The current PythonEnvironment for the scope, or undefined if none is set.
@@ -519,21 +541,35 @@ export class PythonEnvironmentManagers implements EnvironmentManagers {
             return undefined;
         }
 
-        const project = scope ? this.pm.get(scope) : undefined;
+        return manager.get(scope);
+    }
 
-        // Always get the new first, then compare with the old. This has minor impact on the ordering of
-        // events. But it ensures that we always get the latest environment at the time of this call.
+    /**
+     * Refreshes the cached environment for the given scope by querying the selected manager.
+     * If the manager's current environment differs from the cache, updates the cache and
+     * fires onDidChangeActiveEnvironment. Use this when a manager signals that its
+     * selection has changed (e.g., via onDidChangeManagerEnvironment).
+     *
+     * Unlike getEnvironment(), this IS a mutation — it updates internal state.
+     * Unlike setEnvironment(), it does NOT call manager.set() or persist to settings.
+     */
+    async refreshEnvironment(scope: GetEnvironmentScope): Promise<void> {
+        const manager = this.getEnvironmentManager(scope);
+        if (!manager) {
+            return;
+        }
+
+        const project = scope ? this.pm.get(scope) : undefined;
         const newEnv = await manager.get(scope);
 
         const key = project ? project.uri.toString() : 'global';
-        const oldEnv = this._previousEnvironments.get(key);
+        const oldEnv = this._activeSelection.get(key);
         if (oldEnv?.envId.id !== newEnv?.envId.id) {
-            this._previousEnvironments.set(key, newEnv);
+            this._activeSelection.set(key, newEnv);
             setImmediate(() =>
-                this._onDidChangeEnvironmentFiltered.fire({ uri: project?.uri, new: newEnv, old: oldEnv }),
+                this._onDidChangeActiveEnvironment.fire({ uri: project?.uri, new: newEnv, old: oldEnv }),
             );
         }
-        return newEnv;
     }
 
     getProjectEnvManagers(uris: Uri[]): InternalEnvironmentManager[] {

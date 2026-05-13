@@ -284,6 +284,7 @@ export async function applyInitialEnvironmentSelection(
     nativeFinder: NativePythonFinder,
     api: PythonEnvironmentApi,
     activationToReadyDurationMs?: number,
+    globalScopeDeferredRef?: { value: 'deferred' | 'not_deferred' | 'unknown' },
 ): Promise<void> {
     const folders = getWorkspaceFolders() ?? [];
     traceInfo(
@@ -377,6 +378,9 @@ export async function applyInitialEnvironmentSelection(
     if (workspaceFolderResolved) {
         // Defer global scope so it doesn't block post-selection startup.
         traceInfo('[interpreterSelection] Workspace env resolved, deferring global scope to background');
+        if (globalScopeDeferredRef) {
+            globalScopeDeferredRef.value = 'deferred';
+        }
         resolveGlobalScope()
             .then(async (globalErrors) => {
                 if (globalErrors.length > 0) {
@@ -386,6 +390,9 @@ export async function applyInitialEnvironmentSelection(
             .catch((err) => traceError(`[interpreterSelection] Background global scope resolution failed: ${err}`));
     } else {
         // No workspace folder resolved — global scope is the primary fallback, must await.
+        if (globalScopeDeferredRef) {
+            globalScopeDeferredRef.value = 'not_deferred';
+        }
         const globalErrors = await resolveGlobalScope();
         allErrors.push(...globalErrors);
     }
@@ -395,13 +402,19 @@ export async function applyInitialEnvironmentSelection(
         await notifyUserOfSettingErrors(allErrors);
     }
 
-    // Duration measures blocking time only (excludes deferred global scope).
-    sendTelemetryEvent(EventNames.ENV_SELECTION_COMPLETED, selectionStopWatch.elapsedTime, {
-        globalScopeDeferred: workspaceFolderResolved,
-        workspaceFolderCount: folders.length,
-        resolvedFolderCount,
-        settingErrorCount: allErrors.length,
-    });
+    // Numeric values must go via the measures argument (properties are dropped).
+    sendTelemetryEvent(
+        EventNames.ENV_SELECTION_COMPLETED,
+        {
+            duration: selectionStopWatch.elapsedTime,
+            workspaceFolderCount: folders.length,
+            resolvedFolderCount,
+            settingErrorCount: allErrors.length,
+        },
+        {
+            globalScopeDeferred: workspaceFolderResolved,
+        },
+    );
 }
 
 /**

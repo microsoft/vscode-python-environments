@@ -115,7 +115,8 @@ export class SysPythonManager implements EnvironmentManager {
                 const discard = this.collection.map((c) => c);
 
                 // hit here is fine...
-                this.collection = (await refreshPythons(hardRefresh, this.nativeFinder, this.api, this.log, this)) ?? [];
+                this.collection =
+                    (await refreshPythons(hardRefresh, this.nativeFinder, this.api, this.log, this)) ?? [];
                 await this.loadEnvMap();
 
                 const args = [
@@ -155,6 +156,7 @@ export class SysPythonManager implements EnvironmentManager {
             label: 'system',
             getProjectFsPath: (s) => getProjectFsPathForScope(this.api, s),
             getPersistedPath: (fsPath) => getSystemEnvForWorkspace(fsPath),
+            getGlobalPersistedPath: () => getSystemEnvForGlobal(),
             resolve: (p) => resolveSystemPythonEnvironmentPath(p, this.nativeFinder, this.api, this),
             startBackgroundInit: () => this.internalRefresh(false, SysManagerStrings.sysManagerDiscovering),
         });

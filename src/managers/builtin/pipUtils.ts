@@ -290,12 +290,34 @@ export async function getProjectInstallable(
             const uniqueResults = Array.from(new Map(results.map((uri) => [uri.fsPath, uri])).values());
 
             const fsPaths = projects.map((p) => p.uri.fsPath);
+            // Compute depth relative to the owning project root so ordering reflects
+            // "shallower within the project", independent of where the project lives on disk.
+            const depthFromProject = (uri: Uri): number => {
+                const projectRoot = api.getPythonProject(uri)?.uri.fsPath;
+                if (!projectRoot) {
+                    return Number.MAX_SAFE_INTEGER;
+                }
+                const rel = path.relative(projectRoot, uri.fsPath);
+                if (!rel) {
+                    return 0;
+                }
+                return rel.split(path.sep).filter((segment) => segment.length > 0).length;
+            };
             const filtered = uniqueResults
                 .filter((uri) => {
                     const p = api.getPythonProject(uri)?.uri.fsPath;
                     return p && fsPaths.includes(p);
                 })
-                .sort();
+                .sort((a, b) => {
+                    // Sort by path depth relative to the project root (shallowest first) so
+                    // top-level files like requirements.txt appear before deeply nested ones.
+                    const depthA = depthFromProject(a);
+                    const depthB = depthFromProject(b);
+                    if (depthA !== depthB) {
+                        return depthA - depthB;
+                    }
+                    return a.fsPath.localeCompare(b.fsPath);
+                });
 
             await Promise.all(
                 filtered.map(async (uri) => {

@@ -139,6 +139,18 @@ export function compareVersions(version1: string, version2: string): number {
     return 0;
 }
 
+function buildPwshActivationCommands(ps1Path: string): PythonCommandRunConfiguration[] {
+    const commands: PythonCommandRunConfiguration[] = [];
+    if (isWindows()) {
+        commands.push({
+            executable: 'Set-ExecutionPolicy',
+            args: ['-Scope', 'Process', '-ExecutionPolicy', 'RemoteSigned'],
+        });
+    }
+    commands.push({ executable: '&', args: [ps1Path] });
+    return commands;
+}
+
 export async function getShellActivationCommands(binDir: string): Promise<{
     shellActivation: Map<string, PythonCommandRunConfiguration[]>;
     shellDeactivation: Map<string, PythonCommandRunConfiguration[]>;
@@ -172,22 +184,10 @@ export async function getShellActivationCommands(binDir: string): Promise<{
     shellDeactivation.set(ShellConstants.KSH, [{ executable: 'deactivate' }]);
 
     if (await fs.pathExists(path.join(binDir, 'Activate.ps1'))) {
-        shellActivation.set(ShellConstants.PWSH, [
-            {
-                executable: 'Set-ExecutionPolicy',
-                args: ['-Scope', 'Process', '-ExecutionPolicy', 'RemoteSigned'],
-            },
-            { executable: '&', args: [path.join(binDir, `Activate.ps1`)] },
-        ]);
+        shellActivation.set(ShellConstants.PWSH, buildPwshActivationCommands(path.join(binDir, 'Activate.ps1')));
         shellDeactivation.set(ShellConstants.PWSH, [{ executable: 'deactivate' }]);
     } else if (await fs.pathExists(path.join(binDir, 'activate.ps1'))) {
-        shellActivation.set(ShellConstants.PWSH, [
-            {
-                executable: 'Set-ExecutionPolicy',
-                args: ['-Scope', 'Process', '-ExecutionPolicy', 'RemoteSigned'],
-            },
-            { executable: '&', args: [path.join(binDir, `activate.ps1`)] },
-        ]);
+        shellActivation.set(ShellConstants.PWSH, buildPwshActivationCommands(path.join(binDir, 'activate.ps1')));
         shellDeactivation.set(ShellConstants.PWSH, [{ executable: 'deactivate' }]);
     }
 
