@@ -3,8 +3,9 @@
 
 import * as tomljs from '@iarna/toml';
 import * as fs from 'fs/promises';
-import { ConfigurationScope, Uri, workspace } from 'vscode';
+import { ConfigurationScope, Uri } from 'vscode';
 import { traceVerbose, traceWarn } from './logging';
+import { getConfiguration } from './workspace.apis';
 
 /**
  * Parsed and validated PEP 723 `script` metadata block.
@@ -405,6 +406,16 @@ const SETTING_SECTION = 'python-envs';
 const SETTING_KEY = 'useInlineScriptMetadata';
 
 /**
+ * Fully-qualified setting key (`section.key`) for the experimental
+ * inline-script-metadata gate. Exported so other modules (notably
+ * `InlineScriptLazyDetector`) can filter `onDidChangeConfiguration`
+ * events against the same identifier the setting is registered under
+ * — keeping the listener and the accessor below in lockstep if the
+ * setting is ever renamed.
+ */
+export const INLINE_SCRIPT_METADATA_SETTING = `${SETTING_SECTION}.${SETTING_KEY}`;
+
+/**
  * Returns `true` when the inline-script-metadata feature is enabled
  * for the given scope. The setting is `resource`-scoped, so callers
  * SHOULD pass a `Uri` (typically the script's URI or a workspace
@@ -418,5 +429,5 @@ const SETTING_KEY = 'useInlineScriptMetadata';
  * feature invisible for that scope.
  */
 export function isInlineScriptMetadataEnabled(scope?: ConfigurationScope): boolean {
-    return workspace.getConfiguration(SETTING_SECTION, scope).get<boolean>(SETTING_KEY, false);
+    return getConfiguration(SETTING_SECTION, scope).get<boolean>(SETTING_KEY, false);
 }

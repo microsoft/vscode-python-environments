@@ -4,6 +4,7 @@
 import * as path from 'path';
 import { Disposable, TextDocument, Uri } from 'vscode';
 import {
+    INLINE_SCRIPT_METADATA_SETTING,
     InlineScriptMetadata,
     isInlineScriptMetadataEnabled,
     readInlineScriptMetadataFromFile,
@@ -12,10 +13,20 @@ import { traceInfo, traceVerbose, traceWarn } from '../common/logging';
 import {
     getOpenTextDocuments,
     getWorkspaceFolder,
+    onDidChangeConfiguration,
     onDidOpenTextDocument,
     onDidSaveTextDocument,
 } from '../common/workspace.apis';
 import { PythonProjectManager, PythonProjectsImpl } from '../internal.api';
+
+/**
+ * Fully-qualified configuration key for the experimental setting that
+ * gates the inline-script-metadata feature. Re-exported from
+ * `../common/inlineScriptMetadata` so the `onDidChangeConfiguration`
+ * filter and the accessor `isInlineScriptMetadataEnabled` are
+ * guaranteed to refer to the same setting.
+ */
+const SETTING_FQN = INLINE_SCRIPT_METADATA_SETTING;
 
 /**
  * Lazy on-open / on-save detector for `.py` files that declare inline
@@ -55,26 +66,6 @@ export class InlineScriptLazyDetector implements Disposable {
      * AFTER VS Code has already opened any restored editors, so the
      * `onDidOpenTextDocument` for the file that triggered activation
      * (the most common case) is gone by the time we subscribe. The
-     * replay closes that gap; the per-URI dedup in `handleDocument`
-     * keeps it idempotent if a live event happens to arrive too.
-     */
-    /**
-     * Subscribe to workspace text-document events. Safe to call once
-     * during extension activation. The detector starts working
-     * immediately; the experimental gate is re-checked on every event
-     * so toggling the setting takes effect without a reload.
-     *
-     * Listeners return the promise from `handleDocument` rather than
-     * void-ing it. VS Code's event bus does not await listener
-     * promises (so production behaviour is unchanged — still
-     * fire-and-forget), but returning the promise lets tests await
-     * the work triggered by a synthetic open/save event.
-     *
-     * After subscribing we also replay every document already open at
-     * activation time. Our `onLanguage:python` activation event fires
-     * AFTER VS Code has already opened any restored editors, so the
-     * `onDidOpenTextDocument` for the file that triggered activation
-     * (the most common case) is gone by the time we subscribe. The
      * replay is deferred via `setImmediate` so VS Code finishes any
      * in-flight document registration first; the per-URI dedup in
      * `handleDocument` keeps it idempotent if a live event happens to
@@ -84,22 +75,53 @@ export class InlineScriptLazyDetector implements Disposable {
         this.subscriptions.push(
             onDidOpenTextDocument((doc) => this.handleDocument(doc, 'open')),
             onDidSaveTextDocument((doc) => this.handleDocument(doc, 'save')),
+            // When the user toggles `python-envs.useInlineScriptMetadata`
+            // we replay the catch-up pass so already-open `.py` files
+            // get inspected without requiring a window reload or a
+            // manual save. The per-event gate inside `handleDocument`
+            // makes the off→still-off and on→still-on cases free; the
+            // useful case is off→on, where we discover scripts the
+            // user has had open all along.
+            onDidChangeConfiguration((e) => {
+                if (e.affectsConfiguration(SETTING_FQN)) {
+                    this.replayOpenDocuments('config-change');
+                }
+            }),
         );
         // Defer the catch-up pass so we observe `workspace.textDocuments`
         // AFTER VS Code finishes registering the document that triggered
         // our activation. Running the loop synchronously here can race
         // against VS Code's own initialization on `onLanguage:*` activation.
-        const handle = setImmediate(() => {
-            const openDocs = getOpenTextDocuments();
-            traceInfo(
-                `inlineScriptLazyDetector: activate() saw ${openDocs.length} open document(s): ` +
-                    openDocs.map((d) => `[${d.languageId}:${d.uri.scheme}]${d.uri.toString()}`).join(', '),
-            );
-            for (const doc of openDocs) {
-                void this.handleDocument(doc, 'open');
-            }
-        });
+        const handle = setImmediate(() => this.replayOpenDocuments('activate'));
         this.subscriptions.push(new Disposable(() => clearImmediate(handle)));
+    }
+
+    /**
+     * Walk every currently-open text document and run it through
+     * `handleDocument` as if a synthetic `open` event had fired. Used
+     * both for the deferred activation catch-up and for the
+     * setting-toggle replay. The per-URI dedup in `handleDocument`
+     * keeps this safe to call repeatedly.
+     */
+    private replayOpenDocuments(source: 'activate' | 'config-change'): void {
+        // Restrict the replay to documents that the per-event handler
+        // would actually look at. This keeps the activation log
+        // proportional to the work the detector will do — on an
+        // editor with many tabs open we would otherwise dump every
+        // URI just to throw most of them away inside
+        // `handleDocument`.
+        const openDocs = getOpenTextDocuments().filter((d) => shouldHandleUri(d.uri));
+        if (openDocs.length === 0) {
+            traceVerbose(`inlineScriptLazyDetector: ${source} replay found no candidate .py documents`);
+            return;
+        }
+        traceVerbose(
+            `inlineScriptLazyDetector: ${source} replay over ${openDocs.length} candidate .py document(s): ` +
+                openDocs.map((d) => d.uri.fsPath).join(', '),
+        );
+        for (const doc of openDocs) {
+            void this.handleDocument(doc, 'open');
+        }
     }
 
     public dispose(): void {
@@ -110,12 +132,15 @@ export class InlineScriptLazyDetector implements Disposable {
 
     private async handleDocument(doc: TextDocument, trigger: 'open' | 'save'): Promise<void> {
         const uri = doc.uri;
-        // Diagnostic: trace every event entering the detector so we
-        // can see, at the default `Info` channel log level, whether
-        // open/save events are reaching us at all.
-        traceInfo(`inlineScriptLazyDetector: event received (${trigger}) ${uri.toString()}`);
+        // Diagnostic: trace every event entering the detector. This
+        // is high-frequency (fires on every keystroke-triggered save
+        // and on every editor open) so it stays at `traceVerbose` —
+        // the `Trace` log level — to avoid flooding the default
+        // `Info` channel. First-time project registration is logged
+        // at `traceInfo` further down.
+        traceVerbose(`inlineScriptLazyDetector: event received (${trigger}) ${uri.toString()}`);
         if (!shouldHandleUri(uri)) {
-            traceInfo(
+            traceVerbose(
                 `inlineScriptLazyDetector: skipped (${trigger}) ${uri.toString()} ` +
                     `(scheme='${uri.scheme}', extname='${path.extname(uri.fsPath).toLowerCase()}', ` +
                     `inWorkspace=${getWorkspaceFolder(uri) !== undefined})`,
@@ -123,13 +148,13 @@ export class InlineScriptLazyDetector implements Disposable {
             return;
         }
         if (!isInlineScriptMetadataEnabled(uri)) {
-            traceInfo(
+            traceVerbose(
                 `inlineScriptLazyDetector: skipped (${trigger}) ${uri.fsPath} ` +
                     `(setting 'python-envs.useInlineScriptMetadata' is false)`,
             );
             return;
         }
-        traceInfo(`inlineScriptLazyDetector: processing (${trigger}) ${uri.fsPath}`);
+        traceVerbose(`inlineScriptLazyDetector: processing (${trigger}) ${uri.fsPath}`);
         const key = uri.toString();
         const existing = this.inFlight.get(key);
         if (existing) {
@@ -174,10 +199,12 @@ export class InlineScriptLazyDetector implements Disposable {
             // passing edit would be surprising. We only clear the
             // cached metadata so downstream consumers don't act on
             // stale data.
-            traceInfo(`inlineScriptLazyDetector: no metadata block in ${uri.fsPath} (${trigger})`);
+            traceVerbose(`inlineScriptLazyDetector: no metadata block in ${uri.fsPath} (${trigger})`);
             if (existing instanceof PythonProjectsImpl && existing.inlineScriptMetadata !== undefined) {
                 existing.inlineScriptMetadata = undefined;
-                traceInfo(`inlineScriptLazyDetector: cleared cached metadata for ${uri.fsPath} (${trigger}: no block)`);
+                traceVerbose(
+                    `inlineScriptLazyDetector: cleared cached metadata for ${uri.fsPath} (${trigger}: no block)`,
+                );
             }
             return;
         }
@@ -187,7 +214,9 @@ export class InlineScriptLazyDetector implements Disposable {
             // (it may have changed on save; downstream code, e.g.
             // `getProjectInstallable`, is also free to re-read).
             existing.inlineScriptMetadata = metadata;
-            traceInfo(`inlineScriptLazyDetector: refreshed metadata for ${uri.fsPath} (${trigger}: already a project)`);
+            traceVerbose(
+                `inlineScriptLazyDetector: refreshed metadata for ${uri.fsPath} (${trigger}: already a project)`,
+            );
             return;
         }
 

@@ -243,6 +243,26 @@ suite('inlineScriptMetadata', () => {
             assert.deepStrictEqual([...(md.dependencies ?? [])], ['a']);
         });
 
+        test('valid script block followed by non-`script` block', () => {
+            // Reverse order: a valid `# /// script` block immediately
+            // before another block whose TYPE is not `script`. The
+            // parser must still recognize the script block — PEP 723
+            // does not require it to be the first or last block in
+            // the file.
+            const text = script([
+                '# /// script',
+                '# dependencies = ["b"]',
+                '# ///',
+                '',
+                '# /// pyproject',
+                '# foo = "bar"',
+                '# ///',
+            ]);
+            const md = readInlineScriptMetadata(text);
+            assert.ok(md, 'a script block adjacent to a pyproject block must be recognized');
+            assert.deepStrictEqual([...(md.dependencies ?? [])], ['b']);
+        });
+
         test('range refers to the normalized text', () => {
             // Canonical regex requires at least one content line; use a
             // bare `#` so the block is the minimal accepted form.

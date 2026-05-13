@@ -141,7 +141,7 @@
                 },
                 "python-envs.useInlineScriptMetadata": {
                     "type": "boolean",
-                    "description": "%python-envs.useInlineScriptMetadata.description%",
+                    "markdownDescription": "%python-envs.useInlineScriptMetadata.description%",
                     "default": false,
                     "scope": "resource",
                     "tags": [

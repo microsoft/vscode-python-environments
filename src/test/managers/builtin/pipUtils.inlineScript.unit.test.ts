@@ -77,7 +77,7 @@ suite('Pip Utils - getProjectInstallable (inline script metadata)', () => {
         const names = result.map((r) => r.name).sort();
         assert.deepStrictEqual(names, ['requests<3', 'rich']);
         result.forEach((item) => {
-            assert.strictEqual(item.group, 'Inline metadata');
+            assert.strictEqual(item.group, 'PEP 723');
             assert.deepStrictEqual(item.args, [item.name]);
             assert.ok(item.uri && item.uri.toString() === scriptUri.toString());
         });

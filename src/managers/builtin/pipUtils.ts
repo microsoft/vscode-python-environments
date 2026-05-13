@@ -354,8 +354,8 @@ export async function getProjectInstallable(
             // `uri` is a `.py` file may carry inline dependency
             // declarations at the top of the file. We surface those
             // declared deps as `Installable` entries grouped under
-            // 'Inline metadata' so they appear in the same pre-install
-            // picker as `pyproject.toml` and `requirements*.txt`
+            // 'PEP 723' so they appear in the same pre-install picker
+            // as `pyproject.toml` and `requirements*.txt`
             // dependencies. This branch is gated by the experimental
             // setting and only runs for projects whose root URI is
             // itself a `.py` file — folder projects are never walked
@@ -380,7 +380,7 @@ export async function getProjectInstallable(
                         installable.push({
                             name: dep,
                             displayName: dep,
-                            group: 'Inline metadata',
+                            group: 'PEP 723',
                             args: [dep],
                             description: InlineScriptStrings.installableDescription,
                             uri: project.uri,
