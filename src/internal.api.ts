@@ -27,6 +27,7 @@ import {
     ResolveEnvironmentContext,
     SetEnvironmentScope,
 } from './api';
+import type { Pep440Version } from '@renovatebot/pep440';
 import { ISSUES_URL } from './common/constants';
 import { CreateEnvironmentNotSupported, RemoveEnvironmentNotSupported } from './common/errors/NotSupportedError';
 import { traceWarn } from './common/logging';
@@ -377,6 +378,22 @@ export class InternalPackageManager implements PackageManager {
 
     equals(other: PackageManager): boolean {
         return this.manager === other;
+    }
+
+    getVersion(environment: PythonEnvironment): Promise<Pep440Version | undefined> {
+        return this.manager.getVersion ? this.manager.getVersion(environment) : Promise.resolve(undefined);
+    }
+
+    getAvailableVersions(packageName: string, environment: PythonEnvironment): Promise<Pep440Version[] | undefined> {
+        return this.manager.getAvailableVersions
+            ? this.manager.getAvailableVersions(packageName, environment)
+            : Promise.resolve(undefined);
+    }
+
+    formatInstallSpec(packageName: string, version: string): string {
+        return this.manager.formatInstallSpec
+            ? this.manager.formatInstallSpec(packageName, version)
+            : `${packageName}==${version}`;
     }
 }
 

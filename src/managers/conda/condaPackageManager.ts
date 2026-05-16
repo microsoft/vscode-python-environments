@@ -1,3 +1,5 @@
+import { explain as parse, rcompare } from '@renovatebot/pep440';
+import type { Pep440Version } from '@renovatebot/pep440';
 import {
     CancellationError,
     Disposable,
@@ -20,7 +22,7 @@ import {
 import { showErrorMessageWithLogs } from '../../common/errors/utils';
 import { CondaStrings } from '../../common/localize';
 import { withProgress } from '../../common/window.apis';
-import { getCommonCondaPackagesToInstall, managePackages, refreshPackages } from './condaUtils';
+import { getCommonCondaPackagesToInstall, managePackages, refreshPackages, runCondaExecutable } from './condaUtils';
 
 function getChanges(before: Package[], after: Package[]): { kind: PackageChangeKind; pkg: Package }[] {
     const changes: { kind: PackageChangeKind; pkg: Package }[] = [];
@@ -39,7 +41,10 @@ export class CondaPackageManager implements PackageManager, Disposable {
 
     private packages: Map<string, Package[]> = new Map();
 
-    constructor(public readonly api: PythonEnvironmentApi, public readonly log: LogOutputChannel) {
+    constructor(
+        public readonly api: PythonEnvironmentApi,
+        public readonly log: LogOutputChannel,
+    ) {
         this.name = 'conda';
         this.displayName = 'Conda';
         this.description = CondaStrings.condaPackageMgr;
@@ -120,6 +125,39 @@ export class CondaPackageManager implements PackageManager, Disposable {
             await this.refresh(environment);
         }
         return this.packages.get(environment.envId.id);
+    }
+
+    formatInstallSpec(packageName: string, version: string): string {
+        // conda match spec syntax uses a single `=` for version pinning
+        return `${packageName}=${version}`;
+    }
+
+    async getVersion(_environment: PythonEnvironment): Promise<Pep440Version | undefined> {
+        try {
+            const output = await runCondaExecutable(['--version'], this.log);
+            // "conda X.Y.Z"
+            const match = output.match(/conda\s+(\d+\.\d+(?:\.\d+)*)/i);
+            return match ? parse(match[1]) ?? undefined : undefined;
+        } catch {
+            return undefined;
+        }
+    }
+
+    async getAvailableVersions(packageName: string, _environment: PythonEnvironment): Promise<Pep440Version[] | undefined> {
+        try {
+            const output = await runCondaExecutable(['search', packageName, '--json'], this.log);
+            const parsed = JSON.parse(output);
+            if (parsed && typeof parsed === 'object' && Array.isArray(parsed[packageName])) {
+                return parsed[packageName]
+                    .filter((entry: { version?: string }) => !!entry.version?.trim())
+                    .map((entry: { version?: string }) => parse(entry.version!))
+                    .filter((v: Pep440Version | null): v is Pep440Version => v !== null)
+                    .sort((a: Pep440Version, b: Pep440Version) => rcompare(a.public, b.public));
+            }
+            return undefined;
+        } catch {
+            return undefined;
+        }
     }
 
     dispose() {

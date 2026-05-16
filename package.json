@@ -124,7 +124,10 @@
                 "python-envs.workspaceSearchPaths": {
                     "type": "array",
                     "description": "%python-envs.workspaceSearchPaths.description%",
-                    "default": [".venv", "*/.venv"],
+                    "default": [
+                        ".venv",
+                        "*/.venv"
+                    ],
                     "scope": "resource",
                     "items": {
                         "type": "string"
@@ -278,6 +281,12 @@
                 "title": "%python-envs.uninstallPackage.title%",
                 "category": "Python Envs",
                 "icon": "$(trash)"
+            },
+            {
+                "command": "python-envs.managePackageVersion",
+                "title": "%python-envs.managePackageVersion.title%",
+                "category": "Python Envs",
+                "icon": "$(gear)"
             },
             {
                 "command": "python-envs.copyEnvPath",
@@ -512,6 +521,11 @@
                     "when": "view == env-managers && viewItem =~ /.*pythonBrokenEnvironment.*/ && viewItem =~ /.*copied.*/"
                 },
                 {
+                    "command": "python-envs.managePackageVersion",
+                    "group": "inline",
+                    "when": "view == env-managers && viewItem == python-package"
+                },
+                {
                     "command": "python-envs.uninstallPackage",
                     "group": "inline",
                     "when": "view == env-managers && viewItem == python-package"
@@ -552,6 +566,11 @@
                 {
                     "command": "python-envs.revealProjectInExplorer",
                     "when": "view == python-projects && viewItem =~ /.*python-workspace.*/"
+                },
+                {
+                    "command": "python-envs.managePackageVersion",
+                    "group": "inline",
+                    "when": "view == python-projects && viewItem == python-package"
                 },
                 {
                     "command": "python-envs.uninstallPackage",
@@ -714,6 +733,7 @@
     },
     "dependencies": {
         "@iarna/toml": "^2.2.5",
+        "@renovatebot/pep440": "^3.1.0",
         "@vscode/extension-telemetry": "^0.9.7",
         "@vscode/test-cli": "^0.0.10",
         "dotenv": "^16.4.5",
