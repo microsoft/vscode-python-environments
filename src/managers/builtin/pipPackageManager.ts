@@ -1,5 +1,5 @@
-import { compare, explain as parse, rcompare } from '@renovatebot/pep440';
 import type { Pep440Version } from '@renovatebot/pep440';
+import { compare, explain as parse, rcompare } from '@renovatebot/pep440';
 import {
     CancellationError,
     Disposable,
@@ -140,7 +140,7 @@ export class PipPackageManager implements PackageManager, Disposable {
                 const result = await runUV(['--version'], undefined, this.log);
                 // "uv X.Y.Z"
                 const match = result.match(/^uv\s+(\d+\.\d+(?:\.\d+)*)/);
-                return match ? parse(match[1]) ?? undefined : undefined;
+                return match ? (parse(match[1]) ?? undefined) : undefined;
             }
             const result = await runPython(
                 environment.execInfo?.run?.executable ?? 'python',
@@ -150,13 +150,16 @@ export class PipPackageManager implements PackageManager, Disposable {
             );
             // "pip X.Y.Z from /path/to/pip (python X.Y)"
             const match = result.match(/^pip\s+(\d+\.\d+(?:\.\d+)*)/);
-            return match ? parse(match[1]) ?? undefined : undefined;
+            return match ? (parse(match[1]) ?? undefined) : undefined;
         } catch {
             return undefined;
         }
     }
 
-    async getAvailableVersions(packageName: string, environment: PythonEnvironment): Promise<Pep440Version[] | undefined> {
+    async getAvailableVersions(
+        packageName: string,
+        environment: PythonEnvironment,
+    ): Promise<Pep440Version[] | undefined> {
         try {
             const python = environment.execInfo?.run?.executable;
             if (!python) {
@@ -167,7 +170,17 @@ export class PipPackageManager implements PackageManager, Disposable {
             const useUv = await shouldUseUv(this.log, environment.environmentPath.fsPath);
             if (useUv) {
                 const output = await runUV(
-                    ['tool', 'run', 'pip', 'index', 'versions', packageName, '--json'],
+                    [
+                        'tool',
+                        'run',
+                        'pip',
+                        'index',
+                        'versions',
+                        packageName,
+                        '--json',
+                        '--python-version',
+                        environment.version,
+                    ],
                     undefined,
                     this.log,
                 );
@@ -179,7 +192,7 @@ export class PipPackageManager implements PackageManager, Disposable {
             if (pipVersion && compare(pipVersion.public, '21.2.0') >= 0) {
                 const output = await runPython(
                     python,
-                    ['-m', 'pip', 'index', 'versions', packageName, '--json'],
+                    ['-m', 'pip', 'index', 'versions', packageName, '--json', '--python-version', environment.version],
                     undefined,
                     this.log,
                 );
