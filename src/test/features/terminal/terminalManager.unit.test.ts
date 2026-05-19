@@ -12,6 +12,7 @@ import {
     EventEmitter,
     ExtensionTerminalOptions,
     Progress,
+    Pseudoterminal,
     Terminal,
     TerminalOptions,
     Uri,
@@ -627,6 +628,16 @@ suite('TerminalManager - initialize() skips pseudoterminals', () => {
     let mockTerminals: sinon.SinonStub;
     let mockGetEnvironmentForTerminal: sinon.SinonStub;
 
+    const createMockPty = (): Pseudoterminal => {
+        const writeEmitter = new EventEmitter<string>();
+        return { onDidWrite: writeEmitter.event, open: () => {}, close: () => {} };
+    };
+
+    const createMockExtensionTerminalOptions = (name: string): ExtensionTerminalOptions => ({
+        name,
+        pty: createMockPty(),
+    });
+
     const createMockTerminal = (name: string, options?: TerminalOptions | ExtensionTerminalOptions): Terminal =>
         ({
             name,
@@ -687,10 +698,7 @@ suite('TerminalManager - initialize() skips pseudoterminals', () => {
 
     test('initialize skips pseudoterminals and activates regular terminals (ACT_TYPE_COMMAND)', async () => {
         const regularTerminal = createMockTerminal('regular');
-        const pseudoTerminal = createMockTerminal('pseudo', {
-            name: 'pseudo',
-            pty: { open: () => {}, close: () => {} },
-        } as unknown as ExtensionTerminalOptions);
+        const pseudoTerminal = createMockTerminal('pseudo', createMockExtensionTerminalOptions('pseudo'));
         const env = createMockEnvironment();
 
         mockGetAutoActivationType.returns(terminalUtils.ACT_TYPE_COMMAND);
@@ -710,10 +718,7 @@ suite('TerminalManager - initialize() skips pseudoterminals', () => {
 
     test('initialize skips pseudoterminals in shell startup fallback path (ACT_TYPE_SHELL)', async () => {
         const regularTerminal = createMockTerminal('regular');
-        const pseudoTerminal = createMockTerminal('pseudo', {
-            name: 'pseudo',
-            pty: { open: () => {}, close: () => {} },
-        } as unknown as ExtensionTerminalOptions);
+        const pseudoTerminal = createMockTerminal('pseudo', createMockExtensionTerminalOptions('pseudo'));
         const env = createMockEnvironment();
 
         const mockShellProvider: ShellStartupScriptProvider = {
@@ -743,14 +748,8 @@ suite('TerminalManager - initialize() skips pseudoterminals', () => {
     });
 
     test('initialize skips all terminals when only pseudoterminals exist (ACT_TYPE_COMMAND)', async () => {
-        const pseudo1 = createMockTerminal('pseudo1', {
-            name: 'pseudo1',
-            pty: { open: () => {}, close: () => {} },
-        } as unknown as ExtensionTerminalOptions);
-        const pseudo2 = createMockTerminal('pseudo2', {
-            name: 'pseudo2',
-            pty: { open: () => {}, close: () => {} },
-        } as unknown as ExtensionTerminalOptions);
+        const pseudo1 = createMockTerminal('pseudo1', createMockExtensionTerminalOptions('pseudo1'));
+        const pseudo2 = createMockTerminal('pseudo2', createMockExtensionTerminalOptions('pseudo2'));
         const env = createMockEnvironment();
 
         mockGetAutoActivationType.returns(terminalUtils.ACT_TYPE_COMMAND);
