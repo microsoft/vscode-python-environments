@@ -1,5 +1,5 @@
 import * as path from 'path';
-import { Disposable, env, tasks, Terminal, TerminalOptions, Uri } from 'vscode';
+import { Disposable, env, ExtensionTerminalOptions, tasks, Terminal, TerminalOptions, Uri } from 'vscode';
 import { PythonEnvironment, PythonProject, PythonProjectEnvironmentApi, PythonProjectGetterApi } from '../../api';
 import { traceVerbose } from '../../common/logging';
 import { timeout } from '../../common/utils/asyncUtils';
@@ -384,4 +384,18 @@ export function removeAnsiEscapeCodes(str: string): string {
     }
 
     return str;
+}
+
+/**
+ * Determines if a terminal should be skipped for environment activation based on its creation options.
+ * Terminals that are hidden from the user or are PTY-based extension terminals are skipped.
+ * @param terminal The terminal to check.
+ * @returns `true` if the terminal should be skipped; `false` otherwise.
+ */
+export function shouldSkipTerminalActivation(terminal: Terminal): boolean {
+    return (
+        !!(terminal.creationOptions as TerminalOptions)?.hideFromUser ||
+        !!(terminal.creationOptions as ExtensionTerminalOptions)?.pty ||
+        !(terminal.creationOptions as TerminalOptions)?.shellPath
+    );
 }
