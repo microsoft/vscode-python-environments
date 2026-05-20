@@ -1,6 +1,6 @@
 import * as fsapi from 'fs-extra';
 import * as path from 'path';
-import { Disposable, EventEmitter, ProgressLocation, Terminal, TerminalOptions, Uri } from 'vscode';
+import { Disposable, EventEmitter, ProgressLocation, Terminal, Uri } from 'vscode';
 import { PythonEnvironment, PythonEnvironmentApi, PythonProject, PythonTerminalCreateOptions } from '../../api';
 import { ActivationStrings } from '../../common/localize';
 import { traceInfo, traceVerbose } from '../../common/logging';
@@ -34,6 +34,7 @@ import {
     getAutoActivationType,
     getEnvironmentForTerminal,
     shouldActivateInCurrentTerminal,
+    shouldSkipTerminalActivation,
     waitForShellIntegration,
 } from './utils';
 
@@ -94,7 +95,7 @@ export class TerminalManagerImpl implements TerminalManager {
                 this.onTerminalClosedEmitter.fire(t);
             }),
             this.onTerminalOpened(async (t) => {
-                if (this.skipActivationOnOpen.has(t) || (t.creationOptions as TerminalOptions)?.hideFromUser) {
+                if (this.skipActivationOnOpen.has(t) || shouldSkipTerminalActivation(t)) {
                     return;
                 }
                 let env = this.ta.getEnvironment(t);
@@ -419,7 +420,11 @@ export class TerminalManagerImpl implements TerminalManager {
 
         if (actType === ACT_TYPE_COMMAND) {
             if (!skipPreExistingTerminals) {
-                await Promise.all(terminals().map(async (t) => this.activateUsingCommand(api, t)));
+                await Promise.all(
+                    terminals()
+                        .filter((t) => !shouldSkipTerminalActivation(t))
+                        .map(async (t) => this.activateUsingCommand(api, t)),
+                );
             }
         } else if (actType === ACT_TYPE_SHELL) {
             const shells = new Set(
@@ -431,12 +436,14 @@ export class TerminalManagerImpl implements TerminalManager {
                 await this.handleSetupCheck(shells);
                 if (!skipPreExistingTerminals) {
                     await Promise.all(
-                        terminals().map(async (t) => {
-                            // If the shell is not set up, we activate using command fallback.
-                            if (this.shellSetup.get(identifyTerminalShell(t)) === false) {
-                                await this.activateUsingCommand(api, t);
-                            }
-                        }),
+                        terminals()
+                            .filter((t) => !shouldSkipTerminalActivation(t))
+                            .map(async (t) => {
+                                // If the shell is not set up, we activate using command fallback.
+                                if (this.shellSetup.get(identifyTerminalShell(t)) === false) {
+                                    await this.activateUsingCommand(api, t);
+                                }
+                            }),
                     );
                 }
             }

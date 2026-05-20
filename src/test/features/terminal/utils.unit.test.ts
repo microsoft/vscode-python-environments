@@ -1,6 +1,6 @@
 import * as assert from 'assert';
 import * as sinon from 'sinon';
-import { Terminal } from 'vscode';
+import { ExtensionTerminalOptions, Terminal, TerminalOptions } from 'vscode';
 import * as windowApis from '../../../common/window.apis';
 import * as workspaceApis from '../../../common/workspace.apis';
 import * as shellDetector from '../../../features/common/shellDetector';
@@ -11,6 +11,7 @@ import {
     AutoActivationType,
     getAutoActivationType,
     shouldActivateInCurrentTerminal,
+    shouldSkipTerminalActivation,
     waitForShellIntegration,
 } from '../../../features/terminal/utils';
 
@@ -547,6 +548,45 @@ suite('Terminal Utils - shouldActivateInCurrentTerminal', () => {
             false,
             'Any explicit false at any scope should return false, regardless of higher-precedence true values',
         );
+    });
+});
+
+suite('Terminal Utils - shouldSkipTerminalActivation', () => {
+    test('should return false for a regular terminal with no special options', () => {
+        const terminal = { creationOptions: {} as TerminalOptions } as Terminal;
+        assert.strictEqual(shouldSkipTerminalActivation(terminal), false);
+    });
+
+    test('should return true when hideFromUser is true', () => {
+        const terminal = { creationOptions: { hideFromUser: true } as TerminalOptions } as Terminal;
+        assert.strictEqual(shouldSkipTerminalActivation(terminal), true);
+    });
+
+    test('should return false when hideFromUser is false', () => {
+        const terminal = { creationOptions: { hideFromUser: false } as TerminalOptions } as Terminal;
+        assert.strictEqual(shouldSkipTerminalActivation(terminal), false);
+    });
+
+    test('should return true for a pseudoterminal (pty-based extension terminal)', () => {
+        const terminal = {
+            creationOptions: {
+                name: 'pseudo',
+                pty: { open: () => {}, close: () => {} },
+            } as unknown as ExtensionTerminalOptions,
+        } as Terminal;
+        assert.strictEqual(shouldSkipTerminalActivation(terminal), true);
+    });
+
+    test('should return false when pty is undefined', () => {
+        const terminal = { creationOptions: {} as ExtensionTerminalOptions } as Terminal;
+        assert.strictEqual(shouldSkipTerminalActivation(terminal), false);
+    });
+
+    test('should return true when both hideFromUser and pty are set', () => {
+        const terminal = {
+            creationOptions: { hideFromUser: true, pty: { open: () => {}, close: () => {} } },
+        } as unknown as Terminal;
+        assert.strictEqual(shouldSkipTerminalActivation(terminal), true);
     });
 });
 
