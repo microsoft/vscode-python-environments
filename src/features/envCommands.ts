@@ -325,7 +325,11 @@ export async function handlePackageUninstall(context: unknown, em: EnvironmentMa
     traceError(`Invalid context for uninstall command: ${typeof context}`);
 }
 
-export async function handlePackageVersionManagement(context: unknown, em: EnvironmentManagers) {
+/**
+ * Manages package versions by allowing the user to select from available versions or enter a specific version.
+ * If available versions can be fetched, a QuickPick is shown. Otherwise, an InputBox is used for free-text version entry.
+ */
+export async function managePackageVersion(context: unknown, em: EnvironmentManagers) {
     if (context instanceof PackageTreeItem || context instanceof ProjectPackage) {
         const pkg = context.pkg;
         const environment = context.parent.environment;
