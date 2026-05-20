@@ -1,6 +1,7 @@
 // Copyright (c) Microsoft Corporation. All rights reserved.
 // Licensed under the MIT License.
 
+import type { Pep440Version } from '@renovatebot/pep440';
 import {
     Disposable,
     Event,
@@ -21,7 +22,6 @@ import {
  */
 
 export type { Pep440Version } from '@renovatebot/pep440';
-import type { Pep440Version } from '@renovatebot/pep440';
 /**
  * The path to an icon, or a theme-specific configuration of icons.
  */
@@ -735,7 +735,7 @@ export interface PackageManager {
     clearCache?(): Promise<void>;
 
     /**
-     * Returns the version of the underlying package management tool (e.g., pip, conda).
+     * Returns the version of the underlying package management tool (e.g., pip, uv, conda).
      * @param environment - The Python environment context.
      * @returns A promise that resolves to a {@link Pep440Version} object, or `undefined` if not available.
      */
