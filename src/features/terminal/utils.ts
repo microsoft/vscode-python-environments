@@ -395,7 +395,6 @@ export function removeAnsiEscapeCodes(str: string): string {
 export function shouldSkipTerminalActivation(terminal: Terminal): boolean {
     return (
         !!(terminal.creationOptions as TerminalOptions)?.hideFromUser ||
-        !!(terminal.creationOptions as ExtensionTerminalOptions)?.pty ||
-        !(terminal.creationOptions as TerminalOptions)?.shellPath
+        !!(terminal.creationOptions as ExtensionTerminalOptions)?.pty
     );
 }
