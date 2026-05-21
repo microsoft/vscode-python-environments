@@ -39,14 +39,14 @@
         "prepack": "npm run all:publish",
         "all:publish": "git clean -xfd . && npm install && npm run compile",
         "compile": "npm run compile:esm && npm run compile:cjs",
-        "compile:esm": "tsc -b ./tsconfig.esm.json && renamer 'out/esm/**' -f .js -r .mjs --force",
-        "compile:cjs": "tsc -b ./tsconfig.cjs.json && renamer 'out/cjs/**' -f .js -r .cjs --force",
+        "compile:esm": "tsc -b ./tsconfig.esm.json && mve out/esm/main.js out/esm/main.mjs",
+        "compile:cjs": "tsc -b ./tsconfig.cjs.json && mve out/cjs/main.js out/cjs/main.cjs",
         "clean": "node -e \"const fs = require('fs'); fs.rmSync('./out', { recursive: true, force: true });\""
     },
     "devDependencies": {
         "@types/node": "^22.0.0",
         "@types/vscode": "^1.99.0",
-        "renamer": "^5.0.3",
+        "mve": "^0.1.2",
         "typescript": "^5.1.3"
     }
 }
