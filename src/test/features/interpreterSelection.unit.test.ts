@@ -968,6 +968,70 @@ suite('Interpreter Selection - applyInitialEnvironmentSelection', () => {
         const warningMessage = showWarnStub.firstCall.args[0] as string;
         assert.ok(warningMessage.includes('/nonexistent/python'), 'Warning message should include the configured path');
     });
+
+    test('should suppress stale warning when manager registers during await (issue #1517)', async () => {
+        // Simulate the race: defaultEnvManager is set to 'pypa.hatch:hatch', which is not
+        // registered at priority-chain evaluation time, but becomes registered before
+        // notifyUserOfSettingErrors runs. The warning must NOT be shown.
+        const hatchManagerId = 'pypa.hatch:hatch';
+
+        sandbox.stub(workspaceApis, 'getWorkspaceFolders').returns([{ uri: testUri, name: 'test', index: 0 }]);
+        sandbox.stub(workspaceApis, 'getConfiguration').returns(createMockConfig([]) as WorkspaceConfiguration);
+        sandbox.stub(helpers, 'getUserConfiguredSetting').callsFake((section: string, key: string) => {
+            if (section === 'python-envs' && key === 'defaultEnvManager') {
+                return hatchManagerId;
+            }
+            return undefined;
+        });
+
+        // Hatch is not registered when the priority chain runs (returns undefined),
+        // but by the time notifyUserOfSettingErrors is called, it is available.
+        const mockHatchManager = {
+            id: hatchManagerId,
+            name: 'hatch',
+            displayName: 'Hatch',
+            get: sandbox.stub().resolves(undefined),
+            set: sandbox.stub().resolves(),
+        } as unknown as sinon.SinonStubbedInstance<InternalEnvironmentManager>;
+
+        let hatchRegistered = false;
+        // Override getEnvironmentManager: returns undefined until hatchRegistered is set, then returns the manager
+        mockEnvManagers.getEnvironmentManager.callsFake((scope: unknown) => {
+            const id = typeof scope === 'string' ? scope : undefined;
+            if (id === hatchManagerId && hatchRegistered) {
+                return mockHatchManager;
+            }
+            if (id === 'ms-python.python:venv') {
+                return mockVenvManager;
+            }
+            if (id === 'ms-python.python:system') {
+                return mockSystemManager;
+            }
+            return undefined;
+        });
+
+        // Simulate Hatch registering during the venv discovery await
+        mockVenvManager.get.callsFake(async () => {
+            hatchRegistered = true; // Hatch "registers" while venv discovery is awaited
+            return mockVenvEnv;
+        });
+
+        const showWarnStub = sandbox.stub(windowApis, 'showWarningMessage').resolves(undefined);
+
+        await applyInitialEnvironmentSelection(
+            mockEnvManagers as unknown as EnvironmentManagers,
+            mockProjectManager as unknown as PythonProjectManager,
+            mockNativeFinder as unknown as NativePythonFinder,
+            mockApi as unknown as PythonEnvironmentApi,
+        );
+
+        // Warning must NOT be shown because the error was stale
+        assert.strictEqual(
+            showWarnStub.called,
+            false,
+            'showWarningMessage must NOT be called when manager registered before notification',
+        );
+    });
 });
 
 suite('Interpreter Selection - resolveGlobalEnvironmentByPriority', () => {
