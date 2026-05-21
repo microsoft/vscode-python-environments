@@ -9,13 +9,21 @@ export async function getPackageChanges(
     after: Package[],
 ): Promise<{ kind: PackageChangeKind; pkg: Package }[]> {
     const before = (await packageManager.getPackages(environment)) ?? [];
+    const beforeSet = new Set(before.map(({ name, version }) => `${name}==${version}`));
+    const afterSet = new Set(after.map(({ name, version }) => `${name}==${version}`));
     const changes: { kind: PackageChangeKind; pkg: Package }[] = [];
-    before.forEach((pkg) => {
-        changes.push({ kind: PackageChangeKind.remove, pkg });
-    });
-    after.forEach((pkg) => {
-        changes.push({ kind: PackageChangeKind.add, pkg });
-    });
+
+    for (const pkg of after) {
+        if (!beforeSet.has(`${pkg.name}==${pkg.version}`)) {
+            changes.push({ kind: PackageChangeKind.add, pkg });
+        }
+    }
+    for (const pkg of before) {
+        if (!afterSet.has(`${pkg.name}==${pkg.version}`)) {
+            changes.push({ kind: PackageChangeKind.remove, pkg });
+        }
+    }
+
     return changes;
 }
 
