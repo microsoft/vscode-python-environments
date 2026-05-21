@@ -14,11 +14,11 @@
     "exports": {
         "import": {
             "types": "./out/esm/main.d.ts",
-            "default": "./out/esm/main.js"
+            "default": "./out/esm/main.mjs"
         },
         "require": {
             "types": "./out/cjs/main.d.ts",
-            "default": "./out/cjs/main.js"
+            "default": "./out/cjs/main.cjs"
         }
     },
     "engines": {
@@ -38,14 +38,15 @@
         "prepublishOnly": "echo \"⛔ Can only publish from a secure pipeline ⛔\" && node -e \"process.exitCode = 1\"",
         "prepack": "npm run all:publish",
         "all:publish": "git clean -xfd . && npm install && npm run compile",
-        "compile": "npm run compile:cjs && npm run compile:esm",
-        "compile:cjs": "tsc -b ./tsconfig.cjs.json",
-        "compile:esm": "tsc -b ./tsconfig.esm.json",
+        "compile": "npm run compile:esm && npm run compile:cjs",
+        "compile:esm": "tsc -b ./tsconfig.esm.json && renamer 'out/esm/**' -e ext -f js -r mjs",
+        "compile:cjs": "tsc -b ./tsconfig.cjs.json && renamer 'out/cjs/**' -e ext -f js -r cjs",
         "clean": "node -e \"const fs = require('fs'); fs.rmSync('./out', { recursive: true, force: true });\""
     },
     "devDependencies": {
         "@types/node": "^22.0.0",
         "@types/vscode": "^1.99.0",
+        "renamer": "^5.0.3",
         "typescript": "^5.1.3"
     }
 }
