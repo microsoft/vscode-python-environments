@@ -154,4 +154,15 @@ export class CondaPackageManager implements PackageManager, Disposable {
         this._onDidChangePackages.dispose();
         this.packages.clear();
     }
+
+    async fetchPackages(environment: PythonEnvironment): Promise<Package[]> {
+        return refreshPackages(environment, this.api, this);
+    }
+
+    private async updatePackagesAndNotify(environment: PythonEnvironment): Promise<void> {
+        await updatePackagesAndNotify(this, environment, (after, changes) => {
+            this.packages.set(environment.envId.id, after);
+            this._onDidChangePackages.fire({ environment, manager: this, changes });
+        });
+    }
 }
