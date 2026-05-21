@@ -616,6 +616,14 @@ export interface PackageManager {
     getPackages(environment: PythonEnvironment): Promise<Package[] | undefined>;
 
     /**
+     * Fetches the latest list of packages from the package manager for the specified Python environment.
+     * Unlike {@link getPackages}, this always queries the underlying tool and does not use cached results.
+     * @param environment - The Python environment for which to fetch packages.
+     * @returns A promise that resolves to an array of packages.
+     */
+    fetchPackages(environment: PythonEnvironment): Promise<Package[]>;
+
+    /**
      * Event that is fired when packages change.
      */
     onDidChangePackages?: Event<DidChangePackagesEventArgs>;
@@ -915,7 +923,8 @@ export interface PythonProjectEnvironmentApi {
 }
 
 export interface PythonEnvironmentManagerApi
-    extends PythonEnvironmentManagerRegistrationApi,
+    extends
+        PythonEnvironmentManagerRegistrationApi,
         PythonEnvironmentItemApi,
         PythonEnvironmentManagementApi,
         PythonEnvironmentsApi,
@@ -984,7 +993,8 @@ export interface PythonPackageManagementApi {
 }
 
 export interface PythonPackageManagerApi
-    extends PythonPackageManagerRegistrationApi,
+    extends
+        PythonPackageManagerRegistrationApi,
         PythonPackageGetterApi,
         PythonPackageManagementApi,
         PythonPackageItemApi {}
@@ -1203,10 +1213,7 @@ export interface PythonBackgroundRunApi {
 }
 
 export interface PythonExecutionApi
-    extends PythonTerminalCreateApi,
-        PythonTerminalRunApi,
-        PythonTaskRunApi,
-        PythonBackgroundRunApi {}
+    extends PythonTerminalCreateApi, PythonTerminalRunApi, PythonTaskRunApi, PythonBackgroundRunApi {}
 
 /**
  * Event arguments for when the monitored `.env` files or any other sources change.
@@ -1255,7 +1262,8 @@ export interface PythonEnvironmentVariablesApi {
  * The API for interacting with Python environments, package managers, and projects.
  */
 export interface PythonEnvironmentApi
-    extends PythonEnvironmentManagerApi,
+    extends
+        PythonEnvironmentManagerApi,
         PythonPackageManagerApi,
         PythonProjectApi,
         PythonExecutionApi,

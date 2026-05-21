@@ -175,10 +175,6 @@ export class PoetryPackageManager implements PackageManager, Disposable {
         }
     }
 
-    async fetchPackages(environment: PythonEnvironment): Promise<Package[]> {
-        return this.refreshPackages(environment);
-    }
-
     private async updatePackagesAndNotify(environment: PythonEnvironment): Promise<void> {
         await updatePackagesAndNotify(this, environment, (after, changes) => {
             this.packages.set(environment.envId.id, after);
@@ -186,7 +182,7 @@ export class PoetryPackageManager implements PackageManager, Disposable {
         });
     }
 
-    private async refreshPackages(environment: PythonEnvironment): Promise<Package[]> {
+    async fetchPackages(environment: PythonEnvironment): Promise<Package[]> {
         const poetry = await getPoetry();
         if (!poetry) {
             throw new Error(

@@ -20,7 +20,7 @@ export async function getPackageChanges(
 }
 
 export async function updatePackagesAndNotify(
-    packageManager: PackageManager & { fetchPackages(environment: PythonEnvironment): Promise<Package[]> },
+    packageManager: PackageManager,
     environment: PythonEnvironment,
     onChanged: (after: Package[], changes: { kind: PackageChangeKind; pkg: Package }[]) => void,
 ): Promise<void> {

@@ -18,9 +18,10 @@ import {
 } from '../../api';
 import { showErrorMessageWithLogs } from '../../common/errors/utils';
 import { CondaStrings } from '../../common/localize';
+import { traceError } from '../../common/logging';
 import { withProgress } from '../../common/window.apis';
 import { updatePackagesAndNotify } from '../common/packageChanges';
-import { getCommonCondaPackagesToInstall, managePackages, refreshPackages } from './condaUtils';
+import { getCommonCondaPackagesToInstall, managePackages, runCondaExecutable } from './condaUtils';
 
 export class CondaPackageManager implements PackageManager, Disposable {
     private readonly _onDidChangePackages = new EventEmitter<DidChangePackagesEventArgs>();
@@ -111,7 +112,35 @@ export class CondaPackageManager implements PackageManager, Disposable {
     }
 
     async fetchPackages(environment: PythonEnvironment): Promise<Package[]> {
-        return refreshPackages(environment, this.api, this);
+        const args = ['list', '-p', environment.environmentPath.fsPath, '--json'];
+        const data = await runCondaExecutable(args);
+
+        let condaPackages: { name: string; version: string }[];
+        try {
+            condaPackages = JSON.parse(data) as { name: string; version: string }[];
+        } catch (e) {
+            traceError(`Failed to parse conda list JSON output: ${data}`, e);
+            return [];
+        }
+
+        const packages: Package[] = [];
+        for (const condaPkg of condaPackages) {
+            if (condaPkg.name && condaPkg.version) {
+                packages.push(
+                    this.api.createPackageItem(
+                        {
+                            name: condaPkg.name,
+                            displayName: condaPkg.name,
+                            version: condaPkg.version,
+                            description: condaPkg.version,
+                        },
+                        environment,
+                        this,
+                    ),
+                );
+            }
+        }
+        return packages;
     }
 
     private async updatePackagesAndNotify(environment: PythonEnvironment): Promise<void> {
