@@ -372,6 +372,18 @@ export class InternalPackageManager implements PackageManager {
         return this.manager.getPackages(environment, options);
     }
 
+    fetchPackages(environment: PythonEnvironment): Promise<Package[]> {
+        return this.manager.fetchPackages(environment);
+    }
+
+    setPackages(
+        environment: PythonEnvironment,
+        packages: Package[],
+        changes: { kind: PackageChangeKind; pkg: Package }[],
+    ): void {
+        this.manager.setPackages(environment, packages, changes);
+    }
+
     onDidChangePackages(handler: (e: DidChangePackagesEventArgs) => void): Disposable {
         return this.manager.onDidChangePackages ? this.manager.onDidChangePackages(handler) : new Disposable(() => {});
     }
