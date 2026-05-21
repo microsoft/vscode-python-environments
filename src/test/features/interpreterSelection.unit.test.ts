@@ -972,7 +972,8 @@ suite('Interpreter Selection - applyInitialEnvironmentSelection', () => {
     test('should suppress stale warning when manager registers during await (issue #1517)', async () => {
         // Simulate the race: defaultEnvManager is set to 'pypa.hatch:hatch', which is not
         // registered at priority-chain evaluation time, but becomes registered before
-        // notifyUserOfSettingErrors runs. The warning must NOT be shown.
+        // notifyUserOfSettingErrors runs. The warning must NOT be shown — neither from the
+        // awaited workspace path nor from the deferred global `.then(...)` path.
         const hatchManagerId = 'pypa.hatch:hatch';
 
         sandbox.stub(workspaceApis, 'getWorkspaceFolders').returns([{ uri: testUri, name: 'test', index: 0 }]);
@@ -1016,6 +1017,19 @@ suite('Interpreter Selection - applyInitialEnvironmentSelection', () => {
             return mockVenvEnv;
         });
 
+        // The workspace folder will resolve (venv found), so global scope is deferred to
+        // a background `.then(...)`. Use a deferred promise to deterministically wait for
+        // that background work to complete before asserting on showWarningMessage —
+        // otherwise a regression in the deferred-path filtering would fire AFTER the test
+        // returned and silently slip through.
+        let resolveGlobalDone!: () => void;
+        const globalDone = new Promise<void>((resolve) => {
+            resolveGlobalDone = resolve;
+        });
+        mockEnvManagers.setEnvironments.callsFake(async () => {
+            resolveGlobalDone();
+        });
+
         const showWarnStub = sandbox.stub(windowApis, 'showWarningMessage').resolves(undefined);
 
         await applyInitialEnvironmentSelection(
@@ -1025,7 +1039,20 @@ suite('Interpreter Selection - applyInitialEnvironmentSelection', () => {
             mockApi as unknown as PythonEnvironmentApi,
         );
 
-        // Warning must NOT be shown because the error was stale
+        // Wait for the background global scope to call setEnvironments, then flush
+        // microtasks so the `.then(...)` handler that would call notifyUserOfSettingErrors
+        // has a chance to run before we assert.
+        await globalDone;
+        await new Promise<void>((resolve) => process.nextTick(resolve));
+
+        // Workspace folder should have resolved (venv found) and global scope was attempted
+        assert.ok(mockEnvManagers.setEnvironment.called, 'setEnvironment should be called for workspace folder');
+        assert.ok(
+            mockEnvManagers.setEnvironments.called,
+            'setEnvironments should be called for deferred global scope',
+        );
+
+        // Warning must NOT be shown because the error was stale on both paths
         assert.strictEqual(
             showWarnStub.called,
             false,
