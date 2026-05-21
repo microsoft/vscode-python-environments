@@ -185,12 +185,12 @@ export async function refreshPythons(
 
 const PIP_LIST_TIMEOUT_MS = 30_000;
 
-async function refreshPipPackagesRaw(environment: PythonEnvironment, log?: LogOutputChannel): Promise<string> {
+async function execPipList(environment: PythonEnvironment, log?: LogOutputChannel, args?: string[]): Promise<string> {
     // Use environmentPath directly for consistency with UV environment tracking
     const useUv = await shouldUseUv(log, environment.environmentPath.fsPath);
     if (useUv) {
         return await runUV(
-            ['pip', 'list', '--python', environment.execInfo.run.executable, '--format=json'],
+            ['pip', 'list', '--python', environment.execInfo.run.executable, '--format=json', ...(args ?? [])],
             undefined,
             log,
             undefined,
@@ -228,11 +228,11 @@ export async function refreshPipPackages(
                     location: ProgressLocation.Notification,
                 },
                 async () => {
-                    return await refreshPipPackagesRaw(environment, log);
+                    return await execPipList(environment, log);
                 },
             );
         } else {
-            data = await refreshPipPackagesRaw(environment, log);
+            data = await execPipList(environment, log);
         }
 
         return parsePipListJson(data);
