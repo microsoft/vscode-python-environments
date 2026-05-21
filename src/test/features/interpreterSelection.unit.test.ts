@@ -703,6 +703,15 @@ suite('Interpreter Selection - applyInitialEnvironmentSelection', () => {
         // Stub showWarningMessage to track if it's called
         const showWarnStub = sandbox.stub(windowApis, 'showWarningMessage').resolves(undefined);
 
+        // Use a deferred promise to deterministically wait for the background global scope
+        let resolveGlobalDone!: () => void;
+        const globalDone = new Promise<void>((resolve) => {
+            resolveGlobalDone = resolve;
+        });
+        mockEnvManagers.setEnvironments.callsFake(async () => {
+            resolveGlobalDone();
+        });
+
         await applyInitialEnvironmentSelection(
             mockEnvManagers as unknown as EnvironmentManagers,
             mockProjectManager as unknown as PythonProjectManager,
@@ -712,6 +721,11 @@ suite('Interpreter Selection - applyInitialEnvironmentSelection', () => {
 
         // The workspace folder should be set successfully
         assert.ok(mockEnvManagers.setEnvironment.called, 'setEnvironment should be called for workspace folder');
+
+        // Wait for the background global scope to call setEnvironments
+        await globalDone;
+        // Flush microtasks so the .then() handler for notifyUserOfSettingErrors runs
+        await new Promise<void>((resolve) => process.nextTick(resolve));
 
         // No warning should be shown — the global chain should silently skip ${workspaceFolder}
         assert.ok(
