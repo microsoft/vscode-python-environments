@@ -31,6 +31,7 @@ export async function updatePackagesAndNotify(
     packageManager: PackageManager,
     environment: PythonEnvironment,
 ): Promise<void> {
+    packageManager.setPackages(environment, [], []);
     const after = await packageManager.fetchPackages(environment);
     const changes = await getPackageChanges(packageManager, environment, after);
     if (changes.length > 0) {

@@ -145,22 +145,27 @@ suite('packageChanges', () => {
 
             await updatePackagesAndNotify(packageManager, environment);
 
-            assert.ok(setPackagesSpy.calledOnce);
-            const [env, pkgs, changes] = setPackagesSpy.firstCall.args;
+            assert.strictEqual(setPackagesSpy.callCount, 2);
+            // First call seeds the cache
+            assert.deepStrictEqual(setPackagesSpy.firstCall.args, [environment, [], []]);
+            // Second call sets the actual packages
+            const [env, pkgs, changes] = setPackagesSpy.secondCall.args;
             assert.strictEqual(env, environment);
             assert.deepStrictEqual(pkgs, fetched);
             assert.strictEqual(changes.length, 1);
             assert.strictEqual(changes[0].kind, PackageChangeKind.add);
         });
 
-        test('does not call setPackages when there are no changes', async () => {
+        test('does not call setPackages with changes when there are no changes', async () => {
             const pkgs = [{ name: 'requests', version: '2.31.0' } as Package];
             getPackagesStub.resolves(pkgs);
             fetchPackagesStub.resolves(pkgs);
 
             await updatePackagesAndNotify(packageManager, environment);
 
-            assert.ok(setPackagesSpy.notCalled);
+            // Only the seeding call, no second call with changes
+            assert.strictEqual(setPackagesSpy.callCount, 1);
+            assert.deepStrictEqual(setPackagesSpy.firstCall.args, [environment, [], []]);
         });
 
         test('passes all changes to setPackages', async () => {
@@ -171,8 +176,8 @@ suite('packageChanges', () => {
 
             await updatePackagesAndNotify(packageManager, environment);
 
-            assert.ok(setPackagesSpy.calledOnce);
-            const [, , changes] = setPackagesSpy.firstCall.args;
+            assert.strictEqual(setPackagesSpy.callCount, 2);
+            const [, , changes] = setPackagesSpy.secondCall.args;
             assert.strictEqual(changes.length, 2);
             assert.ok(changes.some((c: { kind: PackageChangeKind }) => c.kind === PackageChangeKind.add));
             assert.ok(changes.some((c: { kind: PackageChangeKind }) => c.kind === PackageChangeKind.remove));
