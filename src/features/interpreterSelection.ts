@@ -440,6 +440,28 @@ export function resetSettingWarnings(): void {
     warnedSettings.clear();
 }
 
+/**
+ * Generate a localized, user-facing reason string for a setting resolution error.
+ *
+ * The `reason` field stored on `SettingResolutionError` is English-only (used for logs
+ * and internal diagnostics). When showing a notification to the user, we generate a
+ * properly localized reason here based on the structured `kind` instead of interpolating
+ * the English `reason` into an `l10n.t(...)` template (which would produce partially
+ * localized notifications).
+ */
+function getLocalizedReason(error: SettingResolutionError): string {
+    switch (error.kind) {
+        case 'managerNotRegistered':
+            return l10n.t("Environment manager '{0}' is not registered", error.configuredValue);
+        case 'pathUnresolvedVariables':
+            return l10n.t('Path contains unresolved variables');
+        case 'pathCannotResolve':
+            return l10n.t("Could not resolve interpreter path '{0}'", error.configuredValue);
+        default:
+            return error.reason;
+    }
+}
+
 async function notifyUserOfSettingErrors(
     errors: SettingResolutionError[],
     envManagers: EnvironmentManagers,
@@ -473,6 +495,7 @@ async function notifyUserOfSettingErrors(
 
         const settingErrors = liveErrors.filter((e) => e.setting === setting);
         const firstError = settingErrors[0];
+        const localizedReason = getLocalizedReason(firstError);
 
         let message: string;
         let settingKey: string;
@@ -482,7 +505,7 @@ async function notifyUserOfSettingErrors(
                 message = l10n.t(
                     "Python project setting for environment manager '{0}' could not be applied: {1}",
                     firstError.configuredValue,
-                    firstError.reason,
+                    localizedReason,
                 );
                 settingKey = 'python-envs.pythonProjects';
                 break;
@@ -490,7 +513,7 @@ async function notifyUserOfSettingErrors(
                 message = l10n.t(
                     "Default environment manager '{0}' could not be applied: {1}",
                     firstError.configuredValue,
-                    firstError.reason,
+                    localizedReason,
                 );
                 settingKey = 'python-envs.defaultEnvManager';
                 break;
@@ -498,7 +521,7 @@ async function notifyUserOfSettingErrors(
                 message = l10n.t(
                     "Default interpreter path '{0}' could not be resolved: {1}",
                     firstError.configuredValue,
-                    firstError.reason,
+                    localizedReason,
                 );
                 settingKey = 'python.defaultInterpreterPath';
                 break;
