@@ -72,7 +72,7 @@ export class CondaPackageManager implements PackageManager, Disposable {
             },
             async (_progress, token) => {
                 try {
-                    await managePackages(environment, manageOptions, this, token, this.log);
+                    await managePackages(environment, manageOptions, token, this.log);
                     await updatePackagesAndNotify(this, environment);
                 } catch (e) {
                     if (e instanceof CancellationError) {

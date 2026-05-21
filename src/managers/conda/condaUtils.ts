@@ -16,7 +16,6 @@ import which from 'which';
 import {
     EnvironmentManager,
     PackageManagementOptions,
-    PackageManager,
     PythonCommandRunConfiguration,
     PythonEnvironment,
     PythonEnvironmentApi,
@@ -1281,7 +1280,6 @@ export async function deleteCondaEnvironment(environment: PythonEnvironment, log
 export async function managePackages(
     environment: PythonEnvironment,
     options: PackageManagementOptions,
-    manager: PackageManager,
     token: CancellationToken,
     log: LogOutputChannel,
 ): Promise<void> {
