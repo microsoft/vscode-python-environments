@@ -13,26 +13,15 @@ import {
     DidChangePackagesEventArgs,
     IconPath,
     Package,
-    PackageChangeKind,
     PackageManagementOptions,
     PackageManager,
     PythonEnvironment,
     PythonEnvironmentApi,
 } from '../../api';
+import { getPackageChanges } from '../common/packageChanges';
 import { getWorkspacePackagesToInstall } from './pipUtils';
 import { managePackages, refreshPackages } from './utils';
 import { VenvManager } from './venvManager';
-
-function getChanges(before: Package[], after: Package[]): { kind: PackageChangeKind; pkg: Package }[] {
-    const changes: { kind: PackageChangeKind; pkg: Package }[] = [];
-    before.forEach((pkg) => {
-        changes.push({ kind: PackageChangeKind.remove, pkg });
-    });
-    after.forEach((pkg) => {
-        changes.push({ kind: PackageChangeKind.add, pkg });
-    });
-    return changes;
-}
 
 export class PipPackageManager implements PackageManager, Disposable {
     private readonly _onDidChangePackages = new EventEmitter<DidChangePackagesEventArgs>();
@@ -85,9 +74,8 @@ export class PipPackageManager implements PackageManager, Disposable {
             },
             async (_progress, token) => {
                 try {
-                    const before = this.packages.get(environment.envId.id) ?? [];
                     const after = await managePackages(environment, manageOptions, this.api, this, token);
-                    const changes = getChanges(before, after);
+                    const changes = await getPackageChanges(this, environment, after);
                     this.packages.set(environment.envId.id, after);
                     this._onDidChangePackages.fire({ environment, manager: this, changes });
                 } catch (e) {
@@ -114,9 +102,8 @@ export class PipPackageManager implements PackageManager, Disposable {
                 title: 'Refreshing packages',
             },
             async () => {
-                const before = this.packages.get(environment.envId.id) ?? [];
                 const after = await refreshPackages(environment, this.api, this);
-                const changes = getChanges(before, after);
+                const changes = await getPackageChanges(this, environment, after);
                 this.packages.set(environment.envId.id, after);
                 if (changes.length > 0) {
                     this._onDidChangePackages.fire({ environment, manager: this, changes });
