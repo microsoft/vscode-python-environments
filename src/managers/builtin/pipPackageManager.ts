@@ -161,7 +161,7 @@ export class PipPackageManager implements PackageManager, Disposable {
                 return undefined;
             }
 
-            // uv - Run pip through pipx
+            // uv - Run pip via `uv tool run pip`
             const useUv = await shouldUseUv(this.log, environment.environmentPath.fsPath);
             if (useUv) {
                 const output = await runUV(

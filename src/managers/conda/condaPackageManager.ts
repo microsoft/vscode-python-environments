@@ -168,11 +168,20 @@ export class CondaPackageManager implements PackageManager, Disposable {
             const output = await runCondaExecutable(['search', packageName, '--json'], this.log);
             const parsed = JSON.parse(output);
             if (parsed && typeof parsed === 'object' && Array.isArray(parsed[packageName])) {
-                return parsed[packageName]
+                const uniqueVersions = new Map<string, Pep440Version>();
+                parsed[packageName]
                     .filter((entry: { version?: string }) => !!entry.version?.trim())
                     .map((entry: { version?: string }) => parse(entry.version!))
                     .filter((v: Pep440Version | null): v is Pep440Version => v !== null)
-                    .sort((a: Pep440Version, b: Pep440Version) => rcompare(a.public, b.public));
+                    .forEach((version: Pep440Version) => {
+                        if (!uniqueVersions.has(version.public)) {
+                            uniqueVersions.set(version.public, version);
+                        }
+                    });
+
+                return Array.from(uniqueVersions.values()).sort((a: Pep440Version, b: Pep440Version) =>
+                    rcompare(a.public, b.public),
+                );
             }
             return undefined;
         } catch {
