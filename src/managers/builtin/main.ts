@@ -4,7 +4,7 @@ import { createSimpleDebounce } from '../../common/utils/debounce';
 import { createFileSystemWatcher, onDidDeleteFiles } from '../../common/workspace.apis';
 import { getPythonApi } from '../../features/pythonApi';
 import { NativePythonFinder } from '../common/nativePythonFinder';
-import { PipPackageManager } from './pipManager';
+import { PipPackageManager } from './pipPackageManager';
 import { SysPythonManager } from './sysPythonManager';
 import { VenvManager } from './venvManager';
 
@@ -60,10 +60,10 @@ export async function registerSystemPythonFeatures(
         );
     });
     const packageWatcher = createFileSystemWatcher(
-        '**/site-packages/*.dist-info/METADATA', 
+        '**/site-packages/*.dist-info/METADATA',
         false, // don't ignore create events    (pip install)
-        true,  // ignore change events          (content changes in METADATA don't affect package list)
-        false  // don't ignore delete events    (pip uninstall)
+        true, // ignore change events          (content changes in METADATA don't affect package list)
+        false, // don't ignore delete events    (pip uninstall)
     );
     disposables.push(
         packageDebouncedRefresh,
