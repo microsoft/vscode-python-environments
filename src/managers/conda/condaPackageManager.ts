@@ -194,6 +194,8 @@ export class CondaPackageManager implements PackageManager, Disposable {
         changes: { kind: PackageChangeKind; pkg: Package }[],
     ): void {
         this.packages.set(environment.envId.id, packages);
-        this._onDidChangePackages.fire({ environment, manager: this, changes });
+        if (changes.length > 0) {
+            this._onDidChangePackages.fire({ environment, manager: this, changes });
+        }
     }
 }
