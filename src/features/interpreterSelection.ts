@@ -407,9 +407,14 @@ export async function applyInitialEnvironmentSelection(
         allErrors.push(...globalErrors);
     }
 
+    // Filter out errors that have become stale (e.g. a third-party manager finished
+    // registering during the awaits above). Use the filtered set for both the
+    // user-facing warning and the telemetry count so they stay consistent.
+    const liveErrors = filterLiveErrors(allErrors, envManagers);
+
     // Notify user if any settings could not be applied (workspace + global when awaited)
-    if (allErrors.length > 0) {
-        await notifyUserOfSettingErrors(allErrors, envManagers);
+    if (liveErrors.length > 0) {
+        await notifyUserOfSettingErrors(liveErrors, envManagers);
     }
 
     // Numeric values must go via the measures argument (properties are dropped).
@@ -419,7 +424,7 @@ export async function applyInitialEnvironmentSelection(
             duration: selectionStopWatch.elapsedTime,
             workspaceFolderCount: folders.length,
             resolvedFolderCount,
-            settingErrorCount: allErrors.length,
+            settingErrorCount: liveErrors.length,
         },
         {
             globalScopeDeferred: workspaceFolderResolved,
@@ -440,16 +445,20 @@ export function resetSettingWarnings(): void {
     warnedSettings.clear();
 }
 
-async function notifyUserOfSettingErrors(
+/**
+ * Filter out "manager not registered" errors that have become stale.
+ *
+ * The priority chain records errors at the time it runs, but several awaits
+ * happen before notification/telemetry. A third-party extension (e.g. Hatch)
+ * may finish activating during those awaits and register its manager. Re-check
+ * the current registry: if the manager is now present the error is stale and
+ * should not surface as a user-facing warning or as a telemetry error count.
+ */
+function filterLiveErrors(
     errors: SettingResolutionError[],
     envManagers: EnvironmentManagers,
-): Promise<void> {
-    // The priority chain records "manager not registered" errors at the time it runs,
-    // but several awaits happen before this function is reached. A third-party extension
-    // (e.g. Hatch) may finish activating during those awaits and register its manager.
-    // Re-check the current registry: if the manager is now present the error is stale
-    // and the warning would be a false positive.
-    const liveErrors = errors.filter((e) => {
+): SettingResolutionError[] {
+    return errors.filter((e) => {
         if (e.kind === 'managerNotRegistered' && envManagers.getEnvironmentManager(e.configuredValue)) {
             traceVerbose(
                 `[interpreterSelection] Manager '${e.configuredValue}' is now registered; suppressing stale warning`,
@@ -458,6 +467,15 @@ async function notifyUserOfSettingErrors(
         }
         return true;
     });
+}
+
+async function notifyUserOfSettingErrors(
+    errors: SettingResolutionError[],
+    envManagers: EnvironmentManagers,
+): Promise<void> {
+    // Defensive re-filter: callers in the main path already filter, but the
+    // deferred global-scope path calls this directly with raw errors.
+    const liveErrors = filterLiveErrors(errors, envManagers);
     if (liveErrors.length === 0) {
         return;
     }
