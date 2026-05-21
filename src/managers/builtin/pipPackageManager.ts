@@ -256,7 +256,7 @@ export function parsePipIndexVersionsJson(output: string): Pep440Version[] | und
         if (parsed && Array.isArray(parsed.versions) && parsed.versions.length > 0) {
             return (parsed.versions as string[])
                 .filter((v) => !!v.trim())
-                .map((v) => parse(v))
+                .map((v) => parse(v.trim()))
                 .filter((v): v is Pep440Version => v !== null)
                 .sort((a, b) => rcompare(a.public, b.public));
         }

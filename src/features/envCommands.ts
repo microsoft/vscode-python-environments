@@ -360,21 +360,23 @@ export async function managePackageVersion(context: unknown, em: EnvironmentMana
             version = selected?.label;
         } else {
             // Fallback to free-text input if version listing is not available
-            version = await showInputBox({
+            const inputVersion = await showInputBox({
                 title: l10n.t('Manage Package Version'),
                 prompt: l10n.t('Enter the version for {0}', pkg.name),
                 value: pkg.version,
                 placeHolder: l10n.t('e.g. 1.2.3'),
                 validateInput: (value) => {
-                    if (value.length === 0) {
+                    const trimmedValue = value.trim();
+                    if (trimmedValue.length === 0) {
                         return l10n.t('Version cannot be empty');
                     }
-                    if (!PEP440_VERSION_REGEX.test(value)) {
-                        return l10n.t('Invalid PEP 440 version: {0}', value);
+                    if (!PEP440_VERSION_REGEX.test(trimmedValue)) {
+                        return l10n.t('Invalid PEP 440 version: {0}', trimmedValue);
                     }
                     return undefined;
                 },
             });
+            version = inputVersion?.trim();
         }
 
         if (version === undefined || version === pkg.version) {
