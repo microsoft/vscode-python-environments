@@ -243,22 +243,12 @@ export async function refreshPipPackages(
     }
 }
 
-export async function refreshPackages(
-    environment: PythonEnvironment,
-    api: PythonEnvironmentApi,
-    manager: PackageManager,
-): Promise<Package[]> {
-    const data = await refreshPipPackages(environment, manager.log);
-    return (data ?? []).map((pkg) => api.createPackageItem(pkg, environment, manager));
-}
-
 export async function managePackages(
     environment: PythonEnvironment,
     options: PackageManagementOptions,
-    api: PythonEnvironmentApi,
     manager: PackageManager,
     token?: CancellationToken,
-): Promise<Package[]> {
+): Promise<void> {
     if (environment.version.startsWith('2.')) {
         throw new Error('Python 2.* is not supported (deprecated)');
     }
@@ -310,8 +300,6 @@ export async function managePackages(
             );
         }
     }
-
-    return await refreshPackages(environment, api, manager);
 }
 
 /**

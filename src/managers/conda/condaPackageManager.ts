@@ -19,7 +19,7 @@ import {
 import { showErrorMessageWithLogs } from '../../common/errors/utils';
 import { CondaStrings } from '../../common/localize';
 import { withProgress } from '../../common/window.apis';
-import { getPackageChanges } from '../common/packageChanges';
+import { updatePackagesAndNotify } from '../common/packageChanges';
 import { getCommonCondaPackagesToInstall, managePackages, refreshPackages } from './condaUtils';
 
 export class CondaPackageManager implements PackageManager, Disposable {
@@ -70,10 +70,8 @@ export class CondaPackageManager implements PackageManager, Disposable {
             },
             async (_progress, token) => {
                 try {
-                    const after = await managePackages(environment, manageOptions, this.api, this, token, this.log);
-                    const changes = await getPackageChanges(this, environment, after);
-                    this.packages.set(environment.envId.id, after);
-                    this._onDidChangePackages.fire({ environment: environment, manager: this, changes });
+                    await managePackages(environment, manageOptions, this, token, this.log);
+                    await this.updatePackagesAndNotify(environment);
                 } catch (e) {
                     if (e instanceof CancellationError) {
                         throw e;
@@ -95,12 +93,7 @@ export class CondaPackageManager implements PackageManager, Disposable {
                 title: CondaStrings.condaRefreshingPackages,
             },
             async () => {
-                const after = await refreshPackages(environment, this.api, this);
-                const changes = await getPackageChanges(this, environment, after);
-                this.packages.set(environment.envId.id, after);
-                if (changes.length > 0) {
-                    this._onDidChangePackages.fire({ environment, manager: this, changes });
-                }
+                await this.updatePackagesAndNotify(environment);
             },
         );
     }
@@ -115,5 +108,16 @@ export class CondaPackageManager implements PackageManager, Disposable {
     dispose() {
         this._onDidChangePackages.dispose();
         this.packages.clear();
+    }
+
+    async fetchPackages(environment: PythonEnvironment): Promise<Package[]> {
+        return refreshPackages(environment, this.api, this);
+    }
+
+    private async updatePackagesAndNotify(environment: PythonEnvironment): Promise<void> {
+        await updatePackagesAndNotify(this, environment, (after, changes) => {
+            this.packages.set(environment.envId.id, after);
+            this._onDidChangePackages.fire({ environment, manager: this, changes });
+        });
     }
 }

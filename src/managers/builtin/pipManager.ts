@@ -18,9 +18,9 @@ import {
     PythonEnvironment,
     PythonEnvironmentApi,
 } from '../../api';
-import { getPackageChanges } from '../common/packageChanges';
+import { updatePackagesAndNotify } from '../common/packageChanges';
 import { getWorkspacePackagesToInstall } from './pipUtils';
-import { managePackages, refreshPackages } from './utils';
+import { managePackages, refreshPipPackages } from './utils';
 import { VenvManager } from './venvManager';
 
 export class PipPackageManager implements PackageManager, Disposable {
@@ -74,10 +74,8 @@ export class PipPackageManager implements PackageManager, Disposable {
             },
             async (_progress, token) => {
                 try {
-                    const after = await managePackages(environment, manageOptions, this.api, this, token);
-                    const changes = await getPackageChanges(this, environment, after);
-                    this.packages.set(environment.envId.id, after);
-                    this._onDidChangePackages.fire({ environment, manager: this, changes });
+                    await managePackages(environment, manageOptions, this, token);
+                    await this.updatePackagesAndNotify(environment);
                 } catch (e) {
                     if (e instanceof CancellationError) {
                         throw e;
@@ -102,15 +100,11 @@ export class PipPackageManager implements PackageManager, Disposable {
                 title: 'Refreshing packages',
             },
             async () => {
-                const after = await refreshPackages(environment, this.api, this);
-                const changes = await getPackageChanges(this, environment, after);
-                this.packages.set(environment.envId.id, after);
-                if (changes.length > 0) {
-                    this._onDidChangePackages.fire({ environment, manager: this, changes });
-                }
+                await this.updatePackagesAndNotify(environment);
             },
         );
     }
+
     async getPackages(environment: PythonEnvironment): Promise<Package[] | undefined> {
         if (!this.packages.has(environment.envId.id)) {
             await this.refresh(environment);
@@ -121,5 +115,17 @@ export class PipPackageManager implements PackageManager, Disposable {
     dispose(): void {
         this._onDidChangePackages.dispose();
         this.packages.clear();
+    }
+
+    async fetchPackages(environment: PythonEnvironment): Promise<Package[]> {
+        const data = await refreshPipPackages(environment, this.log);
+        return (data ?? []).map((pkg) => this.api.createPackageItem(pkg, environment, this));
+    }
+
+    private async updatePackagesAndNotify(environment: PythonEnvironment): Promise<void> {
+        await updatePackagesAndNotify(this, environment, (after, changes) => {
+            this.packages.set(environment.envId.id, after);
+            this._onDidChangePackages.fire({ environment, manager: this, changes });
+        });
     }
 }

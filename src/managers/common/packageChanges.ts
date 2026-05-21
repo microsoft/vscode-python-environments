@@ -18,3 +18,15 @@ export async function getPackageChanges(
     });
     return changes;
 }
+
+export async function updatePackagesAndNotify(
+    packageManager: PackageManager & { fetchPackages(environment: PythonEnvironment): Promise<Package[]> },
+    environment: PythonEnvironment,
+    onChanged: (after: Package[], changes: { kind: PackageChangeKind; pkg: Package }[]) => void,
+): Promise<void> {
+    const after = await packageManager.fetchPackages(environment);
+    const changes = await getPackageChanges(packageManager, environment, after);
+    if (changes.length > 0) {
+        onChanged(after, changes);
+    }
+}

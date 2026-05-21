@@ -1333,11 +1333,10 @@ export async function refreshPackages(
 export async function managePackages(
     environment: PythonEnvironment,
     options: PackageManagementOptions,
-    api: PythonEnvironmentApi,
     manager: PackageManager,
     token: CancellationToken,
     log: LogOutputChannel,
-): Promise<Package[]> {
+): Promise<void> {
     if (options.uninstall && options.uninstall.length > 0) {
         await runCondaExecutable(
             ['remove', '--prefix', environment.environmentPath.fsPath, '--yes', ...options.uninstall],
@@ -1353,7 +1352,6 @@ export async function managePackages(
         args.push(...options.install);
         await runCondaExecutable(args, log, token);
     }
-    return refreshPackages(environment, api, manager);
 }
 
 async function getCommonPackages(): Promise<Installable[]> {

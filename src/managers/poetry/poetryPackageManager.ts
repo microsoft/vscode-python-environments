@@ -23,7 +23,7 @@ import {
 } from '../../api';
 import { spawnProcess } from '../../common/childProcess.apis';
 import { showErrorMessage, showInputBox, withProgress } from '../../common/window.apis';
-import { getPackageChanges } from '../common/packageChanges';
+import { updatePackagesAndNotify } from '../common/packageChanges';
 import { PoetryManager } from './poetryManager';
 import { getPoetry } from './poetryUtils';
 
@@ -81,14 +81,8 @@ export class PoetryPackageManager implements PackageManager, Disposable {
             },
             async (_progress, token) => {
                 try {
-                    const after = await this.managePackages(
-                        environment,
-                        { install: toInstall, uninstall: toUninstall },
-                        token,
-                    );
-                    const changes = await getPackageChanges(this, environment, after);
-                    this.packages.set(environment.envId.id, after);
-                    this._onDidChangePackages.fire({ environment, manager: this, changes });
+                    await this.runPoetryManage({ install: toInstall, uninstall: toUninstall }, token);
+                    await this.updatePackagesAndNotify(environment);
                 } catch (e) {
                     if (e instanceof CancellationError) {
                         throw e;
@@ -114,12 +108,7 @@ export class PoetryPackageManager implements PackageManager, Disposable {
             },
             async () => {
                 try {
-                    const after = await this.refreshPackages(environment);
-                    const changes = await getPackageChanges(this, environment, after);
-                    this.packages.set(environment.envId.id, after);
-                    if (changes.length > 0) {
-                        this._onDidChangePackages.fire({ environment, manager: this, changes });
-                    }
+                    await this.updatePackagesAndNotify(environment);
                 } catch (error) {
                     this.log.error(`Failed to refresh packages: ${error}`);
                     // Show error to user but don't break the UI
@@ -146,11 +135,10 @@ export class PoetryPackageManager implements PackageManager, Disposable {
         this.packages.clear();
     }
 
-    private async managePackages(
-        environment: PythonEnvironment,
+    private async runPoetryManage(
         options: { install?: string[]; uninstall?: string[] },
         token?: CancellationToken,
-    ): Promise<Package[]> {
+    ): Promise<void> {
         const poetry = await getPoetry();
         if (!poetry) {
             throw new Error(
@@ -185,9 +173,17 @@ export class PoetryPackageManager implements PackageManager, Disposable {
                 throw err;
             }
         }
+    }
 
-        // Refresh the packages list after changes
+    async fetchPackages(environment: PythonEnvironment): Promise<Package[]> {
         return this.refreshPackages(environment);
+    }
+
+    private async updatePackagesAndNotify(environment: PythonEnvironment): Promise<void> {
+        await updatePackagesAndNotify(this, environment, (after, changes) => {
+            this.packages.set(environment.envId.id, after);
+            this._onDidChangePackages.fire({ environment, manager: this, changes });
+        });
     }
 
     private async refreshPackages(environment: PythonEnvironment): Promise<Package[]> {
