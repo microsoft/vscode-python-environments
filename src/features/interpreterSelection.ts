@@ -386,8 +386,9 @@ export async function applyInitialEnvironmentSelection(
         }
         resolveGlobalScope()
             .then(async (globalErrors) => {
-                if (globalErrors.length > 0) {
-                    await notifyUserOfSettingErrors(globalErrors, envManagers);
+                const liveGlobalErrors = filterLiveSettingErrors(globalErrors, envManagers);
+                if (liveGlobalErrors.length > 0) {
+                    await notifyUserOfSettingErrors(liveGlobalErrors);
                 }
             })
             .catch((err) => traceError(`[interpreterSelection] Background global scope resolution failed: ${err}`));
@@ -400,9 +401,15 @@ export async function applyInitialEnvironmentSelection(
         allErrors.push(...globalErrors);
     }
 
+    // Drop "manager not registered" errors that became stale during the awaits above
+    // (third-party manager extensions may have finished activating in the meantime).
+    // Used for both the user notification and the telemetry settingErrorCount so they
+    // agree on what counts as a real error.
+    const liveErrors = filterLiveSettingErrors(allErrors, envManagers);
+
     // Notify user if any settings could not be applied (workspace + global when awaited)
-    if (allErrors.length > 0) {
-        await notifyUserOfSettingErrors(allErrors, envManagers);
+    if (liveErrors.length > 0) {
+        await notifyUserOfSettingErrors(liveErrors);
     }
 
     // Numeric values must go via the measures argument (properties are dropped).
@@ -412,7 +419,7 @@ export async function applyInitialEnvironmentSelection(
             duration: selectionStopWatch.elapsedTime,
             workspaceFolderCount: folders.length,
             resolvedFolderCount,
-            settingErrorCount: allErrors.length,
+            settingErrorCount: liveErrors.length,
         },
         {
             globalScopeDeferred: workspaceFolderResolved,
@@ -450,16 +457,20 @@ function localizedReasonFor(error: SettingResolutionError): string {
     }
 }
 
-async function notifyUserOfSettingErrors(
+/**
+ * Drop setting errors that became stale before the notification site.
+ *
+ * The priority chain records "manager not registered" errors at the time it runs,
+ * but several awaits happen before notification/telemetry. A third-party extension
+ * (e.g. Hatch) may finish activating during those awaits and register its manager.
+ * Re-check the current registry: if the manager is now present the error is stale
+ * and would be a false positive both in the user-facing warning and in telemetry.
+ */
+function filterLiveSettingErrors(
     errors: SettingResolutionError[],
     envManagers: EnvironmentManagers,
-): Promise<void> {
-    // The priority chain records "manager not registered" errors at the time it runs,
-    // but several awaits happen before this function is reached. A third-party extension
-    // (e.g. Hatch) may finish activating during those awaits and register its manager.
-    // Re-check the current registry: if the manager is now present the error is stale
-    // and the warning would be a false positive.
-    const liveErrors = errors.filter((e) => {
+): SettingResolutionError[] {
+    return errors.filter((e) => {
         if (e.kind === 'managerNotRegistered' && envManagers.getEnvironmentManager(e.configuredValue)) {
             traceVerbose(
                 `[interpreterSelection] Manager '${e.configuredValue}' is now registered; suppressing stale warning`,
@@ -468,12 +479,15 @@ async function notifyUserOfSettingErrors(
         }
         return true;
     });
-    if (liveErrors.length === 0) {
+}
+
+async function notifyUserOfSettingErrors(errors: SettingResolutionError[]): Promise<void> {
+    if (errors.length === 0) {
         return;
     }
 
     // Group errors by setting type to avoid spamming the user
-    const uniqueSettings = [...new Set(liveErrors.map((e) => e.setting))];
+    const uniqueSettings = [...new Set(errors.map((e) => e.setting))];
 
     for (const setting of uniqueSettings) {
         if (warnedSettings.has(setting)) {
@@ -481,7 +495,7 @@ async function notifyUserOfSettingErrors(
         }
         warnedSettings.add(setting);
 
-        const settingErrors = liveErrors.filter((e) => e.setting === setting);
+        const settingErrors = errors.filter((e) => e.setting === setting);
         const firstError = settingErrors[0];
         const reason = localizedReasonFor(firstError);
 
