@@ -12,6 +12,7 @@ import {
     GetPackagesOptions,
     IconPath,
     Package,
+    PackageChangeKind,
     PackageManagementOptions,
     PackageManager,
     PythonEnvironment,
@@ -187,10 +188,12 @@ export class CondaPackageManager implements PackageManager, Disposable {
         return packages;
     }
 
-    private async updatePackagesAndNotify(environment: PythonEnvironment): Promise<void> {
-        await updatePackagesAndNotify(this, environment, (after, changes) => {
-            this.packages.set(environment.envId.id, after);
-            this._onDidChangePackages.fire({ environment, manager: this, changes });
-        });
+    setPackages(
+        environment: PythonEnvironment,
+        packages: Package[],
+        changes: { kind: PackageChangeKind; pkg: Package }[],
+    ): void {
+        this.packages.set(environment.envId.id, packages);
+        this._onDidChangePackages.fire({ environment, manager: this, changes });
     }
 }

@@ -14,6 +14,7 @@ import {
     GetPackagesOptions,
     IconPath,
     Package,
+    PackageChangeKind,
     PackageManagementOptions,
     PackageManager,
     PythonEnvironment,
