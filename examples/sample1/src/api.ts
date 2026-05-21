@@ -617,6 +617,14 @@ export interface PackageManager {
     getPackages(environment: PythonEnvironment, options?: GetPackagesOptions): Promise<Package[] | undefined>;
 
     /**
+     * Fetches the latest list of packages from the package manager for the specified Python environment.
+     * Unlike {@link getPackages}, this always queries the underlying tool and does not use cached results.
+     * @param environment - The Python environment for which to fetch packages.
+     * @returns A promise that resolves to an array of packages.
+     */
+    fetchPackages(environment: PythonEnvironment): Promise<Package[]>;
+
+    /**
      * Event that is fired when packages change.
      */
     onDidChangePackages?: Event<DidChangePackagesEventArgs>;
