@@ -22,11 +22,10 @@ export async function getPackageChanges(
 export async function updatePackagesAndNotify(
     packageManager: PackageManager,
     environment: PythonEnvironment,
-    onChanged: (after: Package[], changes: { kind: PackageChangeKind; pkg: Package }[]) => void,
 ): Promise<void> {
     const after = await packageManager.fetchPackages(environment);
     const changes = await getPackageChanges(packageManager, environment, after);
     if (changes.length > 0) {
-        onChanged(after, changes);
+        packageManager.setPackages(environment, after, changes);
     }
 }

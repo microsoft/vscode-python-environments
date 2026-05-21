@@ -13,6 +13,7 @@ import {
     DidChangePackagesEventArgs,
     IconPath,
     Package,
+    PackageChangeKind,
     PackageManagementOptions,
     PackageManager,
     PythonEnvironment,
@@ -75,7 +76,7 @@ export class PipPackageManager implements PackageManager, Disposable {
             async (_progress, token) => {
                 try {
                     await managePackages(environment, manageOptions, this, token);
-                    await this.updatePackagesAndNotify(environment);
+                    await updatePackagesAndNotify(this, environment);
                 } catch (e) {
                     if (e instanceof CancellationError) {
                         throw e;
@@ -100,7 +101,7 @@ export class PipPackageManager implements PackageManager, Disposable {
                 title: 'Refreshing packages',
             },
             async () => {
-                await this.updatePackagesAndNotify(environment);
+                await updatePackagesAndNotify(this, environment);
             },
         );
     }
@@ -122,10 +123,12 @@ export class PipPackageManager implements PackageManager, Disposable {
         return (data ?? []).map((pkg) => this.api.createPackageItem(pkg, environment, this));
     }
 
-    private async updatePackagesAndNotify(environment: PythonEnvironment): Promise<void> {
-        await updatePackagesAndNotify(this, environment, (after, changes) => {
-            this.packages.set(environment.envId.id, after);
-            this._onDidChangePackages.fire({ environment, manager: this, changes });
-        });
+    setPackages(
+        environment: PythonEnvironment,
+        packages: Package[],
+        changes: { kind: PackageChangeKind; pkg: Package }[],
+    ): void {
+        this.packages.set(environment.envId.id, packages);
+        this._onDidChangePackages.fire({ environment, manager: this, changes });
     }
 }
