@@ -125,6 +125,7 @@ suite('packageChanges', () => {
             const [changes] = onChanges.firstCall.args;
             assert.strictEqual(changes.length, 1);
             assert.strictEqual(changes[0].kind, PackageChangeKind.add);
+            assert.deepStrictEqual(cache, fetched);
         });
 
         test('does not fire callback when nothing changed', async () => {
