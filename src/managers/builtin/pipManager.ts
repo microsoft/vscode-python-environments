@@ -76,7 +76,7 @@ export class PipPackageManager implements PackageManager, Disposable {
             async (_progress, token) => {
                 try {
                     await managePackages(environment, manageOptions, this, token);
-                    await updatePackagesAndNotify(this, environment);
+                    await updatePackagesAndNotify(this, environment, this.packages.get(environment.envId.id));
                 } catch (e) {
                     if (e instanceof CancellationError) {
                         throw e;
@@ -101,7 +101,7 @@ export class PipPackageManager implements PackageManager, Disposable {
                 title: 'Refreshing packages',
             },
             async () => {
-                await updatePackagesAndNotify(this, environment);
+                await updatePackagesAndNotify(this, environment, this.packages.get(environment.envId.id));
             },
         );
     }

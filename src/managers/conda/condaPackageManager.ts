@@ -73,7 +73,7 @@ export class CondaPackageManager implements PackageManager, Disposable {
             async (_progress, token) => {
                 try {
                     await managePackages(environment, manageOptions, token, this.log);
-                    await updatePackagesAndNotify(this, environment);
+                    await updatePackagesAndNotify(this, environment, this.packages.get(environment.envId.id));
                 } catch (e) {
                     if (e instanceof CancellationError) {
                         throw e;
@@ -95,7 +95,7 @@ export class CondaPackageManager implements PackageManager, Disposable {
                 title: CondaStrings.condaRefreshingPackages,
             },
             async () => {
-                await updatePackagesAndNotify(this, environment);
+                await updatePackagesAndNotify(this, environment, this.packages.get(environment.envId.id));
             },
         );
     }
