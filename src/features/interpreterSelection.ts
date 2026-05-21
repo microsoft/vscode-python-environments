@@ -45,14 +45,12 @@ export interface SettingResolutionError {
     /** The setting that failed */
     setting: 'pythonProjects' | 'defaultEnvManager' | 'defaultInterpreterPath';
     /**
-     * Structured failure kind. Allows callers to handle specific failure modes
-     * (e.g. re-checking whether a manager became registered) without parsing `reason`.
+     * Structured failure kind. Drives both the localized user-facing reason and any
+     * conditional handling (e.g. re-checking whether a manager became registered).
      */
     kind: 'managerNotRegistered' | 'pathUnresolvedVariables' | 'pathCannotResolve';
     /** The configured value */
     configuredValue: string;
-    /** Human-readable reason for failure */
-    reason: string;
 }
 
 /**
@@ -88,7 +86,6 @@ async function resolvePriorityChainCore(
                 setting: 'pythonProjects',
                 kind: 'managerNotRegistered',
                 configuredValue: projectManagerId,
-                reason: `Environment manager '${projectManagerId}' is not registered`,
             };
             errors.push(error);
             traceWarn(`${logPrefix} pythonProjects[] manager '${projectManagerId}' not found, trying next priority`);
@@ -107,7 +104,6 @@ async function resolvePriorityChainCore(
             setting: 'defaultEnvManager',
             kind: 'managerNotRegistered',
             configuredValue: userConfiguredManager,
-            reason: `Environment manager '${userConfiguredManager}' is not registered`,
         };
         errors.push(error);
         traceWarn(`${logPrefix} defaultEnvManager '${userConfiguredManager}' not found, trying next priority`);
@@ -127,7 +123,6 @@ async function resolvePriorityChainCore(
                     setting: 'defaultInterpreterPath',
                     kind: 'pathUnresolvedVariables',
                     configuredValue: userInterpreterPath,
-                    reason: l10n.t('Path contains unresolved variables'),
                 };
                 errors.push(error);
             } else {
@@ -148,7 +143,6 @@ async function resolvePriorityChainCore(
                     setting: 'defaultInterpreterPath',
                     kind: 'pathUnresolvedVariables',
                     configuredValue: userInterpreterPath,
-                    reason: l10n.t('Path contains unresolved variables'),
                 };
                 errors.push(error);
             } else {
@@ -166,7 +160,6 @@ async function resolvePriorityChainCore(
                     setting: 'defaultInterpreterPath',
                     kind: 'pathCannotResolve',
                     configuredValue: userInterpreterPath,
-                    reason: `Could not resolve interpreter path '${userInterpreterPath}'`,
                 };
                 errors.push(error);
                 traceWarn(
@@ -440,6 +433,23 @@ export function resetSettingWarnings(): void {
     warnedSettings.clear();
 }
 
+/**
+ * Build the localized "reason" text shown to the user for a given error kind.
+ * Kept inside this file so the user-facing strings remain co-located with the
+ * notification template that interpolates them, and so all user-visible text
+ * goes through `l10n.t` (no partially-localized warnings).
+ */
+function localizedReasonFor(error: SettingResolutionError): string {
+    switch (error.kind) {
+        case 'managerNotRegistered':
+            return l10n.t("Environment manager '{0}' is not registered", error.configuredValue);
+        case 'pathUnresolvedVariables':
+            return l10n.t('Path contains unresolved variables');
+        case 'pathCannotResolve':
+            return l10n.t("Could not resolve interpreter path '{0}'", error.configuredValue);
+    }
+}
+
 async function notifyUserOfSettingErrors(
     errors: SettingResolutionError[],
     envManagers: EnvironmentManagers,
@@ -473,6 +483,7 @@ async function notifyUserOfSettingErrors(
 
         const settingErrors = liveErrors.filter((e) => e.setting === setting);
         const firstError = settingErrors[0];
+        const reason = localizedReasonFor(firstError);
 
         let message: string;
         let settingKey: string;
@@ -482,7 +493,7 @@ async function notifyUserOfSettingErrors(
                 message = l10n.t(
                     "Python project setting for environment manager '{0}' could not be applied: {1}",
                     firstError.configuredValue,
-                    firstError.reason,
+                    reason,
                 );
                 settingKey = 'python-envs.pythonProjects';
                 break;
@@ -490,7 +501,7 @@ async function notifyUserOfSettingErrors(
                 message = l10n.t(
                     "Default environment manager '{0}' could not be applied: {1}",
                     firstError.configuredValue,
-                    firstError.reason,
+                    reason,
                 );
                 settingKey = 'python-envs.defaultEnvManager';
                 break;
@@ -498,7 +509,7 @@ async function notifyUserOfSettingErrors(
                 message = l10n.t(
                     "Default interpreter path '{0}' could not be resolved: {1}",
                     firstError.configuredValue,
-                    firstError.reason,
+                    reason,
                 );
                 settingKey = 'python.defaultInterpreterPath';
                 break;
