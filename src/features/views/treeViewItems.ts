@@ -210,7 +210,7 @@ export class PackageTreeItem implements EnvTreeItem {
         public readonly manager: InternalPackageManager,
     ) {
         const item = new TreeItem(pkg.displayName);
-        item.iconPath = pkg.iconPath;
+        item.iconPath = pkg.isTransitive ? new ThemeIcon('list-tree') : new ThemeIcon('package');
         item.contextValue = 'python-package';
         item.description = pkg.description ?? pkg.version;
         item.tooltip = pkg.tooltip;

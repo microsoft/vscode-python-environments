@@ -688,6 +688,13 @@ export interface PackageManager {
     onDidChangePackages?: Event<DidChangePackagesEventArgs>;
 
     /**
+     * Fetches the names of direct (non-transitive) packages for the specified Python environment.
+     * @param environment - The Python environment for which to fetch direct package names.
+     * @returns A promise that resolves to an array of package name strings, or undefined if not supported.
+     */
+    fetchDirectPackageNames?(environment: PythonEnvironment): Promise<Set<string> | undefined>;
+
+    /**
      * Clears the package manager's cache.
      * @returns A promise that resolves when the cache is cleared.
      */
