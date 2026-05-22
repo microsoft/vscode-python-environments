@@ -4,6 +4,19 @@ export interface PipPackage {
     displayName: string;
     description: string;
 }
+export function isValidVersion(version: string): boolean {
+    return /^([1-9][0-9]*!)?(0|[1-9][0-9]*)(\.(0|[1-9][0-9]*))*((a|b|rc)(0|[1-9][0-9]*))?(\.post(0|[1-9][0-9]*))?(\.dev(0|[1-9][0-9]*))?$/.test(
+        version,
+    );
+}
+
+export function parseUvTree(data: string): string[] {
+    return data
+        .split('\n')
+        .map((line) => line.trim())
+        .map((line) => line.split(/\s+/, 1)[0])
+        .filter((name) => !!name);
+}
 
 export function parsePipListJson(data: string): PipPackage[] {
     try {
