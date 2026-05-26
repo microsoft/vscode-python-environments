@@ -1,22 +1,22 @@
 import assert from 'assert';
 import * as fs from 'fs-extra';
 import * as path from 'path';
-import { parsePipList } from '../../../managers/builtin/pipListUtils';
+import { parsePipListJson } from '../../../managers/builtin/pipListUtils';
 import { EXTENSION_TEST_ROOT } from '../../constants';
 
 const TEST_DATA_ROOT = path.join(EXTENSION_TEST_ROOT, 'managers', 'builtin');
 
-suite('Pip List Parser tests', () => {
+suite('Pip List JSON Parser tests', () => {
     const testNames = ['piplist1', 'piplist2', 'piplist3'];
 
     testNames.forEach((testName) => {
-        test(`Test parsing pip list output ${testName}`, async () => {
-            const pipListOutput = await fs.readFile(path.join(TEST_DATA_ROOT, `${testName}.actual.txt`), 'utf8');
+        test(`Test parsing pip list JSON output ${testName}`, async () => {
             const expected = JSON.parse(
                 await fs.readFile(path.join(TEST_DATA_ROOT, `${testName}.expected.json`), 'utf8'),
             );
+            const pipListOutput = JSON.stringify(expected.packages);
 
-            const actualPackages = parsePipList(pipListOutput);
+            const actualPackages = parsePipListJson(pipListOutput);
 
             assert.equal(actualPackages.length, expected.packages.length, 'Unexpected number of packages');
             actualPackages.forEach((actualPackage) => {
@@ -33,5 +33,24 @@ suite('Pip List Parser tests', () => {
                 assert.equal(actualPackage.version, expectedPackage.version, 'Version mismatch');
             });
         });
+    });
+
+    test('Returns an empty array for invalid JSON input', () => {
+        assert.deepStrictEqual(parsePipListJson('not json'), []);
+    });
+
+    test('Skips items without a name or version', () => {
+        const actualPackages = parsePipListJson(
+            JSON.stringify([{ name: 'pip', version: '24.0' }, { name: 'setuptools' }, { version: '1.0.0' }]),
+        );
+
+        assert.deepStrictEqual(actualPackages, [
+            {
+                name: 'pip',
+                version: '24.0',
+                displayName: 'pip',
+                description: '24.0',
+            },
+        ]);
     });
 });
