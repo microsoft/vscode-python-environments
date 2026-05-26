@@ -11,11 +11,11 @@ export function parsePipListJson(data: string): PipPackage[] {
         if (Array.isArray(json)) {
             return json
                 .filter((item) => item.name && item.version)
-                .map((item) => ({
-                    name: item.name,
-                    version: item.version,
-                    displayName: item.name,
-                    description: item.version,
+                .map(({ name, version }) => ({
+                    name,
+                    version,
+                    displayName: name,
+                    description: version,
                 }));
         }
     } catch (_) {
