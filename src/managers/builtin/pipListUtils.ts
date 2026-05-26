@@ -18,7 +18,7 @@ export function parsePipListJson(data: string): PipPackage[] {
                     description: item.version,
                 }));
         }
-    } catch (e) {
+    } catch (_) {
         // If JSON parsing fails, return an empty array. The caller can decide how to handle this case.
     }
     return [];
