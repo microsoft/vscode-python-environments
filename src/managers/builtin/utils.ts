@@ -190,7 +190,7 @@ async function refreshPipPackagesRaw(environment: PythonEnvironment, log?: LogOu
     const useUv = await shouldUseUv(log, environment.environmentPath.fsPath);
     if (useUv) {
         return await runUV(
-            ['pip', 'list', '--python', '--format=json', environment.execInfo.run.executable],
+            ['pip', 'list', '--python', environment.execInfo.run.executable, '--format=json'],
             undefined,
             log,
             undefined,
