@@ -343,7 +343,7 @@ suite('PythonPackageManagerApi Tests', () => {
                 },
             ];
             packageManager
-                .setup((pm) => pm.getPackages(environment.object))
+                .setup((pm) => pm.getPackages(environment.object, typeMoq.It.isAny()))
                 .returns(() => Promise.resolve(mockPackages))
                 .verifiable(typeMoq.Times.once());
 
@@ -360,7 +360,7 @@ suite('PythonPackageManagerApi Tests', () => {
         test('Should return undefined when no packages found', async () => {
             // Mock - Package manager returns undefined
             packageManager
-                .setup((pm) => pm.getPackages(environment.object))
+                .setup((pm) => pm.getPackages(environment.object, typeMoq.It.isAny()))
                 .returns(() => Promise.resolve(undefined))
                 .verifiable(typeMoq.Times.once());
 
@@ -375,7 +375,7 @@ suite('PythonPackageManagerApi Tests', () => {
         test('Should return empty array when environment has no packages', async () => {
             // Mock - Package manager returns empty array
             packageManager
-                .setup((pm) => pm.getPackages(environment.object))
+                .setup((pm) => pm.getPackages(environment.object, typeMoq.It.isAny()))
                 .returns(() => Promise.resolve([]))
                 .verifiable(typeMoq.Times.once());
 
@@ -402,7 +402,7 @@ suite('PythonPackageManagerApi Tests', () => {
                 },
             ];
             packageManager
-                .setup((pm) => pm.getPackages(environment.object))
+                .setup((pm) => pm.getPackages(environment.object, typeMoq.It.isAny()))
                 .returns(() => Promise.resolve(mockPackages));
 
             // Run
@@ -422,7 +422,9 @@ suite('PythonPackageManagerApi Tests', () => {
         test('Should propagate errors from package manager getPackages method', async () => {
             // Mock - Package manager throws error
             const testError = new Error('Failed to get packages');
-            packageManager.setup((pm) => pm.getPackages(environment.object)).returns(() => Promise.reject(testError));
+            packageManager
+                .setup((pm) => pm.getPackages(environment.object, typeMoq.It.isAny()))
+                .returns(() => Promise.reject(testError));
 
             // Run & Assert - Should reject with same error
             await assert.rejects(
