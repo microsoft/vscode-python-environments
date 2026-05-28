@@ -264,7 +264,7 @@ export class PoetryPackageManager implements PackageManager, Disposable {
         return poetryPackages.map((pkg) => this.api.createPackageItem(pkg, environment, this));
     }
 
-    async fetchDirectPackageNames(_environment: PythonEnvironment): Promise<Set<string> | undefined> {
+    async getDirectPackageNames(_environment: PythonEnvironment): Promise<Set<string> | undefined> {
         try {
             const topLevelResult = await runPoetry(['show', '--no-ansi', '--tree'], undefined, this.log);
             const names = topLevelResult

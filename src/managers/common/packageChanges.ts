@@ -48,11 +48,17 @@ export async function updatePackagesAndNotify(
     onChanges: PackageChangesCallback,
 ): Promise<void> {
     const after = (await packageManager.getPackages(environment, { skipCache: true })) ?? [];
+
+    // Handle transitive dependencies
     const afterDirectDependenciesNames =
-        (await packageManager.fetchDirectPackageNames?.(environment)) ?? new Set<string>();
-    for (const pkg of after) {
-        pkg.isTransitive = !afterDirectDependenciesNames.has(pkg.name);
+        (await packageManager.getDirectPackageNames?.(environment)) ?? new Set<string>();
+    if (afterDirectDependenciesNames.size > 0) {
+        for (const pkg of after) {
+            pkg.isTransitive = !afterDirectDependenciesNames.has(pkg.name);
+        }
     }
+
+    // Fire change event
     const changes = getPackageChanges(before ?? [], after);
     if (changes.length > 0) {
         onChanges(changes);
