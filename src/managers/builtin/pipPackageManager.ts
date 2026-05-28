@@ -108,14 +108,9 @@ export class PipPackageManager implements PackageManager, Disposable {
                 title: 'Refreshing packages',
             },
             async () => {
-                await updatePackagesAndNotify(
-                    this,
-                    environment,
-                    this.packages.get(environment.envId.id),
-                    (changes) => {
-                        this._onDidChangePackages.fire({ environment, manager: this, changes });
-                    },
-                );
+                await updatePackagesAndNotify(this, environment, this.packages.get(environment.envId.id), (changes) => {
+                    this._onDidChangePackages.fire({ environment, manager: this, changes });
+                });
             },
         );
     }

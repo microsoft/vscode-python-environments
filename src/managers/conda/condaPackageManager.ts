@@ -102,14 +102,9 @@ export class CondaPackageManager implements PackageManager, Disposable {
                 title: CondaStrings.condaRefreshingPackages,
             },
             async () => {
-                await updatePackagesAndNotify(
-                    this,
-                    environment,
-                    this.packages.get(environment.envId.id),
-                    (changes) => {
-                        this._onDidChangePackages.fire({ environment, manager: this, changes });
-                    },
-                );
+                await updatePackagesAndNotify(this, environment, this.packages.get(environment.envId.id), (changes) => {
+                    this._onDidChangePackages.fire({ environment, manager: this, changes });
+                });
             },
         );
     }
