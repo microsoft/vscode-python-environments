@@ -1,5 +1,5 @@
-import { explain as parse, rcompare } from '@renovatebot/pep440';
 import type { Pep440Version } from '@renovatebot/pep440';
+import { explain as parse, rcompare } from '@renovatebot/pep440';
 import {
     CancellationError,
     Disposable,
@@ -157,13 +157,16 @@ export class CondaPackageManager implements PackageManager, Disposable {
             const output = await runCondaExecutable(['--version'], this.log);
             // "conda X.Y.Z"
             const match = output.match(/conda\s+(\d+\.\d+(?:\.\d+)*)/i);
-            return match ? parse(match[1]) ?? undefined : undefined;
+            return match ? (parse(match[1]) ?? undefined) : undefined;
         } catch {
             return undefined;
         }
     }
 
-    async getAvailableVersions(packageName: string, _environment: PythonEnvironment): Promise<Pep440Version[] | undefined> {
+    async getPackageAvailableVersions(
+        _environment: PythonEnvironment,
+        packageName: string,
+    ): Promise<Pep440Version[] | undefined> {
         try {
             const output = await runCondaExecutable(['search', packageName, '--json'], this.log);
             const parsed = JSON.parse(output);

@@ -1,3 +1,4 @@
+import type { Pep440Version } from '@renovatebot/pep440';
 import { CancellationError, Disposable, Event, LogOutputChannel, MarkdownString, Uri } from 'vscode';
 import {
     CreateEnvironmentOptions,
@@ -28,7 +29,6 @@ import {
     ResolveEnvironmentContext,
     SetEnvironmentScope,
 } from './api';
-import type { Pep440Version } from '@renovatebot/pep440';
 import { ISSUES_URL } from './common/constants';
 import { CreateEnvironmentNotSupported, RemoveEnvironmentNotSupported } from './common/errors/NotSupportedError';
 import { traceWarn } from './common/logging';
@@ -385,9 +385,12 @@ export class InternalPackageManager implements PackageManager {
         return this.manager.getVersion ? this.manager.getVersion(environment) : Promise.resolve(undefined);
     }
 
-    getAvailableVersions(packageName: string, environment: PythonEnvironment): Promise<Pep440Version[] | undefined> {
-        return this.manager.getAvailableVersions
-            ? this.manager.getAvailableVersions(packageName, environment)
+    getPackageAvailableVersions(
+        environment: PythonEnvironment,
+        packageName: string,
+    ): Promise<Pep440Version[] | undefined> {
+        return this.manager.getPackageAvailableVersions
+            ? this.manager.getPackageAvailableVersions(environment, packageName)
             : Promise.resolve(undefined);
     }
 

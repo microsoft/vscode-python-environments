@@ -151,9 +151,9 @@ export class PipPackageManager implements PackageManager, Disposable {
         }
     }
 
-    async getAvailableVersions(
-        packageName: string,
+    async getPackageAvailableVersions(
         environment: PythonEnvironment,
+        packageName: string,
     ): Promise<Pep440Version[] | undefined> {
         try {
             const python = environment.execInfo?.run?.executable;

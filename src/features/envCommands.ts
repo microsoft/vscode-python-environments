@@ -344,7 +344,7 @@ export async function managePackageVersion(context: unknown, em: EnvironmentMana
         // Try to fetch available versions for a QuickPick experience
         const availableVersions = await withProgress(
             { location: ProgressLocation.Window, title: l10n.t('Fetching available versions for {0}...', pkg.name) },
-            () => packageManager.getAvailableVersions(pkg.name, environment),
+            () => packageManager.getPackageAvailableVersions(environment, pkg.name),
         );
 
         if (availableVersions && availableVersions.length > 0) {

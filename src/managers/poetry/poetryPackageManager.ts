@@ -1,3 +1,5 @@
+import type { Pep440Version } from '@renovatebot/pep440';
+import { explain as parse } from '@renovatebot/pep440';
 import * as fsapi from 'fs-extra';
 import * as path from 'path';
 import {
@@ -22,8 +24,6 @@ import {
     PythonEnvironment,
     PythonEnvironmentApi,
 } from '../../api';
-import { explain as parse } from '@renovatebot/pep440';
-import type { Pep440Version } from '@renovatebot/pep440';
 import { spawnProcess } from '../../common/childProcess.apis';
 import { showErrorMessage, showInputBox, withProgress } from '../../common/window.apis';
 import { updatePackagesAndNotify } from '../common/packageChanges';
@@ -155,10 +155,13 @@ export class PoetryPackageManager implements PackageManager, Disposable {
             return undefined;
         }
         const versionStr = await getPoetryVersion(poetry);
-        return versionStr ? parse(versionStr) ?? undefined : undefined;
+        return versionStr ? (parse(versionStr) ?? undefined) : undefined;
     }
 
-    async getAvailableVersions(_packageName: string, _environment: PythonEnvironment): Promise<Pep440Version[] | undefined> {
+    async getPackageAvailableVersions(
+        _environment: PythonEnvironment,
+        _packageName: string,
+    ): Promise<Pep440Version[] | undefined> {
         // Poetry doesn't have a native "list available versions" command.
         // Poetry 2.x supports `poetry search` but it was disabled on PyPI.
         // Return undefined to indicate this manager doesn't support version listing.

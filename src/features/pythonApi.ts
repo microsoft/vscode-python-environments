@@ -287,7 +287,7 @@ class PythonEnvironmentApiImpl implements PythonEnvironmentApi {
         if (!manager) {
             return undefined;
         }
-        return manager.getAvailableVersions(packageName, environment);
+        return manager.getPackageAvailableVersions(environment, packageName);
     }
 
     createPackageItem(info: PackageInfo, environment: PythonEnvironment, manager: PackageManager): Package {
