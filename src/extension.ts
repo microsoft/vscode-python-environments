@@ -39,7 +39,6 @@ import { getConfiguration, getWorkspaceFolders } from './common/workspace.apis';
 import { createManagerReady } from './features/common/managerReady';
 import { AutoFindProjects } from './features/creators/autoFindProjects';
 import { ExistingProjects } from './features/creators/existingProjects';
-import { InlineScriptDetector } from './features/creators/inlineScriptDetector';
 import { NewPackageProject } from './features/creators/newPackageProject';
 import { NewScriptProject } from './features/creators/newScriptProject';
 import { ProjectCreatorsImpl } from './features/creators/projectCreators';
@@ -205,15 +204,13 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
         projectCreators.registerPythonProjectCreator(new AutoFindProjects(projectManager)),
         projectCreators.registerPythonProjectCreator(new NewPackageProject(envManagers, projectManager)),
         projectCreators.registerPythonProjectCreator(new NewScriptProject(projectManager)),
-        projectCreators.registerPythonProjectCreator(new InlineScriptDetector(projectManager)),
     );
 
-    // Lazy on-open / on-save detector for `.py` files that declare
-    // inline script metadata (PEP 723). The detector subscribes
-    // unconditionally, but every event is gated through the
-    // experimental `python-envs.useInlineScriptMetadata` setting so
-    // there is no work done while the feature is off.
-    const inlineScriptLazyDetector = new InlineScriptLazyDetector(projectManager);
+    // Silent observer for `.py` files that declare PEP 723 inline
+    // script metadata. Kept wired up as the ingest point for PEP 723
+    // telemetry; does not register projects or surface any UI while
+    // the feature itself is not shipped to users.
+    const inlineScriptLazyDetector = new InlineScriptLazyDetector();
     inlineScriptLazyDetector.activate();
     context.subscriptions.push(inlineScriptLazyDetector);
 

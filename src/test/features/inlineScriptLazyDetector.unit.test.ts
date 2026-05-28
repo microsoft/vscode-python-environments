@@ -4,13 +4,10 @@
 import assert from 'assert';
 import * as path from 'path';
 import * as sinon from 'sinon';
-import * as typmoq from 'typemoq';
-import { ConfigurationChangeEvent, Disposable, TextDocument, Uri } from 'vscode';
-import { PythonProject } from '../../api';
+import { Disposable, TextDocument, Uri } from 'vscode';
 import * as ism from '../../common/inlineScriptMetadata';
 import * as wapi from '../../common/workspace.apis';
 import { InlineScriptLazyDetector, shouldHandleUri } from '../../features/inlineScriptLazyDetector';
-import { PythonProjectManager, PythonProjectsImpl } from '../../internal.api';
 
 // Build a minimal TextDocument stub. Only the `uri` field is read by
 // the detector; the rest exists to satisfy the type.
@@ -28,20 +25,15 @@ const VALID_METADATA: ism.InlineScriptMetadata = {
 suite('InlineScriptLazyDetector', () => {
     let onDidOpenStub: sinon.SinonStub;
     let onDidSaveStub: sinon.SinonStub;
-    let onDidChangeConfigStub: sinon.SinonStub;
     let getOpenTextDocumentsStub: sinon.SinonStub;
     let getWorkspaceFolderStub: sinon.SinonStub;
     let readMetadataStub: sinon.SinonStub;
-    let isEnabledStub: sinon.SinonStub;
     let openListener: ((doc: TextDocument) => unknown) | undefined;
     let saveListener: ((doc: TextDocument) => unknown) | undefined;
-    let configListener: ((e: ConfigurationChangeEvent) => unknown) | undefined;
-    let projectManager: typmoq.IMock<PythonProjectManager>;
 
     setup(() => {
         openListener = undefined;
         saveListener = undefined;
-        configListener = undefined;
 
         onDidOpenStub = sinon.stub(wapi, 'onDidOpenTextDocument');
         onDidOpenStub.callsFake((listener: (doc: TextDocument) => unknown) => {
@@ -56,14 +48,6 @@ suite('InlineScriptLazyDetector', () => {
             saveListener = listener;
             return new Disposable(() => {
                 saveListener = undefined;
-            });
-        });
-
-        onDidChangeConfigStub = sinon.stub(wapi, 'onDidChangeConfiguration');
-        onDidChangeConfigStub.callsFake((listener: (e: ConfigurationChangeEvent) => unknown) => {
-            configListener = listener;
-            return new Disposable(() => {
-                configListener = undefined;
             });
         });
 
@@ -84,12 +68,6 @@ suite('InlineScriptLazyDetector', () => {
 
         readMetadataStub = sinon.stub(ism, 'readInlineScriptMetadataFromFile');
         readMetadataStub.resolves(undefined);
-
-        isEnabledStub = sinon.stub(ism, 'isInlineScriptMetadataEnabled');
-        isEnabledStub.returns(true);
-
-        projectManager = typmoq.Mock.ofType<PythonProjectManager>();
-        projectManager.setup((pm) => pm.add(typmoq.It.isAny())).returns(() => Promise.resolve());
     });
 
     teardown(() => {
@@ -107,7 +85,7 @@ suite('InlineScriptLazyDetector', () => {
     }
 
     test('activate() subscribes to onDidOpen and onDidSave', () => {
-        const detector = new InlineScriptLazyDetector(projectManager.object);
+        const detector = new InlineScriptLazyDetector();
         detector.activate();
         assert.ok(onDidOpenStub.calledOnce, 'should subscribe to onDidOpenTextDocument');
         assert.ok(onDidSaveStub.calledOnce, 'should subscribe to onDidSaveTextDocument');
@@ -115,7 +93,7 @@ suite('InlineScriptLazyDetector', () => {
     });
 
     test('skips non-file URI schemes', async () => {
-        const detector = new InlineScriptLazyDetector(projectManager.object);
+        const detector = new InlineScriptLazyDetector();
         detector.activate();
         await fireOpen(Uri.parse('untitled:foo.py'));
         assert.ok(readMetadataStub.notCalled, 'should not read metadata for non-file URI');
@@ -123,7 +101,7 @@ suite('InlineScriptLazyDetector', () => {
     });
 
     test('skips non-.py files', async () => {
-        const detector = new InlineScriptLazyDetector(projectManager.object);
+        const detector = new InlineScriptLazyDetector();
         detector.activate();
         await fireOpen(Uri.file(path.resolve('/ws/foo.txt')));
         assert.ok(readMetadataStub.notCalled, 'should not read metadata for non-.py files');
@@ -132,188 +110,58 @@ suite('InlineScriptLazyDetector', () => {
 
     test('skips files outside any workspace folder', async () => {
         getWorkspaceFolderStub.returns(undefined);
-        const detector = new InlineScriptLazyDetector(projectManager.object);
+        const detector = new InlineScriptLazyDetector();
         detector.activate();
         await fireOpen(Uri.file(path.resolve('/elsewhere/foo.py')));
         assert.ok(readMetadataStub.notCalled, 'should not read metadata for out-of-workspace files');
         detector.dispose();
     });
 
-    test('no-op when feature is disabled', async () => {
-        isEnabledStub.returns(false);
-        const detector = new InlineScriptLazyDetector(projectManager.object);
-        detector.activate();
-        await fireOpen(Uri.file(path.resolve('/ws/foo.py')));
-        assert.ok(readMetadataStub.notCalled, 'should not read metadata when setting is disabled');
-        detector.dispose();
-    });
-
-    test('registers a new project when a .py file with metadata is opened', async () => {
+    test('reads metadata for an in-workspace .py file on open', async () => {
         const uri = Uri.file(path.resolve('/ws/foo.py'));
         readMetadataStub.resolves(VALID_METADATA);
-        projectManager.reset();
-        projectManager.setup((pm) => pm.get(typmoq.It.isAny())).returns(() => undefined);
-        let captured: PythonProject | PythonProject[] | undefined;
-        projectManager
-            .setup((pm) => pm.add(typmoq.It.isAny()))
-            .callback((arg: PythonProject | PythonProject[]) => {
-                captured = arg;
-            })
-            .returns(() => Promise.resolve());
-
-        const detector = new InlineScriptLazyDetector(projectManager.object);
+        const detector = new InlineScriptLazyDetector();
         detector.activate();
         await fireOpen(uri);
-
-        projectManager.verify((pm) => pm.add(typmoq.It.isAny()), typmoq.Times.once());
-        assert.ok(captured, 'pm.add should have been called with a project');
-        assert.ok(!Array.isArray(captured), 'expected a single project, not an array');
-        const project = captured as PythonProjectsImpl;
-        assert.ok(project instanceof PythonProjectsImpl, 'project should be a PythonProjectsImpl');
-        assert.strictEqual(project.uri.toString(), uri.toString());
-        assert.deepStrictEqual(project.inlineScriptMetadata, VALID_METADATA);
+        assert.strictEqual(readMetadataStub.callCount, 1, 'open should trigger exactly one read');
+        assert.strictEqual((readMetadataStub.firstCall.args[0] as Uri).toString(), uri.toString());
         detector.dispose();
     });
 
-    test('save event also registers a new project', async () => {
+    test('reads metadata for an in-workspace .py file on save', async () => {
         const uri = Uri.file(path.resolve('/ws/bar.py'));
         readMetadataStub.resolves(VALID_METADATA);
-        projectManager.setup((pm) => pm.get(typmoq.It.isAny())).returns(() => undefined);
-
-        const detector = new InlineScriptLazyDetector(projectManager.object);
+        const detector = new InlineScriptLazyDetector();
         detector.activate();
         await fireSave(uri);
-
-        projectManager.verify((pm) => pm.add(typmoq.It.isAny()), typmoq.Times.once());
-        detector.dispose();
-    });
-
-    test('does not register a project when there is no metadata', async () => {
-        readMetadataStub.resolves(undefined);
-        projectManager.setup((pm) => pm.get(typmoq.It.isAny())).returns(() => undefined);
-
-        const detector = new InlineScriptLazyDetector(projectManager.object);
-        detector.activate();
-        await fireOpen(Uri.file(path.resolve('/ws/plain.py')));
-
-        projectManager.verify((pm) => pm.add(typmoq.It.isAny()), typmoq.Times.never());
-        detector.dispose();
-    });
-
-    test('refreshes metadata on save when the project is already registered', async () => {
-        const uri = Uri.file(path.resolve('/ws/already.py'));
-        const existing = new PythonProjectsImpl('already.py', uri);
-        existing.inlineScriptMetadata = {
-            requiresPython: '>=3.10',
-            dependencies: ['old'],
-            tool: undefined,
-            range: { start: 0, end: 20 },
-        };
-        readMetadataStub.resolves(VALID_METADATA);
-        projectManager.setup((pm) => pm.get(typmoq.It.isAny())).returns(() => existing);
-
-        const detector = new InlineScriptLazyDetector(projectManager.object);
-        detector.activate();
-        await fireSave(uri);
-
-        // No add() call: the project is already registered.
-        projectManager.verify((pm) => pm.add(typmoq.It.isAny()), typmoq.Times.never());
-        assert.deepStrictEqual(existing.inlineScriptMetadata, VALID_METADATA, 'metadata should be refreshed');
-        detector.dispose();
-    });
-
-    test('clears cached metadata when a save removes the block from a known project', async () => {
-        const uri = Uri.file(path.resolve('/ws/wasScript.py'));
-        const existing = new PythonProjectsImpl('wasScript.py', uri);
-        existing.inlineScriptMetadata = VALID_METADATA;
-        readMetadataStub.resolves(undefined);
-        projectManager.setup((pm) => pm.get(typmoq.It.isAny())).returns(() => existing);
-
-        const detector = new InlineScriptLazyDetector(projectManager.object);
-        detector.activate();
-        await fireSave(uri);
-
-        projectManager.verify((pm) => pm.add(typmoq.It.isAny()), typmoq.Times.never());
-        assert.strictEqual(existing.inlineScriptMetadata, undefined, 'metadata cache should be cleared');
-        detector.dispose();
-    });
-
-    test('coalesces concurrent open + save: open is deduped, save forces a re-read', async () => {
-        const uri = Uri.file(path.resolve('/ws/race.py'));
-        // First call resolves with the \"open-time\" metadata, second call
-        // (triggered by the save) resolves with the \"save-time\"
-        // metadata. The save MUST trigger a fresh read after the open
-        // completes \u2014 dropping it would cache stale data when the
-        // user edited the file between the open and save events.
-        const openTime: ism.InlineScriptMetadata = {
-            requiresPython: '>=3.10',
-            dependencies: ['old'],
-            tool: undefined,
-            range: { start: 0, end: 20 },
-        };
-        const saveTime: ism.InlineScriptMetadata = {
-            requiresPython: '>=3.12',
-            dependencies: ['new'],
-            tool: undefined,
-            range: { start: 0, end: 24 },
-        };
-        readMetadataStub.onFirstCall().resolves(openTime);
-        readMetadataStub.onSecondCall().resolves(saveTime);
-
-        // After the first add(), the second pass should see the
-        // project already exists and refresh metadata on it instead
-        // of calling add() again. Capture the project that gets added
-        // so we can assert its metadata reflects the SAVE read.
-        let added: PythonProjectsImpl | undefined;
-        projectManager.reset();
-        projectManager
-            .setup((pm) => pm.get(typmoq.It.isAny()))
-            .returns(() => added)
-            .verifiable(typmoq.Times.atLeastOnce());
-        projectManager
-            .setup((pm) => pm.add(typmoq.It.isAny()))
-            .callback((arg: PythonProject | PythonProject[]) => {
-                added = (Array.isArray(arg) ? arg[0] : arg) as PythonProjectsImpl;
-            })
-            .returns(() => Promise.resolve());
-
-        const detector = new InlineScriptLazyDetector(projectManager.object);
-        detector.activate();
-        await Promise.all([fireOpen(uri), fireSave(uri)]);
-
-        assert.strictEqual(
-            readMetadataStub.callCount,
-            2,
-            `expected two reads (one per event, save re-reads), got ${readMetadataStub.callCount}`,
-        );
-        projectManager.verify((pm) => pm.add(typmoq.It.isAny()), typmoq.Times.once());
-        assert.ok(added, 'open-side processOnce should have registered the project');
-        assert.deepStrictEqual(
-            added!.inlineScriptMetadata,
-            saveTime,
-            'cached metadata must reflect the SAVE-time read, not the OPEN-time read',
-        );
+        assert.strictEqual(readMetadataStub.callCount, 1, 'save should trigger exactly one read');
         detector.dispose();
     });
 
     test('concurrent open + open coalesces to a single read', async () => {
         const uri = Uri.file(path.resolve('/ws/dedup.py'));
         readMetadataStub.resolves(VALID_METADATA);
-        projectManager.setup((pm) => pm.get(typmoq.It.isAny())).returns(() => undefined);
-
-        const detector = new InlineScriptLazyDetector(projectManager.object);
+        const detector = new InlineScriptLazyDetector();
         detector.activate();
         await Promise.all([fireOpen(uri), fireOpen(uri)]);
-
-        // Two opens for the same URI \u2014 the second waits on the first
-        // and does not re-read (the file content cannot have changed
-        // between two opens).
         assert.strictEqual(readMetadataStub.callCount, 1, 'open+open should coalesce to a single read');
-        projectManager.verify((pm) => pm.add(typmoq.It.isAny()), typmoq.Times.once());
         detector.dispose();
     });
 
-    test('dispose() during an in-flight read prevents post-disposal project registration', async () => {
+    test('concurrent open + save coalesces to a single read', async () => {
+        const uri = Uri.file(path.resolve('/ws/race.py'));
+        readMetadataStub.resolves(VALID_METADATA);
+        const detector = new InlineScriptLazyDetector();
+        detector.activate();
+        await Promise.all([fireOpen(uri), fireSave(uri)]);
+        // The slim observer has no cached state to keep fresh, so
+        // simple URI-level dedup is sufficient: a save concurrent
+        // with an in-flight open coalesces with it.
+        assert.strictEqual(readMetadataStub.callCount, 1, 'concurrent open+save should coalesce to a single read');
+        detector.dispose();
+    });
+
+    test('dispose() during an in-flight read bails out before logging detection', async () => {
         const uri = Uri.file(path.resolve('/ws/disposed.py'));
         let resolveRead: ((meta: ism.InlineScriptMetadata) => void) | undefined;
         readMetadataStub.returns(
@@ -321,24 +169,23 @@ suite('InlineScriptLazyDetector', () => {
                 resolveRead = resolve;
             }),
         );
-        projectManager.setup((pm) => pm.get(typmoq.It.isAny())).returns(() => undefined);
 
-        const detector = new InlineScriptLazyDetector(projectManager.object);
+        const detector = new InlineScriptLazyDetector();
         detector.activate();
         // Kick off the open without awaiting it; the read is parked
         // on our manual resolver above.
         const inFlight = openListener!(makeDoc(uri)) as Promise<void> | undefined;
         // Tear the detector down BEFORE the read settles.
         detector.dispose();
-        // Now let the in-flight read complete with metadata. Without
-        // the disposed guard this would call `projectManager.add()`
-        // on a torn-down detector.
+        // Now let the in-flight read complete with metadata. The
+        // `disposed` guard inside processOnce should prevent any
+        // further work (in the future, this guard also protects the
+        // telemetry emission site from firing after disposal).
         resolveRead!(VALID_METADATA);
-        await inFlight;
-        projectManager.verify((pm) => pm.add(typmoq.It.isAny()), typmoq.Times.never());
+        await assert.doesNotReject(inFlight ?? Promise.resolve());
     });
 
-    // ---------- B1 / B2: catch-up replay over `getOpenTextDocuments` ----------
+    // ---------- catch-up replay over `getOpenTextDocuments` ----------
 
     // Drain the microtask queue and the next `setImmediate` slot so
     // the deferred catch-up replay can run before assertions.
@@ -353,10 +200,9 @@ suite('InlineScriptLazyDetector', () => {
         readMetadataStub.callsFake(async (u: Uri) =>
             u.toString() === uriWithMeta.toString() ? VALID_METADATA : undefined,
         );
-        projectManager.setup((pm) => pm.get(typmoq.It.isAny())).returns(() => undefined);
         getOpenTextDocumentsStub.returns([makeDoc(uriWithMeta), makeDoc(uriPlain), makeDoc(uriNonPy)]);
 
-        const detector = new InlineScriptLazyDetector(projectManager.object);
+        const detector = new InlineScriptLazyDetector();
         detector.activate();
         // Wait for the deferred catch-up.
         await flushImmediate();
@@ -370,119 +216,17 @@ suite('InlineScriptLazyDetector', () => {
         assert.ok(readUris.includes(uriWithMeta.toString()));
         assert.ok(readUris.includes(uriPlain.toString()));
         assert.ok(!readUris.includes(uriNonPy.toString()), 'should not read non-.py URI during replay');
-        projectManager.verify((pm) => pm.add(typmoq.It.isAny()), typmoq.Times.once());
         detector.dispose();
     });
 
     test('dispose() cancels the pending catch-up replay', async () => {
         getOpenTextDocumentsStub.returns([makeDoc(Uri.file(path.resolve('/ws/never.py')))]);
-        const detector = new InlineScriptLazyDetector(projectManager.object);
+        const detector = new InlineScriptLazyDetector();
         detector.activate();
         // Tear down BEFORE the `setImmediate` slot fires.
         detector.dispose();
         await flushImmediate();
         assert.ok(readMetadataStub.notCalled, 'dispose() must clear the pending setImmediate handle');
-    });
-
-    // ---------- B3: URI registered with a non-impl project ----------
-
-    test('skips refresh when URI is registered with a non-PythonProjectsImpl project', async () => {
-        const uri = Uri.file(path.resolve('/ws/foreign.py'));
-        // A `PythonProject` that is NOT a `PythonProjectsImpl`. This
-        // mirrors the (rare) case where a third-party manager has
-        // registered the same URI under its own concrete class.
-        const foreign: PythonProject = { name: 'foreign.py', uri };
-        readMetadataStub.resolves(VALID_METADATA);
-        projectManager.setup((pm) => pm.get(typmoq.It.isAny())).returns(() => foreign);
-
-        const detector = new InlineScriptLazyDetector(projectManager.object);
-        detector.activate();
-        await fireOpen(uri);
-
-        projectManager.verify((pm) => pm.add(typmoq.It.isAny()), typmoq.Times.never());
-        detector.dispose();
-    });
-
-    // ---------- B6: multi-root per-folder gating ----------
-
-    test('respects per-folder setting scope when the feature is enabled in some folders only', async () => {
-        const onUri = Uri.file(path.resolve('/wsOn/script.py'));
-        const offUri = Uri.file(path.resolve('/wsOff/script.py'));
-        // Stub the gate so it returns true only for URIs that look
-        // like they live under `/wsOn`.
-        isEnabledStub.callsFake((scope?: { fsPath?: string }) => {
-            const p = scope?.fsPath;
-            if (typeof p !== 'string') {
-                return false;
-            }
-            return p.includes(`${path.sep}wsOn${path.sep}`) || p.endsWith(`${path.sep}wsOn`);
-        });
-        readMetadataStub.resolves(VALID_METADATA);
-        projectManager.setup((pm) => pm.get(typmoq.It.isAny())).returns(() => undefined);
-
-        const detector = new InlineScriptLazyDetector(projectManager.object);
-        detector.activate();
-        await fireOpen(onUri);
-        await fireOpen(offUri);
-
-        assert.strictEqual(readMetadataStub.callCount, 1, 'should read only the file in the enabled folder');
-        const readUri = readMetadataStub.firstCall.args[0] as Uri;
-        assert.strictEqual(readUri.toString(), onUri.toString());
-        detector.dispose();
-    });
-
-    // ---------- C2: setting-toggle triggers replay ----------
-
-    test('onDidChangeConfiguration replays open documents when the experimental setting toggles', async () => {
-        const uri = Uri.file(path.resolve('/ws/late.py'));
-        // The file is open in the editor BEFORE the user toggles the
-        // setting. The activation replay finds it but bails because
-        // the feature is disabled.
-        getOpenTextDocumentsStub.returns([makeDoc(uri)]);
-        isEnabledStub.returns(false);
-        readMetadataStub.resolves(VALID_METADATA);
-        projectManager.setup((pm) => pm.get(typmoq.It.isAny())).returns(() => undefined);
-
-        const detector = new InlineScriptLazyDetector(projectManager.object);
-        detector.activate();
-        await flushImmediate();
-        assert.ok(readMetadataStub.notCalled, 'replay during activation should bail because setting is off');
-
-        // User flips the setting on; the lazy detector should pick
-        // the file up without requiring a manual save or reload.
-        isEnabledStub.returns(true);
-        assert.ok(configListener, 'config-change listener should be registered after activate()');
-        const event = {
-            affectsConfiguration: (key: string) => key === 'python-envs.useInlineScriptMetadata',
-        } as ConfigurationChangeEvent;
-        configListener!(event);
-        // The replay schedules `handleDocument` synchronously; let
-        // the awaited work resolve.
-        await flushImmediate();
-        await flushImmediate();
-
-        assert.strictEqual(readMetadataStub.callCount, 1, 'config-change replay must inspect the open .py document');
-        projectManager.verify((pm) => pm.add(typmoq.It.isAny()), typmoq.Times.once());
-        detector.dispose();
-    });
-
-    test('onDidChangeConfiguration ignores changes to unrelated settings', async () => {
-        getOpenTextDocumentsStub.returns([makeDoc(Uri.file(path.resolve('/ws/foo.py')))]);
-        const detector = new InlineScriptLazyDetector(projectManager.object);
-        detector.activate();
-        await flushImmediate();
-        // The activation replay invoked `handleDocument` and bailed
-        // inside the gate (read stub returned undefined). Reset.
-        readMetadataStub.resetHistory();
-
-        const event = {
-            affectsConfiguration: (_key: string) => false,
-        } as ConfigurationChangeEvent;
-        assert.ok(configListener);
-        configListener!(event);
-        await flushImmediate();
-        assert.ok(readMetadataStub.notCalled, 'unrelated config change must not trigger a replay');
-        detector.dispose();
     });
 });
 

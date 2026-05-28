@@ -45,6 +45,5 @@
     "python-envs.revealProjectInExplorer.title": "Reveal Project in Explorer",
     "python-envs.revealEnvInManagerView.title": "Reveal in Environment Managers View",
     "python-envs.runPetInTerminal.title": "Run Python Environment Tool (PET) in Terminal...",
-    "python-envs.alwaysUseUv.description": "When set to true, uv will be used to manage all virtual environments if available. When set to false, uv will only manage virtual environments explicitly created by uv.",
-    "python-envs.useInlineScriptMetadata.description": "Use inline script metadata (PEP 723) to manage environments for single-file Python scripts. When enabled, scripts with a `# /// script` block at the top are detected as projects, environments are created honoring `requires-python` and `dependencies`, and the extension watches for metadata changes. Disabled by default while the feature is in preview."
+    "python-envs.alwaysUseUv.description": "When set to true, uv will be used to manage all virtual environments if available. When set to false, uv will only manage virtual environments explicitly created by uv."
 }

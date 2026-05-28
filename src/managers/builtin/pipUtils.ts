@@ -4,8 +4,7 @@ import * as path from 'path';
 import { l10n, LogOutputChannel, ProgressLocation, QuickInputButtons, QuickPickItem, Uri, window } from 'vscode';
 import { PackageManagementOptions, PythonEnvironment, PythonEnvironmentApi, PythonProject } from '../../api';
 import { EXTENSION_ROOT_DIR } from '../../common/constants';
-import { isInlineScriptMetadataEnabled, readInlineScriptMetadataFromFile } from '../../common/inlineScriptMetadata';
-import { InlineScriptStrings, PackageManagement, Pickers, VenvManagerStrings } from '../../common/localize';
+import { PackageManagement, Pickers, VenvManagerStrings } from '../../common/localize';
 import { traceInfo } from '../../common/logging';
 import { showQuickPickWithButtons, withProgress } from '../../common/window.apis';
 import { findFiles } from '../../common/workspace.apis';
@@ -345,45 +344,6 @@ export async function getProjectInstallable(
                             displayName: name,
                             group: 'Requirements',
                             args: ['-r', uri.fsPath],
-                        });
-                    }
-                }),
-            );
-
-            // Inline-script-metadata (PEP 723) branch: any project whose
-            // `uri` is a `.py` file may carry inline dependency
-            // declarations at the top of the file. We surface those
-            // declared deps as `Installable` entries grouped under
-            // 'PEP 723' so they appear in the same pre-install picker
-            // as `pyproject.toml` and `requirements*.txt`
-            // dependencies. This branch is gated by the experimental
-            // setting and only runs for projects whose root URI is
-            // itself a `.py` file — folder projects are never walked
-            // for `.py` files (that would be an unbounded scan).
-            await Promise.all(
-                projects.map(async (project) => {
-                    if (project.uri.scheme !== 'file') {
-                        return;
-                    }
-                    if (path.extname(project.uri.fsPath).toLowerCase() !== '.py') {
-                        return;
-                    }
-                    if (!isInlineScriptMetadataEnabled(project.uri)) {
-                        return;
-                    }
-                    const metadata = await readInlineScriptMetadataFromFile(project.uri);
-                    const deps = metadata?.dependencies;
-                    if (!deps || deps.length === 0) {
-                        return;
-                    }
-                    for (const dep of deps) {
-                        installable.push({
-                            name: dep,
-                            displayName: dep,
-                            group: 'PEP 723',
-                            args: [dep],
-                            description: InlineScriptStrings.installableDescription,
-                            uri: project.uri,
                         });
                     }
                 }),

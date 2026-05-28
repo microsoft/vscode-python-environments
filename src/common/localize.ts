@@ -212,16 +212,6 @@ export namespace ProjectCreatorString {
     export const noProjectsFound = l10n.t('No projects found');
 }
 
-export namespace InlineScriptStrings {
-    export const detectorDisplayName = l10n.t('Find Inline-Metadata Scripts');
-    export const detectorDescription = l10n.t(
-        'Find single-file Python scripts that declare their dependencies inline (PEP 723).',
-    );
-    export const selectScripts = l10n.t('Select inline-metadata scripts to add as projects');
-    export const noScriptsFound = l10n.t('No Python scripts with inline metadata were found in this workspace.');
-    export const installableDescription = l10n.t('Inline script dependency');
-}
-
 export namespace EnvViewStrings {
     export const selectedGlobalTooltip = l10n.t('This environment is selected for non-workspace files');
     export const selectedWorkspaceTooltip = l10n.t('This environment is selected for project files');
