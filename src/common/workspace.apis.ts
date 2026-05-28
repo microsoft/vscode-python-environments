@@ -9,6 +9,7 @@ import {
     FileSystemWatcher,
     GlobPattern,
     TextDocument,
+    TextDocumentChangeEvent,
     Uri,
     workspace,
     WorkspaceConfiguration,
@@ -88,6 +89,14 @@ export function onDidSaveTextDocument(
     disposables?: Disposable[],
 ): Disposable {
     return workspace.onDidSaveTextDocument(listener, thisArgs, disposables);
+}
+
+export function onDidChangeTextDocument(
+    listener: (e: TextDocumentChangeEvent) => any,
+    thisArgs?: any,
+    disposables?: Disposable[],
+): Disposable {
+    return workspace.onDidChangeTextDocument(listener, thisArgs, disposables);
 }
 
 /**

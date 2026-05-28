@@ -2,28 +2,35 @@
 // Licensed under the MIT License.
 
 import * as path from 'path';
-import { Disposable, TextDocument, Uri } from 'vscode';
+import { Disposable, TextDocument, TextDocumentChangeEvent, Uri } from 'vscode';
 import { readInlineScriptMetadataFromFile } from '../common/inlineScriptMetadata';
 import { traceVerbose, traceWarn } from '../common/logging';
+import { EventNames } from '../common/telemetry/constants';
+import { sendTelemetryEvent } from '../common/telemetry/sender';
 import {
     getOpenTextDocuments,
     getWorkspaceFolder,
+    onDidChangeTextDocument,
     onDidOpenTextDocument,
     onDidSaveTextDocument,
 } from '../common/workspace.apis';
 
 /**
  * Silent on-open / on-save detector for `.py` files that declare
- * inline script metadata (PEP 723). The detector is intentionally
- * observer-only: it parses the head of every eligible `.py` file the
- * user opens or saves, but does not surface any UI, register
- * projects, or otherwise change extension behavior.
+ * inline script metadata (PEP 723). The detector parses the head of
+ * every eligible `.py` file the user opens or saves and emits two
+ * anonymized telemetry events:
  *
- * It is kept wired up so we have a single ingest point for PEP 723
- * telemetry. The TODO marker inside `processOnce` is the planned
- * emission site; until the telemetry events are wired up the detector
- * is effectively dead code that runs a cheap parse and discards the
- * result.
+ *  - `PEP723.DETECTED` once per (URI, session) the first time a
+ *    valid `# /// script` block is observed. This is the denominator
+ *    for the "how many users actually see PEP 723 files" question.
+ *  - `PEP723.EDITED` once per (URI, session) the first time a
+ *    previously-detected file receives a real text edit. Together
+ *    with `DETECTED` this distinguishes viewers from editors.
+ *
+ * No URIs, file paths, or file content are sent. The detector does
+ * not register projects, surface UI, or otherwise change extension
+ * behavior; it is a pure observer.
  *
  * Detection is cheap (≤ 8 KiB read + regex + TOML parse) and runs
  * only on files the user has already shown intent in.
@@ -33,6 +40,18 @@ export class InlineScriptLazyDetector implements Disposable {
     // In-flight reads keyed by `uri.toString()` so rapid open+save
     // doesn't double-process the same file.
     private readonly inFlight = new Map<string, Promise<void>>();
+    // URIs (as `uri.toString()`) for which we have already emitted
+    // `PEP723.DETECTED` in this session. Used to dedup the detection
+    // event across repeat opens/saves and to gate `PEP723.EDITED` so
+    // the latter only fires for files we already counted as detected.
+    private readonly detectedUris = new Set<string>();
+    // URIs for which we have already emitted `PEP723.EDITED` in this
+    // session. Each detected file emits at most one edited event.
+    private readonly editedUris = new Set<string>();
+    // Wall-clock ms (from `Date.now`) at which each URI's detection
+    // event fired. Used to compute the `duration` measure on the
+    // first-edit event.
+    private readonly detectionAtMs = new Map<string, number>();
     // Flips to `true` in `dispose()`. Guards async continuations
     // inside `processOnce` so an in-flight read that completes after
     // disposal does not emit telemetry on a detector the host has
@@ -63,6 +82,7 @@ export class InlineScriptLazyDetector implements Disposable {
         this.subscriptions.push(
             onDidOpenTextDocument((doc) => this.handleDocument(doc, 'open')),
             onDidSaveTextDocument((doc) => this.handleDocument(doc, 'save')),
+            onDidChangeTextDocument((e) => this.handleChange(e)),
         );
         // Defer the catch-up pass so we observe `workspace.textDocuments`
         // AFTER VS Code finishes registering the document that triggered
@@ -145,23 +165,64 @@ export class InlineScriptLazyDetector implements Disposable {
             if (this.disposed) {
                 return;
             }
-            if (metadata !== undefined) {
-                traceVerbose(
-                    `inlineScriptLazyDetector: detected inline script metadata in ${uri.fsPath} (${trigger})`,
-                );
-                // TODO(pep723-telemetry): emit a PEP 723 detection
-                // event here (e.g. `pep723.detected`) with
-                // anonymized fields such as `trigger`, presence of
-                // `requires-python`, and dependency count. This is
-                // the planned emission site the detector is being
-                // kept alive for.
+            if (metadata === undefined) {
+                return;
             }
+            const key = uri.toString();
+            if (this.detectedUris.has(key)) {
+                // Already counted this file in the current session.
+                // Subsequent opens/saves of the same URI are silent.
+                return;
+            }
+            this.detectedUris.add(key);
+            this.detectionAtMs.set(key, Date.now());
+            traceVerbose(`inlineScriptLazyDetector: detected inline script metadata in ${uri.fsPath} (${trigger})`);
+            sendTelemetryEvent(
+                EventNames.PEP723_DETECTED,
+                { dependencyCount: metadata.dependencies?.length ?? 0 },
+                {
+                    trigger,
+                    hasRequiresPython: metadata.requiresPython !== undefined,
+                },
+            );
         } catch (err) {
             // `readInlineScriptMetadataFromFile` already swallows I/O
             // errors internally. This catch is a defensive net for
             // unexpected synchronous throws (e.g. malformed URI).
             traceWarn(`inlineScriptLazyDetector: unexpected error while reading ${uri.fsPath}:`, err);
         }
+    }
+
+    /**
+     * Emit `PEP723.EDITED` the first time a previously-detected URI
+     * receives a real content change. The handler is hot (fires on
+     * every keystroke in every text document workspace-wide) so it
+     * bails out as cheaply as possible for the common case where the
+     * file is not a tracked PEP 723 script.
+     */
+    private handleChange(e: TextDocumentChangeEvent): void {
+        if (this.disposed) {
+            return;
+        }
+        // `onDidChangeTextDocument` can fire with empty `contentChanges`
+        // (e.g. dirty-state toggles); skip those — they aren't user edits.
+        if (e.contentChanges.length === 0) {
+            return;
+        }
+        const key = e.document.uri.toString();
+        if (!this.detectedUris.has(key)) {
+            return;
+        }
+        if (this.editedUris.has(key)) {
+            return;
+        }
+        this.editedUris.add(key);
+        const detectedAt = this.detectionAtMs.get(key);
+        const duration = detectedAt !== undefined ? Date.now() - detectedAt : 0;
+        traceVerbose(
+            `inlineScriptLazyDetector: first edit observed on ${e.document.uri.fsPath} (${duration}ms after detection)`,
+        );
+        sendTelemetryEvent(EventNames.PEP723_EDITED, duration);
     }
 }
 
