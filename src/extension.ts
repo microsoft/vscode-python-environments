@@ -207,9 +207,8 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
     );
 
     // Silent observer for `.py` files that declare PEP 723 inline
-    // script metadata. Kept wired up as the ingest point for PEP 723
-    // telemetry; does not register projects or surface any UI while
-    // the feature itself is not shipped to users.
+    // script metadata. Emits anonymized telemetry (PEP723.DETECTED /
+    // PEP723.EDITED) but does not register projects or surface any UI.
     const inlineScriptLazyDetector = new InlineScriptLazyDetector();
     inlineScriptLazyDetector.activate();
     context.subscriptions.push(inlineScriptLazyDetector);
