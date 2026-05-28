@@ -305,6 +305,14 @@ export async function removeEnvironmentCommand(context: unknown, managers: Envir
 
 export async function handlePackageUninstall(context: unknown, em: EnvironmentManagers) {
     if (context instanceof PackageTreeItem || context instanceof ProjectPackage) {
+        // Ask for user confirmation if the package is transitive
+        if (context.pkg.isTransitive) {
+            const message = `The package "${context.pkg.name}" is a transitive dependency. Uninstalling it may break other packages that depend on it. Are you sure you want to uninstall it?`;
+            const confirm = await showInformationMessage(message, { modal: true }, 'Uninstall', 'Cancel');
+            if (confirm !== 'Uninstall') {
+                return;
+            }
+        }
         const moduleName = context.pkg.name;
         const environment = context instanceof ProjectPackage ? context.parent.environment : context.parent.environment;
         const packageManager = em.getPackageManager(environment);
