@@ -259,7 +259,7 @@ export async function refreshPipDirectPackageNames(
         return parseUvTree(treeOutput);
     }
     const data = await execPipList(environment, log, ['--not-required']);
-    const packages = parsePipList(data);
+    const packages = parsePipListJson(data);
     return packages.map((pkg) => pkg.name);
 }
 

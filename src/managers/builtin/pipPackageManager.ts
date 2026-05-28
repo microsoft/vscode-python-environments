@@ -130,7 +130,7 @@ export class PipPackageManager implements PackageManager, Disposable {
         this.packages.clear();
     }
 
-    async fetchDirectPackageNames(environment: PythonEnvironment): Promise<Set<string> | undefined> {
+    async getDirectPackageNames(environment: PythonEnvironment): Promise<Set<string> | undefined> {
         const data = await refreshPipDirectPackageNames(environment, this.log);
         return data ? new Set(data) : undefined;
     }

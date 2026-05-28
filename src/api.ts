@@ -691,7 +691,7 @@ export interface PackageManager {
      * @param environment - The Python environment for which to fetch direct package names.
      * @returns A promise that resolves to an array of package name strings, or undefined if not supported.
      */
-    fetchDirectPackageNames?(environment: PythonEnvironment): Promise<Set<string> | undefined>;
+    getDirectPackageNames?(environment: PythonEnvironment): Promise<Set<string> | undefined>;
 
     /**
      * Clears the package manager's cache.
