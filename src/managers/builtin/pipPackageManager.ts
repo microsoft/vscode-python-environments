@@ -11,6 +11,7 @@ import {
 } from 'vscode';
 import {
     DidChangePackagesEventArgs,
+    GetPackagesOptions,
     IconPath,
     Package,
     PackageChangeKind,
@@ -106,9 +107,12 @@ export class PipPackageManager implements PackageManager, Disposable {
         );
     }
 
-    async getPackages(environment: PythonEnvironment): Promise<Package[] | undefined> {
-        if (!this.packages.has(environment.envId.id)) {
-            await this.refresh(environment);
+    async getPackages(environment: PythonEnvironment, options?: GetPackagesOptions): Promise<Package[] | undefined> {
+        if (options?.skipCache || !this.packages.has(environment.envId.id)) {
+            const data = await refreshPipPackages(environment, this.log);
+            const packages = (data ?? []).map((pkg) => this.api.createPackageItem(pkg, environment, this));
+            this.packages.set(environment.envId.id, packages);
+            return packages;
         }
         return this.packages.get(environment.envId.id);
     }
@@ -116,11 +120,6 @@ export class PipPackageManager implements PackageManager, Disposable {
     dispose(): void {
         this._onDidChangePackages.dispose();
         this.packages.clear();
-    }
-
-    async fetchPackages(environment: PythonEnvironment): Promise<Package[]> {
-        const data = await refreshPipPackages(environment, this.log);
-        return (data ?? []).map((pkg) => this.api.createPackageItem(pkg, environment, this));
     }
 
     setPackages(

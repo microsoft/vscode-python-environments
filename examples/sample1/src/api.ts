@@ -611,17 +611,10 @@ export interface PackageManager {
     /**
      * Retrieves the list of packages for the specified Python environment.
      * @param environment - The Python environment for which to retrieve packages.
+     * @param options - Optional settings for package retrieval.
      * @returns An array of packages, or undefined if the packages could not be retrieved.
      */
-    getPackages(environment: PythonEnvironment): Promise<Package[] | undefined>;
-
-    /**
-     * Fetches the latest list of packages from the package manager for the specified Python environment.
-     * Unlike {@link getPackages}, this always queries the underlying tool and does not use cached results.
-     * @param environment - The Python environment for which to fetch packages.
-     * @returns A promise that resolves to an array of packages.
-     */
-    fetchPackages(environment: PythonEnvironment): Promise<Package[]>;
+    getPackages(environment: PythonEnvironment, options?: GetPackagesOptions): Promise<Package[] | undefined>;
 
     /**
      * Updates the cached packages for the specified environment and fires a change event.
@@ -732,6 +725,17 @@ export interface DidChangePythonProjectsEventArgs {
      * The list of Python projects that were removed.
      */
     removed: PythonProject[];
+}
+
+/**
+ * Options for retrieving packages from a package manager.
+ */
+export interface GetPackagesOptions {
+    /**
+     * When `true`, bypasses the cache and fetches the latest packages from the underlying tool.
+     * Defaults to `false`.
+     */
+    skipCache?: boolean;
 }
 
 /**
@@ -970,9 +974,10 @@ export interface PythonPackageGetterApi {
      * Get the list of packages in a Python Environment.
      *
      * @param environment The Python Environment for which the list of packages is required.
+     * @param options Optional settings for package retrieval.
      * @returns The list of packages in the Python Environment.
      */
-    getPackages(environment: PythonEnvironment): Promise<Package[] | undefined>;
+    getPackages(environment: PythonEnvironment, options?: GetPackagesOptions): Promise<Package[] | undefined>;
 
     /**
      * Event raised when the list of packages in a Python Environment changes.

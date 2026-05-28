@@ -100,20 +100,19 @@ suite('packageChanges', () => {
     suite('updatePackagesAndNotify', () => {
         let environment: PythonEnvironment;
         let cache: Package[] | undefined;
-        let fetchPackagesStub: sinon.SinonStub;
+        let getPackagesStub: sinon.SinonStub;
         let packageManager: PackageManager;
 
         setup(() => {
             environment = {} as PythonEnvironment;
             cache = undefined;
-            fetchPackagesStub = sinon.stub();
+            getPackagesStub = sinon.stub();
 
             packageManager = {
                 name: 'test',
                 manage: sinon.stub(),
                 refresh: sinon.stub(),
-                getPackages: sinon.stub().callsFake(() => Promise.resolve(cache)),
-                fetchPackages: fetchPackagesStub,
+                getPackages: getPackagesStub,
                 setPackages: sinon.stub().callsFake((_env: PythonEnvironment, pkgs: Package[]) => {
                     cache = pkgs;
                 }),
@@ -122,7 +121,7 @@ suite('packageChanges', () => {
 
         test('updates cache and reports adds on first load', async () => {
             const fetched = [{ name: 'requests', version: '2.31.0' } as Package];
-            fetchPackagesStub.resolves(fetched);
+            getPackagesStub.resolves(fetched);
 
             await updatePackagesAndNotify(packageManager, environment, cache);
 
@@ -139,7 +138,7 @@ suite('packageChanges', () => {
         test('updates cache with empty changes when nothing changed', async () => {
             const pkgs = [{ name: 'requests', version: '2.31.0' } as Package];
             cache = pkgs;
-            fetchPackagesStub.resolves(pkgs);
+            getPackagesStub.resolves(pkgs);
 
             await updatePackagesAndNotify(packageManager, environment, cache);
 
@@ -156,7 +155,7 @@ suite('packageChanges', () => {
             ];
             cache = before;
             const after = [{ name: 'requests', version: '2.31.0' } as Package];
-            fetchPackagesStub.resolves(after);
+            getPackagesStub.resolves(after);
 
             await updatePackagesAndNotify(packageManager, environment, cache);
 
@@ -172,7 +171,7 @@ suite('packageChanges', () => {
         test('detects mixed adds and removals', async () => {
             cache = [{ name: 'flask', version: '3.0.0' } as Package];
             const after = [{ name: 'django', version: '5.0.0' } as Package];
-            fetchPackagesStub.resolves(after);
+            getPackagesStub.resolves(after);
 
             await updatePackagesAndNotify(packageManager, environment, cache);
 

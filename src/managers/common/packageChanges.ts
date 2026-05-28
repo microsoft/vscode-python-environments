@@ -42,7 +42,7 @@ export async function updatePackagesAndNotify(
     environment: PythonEnvironment,
     before?: Package[],
 ): Promise<void> {
-    const after = await packageManager.fetchPackages(environment);
+    const after = (await packageManager.getPackages(environment, { skipCache: true })) ?? [];
     const changes = getPackageChanges(before ?? [], after);
     packageManager.setPackages(environment, after, changes);
 }

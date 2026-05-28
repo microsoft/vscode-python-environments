@@ -14,6 +14,7 @@ import {
 import { Disposable } from 'vscode-jsonrpc';
 import {
     DidChangePackagesEventArgs,
+    GetPackagesOptions,
     IconPath,
     Package,
     PackageChangeKind,
@@ -124,9 +125,11 @@ export class PoetryPackageManager implements PackageManager, Disposable {
         );
     }
 
-    async getPackages(environment: PythonEnvironment): Promise<Package[] | undefined> {
-        if (!this.packages.has(environment.envId.id)) {
-            await this.refresh(environment);
+    async getPackages(environment: PythonEnvironment, options?: GetPackagesOptions): Promise<Package[] | undefined> {
+        if (options?.skipCache || !this.packages.has(environment.envId.id)) {
+            const packages = await this.fetchPackagesFromTool(environment);
+            this.packages.set(environment.envId.id, packages);
+            return packages;
         }
         return this.packages.get(environment.envId.id);
     }
@@ -176,7 +179,7 @@ export class PoetryPackageManager implements PackageManager, Disposable {
         }
     }
 
-    async fetchPackages(environment: PythonEnvironment): Promise<Package[]> {
+    private async fetchPackagesFromTool(environment: PythonEnvironment): Promise<Package[]> {
         const poetry = await getPoetry();
         if (!poetry) {
             throw new Error(

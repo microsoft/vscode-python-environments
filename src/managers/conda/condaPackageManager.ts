@@ -9,6 +9,7 @@ import {
 } from 'vscode';
 import {
     DidChangePackagesEventArgs,
+    GetPackagesOptions,
     IconPath,
     Package,
     PackageChangeKind,
@@ -100,9 +101,38 @@ export class CondaPackageManager implements PackageManager, Disposable {
         );
     }
 
-    async getPackages(environment: PythonEnvironment): Promise<Package[] | undefined> {
-        if (!this.packages.has(environment.envId.id)) {
-            await this.refresh(environment);
+    async getPackages(environment: PythonEnvironment, options?: GetPackagesOptions): Promise<Package[] | undefined> {
+        if (options?.skipCache || !this.packages.has(environment.envId.id)) {
+            const args = ['list', '-p', environment.environmentPath.fsPath, '--json'];
+            const data = await runCondaExecutable(args);
+
+            let condaPackages: { name: string; version: string }[];
+            try {
+                condaPackages = JSON.parse(data) as { name: string; version: string }[];
+            } catch (e) {
+                traceError(`Failed to parse conda list JSON output: ${data}`, e);
+                return [];
+            }
+
+            const packages: Package[] = [];
+            for (const condaPkg of condaPackages) {
+                if (condaPkg.name && condaPkg.version) {
+                    packages.push(
+                        this.api.createPackageItem(
+                            {
+                                name: condaPkg.name,
+                                displayName: condaPkg.name,
+                                version: condaPkg.version,
+                                description: condaPkg.version,
+                            },
+                            environment,
+                            this,
+                        ),
+                    );
+                }
+            }
+            this.packages.set(environment.envId.id, packages);
+            return packages;
         }
         return this.packages.get(environment.envId.id);
     }
@@ -110,38 +140,6 @@ export class CondaPackageManager implements PackageManager, Disposable {
     dispose() {
         this._onDidChangePackages.dispose();
         this.packages.clear();
-    }
-
-    async fetchPackages(environment: PythonEnvironment): Promise<Package[]> {
-        const args = ['list', '-p', environment.environmentPath.fsPath, '--json'];
-        const data = await runCondaExecutable(args);
-
-        let condaPackages: { name: string; version: string }[];
-        try {
-            condaPackages = JSON.parse(data) as { name: string; version: string }[];
-        } catch (e) {
-            traceError(`Failed to parse conda list JSON output: ${data}`, e);
-            return [];
-        }
-
-        const packages: Package[] = [];
-        for (const condaPkg of condaPackages) {
-            if (condaPkg.name && condaPkg.version) {
-                packages.push(
-                    this.api.createPackageItem(
-                        {
-                            name: condaPkg.name,
-                            displayName: condaPkg.name,
-                            version: condaPkg.version,
-                            description: condaPkg.version,
-                        },
-                        environment,
-                        this,
-                    ),
-                );
-            }
-        }
-        return packages;
     }
 
     setPackages(
