@@ -1,6 +1,7 @@
 // Copyright (c) Microsoft Corporation. All rights reserved.
 // Licensed under the MIT License.
 
+import type { Pep440Version } from '@renovatebot/pep440';
 import type {
     Disposable,
     Event,
@@ -15,7 +16,6 @@ import type {
 } from 'vscode';
 
 export type { Pep440Version } from '@renovatebot/pep440';
-import type { Pep440Version } from '@renovatebot/pep440';
 
 /**
  * The path to an icon, or a theme-specific configuration of icons.
@@ -737,12 +737,15 @@ export interface PackageManager {
 
     /**
      * Retrieves the list of available versions for a given package.
-     * @param packageName - The name of the package to look up.
      * @param environment - The Python environment context for the lookup.
+     * @param packageName - The name of the package to look up.
      * @returns A promise that resolves to an array of {@link Pep440Version} objects (newest first),
      *          or `undefined` if this manager does not support version listing.
      */
-    getAvailableVersions?(packageName: string, environment: PythonEnvironment): Promise<Pep440Version[] | undefined>;
+    getPackageAvailableVersions?(
+        environment: PythonEnvironment,
+        packageName: string,
+    ): Promise<Pep440Version[] | undefined>;
 
     /**
      * Formats a versioned install specification for this package manager.
