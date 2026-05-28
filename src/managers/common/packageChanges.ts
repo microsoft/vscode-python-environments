@@ -4,6 +4,11 @@
 import { Package, PackageChangeKind, PackageManager, PythonEnvironment } from '../../api';
 
 /**
+ * Callback invoked with the computed changes when at least one change is detected.
+ */
+export type PackageChangesCallback = (changes: { kind: PackageChangeKind; pkg: Package }[]) => void;
+
+/**
  * Computes the list of package changes between a before and after snapshot.
  * @param before - The previous list of packages.
  * @param after - The new list of packages.
@@ -40,9 +45,12 @@ export function getPackageChanges(before: Package[], after: Package[]): { kind: 
 export async function updatePackagesAndNotify(
     packageManager: PackageManager,
     environment: PythonEnvironment,
-    before?: Package[],
+    before: Package[] | undefined,
+    onChanges: PackageChangesCallback,
 ): Promise<void> {
     const after = (await packageManager.getPackages(environment, { skipCache: true })) ?? [];
     const changes = getPackageChanges(before ?? [], after);
-    packageManager.setPackages(environment, after, changes);
+    if (changes.length > 0) {
+        onChanges(changes);
+    }
 }

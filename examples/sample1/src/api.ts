@@ -617,18 +617,6 @@ export interface PackageManager {
     getPackages(environment: PythonEnvironment, options?: GetPackagesOptions): Promise<Package[] | undefined>;
 
     /**
-     * Updates the cached packages for the specified environment and fires a change event.
-     * @param environment - The Python environment whose packages changed.
-     * @param packages - The new list of packages.
-     * @param changes - The list of changes describing what was added or removed.
-     */
-    setPackages(
-        environment: PythonEnvironment,
-        packages: Package[],
-        changes: { kind: PackageChangeKind; pkg: Package }[],
-    ): void;
-
-    /**
      * Event that is fired when packages change.
      */
     onDidChangePackages?: Event<DidChangePackagesEventArgs>;

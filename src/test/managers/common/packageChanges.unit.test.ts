@@ -99,53 +99,41 @@ suite('packageChanges', () => {
 
     suite('updatePackagesAndNotify', () => {
         let environment: PythonEnvironment;
-        let cache: Package[] | undefined;
         let getPackagesStub: sinon.SinonStub;
         let packageManager: PackageManager;
 
         setup(() => {
             environment = {} as PythonEnvironment;
-            cache = undefined;
             getPackagesStub = sinon.stub();
-
             packageManager = {
                 name: 'test',
                 manage: sinon.stub(),
                 refresh: sinon.stub(),
                 getPackages: getPackagesStub,
-                setPackages: sinon.stub().callsFake((_env: PythonEnvironment, pkgs: Package[]) => {
-                    cache = pkgs;
-                }),
             } as unknown as PackageManager;
         });
 
-        test('updates cache and reports adds on first load', async () => {
+        test('reports adds on first load', async () => {
             const fetched = [{ name: 'requests', version: '2.31.0' } as Package];
             getPackagesStub.resolves(fetched);
+            const onChanges = sinon.stub();
 
-            await updatePackagesAndNotify(packageManager, environment, cache);
+            await updatePackagesAndNotify(packageManager, environment, undefined, onChanges);
 
-            const setPackages = packageManager.setPackages as sinon.SinonStub;
-            assert.ok(setPackages.calledOnce);
-            const [env, pkgs, changes] = setPackages.firstCall.args;
-            assert.strictEqual(env, environment);
-            assert.deepStrictEqual(pkgs, fetched);
+            assert.ok(onChanges.calledOnce);
+            const [changes] = onChanges.firstCall.args;
             assert.strictEqual(changes.length, 1);
             assert.strictEqual(changes[0].kind, PackageChangeKind.add);
-            assert.deepStrictEqual(cache, fetched);
         });
 
-        test('updates cache with empty changes when nothing changed', async () => {
+        test('does not fire callback when nothing changed', async () => {
             const pkgs = [{ name: 'requests', version: '2.31.0' } as Package];
-            cache = pkgs;
             getPackagesStub.resolves(pkgs);
+            const onChanges = sinon.stub();
 
-            await updatePackagesAndNotify(packageManager, environment, cache);
+            await updatePackagesAndNotify(packageManager, environment, pkgs, onChanges);
 
-            const setPackages = packageManager.setPackages as sinon.SinonStub;
-            assert.ok(setPackages.calledOnce);
-            const [, , changes] = setPackages.firstCall.args;
-            assert.strictEqual(changes.length, 0);
+            assert.ok(onChanges.notCalled);
         });
 
         test('detects removals correctly', async () => {
@@ -153,31 +141,29 @@ suite('packageChanges', () => {
                 { name: 'requests', version: '2.31.0' } as Package,
                 { name: 'flask', version: '3.0.0' } as Package,
             ];
-            cache = before;
             const after = [{ name: 'requests', version: '2.31.0' } as Package];
             getPackagesStub.resolves(after);
+            const onChanges = sinon.stub();
 
-            await updatePackagesAndNotify(packageManager, environment, cache);
+            await updatePackagesAndNotify(packageManager, environment, before, onChanges);
 
-            const setPackages = packageManager.setPackages as sinon.SinonStub;
-            assert.ok(setPackages.calledOnce);
-            const [, pkgs, changes] = setPackages.firstCall.args;
-            assert.deepStrictEqual(pkgs, after);
+            assert.ok(onChanges.calledOnce);
+            const [changes] = onChanges.firstCall.args;
             assert.strictEqual(changes.length, 1);
             assert.strictEqual(changes[0].kind, PackageChangeKind.remove);
             assert.strictEqual(changes[0].pkg.name, 'flask');
         });
 
         test('detects mixed adds and removals', async () => {
-            cache = [{ name: 'flask', version: '3.0.0' } as Package];
+            const before = [{ name: 'flask', version: '3.0.0' } as Package];
             const after = [{ name: 'django', version: '5.0.0' } as Package];
             getPackagesStub.resolves(after);
+            const onChanges = sinon.stub();
 
-            await updatePackagesAndNotify(packageManager, environment, cache);
+            await updatePackagesAndNotify(packageManager, environment, before, onChanges);
 
-            const setPackages = packageManager.setPackages as sinon.SinonStub;
-            assert.ok(setPackages.calledOnce);
-            const [, , changes] = setPackages.firstCall.args;
+            assert.ok(onChanges.calledOnce);
+            const [changes] = onChanges.firstCall.args;
             assert.strictEqual(changes.length, 2);
             assert.ok(changes.some((c: { kind: PackageChangeKind }) => c.kind === PackageChangeKind.add));
             assert.ok(changes.some((c: { kind: PackageChangeKind }) => c.kind === PackageChangeKind.remove));

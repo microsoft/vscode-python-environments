@@ -17,7 +17,6 @@ import {
     GetPackagesOptions,
     IconPath,
     Package,
-    PackageChangeKind,
     PackageManagementOptions,
     PackageManager,
     PythonEnvironment,
@@ -84,7 +83,14 @@ export class PoetryPackageManager implements PackageManager, Disposable {
             async (_progress, token) => {
                 try {
                     await this.runPoetryManage({ install: toInstall, uninstall: toUninstall }, token);
-                    await updatePackagesAndNotify(this, environment, this.packages.get(environment.envId.id));
+                    await updatePackagesAndNotify(
+                        this,
+                        environment,
+                        this.packages.get(environment.envId.id),
+                        (changes) => {
+                            this._onDidChangePackages.fire({ environment, manager: this, changes });
+                        },
+                    );
                 } catch (e) {
                     if (e instanceof CancellationError) {
                         throw e;
@@ -110,7 +116,14 @@ export class PoetryPackageManager implements PackageManager, Disposable {
             },
             async () => {
                 try {
-                    await updatePackagesAndNotify(this, environment, this.packages.get(environment.envId.id));
+                    await updatePackagesAndNotify(
+                        this,
+                        environment,
+                        this.packages.get(environment.envId.id),
+                        (changes) => {
+                            this._onDidChangePackages.fire({ environment, manager: this, changes });
+                        },
+                    );
                 } catch (error) {
                     this.log.error(`Failed to refresh packages: ${error}`);
                     // Show error to user but don't break the UI
@@ -249,17 +262,6 @@ export class PoetryPackageManager implements PackageManager, Disposable {
 
         // Convert to Package objects using the API
         return poetryPackages.map((pkg) => this.api.createPackageItem(pkg, environment, this));
-    }
-
-    setPackages(
-        environment: PythonEnvironment,
-        packages: Package[],
-        changes: { kind: PackageChangeKind; pkg: Package }[],
-    ): void {
-        this.packages.set(environment.envId.id, packages);
-        if (changes.length > 0) {
-            this._onDidChangePackages.fire({ environment, manager: this, changes });
-        }
     }
 }
 

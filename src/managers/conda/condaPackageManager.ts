@@ -12,7 +12,6 @@ import {
     GetPackagesOptions,
     IconPath,
     Package,
-    PackageChangeKind,
     PackageManagementOptions,
     PackageManager,
     PythonEnvironment,
@@ -74,7 +73,14 @@ export class CondaPackageManager implements PackageManager, Disposable {
             async (_progress, token) => {
                 try {
                     await managePackages(environment, manageOptions, token, this.log);
-                    await updatePackagesAndNotify(this, environment, this.packages.get(environment.envId.id));
+                    await updatePackagesAndNotify(
+                        this,
+                        environment,
+                        this.packages.get(environment.envId.id),
+                        (changes) => {
+                            this._onDidChangePackages.fire({ environment, manager: this, changes });
+                        },
+                    );
                 } catch (e) {
                     if (e instanceof CancellationError) {
                         throw e;
@@ -96,7 +102,14 @@ export class CondaPackageManager implements PackageManager, Disposable {
                 title: CondaStrings.condaRefreshingPackages,
             },
             async () => {
-                await updatePackagesAndNotify(this, environment, this.packages.get(environment.envId.id));
+                await updatePackagesAndNotify(
+                    this,
+                    environment,
+                    this.packages.get(environment.envId.id),
+                    (changes) => {
+                        this._onDidChangePackages.fire({ environment, manager: this, changes });
+                    },
+                );
             },
         );
     }
@@ -140,16 +153,5 @@ export class CondaPackageManager implements PackageManager, Disposable {
     dispose() {
         this._onDidChangePackages.dispose();
         this.packages.clear();
-    }
-
-    setPackages(
-        environment: PythonEnvironment,
-        packages: Package[],
-        changes: { kind: PackageChangeKind; pkg: Package }[],
-    ): void {
-        this.packages.set(environment.envId.id, packages);
-        if (changes.length > 0) {
-            this._onDidChangePackages.fire({ environment, manager: this, changes });
-        }
     }
 }
