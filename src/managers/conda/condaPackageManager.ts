@@ -12,7 +12,6 @@ import {
     GetPackagesOptions,
     IconPath,
     Package,
-    PackageChangeKind,
     PackageManagementOptions,
     PackageManager,
     PythonEnvironment,
@@ -154,16 +153,5 @@ export class CondaPackageManager implements PackageManager, Disposable {
     dispose() {
         this._onDidChangePackages.dispose();
         this.packages.clear();
-    }
-
-    setPackages(
-        environment: PythonEnvironment,
-        packages: Package[],
-        changes: { kind: PackageChangeKind; pkg: Package }[],
-    ): void {
-        this.packages.set(environment.envId.id, packages);
-        if (changes.length > 0) {
-            this._onDidChangePackages.fire({ environment, manager: this, changes });
-        }
     }
 }
