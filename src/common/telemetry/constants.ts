@@ -593,6 +593,8 @@ export interface IEventNamePropertyMapping {
             "breakdownGlobalVirtualEnvs": { "classification": "SystemMetaData", "purpose": "PerformanceAndHealth", "isMeasurement": true, "owner": "eleanorjboyd" },
             "breakdownWorkspaces": { "classification": "SystemMetaData", "purpose": "PerformanceAndHealth", "isMeasurement": true, "owner": "eleanorjboyd" },
             "locatorsJson": { "classification": "SystemMetaData", "purpose": "PerformanceAndHealth", "owner": "eleanorjboyd" },
+            "petVersion": { "classification": "SystemMetaData", "purpose": "PerformanceAndHealth", "owner": "eleanorjboyd" },
+            "petBuildId": { "classification": "SystemMetaData", "purpose": "PerformanceAndHealth", "owner": "eleanorjboyd" },
             "<duration>": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "isMeasurement": true, "owner": "eleanorjboyd" }
         }
     */
@@ -615,6 +617,10 @@ export interface IEventNamePropertyMapping {
         breakdownWorkspaces?: number;
         /** JSON-serialized Record<locatorName, ms>. Parse with parse_json() in Kusto. */
         locatorsJson?: string;
+        /** PET crate version reported by the `info` RPC. 'unknown' if the call failed or the PET binary doesn't implement it. */
+        petVersion?: string;
+        /** PET build identifier (git SHA) reported by the `info` RPC. 'unknown' if unavailable. */
+        petBuildId?: string;
     };
 
     /* __GDPR__
@@ -639,6 +645,8 @@ export interface IEventNamePropertyMapping {
             "result": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "owner": "eleanorjboyd" },
             "errorType": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "owner": "eleanorjboyd" },
             "triggerReason": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "owner": "eleanorjboyd" },
+            "petVersion": { "classification": "SystemMetaData", "purpose": "PerformanceAndHealth", "owner": "eleanorjboyd" },
+            "petBuildId": { "classification": "SystemMetaData", "purpose": "PerformanceAndHealth", "owner": "eleanorjboyd" },
             "<duration>": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "isMeasurement": true, "owner": "eleanorjboyd" }
         }
     */
@@ -654,18 +662,28 @@ export interface IEventNamePropertyMapping {
          * start_failed | unknown.
          */
         triggerReason: string;
+        /** PET crate version reported by the `info` RPC. 'unknown' if the call failed or the PET binary doesn't implement it. */
+        petVersion?: string;
+        /** PET build identifier (git SHA) reported by the `info` RPC. 'unknown' if unavailable. */
+        petBuildId?: string;
     };
 
     /* __GDPR__
         "pet.resolve": {
             "result": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "owner": "eleanorjboyd" },
             "errorType": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "owner": "eleanorjboyd" },
+            "petVersion": { "classification": "SystemMetaData", "purpose": "PerformanceAndHealth", "owner": "eleanorjboyd" },
+            "petBuildId": { "classification": "SystemMetaData", "purpose": "PerformanceAndHealth", "owner": "eleanorjboyd" },
             "<duration>": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "isMeasurement": true, "owner": "eleanorjboyd" }
         }
     */
     [EventNames.PET_RESOLVE]: {
         result: 'success' | 'timeout' | 'error';
         errorType?: string;
+        /** PET crate version reported by the `info` RPC. 'unknown' if the call failed or the PET binary doesn't implement it. */
+        petVersion?: string;
+        /** PET build identifier (git SHA) reported by the `info` RPC. 'unknown' if unavailable. */
+        petBuildId?: string;
     };
 
     /* __GDPR__
