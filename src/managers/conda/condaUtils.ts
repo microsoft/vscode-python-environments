@@ -1274,9 +1274,6 @@ export async function deleteCondaEnvironment(environment: PythonEnvironment, log
     );
 }
 
-/**
- * JSON structure returned by `conda list --json`
- */
 export async function managePackages(
     environment: PythonEnvironment,
     options: PackageManagementOptions,

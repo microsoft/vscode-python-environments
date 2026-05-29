@@ -120,6 +120,7 @@ suite('packageChanges', () => {
 
             await updatePackagesAndNotify(packageManager, environment, undefined, onChanges);
 
+            assert.ok(getPackagesStub.calledOnceWithExactly(environment, sinon.match({ skipCache: true })));
             assert.ok(onChanges.calledOnce);
             const [changes] = onChanges.firstCall.args;
             assert.strictEqual(changes.length, 1);

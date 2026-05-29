@@ -37,10 +37,9 @@ export function getPackageChanges(before: Package[], after: Package[]): { kind: 
  * Fetches the latest packages, computes changes against the current cache,
  * and updates the cache. Fires a change event only when there are actual changes.
  *
- * This function does not call {@link PackageManager.getPackages} to avoid
- * re-entering {@link PackageManager.refresh} on a cold cache. Instead, the
- * caller should pass the previously cached packages (or an empty array for
- * the first load).
+ * This function calls {@link PackageManager.getPackages} with `skipCache` to fetch
+ * the latest snapshot. The caller should pass the previously cached packages
+ * so changes can be computed against the pre-refresh state.
  */
 export async function updatePackagesAndNotify(
     packageManager: PackageManager,
