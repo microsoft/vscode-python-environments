@@ -732,10 +732,16 @@ class NativePythonFinderImpl implements NativePythonFinder {
     private kickoffInfoFetch(connection: rpc.MessageConnection): void {
         sendRequestWithTimeout<NativePetInfo>(connection, 'info', {}, INFO_TIMEOUT_MS)
             .then((result) => {
+                if (connection !== this.connection) {
+                    return;
+                }
                 this.petInfo = result;
-                this.outputChannel.debug(`[pet] info:`, result);
+                this.outputChannel.debug('[pet] info:', result);
             })
             .catch((ex) => {
+                if (connection !== this.connection) {
+                    return;
+                }
                 // Older PET binaries don't implement `info`; leave petInfo undefined so telemetry reports 'unknown'.
                 this.outputChannel.debug('[pet] info request failed:', ex);
             });
