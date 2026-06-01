@@ -196,8 +196,7 @@ export enum EventNames {
      * - result: 'success' | 'timeout' | 'error'
      * - errorType: string (classified error category, on failure only)
      */
-    PET_RESOLVE = 'PET.RESOLVE',
-    /**
+    PET_RESOLVE = 'PET.RESOLVE',    /**
      * Telemetry event for the one-time migration that removes a stale
      * `python-envs.defaultEnvManager: system` value from User (global) settings.
      * Fires only on the activation when the migration actually runs (not on subsequent runs).
