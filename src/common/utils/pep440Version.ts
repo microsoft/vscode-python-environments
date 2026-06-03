@@ -141,12 +141,12 @@ export class PEP440Version {
 
     /** The minor version number (second element of release), or 0 if absent. */
     public get minor(): number {
-        return this.release.length > 1 ? this.release[1] : 0;
+        return this.release.at(1) ?? 0;
     }
 
     /** The micro/patch version number (third element of release), or 0 if absent. */
     public get micro(): number {
-        return this.release.length > 2 ? this.release[2] : 0;
+        return this.release.at(2) ?? 0;
     }
 
     /**
@@ -227,8 +227,8 @@ export class PEP440Version {
         // 2. Release segments (compare element-by-element, pad shorter with 0)
         const maxLen = Math.max(a.release.length, b.release.length);
         for (let i = 0; i < maxLen; i++) {
-            const av = i < a.release.length ? a.release[i] : 0;
-            const bv = i < b.release.length ? b.release[i] : 0;
+            const av = a.release.at(i) ?? 0;
+            const bv = b.release.at(i) ?? 0;
             if (av !== bv) {
                 return av - bv;
             }
