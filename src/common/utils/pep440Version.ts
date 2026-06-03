@@ -149,6 +149,18 @@ export class PEP440Version {
         return this.release.length > 2 ? this.release[2] : 0;
     }
 
+    /**
+     * Returns a short display string: "X.Y.Z" if micro is present, otherwise "X.Y.x".
+     * Parses `input` first; returns it unchanged if not a valid version.
+     */
+    public static shortenVersionString(input: string): string {
+        const v = PEP440Version.parse(input);
+        if (!v) {
+            return input;
+        }
+        return v.release.length >= 3 ? `${v.major}.${v.minor}.${v.micro}` : `${v.major}.${v.minor}.x`;
+    }
+
     /** Whether this version is a pre-release (has pre or dev segment). */
     public get isPreRelease(): boolean {
         return this.pre !== undefined || this.dev !== undefined;
