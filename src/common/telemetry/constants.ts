@@ -209,6 +209,27 @@ export enum EventNames {
      * - errorType: string (only when outcome === 'failed')
      */
     MIGRATION_SYSTEM_ENV_MANAGER = 'MIGRATION.SYSTEM_ENV_MANAGER',
+    /**
+     * Telemetry event fired once per session, per URI, the first time a `.py`
+     * file with a valid PEP 723 `# /// script` block is observed by the lazy
+     * detector. Used to size the population of users who actually see PEP 723
+     * files — the denominator for the "view vs edit" question.
+     * Properties:
+     * - trigger: 'open' | 'save' (which workspace event surfaced the file)
+     * - hasRequiresPython: boolean (whether the block declares `requires-python`)
+     * Measures:
+     * - dependencyCount: number (number of entries in the `dependencies` list)
+     */
+    PEP723_DETECTED = 'PEP723.DETECTED',
+    /**
+     * Telemetry event fired once per session, per URI, the first time a `.py`
+     * file that previously raised a `PEP723.DETECTED` event receives a real
+     * text edit. Together with `PEP723.DETECTED` this measures the fraction
+     * of users who do more than view PEP 723 scripts.
+     * Measures:
+     * - duration: number (ms between the detection and the first edit)
+     */
+    PEP723_EDITED = 'PEP723.EDITED',
 }
 
 // Map all events to their properties
@@ -657,4 +678,25 @@ export interface IEventNamePropertyMapping {
         outcome: 'removed' | 'partial' | 'not_set' | 'failed';
         errorType?: string;
     };
+
+    /* __GDPR__
+        "pep723.detected": {
+            "trigger": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "owner": "StellaHuang95" },
+            "hasRequiresPython": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "owner": "StellaHuang95" },
+            "dependencyCount": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "isMeasurement": true, "owner": "StellaHuang95" }
+        }
+    */
+    [EventNames.PEP723_DETECTED]: {
+        trigger: 'open' | 'save';
+        hasRequiresPython: boolean;
+        // Goes through the measures payload (numeric); listed here for GDPR only.
+        dependencyCount?: number;
+    };
+
+    /* __GDPR__
+        "pep723.edited": {
+            "<duration>": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "isMeasurement": true, "owner": "StellaHuang95" }
+        }
+    */
+    [EventNames.PEP723_EDITED]: never | undefined;
 }
