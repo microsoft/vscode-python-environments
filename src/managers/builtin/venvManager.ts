@@ -33,11 +33,12 @@ import { VenvManagerStrings } from '../../common/localize';
 import { traceError, traceWarn } from '../../common/logging';
 import { createDeferred, Deferred } from '../../common/utils/deferred';
 import { normalizePath } from '../../common/utils/pathUtils';
+import { PEP440Version } from '../../common/utils/pep440Version';
 import { showErrorMessage, showInformationMessage, withProgress } from '../../common/window.apis';
 import { findParentIfFile } from '../../features/envCommands';
 import { getProjectFsPathForScope, tryFastPathGet } from '../common/fastPath';
 import { NativePythonFinder } from '../common/nativePythonFinder';
-import { getLatest, shortVersion, sortEnvironments } from '../common/utils';
+import { getLatest, sortEnvironments } from '../common/utils';
 import { promptInstallPythonViaUv } from './uvPythonInstaller';
 import {
     clearVenvCache,
@@ -117,7 +118,7 @@ export class VenvManager implements EnvironmentManager {
             description: l10n.t('Create a virtual environment in workspace root'),
             detail: l10n.t(
                 'Uses Python version {0} and installs workspace dependencies.',
-                shortVersion(this.globalEnv.version),
+                PEP440Version.shortenVersionString(this.globalEnv.version),
             ),
         };
     }

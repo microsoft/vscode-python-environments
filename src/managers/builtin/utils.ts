@@ -13,6 +13,7 @@ import { getExtension } from '../../common/extension.apis';
 import { Common, PixiStrings, SysManagerStrings } from '../../common/localize';
 import { traceInfo, traceVerbose } from '../../common/logging';
 import { getGlobalPersistentState } from '../../common/persistentState';
+import { PEP440Version } from '../../common/utils/pep440Version';
 import { showInformationMessage, withProgress } from '../../common/window.apis';
 import { openExtension } from '../../common/workbenchCommands';
 import {
@@ -21,7 +22,7 @@ import {
     NativePythonEnvironmentKind,
     NativePythonFinder,
 } from '../common/nativePythonFinder';
-import { shortVersion, sortEnvironments } from '../common/utils';
+import { sortEnvironments } from '../common/utils';
 import { runPython, runUV, shouldUseUv } from './helpers';
 import { parsePipListJson, PipPackage } from './pipListUtils';
 
@@ -80,7 +81,7 @@ function getKindName(kind: NativePythonEnvironmentKind | undefined): string | un
 function getPythonInfo(env: NativeEnvInfo): PythonEnvironmentInfo {
     if (env.executable && env.version && env.prefix) {
         const kindName = getKindName(env.kind);
-        const sv = shortVersion(env.version);
+        const sv = PEP440Version.shortenVersionString(env.version);
         const name = kindName ? `Python ${sv} (${kindName})` : `Python ${sv}`;
         const displayName = kindName ? `Python ${sv} (${kindName})` : `Python ${sv}`;
         const shortDisplayName = kindName ? `${sv} (${kindName})` : `${sv}`;

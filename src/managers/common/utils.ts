@@ -3,6 +3,7 @@ import path from 'path';
 import { commands, ConfigurationTarget, l10n, window, workspace } from 'vscode';
 import { PythonCommandRunConfiguration, PythonEnvironment, PythonEnvironmentApi } from '../../api';
 import { traceLog, traceVerbose } from '../../common/logging';
+import { PEP440Version } from '../../common/utils/pep440Version';
 import { isWindows } from '../../common/utils/platformUtils';
 import { ShellConstants } from '../../features/common/shellConstants';
 import { getDefaultEnvManagerSetting, setDefaultEnvManagerBroken } from '../../features/settings/settingHelpers';
@@ -21,51 +22,6 @@ export function isNumber(obj: unknown): obj is number {
     return typeof obj === 'number' && !isNaN(obj);
 }
 
-export function shortVersion(version: string): string {
-    const pattern = /(\d)\.(\d+)(?:\.(\d+)?)?/gm;
-    const match = pattern.exec(version);
-    if (match) {
-        if (match[3]) {
-            return `${match[1]}.${match[2]}.${match[3]}`;
-        }
-        return `${match[1]}.${match[2]}.x`;
-    }
-    return version;
-}
-
-export function isGreater(a: string | undefined, b: string | undefined): boolean {
-    if (!a && !b) {
-        return false;
-    }
-    if (!a) {
-        return false;
-    }
-    if (!b) {
-        return true;
-    }
-
-    try {
-        const aParts = a.split('.');
-        const bParts = b.split('.');
-        for (let i = 0; i < aParts.length; i++) {
-            if (i >= bParts.length) {
-                return true;
-            }
-            const aPart = parseInt(aParts[i], 10);
-            const bPart = parseInt(bParts[i], 10);
-            if (aPart > bPart) {
-                return true;
-            }
-            if (aPart < bPart) {
-                return false;
-            }
-        }
-    } catch {
-        return false;
-    }
-    return false;
-}
-
 export function sortEnvironments(collection: PythonEnvironment[]): PythonEnvironment[] {
     return collection.sort((a, b) => {
         // Environments with errors should be sorted to the end
@@ -76,7 +32,12 @@ export function sortEnvironments(collection: PythonEnvironment[]): PythonEnviron
             return -1;
         }
         if (a.version !== b.version) {
-            return isGreater(a.version, b.version) ? -1 : 1;
+            const av = PEP440Version.parse(a.version);
+            const bv = PEP440Version.parse(b.version);
+            if (av && bv) {
+                return PEP440Version.compare(bv, av); // descending
+            }
+            return a.version ? 1 : -1;
         }
         const value = a.name.localeCompare(b.name);
         if (value !== 0) {
@@ -96,7 +57,9 @@ export function getLatest(collection: PythonEnvironment[]): PythonEnvironment | 
 
     let latest = candidates[0];
     for (const env of candidates) {
-        if (isGreater(env.version, latest.version)) {
+        const av = PEP440Version.parse(env.version);
+        const bv = PEP440Version.parse(latest.version);
+        if (av && bv && PEP440Version.compare(av, bv) > 0) {
             latest = env;
         }
     }
@@ -112,31 +75,6 @@ export function mergePackages(common: Installable[], installed: string[]): Insta
 
 export function pathForGitBash(binPath: string): string {
     return isWindows() ? binPath.replace(/\\/g, '/').replace(/^([a-zA-Z]):/, '/$1') : binPath;
-}
-
-/**
- * Compares two semantic version strings. Support sonly simple 1.1.1 style versions.
- * @param version1 First version
- * @param version2 Second version
- * @returns -1 if version1 < version2, 0 if equal, 1 if version1 > version2
- */
-export function compareVersions(version1: string, version2: string): number {
-    const v1Parts = version1.split('.').map(Number);
-    const v2Parts = version2.split('.').map(Number);
-
-    for (let i = 0; i < Math.max(v1Parts.length, v2Parts.length); i++) {
-        const v1Part = v1Parts[i] || 0;
-        const v2Part = v2Parts[i] || 0;
-
-        if (v1Part > v2Part) {
-            return 1;
-        }
-        if (v1Part < v2Part) {
-            return -1;
-        }
-    }
-
-    return 0;
 }
 
 function buildPwshActivationCommands(ps1Path: string): PythonCommandRunConfiguration[] {

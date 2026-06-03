@@ -13,6 +13,7 @@ import { ENVS_EXTENSION_ID } from '../../common/constants';
 import { traceError, traceInfo } from '../../common/logging';
 import { getWorkspacePersistentState } from '../../common/persistentState';
 import { getUserHomeDir, normalizePath, untildify } from '../../common/utils/pathUtils';
+import { PEP440Version } from '../../common/utils/pep440Version';
 import { isWindows } from '../../common/utils/platformUtils';
 import {
     isNativeEnvInfo,
@@ -21,7 +22,7 @@ import {
     NativePythonEnvironmentKind,
     NativePythonFinder,
 } from '../common/nativePythonFinder';
-import { shortVersion, sortEnvironments } from '../common/utils';
+import { sortEnvironments } from '../common/utils';
 
 /**
  * Returns the pyenv root directory from the pyenv executable path.
@@ -192,7 +193,7 @@ function nativeToPythonEnv(
         group = PYENV_ENVIRONMENTS;
     }
 
-    const sv = shortVersion(info.version);
+    const sv = PEP440Version.shortenVersionString(info.version);
     const name = info.name || info.displayName || path.basename(info.prefix);
     let displayName = info.displayName || `pyenv (${sv})`;
     if (info.kind === NativePythonEnvironmentKind.pyenvVirtualEnv) {

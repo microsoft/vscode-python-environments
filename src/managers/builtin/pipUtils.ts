@@ -6,6 +6,7 @@ import { PackageManagementOptions, PythonEnvironment, PythonEnvironmentApi, Pyth
 import { EXTENSION_ROOT_DIR } from '../../common/constants';
 import { PackageManagement, Pickers, VenvManagerStrings } from '../../common/localize';
 import { traceInfo } from '../../common/logging';
+import { PEP440Version } from '../../common/utils/pep440Version';
 import { showQuickPickWithButtons, withProgress } from '../../common/window.apis';
 import { findFiles } from '../../common/workspace.apis';
 import { selectFromCommonPackagesToInstall, selectFromInstallableToInstall } from '../common/pickers';
@@ -56,13 +57,7 @@ export function validatePyprojectToml(toml: PyprojectToml): string | undefined {
         if (version.length === 0) {
             return l10n.t('Version cannot be empty in pyproject.toml.');
         }
-        // PEP 440 version regex.  Versions must follow PEP 440 format (e.g., "1.0.0", "2.1a3").
-        // See https://peps.python.org/pep-0440/
-        // This regex is adapted from the official python 'packaging' library:
-        // https://github.com/pypa/packaging/blob/main/src/packaging/version.py
-        const versionRegex =
-            /^v?([0-9]+!)?([0-9]+(?:\.[0-9]+)*)(?:[-_.]?(a|b|c|rc|alpha|beta|pre|preview)[-_.]?([0-9]+)?)?(?:(?:-([0-9]+))|(?:[-_.]?(post|rev|r)[-_.]?([0-9]+)?))?(?:[-_.]?(dev)[-_.]?([0-9]+)?)?(?:\+([a-z0-9]+(?:[-_.][a-z0-9]+)*))?$/i;
-        if (!versionRegex.test(version)) {
+        if (!PEP440Version.parse(version)) {
             return l10n.t('Invalid version "{0}" in pyproject.toml.', version);
         }
     }

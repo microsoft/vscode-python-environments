@@ -3,6 +3,7 @@ import * as path from 'path';
 import { l10n, LogOutputChannel, QuickInputButtons, QuickPickItem, Uri } from 'vscode';
 import { EnvironmentManager, PythonEnvironment, PythonEnvironmentApi } from '../../api';
 import { CondaStrings } from '../../common/localize';
+import { PEP440Version } from '../../common/utils/pep440Version';
 import { showInputBoxWithButtons, showQuickPickWithButtons } from '../../common/window.apis';
 import {
     createNamedCondaEnvironment,
@@ -113,19 +114,14 @@ async function selectPythonVersion(state: CondaCreationState): Promise<StepFunct
             ),
         );
 
-        // Sort versions by major version (descending), ignoring minor/patch for simplicity
-        const parseMajorMinor = (v: string) => {
-            const m = v.match(/^(\\d+)(?:\\.(\\d+))?/);
-            return { major: m ? Number(m[1]) : 0, minor: m && m[2] ? Number(m[2]) : 0 };
-        };
-
+        // Sort versions descending using PEP 440 comparison
         versions = versions.sort((a, b) => {
-            const pa = parseMajorMinor(a as string);
-            const pb = parseMajorMinor(b as string);
-            if (pa.major !== pb.major) {
-                return pb.major - pa.major;
-            } // desc by major
-            return pb.minor - pa.minor; // desc by minor
+            const av = PEP440Version.parse(a as string);
+            const bv = PEP440Version.parse(b as string);
+            if (!av || !bv) {
+                return 0;
+            }
+            return PEP440Version.compare(bv, av); // descending
         });
 
         if (!versions || versions.length === 0) {
