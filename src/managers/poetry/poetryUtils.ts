@@ -8,7 +8,6 @@ import { ENVS_EXTENSION_ID } from '../../common/constants';
 import { traceError, traceInfo } from '../../common/logging';
 import { getWorkspacePersistentState } from '../../common/persistentState';
 import { getUserHomeDir, normalizePath, untildify } from '../../common/utils/pathUtils';
-import { PEP440Version } from '../../common/utils/pep440Version';
 import { isMac, isWindows } from '../../common/utils/platformUtils';
 import { getSettingWorkspaceScope } from '../../features/settings/settingHelpers';
 import {
@@ -18,7 +17,7 @@ import {
     NativePythonEnvironmentKind,
     NativePythonFinder,
 } from '../common/nativePythonFinder';
-import { getShellActivationCommands, sortEnvironments } from '../common/utils';
+import { getShellActivationCommands, shortenVersionString, sortEnvironments } from '../common/utils';
 
 /**
  * Checks if the POETRY_VIRTUALENVS_IN_PROJECT environment variable is set to a truthy value.
@@ -342,7 +341,7 @@ export async function nativeToPythonEnv(
         return undefined;
     }
 
-    const sv = PEP440Version.shortenVersionString(info.version);
+    const sv = shortenVersionString(info.version);
     const name = info.name || info.displayName || path.basename(info.prefix);
     const displayName = info.displayName || `poetry (${sv})`;
 

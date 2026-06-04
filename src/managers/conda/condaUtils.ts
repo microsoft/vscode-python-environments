@@ -1,3 +1,4 @@
+import { compare as pep440Compare, valid as pep440Valid } from '@renovatebot/pep440';
 import * as fse from 'fs-extra';
 import * as os from 'os';
 import * as path from 'path';
@@ -34,7 +35,6 @@ import { pickProject } from '../../common/pickers/projects';
 import { StopWatch } from '../../common/stopWatch';
 import { createDeferred } from '../../common/utils/deferred';
 import { untildify } from '../../common/utils/pathUtils';
-import { PEP440Version } from '../../common/utils/pep440Version';
 import { isWindows } from '../../common/utils/platformUtils';
 import {
     showErrorMessage,
@@ -54,7 +54,7 @@ import {
 } from '../common/nativePythonFinder';
 import { selectFromCommonPackagesToInstall } from '../common/pickers';
 import { Installable } from '../common/types';
-import { sortEnvironments } from '../common/utils';
+import { shortenVersionString, sortEnvironments } from '../common/utils';
 import { CondaEnvManager } from './condaEnvManager';
 import { getCondaHookPs1Path, getLocalActivationScript, ShellCondaInitStatus } from './condaSourcingUtils';
 import { createStepBasedCondaFlow } from './condaStepBasedFlow';
@@ -358,7 +358,7 @@ export async function getNamedCondaPythonInfo(
     envManager: EnvironmentManager,
 ): Promise<PythonEnvironmentInfo> {
     const { shellActivation, shellDeactivation } = await buildShellActivationMapForConda(prefix, envManager, name);
-    const sv = PEP440Version.shortenVersionString(version);
+    const sv = shortenVersionString(version);
 
     return {
         name: name,
@@ -400,7 +400,7 @@ export async function getPrefixesCondaPythonInfo(
     conda: string,
     envManager: EnvironmentManager,
 ): Promise<PythonEnvironmentInfo> {
-    const sv = PEP440Version.shortenVersionString(version);
+    const sv = shortenVersionString(version);
 
     const { shellActivation, shellDeactivation } = await buildShellActivationMapForConda(prefix, envManager);
 
@@ -996,12 +996,10 @@ export async function pickPythonVersion(
 
     // Sort versions descending using PEP 440 comparison
     versions = versions.sort((a, b) => {
-        const av = PEP440Version.parse(a);
-        const bv = PEP440Version.parse(b);
-        if (!av || !bv) {
+        if (!pep440Valid(a) || !pep440Valid(b)) {
             return 0;
         }
-        return PEP440Version.compare(bv, av); // descending
+        return pep440Compare(b, a); // descending
     });
 
     if (!versions || versions.length === 0) {

@@ -1,4 +1,5 @@
 import * as tomljs from '@iarna/toml';
+import { valid as pep440Valid } from '@renovatebot/pep440';
 import * as fse from 'fs-extra';
 import * as path from 'path';
 import { l10n, LogOutputChannel, ProgressLocation, QuickInputButtons, QuickPickItem, Uri, window } from 'vscode';
@@ -6,7 +7,6 @@ import { PackageManagementOptions, PythonEnvironment, PythonEnvironmentApi, Pyth
 import { EXTENSION_ROOT_DIR } from '../../common/constants';
 import { PackageManagement, Pickers, VenvManagerStrings } from '../../common/localize';
 import { traceInfo } from '../../common/logging';
-import { PEP440Version } from '../../common/utils/pep440Version';
 import { showQuickPickWithButtons, withProgress } from '../../common/window.apis';
 import { findFiles } from '../../common/workspace.apis';
 import { selectFromCommonPackagesToInstall, selectFromInstallableToInstall } from '../common/pickers';
@@ -57,7 +57,7 @@ export function validatePyprojectToml(toml: PyprojectToml): string | undefined {
         if (version.length === 0) {
             return l10n.t('Version cannot be empty in pyproject.toml.');
         }
-        if (!PEP440Version.parse(version)) {
+        if (!pep440Valid(version)) {
             return l10n.t('Invalid version "{0}" in pyproject.toml.', version);
         }
     }

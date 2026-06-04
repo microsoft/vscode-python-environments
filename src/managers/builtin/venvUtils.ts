@@ -10,7 +10,6 @@ import { getWorkspacePersistentState } from '../../common/persistentState';
 import { EventNames } from '../../common/telemetry/constants';
 import { sendTelemetryEvent } from '../../common/telemetry/sender';
 import { normalizePath } from '../../common/utils/pathUtils';
-import { PEP440Version } from '../../common/utils/pep440Version';
 import {
     showErrorMessage,
     showOpenDialog,
@@ -25,7 +24,7 @@ import {
     NativePythonEnvironmentKind,
     NativePythonFinder,
 } from '../common/nativePythonFinder';
-import { getShellActivationCommands, sortEnvironments } from '../common/utils';
+import { getShellActivationCommands, shortenVersionString, sortEnvironments } from '../common/utils';
 import { runPython, runUV, shouldUseUv } from './helpers';
 import { getProjectInstallable, PipPackages, shouldProceedAfterPyprojectValidation } from './pipUtils';
 import { resolveSystemPythonEnvironmentPath } from './utils';
@@ -165,7 +164,7 @@ async function getPythonInfo(env: NativeEnvInfo): Promise<PythonEnvironmentInfo>
 
     if (env.executable && env.version && env.prefix) {
         const venvName = env.name ?? getName(env.executable);
-        const sv = PEP440Version.shortenVersionString(env.version);
+        const sv = shortenVersionString(env.version);
         const name = `${venvName} (${sv})`;
         let description = undefined;
         if (env.kind === NativePythonEnvironmentKind.venvUv) {

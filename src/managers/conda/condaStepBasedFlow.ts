@@ -1,9 +1,9 @@
+import { compare as pep440Compare, valid as pep440Valid } from '@renovatebot/pep440';
 import * as fse from 'fs-extra';
 import * as path from 'path';
 import { l10n, LogOutputChannel, QuickInputButtons, QuickPickItem, Uri } from 'vscode';
 import { EnvironmentManager, PythonEnvironment, PythonEnvironmentApi } from '../../api';
 import { CondaStrings } from '../../common/localize';
-import { PEP440Version } from '../../common/utils/pep440Version';
 import { showInputBoxWithButtons, showQuickPickWithButtons } from '../../common/window.apis';
 import {
     createNamedCondaEnvironment,
@@ -116,12 +116,10 @@ async function selectPythonVersion(state: CondaCreationState): Promise<StepFunct
 
         // Sort versions descending using PEP 440 comparison
         versions = versions.sort((a, b) => {
-            const av = PEP440Version.parse(a as string);
-            const bv = PEP440Version.parse(b as string);
-            if (!av || !bv) {
+            if (!pep440Valid(a as string) || !pep440Valid(b as string)) {
                 return 0;
             }
-            return PEP440Version.compare(bv, av); // descending
+            return pep440Compare(b as string, a as string); // descending
         });
 
         if (!versions || versions.length === 0) {

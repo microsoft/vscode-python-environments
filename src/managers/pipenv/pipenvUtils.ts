@@ -17,7 +17,6 @@ import { ENVS_EXTENSION_ID } from '../../common/constants';
 import { traceError, traceInfo, traceVerbose } from '../../common/logging';
 import { getWorkspacePersistentState } from '../../common/persistentState';
 import { untildify } from '../../common/utils/pathUtils';
-import { PEP440Version } from '../../common/utils/pep440Version';
 import { getSettingWorkspaceScope } from '../../features/settings/settingHelpers';
 import {
     isNativeEnvInfo,
@@ -26,7 +25,7 @@ import {
     NativePythonEnvironmentKind,
     NativePythonFinder,
 } from '../common/nativePythonFinder';
-import { getShellActivationCommands } from '../common/utils';
+import { getShellActivationCommands, shortenVersionString } from '../common/utils';
 
 export const PIPENV_PATH_KEY = `${ENVS_EXTENSION_ID}:pipenv:PIPENV_PATH`;
 export const PIPENV_WORKSPACE_KEY = `${ENVS_EXTENSION_ID}:pipenv:WORKSPACE_SELECTED`;
@@ -116,7 +115,7 @@ async function nativeToPythonEnv(
         return undefined;
     }
 
-    const sv = PEP440Version.shortenVersionString(info.version);
+    const sv = shortenVersionString(info.version);
     const folderName = path.basename(info.prefix);
     const name = info.name || info.displayName || folderName;
     const displayName = info.displayName || `${folderName} (${sv})`;
