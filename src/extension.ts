@@ -735,6 +735,8 @@ export async function disposeAll(disposables: IDisposable[]): Promise<void> {
 
 export async function deactivate(context: ExtensionContext) {
     await disposeAll(context.subscriptions);
-    context.subscriptions.length = 0; // Clear subscriptions to prevent memory leaks
+    if (context.subscriptions?.length) {
+        context.subscriptions.length = 0; // Clear subscriptions to prevent memory leaks
+    }
     traceInfo('Python Environments extension deactivated.');
 }
