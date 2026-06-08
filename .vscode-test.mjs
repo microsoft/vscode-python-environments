@@ -1,8 +1,18 @@
 import { defineConfig } from '@vscode/test-cli';
+import * as fs from 'fs';
 import * as path from 'path';
 
 // Explicit user data directory - ensures VS Code reads our settings.json
 const userDataDir = path.resolve('.vscode-test/user-data');
+const userSettingsFile = path.join(userDataDir, 'User', 'settings.json');
+
+fs.mkdirSync(path.dirname(userSettingsFile), { recursive: true });
+fs.writeFileSync(
+    userSettingsFile,
+    JSON.stringify({
+        'python.useEnvironmentsExtension': true,
+    }),
+);
 
 export default defineConfig([
     {
