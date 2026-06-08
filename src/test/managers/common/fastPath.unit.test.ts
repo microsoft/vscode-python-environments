@@ -31,7 +31,7 @@ interface FastPathTestOptions {
 
 function createOpts(overrides?: Partial<FastPathOptions>): FastPathTestOptions {
     const setInitialized = sinon.stub();
-    const persistedPath = path.resolve('persisted', 'path');
+    const persistedPath = __filename;
     return {
         opts: {
             initialized: undefined,
@@ -77,7 +77,7 @@ suite('tryFastPathGet', () => {
     });
 
     test('returns resolved env for global scope when getGlobalPersistedPath returns a path', async () => {
-        const globalPath = path.resolve('usr', 'bin', 'python3');
+        const globalPath = __filename;
         const resolve = sinon.stub().resolves(createMockEnv(globalPath));
         const { opts } = createOpts({
             scope: undefined,
@@ -116,7 +116,7 @@ suite('tryFastPathGet', () => {
     });
 
     test('reports stale when global cached path resolves to undefined', async () => {
-        const globalPath = path.resolve('usr', 'bin', 'python3');
+        const globalPath = __filename;
         const { opts } = createOpts({
             scope: undefined,
             getGlobalPersistedPath: sinon.stub().resolves(globalPath),
@@ -132,7 +132,7 @@ suite('tryFastPathGet', () => {
     });
 
     test('returns undefined for global scope when cached path resolve fails', async () => {
-        const globalPath = path.resolve('usr', 'bin', 'python3');
+        const globalPath = __filename;
         const { opts } = createOpts({
             scope: undefined,
             getGlobalPersistedPath: sinon.stub().resolves(globalPath),
@@ -150,7 +150,7 @@ suite('tryFastPathGet', () => {
     });
 
     test('global scope fast path starts background init when initialized is undefined', async () => {
-        const globalPath = path.resolve('usr', 'bin', 'python3');
+        const globalPath = __filename;
         const startBackgroundInit = sinon.stub().resolves();
         const { opts, setInitialized } = createOpts({
             scope: undefined,
@@ -201,6 +201,37 @@ suite('tryFastPathGet', () => {
         assert.strictEqual(result, undefined);
     });
 
+    test('skips resolve and falls through when workspace persisted path no longer exists on disk', async () => {
+        const missingPath = path.resolve('does', 'not', 'exist', 'python-missing');
+        const resolve = sinon.stub().resolves(createMockEnv(missingPath));
+        const { opts } = createOpts({
+            getPersistedPath: sinon.stub().resolves(missingPath),
+            resolve,
+        });
+        const result = await tryFastPathGet(opts);
+
+        assert.strictEqual(result, undefined, 'Should fall through when cached path is missing');
+        assert.ok(resolve.notCalled, 'Should not invoke resolve (and thus PET) when path is missing');
+    });
+
+    test('skips resolve and reports stale when global persisted path no longer exists on disk', async () => {
+        const missingPath = path.resolve('does', 'not', 'exist', 'python-missing');
+        const resolve = sinon.stub().resolves(createMockEnv(missingPath));
+        const { opts } = createOpts({
+            scope: undefined,
+            getGlobalPersistedPath: sinon.stub().resolves(missingPath),
+            resolve,
+        });
+        const result = await tryFastPathGet(opts);
+
+        assert.strictEqual(result, undefined, 'Should fall through when cached global path is missing');
+        assert.ok(resolve.notCalled, 'Should not invoke resolve (and thus PET) when path is missing');
+        assert.ok(sendTelemetryStub.calledOnce, 'Should send telemetry for stale global cache');
+        const [eventName, , props] = sendTelemetryStub.firstCall.args;
+        assert.strictEqual(eventName, EventNames.GLOBAL_ENV_CACHE);
+        assert.strictEqual(props.result, 'stale');
+    });
+
     test('calls getProjectFsPath with the scope Uri', async () => {
         const scope = Uri.file(path.resolve('my', 'project'));
         const getProjectFsPath = sinon.stub().returns(scope.fsPath);
@@ -214,7 +245,7 @@ suite('tryFastPathGet', () => {
     test('passes project fsPath to getPersistedPath', async () => {
         const projectPath = path.resolve('project', 'path');
         const getProjectFsPath = sinon.stub().returns(projectPath);
-        const getPersistedPath = sinon.stub().resolves(path.resolve('persisted'));
+        const getPersistedPath = sinon.stub().resolves(__filename);
         const { opts } = createOpts({
             getProjectFsPath,
             getPersistedPath,
@@ -266,7 +297,7 @@ suite('tryFastPathGet', () => {
         const getPersistedPath = sinon.stub().callsFake(
             () =>
                 new Promise<string | undefined>((resolve) => {
-                    releasePersistedRead = () => resolve(path.resolve('persisted', 'path'));
+                    releasePersistedRead = () => resolve(__filename);
                 }),
         );
         const { opts, setInitialized } = createOpts({ getPersistedPath });

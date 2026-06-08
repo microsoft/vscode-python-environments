@@ -1,6 +1,7 @@
 // Copyright (c) Microsoft Corporation. All rights reserved.
 // Licensed under the MIT License.
 
+import * as fs from 'fs';
 import { Uri } from 'vscode';
 import { GetEnvironmentScope, PythonEnvironment, PythonEnvironmentApi } from '../../api';
 import { traceError, traceVerbose, traceWarn } from '../../common/logging';
@@ -46,6 +47,28 @@ export interface FastPathResult {
  */
 export function getProjectFsPathForScope(api: Pick<PythonEnvironmentApi, 'getPythonProject'>, scope: Uri): string {
     return api.getPythonProject(scope)?.uri.fsPath ?? scope.fsPath;
+}
+
+/**
+ * Cheap local existence check on the persisted path. If the cached interpreter has
+ * been deleted/renamed/moved we can short-circuit before spawning PET (which holds
+ * the cache mutex and can take up to the spawn timeout to fail).
+ *
+ * Returns true if the path exists (or if the check itself errors — in which case we
+ * fall through to the normal resolve so we don't introduce a new failure mode).
+ */
+async function persistedPathExists(persistedPath: string): Promise<boolean> {
+    try {
+        await fs.promises.access(persistedPath);
+        return true;
+    } catch (err) {
+        const code = (err as NodeJS.ErrnoException)?.code;
+        if (code === 'ENOENT' || code === 'ENOTDIR') {
+            return false;
+        }
+        // Unknown error (e.g. EACCES) — don't treat as missing; let resolve() decide.
+        return true;
+    }
 }
 
 /**
@@ -100,6 +123,18 @@ export async function tryFastPathGet(opts: FastPathOptions): Promise<FastPathRes
         const persistedPath = await getGlobalPersistedPath();
 
         if (persistedPath) {
+            // Cheap local existence check — avoids spawning PET (and waiting on the
+            // bounded timeout) when the cached interpreter has been removed.
+            if (!(await persistedPathExists(persistedPath))) {
+                sendTelemetryEvent(EventNames.GLOBAL_ENV_CACHE, cacheStopWatch.elapsedTime, {
+                    managerLabel: opts.label,
+                    result: 'stale',
+                });
+                traceVerbose(
+                    `[${opts.label}] Fast path: persisted path '${persistedPath}' does not exist, falling through to slow path`,
+                );
+                return undefined;
+            }
             try {
                 const resolved = await opts.resolve(persistedPath);
                 if (resolved) {
@@ -136,6 +171,14 @@ export async function tryFastPathGet(opts: FastPathOptions): Promise<FastPathRes
         const persistedPath = await opts.getPersistedPath(opts.getProjectFsPath(scope));
 
         if (persistedPath) {
+            // Cheap local existence check — avoids spawning PET (and waiting on the
+            // bounded timeout) when the cached interpreter has been removed.
+            if (!(await persistedPathExists(persistedPath))) {
+                traceVerbose(
+                    `[${opts.label}] Fast path: persisted path '${persistedPath}' does not exist, falling through to slow path`,
+                );
+                return undefined;
+            }
             try {
                 const resolved = await opts.resolve(persistedPath);
                 if (resolved) {
