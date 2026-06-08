@@ -153,10 +153,7 @@ jobs:
         run: npm run compile-tests
 
       - name: Configure Test Settings
-        run: |
-          mkdir -p .vscode-test/user-data/User
-          echo '{"python.useEnvironmentsExtension": true}' > .vscode-test/user-data/User/settings.json
-        shell: bash
+        run: node build/setup-test-user-data.mjs
 
       - name: Run Smoke Tests (Linux)
         if: runner.os == 'Linux'
@@ -246,10 +243,7 @@ jobs:
         run: npm run compile-tests
 
       - name: Configure Test Settings
-        run: |
-          mkdir -p .vscode-test/user-data/User
-          echo '{"python.useEnvironmentsExtension": true}' > .vscode-test/user-data/User/settings.json
-        shell: bash
+        run: node build/setup-test-user-data.mjs
 
       - name: Run E2E Tests (Linux)
         if: runner.os == 'Linux'
@@ -339,10 +333,7 @@ jobs:
         run: npm run compile-tests
 
       - name: Configure Test Settings
-        run: |
-          mkdir -p .vscode-test/user-data/User
-          echo '{"python.useEnvironmentsExtension": true}' > .vscode-test/user-data/User/settings.json
-        shell: bash
+        run: node build/setup-test-user-data.mjs
 
       - name: Run Integration Tests (Linux)
         if: runner.os == 'Linux'

@@ -1,8 +1,12 @@
 import { defineConfig } from '@vscode/test-cli';
+import * as os from 'os';
 import * as path from 'path';
 
-// Explicit user data directory - ensures VS Code reads our settings.json
-const userDataDir = path.resolve('.vscode-test/user-data');
+// Keep this path short: macOS caps Unix-domain socket paths at 103 chars and
+// VS Code creates `<userDataDir>/<x.y>-main.sock`. An in-workspace location
+// (e.g. /Users/runner/work/<repo>/<repo>/.vscode-test/user-data) overflows.
+// Must match build/setup-test-user-data.mjs.
+const userDataDir = path.join(os.tmpdir(), 'vsct-ud');
 
 export default defineConfig([
     {
