@@ -151,9 +151,6 @@ jobs:
       - name: Compile Tests
         run: npm run compile-tests
 
-      - name: Configure Test Settings
-        run: node build/setup-test-user-data.mjs
-
       - name: Run Smoke Tests (Linux)
         if: runner.os == 'Linux'
         uses: GabrielBB/xvfb-action@v1
@@ -240,9 +237,6 @@ jobs:
 
       - name: Compile Tests
         run: npm run compile-tests
-
-      - name: Configure Test Settings
-        run: node build/setup-test-user-data.mjs
 
       - name: Run E2E Tests (Linux)
         if: runner.os == 'Linux'
@@ -331,9 +325,6 @@ jobs:
       - name: Compile Tests
         run: npm run compile-tests
 
-      - name: Configure Test Settings
-        run: node build/setup-test-user-data.mjs
-
       - name: Run Integration Tests (Linux)
         if: runner.os == 'Linux'
         uses: GabrielBB/xvfb-action@v1
@@ -377,9 +368,6 @@ jobs:
 
       - name: Compile Tests
         run: npm run compile-tests
-
-      - name: Configure Test Settings
-        run: node build/setup-test-user-data.mjs
 
       - name: Run Integration Tests Multi-Root (Linux)
         if: runner.os == 'Linux'
