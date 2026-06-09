@@ -1,8 +1,22 @@
 import { defineConfig } from '@vscode/test-cli';
+import * as fs from 'fs';
+import * as os from 'os';
 import * as path from 'path';
 
-// Explicit user data directory - ensures VS Code reads our settings.json
-const userDataDir = path.resolve('.vscode-test/user-data');
+// Keep this path short: macOS caps Unix-domain socket paths at 103 chars and
+// VS Code creates `<userDataDir>/<x.y>-main.sock`. An in-workspace location
+// (e.g. /Users/runner/work/<repo>/<repo>/.vscode-test/user-data) overflows.
+const userDataDir = path.join(os.tmpdir(), 'vsct-ud');
+
+// Seed user settings.json so the extension actually activates: without
+// `python.useEnvironmentsExtension=true` it short-circuits during activation
+// and the smoke/e2e/integration tests see no registered managers.
+const userDir = path.join(userDataDir, 'User');
+fs.mkdirSync(userDir, { recursive: true });
+fs.writeFileSync(
+    path.join(userDir, 'settings.json'),
+    JSON.stringify({ 'python.useEnvironmentsExtension': true }) + '\n',
+);
 
 export default defineConfig([
     {
