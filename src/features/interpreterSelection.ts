@@ -44,10 +44,7 @@ export interface PriorityChainResult {
 export interface SettingResolutionError {
     /** The setting that failed */
     setting: 'pythonProjects' | 'defaultEnvManager' | 'defaultInterpreterPath';
-    /**
-     * Structured failure kind. Drives both the localized user-facing reason and any
-     * conditional handling (e.g. re-checking whether a manager became registered).
-     */
+    /** Structured failure kind, used for localization and stale-error re-checks. */
     kind: 'managerNotRegistered' | 'pathUnresolvedVariables' | 'pathCannotResolve';
     /** The configured value */
     configuredValue: string;
@@ -401,13 +398,9 @@ export async function applyInitialEnvironmentSelection(
         allErrors.push(...globalErrors);
     }
 
-    // Drop "manager not registered" errors that became stale during the awaits above
-    // (third-party manager extensions may have finished activating in the meantime).
-    // Used for both the user notification and the telemetry settingErrorCount so they
-    // agree on what counts as a real error.
+    // Drop errors that became stale during the awaits above; see filterLiveSettingErrors.
     const liveErrors = filterLiveSettingErrors(allErrors, envManagers);
 
-    // Notify user if any settings could not be applied (workspace + global when awaited)
     if (liveErrors.length > 0) {
         await notifyUserOfSettingErrors(liveErrors);
     }
@@ -440,12 +433,6 @@ export function resetSettingWarnings(): void {
     warnedSettings.clear();
 }
 
-/**
- * Build the localized "reason" text shown to the user for a given error kind.
- * Kept inside this file so the user-facing strings remain co-located with the
- * notification template that interpolates them, and so all user-visible text
- * goes through `l10n.t` (no partially-localized warnings).
- */
 function localizedReasonFor(error: SettingResolutionError): string {
     switch (error.kind) {
         case 'managerNotRegistered':
@@ -458,13 +445,9 @@ function localizedReasonFor(error: SettingResolutionError): string {
 }
 
 /**
- * Drop setting errors that became stale before the notification site.
- *
- * The priority chain records "manager not registered" errors at the time it runs,
- * but several awaits happen before notification/telemetry. A third-party extension
- * (e.g. Hatch) may finish activating during those awaits and register its manager.
- * Re-check the current registry: if the manager is now present the error is stale
- * and would be a false positive both in the user-facing warning and in telemetry.
+ * Re-check the live registry to drop `managerNotRegistered` errors that became
+ * stale while later awaits ran — a third-party manager extension may have
+ * registered in the meantime, in which case the warning would be a false positive.
  */
 function filterLiveSettingErrors(
     errors: SettingResolutionError[],
