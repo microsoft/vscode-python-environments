@@ -50,6 +50,68 @@ export function getShellCommandAsString(shell: string, command: PythonCommandRun
     return commandStr;
 }
 
+// Shells whose bare `deactivate` command is a shell function/alias defined by venv's
+// `activate` script. These can disappear (e.g. on session restore where VIRTUAL_ENV
+// persists but the shell function does not), so we must guard the call with an
+// existence check before sending it to the terminal — otherwise the shell prints
+// `deactivate: command not found`.
+const bareDeactivateGuardByShell = new Map<string, (cmd: string) => string>([
+    // POSIX-family shells: `command -v <name>` is the portable existence check.
+    [ShellConstants.BASH, (cmd) => `command -v deactivate >/dev/null 2>&1 && ${cmd.trimStart()}`],
+    [ShellConstants.SH, (cmd) => `command -v deactivate >/dev/null 2>&1 && ${cmd.trimStart()}`],
+    [ShellConstants.ZSH, (cmd) => `command -v deactivate >/dev/null 2>&1 && ${cmd.trimStart()}`],
+    [ShellConstants.KSH, (cmd) => `command -v deactivate >/dev/null 2>&1 && ${cmd.trimStart()}`],
+    [ShellConstants.GITBASH, (cmd) => `command -v deactivate >/dev/null 2>&1 && ${cmd.trimStart()}`],
+    // fish uses `functions -q` for function existence.
+    [ShellConstants.FISH, (cmd) => `functions -q deactivate; and ${cmd.trimStart()}`],
+    // PowerShell: Get-Command returns silently if not found with -ErrorAction SilentlyContinue.
+    [ShellConstants.PWSH, (cmd) => `if (Get-Command deactivate -ErrorAction SilentlyContinue) { ${cmd.trimStart()} }`],
+]);
+
+/**
+ * Returns the bare `deactivate` token if and only if `command` represents a single,
+ * bare invocation of a shell function/alias literally named `deactivate` — meaning
+ * it is safe and meaningful to gate on the existence of that function in the shell.
+ *
+ * Returns `undefined` for anything else (full paths like `path/to/deactivate.bat`,
+ * multi-token forms like `conda deactivate`, `pyenv shell --unset`, `overlay hide ...`,
+ * etc.), since those have different failure modes that should not be silently swallowed.
+ *
+ * The token is normalized to lowercase so the generated guard is consistent across
+ * shells (notably PowerShell, which is case-insensitive).
+ */
+function bareDeactivateInvocation(command: string): string | undefined {
+    const trimmed = command.trim();
+    return trimmed.toLowerCase() === 'deactivate' ? 'deactivate' : undefined;
+}
+
+/**
+ * Wraps a deactivation command in a shell-specific existence guard so that sending
+ * it to a terminal where the `deactivate` shell function no longer exists does not
+ * print `deactivate: command not found`.
+ *
+ * Only applies when the command is a single bare `deactivate` token and the shell
+ * has a known guard template. All other deactivation forms (cmd's `deactivate.bat`
+ * path, `conda deactivate`, `pyenv shell --unset`, nu's `overlay hide ...`, etc.)
+ * are returned unchanged — their failure modes are legitimate and should surface.
+ */
+export function wrapDeactivationCommand(shell: string, command: string): string {
+    const bare = bareDeactivateInvocation(command);
+    if (!bare) {
+        return command;
+    }
+    const guard = bareDeactivateGuardByShell.get(shell);
+    if (!guard) {
+        return command;
+    }
+    const wrapped = guard(bare);
+    // Preserve the leading-space history-ignore behavior for shells that honor it.
+    if (shellsWithLeadingSpaceHistorySupport.has(shell)) {
+        return ` ${wrapped}`;
+    }
+    return wrapped;
+}
+
 export function normalizeShellPath(filePath: string, shellType?: string): string {
     if (isWindows() && shellType) {
         if (shellType.toLowerCase() === ShellConstants.GITBASH || shellType.toLowerCase() === 'git-bash') {

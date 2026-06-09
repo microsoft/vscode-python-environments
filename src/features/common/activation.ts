@@ -4,6 +4,7 @@ import {
     getShellActivationCommand,
     getShellCommandAsString,
     getShellDeactivationCommand,
+    wrapDeactivationCommand,
 } from '../terminal/shells/common/shellUtils';
 import { identifyTerminalShell } from './shellDetector';
 
@@ -28,7 +29,7 @@ export function getDeactivationCommand(terminal: Terminal, environment: PythonEn
     const shell = identifyTerminalShell(terminal);
     const command = getShellDeactivationCommand(shell, environment);
     if (command) {
-        return getShellCommandAsString(shell, command);
+        return wrapDeactivationCommand(shell, getShellCommandAsString(shell, command));
     }
     return undefined;
 }
