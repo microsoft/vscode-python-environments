@@ -37,7 +37,7 @@ import { showErrorMessage, showInformationMessage, withProgress } from '../../co
 import { findParentIfFile } from '../../features/envCommands';
 import { getProjectFsPathForScope, tryFastPathGet } from '../common/fastPath';
 import { NativePythonFinder } from '../common/nativePythonFinder';
-import { getLatest, shortVersion, sortEnvironments } from '../common/utils';
+import { getLatest, shortenVersionString, sortEnvironments } from '../common/utils';
 import { promptInstallPythonViaUv } from './uvPythonInstaller';
 import {
     clearVenvCache,
@@ -117,7 +117,7 @@ export class VenvManager implements EnvironmentManager {
             description: l10n.t('Create a virtual environment in workspace root'),
             detail: l10n.t(
                 'Uses Python version {0} and installs workspace dependencies.',
-                shortVersion(this.globalEnv.version),
+                shortenVersionString(this.globalEnv.version),
             ),
         };
     }

@@ -25,7 +25,7 @@ import {
     NativePythonEnvironmentKind,
     NativePythonFinder,
 } from '../common/nativePythonFinder';
-import { getShellActivationCommands, shortVersion } from '../common/utils';
+import { getShellActivationCommands, shortenVersionString } from '../common/utils';
 
 export const PIPENV_PATH_KEY = `${ENVS_EXTENSION_ID}:pipenv:PIPENV_PATH`;
 export const PIPENV_WORKSPACE_KEY = `${ENVS_EXTENSION_ID}:pipenv:WORKSPACE_SELECTED`;
@@ -115,7 +115,7 @@ async function nativeToPythonEnv(
         return undefined;
     }
 
-    const sv = shortVersion(info.version);
+    const sv = shortenVersionString(info.version);
     const folderName = path.basename(info.prefix);
     const name = info.name || info.displayName || folderName;
     const displayName = info.displayName || `${folderName} (${sv})`;
