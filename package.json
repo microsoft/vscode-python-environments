@@ -124,7 +124,10 @@
                 "python-envs.workspaceSearchPaths": {
                     "type": "array",
                     "description": "%python-envs.workspaceSearchPaths.description%",
-                    "default": [".venv", "*/.venv"],
+                    "default": [
+                        ".venv",
+                        "*/.venv"
+                    ],
                     "scope": "resource",
                     "items": {
                         "type": "string"
@@ -714,6 +717,7 @@
     },
     "dependencies": {
         "@iarna/toml": "^2.2.5",
+        "@renovatebot/pep440": "^4.2.4",
         "@vscode/extension-telemetry": "^0.9.7",
         "@vscode/test-cli": "^0.0.10",
         "dotenv": "^16.4.5",

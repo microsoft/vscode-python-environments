@@ -17,7 +17,7 @@ import {
     NativePythonEnvironmentKind,
     NativePythonFinder,
 } from '../common/nativePythonFinder';
-import { getShellActivationCommands, shortVersion, sortEnvironments } from '../common/utils';
+import { getShellActivationCommands, shortenVersionString, sortEnvironments } from '../common/utils';
 
 /**
  * Checks if the POETRY_VIRTUALENVS_IN_PROJECT environment variable is set to a truthy value.
@@ -341,7 +341,7 @@ export async function nativeToPythonEnv(
         return undefined;
     }
 
-    const sv = shortVersion(info.version);
+    const sv = shortenVersionString(info.version);
     const name = info.name || info.displayName || path.basename(info.prefix);
     const displayName = info.displayName || `poetry (${sv})`;
 
