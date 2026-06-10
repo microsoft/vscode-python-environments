@@ -99,25 +99,23 @@ suite('Integration: Interpreter Selection Priority', function () {
         // Set environment globally
         await api.setEnvironment(undefined, envToSet);
 
-        // Wait for the async config write to propagate before reading.
+        // Wait for the async config write to propagate and verify the result.
         // setEnvironment fires onDidChangeEnvironment asynchronously, so getEnvironment
         // called immediately after may still return the previous (auto-discovered) value
         // on slower CI runners.
+        let retrieved: import('../../api').PythonEnvironment | undefined;
         await waitForCondition(
             async () => {
-                const e = await api.getEnvironment(undefined);
-                return !!e && e.environmentPath.fsPath === envToSet.environmentPath.fsPath;
+                retrieved = await api.getEnvironment(undefined);
+                return !!retrieved && retrieved.environmentPath.fsPath === envToSet.environmentPath.fsPath;
             },
             15_000,
             () => `Environment was not persisted as ${envToSet.environmentPath.fsPath}`,
         );
 
-        // Get and verify
-        const retrieved = await api.getEnvironment(undefined);
-
         assert.ok(retrieved, 'Should have environment after setting');
         assert.strictEqual(
-            retrieved.environmentPath.fsPath,
+            retrieved!.environmentPath.fsPath,
             envToSet.environmentPath.fsPath,
             'Retrieved environment should point to the same interpreter as the one set',
         );
@@ -148,40 +146,41 @@ suite('Integration: Interpreter Selection Priority', function () {
         // Set different environment for project
         await api.setEnvironment(project.uri, projectEnv);
 
-        // Wait for the global env async write to propagate before reading.
+        // Wait for the global env async write to propagate and verify.
+        let globalRetrieved: import('../../api').PythonEnvironment | undefined;
         await waitForCondition(
             async () => {
-                const e = await api.getEnvironment(undefined);
-                return !!e && e.environmentPath.fsPath === globalEnv.environmentPath.fsPath;
+                globalRetrieved = await api.getEnvironment(undefined);
+                return !!globalRetrieved && globalRetrieved.environmentPath.fsPath === globalEnv.environmentPath.fsPath;
             },
             15_000,
             () => `Global environment was not persisted as ${globalEnv.environmentPath.fsPath}`,
         );
 
-        // Verify global is unchanged
-        const globalRetrieved = await api.getEnvironment(undefined);
         assert.ok(globalRetrieved, 'Global should have environment');
         assert.strictEqual(
-            globalRetrieved.environmentPath.fsPath,
+            globalRetrieved!.environmentPath.fsPath,
             globalEnv.environmentPath.fsPath,
             'Global selection should be unchanged',
         );
 
-        // Wait for the project env async write to propagate before reading.
+        // Wait for the project env async write to propagate and verify.
+        let projectRetrieved: import('../../api').PythonEnvironment | undefined;
         await waitForCondition(
             async () => {
-                const e = await api.getEnvironment(project.uri);
-                return !!e && e.environmentPath.fsPath === projectEnv.environmentPath.fsPath;
+                projectRetrieved = await api.getEnvironment(project.uri);
+                return (
+                    !!projectRetrieved &&
+                    projectRetrieved.environmentPath.fsPath === projectEnv.environmentPath.fsPath
+                );
             },
             15_000,
             () => `Project environment was not persisted as ${projectEnv.environmentPath.fsPath}`,
         );
 
-        // Verify project has its own selection
-        const projectRetrieved = await api.getEnvironment(project.uri);
         assert.ok(projectRetrieved, 'Project should have environment');
         assert.strictEqual(
-            projectRetrieved.environmentPath.fsPath,
+            projectRetrieved!.environmentPath.fsPath,
             projectEnv.environmentPath.fsPath,
             'Project should have its own selection',
         );
@@ -319,14 +318,20 @@ suite('Integration: Interpreter Selection Priority', function () {
         // Set environment first time
         await api.setEnvironment(undefined, env);
 
-        // Wait for any async config changes to settle before testing idempotency
-        await new Promise((resolve) => setTimeout(resolve, 500));
+        // Wait for the async config write to propagate and verify.
+        let currentEnv: import('../../api').PythonEnvironment | undefined;
+        await waitForCondition(
+            async () => {
+                currentEnv = await api.getEnvironment(undefined);
+                return !!currentEnv && currentEnv.environmentPath.fsPath === env.environmentPath.fsPath;
+            },
+            15_000,
+            () => `Environment was not set to ${env.environmentPath.fsPath} before idempotency test`,
+        );
 
-        // Verify the environment was actually set
-        const currentEnv = await api.getEnvironment(undefined);
         assert.ok(currentEnv, 'Environment should be set before idempotency test');
         assert.strictEqual(
-            currentEnv.environmentPath.fsPath,
+            currentEnv!.environmentPath.fsPath,
             env.environmentPath.fsPath,
             'Environment should match what we just set',
         );
