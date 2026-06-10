@@ -99,6 +99,19 @@ suite('Integration: Interpreter Selection Priority', function () {
         // Set environment globally
         await api.setEnvironment(undefined, envToSet);
 
+        // Wait for the async config write to propagate before reading.
+        // setEnvironment fires onDidChangeEnvironment asynchronously, so getEnvironment
+        // called immediately after may still return the previous (auto-discovered) value
+        // on slower CI runners. See: https://github.com/microsoft/vscode-python-environments
+        await waitForCondition(
+            async () => {
+                const e = await api.getEnvironment(undefined);
+                return !!e && e.environmentPath.fsPath === envToSet.environmentPath.fsPath;
+            },
+            15_000,
+            () => `Environment was not persisted as ${envToSet.environmentPath.fsPath}`,
+        );
+
         // Get and verify
         const retrieved = await api.getEnvironment(undefined);
 
@@ -135,6 +148,16 @@ suite('Integration: Interpreter Selection Priority', function () {
         // Set different environment for project
         await api.setEnvironment(project.uri, projectEnv);
 
+        // Wait for the global env async write to propagate before reading.
+        await waitForCondition(
+            async () => {
+                const e = await api.getEnvironment(undefined);
+                return !!e && e.environmentPath.fsPath === globalEnv.environmentPath.fsPath;
+            },
+            15_000,
+            () => `Global environment was not persisted as ${globalEnv.environmentPath.fsPath}`,
+        );
+
         // Verify global is unchanged
         const globalRetrieved = await api.getEnvironment(undefined);
         assert.ok(globalRetrieved, 'Global should have environment');
@@ -142,6 +165,16 @@ suite('Integration: Interpreter Selection Priority', function () {
             globalRetrieved.environmentPath.fsPath,
             globalEnv.environmentPath.fsPath,
             'Global selection should be unchanged',
+        );
+
+        // Wait for the project env async write to propagate before reading.
+        await waitForCondition(
+            async () => {
+                const e = await api.getEnvironment(project.uri);
+                return !!e && e.environmentPath.fsPath === projectEnv.environmentPath.fsPath;
+            },
+            15_000,
+            () => `Project environment was not persisted as ${projectEnv.environmentPath.fsPath}`,
         );
 
         // Verify project has its own selection
