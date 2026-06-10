@@ -23,7 +23,7 @@
 
 import * as assert from 'assert';
 import * as vscode from 'vscode';
-import { DidChangeEnvironmentEventArgs, PythonEnvironmentApi } from '../../api';
+import { DidChangeEnvironmentEventArgs, PythonEnvironment, PythonEnvironmentApi } from '../../api';
 import { ENVS_EXTENSION_ID } from '../constants';
 import { TestEventHandler, waitForCondition } from '../testUtils';
 
@@ -31,7 +31,7 @@ suite('Integration: Interpreter Selection Priority', function () {
     this.timeout(60_000);
 
     let api: PythonEnvironmentApi;
-    let originalEnv: import('../../api').PythonEnvironment | undefined;
+    let originalEnv: PythonEnvironment | undefined;
 
     suiteSetup(async function () {
         this.timeout(30_000);
@@ -103,7 +103,7 @@ suite('Integration: Interpreter Selection Priority', function () {
         // setEnvironment fires onDidChangeEnvironment asynchronously, so getEnvironment
         // called immediately after may still return the previous (auto-discovered) value
         // on slower CI runners.
-        let retrieved: import('../../api').PythonEnvironment | undefined;
+        let retrieved: PythonEnvironment | undefined;
         await waitForCondition(
             async () => {
                 retrieved = await api.getEnvironment(undefined);
@@ -147,7 +147,7 @@ suite('Integration: Interpreter Selection Priority', function () {
         await api.setEnvironment(project.uri, projectEnv);
 
         // Wait for the global env async write to propagate and verify.
-        let globalRetrieved: import('../../api').PythonEnvironment | undefined;
+        let globalRetrieved: PythonEnvironment | undefined;
         await waitForCondition(
             async () => {
                 globalRetrieved = await api.getEnvironment(undefined);
@@ -165,7 +165,7 @@ suite('Integration: Interpreter Selection Priority', function () {
         );
 
         // Wait for the project env async write to propagate and verify.
-        let projectRetrieved: import('../../api').PythonEnvironment | undefined;
+        let projectRetrieved: PythonEnvironment | undefined;
         await waitForCondition(
             async () => {
                 projectRetrieved = await api.getEnvironment(project.uri);
@@ -319,7 +319,7 @@ suite('Integration: Interpreter Selection Priority', function () {
         await api.setEnvironment(undefined, env);
 
         // Wait for the async config write to propagate and verify.
-        let currentEnv: import('../../api').PythonEnvironment | undefined;
+        let currentEnv: PythonEnvironment | undefined;
         await waitForCondition(
             async () => {
                 currentEnv = await api.getEnvironment(undefined);
