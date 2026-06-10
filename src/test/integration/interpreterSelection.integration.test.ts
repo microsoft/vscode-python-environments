@@ -204,8 +204,19 @@ suite('Integration: Interpreter Selection Priority', function () {
         const oldEnv = environments[0];
         const newEnv = environments[1];
 
-        // Set initial environment
+        // Set initial environment and wait for it to propagate before
+        // registering the event handler. Without this, the handler may
+        // capture the event from this first setEnvironment call instead
+        // of the subsequent one, causing a spurious assertion failure.
         await api.setEnvironment(undefined, oldEnv);
+        await waitForCondition(
+            async () => {
+                const e = await api.getEnvironment(undefined);
+                return !!e && e.environmentPath.fsPath === oldEnv.environmentPath.fsPath;
+            },
+            15_000,
+            () => `Initial environment was not set to ${oldEnv.environmentPath.fsPath}`,
+        );
 
         const handler = new TestEventHandler<DidChangeEnvironmentEventArgs>(
             api.onDidChangeEnvironment,
