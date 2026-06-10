@@ -102,7 +102,7 @@ suite('Integration: Interpreter Selection Priority', function () {
         // Wait for the async config write to propagate before reading.
         // setEnvironment fires onDidChangeEnvironment asynchronously, so getEnvironment
         // called immediately after may still return the previous (auto-discovered) value
-        // on slower CI runners. See: https://github.com/microsoft/vscode-python-environments
+        // on slower CI runners.
         await waitForCondition(
             async () => {
                 const e = await api.getEnvironment(undefined);
