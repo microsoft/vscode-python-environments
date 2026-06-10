@@ -103,7 +103,11 @@ suite('Integration: Interpreter Selection Priority', function () {
         const retrieved = await api.getEnvironment(undefined);
 
         assert.ok(retrieved, 'Should have environment after setting');
-        assert.strictEqual(retrieved.envId.id, envToSet.envId.id, 'Retrieved environment should match set environment');
+        assert.strictEqual(
+            retrieved.environmentPath.fsPath,
+            envToSet.environmentPath.fsPath,
+            'Retrieved environment should point to the same interpreter as the one set',
+        );
     });
 
     /**
@@ -134,12 +138,20 @@ suite('Integration: Interpreter Selection Priority', function () {
         // Verify global is unchanged
         const globalRetrieved = await api.getEnvironment(undefined);
         assert.ok(globalRetrieved, 'Global should have environment');
-        assert.strictEqual(globalRetrieved.envId.id, globalEnv.envId.id, 'Global selection should be unchanged');
+        assert.strictEqual(
+            globalRetrieved.environmentPath.fsPath,
+            globalEnv.environmentPath.fsPath,
+            'Global selection should be unchanged',
+        );
 
         // Verify project has its own selection
         const projectRetrieved = await api.getEnvironment(project.uri);
         assert.ok(projectRetrieved, 'Project should have environment');
-        assert.strictEqual(projectRetrieved.envId.id, projectEnv.envId.id, 'Project should have its own selection');
+        assert.strictEqual(
+            projectRetrieved.environmentPath.fsPath,
+            projectEnv.environmentPath.fsPath,
+            'Project should have its own selection',
+        );
     });
 
     /**
@@ -177,7 +189,11 @@ suite('Integration: Interpreter Selection Priority', function () {
             const event = handler.last;
             assert.ok(event, 'Event should have fired');
             assert.ok(event.new, 'Event should have new environment');
-            assert.strictEqual(event.new.envId.id, newEnv.envId.id, 'New should match set environment');
+            assert.strictEqual(
+                event.new.environmentPath.fsPath,
+                newEnv.environmentPath.fsPath,
+                'New should match set environment',
+            );
         } finally {
             handler.dispose();
         }
@@ -209,7 +225,11 @@ suite('Integration: Interpreter Selection Priority', function () {
         const fileEnv = await api.getEnvironment(fileUri);
 
         assert.ok(fileEnv, 'File should inherit project environment');
-        assert.strictEqual(fileEnv.envId.id, env.envId.id, 'File should use project environment');
+        assert.strictEqual(
+            fileEnv.environmentPath.fsPath,
+            env.environmentPath.fsPath,
+            'File should use project environment',
+        );
     });
 
     /**
@@ -261,7 +281,11 @@ suite('Integration: Interpreter Selection Priority', function () {
         // Verify the environment was actually set
         const currentEnv = await api.getEnvironment(undefined);
         assert.ok(currentEnv, 'Environment should be set before idempotency test');
-        assert.strictEqual(currentEnv.envId.id, env.envId.id, 'Environment should match what we just set');
+        assert.strictEqual(
+            currentEnv.environmentPath.fsPath,
+            env.environmentPath.fsPath,
+            'Environment should match what we just set',
+        );
 
         const handler = new TestEventHandler<DidChangeEnvironmentEventArgs>(
             api.onDidChangeEnvironment,
