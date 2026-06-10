@@ -2,6 +2,7 @@
 // Licensed under the MIT License.
 
 import * as assert from 'assert';
+import * as fs from 'fs';
 import * as path from 'path';
 import * as sinon from 'sinon';
 import { Uri } from 'vscode';
@@ -284,6 +285,9 @@ suite('Manager get() fast path', () => {
     setup(() => {
         sandbox = sinon.createSandbox();
         sandbox.stub(windowApis, 'withProgress').callsFake((_opts, cb) => cb(undefined as never, undefined as never));
+        // fastPath.ts now does a real fs.access on the persisted path; these tests use
+        // synthetic paths that don't exist on disk, so pretend every path is present.
+        sandbox.stub(fs.promises, 'access').resolves();
     });
 
     teardown(() => {

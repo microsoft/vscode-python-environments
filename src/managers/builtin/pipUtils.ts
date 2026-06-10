@@ -1,4 +1,5 @@
 import * as tomljs from '@iarna/toml';
+import { valid as pep440Valid } from '@renovatebot/pep440';
 import * as fse from 'fs-extra';
 import * as path from 'path';
 import { l10n, LogOutputChannel, ProgressLocation, QuickInputButtons, QuickPickItem, Uri, window } from 'vscode';
@@ -56,13 +57,7 @@ export function validatePyprojectToml(toml: PyprojectToml): string | undefined {
         if (version.length === 0) {
             return l10n.t('Version cannot be empty in pyproject.toml.');
         }
-        // PEP 440 version regex.  Versions must follow PEP 440 format (e.g., "1.0.0", "2.1a3").
-        // See https://peps.python.org/pep-0440/
-        // This regex is adapted from the official python 'packaging' library:
-        // https://github.com/pypa/packaging/blob/main/src/packaging/version.py
-        const versionRegex =
-            /^v?([0-9]+!)?([0-9]+(?:\.[0-9]+)*)(?:[-_.]?(a|b|c|rc|alpha|beta|pre|preview)[-_.]?([0-9]+)?)?(?:(?:-([0-9]+))|(?:[-_.]?(post|rev|r)[-_.]?([0-9]+)?))?(?:[-_.]?(dev)[-_.]?([0-9]+)?)?(?:\+([a-z0-9]+(?:[-_.][a-z0-9]+)*))?$/i;
-        if (!versionRegex.test(version)) {
+        if (!pep440Valid(version)) {
             return l10n.t('Invalid version "{0}" in pyproject.toml.', version);
         }
     }

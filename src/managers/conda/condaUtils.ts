@@ -1,3 +1,4 @@
+import { compare as pep440Compare, valid as pep440Valid } from '@renovatebot/pep440';
 import * as fse from 'fs-extra';
 import * as os from 'os';
 import * as path from 'path';
@@ -51,7 +52,7 @@ import {
 } from '../common/nativePythonFinder';
 import { selectFromCommonPackagesToInstall } from '../common/pickers';
 import { Installable } from '../common/types';
-import { shortVersion, sortEnvironments } from '../common/utils';
+import { shortenVersionString, sortEnvironments } from '../common/utils';
 import { CondaEnvManager } from './condaEnvManager';
 import { getCondaHookPs1Path, getLocalActivationScript, ShellCondaInitStatus } from './condaSourcingUtils';
 import { createStepBasedCondaFlow } from './condaStepBasedFlow';
@@ -355,7 +356,7 @@ export async function getNamedCondaPythonInfo(
     envManager: EnvironmentManager,
 ): Promise<PythonEnvironmentInfo> {
     const { shellActivation, shellDeactivation } = await buildShellActivationMapForConda(prefix, envManager, name);
-    const sv = shortVersion(version);
+    const sv = shortenVersionString(version);
 
     return {
         name: name,
@@ -397,7 +398,7 @@ export async function getPrefixesCondaPythonInfo(
     conda: string,
     envManager: EnvironmentManager,
 ): Promise<PythonEnvironmentInfo> {
-    const sv = shortVersion(version);
+    const sv = shortenVersionString(version);
 
     const { shellActivation, shellDeactivation } = await buildShellActivationMapForConda(prefix, envManager);
 
@@ -991,19 +992,12 @@ export async function pickPythonVersion(
         ),
     );
 
-    // Sort versions by major version (descending), ignoring minor/patch for simplicity
-    const parseMajorMinor = (v: string) => {
-        const m = v.match(/^(\d+)(?:\.(\d+))?/);
-        return { major: m ? Number(m[1]) : 0, minor: m && m[2] ? Number(m[2]) : 0 };
-    };
-
+    // Sort versions descending using PEP 440 comparison
     versions = versions.sort((a, b) => {
-        const pa = parseMajorMinor(a);
-        const pb = parseMajorMinor(b);
-        if (pa.major !== pb.major) {
-            return pb.major - pa.major;
-        } // desc by major
-        return pb.minor - pa.minor; // desc by minor
+        if (!pep440Valid(a) || !pep440Valid(b)) {
+            return 0;
+        }
+        return pep440Compare(b, a); // descending
     });
 
     if (!versions || versions.length === 0) {

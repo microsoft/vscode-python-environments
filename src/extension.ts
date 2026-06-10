@@ -64,6 +64,7 @@ import {
 } from './features/envCommands';
 import { PythonEnvironmentManagers } from './features/envManagers';
 import { EnvVarManager, PythonEnvVariableManager } from './features/execution/envVariableManager';
+import { InlineScriptLazyDetector } from './features/inlineScriptLazyDetector';
 import {
     applyInitialEnvironmentSelection,
     registerInterpreterSettingsChangeListener,
@@ -204,6 +205,13 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
         projectCreators.registerPythonProjectCreator(new NewPackageProject(envManagers, projectManager)),
         projectCreators.registerPythonProjectCreator(new NewScriptProject(projectManager)),
     );
+
+    // Silent observer for `.py` files that declare PEP 723 inline
+    // script metadata. Emits anonymized telemetry (PEP723.DETECTED /
+    // PEP723.EDITED) but does not register projects or surface any UI.
+    const inlineScriptLazyDetector = new InlineScriptLazyDetector();
+    inlineScriptLazyDetector.activate();
+    context.subscriptions.push(inlineScriptLazyDetector);
 
     setPythonApi(envManagers, projectManager, projectCreators, terminalManager, envVarManager);
     const api = await getPythonApi();
@@ -727,6 +735,8 @@ export async function disposeAll(disposables: IDisposable[]): Promise<void> {
 
 export async function deactivate(context: ExtensionContext) {
     await disposeAll(context.subscriptions);
-    context.subscriptions.length = 0; // Clear subscriptions to prevent memory leaks
+    if (context.subscriptions?.length) {
+        context.subscriptions.length = 0; // Clear subscriptions to prevent memory leaks
+    }
     traceInfo('Python Environments extension deactivated.');
 }

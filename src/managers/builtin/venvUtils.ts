@@ -24,7 +24,7 @@ import {
     NativePythonEnvironmentKind,
     NativePythonFinder,
 } from '../common/nativePythonFinder';
-import { getShellActivationCommands, shortVersion, sortEnvironments } from '../common/utils';
+import { getShellActivationCommands, shortenVersionString, sortEnvironments } from '../common/utils';
 import { runPython, runUV, shouldUseUv } from './helpers';
 import { getProjectInstallable, PipPackages, shouldProceedAfterPyprojectValidation } from './pipUtils';
 import { resolveSystemPythonEnvironmentPath } from './utils';
@@ -164,7 +164,7 @@ async function getPythonInfo(env: NativeEnvInfo): Promise<PythonEnvironmentInfo>
 
     if (env.executable && env.version && env.prefix) {
         const venvName = env.name ?? getName(env.executable);
-        const sv = shortVersion(env.version);
+        const sv = shortenVersionString(env.version);
         const name = `${venvName} (${sv})`;
         let description = undefined;
         if (env.kind === NativePythonEnvironmentKind.venvUv) {

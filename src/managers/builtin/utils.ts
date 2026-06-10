@@ -21,7 +21,7 @@ import {
     NativePythonEnvironmentKind,
     NativePythonFinder,
 } from '../common/nativePythonFinder';
-import { shortVersion, sortEnvironments } from '../common/utils';
+import { shortenVersionString, sortEnvironments } from '../common/utils';
 import { runPython, runUV, shouldUseUv } from './helpers';
 import { parsePipListJson, PipPackage } from './pipListUtils';
 
@@ -80,7 +80,7 @@ function getKindName(kind: NativePythonEnvironmentKind | undefined): string | un
 function getPythonInfo(env: NativeEnvInfo): PythonEnvironmentInfo {
     if (env.executable && env.version && env.prefix) {
         const kindName = getKindName(env.kind);
-        const sv = shortVersion(env.version);
+        const sv = shortenVersionString(env.version);
         const name = kindName ? `Python ${sv} (${kindName})` : `Python ${sv}`;
         const displayName = kindName ? `Python ${sv} (${kindName})` : `Python ${sv}`;
         const shortDisplayName = kindName ? `${sv} (${kindName})` : `${sv}`;

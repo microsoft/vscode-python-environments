@@ -21,7 +21,7 @@ import {
     NativePythonEnvironmentKind,
     NativePythonFinder,
 } from '../common/nativePythonFinder';
-import { shortVersion, sortEnvironments } from '../common/utils';
+import { shortenVersionString, sortEnvironments } from '../common/utils';
 
 /**
  * Returns the pyenv root directory from the pyenv executable path.
@@ -192,7 +192,7 @@ function nativeToPythonEnv(
         group = PYENV_ENVIRONMENTS;
     }
 
-    const sv = shortVersion(info.version);
+    const sv = shortenVersionString(info.version);
     const name = info.name || info.displayName || path.basename(info.prefix);
     let displayName = info.displayName || `pyenv (${sv})`;
     if (info.kind === NativePythonEnvironmentKind.pyenvVirtualEnv) {

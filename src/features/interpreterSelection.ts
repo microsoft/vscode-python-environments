@@ -44,10 +44,10 @@ export interface PriorityChainResult {
 export interface SettingResolutionError {
     /** The setting that failed */
     setting: 'pythonProjects' | 'defaultEnvManager' | 'defaultInterpreterPath';
+    /** Structured failure kind, used for localization and stale-error re-checks. */
+    kind: 'managerNotRegistered' | 'pathUnresolvedVariables' | 'pathCannotResolve';
     /** The configured value */
     configuredValue: string;
-    /** Reason for failure */
-    reason: string;
 }
 
 /**
@@ -81,8 +81,8 @@ async function resolvePriorityChainCore(
             }
             const error: SettingResolutionError = {
                 setting: 'pythonProjects',
+                kind: 'managerNotRegistered',
                 configuredValue: projectManagerId,
-                reason: `Environment manager '${projectManagerId}' is not registered`,
             };
             errors.push(error);
             traceWarn(`${logPrefix} pythonProjects[] manager '${projectManagerId}' not found, trying next priority`);
@@ -99,8 +99,8 @@ async function resolvePriorityChainCore(
         }
         const error: SettingResolutionError = {
             setting: 'defaultEnvManager',
+            kind: 'managerNotRegistered',
             configuredValue: userConfiguredManager,
-            reason: `Environment manager '${userConfiguredManager}' is not registered`,
         };
         errors.push(error);
         traceWarn(`${logPrefix} defaultEnvManager '${userConfiguredManager}' not found, trying next priority`);
@@ -118,8 +118,8 @@ async function resolvePriorityChainCore(
                 );
                 const error: SettingResolutionError = {
                     setting: 'defaultInterpreterPath',
+                    kind: 'pathUnresolvedVariables',
                     configuredValue: userInterpreterPath,
-                    reason: l10n.t('Path contains unresolved variables'),
                 };
                 errors.push(error);
             } else {
@@ -138,8 +138,8 @@ async function resolvePriorityChainCore(
                 );
                 const error: SettingResolutionError = {
                     setting: 'defaultInterpreterPath',
+                    kind: 'pathUnresolvedVariables',
                     configuredValue: userInterpreterPath,
-                    reason: l10n.t('Path contains unresolved variables'),
                 };
                 errors.push(error);
             } else {
@@ -155,8 +155,8 @@ async function resolvePriorityChainCore(
                 }
                 const error: SettingResolutionError = {
                     setting: 'defaultInterpreterPath',
+                    kind: 'pathCannotResolve',
                     configuredValue: userInterpreterPath,
-                    reason: `Could not resolve interpreter path '${userInterpreterPath}'`,
                 };
                 errors.push(error);
                 traceWarn(
@@ -383,8 +383,9 @@ export async function applyInitialEnvironmentSelection(
         }
         resolveGlobalScope()
             .then(async (globalErrors) => {
-                if (globalErrors.length > 0) {
-                    await notifyUserOfSettingErrors(globalErrors);
+                const liveGlobalErrors = filterLiveSettingErrors(globalErrors, envManagers);
+                if (liveGlobalErrors.length > 0) {
+                    await notifyUserOfSettingErrors(liveGlobalErrors);
                 }
             })
             .catch((err) => traceError(`[interpreterSelection] Background global scope resolution failed: ${err}`));
@@ -397,9 +398,11 @@ export async function applyInitialEnvironmentSelection(
         allErrors.push(...globalErrors);
     }
 
-    // Notify user if any settings could not be applied (workspace + global when awaited)
-    if (allErrors.length > 0) {
-        await notifyUserOfSettingErrors(allErrors);
+    // Drop errors that became stale during the awaits above; see filterLiveSettingErrors.
+    const liveErrors = filterLiveSettingErrors(allErrors, envManagers);
+
+    if (liveErrors.length > 0) {
+        await notifyUserOfSettingErrors(liveErrors);
     }
 
     // Numeric values must go via the measures argument (properties are dropped).
@@ -409,7 +412,7 @@ export async function applyInitialEnvironmentSelection(
             duration: selectionStopWatch.elapsedTime,
             workspaceFolderCount: folders.length,
             resolvedFolderCount,
-            settingErrorCount: allErrors.length,
+            settingErrorCount: liveErrors.length,
         },
         {
             globalScopeDeferred: workspaceFolderResolved,
@@ -430,7 +433,42 @@ export function resetSettingWarnings(): void {
     warnedSettings.clear();
 }
 
+function localizedReasonFor(error: SettingResolutionError): string {
+    switch (error.kind) {
+        case 'managerNotRegistered':
+            return l10n.t("Environment manager '{0}' is not registered", error.configuredValue);
+        case 'pathUnresolvedVariables':
+            return l10n.t('Path contains unresolved variables');
+        case 'pathCannotResolve':
+            return l10n.t("Could not resolve interpreter path '{0}'", error.configuredValue);
+    }
+}
+
+/**
+ * Re-check the live registry to drop `managerNotRegistered` errors that became
+ * stale while later awaits ran — a third-party manager extension may have
+ * registered in the meantime, in which case the warning would be a false positive.
+ */
+function filterLiveSettingErrors(
+    errors: SettingResolutionError[],
+    envManagers: EnvironmentManagers,
+): SettingResolutionError[] {
+    return errors.filter((e) => {
+        if (e.kind === 'managerNotRegistered' && envManagers.getEnvironmentManager(e.configuredValue)) {
+            traceVerbose(
+                `[interpreterSelection] Manager '${e.configuredValue}' is now registered; suppressing stale warning`,
+            );
+            return false;
+        }
+        return true;
+    });
+}
+
 async function notifyUserOfSettingErrors(errors: SettingResolutionError[]): Promise<void> {
+    if (errors.length === 0) {
+        return;
+    }
+
     // Group errors by setting type to avoid spamming the user
     const uniqueSettings = [...new Set(errors.map((e) => e.setting))];
 
@@ -442,6 +480,7 @@ async function notifyUserOfSettingErrors(errors: SettingResolutionError[]): Prom
 
         const settingErrors = errors.filter((e) => e.setting === setting);
         const firstError = settingErrors[0];
+        const reason = localizedReasonFor(firstError);
 
         let message: string;
         let settingKey: string;
@@ -451,7 +490,7 @@ async function notifyUserOfSettingErrors(errors: SettingResolutionError[]): Prom
                 message = l10n.t(
                     "Python project setting for environment manager '{0}' could not be applied: {1}",
                     firstError.configuredValue,
-                    firstError.reason,
+                    reason,
                 );
                 settingKey = 'python-envs.pythonProjects';
                 break;
@@ -459,7 +498,7 @@ async function notifyUserOfSettingErrors(errors: SettingResolutionError[]): Prom
                 message = l10n.t(
                     "Default environment manager '{0}' could not be applied: {1}",
                     firstError.configuredValue,
-                    firstError.reason,
+                    reason,
                 );
                 settingKey = 'python-envs.defaultEnvManager';
                 break;
@@ -467,7 +506,7 @@ async function notifyUserOfSettingErrors(errors: SettingResolutionError[]): Prom
                 message = l10n.t(
                     "Default interpreter path '{0}' could not be resolved: {1}",
                     firstError.configuredValue,
-                    firstError.reason,
+                    reason,
                 );
                 settingKey = 'python.defaultInterpreterPath';
                 break;
