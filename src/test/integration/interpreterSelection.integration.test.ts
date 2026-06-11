@@ -30,9 +30,11 @@ import { waitForCondition } from '../testUtils';
 /**
  * Calls setEnvironment and waits for the async event chain to fully settle.
  *
- * Subscribes to onDidChangeEnvironment BEFORE calling setEnvironment, then
- * waits for the event to fire. For idempotent sets (env already matches the
- * cache), no event fires — the drain fallback ensures we don't hang.
+ * Compares the current environment with the target to determine whether
+ * a change event is expected. If a change is expected, subscribes to
+ * onDidChangeEnvironment BEFORE calling setEnvironment and awaits the
+ * event. If no change is expected (idempotent set), calls setEnvironment
+ * and returns immediately.
  *
  * Returns all captured events, which callers can inspect to verify
  * event payloads (e.g., old/new values).
@@ -42,9 +44,22 @@ async function setEnvironmentAndWait(
     scope: SetEnvironmentScope,
     env: PythonEnvironment | undefined,
 ): Promise<DidChangeEnvironmentEventArgs[]> {
-    const events: DidChangeEnvironmentEventArgs[] = [];
+    // Determine if this set will actually change the environment.
+    // For array scopes, check the first URI (the primary project).
+    const getScope = Array.isArray(scope) ? scope[0] : scope;
+    const current = await api.getEnvironment(getScope);
+    const currentId = current?.envId.id;
+    const targetId = env?.envId.id;
+    const expectsChange = currentId !== targetId;
 
-    // Promise that resolves as soon as the first event fires
+    if (!expectsChange) {
+        // Idempotent set — no event will fire, just call and return
+        await api.setEnvironment(scope, env);
+        return [];
+    }
+
+    // A change is expected — wait for the event
+    const events: DidChangeEnvironmentEventArgs[] = [];
     let resolveEvent: () => void;
     const eventPromise = new Promise<void>((resolve) => {
         resolveEvent = resolve;
@@ -57,22 +72,7 @@ async function setEnvironmentAndWait(
 
     try {
         await api.setEnvironment(scope, env);
-
-        // Drain fallback: 5 setImmediate ticks covers the full async chain.
-        // For idempotent sets (no event), this ensures we don't hang.
-        const drainPromise = (async () => {
-            for (let tick = 0; tick < 5; tick++) {
-                await new Promise<void>((resolve) => setImmediate(resolve));
-            }
-        })();
-
-        // Wait for the event OR drain (whichever comes first)
-        await Promise.race([eventPromise, drainPromise]);
-
-        // Always drain remaining ticks to catch secondary events
-        // (e.g., refreshEnvironment firing after the initial event)
-        await drainPromise;
-
+        await eventPromise;
         return events;
     } finally {
         disposable.dispose();
