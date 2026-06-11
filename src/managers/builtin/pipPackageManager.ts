@@ -1,3 +1,5 @@
+import type { Pep440Version } from '@renovatebot/pep440';
+import { compare, explain as parse, rcompare } from '@renovatebot/pep440';
 import {
     CancellationError,
     Disposable,
@@ -20,6 +22,7 @@ import {
     PythonEnvironmentApi,
 } from '../../api';
 import { updatePackagesAndNotify } from '../common/packageChanges';
+import { runProcessCaptureAll, runPython, runUV, shouldUseUv } from './helpers';
 import { getWorkspacePackagesToInstall } from './pipUtils';
 import { managePackages, refreshPipDirectPackageNames, refreshPipPackages } from './utils';
 import { VenvManager } from './venvManager';
@@ -125,6 +128,95 @@ export class PipPackageManager implements PackageManager, Disposable {
         return this.packages.get(environment.envId.id);
     }
 
+    async getVersion(environment: PythonEnvironment): Promise<Pep440Version | undefined> {
+        try {
+            const useUv = await shouldUseUv(this.log, environment.environmentPath.fsPath);
+            if (useUv) {
+                const result = await runUV(['--version'], undefined, this.log);
+                // "uv X.Y.Z"
+                const match = result.match(/^uv\s+(\d+\.\d+(?:\.\d+)*)/);
+                return match ? (parse(match[1]) ?? undefined) : undefined;
+            }
+            const result = await runPython(
+                environment.execInfo?.run?.executable ?? 'python',
+                ['-m', 'pip', '--version'],
+                undefined,
+                this.log,
+            );
+            // "pip X.Y.Z from /path/to/pip (python X.Y)"
+            const match = result.match(/^pip\s+(\d+\.\d+(?:\.\d+)*)/);
+            return match ? (parse(match[1]) ?? undefined) : undefined;
+        } catch {
+            return undefined;
+        }
+    }
+
+    async getPackageAvailableVersions(
+        environment: PythonEnvironment,
+        packageName: string,
+    ): Promise<Pep440Version[] | undefined> {
+        try {
+            const python = environment.execInfo?.run?.executable;
+            if (!python) {
+                return undefined;
+            }
+
+            // uv - Run pip via `uv tool run pip`
+            const useUv = await shouldUseUv(this.log, environment.environmentPath.fsPath);
+            if (useUv) {
+                const output = await runUV(
+                    [
+                        'tool',
+                        'run',
+                        'pip',
+                        'index',
+                        'versions',
+                        packageName,
+                        '--json',
+                        '--python-version',
+                        parse(environment.version)?.base_version!,
+                    ],
+                    undefined,
+                    this.log,
+                );
+                return parsePipIndexVersionsJson(output);
+            }
+
+            // pip >= 21.2.0 - use `pip index versions <package> --json` to get available versions in a machine readable format.
+            const pipVersion = await this.getVersion(environment);
+            if (pipVersion && compare(pipVersion.public, '21.2.0') >= 0) {
+                const output = await runPython(
+                    python,
+                    [
+                        '-m',
+                        'pip',
+                        'index',
+                        'versions',
+                        packageName,
+                        '--json',
+                        '--python-version',
+                        parse(environment.version)?.base_version!,
+                    ],
+                    undefined,
+                    this.log,
+                );
+                return parsePipIndexVersionsJson(output);
+            }
+
+            // pip <= 20.3.4 - use `pip install <package>==__invalid__` to get available versions from error message.
+            if (pipVersion && compare(pipVersion.public, '20.3.4') <= 0) {
+                const result = await runProcessCaptureAll(
+                    python,
+                    ['-m', 'pip', 'install', `${packageName}==__invalid__`],
+                    this.log,
+                );
+                return parsePipInstallVersions(result.stdout + result.stderr);
+            }
+        } catch {
+            return undefined;
+        }
+    }
+
     dispose(): void {
         this._onDidChangePackages.dispose();
         this.packages.clear();
@@ -133,5 +225,52 @@ export class PipPackageManager implements PackageManager, Disposable {
     async getDirectPackageNames(environment: PythonEnvironment): Promise<Set<string> | undefined> {
         const data = await refreshPipDirectPackageNames(environment, this.log);
         return data ? new Set(data) : undefined;
+    }
+}
+
+/**
+ * Parses the output of `pip install <package>==__invalid__` to extract available versions.
+ * Expected output format:
+ * ```
+ * Collecting <package>==__invalid__
+ *   Could not find a version that satisfies the requirement <package>==__invalid__ (from versions: 1.2.3, 1.2.2, ...)
+ *   No matching distribution found for <package>==__invalid__
+ * ```
+ */
+export function parsePipInstallVersions(output: string): Pep440Version[] | undefined {
+    const match = output.match(/from versions:\s*([^\)]+)\)/);
+    if (match && match[1]) {
+        const versions = match[1]
+            .split(',')
+            .filter((v) => !!v.trim())
+            .map((v) => parse(v.trim()))
+            .filter((v): v is Pep440Version => v !== null)
+            .sort((a, b) => rcompare(a.public, b.public));
+        return versions.length > 0 ? versions : undefined;
+    }
+}
+
+/**
+ * Parses JSON output from `pip index versions <package> --json`.
+ * Expected format: { "name": "...", "versions": ["1.2.3", "1.2.2", ...] }
+ */
+export function parsePipIndexVersionsJson(output: string): Pep440Version[] | undefined {
+    // Only capture output between braces
+    const match = output.match(/{[\s\S]*}/);
+    if (!match) {
+        return undefined;
+    }
+    try {
+        const parsed = JSON.parse(match[0]);
+        if (parsed && Array.isArray(parsed.versions) && parsed.versions.length > 0) {
+            return (parsed.versions as string[])
+                .filter((v) => !!v.trim())
+                .map((v) => parse(v.trim()))
+                .filter((v): v is Pep440Version => v !== null)
+                .sort((a, b) => rcompare(a.public, b.public));
+        }
+        return undefined;
+    } catch {
+        return undefined;
     }
 }

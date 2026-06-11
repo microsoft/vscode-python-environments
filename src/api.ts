@@ -1,6 +1,7 @@
 // Copyright (c) Microsoft Corporation. All rights reserved.
 // Licensed under the MIT License.
 
+import type { Pep440Version } from '@renovatebot/pep440';
 import type {
     Disposable,
     Event,
@@ -13,6 +14,8 @@ import type {
     ThemeIcon,
     Uri,
 } from 'vscode';
+
+export type { Pep440Version } from '@renovatebot/pep440';
 
 /**
  * The path to an icon, or a theme-specific configuration of icons.
@@ -698,6 +701,37 @@ export interface PackageManager {
      * @returns A promise that resolves when the cache is cleared.
      */
     clearCache?(): Promise<void>;
+
+    /**
+     * Returns the version of the underlying package management tool (e.g., pip, conda).
+     * @returns A promise that resolves to a {@link Pep440Version} object, or `undefined` if not available.
+     */
+    getVersion?(environment: PythonEnvironment): Promise<Pep440Version | undefined>;
+
+    /**
+     * Retrieves the list of available versions for a given package.
+     * @param environment - The Python environment context for the lookup.
+     * @param packageName - The name of the package to look up.
+     * @returns A promise that resolves to an array of {@link Pep440Version} objects (newest first),
+     *          or `undefined` if this manager does not support version listing.
+     */
+    getPackageAvailableVersions?(
+        environment: PythonEnvironment,
+        packageName: string,
+    ): Promise<Pep440Version[] | undefined>;
+
+    /**
+     * Formats a versioned install specification for this package manager.
+     *
+     * Different package managers use different syntax (e.g. pip uses `name==version`,
+     * conda uses `name=version`). Implement this method to return the correct format.
+     * When absent, callers should default to `name==version`.
+     *
+     * @param packageName - The name of the package.
+     * @param version - The version string.
+     * @returns The install specification string (e.g. `"requests==2.31.0"` or `"requests=2.31.0"`).
+     */
+    formatInstallSpec?(packageName: string, version: string): string;
 }
 
 /**
@@ -1078,12 +1112,33 @@ export interface PythonPackageManagementApi {
     managePackages(environment: PythonEnvironment, options: PackageManagementOptions): Promise<void>;
 }
 
+export interface Pep440VersionApi {
+    /**
+     * Get the version of the package manager tool associated with the given environment.
+     *
+     * @param environment The Python Environment whose package manager version is requested.
+     * @returns The {@link Pep440Version} of the package manager tool, or `undefined` if not available.
+     */
+    getPackageManagerVersion(environment: PythonEnvironment): Promise<Pep440Version | undefined>;
+
+    /**
+     * Get the list of available versions for a package from the package manager
+     * associated with the given environment.
+     *
+     * @param packageName The name of the package.
+     * @param environment The Python Environment context for the lookup.
+     * @returns An array of {@link Pep440Version} objects (newest first), or `undefined` if not supported.
+     */
+    getAvailableVersions(packageName: string, environment: PythonEnvironment): Promise<Pep440Version[] | undefined>;
+}
+
 export interface PythonPackageManagerApi
     extends
         PythonPackageManagerRegistrationApi,
         PythonPackageGetterApi,
         PythonPackageManagementApi,
-        PythonPackageItemApi {}
+        PythonPackageItemApi,
+        Pep440VersionApi {}
 
 export interface PythonProjectCreationApi {
     /**

@@ -16,6 +16,7 @@ import {
     PackageInfo,
     PackageManagementOptions,
     PackageManager,
+    Pep440Version,
     PythonBackgroundRunOptions,
     PythonEnvironment,
     PythonEnvironmentApi,
@@ -267,6 +268,28 @@ class PythonEnvironmentApiImpl implements PythonEnvironmentApi {
         return manager.getPackages(context, options);
     }
     onDidChangePackages: Event<DidChangePackagesEventArgs> = this._onDidChangePackages.event;
+
+    async getPackageManagerVersion(environment: PythonEnvironment): Promise<Pep440Version | undefined> {
+        await waitForEnvManagerId([environment.envId.managerId]);
+        const manager = this.envManagers.getPackageManager(environment);
+        if (!manager) {
+            return undefined;
+        }
+        return manager.getVersion(environment);
+    }
+
+    async getAvailableVersions(
+        packageName: string,
+        environment: PythonEnvironment,
+    ): Promise<Pep440Version[] | undefined> {
+        await waitForEnvManagerId([environment.envId.managerId]);
+        const manager = this.envManagers.getPackageManager(environment);
+        if (!manager) {
+            return undefined;
+        }
+        return manager.getPackageAvailableVersions(environment, packageName);
+    }
+
     createPackageItem(info: PackageInfo, environment: PythonEnvironment, manager: PackageManager): Package {
         const mgr = this.envManagers.packageManagers.find((m) => m.equals(manager));
         if (!mgr) {

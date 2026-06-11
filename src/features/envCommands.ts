@@ -28,6 +28,7 @@ import {
 } from '../internal.api';
 import { removePythonProjectSetting, setEnvironmentManager, setPackageManager } from './settings/settingHelpers';
 
+import { valid as pep440Valid } from '@renovatebot/pep440';
 import { executeCommand } from '../common/command.api';
 import { clipboardWriteText } from '../common/env.apis';
 import { Pickers } from '../common/localize';
@@ -46,7 +47,9 @@ import {
     activeTextEditor,
     showErrorMessage,
     showInformationMessage,
+    showInputBox,
     showOpenDialog,
+    showQuickPick,
     withProgress,
 } from '../common/window.apis';
 import { runAsTask } from './execution/runAsTask';
@@ -314,12 +317,79 @@ export async function handlePackageUninstall(context: unknown, em: EnvironmentMa
             }
         }
         const moduleName = context.pkg.name;
-        const environment = context instanceof ProjectPackage ? context.parent.environment : context.parent.environment;
+        const environment = context.parent.environment;
         const packageManager = em.getPackageManager(environment);
         await packageManager?.manage(environment, { uninstall: [moduleName], install: [] });
         return;
     }
     traceError(`Invalid context for uninstall command: ${typeof context}`);
+}
+
+/**
+ * Manages package versions by allowing the user to select from available versions or enter a specific version.
+ * If available versions can be fetched, a QuickPick is shown. Otherwise, an InputBox is used for free-text version entry.
+ */
+export async function managePackageVersion(context: unknown, em: EnvironmentManagers) {
+    if (context instanceof PackageTreeItem || context instanceof ProjectPackage) {
+        const pkg = context.pkg;
+        const environment = context.parent.environment;
+        const packageManager = em.getPackageManager(environment);
+
+        if (!packageManager) {
+            return;
+        }
+
+        let version: string | undefined;
+
+        // Try to fetch available versions for a QuickPick experience
+        const availableVersions = await withProgress(
+            { location: ProgressLocation.Window, title: l10n.t('Fetching available versions for {0}...', pkg.name) },
+            () => packageManager.getPackageAvailableVersions(environment, pkg.name),
+        );
+
+        if (availableVersions && availableVersions.length > 0) {
+            const items = availableVersions.map((v) => ({
+                label: v.public,
+                description: v.public === pkg.version ? `$(check) ${l10n.t('Installed')}` : undefined,
+            }));
+
+            const selected = await showQuickPick(items, {
+                title: l10n.t('Select version for {0}', pkg.name),
+                placeHolder: l10n.t('Choose a version or press Escape to cancel'),
+            });
+            version = selected?.label;
+        } else {
+            // Fallback to free-text input if version listing is not available
+            const inputVersion = await showInputBox({
+                title: l10n.t('Manage Package Version'),
+                prompt: l10n.t('Enter the version for {0}', pkg.name),
+                value: pkg.version,
+                placeHolder: l10n.t('e.g. 1.2.3'),
+                validateInput: (value) => {
+                    const trimmedValue = value.trim();
+                    if (trimmedValue.length === 0) {
+                        return l10n.t('Version cannot be empty');
+                    }
+                    if (!pep440Valid(trimmedValue)) {
+                        return l10n.t('Invalid PEP 440 version: {0}', trimmedValue);
+                    }
+                    return undefined;
+                },
+            });
+            version = inputVersion?.trim();
+        }
+
+        if (version === undefined || version === pkg.version) {
+            return;
+        }
+
+        await packageManager.manage(environment, {
+            install: [packageManager.formatInstallSpec(pkg.name, version)],
+            uninstall: [],
+        });
+    } else {
+        traceError(`Invalid context for manage package version command: ${typeof context}`);
+    }
 }
 
 export async function setEnvironmentCommand(
