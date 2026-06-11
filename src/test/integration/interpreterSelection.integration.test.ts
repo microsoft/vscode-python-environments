@@ -23,56 +23,9 @@
 
 import * as assert from 'assert';
 import * as vscode from 'vscode';
-import { DidChangeEnvironmentEventArgs, PythonEnvironment, PythonEnvironmentApi, SetEnvironmentScope } from '../../api';
+import { DidChangeEnvironmentEventArgs, PythonEnvironment, PythonEnvironmentApi } from '../../api';
 import { ENVS_EXTENSION_ID } from '../constants';
 import { waitForCondition } from '../testUtils';
-
-/**
- * Returns a promise that resolves with the first event fired by the given
- * VS Code event emitter. Automatically disposes the subscription after
- * the event fires.
- */
-function onceEvent<T>(event: vscode.Event<T>): Promise<T> {
-    return new Promise<T>((resolve) => {
-        const disposable = event((e) => {
-            disposable.dispose();
-            resolve(e);
-        });
-    });
-}
-
-/**
- * Calls setEnvironment and waits for the async event chain to fully settle.
- *
- * Compares the current environment with the target to determine whether
- * a change event is expected. If a change is expected, subscribes to
- * onDidChangeEnvironment BEFORE calling setEnvironment and awaits the
- * event. If no change is expected (idempotent set), calls setEnvironment
- * and returns immediately.
- *
- * Returns the change event if one was fired, or undefined for idempotent sets.
- */
-async function setEnvironmentAndWait(
-    api: PythonEnvironmentApi,
-    scope: SetEnvironmentScope,
-    env: PythonEnvironment | undefined,
-): Promise<DidChangeEnvironmentEventArgs | undefined> {
-    // Determine if this set will actually change the environment.
-    // For array scopes, check the first URI (the primary project).
-    const getScope = Array.isArray(scope) ? scope[0] : scope;
-    const current = await api.getEnvironment(getScope);
-    const expectsChange = current?.envId.id !== env?.envId.id;
-
-    if (!expectsChange) {
-        await api.setEnvironment(scope, env);
-        return undefined;
-    }
-
-    // Subscribe before calling setEnvironment so we don't miss the event
-    const eventPromise = onceEvent(api.onDidChangeEnvironment);
-    await api.setEnvironment(scope, env);
-    return eventPromise;
-}
 
 suite('Integration: Interpreter Selection Priority', function () {
     this.timeout(60_000);
@@ -99,11 +52,9 @@ suite('Integration: Interpreter Selection Priority', function () {
     });
 
     // Reset to original state after each test to prevent state pollution.
-    // Uses setEnvironmentAndWait to ensure all async events drain before
-    // the next test starts — prevents stale events from leaking.
     teardown(async function () {
         try {
-            await setEnvironmentAndWait(api, undefined, originalEnv);
+            await api.setEnvironment(undefined, originalEnv);
         } catch {
             // Ignore errors during reset
         }
@@ -141,8 +92,8 @@ suite('Integration: Interpreter Selection Priority', function () {
 
         const envToSet = environments[0];
 
-        // Set environment and wait for async event chain to settle
-        await setEnvironmentAndWait(api, undefined, envToSet);
+        // Set environment globally — await guarantees the event has fired
+        await api.setEnvironment(undefined, envToSet);
 
         const retrieved = await api.getEnvironment(undefined);
 
@@ -173,11 +124,11 @@ suite('Integration: Interpreter Selection Priority', function () {
         const projectEnv = environments[1];
         const project = projects[0];
 
-        // Set global environment and wait for event chain to settle
-        await setEnvironmentAndWait(api, undefined, globalEnv);
+        // Set global environment
+        await api.setEnvironment(undefined, globalEnv);
 
-        // Set different environment for project and wait
-        await setEnvironmentAndWait(api, project.uri, projectEnv);
+        // Set different environment for project
+        await api.setEnvironment(project.uri, projectEnv);
 
         // Verify global is unchanged
         const globalRetrieved = await api.getEnvironment(undefined);
@@ -215,24 +166,34 @@ suite('Integration: Interpreter Selection Priority', function () {
         const oldEnv = environments[0];
         const newEnv = environments[1];
 
-        // Set initial environment and wait for all async events to drain
-        await setEnvironmentAndWait(api, undefined, oldEnv);
+        // Set initial environment
+        await api.setEnvironment(undefined, oldEnv);
 
-        // Set new environment — the returned event contains the change payload
-        const event = await setEnvironmentAndWait(api, undefined, newEnv);
+        // Subscribe to capture the change event from the next set
+        let capturedEvent: DidChangeEnvironmentEventArgs | undefined;
+        const disposable = api.onDidChangeEnvironment((e) => {
+            capturedEvent = e;
+        });
 
-        assert.ok(event, 'Change event should have fired');
-        assert.ok(event.new, 'Event should have new environment');
-        assert.strictEqual(
-            event.new.envId.id,
-            newEnv.envId.id,
-            'Event new envId should match the environment we set',
-        );
-        assert.strictEqual(
-            event.new.environmentPath.fsPath,
-            newEnv.environmentPath.fsPath,
-            'New should match set environment',
-        );
+        try {
+            // Change to new environment — await guarantees the event has fired
+            await api.setEnvironment(undefined, newEnv);
+
+            assert.ok(capturedEvent, 'Change event should have fired');
+            assert.ok(capturedEvent.new, 'Event should have new environment');
+            assert.strictEqual(
+                capturedEvent.new.envId.id,
+                newEnv.envId.id,
+                'Event new envId should match the environment we set',
+            );
+            assert.strictEqual(
+                capturedEvent.new.environmentPath.fsPath,
+                newEnv.environmentPath.fsPath,
+                'New should match set environment',
+            );
+        } finally {
+            disposable.dispose();
+        }
     });
 
     /**
@@ -253,8 +214,8 @@ suite('Integration: Interpreter Selection Priority', function () {
         const project = projects[0];
         const env = environments[0];
 
-        // Set project environment and wait for event chain to settle
-        await setEnvironmentAndWait(api, project.uri, env);
+        // Set project environment
+        await api.setEnvironment(project.uri, env);
 
         // Query for a file inside the project
         const fileUri = vscode.Uri.joinPath(project.uri, 'subdir', 'script.py');
@@ -308,11 +269,11 @@ suite('Integration: Interpreter Selection Priority', function () {
 
         const env = environments[0];
 
-        // Set environment first time and wait for event chain to settle
-        await setEnvironmentAndWait(api, undefined, env);
+        // Set environment first time
+        await api.setEnvironment(undefined, env);
 
-        // Set same environment again and wait for any events to drain
-        await setEnvironmentAndWait(api, undefined, env);
+        // Set same environment again
+        await api.setEnvironment(undefined, env);
 
         // Verify functional idempotency: after setting the same environment
         // twice, getEnvironment should still return the same environment.
@@ -343,13 +304,13 @@ suite('Integration: Interpreter Selection Priority', function () {
             return;
         }
 
-        // Set an explicit environment and wait for event chain to settle
-        await setEnvironmentAndWait(api, undefined, environments[0]);
+        // Set an explicit environment
+        await api.setEnvironment(undefined, environments[0]);
         const beforeClear = await api.getEnvironment(undefined);
         assert.ok(beforeClear, 'Should have environment before clearing');
 
-        // Clear the selection and wait for event chain to settle
-        await setEnvironmentAndWait(api, undefined, undefined);
+        // Clear the selection
+        await api.setEnvironment(undefined, undefined);
 
         // Get environment - should return auto-discovered environment
         const autoEnv = await api.getEnvironment(undefined);

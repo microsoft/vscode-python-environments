@@ -363,9 +363,12 @@ export class PythonEnvironmentManagers implements EnvironmentManagers {
         const oldEnv = this._activeSelection.get(key);
         if (oldEnv?.envId.id !== environment?.envId.id) {
             this._activeSelection.set(key, environment);
-            setImmediate(() =>
-                this._onDidChangeActiveEnvironment.fire({ uri: project?.uri, new: environment, old: oldEnv }),
-            );
+            await new Promise<void>((resolve) => {
+                setImmediate(() => {
+                    this._onDidChangeActiveEnvironment.fire({ uri: project?.uri, new: environment, old: oldEnv });
+                    resolve();
+                });
+            });
         }
     }
 
@@ -443,7 +446,12 @@ export class PythonEnvironmentManagers implements EnvironmentManagers {
             if (shouldPersistSettings) {
                 await setAllManagerSettings(settings);
             }
-            setImmediate(() => events.forEach((e) => this._onDidChangeActiveEnvironment.fire(e)));
+            await new Promise<void>((resolve) => {
+                setImmediate(() => {
+                    events.forEach((e) => this._onDidChangeActiveEnvironment.fire(e));
+                    resolve();
+                });
+            });
         } else {
             const promises: Promise<void>[] = [];
             const events: DidChangeEnvironmentEventArgs[] = [];
@@ -488,7 +496,12 @@ export class PythonEnvironmentManagers implements EnvironmentManagers {
                 }
             }
             await Promise.all(promises);
-            setImmediate(() => events.forEach((e) => this._onDidChangeActiveEnvironment.fire(e)));
+            await new Promise<void>((resolve) => {
+                setImmediate(() => {
+                    events.forEach((e) => this._onDidChangeActiveEnvironment.fire(e));
+                    resolve();
+                });
+            });
         }
     }
 
