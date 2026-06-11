@@ -96,26 +96,23 @@ suite('Integration: Interpreter Selection Priority', function () {
 
         const envToSet = environments[0];
 
+        // Subscribe before setting so we can wait for the event to propagate.
+        const drainHandler = new TestEventHandler<DidChangeEnvironmentEventArgs>(
+            api.onDidChangeEnvironment,
+            'drain',
+        );
+
         // Set environment globally
         await api.setEnvironment(undefined, envToSet);
+        await drainHandler.assertFired(15_000);
+        drainHandler.dispose();
 
-        // Wait for the async config write to propagate and verify the result.
-        // setEnvironment fires onDidChangeEnvironment asynchronously, so getEnvironment
-        // called immediately after may still return the previous (auto-discovered) value
-        // on slower CI runners.
-        let retrieved: PythonEnvironment | undefined;
-        await waitForCondition(
-            async () => {
-                retrieved = await api.getEnvironment(undefined);
-                return !!retrieved && retrieved.environmentPath.fsPath === envToSet.environmentPath.fsPath;
-            },
-            15_000,
-            () => `Environment was not persisted as ${envToSet.environmentPath.fsPath}`,
-        );
+        // Get and verify
+        const retrieved = await api.getEnvironment(undefined);
 
         assert.ok(retrieved, 'Should have environment after setting');
         assert.strictEqual(
-            retrieved!.environmentPath.fsPath,
+            retrieved.environmentPath.fsPath,
             envToSet.environmentPath.fsPath,
             'Retrieved environment should point to the same interpreter as the one set',
         );
@@ -140,47 +137,41 @@ suite('Integration: Interpreter Selection Priority', function () {
         const projectEnv = environments[1];
         const project = projects[0];
 
+        // Subscribe before setting so we can wait for events to propagate.
+        const globalDrain = new TestEventHandler<DidChangeEnvironmentEventArgs>(
+            api.onDidChangeEnvironment,
+            'globalDrain',
+        );
+
         // Set global environment
         await api.setEnvironment(undefined, globalEnv);
+        await globalDrain.assertFired(15_000);
+        globalDrain.dispose();
+
+        const projectDrain = new TestEventHandler<DidChangeEnvironmentEventArgs>(
+            api.onDidChangeEnvironment,
+            'projectDrain',
+        );
 
         // Set different environment for project
         await api.setEnvironment(project.uri, projectEnv);
+        await projectDrain.assertFired(15_000);
+        projectDrain.dispose();
 
-        // Wait for the global env async write to propagate and verify.
-        let globalRetrieved: PythonEnvironment | undefined;
-        await waitForCondition(
-            async () => {
-                globalRetrieved = await api.getEnvironment(undefined);
-                return !!globalRetrieved && globalRetrieved.environmentPath.fsPath === globalEnv.environmentPath.fsPath;
-            },
-            15_000,
-            () => `Global environment was not persisted as ${globalEnv.environmentPath.fsPath}`,
-        );
-
+        // Verify global is unchanged
+        const globalRetrieved = await api.getEnvironment(undefined);
         assert.ok(globalRetrieved, 'Global should have environment');
         assert.strictEqual(
-            globalRetrieved!.environmentPath.fsPath,
+            globalRetrieved.environmentPath.fsPath,
             globalEnv.environmentPath.fsPath,
             'Global selection should be unchanged',
         );
 
-        // Wait for the project env async write to propagate and verify.
-        let projectRetrieved: PythonEnvironment | undefined;
-        await waitForCondition(
-            async () => {
-                projectRetrieved = await api.getEnvironment(project.uri);
-                return (
-                    !!projectRetrieved &&
-                    projectRetrieved.environmentPath.fsPath === projectEnv.environmentPath.fsPath
-                );
-            },
-            15_000,
-            () => `Project environment was not persisted as ${projectEnv.environmentPath.fsPath}`,
-        );
-
+        // Verify project has its own selection
+        const projectRetrieved = await api.getEnvironment(project.uri);
         assert.ok(projectRetrieved, 'Project should have environment');
         assert.strictEqual(
-            projectRetrieved!.environmentPath.fsPath,
+            projectRetrieved.environmentPath.fsPath,
             projectEnv.environmentPath.fsPath,
             'Project should have its own selection',
         );
