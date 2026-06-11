@@ -203,19 +203,17 @@ suite('Integration: Interpreter Selection Priority', function () {
         const oldEnv = environments[0];
         const newEnv = environments[1];
 
-        // Set initial environment and wait for it to propagate before
-        // registering the event handler. Without this, the handler may
-        // capture the event from this first setEnvironment call instead
-        // of the subsequent one, causing a spurious assertion failure.
-        await api.setEnvironment(undefined, oldEnv);
-        await waitForCondition(
-            async () => {
-                const e = await api.getEnvironment(undefined);
-                return !!e && e.environmentPath.fsPath === oldEnv.environmentPath.fsPath;
-            },
-            15_000,
-            () => `Initial environment was not set to ${oldEnv.environmentPath.fsPath}`,
+        // Subscribe a temporary handler BEFORE the first setEnvironment so we
+        // can wait for its event to drain. This avoids the real handler
+        // capturing a stale event from this initial call.
+        const drainHandler = new TestEventHandler<DidChangeEnvironmentEventArgs>(
+            api.onDidChangeEnvironment,
+            'drain',
         );
+
+        await api.setEnvironment(undefined, oldEnv);
+        await drainHandler.assertFired(15_000);
+        drainHandler.dispose();
 
         const handler = new TestEventHandler<DidChangeEnvironmentEventArgs>(
             api.onDidChangeEnvironment,
@@ -322,18 +320,15 @@ suite('Integration: Interpreter Selection Priority', function () {
 
         const env = environments[0];
 
-        // Set environment first time
-        await api.setEnvironment(undefined, env);
-
-        // Wait for the async config write to propagate and verify.
-        await waitForCondition(
-            async () => {
-                const current = await api.getEnvironment(undefined);
-                return !!current && current.environmentPath.fsPath === env.environmentPath.fsPath;
-            },
-            15_000,
-            () => `Environment was not set to ${env.environmentPath.fsPath} before idempotency test`,
+        // Set environment first time and wait for the event to propagate.
+        const drainHandler = new TestEventHandler<DidChangeEnvironmentEventArgs>(
+            api.onDidChangeEnvironment,
+            'drain',
         );
+
+        await api.setEnvironment(undefined, env);
+        await drainHandler.assertFired(15_000);
+        drainHandler.dispose();
 
         // Set same environment again
         await api.setEnvironment(undefined, env);
