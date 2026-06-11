@@ -11,28 +11,18 @@ import {
 } from 'vscode';
 import {
     DidChangePackagesEventArgs,
+    GetPackagesOptions,
     IconPath,
     Package,
-    PackageChangeKind,
     PackageManagementOptions,
     PackageManager,
     PythonEnvironment,
     PythonEnvironmentApi,
 } from '../../api';
+import { updatePackagesAndNotify } from '../common/packageChanges';
 import { getWorkspacePackagesToInstall } from './pipUtils';
-import { managePackages, refreshPackages } from './utils';
+import { managePackages, refreshPipPackages } from './utils';
 import { VenvManager } from './venvManager';
-
-function getChanges(before: Package[], after: Package[]): { kind: PackageChangeKind; pkg: Package }[] {
-    const changes: { kind: PackageChangeKind; pkg: Package }[] = [];
-    before.forEach((pkg) => {
-        changes.push({ kind: PackageChangeKind.remove, pkg });
-    });
-    after.forEach((pkg) => {
-        changes.push({ kind: PackageChangeKind.add, pkg });
-    });
-    return changes;
-}
 
 export class PipPackageManager implements PackageManager, Disposable {
     private readonly _onDidChangePackages = new EventEmitter<DidChangePackagesEventArgs>();
@@ -85,11 +75,15 @@ export class PipPackageManager implements PackageManager, Disposable {
             },
             async (_progress, token) => {
                 try {
-                    const before = this.packages.get(environment.envId.id) ?? [];
-                    const after = await managePackages(environment, manageOptions, this.api, this, token);
-                    const changes = getChanges(before, after);
-                    this.packages.set(environment.envId.id, after);
-                    this._onDidChangePackages.fire({ environment, manager: this, changes });
+                    await managePackages(environment, manageOptions, this, token);
+                    await updatePackagesAndNotify(
+                        this,
+                        environment,
+                        this.packages.get(environment.envId.id),
+                        (changes) => {
+                            this._onDidChangePackages.fire({ environment, manager: this, changes });
+                        },
+                    );
                 } catch (e) {
                     if (e instanceof CancellationError) {
                         throw e;
@@ -114,19 +108,19 @@ export class PipPackageManager implements PackageManager, Disposable {
                 title: 'Refreshing packages',
             },
             async () => {
-                const before = this.packages.get(environment.envId.id) ?? [];
-                const after = await refreshPackages(environment, this.api, this);
-                const changes = getChanges(before, after);
-                this.packages.set(environment.envId.id, after);
-                if (changes.length > 0) {
+                await updatePackagesAndNotify(this, environment, this.packages.get(environment.envId.id), (changes) => {
                     this._onDidChangePackages.fire({ environment, manager: this, changes });
-                }
+                });
             },
         );
     }
-    async getPackages(environment: PythonEnvironment): Promise<Package[] | undefined> {
-        if (!this.packages.has(environment.envId.id)) {
-            await this.refresh(environment);
+
+    async getPackages(environment: PythonEnvironment, options?: GetPackagesOptions): Promise<Package[] | undefined> {
+        if (options?.skipCache || !this.packages.has(environment.envId.id)) {
+            const data = await refreshPipPackages(environment, this.log);
+            const packages = (data ?? []).map((pkg) => this.api.createPackageItem(pkg, environment, this));
+            this.packages.set(environment.envId.id, packages);
+            return packages;
         }
         return this.packages.get(environment.envId.id);
     }

@@ -14,9 +14,9 @@ import {
 import { Disposable } from 'vscode-jsonrpc';
 import {
     DidChangePackagesEventArgs,
+    GetPackagesOptions,
     IconPath,
     Package,
-    PackageChangeKind,
     PackageManagementOptions,
     PackageManager,
     PythonEnvironment,
@@ -24,19 +24,9 @@ import {
 } from '../../api';
 import { spawnProcess } from '../../common/childProcess.apis';
 import { showErrorMessage, showInputBox, withProgress } from '../../common/window.apis';
+import { updatePackagesAndNotify } from '../common/packageChanges';
 import { PoetryManager } from './poetryManager';
 import { getPoetry } from './poetryUtils';
-
-function getChanges(before: Package[], after: Package[]): { kind: PackageChangeKind; pkg: Package }[] {
-    const changes: { kind: PackageChangeKind; pkg: Package }[] = [];
-    before.forEach((pkg) => {
-        changes.push({ kind: PackageChangeKind.remove, pkg });
-    });
-    after.forEach((pkg) => {
-        changes.push({ kind: PackageChangeKind.add, pkg });
-    });
-    return changes;
-}
 
 export class PoetryPackageManager implements PackageManager, Disposable {
     private readonly _onDidChangePackages = new EventEmitter<DidChangePackagesEventArgs>();
@@ -92,15 +82,15 @@ export class PoetryPackageManager implements PackageManager, Disposable {
             },
             async (_progress, token) => {
                 try {
-                    const before = this.packages.get(environment.envId.id) ?? [];
-                    const after = await this.managePackages(
+                    await this.runPoetryManage({ install: toInstall, uninstall: toUninstall }, token);
+                    await updatePackagesAndNotify(
+                        this,
                         environment,
-                        { install: toInstall, uninstall: toUninstall },
-                        token,
+                        this.packages.get(environment.envId.id),
+                        (changes) => {
+                            this._onDidChangePackages.fire({ environment, manager: this, changes });
+                        },
                     );
-                    const changes = getChanges(before, after);
-                    this.packages.set(environment.envId.id, after);
-                    this._onDidChangePackages.fire({ environment, manager: this, changes });
                 } catch (e) {
                     if (e instanceof CancellationError) {
                         throw e;
@@ -126,13 +116,14 @@ export class PoetryPackageManager implements PackageManager, Disposable {
             },
             async () => {
                 try {
-                    const before = this.packages.get(environment.envId.id) ?? [];
-                    const after = await this.refreshPackages(environment);
-                    const changes = getChanges(before, after);
-                    this.packages.set(environment.envId.id, after);
-                    if (changes.length > 0) {
-                        this._onDidChangePackages.fire({ environment, manager: this, changes });
-                    }
+                    await updatePackagesAndNotify(
+                        this,
+                        environment,
+                        this.packages.get(environment.envId.id),
+                        (changes) => {
+                            this._onDidChangePackages.fire({ environment, manager: this, changes });
+                        },
+                    );
                 } catch (error) {
                     this.log.error(`Failed to refresh packages: ${error}`);
                     // Show error to user but don't break the UI
@@ -147,9 +138,11 @@ export class PoetryPackageManager implements PackageManager, Disposable {
         );
     }
 
-    async getPackages(environment: PythonEnvironment): Promise<Package[] | undefined> {
-        if (!this.packages.has(environment.envId.id)) {
-            await this.refresh(environment);
+    async getPackages(environment: PythonEnvironment, options?: GetPackagesOptions): Promise<Package[] | undefined> {
+        if (options?.skipCache || !this.packages.has(environment.envId.id)) {
+            const packages = await this.fetchPackagesFromTool(environment);
+            this.packages.set(environment.envId.id, packages);
+            return packages;
         }
         return this.packages.get(environment.envId.id);
     }
@@ -159,11 +152,10 @@ export class PoetryPackageManager implements PackageManager, Disposable {
         this.packages.clear();
     }
 
-    private async managePackages(
-        environment: PythonEnvironment,
+    private async runPoetryManage(
         options: { install?: string[]; uninstall?: string[] },
         token?: CancellationToken,
-    ): Promise<Package[]> {
+    ): Promise<void> {
         const poetry = await getPoetry();
         if (!poetry) {
             throw new Error(
@@ -198,12 +190,9 @@ export class PoetryPackageManager implements PackageManager, Disposable {
                 throw err;
             }
         }
-
-        // Refresh the packages list after changes
-        return this.refreshPackages(environment);
     }
 
-    private async refreshPackages(environment: PythonEnvironment): Promise<Package[]> {
+    private async fetchPackagesFromTool(environment: PythonEnvironment): Promise<Package[]> {
         const poetry = await getPoetry();
         if (!poetry) {
             throw new Error(

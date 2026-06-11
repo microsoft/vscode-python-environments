@@ -9,9 +9,9 @@ import {
 } from 'vscode';
 import {
     DidChangePackagesEventArgs,
+    GetPackagesOptions,
     IconPath,
     Package,
-    PackageChangeKind,
     PackageManagementOptions,
     PackageManager,
     PythonEnvironment,
@@ -19,19 +19,10 @@ import {
 } from '../../api';
 import { showErrorMessageWithLogs } from '../../common/errors/utils';
 import { CondaStrings } from '../../common/localize';
+import { traceError } from '../../common/logging';
 import { withProgress } from '../../common/window.apis';
-import { getCommonCondaPackagesToInstall, managePackages, refreshPackages } from './condaUtils';
-
-function getChanges(before: Package[], after: Package[]): { kind: PackageChangeKind; pkg: Package }[] {
-    const changes: { kind: PackageChangeKind; pkg: Package }[] = [];
-    before.forEach((pkg) => {
-        changes.push({ kind: PackageChangeKind.remove, pkg });
-    });
-    after.forEach((pkg) => {
-        changes.push({ kind: PackageChangeKind.add, pkg });
-    });
-    return changes;
-}
+import { updatePackagesAndNotify } from '../common/packageChanges';
+import { getCommonCondaPackagesToInstall, managePackages, runCondaExecutable } from './condaUtils';
 
 export class CondaPackageManager implements PackageManager, Disposable {
     private readonly _onDidChangePackages = new EventEmitter<DidChangePackagesEventArgs>();
@@ -39,7 +30,10 @@ export class CondaPackageManager implements PackageManager, Disposable {
 
     private packages: Map<string, Package[]> = new Map();
 
-    constructor(public readonly api: PythonEnvironmentApi, public readonly log: LogOutputChannel) {
+    constructor(
+        public readonly api: PythonEnvironmentApi,
+        public readonly log: LogOutputChannel,
+    ) {
         this.name = 'conda';
         this.displayName = 'Conda';
         this.description = CondaStrings.condaPackageMgr;
@@ -78,11 +72,15 @@ export class CondaPackageManager implements PackageManager, Disposable {
             },
             async (_progress, token) => {
                 try {
-                    const before = this.packages.get(environment.envId.id) ?? [];
-                    const after = await managePackages(environment, manageOptions, this.api, this, token, this.log);
-                    const changes = getChanges(before, after);
-                    this.packages.set(environment.envId.id, after);
-                    this._onDidChangePackages.fire({ environment: environment, manager: this, changes });
+                    await managePackages(environment, manageOptions, token, this.log);
+                    await updatePackagesAndNotify(
+                        this,
+                        environment,
+                        this.packages.get(environment.envId.id),
+                        (changes) => {
+                            this._onDidChangePackages.fire({ environment, manager: this, changes });
+                        },
+                    );
                 } catch (e) {
                     if (e instanceof CancellationError) {
                         throw e;
@@ -104,20 +102,45 @@ export class CondaPackageManager implements PackageManager, Disposable {
                 title: CondaStrings.condaRefreshingPackages,
             },
             async () => {
-                const before = this.packages.get(environment.envId.id) ?? [];
-                const after = await refreshPackages(environment, this.api, this);
-                const changes = getChanges(before, after);
-                this.packages.set(environment.envId.id, after);
-                if (changes.length > 0) {
+                await updatePackagesAndNotify(this, environment, this.packages.get(environment.envId.id), (changes) => {
                     this._onDidChangePackages.fire({ environment, manager: this, changes });
-                }
+                });
             },
         );
     }
 
-    async getPackages(environment: PythonEnvironment): Promise<Package[] | undefined> {
-        if (!this.packages.has(environment.envId.id)) {
-            await this.refresh(environment);
+    async getPackages(environment: PythonEnvironment, options?: GetPackagesOptions): Promise<Package[] | undefined> {
+        if (options?.skipCache || !this.packages.has(environment.envId.id)) {
+            const args = ['list', '-p', environment.environmentPath.fsPath, '--json'];
+            const data = await runCondaExecutable(args);
+
+            let condaPackages: { name: string; version: string }[];
+            try {
+                condaPackages = JSON.parse(data) as { name: string; version: string }[];
+            } catch (e) {
+                traceError(`Failed to parse conda list JSON output: ${data}`, e);
+                return [];
+            }
+
+            const packages: Package[] = [];
+            for (const condaPkg of condaPackages) {
+                if (condaPkg.name && condaPkg.version) {
+                    packages.push(
+                        this.api.createPackageItem(
+                            {
+                                name: condaPkg.name,
+                                displayName: condaPkg.name,
+                                version: condaPkg.version,
+                                description: condaPkg.version,
+                            },
+                            environment,
+                            this,
+                        ),
+                    );
+                }
+            }
+            this.packages.set(environment.envId.id, packages);
+            return packages;
         }
         return this.packages.get(environment.envId.id);
     }

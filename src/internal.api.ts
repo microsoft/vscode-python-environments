@@ -9,6 +9,7 @@ import {
     EnvironmentManager,
     GetEnvironmentScope,
     GetEnvironmentsScope,
+    GetPackagesOptions,
     IconPath,
     Package,
     PackageChangeKind,
@@ -367,8 +368,8 @@ export class InternalPackageManager implements PackageManager {
         return this.manager.refresh(environment);
     }
 
-    getPackages(environment: PythonEnvironment): Promise<Package[] | undefined> {
-        return this.manager.getPackages(environment);
+    getPackages(environment: PythonEnvironment, options?: GetPackagesOptions): Promise<Package[] | undefined> {
+        return this.manager.getPackages(environment, options);
     }
 
     onDidChangePackages(handler: (e: DidChangePackagesEventArgs) => void): Disposable {

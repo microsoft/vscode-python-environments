@@ -16,9 +16,7 @@ import {
 import which from 'which';
 import {
     EnvironmentManager,
-    Package,
     PackageManagementOptions,
-    PackageManager,
     PythonCommandRunConfiguration,
     PythonEnvironment,
     PythonEnvironmentApi,
@@ -1270,68 +1268,12 @@ export async function deleteCondaEnvironment(environment: PythonEnvironment, log
     );
 }
 
-/**
- * JSON structure returned by `conda list --json`
- */
-interface CondaPackageJson {
-    name: string;
-    version: string;
-    build_string?: string;
-    channel?: string;
-}
-
-/**
- * Refreshes the list of packages installed in a conda environment.
- * Uses `conda list -p <prefix> --json` for reliable parsing.
- *
- * @param environment The Python environment to get packages for
- * @param api The Python environment API
- * @param manager The package manager instance
- * @returns Promise resolving to an array of Package objects
- */
-export async function refreshPackages(
-    environment: PythonEnvironment,
-    api: PythonEnvironmentApi,
-    manager: PackageManager,
-): Promise<Package[]> {
-    const args = ['list', '-p', environment.environmentPath.fsPath, '--json'];
-    const data = await runCondaExecutable(args);
-
-    let condaPackages: CondaPackageJson[];
-    try {
-        condaPackages = JSON.parse(data) as CondaPackageJson[];
-    } catch (e) {
-        traceError(`Failed to parse conda list JSON output: ${data}`, e);
-        return [];
-    }
-
-    const packages: Package[] = [];
-    for (const condaPkg of condaPackages) {
-        if (condaPkg.name && condaPkg.version) {
-            const pkg = api.createPackageItem(
-                {
-                    name: condaPkg.name,
-                    displayName: condaPkg.name,
-                    version: condaPkg.version,
-                    description: condaPkg.version,
-                },
-                environment,
-                manager,
-            );
-            packages.push(pkg);
-        }
-    }
-    return packages;
-}
-
 export async function managePackages(
     environment: PythonEnvironment,
     options: PackageManagementOptions,
-    api: PythonEnvironmentApi,
-    manager: PackageManager,
     token: CancellationToken,
     log: LogOutputChannel,
-): Promise<Package[]> {
+): Promise<void> {
     if (options.uninstall && options.uninstall.length > 0) {
         await runCondaExecutable(
             ['remove', '--prefix', environment.environmentPath.fsPath, '--yes', ...options.uninstall],
@@ -1347,7 +1289,6 @@ export async function managePackages(
         args.push(...options.install);
         await runCondaExecutable(args, log, token);
     }
-    return refreshPackages(environment, api, manager);
 }
 
 async function getCommonPackages(): Promise<Installable[]> {

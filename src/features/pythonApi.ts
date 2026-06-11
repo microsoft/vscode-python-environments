@@ -10,6 +10,7 @@ import {
     EnvironmentManager,
     GetEnvironmentScope,
     GetEnvironmentsScope,
+    GetPackagesOptions,
     Package,
     PackageId,
     PackageInfo,
@@ -96,9 +97,9 @@ class PythonEnvironmentApiImpl implements PythonEnvironmentApi {
                         // *selected* manager's changes propagate (refreshEnvironment checks
                         // getEnvironmentManager(scope) internally). It updates the cache and
                         // fires onDidChangeActiveEnvironment, which the Python API listens to.
-                        this.envManagers.refreshEnvironment(e.uri).catch((err) =>
-                            traceError('Failed to refresh environment on change:', err),
-                        );
+                        this.envManagers
+                            .refreshEnvironment(e.uri)
+                            .catch((err) => traceError('Failed to refresh environment on change:', err));
                     });
                 }),
             );
@@ -257,13 +258,13 @@ class PythonEnvironmentApiImpl implements PythonEnvironmentApi {
         }
         return manager.refresh(context);
     }
-    async getPackages(context: PythonEnvironment): Promise<Package[] | undefined> {
+    async getPackages(context: PythonEnvironment, options?: GetPackagesOptions): Promise<Package[] | undefined> {
         await waitForEnvManagerId([context.envId.managerId]);
         const manager = this.envManagers.getPackageManager(context);
         if (!manager) {
             return Promise.resolve(undefined);
         }
-        return manager.getPackages(context);
+        return manager.getPackages(context, options);
     }
     onDidChangePackages: Event<DidChangePackagesEventArgs> = this._onDidChangePackages.event;
     createPackageItem(info: PackageInfo, environment: PythonEnvironment, manager: PackageManager): Package {
