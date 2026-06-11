@@ -169,5 +169,101 @@ suite('packageChanges', () => {
             assert.ok(changes.some((c: { kind: PackageChangeKind }) => c.kind === PackageChangeKind.add));
             assert.ok(changes.some((c: { kind: PackageChangeKind }) => c.kind === PackageChangeKind.remove));
         });
+
+        test('marks transitive packages when getDirectPackageNames is provided', async () => {
+            const after = [
+                { name: 'requests', version: '2.31.0' } as Package,
+                { name: 'urllib3', version: '2.0.0' } as Package,
+                { name: 'charset-normalizer', version: '3.0.0' } as Package,
+            ];
+            getPackagesStub.resolves(after);
+            const getDirectPackageNamesStub = sinon.stub().resolves(new Set(['requests']));
+            (packageManager as unknown as Record<string, unknown>).getDirectPackageNames = getDirectPackageNamesStub;
+            const onChanges = sinon.stub();
+
+            await updatePackagesAndNotify(packageManager, environment, undefined, onChanges);
+
+            assert.strictEqual(after[0].isTransitive, false, 'requests should be direct');
+            assert.strictEqual(after[1].isTransitive, true, 'urllib3 should be transitive');
+            assert.strictEqual(after[2].isTransitive, true, 'charset-normalizer should be transitive');
+        });
+
+        test('does not mark packages transitive when getDirectPackageNames is not implemented', async () => {
+            const after = [
+                { name: 'requests', version: '2.31.0' } as Package,
+                { name: 'urllib3', version: '2.0.0' } as Package,
+            ];
+            getPackagesStub.resolves(after);
+            const onChanges = sinon.stub();
+
+            await updatePackagesAndNotify(packageManager, environment, undefined, onChanges);
+
+            assert.strictEqual(after[0].isTransitive, undefined, 'should not be set');
+            assert.strictEqual(after[1].isTransitive, undefined, 'should not be set');
+        });
+
+        test('does not mark packages transitive when getDirectPackageNames returns undefined', async () => {
+            const after = [
+                { name: 'requests', version: '2.31.0' } as Package,
+                { name: 'urllib3', version: '2.0.0' } as Package,
+            ];
+            getPackagesStub.resolves(after);
+            const getDirectPackageNamesStub = sinon.stub().resolves(undefined);
+            (packageManager as unknown as Record<string, unknown>).getDirectPackageNames = getDirectPackageNamesStub;
+            const onChanges = sinon.stub();
+
+            await updatePackagesAndNotify(packageManager, environment, undefined, onChanges);
+
+            assert.strictEqual(after[0].isTransitive, undefined, 'should not be set');
+            assert.strictEqual(after[1].isTransitive, undefined, 'should not be set');
+        });
+
+        test('does not mark packages transitive when getDirectPackageNames returns empty set', async () => {
+            const after = [
+                { name: 'requests', version: '2.31.0' } as Package,
+                { name: 'urllib3', version: '2.0.0' } as Package,
+            ];
+            getPackagesStub.resolves(after);
+            const getDirectPackageNamesStub = sinon.stub().resolves(new Set<string>());
+            (packageManager as unknown as Record<string, unknown>).getDirectPackageNames = getDirectPackageNamesStub;
+            const onChanges = sinon.stub();
+
+            await updatePackagesAndNotify(packageManager, environment, undefined, onChanges);
+
+            assert.strictEqual(after[0].isTransitive, undefined, 'should not be set');
+            assert.strictEqual(after[1].isTransitive, undefined, 'should not be set');
+        });
+
+        test('all packages marked direct when all are in direct set', async () => {
+            const after = [
+                { name: 'requests', version: '2.31.0' } as Package,
+                { name: 'flask', version: '3.0.0' } as Package,
+            ];
+            getPackagesStub.resolves(after);
+            const getDirectPackageNamesStub = sinon.stub().resolves(new Set(['requests', 'flask']));
+            (packageManager as unknown as Record<string, unknown>).getDirectPackageNames = getDirectPackageNamesStub;
+            const onChanges = sinon.stub();
+
+            await updatePackagesAndNotify(packageManager, environment, undefined, onChanges);
+
+            assert.strictEqual(after[0].isTransitive, false, 'requests should be direct');
+            assert.strictEqual(after[1].isTransitive, false, 'flask should be direct');
+        });
+
+        test('all packages marked transitive when none are in direct set', async () => {
+            const after = [
+                { name: 'urllib3', version: '2.0.0' } as Package,
+                { name: 'charset-normalizer', version: '3.0.0' } as Package,
+            ];
+            getPackagesStub.resolves(after);
+            const getDirectPackageNamesStub = sinon.stub().resolves(new Set(['requests']));
+            (packageManager as unknown as Record<string, unknown>).getDirectPackageNames = getDirectPackageNamesStub;
+            const onChanges = sinon.stub();
+
+            await updatePackagesAndNotify(packageManager, environment, undefined, onChanges);
+
+            assert.strictEqual(after[0].isTransitive, true, 'urllib3 should be transitive');
+            assert.strictEqual(after[1].isTransitive, true, 'charset-normalizer should be transitive');
+        });
     });
 });
