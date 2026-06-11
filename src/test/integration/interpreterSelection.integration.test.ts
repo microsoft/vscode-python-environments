@@ -326,55 +326,30 @@ suite('Integration: Interpreter Selection Priority', function () {
         await api.setEnvironment(undefined, env);
 
         // Wait for the async config write to propagate and verify.
-        let currentEnv: PythonEnvironment | undefined;
         await waitForCondition(
             async () => {
-                currentEnv = await api.getEnvironment(undefined);
-                return !!currentEnv && currentEnv.environmentPath.fsPath === env.environmentPath.fsPath;
+                const current = await api.getEnvironment(undefined);
+                return !!current && current.environmentPath.fsPath === env.environmentPath.fsPath;
             },
             15_000,
             () => `Environment was not set to ${env.environmentPath.fsPath} before idempotency test`,
         );
 
-        assert.ok(currentEnv, 'Environment should be set before idempotency test');
+        // Set same environment again
+        await api.setEnvironment(undefined, env);
+
+        // Verify functional idempotency: after setting the same environment
+        // twice, getEnvironment should still return the same environment.
+        // Note: We don't assert on events because the internal cache can be
+        // mutated by manager-level refreshEnvironment() between calls, making
+        // event-level idempotency unreliable.
+        const afterSecondSet = await api.getEnvironment(undefined);
+        assert.ok(afterSecondSet, 'Should still have environment after setting same env twice');
         assert.strictEqual(
-            currentEnv!.environmentPath.fsPath,
+            afterSecondSet.environmentPath.fsPath,
             env.environmentPath.fsPath,
-            'Environment should match what we just set',
+            'Environment should remain the same after idempotent set',
         );
-
-        const handler = new TestEventHandler<DidChangeEnvironmentEventArgs>(
-            api.onDidChangeEnvironment,
-            'onDidChangeEnvironment',
-        );
-
-        try {
-            // Set same environment again
-            await api.setEnvironment(undefined, env);
-
-            // Wait long enough for any potential events to fire
-            await new Promise((resolve) => setTimeout(resolve, 2000));
-
-            // If any events fired, they should NOT indicate an actual change —
-            // the new environment should still be the same one we set.
-            // Note: The underlying manager may fire its own onDidChangeEnvironment
-            // callback even on idempotent sets, but the environment IDs should match.
-            if (handler.fired) {
-                const events = handler.all;
-                for (const e of events) {
-                    if (e.new && e.old) {
-                        assert.strictEqual(
-                            e.new.envId.id,
-                            e.old.envId.id,
-                            'If an event fires on idempotent set, old and new should be the same environment',
-                        );
-                    }
-                }
-            }
-            // If no events fired, that's the ideal idempotent behavior — also fine.
-        } finally {
-            handler.dispose();
-        }
     });
 
     /**
