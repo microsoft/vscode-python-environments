@@ -1,4 +1,3 @@
-import * as semver from 'semver';
 import { Disposable, Event, EventEmitter, TaskExecution, Terminal, Uri } from 'vscode';
 import {
     CreateEnvironmentOptions,
@@ -17,6 +16,7 @@ import {
     PackageInfo,
     PackageManagementOptions,
     PackageManager,
+    Pep440Version,
     PythonBackgroundRunOptions,
     PythonEnvironment,
     PythonEnvironmentApi,
@@ -269,7 +269,7 @@ class PythonEnvironmentApiImpl implements PythonEnvironmentApi {
     }
     onDidChangePackages: Event<DidChangePackagesEventArgs> = this._onDidChangePackages.event;
 
-    async getPackageManagerVersion(environment: PythonEnvironment): Promise<semver.SemVer | undefined> {
+    async getPackageManagerVersion(environment: PythonEnvironment): Promise<Pep440Version | undefined> {
         await waitForEnvManagerId([environment.envId.managerId]);
         const manager = this.envManagers.getPackageManager(environment);
         if (!manager) {
@@ -281,7 +281,7 @@ class PythonEnvironmentApiImpl implements PythonEnvironmentApi {
     async getAvailableVersions(
         packageName: string,
         environment: PythonEnvironment,
-    ): Promise<semver.SemVer[] | undefined> {
+    ): Promise<Pep440Version[] | undefined> {
         await waitForEnvManagerId([environment.envId.managerId]);
         const manager = this.envManagers.getPackageManager(environment);
         if (!manager) {

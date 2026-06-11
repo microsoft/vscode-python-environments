@@ -1,6 +1,6 @@
 import assert from 'assert';
 import { explain } from '@renovatebot/pep440';
-import { parsePipIndexVersionsJson, parsePipInstallVersions } from '../../../managers/builtin/pipManager';
+import { parsePipIndexVersionsJson, parsePipInstallVersions } from '../../../managers/builtin/pipPackageManager';
 
 suite('Pip Version Parsing', () => {
     suite('parsePipIndexVersionsJson', () => {
