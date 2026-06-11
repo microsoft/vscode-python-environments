@@ -254,10 +254,10 @@ suite('Integration: Interpreter Selection Priority', function () {
     });
 
     /**
-     * Test: Setting same environment doesn't fire extra events
+     * Test: Setting same environment is idempotent
      *
-     * Setting the same environment twice should not fire change event
-     * on the second call. This ensures idempotent behavior.
+     * Setting the same environment twice should leave the selection
+     * unchanged. Verifies functional idempotency via getEnvironment.
      */
     test('Setting same environment is idempotent', async function () {
         const environments = await api.getEnvironments('all');
