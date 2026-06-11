@@ -96,18 +96,11 @@ suite('Integration: Interpreter Selection Priority', function () {
 
         const envToSet = environments[0];
 
-        // Subscribe before setting so we can wait for the event to propagate.
-        const drainHandler = new TestEventHandler<DidChangeEnvironmentEventArgs>(
-            api.onDidChangeEnvironment,
-            'drain',
-        );
-
         // Set environment globally
         await api.setEnvironment(undefined, envToSet);
-        await drainHandler.assertFired(15_000);
-        drainHandler.dispose();
 
-        // Get and verify
+        // getEnvironment calls manager.get() directly (no cache),
+        // so it returns the correct value immediately after set.
         const retrieved = await api.getEnvironment(undefined);
 
         assert.ok(retrieved, 'Should have environment after setting');
@@ -137,26 +130,14 @@ suite('Integration: Interpreter Selection Priority', function () {
         const projectEnv = environments[1];
         const project = projects[0];
 
-        // Subscribe before setting so we can wait for events to propagate.
-        const globalDrain = new TestEventHandler<DidChangeEnvironmentEventArgs>(
-            api.onDidChangeEnvironment,
-            'globalDrain',
-        );
-
         // Set global environment
         await api.setEnvironment(undefined, globalEnv);
-        await globalDrain.assertFired(15_000);
-        globalDrain.dispose();
-
-        const projectDrain = new TestEventHandler<DidChangeEnvironmentEventArgs>(
-            api.onDidChangeEnvironment,
-            'projectDrain',
-        );
 
         // Set different environment for project
         await api.setEnvironment(project.uri, projectEnv);
-        await projectDrain.assertFired(15_000);
-        projectDrain.dispose();
+
+        // getEnvironment calls manager.get() directly (no cache),
+        // so it returns the correct value immediately after set.
 
         // Verify global is unchanged
         const globalRetrieved = await api.getEnvironment(undefined);
@@ -194,16 +175,20 @@ suite('Integration: Interpreter Selection Priority', function () {
         const oldEnv = environments[0];
         const newEnv = environments[1];
 
-        // Subscribe a temporary handler BEFORE the first setEnvironment so we
-        // can wait for its event to drain. This avoids the real handler
-        // capturing a stale event from this initial call.
+        // Set initial environment. Subscribe a temporary handler to drain
+        // any async event from this call before we create the real handler.
+        // If the env is already set (e.g. restored by teardown), no event
+        // fires — that's fine, nothing to drain.
         const drainHandler = new TestEventHandler<DidChangeEnvironmentEventArgs>(
             api.onDidChangeEnvironment,
             'drain',
         );
 
         await api.setEnvironment(undefined, oldEnv);
-        await drainHandler.assertFired(15_000);
+
+        // Short wait: if an event fires, it arrives within one setImmediate tick.
+        // If none fires (idempotent set), we don't block.
+        await new Promise((resolve) => setImmediate(resolve));
         drainHandler.dispose();
 
         const handler = new TestEventHandler<DidChangeEnvironmentEventArgs>(
@@ -311,15 +296,8 @@ suite('Integration: Interpreter Selection Priority', function () {
 
         const env = environments[0];
 
-        // Set environment first time and wait for the event to propagate.
-        const drainHandler = new TestEventHandler<DidChangeEnvironmentEventArgs>(
-            api.onDidChangeEnvironment,
-            'drain',
-        );
-
+        // Set environment first time
         await api.setEnvironment(undefined, env);
-        await drainHandler.assertFired(15_000);
-        drainHandler.dispose();
 
         // Set same environment again
         await api.setEnvironment(undefined, env);
