@@ -60,11 +60,12 @@ async function setEnvironmentAndWait(
         //   tick 2: refreshEnvironment() from manager callback
         //   tick 3: _onDidChangeActiveEnvironment.fire() from refresh
         //   ticks 4-5: safety margin for edge cases
+        // Always drain all ticks — don't break early. The first event
+        // (from setEnvironment) may be followed by a second event (from
+        // refreshEnvironment) on a later tick. Breaking early would leave
+        // that second event pending, leaking into the next test step.
         for (let tick = 0; tick < 5; tick++) {
             await new Promise<void>((resolve) => setImmediate(resolve));
-            if (handler.fired) {
-                break;
-            }
         }
     } finally {
         handler.dispose();
@@ -227,12 +228,14 @@ suite('Integration: Interpreter Selection Priority', function () {
             // oldEnv.envId.id !== newEnv.envId.id
             await api.setEnvironment(undefined, newEnv);
 
-            // Wait for the event whose new env matches what we set
-            await waitForCondition(
-                () => handler.all.some((e) => e.new?.envId.id === newEnv.envId.id),
-                15_000,
-                () =>
-                    `Expected change event with new env ${newEnv.envId.id}, ` +
+            // Drain the full setImmediate event chain so all events settle
+            for (let tick = 0; tick < 5; tick++) {
+                await new Promise<void>((resolve) => setImmediate(resolve));
+            }
+
+            assert.ok(
+                handler.all.some((e) => e.new?.envId.id === newEnv.envId.id),
+                `Expected change event with new env ${newEnv.envId.id}, ` +
                     `but got: [${handler.all.map((e) => e.new?.envId.id).join(', ')}]`,
             );
 
