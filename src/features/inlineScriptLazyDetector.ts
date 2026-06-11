@@ -21,12 +21,12 @@ import {
  * every eligible `.py` file the user opens or saves and emits two
  * anonymized telemetry events:
  *
- *  - `PEP723.DETECTED` once per (URI, session) the first time a
+ *  - `inlineScript.detected` once per (URI, session) the first time a
  *    valid `# /// script` block is observed. This is the denominator
- *    for the "how many users actually see PEP 723 files" question.
- *  - `PEP723.EDITED` once per (URI, session) the first time a
+ *    for the "how many users actually see inline script files" question.
+ *  - `inlineScript.edited` once per (URI, session) the first time a
  *    previously-detected file receives a real text edit. Together
- *    with `DETECTED` this distinguishes viewers from editors.
+ *    with `inlineScript.detected` this distinguishes viewers from editors.
  *
  * No URIs, file paths, or file content are sent. The detector does
  * not register projects, surface UI, or otherwise change extension
@@ -41,11 +41,11 @@ export class InlineScriptLazyDetector implements Disposable {
     // doesn't double-process the same file.
     private readonly inFlight = new Map<string, Promise<void>>();
     // URIs (as `uri.toString()`) for which we have already emitted
-    // `PEP723.DETECTED` in this session. Used to dedup the detection
-    // event across repeat opens/saves and to gate `PEP723.EDITED` so
+    // `inlineScript.detected` in this session. Used to dedup the detection
+    // event across repeat opens/saves and to gate `inlineScript.edited` so
     // the latter only fires for files we already counted as detected.
     private readonly detectedUris = new Set<string>();
-    // URIs for which we have already emitted `PEP723.EDITED` in this
+    // URIs for which we have already emitted `inlineScript.edited` in this
     // session. Each detected file emits at most one edited event.
     private readonly editedUris = new Set<string>();
     // Wall-clock ms (from `Date.now`) at which each URI's detection
@@ -178,7 +178,7 @@ export class InlineScriptLazyDetector implements Disposable {
             this.detectionAtMs.set(key, Date.now());
             traceVerbose(`inlineScriptLazyDetector: detected inline script metadata in ${uri.fsPath} (${trigger})`);
             sendTelemetryEvent(
-                EventNames.PEP723_DETECTED,
+                EventNames.INLINE_SCRIPT_DETECTED,
                 { dependencyCount: metadata.dependencies?.length ?? 0 },
                 {
                     trigger,
@@ -194,11 +194,11 @@ export class InlineScriptLazyDetector implements Disposable {
     }
 
     /**
-     * Emit `PEP723.EDITED` the first time a previously-detected URI
+     * Emit `inlineScript.edited` the first time a previously-detected URI
      * receives a real content change. The handler is hot (fires on
      * every keystroke in every text document workspace-wide) so it
      * bails out as cheaply as possible for the common case where the
-     * file is not a tracked PEP 723 script.
+     * file is not a tracked inline script.
      */
     private handleChange(e: TextDocumentChangeEvent): void {
         if (this.disposed) {
@@ -222,7 +222,7 @@ export class InlineScriptLazyDetector implements Disposable {
         traceVerbose(
             `inlineScriptLazyDetector: first edit observed on ${e.document.uri.fsPath} (${duration}ms after detection)`,
         );
-        sendTelemetryEvent(EventNames.PEP723_EDITED, duration);
+        sendTelemetryEvent(EventNames.INLINE_SCRIPT_EDITED, duration);
     }
 }
 
