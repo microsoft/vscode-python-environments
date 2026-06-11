@@ -25,50 +25,57 @@ import * as assert from 'assert';
 import * as vscode from 'vscode';
 import { DidChangeEnvironmentEventArgs, PythonEnvironment, PythonEnvironmentApi, SetEnvironmentScope } from '../../api';
 import { ENVS_EXTENSION_ID } from '../constants';
-import { TestEventHandler, waitForCondition } from '../testUtils';
+import { waitForCondition } from '../testUtils';
 
 /**
  * Calls setEnvironment and waits for the async event chain to fully settle.
  *
- * setEnvironment fires onDidChangeActiveEnvironment via setImmediate, which
- * can trigger refreshEnvironment (another setImmediate), which may fire
- * again (a third setImmediate). This helper subscribes to the event BEFORE
- * the call and yields enough event loop iterations to drain all pending
- * setImmediate callbacks — ensuring no stale events leak into subsequent
- * test steps.
+ * Subscribes to onDidChangeEnvironment BEFORE calling setEnvironment, then
+ * waits for the event to fire. For idempotent sets (env already matches the
+ * cache), no event fires — the drain fallback ensures we don't hang.
  *
- * This is NOT a timeout — each iteration is a deterministic event loop tick
- * that completes in microseconds. For idempotent sets (env already matches),
- * no events fire and the loop exits immediately after the ticks drain.
+ * Returns all captured events, which callers can inspect to verify
+ * event payloads (e.g., old/new values).
  */
 async function setEnvironmentAndWait(
     api: PythonEnvironmentApi,
     scope: SetEnvironmentScope,
     env: PythonEnvironment | undefined,
-): Promise<void> {
-    const handler = new TestEventHandler<DidChangeEnvironmentEventArgs>(
-        api.onDidChangeEnvironment,
-        'setEnvironmentAndWait',
-    );
+): Promise<DidChangeEnvironmentEventArgs[]> {
+    const events: DidChangeEnvironmentEventArgs[] = [];
+
+    // Promise that resolves as soon as the first event fires
+    let resolveEvent: () => void;
+    const eventPromise = new Promise<void>((resolve) => {
+        resolveEvent = resolve;
+    });
+
+    const disposable = api.onDidChangeEnvironment((e) => {
+        events.push(e);
+        resolveEvent();
+    });
 
     try {
         await api.setEnvironment(scope, env);
 
-        // Drain the setImmediate event chain. Each tick processes one
-        // pending callback. 5 ticks covers the full chain:
-        //   tick 1: _onDidChangeActiveEnvironment.fire()
-        //   tick 2: refreshEnvironment() from manager callback
-        //   tick 3: _onDidChangeActiveEnvironment.fire() from refresh
-        //   ticks 4-5: safety margin for edge cases
-        // Always drain all ticks — don't break early. The first event
-        // (from setEnvironment) may be followed by a second event (from
-        // refreshEnvironment) on a later tick. Breaking early would leave
-        // that second event pending, leaking into the next test step.
-        for (let tick = 0; tick < 5; tick++) {
-            await new Promise<void>((resolve) => setImmediate(resolve));
-        }
+        // Drain fallback: 5 setImmediate ticks covers the full async chain.
+        // For idempotent sets (no event), this ensures we don't hang.
+        const drainPromise = (async () => {
+            for (let tick = 0; tick < 5; tick++) {
+                await new Promise<void>((resolve) => setImmediate(resolve));
+            }
+        })();
+
+        // Wait for the event OR drain (whichever comes first)
+        await Promise.race([eventPromise, drainPromise]);
+
+        // Always drain remaining ticks to catch secondary events
+        // (e.g., refreshEnvironment firing after the initial event)
+        await drainPromise;
+
+        return events;
     } finally {
-        handler.dispose();
+        disposable.dispose();
     }
 }
 
@@ -213,43 +220,24 @@ suite('Integration: Interpreter Selection Priority', function () {
         const oldEnv = environments[0];
         const newEnv = environments[1];
 
-        // Set initial environment and wait for all async events to drain.
-        // This ensures no stale events from this call leak into the handler.
+        // Set initial environment and wait for all async events to drain
         await setEnvironmentAndWait(api, undefined, oldEnv);
 
-        // Now subscribe a fresh handler for the second set
-        const handler = new TestEventHandler<DidChangeEnvironmentEventArgs>(
-            api.onDidChangeEnvironment,
-            'onDidChangeEnvironment',
+        // Set new environment — the returned events contain the change payload
+        const events = await setEnvironmentAndWait(api, undefined, newEnv);
+
+        const event = events.find((e) => e.new?.envId.id === newEnv.envId.id);
+        assert.ok(
+            event,
+            `Expected change event with new env ${newEnv.envId.id}, ` +
+                `but got: [${events.map((e) => e.new?.envId.id).join(', ')}]`,
         );
-
-        try {
-            // Change to new environment — this MUST fire an event since
-            // oldEnv.envId.id !== newEnv.envId.id
-            await api.setEnvironment(undefined, newEnv);
-
-            // Drain the full setImmediate event chain so all events settle
-            for (let tick = 0; tick < 5; tick++) {
-                await new Promise<void>((resolve) => setImmediate(resolve));
-            }
-
-            assert.ok(
-                handler.all.some((e) => e.new?.envId.id === newEnv.envId.id),
-                `Expected change event with new env ${newEnv.envId.id}, ` +
-                    `but got: [${handler.all.map((e) => e.new?.envId.id).join(', ')}]`,
-            );
-
-            const event = handler.all.find((e) => e.new?.envId.id === newEnv.envId.id);
-            assert.ok(event, 'Event should have fired');
-            assert.ok(event.new, 'Event should have new environment');
-            assert.strictEqual(
-                event.new.environmentPath.fsPath,
-                newEnv.environmentPath.fsPath,
-                'New should match set environment',
-            );
-        } finally {
-            handler.dispose();
-        }
+        assert.ok(event.new, 'Event should have new environment');
+        assert.strictEqual(
+            event.new.environmentPath.fsPath,
+            newEnv.environmentPath.fsPath,
+            'New should match set environment',
+        );
     });
 
     /**
