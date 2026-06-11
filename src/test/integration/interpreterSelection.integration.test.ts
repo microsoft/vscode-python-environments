@@ -175,38 +175,34 @@ suite('Integration: Interpreter Selection Priority', function () {
         const oldEnv = environments[0];
         const newEnv = environments[1];
 
-        // Set initial environment. Subscribe a temporary handler to drain
-        // any async event from this call before we create the real handler.
-        // If the env is already set (e.g. restored by teardown), no event
-        // fires — that's fine, nothing to drain.
-        const drainHandler = new TestEventHandler<DidChangeEnvironmentEventArgs>(
-            api.onDidChangeEnvironment,
-            'drain',
-        );
-
-        await api.setEnvironment(undefined, oldEnv);
-
-        // Short wait: if an event fires, it arrives within one setImmediate tick.
-        // If none fires (idempotent set), we don't block.
-        await new Promise((resolve) => setImmediate(resolve));
-        drainHandler.dispose();
-
+        // Subscribe BEFORE any setEnvironment calls. The handler captures
+        // all events — from both sets and any async refreshEnvironment
+        // side-effects. We then search for the specific event we need.
+        // This eliminates drain races entirely: no matter how many
+        // setImmediate ticks the event chain takes, the handler sees
+        // everything and we pick the right event by envId match.
         const handler = new TestEventHandler<DidChangeEnvironmentEventArgs>(
             api.onDidChangeEnvironment,
             'onDidChangeEnvironment',
         );
 
         try {
-            // Change to new environment
+            // Set initial environment (may or may not fire events)
+            await api.setEnvironment(undefined, oldEnv);
+
+            // Change to new environment — this MUST fire an event since
+            // oldEnv.envId.id !== newEnv.envId.id, so the _activeSelection
+            // idempotency check passes.
             await api.setEnvironment(undefined, newEnv);
 
-            // Wait for an event whose new environment matches what we set.
-            // Multiple events may fire (e.g. from manager-level callbacks),
-            // so look for the specific one we care about.
+            // Wait for the specific event whose new env matches newEnv.
+            // Events from the first set (new=oldEnv) are captured but
+            // won't match this condition, so they're harmlessly ignored.
             await waitForCondition(
                 () => handler.all.some((e) => e.new?.envId.id === newEnv.envId.id),
                 15_000,
-                `Expected change event with new env ${newEnv.envId.id}, ` +
+                () =>
+                    `Expected change event with new env ${newEnv.envId.id}, ` +
                     `but got: [${handler.all.map((e) => e.new?.envId.id).join(', ')}]`,
             );
 
