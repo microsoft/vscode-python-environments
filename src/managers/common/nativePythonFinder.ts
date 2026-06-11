@@ -24,6 +24,7 @@ const CONFIGURE_TIMEOUT_MS = 30_000; // 30 seconds for configuration
 const MAX_CONFIGURE_TIMEOUT_MS = 60_000; // Max configure timeout after retries (60s)
 const REFRESH_TIMEOUT_MS = 30_000; // 30 seconds for full refresh (with 1 retry = 60s max)
 const RESOLVE_TIMEOUT_MS = 30_000; // 30 seconds for single resolve
+const INFO_TIMEOUT_MS = 2_000; // `info` is a const lookup on PET; 2s is generous
 
 // CLI fallback timeout: generous budget since it's a full process spawn doing a full scan
 const CLI_FALLBACK_TIMEOUT_MS = 120_000; // 2 minutes
@@ -266,6 +267,17 @@ interface PetTelemetryNotification {
 }
 
 /**
+ * Response shape of the PET `info` JSON-RPC request.
+ * `buildId` / `commitSha` are populated only when the PET binary was built by CI
+ * with the appropriate env vars set; local dev builds omit them.
+ */
+interface NativePetInfo {
+    petVersion: string;
+    buildId?: string;
+    commitSha?: string;
+}
+
+/**
  * Error thrown when a JSON-RPC request times out.
  */
 export class RpcTimeoutError extends Error {
@@ -322,6 +334,13 @@ class NativePythonFinderImpl implements NativePythonFinder {
     private isRestarting: boolean = false;
     private processExitReason: string | undefined = undefined;
     private readonly configureRetry = new ConfigureRetryState();
+    /**
+     * Cached PET `info` response for the current connection. Reset to undefined on every
+     * `start()` and re-populated asynchronously by `kickoffInfoFetch()`. Telemetry callers
+     * read this via `getPetInfoProperties()`; if the fetch hasn't finished yet (or the PET
+     * binary is too old to implement `info`), telemetry reports 'unknown'.
+     */
+    private petInfo: NativePetInfo | undefined;
 
     constructor(
         private readonly outputChannel: LogOutputChannel,
@@ -353,7 +372,10 @@ class NativePythonFinderImpl implements NativePythonFinder {
                 this.outputChannel.info(`Resolved Python Environment ${environment.executable}`);
                 // Reset restart attempts on successful request
                 this.restartAttempts = 0;
-                sendTelemetryEvent(EventNames.PET_RESOLVE, sw.elapsedTime, { result: 'success' });
+                sendTelemetryEvent(EventNames.PET_RESOLVE, sw.elapsedTime, {
+                    result: 'success',
+                    ...this.getPetInfoProperties(),
+                });
                 return environment;
             } catch (ex) {
                 // On resolve timeout or connection error (not configure — configure handles its own timeout),
@@ -376,6 +398,7 @@ class NativePythonFinderImpl implements NativePythonFinder {
                 {
                     result: errorType === 'spawn_timeout' ? 'timeout' : 'error',
                     errorType,
+                    ...this.getPetInfoProperties(),
                 },
                 ex instanceof Error ? ex : undefined,
             );
@@ -460,6 +483,7 @@ class NativePythonFinderImpl implements NativePythonFinder {
                 attempt,
                 result: 'success',
                 triggerReason,
+                ...this.getPetInfoProperties(),
             });
 
             // Reset restart attempts on successful start (process didn't immediately fail)
@@ -468,7 +492,13 @@ class NativePythonFinderImpl implements NativePythonFinder {
             sendTelemetryEvent(
                 EventNames.PET_PROCESS_RESTART,
                 sw.elapsedTime,
-                { attempt, result: 'error', errorType: classifyError(ex), triggerReason },
+                {
+                    attempt,
+                    result: 'error',
+                    errorType: classifyError(ex),
+                    triggerReason,
+                    ...this.getPetInfoProperties(),
+                },
                 ex instanceof Error ? ex : undefined,
             );
             this.outputChannel.error('[pet] Failed to restart Python Environment Tools:', ex);
@@ -701,7 +731,52 @@ class NativePythonFinderImpl implements NativePythonFinder {
         );
 
         connection.listen();
+
+        // Stamp PET telemetry with version/buildId/commitSha. Fire-and-forget — must not block refresh.
+        this.petInfo = undefined;
+        this.kickoffInfoFetch(connection);
+
         return connection;
+    }
+
+    /**
+     * Asks the PET server for its build metadata (version + optional buildId + optional commitSha)
+     * and caches it in `this.petInfo` for downstream telemetry. Runs once per `start()` call.
+     *
+     * Fire-and-forget by design — the response is not awaited so refresh/resolve callers are
+     * never blocked. The 2 s timeout caps the worst case if PET is misbehaving. If a newer
+     * connection has replaced `this.connection` by the time the response arrives, the response
+     * is dropped to avoid clobbering the cache for the newer process.
+     */
+    private kickoffInfoFetch(connection: rpc.MessageConnection): void {
+        sendRequestWithTimeout<NativePetInfo>(connection, 'info', {}, INFO_TIMEOUT_MS)
+            .then((result) => {
+                if (connection !== this.connection) {
+                    return;
+                }
+                this.petInfo = result;
+                this.outputChannel.debug('[pet] info:', result);
+            })
+            .catch((ex) => {
+                if (connection !== this.connection) {
+                    return;
+                }
+                // Older PET binaries don't implement `info`; leave petInfo undefined so telemetry reports 'unknown'.
+                this.outputChannel.debug('[pet] info request failed:', ex);
+            });
+    }
+
+    /**
+     * Builds the petVersion/petBuildId/petCommitSha properties for PET telemetry events.
+     * Always returns concrete strings (defaulting to 'unknown') so Kusto can group by them
+     * without dealing with nulls.
+     */
+    private getPetInfoProperties(): { petVersion: string; petBuildId: string; petCommitSha: string } {
+        return {
+            petVersion: this.petInfo?.petVersion ?? 'unknown',
+            petBuildId: this.petInfo?.buildId ?? 'unknown',
+            petCommitSha: this.petInfo?.commitSha ?? 'unknown',
+        };
     }
 
     private async doRefresh(options?: NativePythonEnvironmentKind | Uri[]): Promise<NativeInfo[]> {
@@ -840,6 +915,7 @@ class NativePythonFinderImpl implements NativePythonFinder {
                     searchPathCount,
                     attempt,
                     locatorsJson: refreshPerf ? JSON.stringify(refreshPerf.locators) : undefined,
+                    ...this.getPetInfoProperties(),
                 },
             );
         } catch (ex) {
@@ -853,6 +929,7 @@ class NativePythonFinderImpl implements NativePythonFinder {
                     unresolvedCount,
                     attempt,
                     errorType,
+                    ...this.getPetInfoProperties(),
                 },
                 ex instanceof Error ? ex : undefined,
             );
