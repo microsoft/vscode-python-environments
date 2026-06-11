@@ -212,7 +212,7 @@ export class PackageTreeItem implements EnvTreeItem {
         const item = new TreeItem(pkg.displayName);
         item.iconPath = pkg.isTransitive ? new ThemeIcon('list-tree') : new ThemeIcon('package');
         item.contextValue = pkg.isTransitive ? 'python-package-transitive' : 'python-package';
-        item.description = (pkg.isTransitive ? '(dependency) ' : '') + (pkg.description ?? pkg.version);
+        item.description = (pkg.isTransitive ? '(transitive) ' : '') + (pkg.description ?? pkg.version);
         item.tooltip = pkg.tooltip;
         this.treeItem = item;
     }
