@@ -212,24 +212,24 @@ export enum EventNames {
     /**
      * Telemetry event fired once per session, per URI, the first time a `.py`
      * file with a valid PEP 723 `# /// script` block is observed by the lazy
-     * detector. Used to size the population of users who actually see PEP 723
-     * files — the denominator for the "view vs edit" question.
+     * detector. Used to size the population of users who actually see inline
+     * script files — the denominator for the "view vs edit" question.
      * Properties:
      * - trigger: 'open' | 'save' (which workspace event surfaced the file)
      * - hasRequiresPython: boolean (whether the block declares `requires-python`)
      * Measures:
      * - dependencyCount: number (number of entries in the `dependencies` list)
      */
-    PEP723_DETECTED = 'PEP723.DETECTED',
+    INLINE_SCRIPT_DETECTED = 'inlineScript.detected',
     /**
      * Telemetry event fired once per session, per URI, the first time a `.py`
-     * file that previously raised a `PEP723.DETECTED` event receives a real
-     * text edit. Together with `PEP723.DETECTED` this measures the fraction
-     * of users who do more than view PEP 723 scripts.
+     * file that previously raised an `inlineScript.detected` event receives a
+     * real text edit. Together with `inlineScript.detected` this measures the
+     * fraction of users who do more than view inline script files.
      * Measures:
      * - duration: number (ms between the detection and the first edit)
      */
-    PEP723_EDITED = 'PEP723.EDITED',
+    INLINE_SCRIPT_EDITED = 'inlineScript.edited',
 }
 
 // Map all events to their properties
@@ -707,13 +707,13 @@ export interface IEventNamePropertyMapping {
     };
 
     /* __GDPR__
-        "pep723.detected": {
+        "inlineScript.detected": {
             "trigger": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "owner": "StellaHuang95" },
             "hasRequiresPython": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "owner": "StellaHuang95" },
             "dependencyCount": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "isMeasurement": true, "owner": "StellaHuang95" }
         }
     */
-    [EventNames.PEP723_DETECTED]: {
+    [EventNames.INLINE_SCRIPT_DETECTED]: {
         trigger: 'open' | 'save';
         hasRequiresPython: boolean;
         // Goes through the measures payload (numeric); listed here for GDPR only.
@@ -721,9 +721,9 @@ export interface IEventNamePropertyMapping {
     };
 
     /* __GDPR__
-        "pep723.edited": {
+        "inlineScript.edited": {
             "<duration>": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "isMeasurement": true, "owner": "StellaHuang95" }
         }
     */
-    [EventNames.PEP723_EDITED]: never | undefined;
+    [EventNames.INLINE_SCRIPT_EDITED]: never | undefined;
 }

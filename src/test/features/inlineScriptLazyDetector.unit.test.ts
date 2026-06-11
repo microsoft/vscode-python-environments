@@ -120,7 +120,7 @@ suite('InlineScriptLazyDetector', () => {
         changeListener!(makeChange(uri, changes));
     }
 
-    // Filter `sendTelemetryStub.getCalls()` to a single PEP 723 event name.
+    // Filter `sendTelemetryStub.getCalls()` to a single inline script event name.
     function callsFor(name: EventNames): sinon.SinonSpyCall[] {
         return sendTelemetryStub.getCalls().filter((c) => c.args[0] === name);
     }
@@ -224,7 +224,7 @@ suite('InlineScriptLazyDetector', () => {
         // further work — including the detection telemetry event.
         resolveRead!(VALID_METADATA);
         await assert.doesNotReject(inFlight ?? Promise.resolve());
-        assert.strictEqual(callsFor(EventNames.PEP723_DETECTED).length, 0, 'no detection event after dispose');
+        assert.strictEqual(callsFor(EventNames.INLINE_SCRIPT_DETECTED).length, 0, 'no detection event after dispose');
     });
 
     // ---------- catch-up replay over `getOpenTextDocuments` ----------
@@ -271,16 +271,16 @@ suite('InlineScriptLazyDetector', () => {
         assert.ok(readMetadataStub.notCalled, 'dispose() must clear the pending setImmediate handle');
     });
 
-    // ---------- PEP723.DETECTED telemetry ----------
+    // ---------- inlineScript.detected telemetry ----------
 
-    test('PEP723.DETECTED fires once with trigger=open + dependencyCount + hasRequiresPython', async () => {
+    test('inlineScript.detected fires once with trigger=open + dependencyCount + hasRequiresPython', async () => {
         const uri = Uri.file(path.resolve('/ws/detect.py'));
         readMetadataStub.resolves(VALID_METADATA);
         const detector = new InlineScriptLazyDetector();
         detector.activate();
         await fireOpen(uri);
 
-        const detectedCalls = callsFor(EventNames.PEP723_DETECTED);
+        const detectedCalls = callsFor(EventNames.INLINE_SCRIPT_DETECTED);
         assert.strictEqual(detectedCalls.length, 1, 'detection event should fire exactly once');
         const [, measures, properties] = detectedCalls[0].args;
         assert.deepStrictEqual(measures, { dependencyCount: 2 });
@@ -288,30 +288,30 @@ suite('InlineScriptLazyDetector', () => {
         detector.dispose();
     });
 
-    test('PEP723.DETECTED fires with trigger=save when surfaced by a save event', async () => {
+    test('inlineScript.detected fires with trigger=save when surfaced by a save event', async () => {
         const uri = Uri.file(path.resolve('/ws/detectOnSave.py'));
         readMetadataStub.resolves(VALID_METADATA);
         const detector = new InlineScriptLazyDetector();
         detector.activate();
         await fireSave(uri);
 
-        const detectedCalls = callsFor(EventNames.PEP723_DETECTED);
+        const detectedCalls = callsFor(EventNames.INLINE_SCRIPT_DETECTED);
         assert.strictEqual(detectedCalls.length, 1);
         assert.strictEqual(detectedCalls[0].args[2].trigger, 'save');
         detector.dispose();
     });
 
-    test('PEP723.DETECTED does not fire when the file has no metadata block', async () => {
+    test('inlineScript.detected does not fire when the file has no metadata block', async () => {
         const uri = Uri.file(path.resolve('/ws/plain.py'));
         readMetadataStub.resolves(undefined);
         const detector = new InlineScriptLazyDetector();
         detector.activate();
         await fireOpen(uri);
-        assert.strictEqual(callsFor(EventNames.PEP723_DETECTED).length, 0);
+        assert.strictEqual(callsFor(EventNames.INLINE_SCRIPT_DETECTED).length, 0);
         detector.dispose();
     });
 
-    test('PEP723.DETECTED is deduplicated across repeated opens and saves of the same URI', async () => {
+    test('inlineScript.detected is deduplicated across repeated opens and saves of the same URI', async () => {
         const uri = Uri.file(path.resolve('/ws/repeat.py'));
         readMetadataStub.resolves(VALID_METADATA);
         const detector = new InlineScriptLazyDetector();
@@ -320,11 +320,11 @@ suite('InlineScriptLazyDetector', () => {
         await fireSave(uri);
         await fireSave(uri);
         await fireOpen(uri);
-        assert.strictEqual(callsFor(EventNames.PEP723_DETECTED).length, 1, 'detection event must dedup per session');
+        assert.strictEqual(callsFor(EventNames.INLINE_SCRIPT_DETECTED).length, 1, 'detection event must dedup per session');
         detector.dispose();
     });
 
-    test('PEP723.DETECTED reports hasRequiresPython=false when not declared', async () => {
+    test('inlineScript.detected reports hasRequiresPython=false when not declared', async () => {
         const uri = Uri.file(path.resolve('/ws/noPython.py'));
         readMetadataStub.resolves({
             requiresPython: undefined,
@@ -336,15 +336,15 @@ suite('InlineScriptLazyDetector', () => {
         detector.activate();
         await fireOpen(uri);
 
-        const [, measures, properties] = callsFor(EventNames.PEP723_DETECTED)[0].args;
+        const [, measures, properties] = callsFor(EventNames.INLINE_SCRIPT_DETECTED)[0].args;
         assert.deepStrictEqual(measures, { dependencyCount: 0 });
         assert.deepStrictEqual(properties, { trigger: 'open', hasRequiresPython: false });
         detector.dispose();
     });
 
-    // ---------- PEP723.EDITED telemetry ----------
+    // ---------- inlineScript.edited telemetry ----------
 
-    test('PEP723.EDITED fires once on first content change after detection', async () => {
+    test('inlineScript.edited fires once on first content change after detection', async () => {
         const uri = Uri.file(path.resolve('/ws/edit.py'));
         readMetadataStub.resolves(VALID_METADATA);
         const detector = new InlineScriptLazyDetector();
@@ -352,7 +352,7 @@ suite('InlineScriptLazyDetector', () => {
         await fireOpen(uri);
         fireChange(uri);
 
-        const editedCalls = callsFor(EventNames.PEP723_EDITED);
+        const editedCalls = callsFor(EventNames.INLINE_SCRIPT_EDITED);
         assert.strictEqual(editedCalls.length, 1, 'edited event should fire exactly once');
         // Second arg is the measure (number → { duration }); accept either form.
         const measureArg = editedCalls[0].args[1];
@@ -361,7 +361,7 @@ suite('InlineScriptLazyDetector', () => {
         detector.dispose();
     });
 
-    test('PEP723.EDITED is deduplicated across repeated edits of the same URI', async () => {
+    test('inlineScript.edited is deduplicated across repeated edits of the same URI', async () => {
         const uri = Uri.file(path.resolve('/ws/multiEdit.py'));
         readMetadataStub.resolves(VALID_METADATA);
         const detector = new InlineScriptLazyDetector();
@@ -370,22 +370,22 @@ suite('InlineScriptLazyDetector', () => {
         fireChange(uri);
         fireChange(uri);
         fireChange(uri);
-        assert.strictEqual(callsFor(EventNames.PEP723_EDITED).length, 1);
+        assert.strictEqual(callsFor(EventNames.INLINE_SCRIPT_EDITED).length, 1);
         detector.dispose();
     });
 
-    test('PEP723.EDITED does not fire for changes on a URI that was never detected', async () => {
+    test('inlineScript.edited does not fire for changes on a URI that was never detected', async () => {
         const uri = Uri.file(path.resolve('/ws/notDetected.py'));
         readMetadataStub.resolves(undefined);
         const detector = new InlineScriptLazyDetector();
         detector.activate();
         await fireOpen(uri);
         fireChange(uri);
-        assert.strictEqual(callsFor(EventNames.PEP723_EDITED).length, 0);
+        assert.strictEqual(callsFor(EventNames.INLINE_SCRIPT_EDITED).length, 0);
         detector.dispose();
     });
 
-    test('PEP723.EDITED ignores change events with no content changes', async () => {
+    test('inlineScript.edited ignores change events with no content changes', async () => {
         const uri = Uri.file(path.resolve('/ws/noOpChange.py'));
         readMetadataStub.resolves(VALID_METADATA);
         const detector = new InlineScriptLazyDetector();
@@ -395,14 +395,14 @@ suite('InlineScriptLazyDetector', () => {
         // array for things like dirty-state toggles; that's not a user
         // edit and must not count.
         fireChange(uri, []);
-        assert.strictEqual(callsFor(EventNames.PEP723_EDITED).length, 0);
+        assert.strictEqual(callsFor(EventNames.INLINE_SCRIPT_EDITED).length, 0);
         // A real edit still counts after the no-op was ignored.
         fireChange(uri);
-        assert.strictEqual(callsFor(EventNames.PEP723_EDITED).length, 1);
+        assert.strictEqual(callsFor(EventNames.INLINE_SCRIPT_EDITED).length, 1);
         detector.dispose();
     });
 
-    test('PEP723.EDITED is suppressed after dispose()', async () => {
+    test('inlineScript.edited is suppressed after dispose()', async () => {
         const uri = Uri.file(path.resolve('/ws/disposedEdit.py'));
         readMetadataStub.resolves(VALID_METADATA);
         const detector = new InlineScriptLazyDetector();
@@ -411,7 +411,7 @@ suite('InlineScriptLazyDetector', () => {
         const grabbedChangeListener = changeListener!;
         detector.dispose();
         grabbedChangeListener(makeChange(uri));
-        assert.strictEqual(callsFor(EventNames.PEP723_EDITED).length, 0);
+        assert.strictEqual(callsFor(EventNames.INLINE_SCRIPT_EDITED).length, 0);
     });
 });
 
