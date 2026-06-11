@@ -363,9 +363,20 @@ export class PythonEnvironmentManagers implements EnvironmentManagers {
         const oldEnv = this._activeSelection.get(key);
         if (oldEnv?.envId.id !== environment?.envId.id) {
             this._activeSelection.set(key, environment);
-            setImmediate(() =>
-                this._onDidChangeActiveEnvironment.fire({ uri: project?.uri, new: environment, old: oldEnv }),
-            );
+            await new Promise<void>((resolve, reject) => {
+                setImmediate(() => {
+                    try {
+                        this._onDidChangeActiveEnvironment.fire({
+                            uri: project?.uri,
+                            new: environment,
+                            old: oldEnv,
+                        });
+                        resolve();
+                    } catch (err) {
+                        reject(err);
+                    }
+                });
+            });
         }
     }
 
@@ -443,7 +454,18 @@ export class PythonEnvironmentManagers implements EnvironmentManagers {
             if (shouldPersistSettings) {
                 await setAllManagerSettings(settings);
             }
-            setImmediate(() => events.forEach((e) => this._onDidChangeActiveEnvironment.fire(e)));
+            if (events.length > 0) {
+                await new Promise<void>((resolve, reject) => {
+                    setImmediate(() => {
+                        try {
+                            events.forEach((e) => this._onDidChangeActiveEnvironment.fire(e));
+                            resolve();
+                        } catch (err) {
+                            reject(err);
+                        }
+                    });
+                });
+            }
         } else {
             const promises: Promise<void>[] = [];
             const events: DidChangeEnvironmentEventArgs[] = [];
@@ -488,7 +510,18 @@ export class PythonEnvironmentManagers implements EnvironmentManagers {
                 }
             }
             await Promise.all(promises);
-            setImmediate(() => events.forEach((e) => this._onDidChangeActiveEnvironment.fire(e)));
+            if (events.length > 0) {
+                await new Promise<void>((resolve, reject) => {
+                    setImmediate(() => {
+                        try {
+                            events.forEach((e) => this._onDidChangeActiveEnvironment.fire(e));
+                            resolve();
+                        } catch (err) {
+                            reject(err);
+                        }
+                    });
+                });
+            }
         }
     }
 
