@@ -28,6 +28,7 @@ import {
 } from '../internal.api';
 import { removePythonProjectSetting, setEnvironmentManager, setPackageManager } from './settings/settingHelpers';
 
+import { valid as pep440Valid } from '@renovatebot/pep440';
 import { executeCommand } from '../common/command.api';
 import { clipboardWriteText } from '../common/env.apis';
 import { Pickers } from '../common/localize';
@@ -51,7 +52,6 @@ import {
     showQuickPick,
     withProgress,
 } from '../common/window.apis';
-import { PEP440_VERSION_REGEX } from '../managers/builtin/pipUtils';
 import { runAsTask } from './execution/runAsTask';
 import { runInTerminal } from './terminal/runInTerminal';
 import { TerminalManager } from './terminal/terminalManager';
@@ -370,7 +370,7 @@ export async function managePackageVersion(context: unknown, em: EnvironmentMana
                     if (trimmedValue.length === 0) {
                         return l10n.t('Version cannot be empty');
                     }
-                    if (!PEP440_VERSION_REGEX.test(trimmedValue)) {
+                    if (!pep440Valid(trimmedValue)) {
                         return l10n.t('Invalid PEP 440 version: {0}', trimmedValue);
                     }
                     return undefined;
