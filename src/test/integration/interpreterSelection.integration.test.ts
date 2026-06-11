@@ -28,6 +28,20 @@ import { ENVS_EXTENSION_ID } from '../constants';
 import { waitForCondition } from '../testUtils';
 
 /**
+ * Returns a promise that resolves with the first event fired by the given
+ * VS Code event emitter. Automatically disposes the subscription after
+ * the event fires.
+ */
+function onceEvent<T>(event: vscode.Event<T>): Promise<T> {
+    return new Promise<T>((resolve) => {
+        const disposable = event((e) => {
+            disposable.dispose();
+            resolve(e);
+        });
+    });
+}
+
+/**
  * Calls setEnvironment and waits for the async event chain to fully settle.
  *
  * Compares the current environment with the target to determine whether
@@ -36,47 +50,28 @@ import { waitForCondition } from '../testUtils';
  * event. If no change is expected (idempotent set), calls setEnvironment
  * and returns immediately.
  *
- * Returns all captured events, which callers can inspect to verify
- * event payloads (e.g., old/new values).
+ * Returns the change event if one was fired, or undefined for idempotent sets.
  */
 async function setEnvironmentAndWait(
     api: PythonEnvironmentApi,
     scope: SetEnvironmentScope,
     env: PythonEnvironment | undefined,
-): Promise<DidChangeEnvironmentEventArgs[]> {
+): Promise<DidChangeEnvironmentEventArgs | undefined> {
     // Determine if this set will actually change the environment.
     // For array scopes, check the first URI (the primary project).
     const getScope = Array.isArray(scope) ? scope[0] : scope;
     const current = await api.getEnvironment(getScope);
-    const currentId = current?.envId.id;
-    const targetId = env?.envId.id;
-    const expectsChange = currentId !== targetId;
+    const expectsChange = current?.envId.id !== env?.envId.id;
 
     if (!expectsChange) {
-        // Idempotent set — no event will fire, just call and return
         await api.setEnvironment(scope, env);
-        return [];
+        return undefined;
     }
 
-    // A change is expected — wait for the event
-    const events: DidChangeEnvironmentEventArgs[] = [];
-    let resolveEvent: () => void;
-    const eventPromise = new Promise<void>((resolve) => {
-        resolveEvent = resolve;
-    });
-
-    const disposable = api.onDidChangeEnvironment((e) => {
-        events.push(e);
-        resolveEvent();
-    });
-
-    try {
-        await api.setEnvironment(scope, env);
-        await eventPromise;
-        return events;
-    } finally {
-        disposable.dispose();
-    }
+    // Subscribe before calling setEnvironment so we don't miss the event
+    const eventPromise = onceEvent(api.onDidChangeEnvironment);
+    await api.setEnvironment(scope, env);
+    return eventPromise;
 }
 
 suite('Integration: Interpreter Selection Priority', function () {
@@ -223,16 +218,16 @@ suite('Integration: Interpreter Selection Priority', function () {
         // Set initial environment and wait for all async events to drain
         await setEnvironmentAndWait(api, undefined, oldEnv);
 
-        // Set new environment — the returned events contain the change payload
-        const events = await setEnvironmentAndWait(api, undefined, newEnv);
+        // Set new environment — the returned event contains the change payload
+        const event = await setEnvironmentAndWait(api, undefined, newEnv);
 
-        const event = events.find((e) => e.new?.envId.id === newEnv.envId.id);
-        assert.ok(
-            event,
-            `Expected change event with new env ${newEnv.envId.id}, ` +
-                `but got: [${events.map((e) => e.new?.envId.id).join(', ')}]`,
-        );
+        assert.ok(event, 'Change event should have fired');
         assert.ok(event.new, 'Event should have new environment');
+        assert.strictEqual(
+            event.new.envId.id,
+            newEnv.envId.id,
+            'Event new envId should match the environment we set',
+        );
         assert.strictEqual(
             event.new.environmentPath.fsPath,
             newEnv.environmentPath.fsPath,
