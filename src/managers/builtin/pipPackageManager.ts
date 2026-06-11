@@ -179,7 +179,7 @@ export class PipPackageManager implements PackageManager, Disposable {
                         packageName,
                         '--json',
                         '--python-version',
-                        environment.version,
+                        parse(environment.version)?.base_version!,
                     ],
                     undefined,
                     this.log,
@@ -192,7 +192,16 @@ export class PipPackageManager implements PackageManager, Disposable {
             if (pipVersion && compare(pipVersion.public, '21.2.0') >= 0) {
                 const output = await runPython(
                     python,
-                    ['-m', 'pip', 'index', 'versions', packageName, '--json', '--python-version', environment.version],
+                    [
+                        '-m',
+                        'pip',
+                        'index',
+                        'versions',
+                        packageName,
+                        '--json',
+                        '--python-version',
+                        parse(environment.version)?.base_version!,
+                    ],
                     undefined,
                     this.log,
                 );
