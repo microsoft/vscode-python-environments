@@ -23,7 +23,7 @@ import {
 } from '../common/nativePythonFinder';
 import { shortenVersionString, sortEnvironments } from '../common/utils';
 import { runPython, runUV, shouldUseUv } from './helpers';
-import { parsePipListJson, PipPackage } from './pipListUtils';
+import { parsePipListJson, parseUvTree, PipPackage } from './pipListUtils';
 
 const PIXI_EXTENSION_ID = 'renan-r-santos.pixi-code';
 const PIXI_RECOMMEND_DONT_ASK_KEY = 'pixi-extension-recommend-dont-ask';
@@ -200,7 +200,7 @@ async function execPipList(environment: PythonEnvironment, log?: LogOutputChanne
     try {
         return await runPython(
             environment.execInfo.run.executable,
-            ['-m', 'pip', 'list', '--format=json'],
+            ['-m', 'pip', 'list', '--format=json', ...(args ?? [])],
             undefined,
             log,
             undefined,
@@ -235,12 +235,32 @@ export async function refreshPipPackages(
             data = await execPipList(environment, log);
         }
 
-        return parsePipListJson(data);
+        return parsePipListJson(data, log);
     } catch (e) {
         log?.error('Error refreshing packages', e);
         showErrorMessageWithLogs(SysManagerStrings.packageRefreshError, log);
         return undefined;
     }
+}
+
+export async function refreshPipDirectPackageNames(
+    environment: PythonEnvironment,
+    log?: LogOutputChannel,
+): Promise<string[] | undefined> {
+    const useUv = await shouldUseUv(log, environment.environmentPath.fsPath);
+    if (useUv) {
+        const treeOutput = await runUV(
+            ['pip', 'tree', '--python', environment.execInfo.run.executable, '--depth=0'],
+            undefined,
+            log,
+            undefined,
+            PIP_LIST_TIMEOUT_MS,
+        );
+        return parseUvTree(treeOutput);
+    }
+    const data = await execPipList(environment, log, ['--not-required']);
+    const packages = parsePipListJson(data);
+    return packages.map((pkg) => pkg.name);
 }
 
 export async function managePackages(

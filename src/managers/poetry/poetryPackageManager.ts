@@ -263,6 +263,21 @@ export class PoetryPackageManager implements PackageManager, Disposable {
         // Convert to Package objects using the API
         return poetryPackages.map((pkg) => this.api.createPackageItem(pkg, environment, this));
     }
+
+    async getDirectPackageNames(_environment: PythonEnvironment): Promise<Set<string> | undefined> {
+        try {
+            const topLevelResult = await runPoetry(['show', '--no-ansi', '--top-level'], undefined, this.log);
+            const names = topLevelResult
+                .split('\n')
+                .map((line) => line.trim())
+                .map((line) => line.match(/^([a-zA-Z0-9_-]+)/)?.[1] ?? '')
+                .filter((name) => !!name);
+            return new Set(names);
+        } catch (err) {
+            this.log.error(`Error fetching direct package names with Poetry: ${err}`);
+            return undefined;
+        }
+    }
 }
 
 export async function runPoetry(

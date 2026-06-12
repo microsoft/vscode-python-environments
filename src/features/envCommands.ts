@@ -305,6 +305,9 @@ export async function removeEnvironmentCommand(context: unknown, managers: Envir
 
 export async function handlePackageUninstall(context: unknown, em: EnvironmentManagers) {
     if (context instanceof PackageTreeItem || context instanceof ProjectPackage) {
+        if (context.pkg.isTransitive) {
+            return;
+        }
         const moduleName = context.pkg.name;
         const environment = context instanceof ProjectPackage ? context.parent.environment : context.parent.environment;
         const packageManager = em.getPackageManager(environment);

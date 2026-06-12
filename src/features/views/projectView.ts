@@ -245,6 +245,10 @@ export class ProjectView implements TreeDataProvider<ProjectTreeItem> {
             }
 
             let packages = await pkgManager.getPackages(environment);
+            if (!packages || packages.length === 0) {
+                await pkgManager.refresh(environment);
+                packages = await pkgManager.getPackages(environment);
+            }
             if (!packages) {
                 return [new ProjectEnvironmentInfo(environmentItem, ProjectViews.noPackages)];
             }
