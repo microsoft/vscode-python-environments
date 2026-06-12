@@ -305,7 +305,6 @@ export async function removeEnvironmentCommand(context: unknown, managers: Envir
 
 export async function handlePackageUninstall(context: unknown, em: EnvironmentManagers) {
     if (context instanceof PackageTreeItem || context instanceof ProjectPackage) {
-        // Ask for user confirmation if the package is transitive
         if (context.pkg.isTransitive) {
             return;
         }
