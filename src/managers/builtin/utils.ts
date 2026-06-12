@@ -235,7 +235,7 @@ export async function refreshPipPackages(
             data = await execPipList(environment, log);
         }
 
-        return parsePipListJson(data);
+        return parsePipListJson(data, log);
     } catch (e) {
         log?.error('Error refreshing packages', e);
         showErrorMessageWithLogs(SysManagerStrings.packageRefreshError, log);

@@ -265,5 +265,22 @@ suite('packageChanges', () => {
             assert.strictEqual(after[0].isTransitive, true, 'urllib3 should be transitive');
             assert.strictEqual(after[1].isTransitive, true, 'charset-normalizer should be transitive');
         });
+
+        test('leaves isTransitive undefined when getDirectPackageNames throws', async () => {
+            const after = [
+                { name: 'requests', version: '2.31.0' } as Package,
+                { name: 'urllib3', version: '2.0.0' } as Package,
+            ];
+            getPackagesStub.resolves(after);
+            const getDirectPackageNamesStub = sinon.stub().rejects(new Error('command failed'));
+            (packageManager as unknown as Record<string, unknown>).getDirectPackageNames = getDirectPackageNamesStub;
+            const onChanges = sinon.stub();
+
+            await updatePackagesAndNotify(packageManager, environment, undefined, onChanges);
+
+            assert.strictEqual(after[0].isTransitive, undefined, 'should not be set on error');
+            assert.strictEqual(after[1].isTransitive, undefined, 'should not be set on error');
+            assert.ok(onChanges.calledOnce, 'should still fire change event');
+        });
     });
 });

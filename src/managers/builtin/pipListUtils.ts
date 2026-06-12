@@ -1,3 +1,5 @@
+import { LogOutputChannel } from 'vscode';
+
 export interface PipPackage {
     name: string;
     version: string;
@@ -12,7 +14,7 @@ export function parseUvTree(data: string): string[] {
         .filter((name) => !!name);
 }
 
-export function parsePipListJson(data: string): PipPackage[] {
+export function parsePipListJson(data: string, log?: LogOutputChannel): PipPackage[] {
     try {
         const json = JSON.parse(data);
         if (Array.isArray(json)) {
@@ -25,8 +27,8 @@ export function parsePipListJson(data: string): PipPackage[] {
                     description: version,
                 }));
         }
-    } catch (_) {
-        // If JSON parsing fails, return an empty array. The caller can decide how to handle this case.
+    } catch (ex) {
+        log?.error('Failed to parse pip list JSON output', ex);
     }
     return [];
 }

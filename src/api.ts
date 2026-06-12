@@ -576,7 +576,7 @@ export interface PackageInfo {
     /**
      * Whether the package is a transitive dependency.
      */
-    isTransitive?: boolean;
+    readonly isTransitive?: boolean;
 }
 
 /**
@@ -689,7 +689,7 @@ export interface PackageManager {
     /**
      * Fetches the names of direct (non-transitive) packages for the specified Python environment.
      * @param environment - The Python environment for which to fetch direct package names.
-     * @returns A promise that resolves to an array of package name strings, or undefined if not supported.
+     * @returns A promise that resolves to a set of package name strings, or undefined if not supported.
      */
     getDirectPackageNames?(environment: PythonEnvironment): Promise<Set<string> | undefined>;
 

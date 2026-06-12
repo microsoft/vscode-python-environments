@@ -266,12 +266,12 @@ export class PoetryPackageManager implements PackageManager, Disposable {
 
     async getDirectPackageNames(_environment: PythonEnvironment): Promise<Set<string> | undefined> {
         try {
-            const topLevelResult = await runPoetry(['show', '--no-ansi', '--tree'], undefined, this.log);
+            const topLevelResult = await runPoetry(['show', '--no-ansi', '--top-level'], undefined, this.log);
             const names = topLevelResult
                 .split('\n')
                 .map((line) => line.trim())
-                .map((line) => line.match(/^(\S+)/)?.[1] ?? '') // Extract package name from lines like "├── package (version)"
-                .filter((name) => !!name); // Filter out empty names
+                .map((line) => line.match(/^([a-zA-Z0-9_-]+)/)?.[1] ?? '')
+                .filter((name) => !!name);
             return new Set(names);
         } catch (err) {
             this.log.error(`Error fetching direct package names with Poetry: ${err}`);

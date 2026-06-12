@@ -252,8 +252,11 @@ export class EnvManagerView implements TreeDataProvider<EnvTreeItem>, Disposable
             const views: EnvTreeItem[] = [];
 
             if (pkgManager) {
-                await pkgManager.refresh(environment);
-                const packages = await pkgManager.getPackages(environment);
+                let packages = await pkgManager.getPackages(environment);
+                if (!packages || packages.length === 0) {
+                    await pkgManager.refresh(environment);
+                    packages = await pkgManager.getPackages(environment);
+                }
                 if (packages && packages.length > 0) {
                     views.push(
                         ...packages

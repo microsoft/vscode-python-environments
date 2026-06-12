@@ -1,4 +1,4 @@
-import { Command, MarkdownString, ThemeIcon, TreeItem, TreeItemCollapsibleState } from 'vscode';
+import { Command, MarkdownString, ThemeIcon, TreeItem, TreeItemCollapsibleState, l10n } from 'vscode';
 import { EnvironmentGroupInfo, IconPath, Package, PythonEnvironment, PythonProject } from '../../api';
 import { EnvViewStrings, UvInstallStrings, VenvManagerStrings } from '../../common/localize';
 import { InternalEnvironmentManager, InternalPackageManager } from '../../internal.api';
@@ -210,9 +210,10 @@ export class PackageTreeItem implements EnvTreeItem {
         public readonly manager: InternalPackageManager,
     ) {
         const item = new TreeItem(pkg.displayName);
-        item.iconPath = pkg.isTransitive ? new ThemeIcon('list-tree') : new ThemeIcon('package');
+        const defaultIcon = pkg.isTransitive ? new ThemeIcon('list-tree') : new ThemeIcon('package');
+        item.iconPath = pkg.iconPath ?? defaultIcon;
         item.contextValue = pkg.isTransitive ? 'python-package-transitive' : 'python-package';
-        item.description = (pkg.isTransitive ? '(transitive) ' : '') + (pkg.description ?? pkg.version);
+        item.description = (pkg.isTransitive ? l10n.t('(transitive) ') : '') + (pkg.description ?? pkg.version);
         item.tooltip = pkg.tooltip;
         this.treeItem = item;
     }
