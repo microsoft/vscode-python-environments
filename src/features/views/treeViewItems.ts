@@ -214,7 +214,9 @@ export class PackageTreeItem implements EnvTreeItem {
         item.iconPath = pkg.iconPath ?? defaultIcon;
         item.contextValue = pkg.isTransitive ? 'python-package-transitive' : 'python-package';
         item.description = (pkg.isTransitive ? l10n.t('(transitive) ') : '') + (pkg.description ?? pkg.version);
-        item.tooltip = pkg.tooltip;
+        item.tooltip = pkg.isTransitive
+            ? l10n.t('This package is a dependency of another installed package. It may also have been explicitly installed.')
+            : pkg.tooltip;
         this.treeItem = item;
     }
 }
