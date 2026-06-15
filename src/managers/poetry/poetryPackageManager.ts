@@ -272,7 +272,7 @@ export class PoetryPackageManager implements PackageManager, Disposable {
             const names = topLevelResult
                 .split('\n')
                 .map((line) => line.trim())
-                .map((line) => line.match(/^([a-zA-Z0-9_-]+)/)?.[1] ?? '')
+                .map((line) => line.match(/^([a-zA-Z0-9._-]+)/)?.[1] ?? '')
                 .filter((name) => !!name)
                 .map(normalizePackageName);
             return new Set(names);
