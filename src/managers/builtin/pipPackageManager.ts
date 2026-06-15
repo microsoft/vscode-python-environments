@@ -101,16 +101,21 @@ export class PipPackageManager implements PackageManager, Disposable {
         );
     }
 
-    async refresh(environment: PythonEnvironment): Promise<void> {
-        await window.withProgress(
+    async refresh(environment: PythonEnvironment): Promise<Package[] | undefined> {
+        return window.withProgress(
             {
                 location: ProgressLocation.Window,
                 title: 'Refreshing packages',
             },
             async () => {
-                await updatePackagesAndNotify(this, environment, this.packages.get(environment.envId.id), (changes) => {
-                    this._onDidChangePackages.fire({ environment, manager: this, changes });
-                });
+                return updatePackagesAndNotify(
+                    this,
+                    environment,
+                    this.packages.get(environment.envId.id),
+                    (changes) => {
+                        this._onDidChangePackages.fire({ environment, manager: this, changes });
+                    },
+                );
             },
         );
     }

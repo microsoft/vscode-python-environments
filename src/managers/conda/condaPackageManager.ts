@@ -95,16 +95,21 @@ export class CondaPackageManager implements PackageManager, Disposable {
         );
     }
 
-    async refresh(environment: PythonEnvironment): Promise<void> {
-        await withProgress(
+    async refresh(environment: PythonEnvironment): Promise<Package[] | undefined> {
+        return withProgress(
             {
                 location: ProgressLocation.Window,
                 title: CondaStrings.condaRefreshingPackages,
             },
             async () => {
-                await updatePackagesAndNotify(this, environment, this.packages.get(environment.envId.id), (changes) => {
-                    this._onDidChangePackages.fire({ environment, manager: this, changes });
-                });
+                return updatePackagesAndNotify(
+                    this,
+                    environment,
+                    this.packages.get(environment.envId.id),
+                    (changes) => {
+                        this._onDidChangePackages.fire({ environment, manager: this, changes });
+                    },
+                );
             },
         );
     }

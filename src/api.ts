@@ -669,9 +669,9 @@ export interface PackageManager {
     /**
      * Refreshes the package list for the specified Python environment.
      * @param environment - The Python environment for which to refresh the package list.
-     * @returns A promise that resolves when the refresh is complete.
+     * @returns A promise that resolves with the refreshed list of packages, or undefined.
      */
-    refresh(environment: PythonEnvironment): Promise<void>;
+    refresh(environment: PythonEnvironment): Promise<Package[] | undefined>;
 
     /**
      * Retrieves the list of packages for the specified Python environment.
@@ -1035,9 +1035,9 @@ export interface PythonPackageGetterApi {
      * Refresh the list of packages in a Python Environment.
      *
      * @param environment The Python Environment for which the list of packages is to be refreshed.
-     * @returns A promise that resolves when the list of packages has been refreshed.
+     * @returns A promise that resolves with the refreshed list of packages, or undefined.
      */
-    refreshPackages(environment: PythonEnvironment): Promise<void>;
+    refreshPackages(environment: PythonEnvironment): Promise<Package[] | undefined>;
 
     /**
      * Get the list of packages in a Python Environment.

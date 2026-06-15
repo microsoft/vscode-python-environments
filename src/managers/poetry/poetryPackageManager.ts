@@ -108,15 +108,15 @@ export class PoetryPackageManager implements PackageManager, Disposable {
         );
     }
 
-    async refresh(environment: PythonEnvironment): Promise<void> {
-        await withProgress(
+    async refresh(environment: PythonEnvironment): Promise<Package[] | undefined> {
+        return withProgress(
             {
                 location: ProgressLocation.Window,
                 title: 'Refreshing Poetry packages',
             },
             async () => {
                 try {
-                    await updatePackagesAndNotify(
+                    return await updatePackagesAndNotify(
                         this,
                         environment,
                         this.packages.get(environment.envId.id),
@@ -133,6 +133,7 @@ export class PoetryPackageManager implements PackageManager, Disposable {
                             this.log.show();
                         }
                     });
+                    return undefined;
                 }
             },
         );

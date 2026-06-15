@@ -46,16 +46,13 @@ export async function updatePackagesAndNotify(
     environment: PythonEnvironment,
     before: Package[] | undefined,
     onChanges: PackageChangesCallback,
-): Promise<void> {
-    const after = (await packageManager.getPackages(environment, { skipCache: true })) ?? [];
+): Promise<Package[] | undefined> {
+    const [after, afterDirectDependenciesNames] = await Promise.all([
+        packageManager.getPackages(environment, { skipCache: true }).then((pkgs) => pkgs ?? []),
+        // Handle transitive dependencies (best-effort, don't break package refresh on failure)
+        packageManager.getDirectPackageNames?.(environment).catch(() => undefined),
+    ]);
 
-    // Handle transitive dependencies (best-effort, don't break package refresh on failure)
-    let afterDirectDependenciesNames: Set<string> | undefined;
-    try {
-        afterDirectDependenciesNames = await packageManager.getDirectPackageNames?.(environment);
-    } catch {
-        // If direct package detection fails, leave isTransitive undefined rather than breaking refresh
-    }
     if (afterDirectDependenciesNames && afterDirectDependenciesNames.size > 0) {
         for (const pkg of after) {
             (pkg as { isTransitive?: boolean }).isTransitive = !afterDirectDependenciesNames.has(pkg.name);
@@ -67,4 +64,6 @@ export async function updatePackagesAndNotify(
     if (changes.length > 0) {
         onChanges(changes);
     }
+
+    return after;
 }
