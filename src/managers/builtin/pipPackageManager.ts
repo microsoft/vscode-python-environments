@@ -21,7 +21,7 @@ import {
 } from '../../api';
 import { updatePackagesAndNotify } from '../common/packageChanges';
 import { getWorkspacePackagesToInstall } from './pipUtils';
-import { managePackages, refreshPipDirectPackageNames, refreshPipPackages } from './utils';
+import { managePackages, normalizePackageName, refreshPipDirectPackageNames, refreshPipPackages } from './utils';
 import { VenvManager } from './venvManager';
 
 export class PipPackageManager implements PackageManager, Disposable {
@@ -137,6 +137,6 @@ export class PipPackageManager implements PackageManager, Disposable {
 
     async getDirectPackageNames(environment: PythonEnvironment): Promise<Set<string> | undefined> {
         const data = await refreshPipDirectPackageNames(environment, this.log);
-        return data ? new Set(data) : undefined;
+        return data ? new Set(data.map(normalizePackageName)) : undefined;
     }
 }

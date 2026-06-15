@@ -2,6 +2,7 @@
 // Licensed under the MIT License.
 
 import { Package, PackageChangeKind, PackageManager, PythonEnvironment } from '../../api';
+import { normalizePackageName } from '../builtin/utils';
 
 /**
  * Callback invoked with the computed changes when at least one change is detected.
@@ -15,17 +16,17 @@ export type PackageChangesCallback = (changes: { kind: PackageChangeKind; pkg: P
  * @returns An array of changes indicating which packages were added or removed.
  */
 export function getPackageChanges(before: Package[], after: Package[]): { kind: PackageChangeKind; pkg: Package }[] {
-    const beforeSet = new Set(before.map(({ name, version }) => `${name}==${version}`));
-    const afterSet = new Set(after.map(({ name, version }) => `${name}==${version}`));
+    const beforeSet = new Set(before.map(({ name, version }) => `${normalizePackageName(name)}==${version}`));
+    const afterSet = new Set(after.map(({ name, version }) => `${normalizePackageName(name)}==${version}`));
     const changes: { kind: PackageChangeKind; pkg: Package }[] = [];
 
     for (const pkg of after) {
-        if (!beforeSet.has(`${pkg.name}==${pkg.version}`)) {
+        if (!beforeSet.has(`${normalizePackageName(pkg.name)}==${pkg.version}`)) {
             changes.push({ kind: PackageChangeKind.add, pkg });
         }
     }
     for (const pkg of before) {
-        if (!afterSet.has(`${pkg.name}==${pkg.version}`)) {
+        if (!afterSet.has(`${normalizePackageName(pkg.name)}==${pkg.version}`)) {
             changes.push({ kind: PackageChangeKind.remove, pkg });
         }
     }
@@ -55,7 +56,9 @@ export async function updatePackagesAndNotify(
 
     if (afterDirectDependenciesNames && afterDirectDependenciesNames.size > 0) {
         for (const pkg of after) {
-            (pkg as { isTransitive?: boolean }).isTransitive = !afterDirectDependenciesNames.has(pkg.name);
+            (pkg as { isTransitive?: boolean }).isTransitive = !afterDirectDependenciesNames.has(
+                normalizePackageName(pkg.name),
+            );
         }
     }
 

@@ -380,3 +380,7 @@ export async function resolveSystemPythonEnvironmentPath(
     }
     return undefined;
 }
+
+export function normalizePackageName(name: string): string {
+    return name.replace(/[-_.]+/g, '-').toLowerCase();
+}

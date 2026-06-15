@@ -24,6 +24,7 @@ import {
 } from '../../api';
 import { spawnProcess } from '../../common/childProcess.apis';
 import { showErrorMessage, showInputBox, withProgress } from '../../common/window.apis';
+import { normalizePackageName } from '../builtin/utils';
 import { updatePackagesAndNotify } from '../common/packageChanges';
 import { PoetryManager } from './poetryManager';
 import { getPoetry } from './poetryUtils';
@@ -272,7 +273,8 @@ export class PoetryPackageManager implements PackageManager, Disposable {
                 .split('\n')
                 .map((line) => line.trim())
                 .map((line) => line.match(/^([a-zA-Z0-9_-]+)/)?.[1] ?? '')
-                .filter((name) => !!name);
+                .filter((name) => !!name)
+                .map(normalizePackageName);
             return new Set(names);
         } catch (err) {
             this.log.error(`Error fetching direct package names with Poetry: ${err}`);
