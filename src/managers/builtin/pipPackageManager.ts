@@ -135,6 +135,12 @@ export class PipPackageManager implements PackageManager, Disposable {
         this.packages.clear();
     }
 
+    /**
+     * Returns direct (non-transitive) package names using `pip list --not-required` or `uv pip tree --depth=0`.
+     *
+     * Note: These commands return packages with no installed dependents (leaf packages), not packages
+     * the user explicitly installed. pip/uv do not track install intent.
+     */
     async getDirectPackageNames(environment: PythonEnvironment): Promise<Set<string> | undefined> {
         const data = await refreshPipDirectPackageNames(environment, this.log);
         return data ? new Set(data.map(normalizePackageName)) : undefined;

@@ -243,6 +243,14 @@ export async function refreshPipPackages(
     }
 }
 
+/**
+ * Returns names of packages with no installed dependents (leaf packages).
+ *
+ * Uses `pip list --not-required` (pip) or `uv pip tree --depth=0` (uv). These report
+ * packages that nothing else depends on, which is a proxy for "directly installed" but
+ * not equivalent — e.g., `pip install flask werkzeug` will report werkzeug as having
+ * dependents (flask) even though the user installed it explicitly.
+ */
 export async function refreshPipDirectPackageNames(
     environment: PythonEnvironment,
     log?: LogOutputChannel,

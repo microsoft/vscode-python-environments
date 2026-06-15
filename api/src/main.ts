@@ -694,6 +694,13 @@ export interface PackageManager {
 
     /**
      * Fetches the names of direct (non-transitive) packages for the specified Python environment.
+     *
+     * **Caveat:** Most package managers cannot track user install intent. For pip, this uses
+     * `pip list --not-required` which returns packages with no installed dependents (leaf packages),
+     * not necessarily packages the user explicitly installed. For example, if a user runs
+     * `pip install flask werkzeug`, werkzeug will still be reported as transitive because flask
+     * depends on it. This is a best-effort approximation.
+     *
      * @param environment - The Python environment for which to fetch direct package names.
      * @returns A promise that resolves to a set of package name strings, or undefined if not supported.
      */
