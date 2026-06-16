@@ -232,28 +232,6 @@ export class PipPackageManager implements PackageManager, Disposable {
 }
 
 /**
- * Parses the output of `pip install <package>==__invalid__` to extract available versions.
- * Expected output format:
- * ```
- * Collecting <package>==__invalid__
- *   Could not find a version that satisfies the requirement <package>==__invalid__ (from versions: 1.2.3, 1.2.2, ...)
- *   No matching distribution found for <package>==__invalid__
- * ```
- */
-export function parsePipInstallVersions(output: string): Pep440Version[] | undefined {
-    const match = output.match(/from versions:\s*([^\)]+)\)/);
-    if (match && match[1]) {
-        const versions = match[1]
-            .split(',')
-            .filter((v) => !!v.trim())
-            .map((v) => parse(v.trim()))
-            .filter((v): v is Pep440Version => v !== null)
-            .sort((a, b) => rcompare(a.public, b.public));
-        return versions.length > 0 ? versions : undefined;
-    }
-}
-
-/**
  * Parses JSON output from `pip index versions <package> --json`.
  * Expected format: { "name": "...", "versions": ["1.2.3", "1.2.2", ...] }
  */
