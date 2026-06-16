@@ -208,6 +208,7 @@ export class PipPackageManager implements PackageManager, Disposable {
                 return parsePipIndexVersionsJson(output);
             }
 
+            // pip <= 20.3.4 - version picking is undefined; no reliable machine-readable API exists.
         } catch {
             return undefined;
         }
