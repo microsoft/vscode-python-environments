@@ -181,11 +181,14 @@ suite('packageChanges', () => {
             (packageManager as unknown as Record<string, unknown>).getDirectPackageNames = getDirectPackageNamesStub;
             const onChanges = sinon.stub();
 
-            await updatePackagesAndNotify(packageManager, environment, undefined, onChanges);
+            const result = await updatePackagesAndNotify(packageManager, environment, undefined, onChanges);
 
-            assert.strictEqual(after[0].isTransitive, false, 'requests should be direct');
-            assert.strictEqual(after[1].isTransitive, true, 'urllib3 should be transitive');
-            assert.strictEqual(after[2].isTransitive, true, 'charset-normalizer should be transitive');
+            assert.ok(result);
+            assert.strictEqual(result![0].isTransitive, false, 'requests should be direct');
+            assert.strictEqual(result![1].isTransitive, true, 'urllib3 should be transitive');
+            assert.strictEqual(result![2].isTransitive, true, 'charset-normalizer should be transitive');
+            // Original objects should not be mutated
+            assert.strictEqual(after[0].isTransitive, undefined, 'original should not be mutated');
         });
 
         test('does not mark packages transitive when getDirectPackageNames is not implemented', async () => {
@@ -196,10 +199,11 @@ suite('packageChanges', () => {
             getPackagesStub.resolves(after);
             const onChanges = sinon.stub();
 
-            await updatePackagesAndNotify(packageManager, environment, undefined, onChanges);
+            const result = await updatePackagesAndNotify(packageManager, environment, undefined, onChanges);
 
-            assert.strictEqual(after[0].isTransitive, undefined, 'should not be set');
-            assert.strictEqual(after[1].isTransitive, undefined, 'should not be set');
+            assert.ok(result);
+            assert.strictEqual(result![0].isTransitive, undefined, 'should not be set');
+            assert.strictEqual(result![1].isTransitive, undefined, 'should not be set');
         });
 
         test('does not mark packages transitive when getDirectPackageNames returns undefined', async () => {
@@ -212,10 +216,11 @@ suite('packageChanges', () => {
             (packageManager as unknown as Record<string, unknown>).getDirectPackageNames = getDirectPackageNamesStub;
             const onChanges = sinon.stub();
 
-            await updatePackagesAndNotify(packageManager, environment, undefined, onChanges);
+            const result = await updatePackagesAndNotify(packageManager, environment, undefined, onChanges);
 
-            assert.strictEqual(after[0].isTransitive, undefined, 'should not be set');
-            assert.strictEqual(after[1].isTransitive, undefined, 'should not be set');
+            assert.ok(result);
+            assert.strictEqual(result![0].isTransitive, undefined, 'should not be set');
+            assert.strictEqual(result![1].isTransitive, undefined, 'should not be set');
         });
 
         test('does not mark packages transitive when getDirectPackageNames returns empty set', async () => {
@@ -228,10 +233,11 @@ suite('packageChanges', () => {
             (packageManager as unknown as Record<string, unknown>).getDirectPackageNames = getDirectPackageNamesStub;
             const onChanges = sinon.stub();
 
-            await updatePackagesAndNotify(packageManager, environment, undefined, onChanges);
+            const result = await updatePackagesAndNotify(packageManager, environment, undefined, onChanges);
 
-            assert.strictEqual(after[0].isTransitive, undefined, 'should not be set');
-            assert.strictEqual(after[1].isTransitive, undefined, 'should not be set');
+            assert.ok(result);
+            assert.strictEqual(result![0].isTransitive, undefined, 'should not be set');
+            assert.strictEqual(result![1].isTransitive, undefined, 'should not be set');
         });
 
         test('all packages marked direct when all are in direct set', async () => {
@@ -244,10 +250,11 @@ suite('packageChanges', () => {
             (packageManager as unknown as Record<string, unknown>).getDirectPackageNames = getDirectPackageNamesStub;
             const onChanges = sinon.stub();
 
-            await updatePackagesAndNotify(packageManager, environment, undefined, onChanges);
+            const result = await updatePackagesAndNotify(packageManager, environment, undefined, onChanges);
 
-            assert.strictEqual(after[0].isTransitive, false, 'requests should be direct');
-            assert.strictEqual(after[1].isTransitive, false, 'flask should be direct');
+            assert.ok(result);
+            assert.strictEqual(result![0].isTransitive, false, 'requests should be direct');
+            assert.strictEqual(result![1].isTransitive, false, 'flask should be direct');
         });
 
         test('all packages marked transitive when none are in direct set', async () => {
@@ -260,10 +267,11 @@ suite('packageChanges', () => {
             (packageManager as unknown as Record<string, unknown>).getDirectPackageNames = getDirectPackageNamesStub;
             const onChanges = sinon.stub();
 
-            await updatePackagesAndNotify(packageManager, environment, undefined, onChanges);
+            const result = await updatePackagesAndNotify(packageManager, environment, undefined, onChanges);
 
-            assert.strictEqual(after[0].isTransitive, true, 'urllib3 should be transitive');
-            assert.strictEqual(after[1].isTransitive, true, 'charset-normalizer should be transitive');
+            assert.ok(result);
+            assert.strictEqual(result![0].isTransitive, true, 'urllib3 should be transitive');
+            assert.strictEqual(result![1].isTransitive, true, 'charset-normalizer should be transitive');
         });
 
         test('leaves isTransitive undefined when getDirectPackageNames throws', async () => {
@@ -276,10 +284,11 @@ suite('packageChanges', () => {
             (packageManager as unknown as Record<string, unknown>).getDirectPackageNames = getDirectPackageNamesStub;
             const onChanges = sinon.stub();
 
-            await updatePackagesAndNotify(packageManager, environment, undefined, onChanges);
+            const result = await updatePackagesAndNotify(packageManager, environment, undefined, onChanges);
 
-            assert.strictEqual(after[0].isTransitive, undefined, 'should not be set on error');
-            assert.strictEqual(after[1].isTransitive, undefined, 'should not be set on error');
+            assert.ok(result);
+            assert.strictEqual(result![0].isTransitive, undefined, 'should not be set on error');
+            assert.strictEqual(result![1].isTransitive, undefined, 'should not be set on error');
             assert.ok(onChanges.calledOnce, 'should still fire change event');
         });
     });

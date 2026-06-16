@@ -54,19 +54,19 @@ export async function updatePackagesAndNotify(
         packageManager.getDirectPackageNames?.(environment).catch(() => undefined),
     ]);
 
-    if (afterDirectDependenciesNames && afterDirectDependenciesNames.size > 0) {
-        for (const pkg of after) {
-            (pkg as { isTransitive?: boolean }).isTransitive = !afterDirectDependenciesNames.has(
-                normalizePackageName(pkg.name),
-            );
-        }
-    }
+    // Enrich packages with transitive dependency info (best-effort, creates new objects to respect readonly)
+    const enriched = afterDirectDependenciesNames && afterDirectDependenciesNames.size > 0
+        ? after.map((pkg) => ({
+              ...pkg,
+              isTransitive: !afterDirectDependenciesNames.has(normalizePackageName(pkg.name)),
+          }))
+        : after;
 
     // Fire change event
-    const changes = getPackageChanges(before ?? [], after);
+    const changes = getPackageChanges(before ?? [], enriched);
     if (changes.length > 0) {
         onChanges(changes);
     }
 
-    return after;
+    return enriched;
 }
