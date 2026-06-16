@@ -345,6 +345,21 @@ export async function managePackageVersion(context: unknown, em: EnvironmentMana
             return;
         }
 
+        if (pkg.isTransitive) {
+            const confirm = await showInformationMessage(
+                l10n.t(
+                    'The package "{0}" is a transitive dependency. Changing its version may cause unexpected behavior in packages that depend on it.',
+                    pkg.name,
+                ),
+                { modal: true },
+                l10n.t('Change Version'),
+                l10n.t('Cancel'),
+            );
+            if (confirm !== l10n.t('Change Version')) {
+                return;
+            }
+        }
+
         let version: string | undefined;
 
         // Try to fetch available versions for a QuickPick experience
