@@ -10,11 +10,6 @@ import { normalizePackageName } from '../builtin/utils';
 export type PackageChangesCallback = (changes: { kind: PackageChangeKind; pkg: Package }[]) => void;
 
 /**
- * Callback invoked with the computed changes when at least one change is detected.
- */
-export type PackageChangesCallback = (changes: { kind: PackageChangeKind; pkg: Package }[]) => void;
-
-/**
  * Computes the list of package changes between a before and after snapshot.
  * @param before - The previous list of packages.
  * @param after - The new list of packages.
