@@ -252,9 +252,13 @@ export class EnvManagerView implements TreeDataProvider<EnvTreeItem>, Disposable
             const views: EnvTreeItem[] = [];
 
             if (pkgManager) {
-                const packages = await pkgManager.getPackages(environment);
+                let packages = await pkgManager.refresh(environment);
                 if (packages && packages.length > 0) {
-                    views.push(...packages.map((p) => new PackageTreeItem(p, parent, pkgManager)));
+                    views.push(
+                        ...packages
+                            .sort((a, b) => (a.isTransitive === b.isTransitive ? 0 : a.isTransitive ? 1 : -1))
+                            .map((p) => new PackageTreeItem(p, parent, pkgManager)),
+                    );
                 } else {
                     views.push(new EnvInfoTreeItem(parent, ProjectViews.noPackages));
                 }

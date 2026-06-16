@@ -2,6 +2,7 @@
 // Licensed under the MIT License.
 
 import { Package, PackageChangeKind, PackageManager, PythonEnvironment } from '../../api';
+import { normalizePackageName } from '../builtin/utils';
 
 /**
  * Callback invoked with the computed changes when at least one change is detected.
@@ -15,17 +16,17 @@ export type PackageChangesCallback = (changes: { kind: PackageChangeKind; pkg: P
  * @returns An array of changes indicating which packages were added or removed.
  */
 export function getPackageChanges(before: Package[], after: Package[]): { kind: PackageChangeKind; pkg: Package }[] {
-    const beforeSet = new Set(before.map(({ name, version }) => `${name}==${version}`));
-    const afterSet = new Set(after.map(({ name, version }) => `${name}==${version}`));
+    const beforeSet = new Set(before.map(({ name, version }) => `${normalizePackageName(name)}==${version}`));
+    const afterSet = new Set(after.map(({ name, version }) => `${normalizePackageName(name)}==${version}`));
     const changes: { kind: PackageChangeKind; pkg: Package }[] = [];
 
     for (const pkg of after) {
-        if (!beforeSet.has(`${pkg.name}==${pkg.version}`)) {
+        if (!beforeSet.has(`${normalizePackageName(pkg.name)}==${pkg.version}`)) {
             changes.push({ kind: PackageChangeKind.add, pkg });
         }
     }
     for (const pkg of before) {
-        if (!afterSet.has(`${pkg.name}==${pkg.version}`)) {
+        if (!afterSet.has(`${normalizePackageName(pkg.name)}==${pkg.version}`)) {
             changes.push({ kind: PackageChangeKind.remove, pkg });
         }
     }
@@ -46,10 +47,26 @@ export async function updatePackagesAndNotify(
     environment: PythonEnvironment,
     before: Package[] | undefined,
     onChanges: PackageChangesCallback,
-): Promise<void> {
-    const after = (await packageManager.getPackages(environment, { skipCache: true })) ?? [];
-    const changes = getPackageChanges(before ?? [], after);
+): Promise<Package[] | undefined> {
+    const [after, afterDirectDependenciesNames] = await Promise.all([
+        packageManager.getPackages(environment, { skipCache: true }).then((pkgs) => pkgs ?? []),
+        // Handle transitive dependencies (best-effort, don't break package refresh on failure)
+        packageManager.getDirectPackageNames?.(environment).catch(() => undefined),
+    ]);
+
+    // Enrich packages with transitive dependency info (best-effort, creates new objects to respect readonly)
+    const enriched = afterDirectDependenciesNames && afterDirectDependenciesNames.size > 0
+        ? after.map((pkg) => ({
+              ...pkg,
+              isTransitive: !afterDirectDependenciesNames.has(normalizePackageName(pkg.name)),
+          }))
+        : after;
+
+    // Fire change event
+    const changes = getPackageChanges(before ?? [], enriched);
     if (changes.length > 0) {
         onChanges(changes);
     }
+
+    return enriched;
 }

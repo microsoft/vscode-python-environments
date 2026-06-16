@@ -24,6 +24,7 @@ import {
 } from '../../api';
 import { spawnProcess } from '../../common/childProcess.apis';
 import { showErrorMessage, showInputBox, withProgress } from '../../common/window.apis';
+import { normalizePackageName } from '../builtin/utils';
 import { updatePackagesAndNotify } from '../common/packageChanges';
 import { PoetryManager } from './poetryManager';
 import { getPoetry } from './poetryUtils';
@@ -108,15 +109,15 @@ export class PoetryPackageManager implements PackageManager, Disposable {
         );
     }
 
-    async refresh(environment: PythonEnvironment): Promise<void> {
-        await withProgress(
+    async refresh(environment: PythonEnvironment): Promise<Package[] | undefined> {
+        return withProgress(
             {
                 location: ProgressLocation.Window,
                 title: 'Refreshing Poetry packages',
             },
             async () => {
                 try {
-                    await updatePackagesAndNotify(
+                    return await updatePackagesAndNotify(
                         this,
                         environment,
                         this.packages.get(environment.envId.id),
@@ -133,6 +134,7 @@ export class PoetryPackageManager implements PackageManager, Disposable {
                             this.log.show();
                         }
                     });
+                    return undefined;
                 }
             },
         );
@@ -262,6 +264,22 @@ export class PoetryPackageManager implements PackageManager, Disposable {
 
         // Convert to Package objects using the API
         return poetryPackages.map((pkg) => this.api.createPackageItem(pkg, environment, this));
+    }
+
+    async getDirectPackageNames(_environment: PythonEnvironment): Promise<Set<string> | undefined> {
+        try {
+            const topLevelResult = await runPoetry(['show', '--no-ansi', '--top-level'], undefined, this.log);
+            const names = topLevelResult
+                .split('\n')
+                .map((line) => line.trim())
+                .map((line) => line.match(/^([a-zA-Z0-9._-]+)/)?.[1] ?? '')
+                .filter((name) => !!name)
+                .map(normalizePackageName);
+            return new Set(names);
+        } catch (err) {
+            this.log.error(`Error fetching direct package names with Poetry: ${err}`);
+            return undefined;
+        }
     }
 }
 

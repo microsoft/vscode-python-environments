@@ -578,6 +578,11 @@ export interface PackageInfo {
      * The URIs associated with the package.
      */
     readonly uris?: readonly Uri[];
+
+    /**
+     * Whether the package is a transitive dependency.
+     */
+    readonly isTransitive?: boolean;
 }
 
 /**
@@ -670,9 +675,9 @@ export interface PackageManager {
     /**
      * Refreshes the package list for the specified Python environment.
      * @param environment - The Python environment for which to refresh the package list.
-     * @returns A promise that resolves when the refresh is complete.
+     * @returns A promise that resolves with the refreshed list of packages, or undefined.
      */
-    refresh(environment: PythonEnvironment): Promise<void>;
+    refresh(environment: PythonEnvironment): Promise<Package[] | undefined>;
 
     /**
      * Retrieves the list of packages for the specified Python environment.
@@ -686,6 +691,20 @@ export interface PackageManager {
      * Event that is fired when packages change.
      */
     onDidChangePackages?: Event<DidChangePackagesEventArgs>;
+
+    /**
+     * Fetches the names of direct (non-transitive) packages for the specified Python environment.
+     *
+     * **Caveat:** Most package managers cannot track user install intent. For pip, this uses
+     * `pip list --not-required` which returns packages with no installed dependents (leaf packages),
+     * not necessarily packages the user explicitly installed. For example, if a user runs
+     * `pip install flask werkzeug`, werkzeug will still be reported as transitive because flask
+     * depends on it. This is a best-effort approximation.
+     *
+     * @param environment - The Python environment for which to fetch direct package names.
+     * @returns A promise that resolves to a set of package name strings, or undefined if not supported.
+     */
+    getDirectPackageNames?(environment: PythonEnvironment): Promise<Set<string> | undefined>;
 
     /**
      * Clears the package manager's cache.
@@ -1029,9 +1048,9 @@ export interface PythonPackageGetterApi {
      * Refresh the list of packages in a Python Environment.
      *
      * @param environment The Python Environment for which the list of packages is to be refreshed.
-     * @returns A promise that resolves when the list of packages has been refreshed.
+     * @returns A promise that resolves with the refreshed list of packages, or undefined.
      */
-    refreshPackages(environment: PythonEnvironment): Promise<void>;
+    refreshPackages(environment: PythonEnvironment): Promise<Package[] | undefined>;
 
     /**
      * Get the list of packages in a Python Environment.

@@ -21,7 +21,7 @@ import {
 } from '../../api';
 import { updatePackagesAndNotify } from '../common/packageChanges';
 import { getWorkspacePackagesToInstall } from './pipUtils';
-import { managePackages, refreshPipPackages } from './utils';
+import { managePackages, normalizePackageName, refreshPipDirectPackageNames, refreshPipPackages } from './utils';
 import { VenvManager } from './venvManager';
 
 export class PipPackageManager implements PackageManager, Disposable {
@@ -101,16 +101,21 @@ export class PipPackageManager implements PackageManager, Disposable {
         );
     }
 
-    async refresh(environment: PythonEnvironment): Promise<void> {
-        await window.withProgress(
+    async refresh(environment: PythonEnvironment): Promise<Package[] | undefined> {
+        return window.withProgress(
             {
                 location: ProgressLocation.Window,
                 title: 'Refreshing packages',
             },
             async () => {
-                await updatePackagesAndNotify(this, environment, this.packages.get(environment.envId.id), (changes) => {
-                    this._onDidChangePackages.fire({ environment, manager: this, changes });
-                });
+                return updatePackagesAndNotify(
+                    this,
+                    environment,
+                    this.packages.get(environment.envId.id),
+                    (changes) => {
+                        this._onDidChangePackages.fire({ environment, manager: this, changes });
+                    },
+                );
             },
         );
     }
@@ -128,5 +133,16 @@ export class PipPackageManager implements PackageManager, Disposable {
     dispose(): void {
         this._onDidChangePackages.dispose();
         this.packages.clear();
+    }
+
+    /**
+     * Returns direct (non-transitive) package names using `pip list --not-required` or `uv pip tree --depth=0`.
+     *
+     * Note: These commands return packages with no installed dependents (leaf packages), not packages
+     * the user explicitly installed. pip/uv do not track install intent.
+     */
+    async getDirectPackageNames(environment: PythonEnvironment): Promise<Set<string> | undefined> {
+        const data = await refreshPipDirectPackageNames(environment, this.log);
+        return data ? new Set(data.map(normalizePackageName)) : undefined;
     }
 }

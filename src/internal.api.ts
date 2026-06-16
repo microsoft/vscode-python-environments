@@ -364,7 +364,7 @@ export class InternalPackageManager implements PackageManager {
         }
     }
 
-    refresh(environment: PythonEnvironment): Promise<void> {
+    refresh(environment: PythonEnvironment): Promise<Package[] | undefined> {
         return this.manager.refresh(environment);
     }
 
@@ -446,6 +446,8 @@ export class PythonPackageImpl implements Package {
     public readonly iconPath?: IconPath;
     public readonly uris?: readonly Uri[];
 
+    public readonly isTransitive?: boolean;
+
     constructor(
         public readonly pkgId: PackageId,
         info: PackageInfo,
@@ -457,6 +459,7 @@ export class PythonPackageImpl implements Package {
         this.tooltip = info.tooltip;
         this.iconPath = info.iconPath;
         this.uris = info.uris;
+        this.isTransitive = info.isTransitive;
     }
 }
 
