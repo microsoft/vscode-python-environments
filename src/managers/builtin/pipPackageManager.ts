@@ -22,7 +22,7 @@ import {
     PythonEnvironmentApi,
 } from '../../api';
 import { updatePackagesAndNotify } from '../common/packageChanges';
-import { runProcessCaptureAll, runPython, runUV, shouldUseUv } from './helpers';
+import { runPython, runUV, shouldUseUv } from './helpers';
 import { getWorkspacePackagesToInstall } from './pipUtils';
 import { managePackages, normalizePackageName, refreshPipDirectPackageNames, refreshPipPackages } from './utils';
 import { VenvManager } from './venvManager';
@@ -208,15 +208,6 @@ export class PipPackageManager implements PackageManager, Disposable {
                 return parsePipIndexVersionsJson(output);
             }
 
-            // pip <= 20.3.4 - use `pip install <package>==__invalid__` to get available versions from error message.
-            if (pipVersion && compare(pipVersion.public, '20.3.4') <= 0) {
-                const result = await runProcessCaptureAll(
-                    python,
-                    ['-m', 'pip', 'install', `${packageName}==__invalid__`],
-                    this.log,
-                );
-                return parsePipInstallVersions(result.stdout + result.stderr);
-            }
         } catch {
             return undefined;
         }

@@ -373,10 +373,6 @@ export class InternalPackageManager implements PackageManager {
         return this.manager.getPackages(environment, options);
     }
 
-    fetchPackages(environment: PythonEnvironment): Promise<Package[]> {
-        return this.manager.fetchPackages(environment);
-    }
-
     setPackages(
         environment: PythonEnvironment,
         packages: Package[],
