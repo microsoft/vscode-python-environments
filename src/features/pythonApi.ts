@@ -34,7 +34,7 @@ import {
 import { traceError, traceInfo } from '../common/logging';
 import { pickEnvironmentManager } from '../common/pickers/managers';
 import { createDeferred } from '../common/utils/deferred';
-import { checkUri } from '../common/utils/pathUtils';
+import { checkUri, normalizePath } from '../common/utils/pathUtils';
 import { handlePythonPath } from '../common/utils/pythonPath';
 import {
     EnvironmentManagers,
@@ -50,6 +50,23 @@ import { runAsTask } from './execution/runAsTask';
 import { runInBackground } from './execution/runInBackground';
 import { runInTerminal } from './terminal/runInTerminal';
 import { TerminalManager } from './terminal/terminalManager';
+
+/**
+ * Produces a short, deterministic base-36 suffix from an environment executable fsPath.
+ * Using the path rather than Math.random() ensures that resolving the same interpreter
+ * multiple times within a session always yields the same environment ID.
+ * The path is normalized to handle case-insensitive file systems (e.g. Windows).
+ */
+function envPathHash(fsPath: string): string {
+    // djb2-style hash over the normalized path characters
+    const normalized = normalizePath(fsPath);
+    let hash = 5381;
+    for (let i = 0; i < normalized.length; i++) {
+        hash = ((hash << 5) + hash) ^ normalized.charCodeAt(i);
+        hash = hash >>> 0; // keep as unsigned 32-bit integer
+    }
+    return hash.toString(36);
+}
 
 class PythonEnvironmentApiImpl implements PythonEnvironmentApi {
     private readonly _onDidChangeEnvironments = new EventEmitter<DidChangeEnvironmentsEventArgs>();
@@ -112,10 +129,14 @@ class PythonEnvironmentApiImpl implements PythonEnvironmentApi {
         if (!mgr) {
             throw new Error('Environment manager not found');
         }
-        const randomStr = Math.random().toString(36).substring(2);
+        // Use a deterministic hash of the environment executable path so that resolving
+        // the same interpreter multiple times (e.g., during settings-change re-evaluation)
+        // always produces the same ID. This avoids ID mismatches when
+        // applyInitialEnvironmentSelection re-resolves an env that was just set by the API.
+        const pathSuffix = envPathHash(info.environmentPath.fsPath);
         const envId: PythonEnvironmentId = {
             managerId: mgr.id,
-            id: `${info.name}-${randomStr}`,
+            id: `${info.name}-${pathSuffix}`,
         };
         return new PythonEnvironmentImpl(envId, info);
     }
