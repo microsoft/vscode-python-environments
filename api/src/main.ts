@@ -723,12 +723,12 @@ export interface PackageManager {
 
     /**
      * Retrieves the list of available versions for a given package.
-     * @param packageName - The name of the package to look up.
      * @param environment - The Python environment context for the lookup.
+     * @param packageName - The name of the package to look up.
      * @returns A promise that resolves to an array of {@link Pep440Version} objects (newest first),
      *          or `undefined` if this manager does not support version listing.
      */
-    getAvailableVersions?(packageName: string, environment: PythonEnvironment): Promise<Pep440Version[] | undefined>;
+    getPackageAvailableVersions?(environment: PythonEnvironment, packageName: string): Promise<Pep440Version[] | undefined>;
 
     /**
      * Formats a versioned install specification for this package manager.
