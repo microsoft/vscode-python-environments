@@ -6,6 +6,7 @@ import { sendTelemetryEvent } from '../../common/telemetry/sender';
 import { getPythonApi } from '../../features/pythonApi';
 import { PythonProjectManager } from '../../internal.api';
 import { NativePythonFinder } from '../common/nativePythonFinder';
+import { registerPackageWatcherForManager } from '../common/packageWatcher';
 import { notifyMissingManagerIfDefault } from '../common/utils';
 import { CondaEnvManager } from './condaEnvManager';
 import { CondaPackageManager } from './condaPackageManager';
@@ -55,6 +56,7 @@ export async function registerCondaFeatures(
             packageManager,
             api.registerEnvironmentManager(envManager),
             api.registerPackageManager(packageManager),
+            await registerPackageWatcherForManager(envManager, packageManager, log),
         );
     } catch (ex) {
         await notifyMissingManagerIfDefault('ms-python.python:conda', projectManager, api);
