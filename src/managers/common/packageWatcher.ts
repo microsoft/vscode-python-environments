@@ -1,5 +1,5 @@
 import * as path from 'path';
-import { Disposable, LogOutputChannel, RelativePattern, Uri } from 'vscode';
+import { Disposable, LogOutputChannel, RelativePattern } from 'vscode';
 import { EnvironmentManager, PackageManager, PythonEnvironment } from '../../api';
 import { traceVerbose } from '../../common/logging';
 import { createSimpleDebounce } from '../../common/utils/debounce';
@@ -22,18 +22,13 @@ function getWatchTargets(env: PythonEnvironment): RelativePattern[] {
 
     const targets: RelativePattern[] = [];
     if (process.platform === 'win32') {
-        targets.push(
-            new RelativePattern(Uri.file(path.join(env.sysPrefix, 'Lib')), 'site-packages/**/*.dist-info/METADATA'),
-        );
+        targets.push(new RelativePattern(path.join(env.sysPrefix, 'Lib'), 'site-packages/**/*.dist-info/METADATA'));
     } else {
         targets.push(
-            new RelativePattern(
-                Uri.file(path.join(env.sysPrefix, 'lib')),
-                'python*/site-packages/**/*.dist-info/METADATA',
-            ),
+            new RelativePattern(path.join(env.sysPrefix, 'lib'), 'python*/site-packages/**/*.dist-info/METADATA'),
         );
     }
-    targets.push(new RelativePattern(Uri.file(path.join(env.sysPrefix, 'conda-meta')), '**/*.json'));
+    targets.push(new RelativePattern(path.join(env.sysPrefix, 'conda-meta'), '**/*.json'));
     return targets;
 }
 
