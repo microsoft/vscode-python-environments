@@ -8,34 +8,26 @@ import { createFileSystemWatcher } from '../../common/workspace.apis';
 /**
  * Derives the file system watch targets for a given Python environment.
  *
- * Targets include site-packages `.dist-info/METADATA` files (for pip installs/uninstalls)
- * and conda-meta JSON files (for conda installs/uninstalls).
+ * Targets include site-packages `.dist-info/METADATA` files for pip-style installs.
  *
  * @param env - The Python environment to derive watch targets for.
  * @returns An array of RelativePattern objects, one per discoverable package location.
  *          Empty if the environment has no `sysPrefix` or discoverable paths.
  */
-function getWatchTargets(env: PythonEnvironment): RelativePattern[] {
+function getDefaultPackageWatchTargets(env: PythonEnvironment): RelativePattern[] {
     if (!env.sysPrefix) {
         return [];
     }
-
-    const targets: RelativePattern[] = [];
-    if (process.platform === 'win32') {
-        targets.push(new RelativePattern(path.join(env.sysPrefix, 'Lib'), 'site-packages/**/*.dist-info/METADATA'));
-    } else {
-        targets.push(
-            new RelativePattern(path.join(env.sysPrefix, 'lib'), 'python*/site-packages/**/*.dist-info/METADATA'),
-        );
-    }
-    targets.push(new RelativePattern(path.join(env.sysPrefix, 'conda-meta'), '**/*.json'));
-    return targets;
+    return process.platform === 'win32'
+        ? [new RelativePattern(path.join(env.sysPrefix, 'Lib'), 'site-packages/**/*.dist-info/METADATA')] // Windows
+        : [new RelativePattern(path.join(env.sysPrefix, 'lib'), 'python*/site-packages/**/*.dist-info/METADATA')]; // Unix-like
 }
 
 /**
  * Creates a file system watcher for package changes in a single environment.
  *
- * Monitors site-packages and conda-meta locations for install/uninstall operations
+ * Monitors default site-packages locations and any manager-specific extra locations
+ * for install/uninstall operations.
  * and triggers a debounced package refresh when changes are detected.
  *
  * @param env - The Python environment to watch.
@@ -49,14 +41,17 @@ export function watchPackageChangesForEnvironment(
     log: LogOutputChannel,
 ): Disposable {
     // Watch targets
-    const watchTargets = getWatchTargets(env);
+    const watchTargets = [
+        ...getDefaultPackageWatchTargets(env),
+        ...(packageManager.getPackageWatchTargets?.(env) ?? []),
+    ];
     if (watchTargets.length === 0) {
         traceVerbose(log, `No watch targets for environment ${env.envId}`);
         return new Disposable(() => undefined);
     }
     // Debounced refresh function
     const debouncedRefresh = createSimpleDebounce(500, async () => {
-        console.log(`Package change detected for environment ${env.envId}, refreshing packages...`);
+        traceVerbose(log, `Package change detected for environment ${env.envId.id}, refreshing packages.`);
         packageManager.refresh(env).catch((ex) => {
             log.error(
                 `Failed to refresh packages for environment ${env.envId}: ${ex instanceof Error ? ex.message : String(ex)}`,
@@ -68,9 +63,9 @@ export function watchPackageChangesForEnvironment(
     for (const target of watchTargets) {
         const watcher = createFileSystemWatcher(
             target,
-            true, // create   -> install
+            false, // create   -> install
             false, // change   -> ignore
-            true, // delete   -> uninstall
+            false, // delete   -> uninstall
         );
         disposables.push(
             watcher,

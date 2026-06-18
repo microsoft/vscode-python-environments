@@ -1,5 +1,6 @@
 import type { Pep440Version } from '@renovatebot/pep440';
 import { explain as parse, rcompare } from '@renovatebot/pep440';
+import * as path from 'path';
 import {
     CancellationError,
     Disposable,
@@ -8,6 +9,7 @@ import {
     LogOutputChannel,
     MarkdownString,
     ProgressLocation,
+    RelativePattern,
 } from 'vscode';
 import {
     DidChangePackagesEventArgs,
@@ -195,6 +197,14 @@ export class CondaPackageManager implements PackageManager, Disposable {
         } catch {
             return undefined;
         }
+    }
+
+    getPackageWatchTargets(environment: PythonEnvironment): RelativePattern[] {
+        if (!environment.sysPrefix) {
+            return [];
+        }
+
+        return [new RelativePattern(path.join(environment.sysPrefix, 'conda-meta'), '**/*.json')];
     }
 
     dispose() {

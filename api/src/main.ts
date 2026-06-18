@@ -8,6 +8,7 @@ import {
     FileChangeType,
     LogOutputChannel,
     MarkdownString,
+    RelativePattern,
     TaskExecution,
     Terminal,
     TerminalOptions,
@@ -689,6 +690,16 @@ export interface PackageManager {
      */
     getPackages(environment: PythonEnvironment, options?: GetPackagesOptions): Promise<Package[] | undefined>;
 
+    /**
+     * Returns additional filesystem patterns to watch for package install/uninstall changes.
+     *
+     * These patterns are appended to the default site-packages metadata locations.
+     * Implement this for manager-specific locations (for example, conda-meta).
+     *
+     * @param environment - The Python environment whose package paths should be watched.
+     * @returns Relative patterns to watch for package changes.
+     */
+    getPackageWatchTargets?(environment: PythonEnvironment): RelativePattern[];
     /**
      * Event that is fired when packages change.
      */

@@ -104,12 +104,8 @@ suite('Package Watcher', () => {
                 mockLogOutputChannel as LogOutputChannel,
             );
 
-            // Should create watchers for site-packages and conda-meta
-            assert.strictEqual(
-                createFileSystemWatcherStub.callCount,
-                2,
-                'Should create 2 watchers (site-packages + conda-meta)',
-            );
+            // Default should create watcher for site-packages metadata.
+            assert.strictEqual(createFileSystemWatcherStub.callCount, 1, 'Should create 1 watcher (site-packages)');
         });
 
         test('should create correct watch patterns on Windows', () => {
@@ -174,12 +170,15 @@ suite('Package Watcher', () => {
             }
         });
 
-        test('should watch conda-meta for conda packages', () => {
+        test('should append package-manager-provided watch targets to defaults', () => {
             const mockWatcher = createMockWatcher();
             createFileSystemWatcherStub.returns(mockWatcher);
 
             const env = createMockEnvironment({ sysPrefix: '/path/to/env' });
             const packageManager = createMockPackageManager();
+            (packageManager as PackageManager).getPackageWatchTargets = () => [
+                new RelativePattern('/path/to/env/conda-meta', '**/*.json'),
+            ];
 
             watchPackageChangesForEnvironment(
                 env,
@@ -187,11 +186,19 @@ suite('Package Watcher', () => {
                 mockLogOutputChannel as LogOutputChannel,
             );
 
-            const secondCall = createFileSystemWatcherStub.getCall(1);
-            const pattern = secondCall.args[0] as RelativePattern;
+            assert.strictEqual(createFileSystemWatcherStub.callCount, 2, 'Should watch default and custom targets');
 
-            assert.ok(pattern.baseUri.fsPath.includes('conda-meta'), 'Should watch conda-meta');
-            assert.strictEqual(pattern.pattern, '**/*.json', 'Should watch JSON files in conda-meta');
+            const firstCall = createFileSystemWatcherStub.getCall(0);
+            const firstPattern = firstCall.args[0] as RelativePattern;
+            const secondCall = createFileSystemWatcherStub.getCall(1);
+            const secondPattern = secondCall.args[0] as RelativePattern;
+
+            assert.ok(
+                firstPattern.pattern.endsWith('site-packages/**/*.dist-info/METADATA'),
+                'Should keep default site-packages watcher',
+            );
+            assert.ok(secondPattern.baseUri.fsPath.includes('conda-meta'), 'Should append conda-meta target');
+            assert.strictEqual(secondPattern.pattern, '**/*.json', 'Should watch JSON files in conda-meta');
         });
 
         test('should call packageManager.refresh on file create', () => {
@@ -207,12 +214,9 @@ suite('Package Watcher', () => {
                 mockLogOutputChannel as LogOutputChannel,
             );
 
-            // Verify watchers are created which will have create event handlers
-            assert.strictEqual(
-                createFileSystemWatcherStub.callCount,
-                2,
-                'Should create watchers for site-packages and conda-meta',
-            );
+            // Verify watcher is created and create events are observed.
+            assert.strictEqual(createFileSystemWatcherStub.callCount, 1, 'Should create watcher for site-packages');
+            assert.strictEqual(createFileSystemWatcherStub.getCall(0).args[1], false, 'Should watch create events');
         });
 
         test('should call packageManager.refresh on file delete', () => {
@@ -228,12 +232,9 @@ suite('Package Watcher', () => {
                 mockLogOutputChannel as LogOutputChannel,
             );
 
-            // Verify watchers are created which will have delete event handlers
-            assert.strictEqual(
-                createFileSystemWatcherStub.callCount,
-                2,
-                'Should create watchers for site-packages and conda-meta',
-            );
+            // Verify watcher is created and delete events are observed.
+            assert.strictEqual(createFileSystemWatcherStub.callCount, 1, 'Should create watcher for site-packages');
+            assert.strictEqual(createFileSystemWatcherStub.getCall(0).args[3], false, 'Should watch delete events');
         });
 
         test('should debounce multiple rapid file events', () => {
@@ -249,11 +250,11 @@ suite('Package Watcher', () => {
                 mockLogOutputChannel as LogOutputChannel,
             );
 
-            // Verify watchers are created with event handlers for debouncing
+            // Verify watcher is created with event handlers for debouncing.
             assert.strictEqual(
                 createFileSystemWatcherStub.callCount,
-                2,
-                'Should create watchers with debounced event handlers',
+                1,
+                'Should create watcher with debounced event handlers',
             );
         });
 
