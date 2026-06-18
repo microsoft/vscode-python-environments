@@ -1,6 +1,6 @@
 import * as path from 'path';
 import { Disposable, LogOutputChannel, RelativePattern, Uri } from 'vscode';
-import { EnvironmentChangeKind, EnvironmentManager, PackageManager, PythonEnvironment } from '../../api';
+import { EnvironmentManager, PackageManager, PythonEnvironment } from '../../api';
 import { traceVerbose } from '../../common/logging';
 import { createSimpleDebounce } from '../../common/utils/debounce';
 import { createFileSystemWatcher } from '../../common/workspace.apis';
@@ -41,6 +41,7 @@ export function watchPackageChangesForEnvironment(
     }
     // Debounced refresh function
     const debouncedRefresh = createSimpleDebounce(500, async () => {
+        console.log(`Package change detected for environment ${env.envId}, refreshing packages...`);
         packageManager.refresh(env).catch((ex) => {
             log.error(
                 `Failed to refresh packages for environment ${env.envId}: ${ex instanceof Error ? ex.message : String(ex)}`,
@@ -90,20 +91,14 @@ export async function registerPackageWatcherForManager(
         watchers.delete(envId);
     };
 
-    // Keep watchers in sync with environment discovery/removal events.
-    const envChangeDisposable = envManager.onDidChangeEnvironments?.((changes) => {
-        changes.forEach((change) => {
-            if (change.kind === EnvironmentChangeKind.add) {
-                addWatcher(change.environment);
-            } else {
-                removeWatcher(change.environment.envId.id);
-            }
-        });
+    const envChangeDisposable = envManager.onDidChangeEnvironment?.((changes) => {
+        if (changes.new) {
+            addWatcher(changes.new);
+        }
+        if (changes.old) {
+            removeWatcher(changes.old.envId.id);
+        }
     });
-
-    // Seed with environments that already exist before this subscription.
-    const environments = await envManager.getEnvironments('all');
-    environments.forEach(addWatcher);
 
     return new Disposable(() => {
         envChangeDisposable?.dispose();
