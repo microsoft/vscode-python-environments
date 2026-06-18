@@ -116,7 +116,7 @@ suite('Package Watcher', () => {
             const mockWatcher = createMockWatcher();
             createFileSystemWatcherStub.returns(mockWatcher);
 
-            const originalPlatform = (process as any).platform;
+            const originalPlatform = process.platform;
             Object.defineProperty(process, 'platform', { value: 'win32', configurable: true });
 
             try {
@@ -147,7 +147,7 @@ suite('Package Watcher', () => {
             const mockWatcher = createMockWatcher();
             createFileSystemWatcherStub.returns(mockWatcher);
 
-            const originalPlatform = (process as any).platform;
+            const originalPlatform = process.platform;
             Object.defineProperty(process, 'platform', { value: 'linux', configurable: true });
 
             try {
