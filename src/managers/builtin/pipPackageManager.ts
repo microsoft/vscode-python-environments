@@ -166,25 +166,15 @@ export class PipPackageManager implements PackageManager, Disposable {
                 return undefined;
             }
 
+            const baseVersion = parse(environment.version)?.base_version;
+            if (!baseVersion) {
+                return undefined;
+            }
             // uv - Run pip via `uv tool run pip`
             const useUv = await shouldUseUv(this.log, environment.environmentPath.fsPath);
             if (useUv) {
-                const baseVersion = parse(environment.version)?.base_version;
-                if (!baseVersion) {
-                    return undefined;
-                }
                 const output = await runUV(
-                    [
-                        'tool',
-                        'run',
-                        'pip',
-                        'index',
-                        'versions',
-                        packageName,
-                        '--json',
-                        '--python-version',
-                        baseVersion,
-                    ],
+                    ['tool', 'run', 'pip', 'index', 'versions', packageName, '--json', '--python-version', baseVersion],
                     undefined,
                     this.log,
                 );
@@ -194,22 +184,9 @@ export class PipPackageManager implements PackageManager, Disposable {
             // pip >= 21.2.0 - use `pip index versions <package> --json` to get available versions in a machine readable format.
             const pipVersion = await this.getVersion(environment);
             if (pipVersion && compare(pipVersion.public, '21.2.0') >= 0) {
-                const baseVersion = parse(environment.version)?.base_version;
-                if (!baseVersion) {
-                    return undefined;
-                }
                 const output = await runPython(
                     python,
-                    [
-                        '-m',
-                        'pip',
-                        'index',
-                        'versions',
-                        packageName,
-                        '--json',
-                        '--python-version',
-                        baseVersion,
-                    ],
+                    ['-m', 'pip', 'index', 'versions', packageName, '--json', '--python-version', baseVersion],
                     undefined,
                     this.log,
                 );
