@@ -1119,33 +1119,12 @@ export interface PythonPackageManagementApi {
     managePackages(environment: PythonEnvironment, options: PackageManagementOptions): Promise<void>;
 }
 
-export interface Pep440VersionApi {
-    /**
-     * Get the version of the package manager tool associated with the given environment.
-     *
-     * @param environment The Python Environment whose package manager version is requested.
-     * @returns The {@link Pep440Version} of the package manager tool, or `undefined` if not available.
-     */
-    getPackageManagerVersion(environment: PythonEnvironment): Promise<Pep440Version | undefined>;
-
-    /**
-     * Get the list of available versions for a package from the package manager
-     * associated with the given environment.
-     *
-     * @param packageName The name of the package.
-     * @param environment The Python Environment context for the lookup.
-     * @returns An array of {@link Pep440Version} objects (newest first), or `undefined` if not supported.
-     */
-    getAvailableVersions(packageName: string, environment: PythonEnvironment): Promise<Pep440Version[] | undefined>;
-}
-
 export interface PythonPackageManagerApi
     extends
         PythonPackageManagerRegistrationApi,
         PythonPackageGetterApi,
         PythonPackageManagementApi,
-        PythonPackageItemApi,
-        Pep440VersionApi {}
+        PythonPackageItemApi {}
 
 export interface PythonProjectCreationApi {
     /**
