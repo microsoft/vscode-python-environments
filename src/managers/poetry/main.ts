@@ -25,6 +25,6 @@ export async function registerPoetryFeatures(
         pkgManager,
         api.registerEnvironmentManager(envManager),
         api.registerPackageManager(pkgManager),
-        await registerPackageWatcherForManager(envManager, pkgManager, outputChannel),
+        registerPackageWatcherForManager(envManager, pkgManager, outputChannel),
     );
 }

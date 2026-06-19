@@ -89,11 +89,11 @@ export function watchPackageChangesForEnvironment(
  * @param log - Logger for diagnostic and error messages.
  * @returns A disposable that removes all watchers and subscriptions when disposed.
  */
-export async function registerPackageWatcherForManager(
+export function registerPackageWatcherForManager(
     envManager: EnvironmentManager,
     packageManager: PackageManager,
     log: LogOutputChannel,
-): Promise<Disposable> {
+): Disposable {
     // One watcher per environment id.
     const watchers = new Map<string, Disposable>();
 

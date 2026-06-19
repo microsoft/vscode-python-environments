@@ -56,7 +56,7 @@ export async function registerCondaFeatures(
             packageManager,
             api.registerEnvironmentManager(envManager),
             api.registerPackageManager(packageManager),
-            await registerPackageWatcherForManager(envManager, packageManager, log),
+            registerPackageWatcherForManager(envManager, packageManager, log),
         );
     } catch (ex) {
         await notifyMissingManagerIfDefault('ms-python.python:conda', projectManager, api);

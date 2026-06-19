@@ -309,7 +309,7 @@ suite('Package Watcher', () => {
             });
             const packageManager = createMockPackageManager();
 
-            await registerPackageWatcherForManager(
+            registerPackageWatcherForManager(
                 envManager as EnvironmentManager,
                 packageManager as PackageManager,
                 mockLogOutputChannel as LogOutputChannel,
@@ -342,7 +342,7 @@ suite('Package Watcher', () => {
             });
             const packageManager = createMockPackageManager();
 
-            const disposable = await registerPackageWatcherForManager(
+            const disposable = registerPackageWatcherForManager(
                 envManager as EnvironmentManager,
                 packageManager as PackageManager,
                 mockLogOutputChannel as LogOutputChannel,
@@ -387,7 +387,7 @@ suite('Package Watcher', () => {
             });
             const packageManager = createMockPackageManager();
 
-            const disposable = await registerPackageWatcherForManager(
+            const disposable = registerPackageWatcherForManager(
                 envManager as EnvironmentManager,
                 packageManager as PackageManager,
                 mockLogOutputChannel as LogOutputChannel,
@@ -418,7 +418,7 @@ suite('Package Watcher', () => {
             });
             const packageManager = createMockPackageManager();
 
-            const disposable = await registerPackageWatcherForManager(
+            const disposable = registerPackageWatcherForManager(
                 envManager as EnvironmentManager,
                 packageManager as PackageManager,
                 mockLogOutputChannel as LogOutputChannel,

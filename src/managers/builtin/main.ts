@@ -43,7 +43,7 @@ export async function registerSystemPythonFeatures(
     );
 
     disposables.push(
-        await registerPackageWatcherForManager(envManager, pkgManager, log),
-        await registerPackageWatcherForManager(venvManager, pkgManager, log),
+        registerPackageWatcherForManager(envManager, pkgManager, log),
+        registerPackageWatcherForManager(venvManager, pkgManager, log),
     );
 }
