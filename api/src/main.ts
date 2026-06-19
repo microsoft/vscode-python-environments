@@ -1,6 +1,7 @@
 // Copyright (c) Microsoft Corporation. All rights reserved.
 // Licensed under the MIT License.
 
+import type { Pep440Version } from '@renovatebot/pep440';
 import {
     Disposable,
     Event,
@@ -20,6 +21,7 @@ import {
  * This is the public API for other extensions to interact with the Python Environments extension.
  */
 
+export type { Pep440Version } from '@renovatebot/pep440';
 /**
  * The path to an icon, or a theme-specific configuration of icons.
  */
@@ -711,6 +713,38 @@ export interface PackageManager {
      * @returns A promise that resolves when the cache is cleared.
      */
     clearCache?(): Promise<void>;
+
+    /**
+     * Returns the version of the underlying package management tool (e.g., pip, uv, conda).
+     * @param environment - The Python environment context.
+     * @returns A promise that resolves to a {@link Pep440Version} object, or `undefined` if not available.
+     */
+    getVersion?(environment: PythonEnvironment): Promise<Pep440Version | undefined>;
+
+    /**
+     * Retrieves the list of available versions for a given package.
+     * @param environment - The Python environment context for the lookup.
+     * @param packageName - The name of the package to look up.
+     * @returns A promise that resolves to an array of {@link Pep440Version} objects (newest first),
+     *          or `undefined` if this manager does not support version listing.
+     */
+    getPackageAvailableVersions?(
+        environment: PythonEnvironment,
+        packageName: string,
+    ): Promise<Pep440Version[] | undefined>;
+
+    /**
+     * Formats a versioned install specification for this package manager.
+     *
+     * Different package managers use different syntax (e.g. pip uses `name==version`,
+     * conda uses `name=version`). Implement this method to return the correct format.
+     * When absent, callers should default to `name==version`.
+     *
+     * @param packageName - The name of the package.
+     * @param version - The version string.
+     * @returns The install specification string (e.g. `"requests==2.31.0"` or `"requests=2.31.0"`).
+     */
+    formatInstallSpec?(packageName: string, version: string): string;
 }
 
 /**

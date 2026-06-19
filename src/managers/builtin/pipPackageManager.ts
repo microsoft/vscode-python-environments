@@ -1,3 +1,5 @@
+import type { Pep440Version } from '@renovatebot/pep440';
+import { compare, explain as parse, rcompare } from '@renovatebot/pep440';
 import {
     CancellationError,
     Disposable,
@@ -20,6 +22,7 @@ import {
     PythonEnvironmentApi,
 } from '../../api';
 import { updatePackagesAndNotify } from '../common/packageChanges';
+import { runPython, runUV, shouldUseUv } from './helpers';
 import { getWorkspacePackagesToInstall } from './pipUtils';
 import { managePackages, normalizePackageName, refreshPipDirectPackageNames, refreshPipPackages } from './utils';
 import { VenvManager } from './venvManager';
@@ -130,6 +133,72 @@ export class PipPackageManager implements PackageManager, Disposable {
         return this.packages.get(environment.envId.id);
     }
 
+    async getVersion(environment: PythonEnvironment): Promise<Pep440Version | undefined> {
+        try {
+            const useUv = await shouldUseUv(this.log, environment.environmentPath.fsPath);
+            if (useUv) {
+                const result = await runUV(['--version'], undefined, this.log);
+                // "uv X.Y.Z"
+                const match = result.match(/^uv\s+(\d+\.\d+(?:\.\d+)*)/);
+                return match ? (parse(match[1]) ?? undefined) : undefined;
+            }
+            const result = await runPython(
+                environment.execInfo?.run?.executable ?? 'python',
+                ['-m', 'pip', '--version'],
+                undefined,
+                this.log,
+            );
+            // "pip X.Y.Z from /path/to/pip (python X.Y)"
+            const match = result.match(/^pip\s+(\d+\.\d+(?:\.\d+)*)/);
+            return match ? (parse(match[1]) ?? undefined) : undefined;
+        } catch {
+            return undefined;
+        }
+    }
+
+    async getPackageAvailableVersions(
+        environment: PythonEnvironment,
+        packageName: string,
+    ): Promise<Pep440Version[] | undefined> {
+        try {
+            const python = environment.execInfo?.run?.executable;
+            if (!python) {
+                return undefined;
+            }
+
+            const baseVersion = parse(environment.version)?.base_version;
+            if (!baseVersion) {
+                return undefined;
+            }
+            // uv - Run pip via `uv tool run pip`
+            const useUv = await shouldUseUv(this.log, environment.environmentPath.fsPath);
+            if (useUv) {
+                const output = await runUV(
+                    ['tool', 'run', 'pip', 'index', 'versions', packageName, '--json', '--python-version', baseVersion],
+                    undefined,
+                    this.log,
+                );
+                return parsePipIndexVersionsJson(output);
+            }
+
+            // pip >= 21.2.0 - use `pip index versions <package> --json` to get available versions in a machine readable format.
+            const pipVersion = await this.getVersion(environment);
+            if (pipVersion && compare(pipVersion.public, '21.2.0') >= 0) {
+                const output = await runPython(
+                    python,
+                    ['-m', 'pip', 'index', 'versions', packageName, '--json', '--python-version', baseVersion],
+                    undefined,
+                    this.log,
+                );
+                return parsePipIndexVersionsJson(output);
+            }
+
+            // pip <= 20.3.4 - version picking is undefined; no reliable machine-readable API exists.
+        } catch {
+            return undefined;
+        }
+    }
+
     dispose(): void {
         this._onDidChangePackages.dispose();
         this.packages.clear();
@@ -144,5 +213,30 @@ export class PipPackageManager implements PackageManager, Disposable {
     async getDirectPackageNames(environment: PythonEnvironment): Promise<Set<string> | undefined> {
         const data = await refreshPipDirectPackageNames(environment, this.log);
         return data ? new Set(data.map(normalizePackageName)) : undefined;
+    }
+}
+
+/**
+ * Parses JSON output from `pip index versions <package> --json`.
+ * Expected format: { "name": "...", "versions": ["1.2.3", "1.2.2", ...] }
+ */
+export function parsePipIndexVersionsJson(output: string): Pep440Version[] | undefined {
+    // Only capture output between braces
+    const match = output.match(/{[\s\S]*}/);
+    if (!match) {
+        return undefined;
+    }
+    try {
+        const parsed = JSON.parse(match[0]);
+        if (parsed && Array.isArray(parsed.versions) && parsed.versions.length > 0) {
+            return (parsed.versions as string[])
+                .filter((v) => !!v.trim())
+                .map((v) => parse(v.trim()))
+                .filter((v): v is Pep440Version => v !== null)
+                .sort((a, b) => rcompare(a.public, b.public));
+        }
+        return undefined;
+    } catch {
+        return undefined;
     }
 }

@@ -1,3 +1,5 @@
+import type { Pep440Version } from '@renovatebot/pep440';
+import { explain as parse, rcompare } from '@renovatebot/pep440';
 import {
     CancellationError,
     Disposable,
@@ -148,6 +150,51 @@ export class CondaPackageManager implements PackageManager, Disposable {
             return packages;
         }
         return this.packages.get(environment.envId.id);
+    }
+
+    formatInstallSpec(packageName: string, version: string): string {
+        // conda match spec syntax uses a single `=` for version pinning
+        return `${packageName}=${version}`;
+    }
+
+    async getVersion(_environment: PythonEnvironment): Promise<Pep440Version | undefined> {
+        try {
+            const output = await runCondaExecutable(['--version'], this.log);
+            // "conda X.Y.Z"
+            const match = output.match(/conda\s+(\d+\.\d+(?:\.\d+)*)/i);
+            return match ? (parse(match[1]) ?? undefined) : undefined;
+        } catch {
+            return undefined;
+        }
+    }
+
+    async getPackageAvailableVersions(
+        _environment: PythonEnvironment,
+        packageName: string,
+    ): Promise<Pep440Version[] | undefined> {
+        try {
+            const output = await runCondaExecutable(['search', packageName, '--json'], this.log);
+            const parsed = JSON.parse(output);
+            if (parsed && typeof parsed === 'object' && Array.isArray(parsed[packageName])) {
+                const uniqueVersions = new Map<string, Pep440Version>();
+                parsed[packageName]
+                    .filter((entry: { version?: string }) => !!entry.version?.trim())
+                    .map((entry: { version?: string }) => parse(entry.version!))
+                    .filter((v: Pep440Version | null): v is Pep440Version => v !== null)
+                    .forEach((version: Pep440Version) => {
+                        if (!uniqueVersions.has(version.public)) {
+                            uniqueVersions.set(version.public, version);
+                        }
+                    });
+
+                return Array.from(uniqueVersions.values()).sort((a: Pep440Version, b: Pep440Version) =>
+                    rcompare(a.public, b.public),
+                );
+            }
+            return undefined;
+        } catch {
+            return undefined;
+        }
     }
 
     dispose() {

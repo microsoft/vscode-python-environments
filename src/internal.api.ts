@@ -1,3 +1,4 @@
+import type { Pep440Version } from '@renovatebot/pep440';
 import { CancellationError, Disposable, Event, LogOutputChannel, MarkdownString, Uri } from 'vscode';
 import {
     CreateEnvironmentOptions,
@@ -378,6 +379,25 @@ export class InternalPackageManager implements PackageManager {
 
     equals(other: PackageManager): boolean {
         return this.manager === other;
+    }
+
+    getVersion(environment: PythonEnvironment): Promise<Pep440Version | undefined> {
+        return this.manager.getVersion ? this.manager.getVersion(environment) : Promise.resolve(undefined);
+    }
+
+    getPackageAvailableVersions(
+        environment: PythonEnvironment,
+        packageName: string,
+    ): Promise<Pep440Version[] | undefined> {
+        return this.manager.getPackageAvailableVersions
+            ? this.manager.getPackageAvailableVersions(environment, packageName)
+            : Promise.resolve(undefined);
+    }
+
+    formatInstallSpec(packageName: string, version: string): string {
+        return this.manager.formatInstallSpec
+            ? this.manager.formatInstallSpec(packageName, version)
+            : `${packageName}==${version}`;
     }
 }
 
