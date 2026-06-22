@@ -46,5 +46,6 @@
     "python-envs.revealEnvInManagerView.title": "Reveal in Environment Managers View",
     "python-envs.runPetInTerminal.title": "Run Python Environment Tool (PET) in Terminal...",
     "python-envs.managePackageVersion.title": "Manage Package Version",
-    "python-envs.alwaysUseUv.description": "When set to true, uv will be used to manage all virtual environments if available. When set to false, uv will only manage virtual environments explicitly created by uv."
+    "python-envs.alwaysUseUv.description": "When set to true, uv will be used to manage all virtual environments if available. When set to false, uv will only manage virtual environments explicitly created by uv.",
+    "python-envs.packageWatchers.description": "When enabled, file system watchers monitor site-packages for install/uninstall changes and automatically refresh the package list. Disable this if you experience performance issues in large workspaces."
 }

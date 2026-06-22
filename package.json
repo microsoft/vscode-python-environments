@@ -138,6 +138,12 @@
                     "description": "%python-envs.alwaysUseUv.description%",
                     "default": true,
                     "scope": "machine"
+                },
+                "python-envs.packageWatchers": {
+                    "type": "boolean",
+                    "description": "%python-envs.packageWatchers.description%",
+                    "default": true,
+                    "scope": "machine"
                 }
             }
         },

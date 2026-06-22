@@ -3,7 +3,7 @@ import { Disposable, LogOutputChannel, RelativePattern } from 'vscode';
 import { EnvironmentManager, PackageManager, PythonEnvironment } from '../../api';
 import { traceVerbose } from '../../common/logging';
 import { createSimpleDebounce } from '../../common/utils/debounce';
-import { createFileSystemWatcher } from '../../common/workspace.apis';
+import { createFileSystemWatcher, getConfiguration } from '../../common/workspace.apis';
 
 /**
  * Derives the file system watch targets for a given Python environment.
@@ -94,6 +94,11 @@ export function registerPackageWatcherForManager(
     packageManager: PackageManager,
     log: LogOutputChannel,
 ): Disposable {
+    const packageWatchersEnabled = getConfiguration('python-envs').get<boolean>('packageWatchers', true);
+    if (!packageWatchersEnabled) {
+        return new Disposable(() => undefined);
+    }
+
     // One watcher per environment id.
     const watchers = new Map<string, Disposable>();
 
