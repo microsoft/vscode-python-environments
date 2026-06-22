@@ -39,8 +39,7 @@ Environments extension.
 **Decision:**
 
 - **`<globalStorageUri>/script-envs-v1/<...>/`** — hidden per-extension,
-  sandboxed by VS Code, never in workspace. (Matches uv's
-  `environments-v2` model.)
+  sandboxed by VS Code, never in workspace.
 
 ## 3. Env folder contents
 
@@ -220,7 +219,7 @@ cleanup, the cache grows unbounded.
   reuses, or syncs an env for a PEP 723 script), it walks the cache
   directory once. For each cached env whose `.meta.json` sidecar
   shows a `lastUsedAt` (bumped on every successful reuse) older than
-  the threshold (suggested: **14 days**, matching pipx), delete it.
+  the threshold (**14 days**, matching pipx), delete it.
 
 ---
 
