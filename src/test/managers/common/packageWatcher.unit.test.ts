@@ -31,6 +31,9 @@ suite('Package Watcher', () => {
             debug: sandbox.stub(),
         };
         createFileSystemWatcherStub = sandbox.stub(workspaceApis, 'createFileSystemWatcher');
+        sandbox.stub(workspaceApis, 'getConfiguration').returns({
+            get: (_key: string, defaultValue?: unknown) => defaultValue ?? true,
+        } as ReturnType<typeof workspaceApis.getConfiguration>);
     });
 
     teardown(() => {
