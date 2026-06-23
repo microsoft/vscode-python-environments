@@ -14,6 +14,7 @@ import {
     withProgress,
 } from '../../common/window.apis';
 import { getConfiguration, onDidChangeConfiguration } from '../../common/workspace.apis';
+import { normalizePath } from '../../common/utils/pathUtils';
 import { isActivatableEnvironment } from '../common/activation';
 import { identifyTerminalShell } from '../common/shellDetector';
 import { getPythonApi } from '../pythonApi';
@@ -323,7 +324,7 @@ export class TerminalManagerImpl implements TerminalManager {
         environment: PythonEnvironment,
         createNew: boolean = false,
     ): Promise<Terminal> {
-        const part = terminalKey instanceof Uri ? path.normalize(terminalKey.fsPath) : terminalKey;
+        const part = terminalKey instanceof Uri ? normalizePath(terminalKey.fsPath) : terminalKey;
         const key = `${environment.envId.id}:${part}`;
         if (!createNew) {
             const terminal = this.dedicatedTerminals.get(key);
@@ -373,7 +374,7 @@ export class TerminalManagerImpl implements TerminalManager {
         createNew: boolean = false,
     ): Promise<Terminal> {
         const uri = project instanceof Uri ? project : project.uri;
-        const key = `${environment.envId.id}:${path.normalize(uri.fsPath)}`;
+        const key = `${environment.envId.id}:${normalizePath(uri.fsPath)}`;
         if (!createNew) {
             const terminal = this.projectTerminals.get(key);
             if (terminal) {
