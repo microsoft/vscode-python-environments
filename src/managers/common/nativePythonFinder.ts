@@ -326,6 +326,11 @@ class NativePythonFinderImpl implements NativePythonFinder {
     private connection: rpc.MessageConnection;
     private readonly pool: WorkerPool<NativePythonEnvironmentKind | Uri[] | undefined, NativeInfo[]>;
     private cache: Map<string, NativeInfo[]> = new Map();
+    /**
+     * Tracks in-flight hard refreshes by cache key so concurrent callers share a
+     * single PET scan instead of queueing duplicate work.
+     */
+    private inFlightRefreshes: Map<string, Promise<NativeInfo[]>> = new Map();
     private startDisposables: Disposable[] = [];
     private proc: ChildProcess | undefined;
     private processExited: boolean = false;
@@ -555,20 +560,39 @@ class NativePythonFinderImpl implements NativePythonFinder {
 
     private async handleHardRefresh(options?: NativePythonEnvironmentKind | Uri[]): Promise<NativeInfo[]> {
         const key = this.getKey(options);
+
+        const inFlight = this.inFlightRefreshes.get(key);
+        if (inFlight) {
+            this.outputChannel.debug(`[Finder] Coalescing hard refresh with in-flight request for key: ${key}`);
+            return inFlight;
+        }
+
         this.cache.delete(key);
         if (!options) {
             this.outputChannel.debug('[Finder] Refreshing all environments');
         } else {
             this.outputChannel.debug(`[Finder] Hard refresh for key: ${key}`);
         }
-        const result = await this.pool.addToQueue(options);
-        // Validate result from worker pool
-        if (!result || !Array.isArray(result)) {
-            this.outputChannel.warn(`[pet] Worker pool returned invalid result type: ${typeof result}`);
-            return [];
-        }
-        this.cache.set(key, result);
-        return result;
+
+        // .finally clears the in-flight slot on both success AND failure paths so
+        // a rejected refresh does not poison the cache — the next call after a
+        // failure starts a fresh attempt, matching today's behavior.
+        const refreshPromise = this.pool
+            .addToQueue(options)
+            .then((result) => {
+                if (!result || !Array.isArray(result)) {
+                    this.outputChannel.warn(`[pet] Worker pool returned invalid result type: ${typeof result}`);
+                    return [] as NativeInfo[];
+                }
+                this.cache.set(key, result);
+                return result;
+            })
+            .finally(() => {
+                this.inFlightRefreshes.delete(key);
+            });
+
+        this.inFlightRefreshes.set(key, refreshPromise);
+        return refreshPromise;
     }
 
     private async handleSoftRefresh(options?: NativePythonEnvironmentKind | Uri[]): Promise<NativeInfo[]> {
