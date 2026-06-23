@@ -251,28 +251,64 @@ and hover/completions work?
 
 **Decision:**
 
-Essentially nothing extra to design — Pylance already routes through
-our extension's API.
+We register the script-to-env association on our side via
+`envManagers.setEnvironment(scriptUri, env, /*persist*/ true)` (per
+Q6). On its own that is **not sufficient** — Pylance currently does
+not query per-file env for regular `.py` files, so the per-file
+mapping we register is invisible to it. Closing the gap requires a
+small, contained Pylance-side change. The good news is that the
+necessary primitive already exists in Pylance for notebook cells;
+we extend it to regular `.py` files.
 
-**Verified from source.** Pylance's
-[`PythonEnvironmentExtensionApi.getActivePythonEnvironment(scope)`](Z:\Repos\pyrx\packages\vscode-pylance\src\common\pythonEnvironmentApi.ts)
-calls our public API directly when our extension is present:
+### Required Pylance change (sketch)
 
-```typescript
-const environment = await this._pythonEnvsApi.getEnvironment(scope);
-return environment?.execInfo.run.executable;
-```
+In `pylance-internal` and `vscode-pylance`:
 
-The `scope` is the document URI, so per-file association works
-out of the box. Whatever we register for `demo.py` is what Pylance
-sees for `demo.py`.
+1. **`documentWorkspaceResolver.getWorkspaceForFile`** — for regular
+   `.py` files with inline script, when `pythonPath` is undefined, query per-file
+   pythonPath via the existing `workspace/configuration` request
+   with the file URI as scope. Pass it to the workspace factory the
+   same way the notebook path does. If the per-file pythonPath
+   matches the workspace's, the equality check in
+   `_getOrCreateBestWorkspaceFileSync` short-circuits and the file
+   shares the workspace's analysis — no sub-workspace, no extra
+   cost. If different, an immutable sub-workspace is created pinned
+   to that interpreter.
+2. **A new custom LSP notification** (`python/didChangeFilePythonPath`)
+   so that when we fire `onDidChangeEnvironment(scriptUri)` after
+   the user creates / removes an inline env, Pylance can re-route
+   that one file via the existing `moveFiles` flow without
+   restarting analysis.
+3. **A small server-side handler** that mirrors
+   `_changeNotebookKernel`: re-resolve per-file pythonPath, call
+   `moveFiles([fileUri], oldWorkspace, newWorkspace)`,
+   `invalidateAndForceReanalysis`, and `tryAutoDispose` the old
+   workspace if it's now empty.
 
-**What we need to do:**
+### Behavior in both branches
+
+- **No inline env registered (fallback case)** —
+  `getEnvironment(scriptUri)` walks parents and returns the
+  workspace folder's env. The per-file pythonPath equals the
+  workspace's, the equality check skips sub-workspace creation, and
+  the file is analyzed in the workspace env exactly as today.
+  **Zero behavior change.**
+- **Inline env registered** — `getEnvironment(scriptUri)` returns
+  the inline env. The pythonPath differs from the workspace's, an
+  immutable sub-workspace is created pinned to the inline env's
+  interpreter, and the file is analyzed against that env's
+  `site-packages`. `import rich` resolves.
+
+### What we need to do on the Python Envs side
 
 - After the env is materialized (created or reused), call
   `envManagers.setEnvironment(scriptUri, env, /*persist*/ true)`.
   Persistence is true so the association survives Code restart
   (`.vscode/settings.json` `python-envs.pythonProjects[]`, see Q6).
+- Register the script as a `PythonProject(uri = scriptUri)` (per
+  Q6 and Phase 3 PR 10) so the `onDidChangeActiveEnvironment` event
+  fires with `e.uri = scriptUri`, giving Pylance the per-file URI
+  it needs to re-route.
 - After a sync operation installs new packages, fire
   `_onDidChangeEnvironment` so Pylance reloads its import graph.
   The existing `EnvironmentManagers.setEnvironment` already does
@@ -287,26 +323,45 @@ discover our env?
 
 **Decision:**
 
-Same path as Pylance — and again, essentially solved by `setEnvironment`.
+The story splits in two:
 
-**Verified from source.** The Python extension's debug-config resolver
-([`base.ts` lines 104-129](Z:\Repos\vscode-python\src\client\debugger\extension\configuration\resolvers\base.ts)):
+- **Run Python File (green triangle / `Commands.Exec_In_Terminal`)** —
+  already routes per-file correctly. Works out of the box once we
+  call `setEnvironment(scriptUri, env, true)`.
+- **F5 / Debug-in-Terminal** — does not route per-file today. The
+  debug-config resolver passes the workspace folder URI to
+  `getActiveInterpreter`, so the per-file env we registered is
+  invisible. Requires a small fix in `vscode-python` (~10 LOC)
+  for the per-file env to flow through to the debug launch. This
+  is a **pre-existing gap**, not a PEP 723 regression — any user
+  who today assigns a per-file env via "Select Interpreter" has the
+  same problem with F5.
+
+### Required vscode-python change (sketch)
+
+In `resolveAndUpdatePythonPath`, prefer the program URI for the
+env lookup when present, and keep the workspace folder as the
+fallback for the settings call (which is workspace-scoped by
+contract):
 
 ```typescript
-const interpreterPath =
-    (await this.interpreterService.getActiveInterpreter(workspaceFolder))?.path ??
-    this.configurationService.getSettings(workspaceFolder).pythonPath;
-debugConfiguration.pythonPath = interpreterPath;
+if (debugConfiguration.pythonPath === '${command:python.interpreterPath}' || !debugConfiguration.pythonPath) {
+    const programUri = debugConfiguration.program ? Uri.file(debugConfiguration.program) : undefined;
+    const lookupScope = programUri ?? workspaceFolder;
+    const interpreterPath =
+        (await this.interpreterService.getActiveInterpreter(lookupScope))?.path ??
+        this.configurationService.getSettings(workspaceFolder).pythonPath;
+    debugConfiguration.pythonPath = interpreterPath;
+}
+// Apply the same shape to the `debugConfiguration.python` branch immediately below.
 ```
 
-As long as we've registered the inline-metadata script as a
-project, `getPythonProject(demo.py)` returns the script project, and the script's env is what Run/F5 launch with.
+### What we need to do on the Python Envs side
 
-**What we need to do:**
-
-- Same `setEnvironment(scriptUri, env, true)` call as in Q9. One
-  registration covers Pylance, Run/F5, and the green Run button.
-- Register each cached env at activation as a discoverable
+- Same `setEnvironment(scriptUri, env, true)` call as Q9 — covers
+  both Run (today) and Debug (post-fix). One registration covers
+  Pylance, Run, F5, and the green Run button.
+- Register each cached inline env at activation as a discoverable
   interpreter via `api.createPythonEnvironmentItem(...)`, so the
   Select Interpreter quick-pick lists them under "Inline script
   environments". This is the user's recovery path if our automatic
