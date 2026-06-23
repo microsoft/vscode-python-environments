@@ -540,7 +540,8 @@ suite('Test TreeView Items', () => {
             assert.ok(item.treeItem.tooltip, 'Transitive package should have an explanatory tooltip');
         });
 
-        test('Prefers package-provided iconPath over default icon', () => {            // Arrange
+        test('Prefers package-provided iconPath over default icon', () => {
+            // Arrange
             const pkg = createMockPackage({ name: 'numpy', isTransitive: true, iconPath: new ThemeIcon('symbol-numeric') });
 
             // Act
