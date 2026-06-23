@@ -75,4 +75,15 @@ suite('Internal Variable substitution', () => {
 
         assert.equal(result, '${workspaceFolder}/.venv/Scripts/python.exe');
     });
+
+    test('Leaves ${workspaceFolder} unresolved when no folders are open', () => {
+        // No owning folder and no open folders at all (getWorkspaceFolders returns undefined):
+        // the single-folder fallback must not crash and the token stays literal.
+        getWorkspaceFolderStub.returns(undefined);
+        getWorkspaceFoldersStub.returns(undefined);
+
+        const result = resolveVariables('${workspaceFolder}/.venv/Scripts/python.exe', project.uri as unknown as Uri);
+
+        assert.equal(result, '${workspaceFolder}/.venv/Scripts/python.exe');
+    });
 });
