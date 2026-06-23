@@ -20,21 +20,29 @@ import {
     SetEnvironmentScope,
 } from '../../api';
 import { CondaStrings } from '../../common/localize';
-import { traceError } from '../../common/logging';
+import { traceError, traceInfo } from '../../common/logging';
+import { StopWatch } from '../../common/stopWatch';
+import { EventNames } from '../../common/telemetry/constants';
+import { classifyError } from '../../common/telemetry/errorClassifier';
+import { sendTelemetryEvent } from '../../common/telemetry/sender';
 import { createDeferred, Deferred } from '../../common/utils/deferred';
 import { normalizePath } from '../../common/utils/pathUtils';
 import { showErrorMessage, showInformationMessage, withProgress } from '../../common/window.apis';
+import { PythonProjectManager } from '../../internal.api';
 import { getProjectFsPathForScope, tryFastPathGet } from '../common/fastPath';
 import { NativePythonFinder } from '../common/nativePythonFinder';
-import { CondaSourcingStatus } from './condaSourcingUtils';
+import { notifyMissingManagerIfDefault } from '../common/utils';
+import { constructCondaSourcingStatus, CondaSourcingStatus } from './condaSourcingUtils';
 import {
     checkForNoPythonCondaEnvironment,
     clearCondaCache,
     createCondaEnvironment,
     deleteCondaEnvironment,
     generateName,
+    getConda,
     getCondaForGlobal,
     getCondaForWorkspace,
+    getCondaPathSetting,
     getDefaultCondaPrefix,
     quickCreateConda,
     refreshCondaEnvs,
@@ -61,6 +69,7 @@ export class CondaEnvManager implements EnvironmentManager, Disposable {
         private readonly nativeFinder: NativePythonFinder,
         private readonly api: PythonEnvironmentApi,
         public readonly log: LogOutputChannel,
+        private readonly projectManager?: PythonProjectManager,
     ) {
         this.name = 'conda';
         this.displayName = 'Conda';
@@ -87,8 +96,27 @@ export class CondaEnvManager implements EnvironmentManager, Disposable {
         }
 
         this._initialized = createDeferred();
+        const stopWatch = new StopWatch();
+        let result: 'success' | 'tool_not_found' | 'error' = 'success';
+        let envCount = 0;
+        let toolSource = 'none';
+        let errorType: string | undefined;
 
         try {
+            // Check if tool is findable before PET refresh (settings/cache/persistent state/PATH only, no PET).
+            // Calling getConda() without a native finder skips the PET refresh path inside getCondaExecutable.
+            const hasExplicitSetting = !!getCondaPathSetting();
+            let condaTool: string | undefined;
+            try {
+                condaTool = await getConda();
+            } catch {
+                condaTool = undefined;
+            }
+            const preRefreshTool = condaTool;
+            if (preRefreshTool) {
+                toolSource = hasExplicitSetting ? 'settings' : 'local';
+            }
+
             await withProgress(
                 {
                     location: ProgressLocation.Window,
@@ -104,7 +132,47 @@ export class CondaEnvManager implements EnvironmentManager, Disposable {
                     );
                 },
             );
+
+            envCount = this.collection.length;
+
+            // If tool wasn't found via local lookup, check if refresh discovered it via PET
+            // (refreshCondaEnvs persists the conda path it found from native data).
+            if (!preRefreshTool) {
+                try {
+                    condaTool = await getConda();
+                } catch {
+                    condaTool = undefined;
+                }
+                toolSource = condaTool ? 'pet' : 'none';
+            }
+
+            if (toolSource === 'none') {
+                result = 'tool_not_found';
+                traceInfo('Conda not found, conda features will be inactive.');
+                if (this.projectManager) {
+                    await notifyMissingManagerIfDefault('ms-python.python:conda', this.projectManager, this.api);
+                }
+            } else if (condaTool) {
+                // Conda was found — populate sourcing information for activation/shell support.
+                try {
+                    this.sourcingInformation = await constructCondaSourcingStatus(condaTool);
+                    traceInfo(this.sourcingInformation.toString());
+                } catch (ex) {
+                    traceError('Failed to construct conda sourcing status', ex);
+                }
+            }
+        } catch (ex) {
+            result = 'error';
+            errorType = classifyError(ex);
+            traceError('Conda lazy initialization failed', ex);
         } finally {
+            sendTelemetryEvent(EventNames.MANAGER_LAZY_INIT, stopWatch.elapsedTime, {
+                managerName: 'conda',
+                result,
+                envCount,
+                toolSource,
+                errorType,
+            });
             this._initialized.resolve();
         }
     }
