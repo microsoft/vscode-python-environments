@@ -1,14 +1,17 @@
 import * as assert from 'assert';
-import { Uri } from 'vscode';
+import { ThemeIcon, Uri } from 'vscode';
+import { Package } from '../../../api';
 import { UvInstallStrings, VenvManagerStrings } from '../../../common/localize';
 import {
     EnvManagerTreeItem,
     getEnvironmentParentDirName,
     NoPythonEnvTreeItem,
+    ProjectEnvironment,
+    ProjectPackage,
     PythonEnvTreeItem,
     PythonGroupEnvTreeItem,
 } from '../../../features/views/treeViewItems';
-import { InternalEnvironmentManager, PythonEnvironmentImpl } from '../../../internal.api';
+import { InternalEnvironmentManager, InternalPackageManager, PythonEnvironmentImpl } from '../../../internal.api';
 
 /**
  * Helper to create a mock PythonEnvironmentImpl with minimal required fields.
@@ -485,6 +488,65 @@ suite('Test TreeView Items', () => {
 
             assert.equal(item.treeItem.label, VenvManagerStrings.noEnvFound);
             assert.equal(item.treeItem.command, undefined, 'Should not have a command');
+        });
+    });
+
+    suite('ProjectPackage', () => {
+        const parent = { id: 'project>>>env' } as ProjectEnvironment;
+        const manager = {} as InternalPackageManager;
+
+        function createMockPackage(options: Partial<Package> = {}): Package {
+            return {
+                name: options.name ?? 'requests',
+                displayName: options.displayName ?? options.name ?? 'requests',
+                version: options.version,
+                description: options.description,
+                tooltip: options.tooltip,
+                iconPath: options.iconPath,
+                isTransitive: options.isTransitive,
+                pkgId: { id: options.name ?? 'requests', managerId: 'ms-python.python:pip' },
+            } as Package;
+        }
+
+        test('Direct package uses package icon and shows no transitive prefix', () => {
+            // Arrange
+            const pkg = createMockPackage({ name: 'requests', version: '2.31.0', isTransitive: false });
+
+            // Act
+            const item = new ProjectPackage(parent, pkg, manager);
+
+            // Assert
+            assert.strictEqual(item.treeItem.contextValue, 'python-package');
+            assert.strictEqual((item.treeItem.iconPath as ThemeIcon).id, 'package');
+            assert.strictEqual(item.treeItem.description, '2.31.0');
+        });
+
+        test('Transitive package uses list-tree icon and shows transitive prefix', () => {
+            // Arrange
+            const pkg = createMockPackage({ name: 'urllib3', version: '2.0.0', isTransitive: true });
+
+            // Act
+            const item = new ProjectPackage(parent, pkg, manager);
+
+            // Assert
+            assert.strictEqual(item.treeItem.contextValue, 'python-package-transitive');
+            assert.strictEqual((item.treeItem.iconPath as ThemeIcon).id, 'list-tree');
+            assert.ok(
+                (item.treeItem.description as string).startsWith('(transitive) '),
+                'Transitive package description should be prefixed with "(transitive) "',
+            );
+            assert.ok(item.treeItem.tooltip, 'Transitive package should have an explanatory tooltip');
+        });
+
+        test('Prefers package-provided iconPath over default icon', () => {
+            // Arrange
+            const pkg = createMockPackage({ name: 'numpy', isTransitive: true, iconPath: new ThemeIcon('symbol-numeric') });
+
+            // Act
+            const item = new ProjectPackage(parent, pkg, manager);
+
+            // Assert
+            assert.strictEqual((item.treeItem.iconPath as ThemeIcon).id, 'symbol-numeric');
         });
     });
 });
