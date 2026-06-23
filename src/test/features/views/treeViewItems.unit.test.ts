@@ -492,6 +492,8 @@ suite('Test TreeView Items', () => {
     });
 
     suite('ProjectPackage', () => {
+        // ProjectPackage only reads parent.id and does not call any manager methods,
+        // so minimal cast mocks are sufficient for exercising the tree item rendering.
         const parent = { id: 'project>>>env' } as ProjectEnvironment;
         const manager = {} as InternalPackageManager;
 
@@ -538,8 +540,7 @@ suite('Test TreeView Items', () => {
             assert.ok(item.treeItem.tooltip, 'Transitive package should have an explanatory tooltip');
         });
 
-        test('Prefers package-provided iconPath over default icon', () => {
-            // Arrange
+        test('Prefers package-provided iconPath over default icon', () => {            // Arrange
             const pkg = createMockPackage({ name: 'numpy', isTransitive: true, iconPath: new ThemeIcon('symbol-numeric') });
 
             // Act
@@ -547,6 +548,20 @@ suite('Test TreeView Items', () => {
 
             // Assert
             assert.strictEqual((item.treeItem.iconPath as ThemeIcon).id, 'symbol-numeric');
+        });
+
+        test('Falls back to empty description when version and description are missing', () => {
+            // Arrange
+            const directPkg = createMockPackage({ name: 'mypkg', isTransitive: false });
+            const transitivePkg = createMockPackage({ name: 'mypkg', isTransitive: true });
+
+            // Act
+            const directItem = new ProjectPackage(parent, directPkg, manager);
+            const transitiveItem = new ProjectPackage(parent, transitivePkg, manager);
+
+            // Assert
+            assert.strictEqual(directItem.treeItem.description, '');
+            assert.strictEqual(transitiveItem.treeItem.description, '(transitive) ');
         });
     });
 });
