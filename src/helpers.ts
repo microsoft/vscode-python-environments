@@ -145,6 +145,15 @@ export function getUserConfiguredSetting<T>(section: string, key: string, scope?
 }
 
 /**
+ * Whether the PEP 723 inline-script env support is enabled. Internal
+ * undeclared flag (`python-envs.inlineScripts.enabled`); defaults to
+ * false. Window reload required to take effect.
+ */
+export function isInlineScriptsFeatureEnabled(): boolean {
+    return getConfiguration('python-envs').get<boolean>('inlineScripts.enabled', false);
+}
+
+/**
  * Runs the Python Environment Tool (PET) in a terminal window, allowing users to
  * execute various PET commands like finding all Python environments or resolving
  * the details of a specific environment.
