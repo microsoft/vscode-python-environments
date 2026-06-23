@@ -252,7 +252,9 @@ export class ProjectView implements TreeDataProvider<ProjectTreeItem> {
             // Store the reference for refreshing packages
             this.packageRoots.set(uri ? uri.fsPath : 'global', environmentItem);
 
-            return packages.map((p) => new ProjectPackage(environmentItem, p, pkgManager));
+            return packages
+                .sort((a, b) => (a.isTransitive === b.isTransitive ? 0 : a.isTransitive ? 1 : -1))
+                .map((p) => new ProjectPackage(environmentItem, p, pkgManager));
         }
 
         //return nothing if the element is not a project, environment, or undefined
