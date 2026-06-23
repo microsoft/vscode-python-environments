@@ -266,6 +266,53 @@ suite('Interpreter Selection - Priority Chain', () => {
             assert.ok(mockNativeFinder.resolve.calledOnceWithExactly(expandedInterpreterPath));
         });
 
+        test('should resolve a relative defaultInterpreterPath against the workspace folder', async () => {
+            // A relative path must be made absolute against the workspace folder so the native
+            // finder does not resolve it against an unrelated working directory (which can yield
+            // a malformed, duplicated path such as <workspace>/<workspace-name>/.venv/...).
+            const workspaceUri = Uri.file(path.resolve('/test/workspace'));
+            const absoluteInterpreterPath = path.resolve(workspaceUri.fsPath, '.venv/bin/python');
+            const workspaceFolder = { name: 'workspace', uri: workspaceUri } as WorkspaceFolder;
+
+            sandbox.stub(workspaceApis, 'getConfiguration').returns(createMockConfig([]) as WorkspaceConfiguration);
+            sandbox.stub(workspaceApis, 'getWorkspaceFolder').returns(workspaceFolder);
+            sandbox.stub(workspaceApis, 'getWorkspaceFolders').returns([workspaceFolder]);
+            sandbox.stub(helpers, 'getUserConfiguredSetting').callsFake((section: string, key: string) => {
+                if (section === 'python' && key === 'defaultInterpreterPath') {
+                    return './.venv/bin/python';
+                }
+                return undefined;
+            });
+            mockNativeFinder.resolve.resolves({
+                executable: absoluteInterpreterPath,
+                version: '3.11.0',
+                prefix: path.dirname(path.dirname(absoluteInterpreterPath)),
+            });
+            mockApi.resolveEnvironment.resolves({
+                ...mockVenvEnv,
+                displayPath: absoluteInterpreterPath,
+                environmentPath: Uri.file(absoluteInterpreterPath),
+                execInfo: { run: { executable: absoluteInterpreterPath } },
+            });
+
+            const result = await resolveEnvironmentByPriority(
+                workspaceUri,
+                mockEnvManagers as unknown as EnvironmentManagers,
+                mockProjectManager as unknown as PythonProjectManager,
+                mockNativeFinder as unknown as NativePythonFinder,
+                mockApi as unknown as PythonEnvironmentApi,
+            );
+
+            assert.strictEqual(result.source, 'defaultInterpreterPath');
+            assert.ok(mockNativeFinder.resolve.calledOnceWithExactly(absoluteInterpreterPath));
+            // The path passed to the native finder must not duplicate the workspace folder name.
+            const passedPath = mockNativeFinder.resolve.firstCall.args[0] as string;
+            assert.ok(
+                !passedPath.includes(`workspace${path.sep}workspace`),
+                `path should not duplicate the workspace folder: ${passedPath}`,
+            );
+        });
+
         test('should skip native resolution when defaultInterpreterPath has unresolved variables', async () => {
             // When resolveVariables can't resolve ${workspaceFolder} (e.g., global scope with no workspace),
             // the path still contains '${' and should be skipped without calling nativeFinder.resolve
