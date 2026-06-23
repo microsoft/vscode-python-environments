@@ -204,7 +204,8 @@ suite('Package Watcher', () => {
             assert.strictEqual(secondPattern.pattern, '**/*.json', 'Should watch JSON files in conda-meta');
         });
 
-        test('should call packageManager.refresh on file create', () => {
+        test('should call packageManager.refresh on file create', async () => {
+            const clock = sandbox.useFakeTimers();
             const mockWatcher = createMockWatcher();
             createFileSystemWatcherStub.returns(mockWatcher);
 
@@ -217,12 +218,22 @@ suite('Package Watcher', () => {
                 mockLogOutputChannel as LogOutputChannel,
             );
 
-            // Verify watcher is created and create events are observed.
-            assert.strictEqual(createFileSystemWatcherStub.callCount, 1, 'Should create watcher for site-packages');
-            assert.strictEqual(createFileSystemWatcherStub.getCall(0).args[1], false, 'Should watch create events');
+            // Fire a create event and advance past debounce
+            mockWatcher._createEmitter.fire(Uri.file('/path/to/pkg.dist-info/METADATA'));
+            clock.tick(600);
+            await clock.tickAsync(0);
+
+            assert.strictEqual(
+                (packageManager.refresh as sinon.SinonStub).callCount,
+                1,
+                'Should call refresh on file create',
+            );
+
+            clock.restore();
         });
 
-        test('should call packageManager.refresh on file delete', () => {
+        test('should call packageManager.refresh on file delete', async () => {
+            const clock = sandbox.useFakeTimers();
             const mockWatcher = createMockWatcher();
             createFileSystemWatcherStub.returns(mockWatcher);
 
@@ -235,9 +246,18 @@ suite('Package Watcher', () => {
                 mockLogOutputChannel as LogOutputChannel,
             );
 
-            // Verify watcher is created and delete events are observed.
-            assert.strictEqual(createFileSystemWatcherStub.callCount, 1, 'Should create watcher for site-packages');
-            assert.strictEqual(createFileSystemWatcherStub.getCall(0).args[3], false, 'Should watch delete events');
+            // Fire a delete event and advance past debounce
+            mockWatcher._deleteEmitter.fire(Uri.file('/path/to/pkg.dist-info/METADATA'));
+            clock.tick(600);
+            await clock.tickAsync(0);
+
+            assert.strictEqual(
+                (packageManager.refresh as sinon.SinonStub).callCount,
+                1,
+                'Should call refresh on file delete',
+            );
+
+            clock.restore();
         });
 
         test('should debounce multiple rapid file events', () => {
@@ -436,7 +456,7 @@ suite('Package Watcher', () => {
 
             const initialCallCount = createFileSystemWatcherStub.callCount;
 
-            // Fire another change for the same environment
+            // Fire another change for the same environment (old === new)
             changeEmitter.fire({
                 uri: env.environmentPath,
                 new: env,
@@ -448,6 +468,12 @@ suite('Package Watcher', () => {
                 createFileSystemWatcherStub.callCount,
                 initialCallCount,
                 'Should not create duplicate watchers for same envId',
+            );
+
+            // Existing watcher should NOT be disposed when old.id === new.id
+            assert.ok(
+                !(mockWatcher.dispose as sinon.SinonStub).called,
+                'Should not dispose existing watcher when environment re-emits with same id',
             );
 
             disposable.dispose();

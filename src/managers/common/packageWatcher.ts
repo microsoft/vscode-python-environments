@@ -1,7 +1,6 @@
 import * as path from 'path';
 import { Disposable, LogOutputChannel, RelativePattern } from 'vscode';
 import { EnvironmentManager, PackageManager, PythonEnvironment } from '../../api';
-import { traceVerbose } from '../../common/logging';
 import { createSimpleDebounce } from '../../common/utils/debounce';
 import { createFileSystemWatcher, getConfiguration } from '../../common/workspace.apis';
 
@@ -46,31 +45,32 @@ export function watchPackageChangesForEnvironment(
         ...(packageManager.getPackageWatchTargets?.(env) ?? []),
     ];
     if (watchTargets.length === 0) {
-        traceVerbose(log, `No watch targets for environment ${env.envId}`);
+        log.debug(`No watch targets for environment ${env.envId.id}`);
         return new Disposable(() => undefined);
     }
     // Debounced refresh function
     const debouncedRefresh = createSimpleDebounce(500, async () => {
-        traceVerbose(log, `Package change detected for environment ${env.envId.id}, refreshing packages.`);
+        log.debug(`Package change detected for environment ${env.envId.id}, refreshing packages.`);
         packageManager.refresh(env).catch((ex) => {
             log.error(
-                `Failed to refresh packages for environment ${env.envId}: ${ex instanceof Error ? ex.message : String(ex)}`,
+                `Failed to refresh packages for environment ${env.envId.id}: ${ex instanceof Error ? ex.message : String(ex)}`,
             );
         });
     });
     // Create watchers
-    const disposables: Disposable[] = [];
+    const disposables: Disposable[] = [debouncedRefresh];
+    const trigger = debouncedRefresh.trigger.bind(debouncedRefresh);
     for (const target of watchTargets) {
         const watcher = createFileSystemWatcher(
             target,
             false, // create   -> install
-            false, // change   -> ignore
+            true, // change   -> ignore
             false, // delete   -> uninstall
         );
         disposables.push(
             watcher,
-            watcher.onDidCreate(debouncedRefresh.trigger),
-            watcher.onDidDelete(debouncedRefresh.trigger),
+            watcher.onDidCreate(trigger),
+            watcher.onDidDelete(trigger),
         );
     }
 
@@ -117,7 +117,7 @@ export function registerPackageWatcherForManager(
         if (changes.new) {
             addWatcher(changes.new);
         }
-        if (changes.old) {
+        if (changes.old && changes.old.envId.id !== changes.new?.envId.id) {
             removeWatcher(changes.old.envId.id);
         }
     });
