@@ -1,6 +1,6 @@
 import * as fsapi from 'fs-extra';
 import * as path from 'path';
-import { Disposable, EventEmitter, ProgressLocation, Terminal, TerminalOptions, Uri } from 'vscode';
+import { Disposable, EventEmitter, ProgressLocation, Terminal, Uri } from 'vscode';
 import { PythonEnvironment, PythonEnvironmentApi, PythonProject, PythonTerminalCreateOptions } from '../../api';
 import { ActivationStrings } from '../../common/localize';
 import { traceInfo, traceVerbose } from '../../common/logging';
@@ -14,6 +14,7 @@ import {
     withProgress,
 } from '../../common/window.apis';
 import { getConfiguration, onDidChangeConfiguration } from '../../common/workspace.apis';
+import { normalizePath } from '../../common/utils/pathUtils';
 import { isActivatableEnvironment } from '../common/activation';
 import { identifyTerminalShell } from '../common/shellDetector';
 import { getPythonApi } from '../pythonApi';
@@ -33,6 +34,8 @@ import {
     AutoActivationType,
     getAutoActivationType,
     getEnvironmentForTerminal,
+    shouldActivateInCurrentTerminal,
+    shouldSkipTerminalActivation,
     waitForShellIntegration,
 } from './utils';
 
@@ -59,12 +62,7 @@ export interface TerminalInit {
 }
 
 export interface TerminalManager
-    extends TerminalEnvironment,
-        TerminalInit,
-        TerminalActivation,
-        TerminalCreation,
-        TerminalGetters,
-        Disposable {}
+    extends TerminalEnvironment, TerminalInit, TerminalActivation, TerminalCreation, TerminalGetters, Disposable {}
 
 export class TerminalManagerImpl implements TerminalManager {
     private disposables: Disposable[] = [];
@@ -98,7 +96,7 @@ export class TerminalManagerImpl implements TerminalManager {
                 this.onTerminalClosedEmitter.fire(t);
             }),
             this.onTerminalOpened(async (t) => {
-                if (this.skipActivationOnOpen.has(t) || (t.creationOptions as TerminalOptions)?.hideFromUser) {
+                if (this.skipActivationOnOpen.has(t) || shouldSkipTerminalActivation(t)) {
                     return;
                 }
                 let env = this.ta.getEnvironment(t);
@@ -289,11 +287,13 @@ export class TerminalManagerImpl implements TerminalManager {
             });
         }
 
-        // Uncomment the code line below after the issue is resolved:
-        // https://github.com/microsoft/vscode-python-environments/issues/172
-        // const name = options.name ?? `Python: ${environment.displayName}`;
+        // Follow Python extension's terminal naming convention:
+        // - Default: 'Python'
+        // - Dedicated: 'Python: {filename}' (set by getDedicatedTerminal)
+        const name = options.name ?? 'Python';
         const newTerminal = createTerminal({
             ...options,
+            name,
             env: envVars,
         });
 
@@ -306,6 +306,11 @@ export class TerminalManagerImpl implements TerminalManager {
             // We add it to skip activation on open to prevent double activation.
             // We can activate it ourselves since we are creating it.
             this.skipActivationOnOpen.add(newTerminal);
+
+            // Show terminal before activation so users can see the activation happening, requested script running.
+            // Necessary for scenarios such as when terminal is awaiting user input, etc.
+            newTerminal.show();
+
             await this.autoActivateOnTerminalOpen(newTerminal, environment);
         }
 
@@ -314,12 +319,12 @@ export class TerminalManagerImpl implements TerminalManager {
 
     private dedicatedTerminals = new Map<string, Terminal>();
     async getDedicatedTerminal(
-        terminalKey: Uri,
+        terminalKey: Uri | string,
         project: Uri | PythonProject,
         environment: PythonEnvironment,
         createNew: boolean = false,
     ): Promise<Terminal> {
-        const part = terminalKey instanceof Uri ? path.normalize(terminalKey.fsPath) : terminalKey;
+        const part = terminalKey instanceof Uri ? normalizePath(terminalKey.fsPath) : terminalKey;
         const key = `${environment.envId.id}:${part}`;
         if (!createNew) {
             const terminal = this.dedicatedTerminals.get(key);
@@ -329,15 +334,27 @@ export class TerminalManagerImpl implements TerminalManager {
         }
 
         const puri = project instanceof Uri ? project : project.uri;
-        const config = getConfiguration('python', terminalKey);
+        const config = getConfiguration('python', terminalKey instanceof Uri ? terminalKey : puri);
         const projectStat = await fsapi.stat(puri.fsPath);
         const projectDir = projectStat.isDirectory() ? puri.fsPath : path.dirname(puri.fsPath);
 
-        const uriStat = await fsapi.stat(terminalKey.fsPath);
-        const uriDir = uriStat.isDirectory() ? terminalKey.fsPath : path.dirname(terminalKey.fsPath);
-        const cwd = config.get<boolean>('terminal.executeInFileDir', false) ? uriDir : projectDir;
+        let cwd: string;
+        let name: string;
 
-        const newTerminal = await this.create(environment, { cwd });
+        if (terminalKey instanceof Uri) {
+            const uriStat = await fsapi.stat(terminalKey.fsPath);
+            const uriDir = uriStat.isDirectory() ? terminalKey.fsPath : path.dirname(terminalKey.fsPath);
+            cwd = config.get<boolean>('terminal.executeInFileDir', false) ? uriDir : projectDir;
+            // Follow Python extension's naming: 'Python: {filename}' for dedicated terminals
+            const fileName = path.basename(terminalKey.fsPath).replace('.py', '');
+            name = `Python: ${fileName}`;
+        } else {
+            // When terminalKey is a string, use project directory and the string as name
+            cwd = projectDir;
+            name = `Python: ${terminalKey}`;
+        }
+
+        const newTerminal = await this.create(environment, { cwd, name });
         this.dedicatedTerminals.set(key, newTerminal);
 
         const disable = onDidCloseTerminal((terminal) => {
@@ -357,7 +374,7 @@ export class TerminalManagerImpl implements TerminalManager {
         createNew: boolean = false,
     ): Promise<Terminal> {
         const uri = project instanceof Uri ? project : project.uri;
-        const key = `${environment.envId.id}:${path.normalize(uri.fsPath)}`;
+        const key = `${environment.envId.id}:${normalizePath(uri.fsPath)}`;
         if (!createNew) {
             const terminal = this.projectTerminals.get(key);
             if (terminal) {
@@ -391,8 +408,25 @@ export class TerminalManagerImpl implements TerminalManager {
 
     public async initialize(api: PythonEnvironmentApi): Promise<void> {
         const actType = getAutoActivationType();
+
+        // When activateEnvInCurrentTerminal is explicitly false,
+        // skip activation for ALL pre-existing terminals (terminals open before extension load).
+        // New terminals opened after extension load are still activated via autoActivateOnTerminalOpen.
+        const skipPreExistingTerminals = !shouldActivateInCurrentTerminal() && terminals().length > 0;
+        if (skipPreExistingTerminals) {
+            traceVerbose(
+                'python.terminal.activateEnvInCurrentTerminal is explicitly disabled, skipping activation for pre-existing terminals',
+            );
+        }
+
         if (actType === ACT_TYPE_COMMAND) {
-            await Promise.all(terminals().map(async (t) => this.activateUsingCommand(api, t)));
+            if (!skipPreExistingTerminals) {
+                await Promise.all(
+                    terminals()
+                        .filter((t) => !shouldSkipTerminalActivation(t))
+                        .map(async (t) => this.activateUsingCommand(api, t)),
+                );
+            }
         } else if (actType === ACT_TYPE_SHELL) {
             const shells = new Set(
                 terminals()
@@ -401,14 +435,18 @@ export class TerminalManagerImpl implements TerminalManager {
             );
             if (shells.size > 0) {
                 await this.handleSetupCheck(shells);
-                await Promise.all(
-                    terminals().map(async (t) => {
-                        // If the shell is not set up, we activate using command fallback.
-                        if (this.shellSetup.get(identifyTerminalShell(t)) === false) {
-                            await this.activateUsingCommand(api, t);
-                        }
-                    }),
-                );
+                if (!skipPreExistingTerminals) {
+                    await Promise.all(
+                        terminals()
+                            .filter((t) => !shouldSkipTerminalActivation(t))
+                            .map(async (t) => {
+                                // If the shell is not set up, we activate using command fallback.
+                                if (this.shellSetup.get(identifyTerminalShell(t)) === false) {
+                                    await this.activateUsingCommand(api, t);
+                                }
+                            }),
+                    );
+                }
             }
         }
     }

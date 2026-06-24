@@ -58,7 +58,7 @@ suite('PythonEnvironmentManagers getLastKnownEnvironment', () => {
 
         projectManager = typeMoq.Mock.ofType<PythonProjectManager>();
         setupNonThenable(projectManager);
-        // No project for a scope -> getEnvironment/getLastKnownEnvironment use the 'global' key.
+        // No project for a scope -> refreshEnvironment/getLastKnownEnvironment use the 'global' key.
         projectManager.setup((pm) => pm.get(typeMoq.It.isAny())).returns(() => undefined);
 
         envManagers = new PythonEnvironmentManagers(projectManager.object);
@@ -97,12 +97,12 @@ suite('PythonEnvironmentManagers getLastKnownEnvironment', () => {
         assert.strictEqual(envManagers.getLastKnownEnvironment(undefined), undefined);
     });
 
-    test('returns the environment resolved by a prior getEnvironment call', async () => {
+    test('returns the active environment after it has been resolved', async () => {
         const env = makeEnv('env1');
         registerManager(async () => env);
 
-        const resolved = await envManagers.getEnvironment(undefined);
-        assert.strictEqual(resolved, env);
+        // Refreshing the active selection populates the last-known cache.
+        await envManagers.refreshEnvironment(undefined);
 
         // Now available synchronously without any await or refresh.
         assert.strictEqual(envManagers.getLastKnownEnvironment(undefined), env);
@@ -112,11 +112,11 @@ suite('PythonEnvironmentManagers getLastKnownEnvironment', () => {
         let current = makeEnv('env1');
         registerManager(async () => current);
 
-        await envManagers.getEnvironment(undefined);
+        await envManagers.refreshEnvironment(undefined);
         assert.strictEqual(envManagers.getLastKnownEnvironment(undefined)?.envId.id, 'env1');
 
         current = makeEnv('env2');
-        await envManagers.getEnvironment(undefined);
+        await envManagers.refreshEnvironment(undefined);
         assert.strictEqual(envManagers.getLastKnownEnvironment(undefined)?.envId.id, 'env2');
     });
 });

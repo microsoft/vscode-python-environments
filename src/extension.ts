@@ -1,14 +1,31 @@
-import { commands, ExtensionContext, LogOutputChannel, Terminal, Uri, window } from 'vscode';
-import { version as extensionVersion } from '../package.json';
+import {
+    commands,
+    ExtensionContext,
+    extensions,
+    l10n,
+    LogOutputChannel,
+    ProgressLocation,
+    Terminal,
+    Uri,
+    window,
+} from 'vscode';
 import { PythonEnvironment, PythonEnvironmentApi, PythonProjectCreator } from './api';
+import { ENVS_EXTENSION_ID } from './common/constants';
 import { ensureCorrectVersion } from './common/extVersion';
-import { registerLogger, traceError, traceInfo, traceVerbose, traceWarn } from './common/logging';
+import { registerLogger, traceError, traceInfo, traceWarn } from './common/logging';
 import { clearPersistentState, setPersistentState } from './common/persistentState';
 import { newProjectSelection } from './common/pickers/managers';
 import { StopWatch } from './common/stopWatch';
 import { EventNames } from './common/telemetry/constants';
-import { sendManagerSelectionTelemetry } from './common/telemetry/helpers';
+import { classifyError } from './common/telemetry/errorClassifier';
+import {
+    logDiscoverySummary,
+    sendEnvironmentToolUsageTelemetry,
+    sendManagerSelectionTelemetry,
+    sendProjectStructureTelemetry,
+} from './common/telemetry/helpers';
 import { sendTelemetryEvent } from './common/telemetry/sender';
+import { safeRegister } from './common/utils/asyncUtils';
 import { createDeferred } from './common/utils/deferred';
 
 import {
@@ -16,8 +33,9 @@ import {
     createLogOutputChannel,
     onDidChangeActiveTerminal,
     onDidChangeTerminalShellIntegration,
+    withProgress,
 } from './common/window.apis';
-import { getConfiguration } from './common/workspace.apis';
+import { getConfiguration, getWorkspaceFolders } from './common/workspace.apis';
 import { createManagerReady } from './features/common/managerReady';
 import { AutoFindProjects } from './features/creators/autoFindProjects';
 import { ExistingProjects } from './features/creators/existingProjects';
@@ -32,9 +50,11 @@ import {
     createTerminalCommand,
     getPackageCommandOptions,
     handlePackageUninstall,
+    managePackageVersion,
     refreshPackagesCommand,
     removeEnvironmentCommand,
     removePythonProject,
+    revealEnvInManagerView,
     revealProjectInExplorer,
     runAsTaskCommand,
     runInDedicatedTerminalCommand,
@@ -45,9 +65,15 @@ import {
 } from './features/envCommands';
 import { PythonEnvironmentManagers } from './features/envManagers';
 import { EnvVarManager, PythonEnvVariableManager } from './features/execution/envVariableManager';
+import { InlineScriptLazyDetector } from './features/inlineScriptLazyDetector';
+import {
+    applyInitialEnvironmentSelection,
+    registerInterpreterSettingsChangeListener,
+} from './features/interpreterSelection';
 import { PythonProjectManagerImpl } from './features/projectManager';
 import { getPythonApi, setPythonApi } from './features/pythonApi';
 import { registerCompletionProvider } from './features/settings/settingCompletions';
+import { migrateGlobalDefaultEnvManagerSetting } from './features/settings/settingHelpers';
 import { setActivateMenuButtonContext } from './features/terminal/activateMenuButton';
 import { normalizeShellPath } from './features/terminal/shells/common/shellUtils';
 import {
@@ -60,23 +86,25 @@ import { cleanupStartupScripts } from './features/terminal/shellStartupSetupHand
 import { TerminalActivationImpl } from './features/terminal/terminalActivationState';
 import { TerminalEnvVarInjector } from './features/terminal/terminalEnvVarInjector';
 import { TerminalManager, TerminalManagerImpl } from './features/terminal/terminalManager';
+import { registerTerminalPackageWatcher } from './features/terminal/terminalPackageWatcher';
 import { getEnvironmentForTerminal } from './features/terminal/utils';
+import { openSearchSettings } from './features/views/envManagerSearch';
 import { EnvManagerView } from './features/views/envManagersView';
 import { ProjectView } from './features/views/projectView';
 import { PythonStatusBarImpl } from './features/views/pythonStatusBar';
 import { updateViewsAndStatus } from './features/views/revealHandler';
 import { TemporaryStateManager } from './features/views/temporaryStateManager';
 import { ProjectItem, PythonEnvTreeItem } from './features/views/treeViewItems';
-import {
-    collectEnvironmentInfo,
-    getEnvManagerAndPackageManagerConfigLevels,
-    resolveDefaultInterpreter,
-    runPetInTerminalImpl,
-} from './helpers';
+import { collectEnvironmentInfo, getEnvManagerAndPackageManagerConfigLevels, runPetInTerminalImpl } from './helpers';
 import { EnvironmentManagers, ProjectCreators, PythonProjectManager } from './internal.api';
 import { registerSystemPythonFeatures } from './managers/builtin/main';
 import { SysPythonManager } from './managers/builtin/sysPythonManager';
-import { createNativePythonFinder, NativePythonFinder } from './managers/common/nativePythonFinder';
+import {
+    createNativePythonFinder,
+    getNativePythonToolsPathAndSource,
+    getNativePythonToolsVersion,
+    NativePythonFinder,
+} from './managers/common/nativePythonFinder';
 import { IDisposable } from './managers/common/types';
 import { registerCondaFeatures } from './managers/conda/main';
 import { registerPipenvFeatures } from './managers/pipenv/main';
@@ -84,7 +112,31 @@ import { registerPoetryFeatures } from './managers/poetry/main';
 import { registerPyenvFeatures } from './managers/pyenv/main';
 
 export async function activate(context: ExtensionContext): Promise<PythonEnvironmentApi | undefined> {
-    const useEnvironmentsExtension = getConfiguration('python').get<boolean>('useEnvironmentsExtension', true);
+    // Only skip activation if user explicitly set useEnvironmentsExtension to false.
+    // When disabled, the main Python extension handles environments instead (legacy mode).
+    const config = getConfiguration('python');
+    const inspection = config.inspect<boolean>('useEnvironmentsExtension');
+
+    // Check global and workspace-level explicit disables
+    let explicitlyDisabled = inspection?.globalValue === false || inspection?.workspaceValue === false;
+
+    // Also check folder-scoped settings in multi-root workspaces
+    // (inspect() on an unscoped config won't populate workspaceFolderValue reliably)
+    if (!explicitlyDisabled) {
+        const workspaceFolders = getWorkspaceFolders();
+        if (workspaceFolders) {
+            for (const folder of workspaceFolders) {
+                const folderConfig = getConfiguration('python', folder.uri);
+                const folderInspection = folderConfig.inspect<boolean>('useEnvironmentsExtension');
+                if (folderInspection?.workspaceFolderValue === false) {
+                    explicitlyDisabled = true;
+                    break;
+                }
+            }
+        }
+    }
+
+    const useEnvironmentsExtension = !explicitlyDisabled;
     traceInfo(`Experiment Status: useEnvironmentsExtension setting set to ${useEnvironmentsExtension}`);
     if (!useEnvironmentsExtension) {
         traceWarn(
@@ -101,8 +153,10 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
 
     ensureCorrectVersion();
 
-    // log extension version
-    traceVerbose(`Python-envs extension version: ${extensionVersion}`);
+    // Log extension version for diagnostics
+    const extensionVersion = extensions.getExtension(ENVS_EXTENSION_ID)?.packageJSON?.version;
+    traceInfo(`Python-envs extension version: ${extensionVersion ?? 'unknown'}`);
+
     // log settings
     const configLevels = getEnvManagerAndPackageManagerConfigLevels();
     traceInfo(`\n=== ${configLevels.section} ===`);
@@ -110,6 +164,15 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
 
     // Setup the persistent state for the extension.
     setPersistentState(context);
+
+    // One-time migration: remove `system` defaultEnvManager from User settings if a previous
+    // version wrote it there (bug #1468). Awaited so the migration deterministically affects
+    // initial environment selection on the very first activation after upgrade.
+    try {
+        await migrateGlobalDefaultEnvManagerSetting();
+    } catch (err) {
+        traceError(`[migration] migrateGlobalDefaultEnvManagerSetting threw: ${err}`);
+    }
 
     const statusBar = new PythonStatusBarImpl();
     context.subscriptions.push(statusBar);
@@ -144,6 +207,13 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
         projectCreators.registerPythonProjectCreator(new NewScriptProject(projectManager)),
     );
 
+    // Silent observer for `.py` files that declare PEP 723 inline
+    // script metadata. Emits anonymized telemetry (inlineScript.detected /
+    // inlineScript.edited) but does not register projects or surface any UI.
+    const inlineScriptLazyDetector = new InlineScriptLazyDetector();
+    inlineScriptLazyDetector.activate();
+    context.subscriptions.push(inlineScriptLazyDetector);
+
     setPythonApi(envManagers, projectManager, projectCreators, terminalManager, envVarManager);
     const api = await getPythonApi();
     const sysPythonManager = createDeferred<SysPythonManager>();
@@ -177,7 +247,18 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
         }),
         commands.registerCommand('python-envs.viewLogs', () => outputChannel.show()),
         commands.registerCommand('python-envs.refreshAllManagers', async () => {
-            await Promise.all(envManagers.managers.map((m) => m.refresh(undefined)));
+            await withProgress(
+                {
+                    location: ProgressLocation.Notification,
+                    title: l10n.t('Refreshing environment managers...'),
+                },
+                async () => {
+                    await Promise.all(envManagers.managers.map((m) => m.refresh(undefined)));
+                },
+            );
+        }),
+        commands.registerCommand('python-envs.searchSettings', async () => {
+            await openSearchSettings();
         }),
         commands.registerCommand('python-envs.refreshPackages', async (item) => {
             await refreshPackagesCommand(item, envManagers);
@@ -192,7 +273,15 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
                 manager: managerId,
                 triggeredLocation: 'createSpecifiedCommand',
             });
-            return await createEnvironmentCommand(item, envManagers, projectManager);
+            return await withProgress(
+                {
+                    location: ProgressLocation.Notification,
+                    title: l10n.t('Creating environment...'),
+                },
+                async () => {
+                    return await createEnvironmentCommand(item, envManagers, projectManager);
+                },
+            );
         }),
         commands.registerCommand('python-envs.createAny', async (options) => {
             // Telemetry: record environment creation attempt with no specific manager
@@ -200,10 +289,18 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
                 manager: 'none',
                 triggeredLocation: 'createAnyCommand',
             });
-            return await createAnyEnvironmentCommand(
-                envManagers,
-                projectManager,
-                options ?? { selectEnvironment: true },
+            return await withProgress(
+                {
+                    location: ProgressLocation.Notification,
+                    title: l10n.t('Creating environment...'),
+                },
+                async () => {
+                    return await createAnyEnvironmentCommand(
+                        envManagers,
+                        projectManager,
+                        options ?? { selectEnvironment: true },
+                    );
+                },
             );
         }),
         commands.registerCommand('python-envs.remove', async (item) => {
@@ -223,6 +320,9 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
         }),
         commands.registerCommand('python-envs.uninstallPackage', async (context: unknown) => {
             await handlePackageUninstall(context, envManagers);
+        }),
+        commands.registerCommand('python-envs.managePackageVersion', async (context: unknown) => {
+            await managePackageVersion(context, envManagers);
         }),
         commands.registerCommand('python-envs.set', async (item) => {
             await setEnvironmentCommand(item, envManagers, projectManager);
@@ -313,6 +413,9 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
         commands.registerCommand('python-envs.revealProjectInExplorer', async (item) => {
             await revealProjectInExplorer(item);
         }),
+        commands.registerCommand('python-envs.revealEnvInManagerView', async (item) => {
+            await revealEnvInManagerView(item, managerView);
+        }),
         commands.registerCommand('python-envs.terminal.activate', async () => {
             const terminal = activeTerminal();
             if (terminal) {
@@ -371,12 +474,40 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
         ),
         commands.registerCommand('python-envs.reportIssue', async () => {
             try {
+                // Prompt for issue title
+                const rawTitle = await window.showInputBox({
+                    title: l10n.t('Report Issue - Title'),
+                    prompt: l10n.t('Enter a brief title for the issue'),
+                    placeHolder: l10n.t('e.g., Environment not detected, activation fails, etc.'),
+                    ignoreFocusOut: true,
+                });
+                const title = rawTitle?.trim();
+
+                if (!title) {
+                    // User cancelled or provided empty title
+                    return;
+                }
+
+                // Prompt for issue description
+                const rawDescription = await window.showInputBox({
+                    title: l10n.t('Report Issue - Description'),
+                    prompt: l10n.t('Describe the issue in more detail'),
+                    placeHolder: l10n.t('Provide additional context about what happened...'),
+                    ignoreFocusOut: true,
+                });
+                const description = rawDescription?.trim();
+
+                if (!description) {
+                    // User cancelled or provided empty description
+                    return;
+                }
+
                 const issueData = await collectEnvironmentInfo(context, envManagers, projectManager);
 
                 await commands.executeCommand('workbench.action.openIssueReporter', {
                     extensionId: 'ms-python.vscode-python-envs',
-                    issueTitle: '[Python Environments] ',
-                    issueBody: `<!-- Please describe the issue you're experiencing -->\n\n<!-- The following information was automatically generated -->\n\n<details>\n<summary>Environment Information</summary>\n\n\`\`\`\n${issueData}\n\`\`\`\n\n</details>`,
+                    issueTitle: `[Python Environments] ${title}`,
+                    issueBody: `## Description\n${description}\n\n## Steps to Reproduce\n1. \n2. \n3. \n\n## Expected Behavior\n\n\n## Actual Behavior\n\n\n<!-- The following information was automatically generated -->\n\n<details>\n<summary>Environment Information</summary>\n\n\`\`\`\n${issueData}\n\`\`\`\n\n</details>`,
                 });
             } catch (error) {
                 window.showErrorMessage(`Failed to open issue reporter: ${error}`);
@@ -404,13 +535,13 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
         window.onDidChangeActiveTextEditor(async () => {
             updateViewsAndStatus(statusBar, workspaceView, managerView, api);
         }),
-        envManagers.onDidChangeEnvironment(async () => {
+        envManagers.onDidChangeManagerEnvironment(async () => {
             updateViewsAndStatus(statusBar, workspaceView, managerView, api);
         }),
         envManagers.onDidChangeEnvironments(async () => {
             updateViewsAndStatus(statusBar, workspaceView, managerView, api);
         }),
-        envManagers.onDidChangeEnvironmentFiltered(async (e) => {
+        envManagers.onDidChangeActiveEnvironment(async (e) => {
             managerView.environmentChanged(e);
             const location = e.uri?.fsPath ?? 'global';
             traceInfo(
@@ -425,8 +556,9 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
             }
             const envVar = shellEnv.value;
             if (envVar) {
-                if (envVar['VIRTUAL_ENV']) {
-                    const envPath = normalizeShellPath(envVar['VIRTUAL_ENV'], e.terminal.state.shell);
+                const envVarPath = envVar['VIRTUAL_ENV'] || envVar['CONDA_PREFIX'];
+                if (envVarPath) {
+                    const envPath = normalizeShellPath(envVarPath, e.terminal.state.shell);
                     const env = await api.resolveEnvironment(Uri.file(envPath));
                     if (env) {
                         monitoredTerminals.set(e.terminal, env);
@@ -446,25 +578,145 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
      * Below are all the contributed features using the APIs.
      */
     setImmediate(async () => {
-        // This is the finder that is used by all the built in environment managers
-        const nativeFinder: NativePythonFinder = await createNativePythonFinder(outputChannel, api, context);
-        context.subscriptions.push(nativeFinder);
-        const sysMgr = new SysPythonManager(nativeFinder, api, outputChannel);
-        sysPythonManager.resolve(sysMgr);
-        await Promise.all([
-            registerSystemPythonFeatures(nativeFinder, context.subscriptions, outputChannel, sysMgr),
-            registerCondaFeatures(nativeFinder, context.subscriptions, outputChannel, projectManager),
-            registerPyenvFeatures(nativeFinder, context.subscriptions, projectManager),
-            registerPipenvFeatures(nativeFinder, context.subscriptions, projectManager),
-            registerPoetryFeatures(nativeFinder, context.subscriptions, outputChannel, projectManager),
-            shellStartupVarsMgr.initialize(),
-        ]);
+        let failureStage = 'nativeFinder';
+        const stageWatch = new StopWatch();
+        // Mutable ref so the hang watchdog can report whether global scope was deferred
+        // even if it fires mid-envSelection before applyInitialEnvironmentSelection returns.
+        const globalScopeDeferredRef: { value: 'deferred' | 'not_deferred' | 'unknown' } = { value: 'unknown' };
+        // Watchdog: fires if setup hasn't completed within 120s, indicating a likely hang
+        const SETUP_HANG_TIMEOUT_MS = 120_000;
+        let hangWatchdogActive = true;
+        const clearHangWatchdog = () => {
+            if (!hangWatchdogActive) {
+                return;
+            }
+            hangWatchdogActive = false;
+            clearTimeout(hangWatchdog);
+        };
+        const hangWatchdog = setTimeout(() => {
+            if (!hangWatchdogActive) {
+                return;
+            }
+            hangWatchdogActive = false;
+            traceError(`Setup appears hung during stage: ${failureStage}`);
+            sendTelemetryEvent(
+                EventNames.SETUP_HANG_DETECTED,
+                { duration: start.elapsedTime, stageDuration: stageWatch.elapsedTime },
+                { failureStage, globalScopeDeferred: globalScopeDeferredRef.value },
+            );
+        }, SETUP_HANG_TIMEOUT_MS);
+        context.subscriptions.push({ dispose: clearHangWatchdog });
+        try {
+            // This is the finder that is used by all the built in environment managers
+            const petStart = new StopWatch();
+            let nativeFinder: NativePythonFinder;
+            try {
+                nativeFinder = await createNativePythonFinder(outputChannel, api, context);
+                sendTelemetryEvent(EventNames.PET_INIT_DURATION, petStart.elapsedTime, { result: 'success' });
+                // Fire-and-forget: report the bundled PET binary version so other PET telemetry
+                // can be sliced by version. Don't block activation on this.
+                void getNativePythonToolsPathAndSource()
+                    .then(async ({ toolPath, source }) => {
+                        const version = await getNativePythonToolsVersion(toolPath);
+                        sendTelemetryEvent(EventNames.PET_VERSION, undefined, { version, source });
+                    })
+                    .catch(() => {
+                        sendTelemetryEvent(EventNames.PET_VERSION, undefined, {
+                            version: 'unknown',
+                            source: 'python_extension',
+                        });
+                    });
+            } catch (petError) {
+                sendTelemetryEvent(
+                    EventNames.PET_INIT_DURATION,
+                    petStart.elapsedTime,
+                    { result: 'error', errorType: classifyError(petError) },
+                    petError instanceof Error ? petError : undefined,
+                );
+                throw petError;
+            }
+            context.subscriptions.push(nativeFinder);
+            const sysMgr = new SysPythonManager(nativeFinder, api, outputChannel);
+            sysPythonManager.resolve(sysMgr);
+            // Each manager registers independently — one failure must not block the others.
+            failureStage = 'managerRegistration';
+            stageWatch.reset();
+            await Promise.all([
+                safeRegister(
+                    'system',
+                    registerSystemPythonFeatures(nativeFinder, context.subscriptions, outputChannel, sysMgr),
+                ),
+                safeRegister(
+                    'conda',
+                    registerCondaFeatures(nativeFinder, context.subscriptions, outputChannel, projectManager),
+                ),
+                safeRegister('pyenv', registerPyenvFeatures(nativeFinder, context.subscriptions, projectManager)),
+                safeRegister('pipenv', registerPipenvFeatures(nativeFinder, context.subscriptions, projectManager)),
+                safeRegister(
+                    'poetry',
+                    registerPoetryFeatures(nativeFinder, context.subscriptions, outputChannel, projectManager),
+                ),
+                safeRegister('shellStartupVars', shellStartupVarsMgr.initialize()),
+            ]);
 
-        await resolveDefaultInterpreter(nativeFinder, envManagers, api);
+            failureStage = 'envSelection';
+            stageWatch.reset();
+            await applyInitialEnvironmentSelection(
+                envManagers,
+                projectManager,
+                nativeFinder,
+                api,
+                start.elapsedTime,
+                globalScopeDeferredRef,
+            );
 
-        sendTelemetryEvent(EventNames.EXTENSION_MANAGER_REGISTRATION_DURATION, start.elapsedTime);
-        await terminalManager.initialize(api);
-        sendManagerSelectionTelemetry(projectManager);
+            // Register manager-agnostic terminal watcher for package-modifying commands
+            failureStage = 'terminalWatcher';
+            stageWatch.reset();
+            registerTerminalPackageWatcher(api, terminalActivation, outputChannel, context.subscriptions);
+
+            // Register listener for interpreter settings changes for interpreter re-selection
+            failureStage = 'settingsListener';
+            stageWatch.reset();
+            context.subscriptions.push(
+                registerInterpreterSettingsChangeListener(envManagers, projectManager, nativeFinder, api),
+            );
+
+            sendTelemetryEvent(EventNames.EXTENSION_MANAGER_REGISTRATION_DURATION, start.elapsedTime, {
+                result: 'success',
+            });
+            clearHangWatchdog();
+            try {
+                await terminalManager.initialize(api);
+                sendManagerSelectionTelemetry(projectManager);
+                await sendProjectStructureTelemetry(projectManager, envManagers);
+                await sendEnvironmentToolUsageTelemetry(projectManager, envManagers);
+
+                // Log discovery summary to help users troubleshoot environment detection issues
+                await logDiscoverySummary(envManagers);
+            } catch (postInitError) {
+                traceError('Post-initialization tasks failed:', postInitError);
+            }
+        } catch (error) {
+            clearHangWatchdog();
+            traceError('Failed to initialize environment managers:', error);
+            sendTelemetryEvent(
+                EventNames.EXTENSION_MANAGER_REGISTRATION_DURATION,
+                start.elapsedTime,
+                {
+                    result: 'error',
+                    failureStage,
+                    errorType: classifyError(error),
+                },
+                error instanceof Error ? error : undefined,
+            );
+            // Show a user-friendly error message
+            window.showErrorMessage(
+                l10n.t(
+                    'Python Environments: Failed to initialize environment managers. Some features may not work correctly. Check the Output panel for details.',
+                ),
+            );
+        }
     });
 
     sendTelemetryEvent(EventNames.EXTENSION_ACTIVATION_DURATION, start.elapsedTime);
@@ -487,6 +739,8 @@ export async function disposeAll(disposables: IDisposable[]): Promise<void> {
 
 export async function deactivate(context: ExtensionContext) {
     await disposeAll(context.subscriptions);
-    context.subscriptions.length = 0; // Clear subscriptions to prevent memory leaks
+    if (context.subscriptions?.length) {
+        context.subscriptions.length = 0; // Clear subscriptions to prevent memory leaks
+    }
     traceInfo('Python Environments extension deactivated.');
 }

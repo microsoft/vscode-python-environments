@@ -5,7 +5,7 @@ import { l10n, LogOutputChannel, ProgressLocation, QuickPickItem, QuickPickItemK
 import { EnvironmentManager, PythonEnvironment, PythonEnvironmentApi, PythonEnvironmentInfo } from '../../api';
 import { ENVS_EXTENSION_ID } from '../../common/constants';
 import { Common, VenvManagerStrings } from '../../common/localize';
-import { traceInfo } from '../../common/logging';
+import { traceInfo, traceVerbose } from '../../common/logging';
 import { getWorkspacePersistentState } from '../../common/persistentState';
 import { EventNames } from '../../common/telemetry/constants';
 import { sendTelemetryEvent } from '../../common/telemetry/sender';
@@ -24,7 +24,7 @@ import {
     NativePythonEnvironmentKind,
     NativePythonFinder,
 } from '../common/nativePythonFinder';
-import { getShellActivationCommands, shortVersion, sortEnvironments } from '../common/utils';
+import { getShellActivationCommands, shortenVersionString, sortEnvironments } from '../common/utils';
 import { runPython, runUV, shouldUseUv } from './helpers';
 import { getProjectInstallable, PipPackages, shouldProceedAfterPyprojectValidation } from './pipUtils';
 import { resolveSystemPythonEnvironmentPath } from './utils';
@@ -61,23 +61,32 @@ export async function clearVenvCache(): Promise<void> {
 }
 
 export async function getVenvForWorkspace(fsPath: string): Promise<string | undefined> {
-    if (process.env.VIRTUAL_ENV) {
-        return process.env.VIRTUAL_ENV;
-    }
-
-    const state = await getWorkspacePersistentState();
-    const data: { [key: string]: string } | undefined = await state.get(VENV_WORKSPACE_KEY);
-    if (data) {
-        try {
+    // Check persisted user selection first — this should always take priority
+    // over process.env.VIRTUAL_ENV so that explicit selections survive reload.
+    try {
+        const state = await getWorkspacePersistentState();
+        const data: { [key: string]: string } | undefined = await state.get(VENV_WORKSPACE_KEY);
+        if (data) {
             const envPath = data[fsPath];
-            if (await fsapi.pathExists(envPath)) {
+            if (envPath && (await fsapi.pathExists(envPath))) {
                 return envPath;
             }
-            setVenvForWorkspace(fsPath, undefined);
-        } catch {
-            return undefined;
+            if (envPath) {
+                await setVenvForWorkspace(fsPath, undefined);
+            }
+        }
+    } catch {
+        // fall through to VIRTUAL_ENV check
+    }
+
+    // Fall back to VIRTUAL_ENV only if it points to a path inside this workspace.
+    if (process.env.VIRTUAL_ENV) {
+        const rel = path.relative(fsPath, process.env.VIRTUAL_ENV);
+        if (rel === '' || (!rel.startsWith('..') && !path.isAbsolute(rel))) {
+            return process.env.VIRTUAL_ENV;
         }
     }
+
     return undefined;
 }
 
@@ -128,9 +137,34 @@ function getName(binPath: string): string {
 }
 
 async function getPythonInfo(env: NativeEnvInfo): Promise<PythonEnvironmentInfo> {
+    // Handle broken environments that have an error field
+    if (env.error) {
+        const venvName = env.name ?? (env.prefix ? path.basename(env.prefix) : 'Unknown');
+        const name = `${venvName} (broken)`;
+
+        return {
+            name: name,
+            displayName: name,
+            shortDisplayName: `(${venvName})`,
+            displayPath: env.prefix ?? env.executable ?? 'Unknown path',
+            version: env.version ?? 'Unknown',
+            description: env.error,
+            tooltip: env.error,
+            environmentPath: Uri.file(env.prefix ?? env.executable ?? ''),
+            iconPath: new ThemeIcon('warning'),
+            sysPrefix: env.prefix ?? '',
+            execInfo: {
+                run: {
+                    executable: env.executable ?? '',
+                },
+            },
+            error: env.error,
+        };
+    }
+
     if (env.executable && env.version && env.prefix) {
         const venvName = env.name ?? getName(env.executable);
-        const sv = shortVersion(env.version);
+        const sv = shortenVersionString(env.version);
         const name = `${venvName} (${sv})`;
         let description = undefined;
         if (env.kind === NativePythonEnvironmentKind.venvUv) {
@@ -193,6 +227,19 @@ export async function findVirtualEnvironments(
         );
 
     for (const e of envs) {
+        // Include environments with errors (broken environments) so users can see and diagnose them
+        if (e.error) {
+            log.warn(`Broken venv environment detected: ${e.error} - ${JSON.stringify(e)}`);
+            try {
+                const env = api.createPythonEnvironmentItem(await getPythonInfo(e), manager);
+                collection.push(env);
+                log.info(`Found broken venv environment: ${env.name}`);
+            } catch (err) {
+                log.error(`Failed to create broken environment item: ${err}`);
+            }
+            continue;
+        }
+
         if (!(e.prefix && e.executable && e.version)) {
             log.warn(`Invalid venv environment: ${JSON.stringify(e)}`);
             continue;
@@ -543,15 +590,19 @@ export async function resolveVenvPythonEnvironmentPath(
     manager: EnvironmentManager,
     baseManager: EnvironmentManager,
 ): Promise<PythonEnvironment | undefined> {
-    const resolved = await nativeFinder.resolve(fsPath);
+    try {
+        const resolved = await nativeFinder.resolve(fsPath);
 
-    if (
-        resolved.kind === NativePythonEnvironmentKind.venv ||
-        resolved.kind === NativePythonEnvironmentKind.venvUv ||
-        resolved.kind === NativePythonEnvironmentKind.uvWorkspace
-    ) {
-        const envInfo = await getPythonInfo(resolved);
-        return api.createPythonEnvironmentItem(envInfo, manager);
+        if (
+            resolved.kind === NativePythonEnvironmentKind.venv ||
+            resolved.kind === NativePythonEnvironmentKind.venvUv ||
+            resolved.kind === NativePythonEnvironmentKind.uvWorkspace
+        ) {
+            const envInfo = await getPythonInfo(resolved);
+            return api.createPythonEnvironmentItem(envInfo, manager);
+        }
+    } catch (ex) {
+        traceVerbose(`Failed to resolve venv env "${fsPath}": ${ex}`);
     }
 
     return resolveSystemPythonEnvironmentPath(fsPath, nativeFinder, api, baseManager);

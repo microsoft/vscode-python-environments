@@ -1,12 +1,18 @@
 import * as assert from 'assert';
 import * as sinon from 'sinon';
+import { ExtensionTerminalOptions, Terminal, TerminalOptions } from 'vscode';
+import * as windowApis from '../../../common/window.apis';
 import * as workspaceApis from '../../../common/workspace.apis';
+import * as shellDetector from '../../../features/common/shellDetector';
 import {
     ACT_TYPE_COMMAND,
     ACT_TYPE_OFF,
     ACT_TYPE_SHELL,
     AutoActivationType,
     getAutoActivationType,
+    shouldActivateInCurrentTerminal,
+    shouldSkipTerminalActivation,
+    waitForShellIntegration,
 } from '../../../features/terminal/utils';
 
 interface MockWorkspaceConfig {
@@ -352,5 +358,385 @@ suite('Terminal Utils - getAutoActivationType', () => {
                 assert.strictEqual(result, expected, `Should handle ${input} value correctly`);
             });
         });
+    });
+});
+
+suite('Terminal Utils - shouldActivateInCurrentTerminal', () => {
+    let mockGetConfiguration: sinon.SinonStub;
+    let pythonConfig: MockWorkspaceConfig;
+
+    setup(() => {
+        mockGetConfiguration = sinon.stub(workspaceApis, 'getConfiguration');
+
+        pythonConfig = {
+            get: sinon.stub(),
+            inspect: sinon.stub(),
+            update: sinon.stub(),
+        };
+
+        mockGetConfiguration.withArgs('python').returns(pythonConfig);
+    });
+
+    teardown(() => {
+        sinon.restore();
+    });
+
+    test('should return true when inspect returns undefined (no config)', () => {
+        pythonConfig.inspect.withArgs('terminal.activateEnvInCurrentTerminal').returns(undefined);
+
+        assert.strictEqual(shouldActivateInCurrentTerminal(), true, 'Should default to true when no config exists');
+    });
+
+    test('should return true when no explicit values are set (all undefined)', () => {
+        pythonConfig.inspect.withArgs('terminal.activateEnvInCurrentTerminal').returns({
+            key: 'terminal.activateEnvInCurrentTerminal',
+            defaultValue: false,
+            globalValue: undefined,
+            workspaceValue: undefined,
+            workspaceFolderValue: undefined,
+        });
+
+        assert.strictEqual(
+            shouldActivateInCurrentTerminal(),
+            true,
+            'Should return true when only defaultValue is set (not user-explicit)',
+        );
+    });
+
+    test('should return false when globalValue is explicitly false', () => {
+        pythonConfig.inspect.withArgs('terminal.activateEnvInCurrentTerminal').returns({
+            key: 'terminal.activateEnvInCurrentTerminal',
+            defaultValue: false,
+            globalValue: false,
+            workspaceValue: undefined,
+            workspaceFolderValue: undefined,
+        });
+
+        assert.strictEqual(
+            shouldActivateInCurrentTerminal(),
+            false,
+            'Should return false when user explicitly set globalValue to false',
+        );
+    });
+
+    test('should return false when workspaceValue is explicitly false', () => {
+        pythonConfig.inspect.withArgs('terminal.activateEnvInCurrentTerminal').returns({
+            key: 'terminal.activateEnvInCurrentTerminal',
+            defaultValue: false,
+            globalValue: undefined,
+            workspaceValue: false,
+            workspaceFolderValue: undefined,
+        });
+
+        assert.strictEqual(
+            shouldActivateInCurrentTerminal(),
+            false,
+            'Should return false when user explicitly set workspaceValue to false',
+        );
+    });
+
+    test('should return false when workspaceFolderValue is explicitly false', () => {
+        pythonConfig.inspect.withArgs('terminal.activateEnvInCurrentTerminal').returns({
+            key: 'terminal.activateEnvInCurrentTerminal',
+            defaultValue: false,
+            globalValue: undefined,
+            workspaceValue: undefined,
+            workspaceFolderValue: false,
+        });
+
+        assert.strictEqual(
+            shouldActivateInCurrentTerminal(),
+            false,
+            'Should return false when user explicitly set workspaceFolderValue to false',
+        );
+    });
+
+    test('should return true when globalValue is explicitly true', () => {
+        pythonConfig.inspect.withArgs('terminal.activateEnvInCurrentTerminal').returns({
+            key: 'terminal.activateEnvInCurrentTerminal',
+            defaultValue: false,
+            globalValue: true,
+            workspaceValue: undefined,
+            workspaceFolderValue: undefined,
+        });
+
+        assert.strictEqual(
+            shouldActivateInCurrentTerminal(),
+            true,
+            'Should return true when user explicitly set globalValue to true',
+        );
+    });
+
+    test('workspaceFolderValue false takes precedence over globalValue true', () => {
+        pythonConfig.inspect.withArgs('terminal.activateEnvInCurrentTerminal').returns({
+            key: 'terminal.activateEnvInCurrentTerminal',
+            defaultValue: false,
+            globalValue: true,
+            workspaceValue: undefined,
+            workspaceFolderValue: false,
+        });
+
+        assert.strictEqual(
+            shouldActivateInCurrentTerminal(),
+            false,
+            'workspaceFolderValue false should take precedence',
+        );
+    });
+
+    test('should return false when globalRemoteValue is explicitly false', () => {
+        pythonConfig.inspect.withArgs('terminal.activateEnvInCurrentTerminal').returns({
+            key: 'terminal.activateEnvInCurrentTerminal',
+            defaultValue: false,
+            globalRemoteValue: false,
+            globalValue: undefined,
+            workspaceValue: undefined,
+            workspaceFolderValue: undefined,
+        });
+
+        assert.strictEqual(
+            shouldActivateInCurrentTerminal(),
+            false,
+            'Should return false when user explicitly set globalRemoteValue to false',
+        );
+    });
+
+    test('should return false when globalLocalValue is explicitly false', () => {
+        pythonConfig.inspect.withArgs('terminal.activateEnvInCurrentTerminal').returns({
+            key: 'terminal.activateEnvInCurrentTerminal',
+            defaultValue: false,
+            globalLocalValue: false,
+            globalValue: undefined,
+            workspaceValue: undefined,
+            workspaceFolderValue: undefined,
+        });
+
+        assert.strictEqual(
+            shouldActivateInCurrentTerminal(),
+            false,
+            'Should return false when user explicitly set globalLocalValue to false',
+        );
+    });
+
+    test('workspaceValue false takes precedence over globalRemoteValue true', () => {
+        pythonConfig.inspect.withArgs('terminal.activateEnvInCurrentTerminal').returns({
+            key: 'terminal.activateEnvInCurrentTerminal',
+            defaultValue: false,
+            globalRemoteValue: true,
+            globalValue: undefined,
+            workspaceValue: false,
+            workspaceFolderValue: undefined,
+        });
+
+        assert.strictEqual(
+            shouldActivateInCurrentTerminal(),
+            false,
+            'workspaceValue false should take precedence over globalRemoteValue true',
+        );
+    });
+
+    test('should return false when globalValue is false even if workspaceValue is true (any explicit false wins)', () => {
+        pythonConfig.inspect.withArgs('terminal.activateEnvInCurrentTerminal').returns({
+            key: 'terminal.activateEnvInCurrentTerminal',
+            defaultValue: false,
+            globalValue: false,
+            workspaceValue: true,
+            workspaceFolderValue: undefined,
+        });
+
+        assert.strictEqual(
+            shouldActivateInCurrentTerminal(),
+            false,
+            'Any explicit false at any scope should return false, regardless of higher-precedence true values',
+        );
+    });
+});
+
+suite('Terminal Utils - shouldSkipTerminalActivation', () => {
+    test('should return false for a regular terminal with no special options', () => {
+        const terminal = { creationOptions: {} as TerminalOptions } as Terminal;
+        assert.strictEqual(shouldSkipTerminalActivation(terminal), false);
+    });
+
+    test('should return true when hideFromUser is true', () => {
+        const terminal = { creationOptions: { hideFromUser: true } as TerminalOptions } as Terminal;
+        assert.strictEqual(shouldSkipTerminalActivation(terminal), true);
+    });
+
+    test('should return false when hideFromUser is false', () => {
+        const terminal = { creationOptions: { hideFromUser: false } as TerminalOptions } as Terminal;
+        assert.strictEqual(shouldSkipTerminalActivation(terminal), false);
+    });
+
+    test('should return true for a pseudoterminal (pty-based extension terminal)', () => {
+        const terminal = {
+            creationOptions: {
+                name: 'pseudo',
+                pty: { open: () => {}, close: () => {} },
+            } as unknown as ExtensionTerminalOptions,
+        } as Terminal;
+        assert.strictEqual(shouldSkipTerminalActivation(terminal), true);
+    });
+
+    test('should return false when pty is undefined', () => {
+        const terminal = { creationOptions: {} as ExtensionTerminalOptions } as Terminal;
+        assert.strictEqual(shouldSkipTerminalActivation(terminal), false);
+    });
+
+    test('should return true when both hideFromUser and pty are set', () => {
+        const terminal = {
+            creationOptions: { hideFromUser: true, pty: { open: () => {}, close: () => {} } },
+        } as unknown as Terminal;
+        assert.strictEqual(shouldSkipTerminalActivation(terminal), true);
+    });
+});
+
+suite('Terminal Utils - waitForShellIntegration', () => {
+    let mockGetConfiguration: sinon.SinonStub;
+    let identifyTerminalShellStub: sinon.SinonStub;
+    let onDidChangeTerminalShellIntegrationStub: sinon.SinonStub;
+    let onDidWriteTerminalDataStub: sinon.SinonStub;
+
+    function setupLongTimeoutConfig() {
+        // Make the timeout effectively infinite so tests resolve via the listener,
+        // not the timer. Avoids flakiness while keeping the race code paths exercised.
+        const config = {
+            get: sinon.stub(),
+            inspect: sinon.stub(),
+            update: sinon.stub(),
+        };
+        config.get.withArgs('shellIntegration.timeout').returns(60_000);
+        config.get.withArgs('shellIntegration.enabled', true).returns(true);
+        mockGetConfiguration.withArgs('terminal.integrated').returns(config);
+    }
+
+    setup(() => {
+        mockGetConfiguration = sinon.stub(workspaceApis, 'getConfiguration');
+        identifyTerminalShellStub = sinon.stub(shellDetector, 'identifyTerminalShell');
+        onDidChangeTerminalShellIntegrationStub = sinon.stub(windowApis, 'onDidChangeTerminalShellIntegration');
+        onDidWriteTerminalDataStub = sinon.stub(windowApis, 'onDidWriteTerminalData');
+
+        // Default: dispose-only fake event registrations. Tests that need to fire
+        // events override these via .callsFake.
+        const fakeDisposable = { dispose: () => undefined };
+        onDidChangeTerminalShellIntegrationStub.returns(fakeDisposable);
+        onDidWriteTerminalDataStub.returns(fakeDisposable);
+    });
+
+    teardown(() => {
+        sinon.restore();
+    });
+
+    test('returns false immediately when terminal is undefined', async () => {
+        const result = await waitForShellIntegration(undefined);
+
+        assert.strictEqual(result, false);
+        sinon.assert.notCalled(identifyTerminalShellStub);
+        sinon.assert.notCalled(onDidChangeTerminalShellIntegrationStub);
+    });
+
+    test('returns true immediately when terminal.shellIntegration is already set', async () => {
+        const terminal = { shellIntegration: {} } as unknown as Terminal;
+
+        const result = await waitForShellIntegration(terminal);
+
+        assert.strictEqual(result, true);
+        sinon.assert.notCalled(identifyTerminalShellStub);
+        sinon.assert.notCalled(onDidChangeTerminalShellIntegrationStub);
+    });
+
+    test('returns false immediately for nu without registering event listeners', async () => {
+        const terminal = {} as Terminal;
+        identifyTerminalShellStub.returns('nu');
+
+        const result = await waitForShellIntegration(terminal);
+
+        assert.strictEqual(result, false);
+        sinon.assert.calledOnce(identifyTerminalShellStub);
+        sinon.assert.notCalled(onDidChangeTerminalShellIntegrationStub);
+        sinon.assert.notCalled(onDidWriteTerminalDataStub);
+    });
+
+    test('returns false immediately for cmd', async () => {
+        const terminal = {} as Terminal;
+        identifyTerminalShellStub.returns('cmd');
+
+        const result = await waitForShellIntegration(terminal);
+
+        assert.strictEqual(result, false);
+        sinon.assert.notCalled(onDidChangeTerminalShellIntegrationStub);
+    });
+
+    test('returns false immediately for csh / tcsh / ksh / xonsh', async () => {
+        const unsupported = ['csh', 'tcsh', 'ksh', 'xonsh'];
+        for (const shell of unsupported) {
+            identifyTerminalShellStub.resetHistory();
+            identifyTerminalShellStub.returns(shell);
+            onDidChangeTerminalShellIntegrationStub.resetHistory();
+
+            const result = await waitForShellIntegration({} as Terminal);
+
+            assert.strictEqual(result, false, `expected false for shell '${shell}'`);
+            sinon.assert.notCalled(onDidChangeTerminalShellIntegrationStub);
+        }
+    });
+
+    test('falls through to event race for bash (supported shell)', async () => {
+        setupLongTimeoutConfig();
+        const terminal = {} as Terminal;
+        identifyTerminalShellStub.returns('bash');
+
+        let listenerRef: ((e: { terminal: Terminal }) => void) | undefined;
+        onDidChangeTerminalShellIntegrationStub.callsFake((listener: (e: { terminal: Terminal }) => void) => {
+            listenerRef = listener;
+            return { dispose: () => undefined };
+        });
+
+        const racePromise = waitForShellIntegration(terminal);
+        // Yield once so the Promise.race body has a chance to register listeners.
+        await new Promise<void>((r) => setImmediate(r));
+        assert.ok(listenerRef, 'shell integration listener should be registered');
+        listenerRef!({ terminal });
+
+        const result = await racePromise;
+        assert.strictEqual(result, true);
+        sinon.assert.calledOnce(onDidChangeTerminalShellIntegrationStub);
+    });
+
+    test('falls through to event race when shell type is unknown', async () => {
+        setupLongTimeoutConfig();
+        const terminal = {} as Terminal;
+        identifyTerminalShellStub.returns('unknown');
+
+        let listenerRef: ((e: { terminal: Terminal }) => void) | undefined;
+        onDidChangeTerminalShellIntegrationStub.callsFake((listener: (e: { terminal: Terminal }) => void) => {
+            listenerRef = listener;
+            return { dispose: () => undefined };
+        });
+
+        const racePromise = waitForShellIntegration(terminal);
+        await new Promise<void>((r) => setImmediate(r));
+        listenerRef!({ terminal });
+
+        const result = await racePromise;
+        assert.strictEqual(result, true);
+    });
+
+    test('falls through to event race when identifyTerminalShell throws', async () => {
+        setupLongTimeoutConfig();
+        const terminal = {} as Terminal;
+        identifyTerminalShellStub.throws(new Error('detection failed'));
+
+        let listenerRef: ((e: { terminal: Terminal }) => void) | undefined;
+        onDidChangeTerminalShellIntegrationStub.callsFake((listener: (e: { terminal: Terminal }) => void) => {
+            listenerRef = listener;
+            return { dispose: () => undefined };
+        });
+
+        const racePromise = waitForShellIntegration(terminal);
+        await new Promise<void>((r) => setImmediate(r));
+        listenerRef!({ terminal });
+
+        const result = await racePromise;
+        assert.strictEqual(result, true, 'should not regress when detection throws');
     });
 });

@@ -1,4 +1,5 @@
 import * as tomljs from '@iarna/toml';
+import { valid as pep440Valid } from '@renovatebot/pep440';
 import * as fse from 'fs-extra';
 import * as path from 'path';
 import { l10n, LogOutputChannel, ProgressLocation, QuickInputButtons, QuickPickItem, Uri, window } from 'vscode';
@@ -22,6 +23,7 @@ export interface PyprojectToml {
         requires?: unknown;
     };
 }
+
 export function validatePyprojectToml(toml: PyprojectToml): string | undefined {
     // 1. Validate required "requires" field in [build-system] section (PEP 518)
     const buildSystem = toml['build-system'];
@@ -56,13 +58,7 @@ export function validatePyprojectToml(toml: PyprojectToml): string | undefined {
         if (version.length === 0) {
             return l10n.t('Version cannot be empty in pyproject.toml.');
         }
-        // PEP 440 version regex.  Versions must follow PEP 440 format (e.g., "1.0.0", "2.1a3").
-        // See https://peps.python.org/pep-0440/
-        // This regex is adapted from the official python 'packaging' library:
-        // https://github.com/pypa/packaging/blob/main/src/packaging/version.py
-        const versionRegex =
-            /^v?([0-9]+!)?([0-9]+(?:\.[0-9]+)*)(?:[-_.]?(a|b|c|rc|alpha|beta|pre|preview)[-_.]?([0-9]+)?)?(?:(?:-([0-9]+))|(?:[-_.]?(post|rev|r)[-_.]?([0-9]+)?))?(?:[-_.]?(dev)[-_.]?([0-9]+)?)?(?:\+([a-z0-9]+(?:[-_.][a-z0-9]+)*))?$/i;
-        if (!versionRegex.test(version)) {
+        if (!pep440Valid(version)) {
             return l10n.t('Invalid version "{0}" in pyproject.toml.', version);
         }
     }
@@ -290,12 +286,34 @@ export async function getProjectInstallable(
             const uniqueResults = Array.from(new Map(results.map((uri) => [uri.fsPath, uri])).values());
 
             const fsPaths = projects.map((p) => p.uri.fsPath);
+            // Compute depth relative to the owning project root so ordering reflects
+            // "shallower within the project", independent of where the project lives on disk.
+            const depthFromProject = (uri: Uri): number => {
+                const projectRoot = api.getPythonProject(uri)?.uri.fsPath;
+                if (!projectRoot) {
+                    return Number.MAX_SAFE_INTEGER;
+                }
+                const rel = path.relative(projectRoot, uri.fsPath);
+                if (!rel) {
+                    return 0;
+                }
+                return rel.split(path.sep).filter((segment) => segment.length > 0).length;
+            };
             const filtered = uniqueResults
                 .filter((uri) => {
                     const p = api.getPythonProject(uri)?.uri.fsPath;
                     return p && fsPaths.includes(p);
                 })
-                .sort();
+                .sort((a, b) => {
+                    // Sort by path depth relative to the project root (shallowest first) so
+                    // top-level files like requirements.txt appear before deeply nested ones.
+                    const depthA = depthFromProject(a);
+                    const depthB = depthFromProject(b);
+                    if (depthA !== depthB) {
+                        return depthA - depthB;
+                    }
+                    return a.fsPath.localeCompare(b.fsPath);
+                });
 
             await Promise.all(
                 filtered.map(async (uri) => {

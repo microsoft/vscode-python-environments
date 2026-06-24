@@ -1,13 +1,15 @@
 import { isWindows } from '../../../common/utils/platformUtils';
 import { ShellConstants } from '../../common/shellConstants';
-import { BashEnvsProvider, ZshEnvsProvider } from './bash/bashEnvs';
-import { BashStartupProvider, GitBashStartupProvider, ZshStartupProvider } from './bash/bashStartup';
+import { BashEnvsProvider } from './bash/bashEnvs';
+import { BashStartupProvider, GitBashStartupProvider } from './bash/bashStartup';
 import { CmdEnvsProvider } from './cmd/cmdEnvs';
 import { CmdStartupProvider } from './cmd/cmdStartup';
 import { FishEnvsProvider } from './fish/fishEnvs';
 import { FishStartupProvider } from './fish/fishStartup';
 import { PowerShellEnvsProvider } from './pwsh/pwshEnvs';
 import { PwshStartupProvider } from './pwsh/pwshStartup';
+import { ZshEnvsProvider } from './zsh/zshEnvs';
+import { ZshStartupProvider } from './zsh/zshStartup';
 import { ShellEnvsProvider, ShellStartupScriptProvider } from './startupProvider';
 
 export function createShellStartupProviders(): ShellStartupScriptProvider[] {

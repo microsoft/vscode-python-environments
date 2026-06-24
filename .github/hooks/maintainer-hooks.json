@@ -1,0 +1,50 @@
+{
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "description": "Agent hooks for vscode-python-environments maintainer workflow",
+    "hooks": {
+        "SessionStart": [
+            {
+                "type": "command",
+                "command": "python .github/hooks/scripts/session_start.py",
+                "windows": "python .github\\hooks\\scripts\\session_start.py",
+                "timeout": 10,
+                "env": {
+                    "PYTHONPATH": "."
+                }
+            }
+        ],
+        "PostToolUse": [
+            {
+                "type": "command",
+                "command": "python .github/hooks/scripts/post_tool_use.py",
+                "windows": "python .github\\hooks\\scripts\\post_tool_use.py",
+                "timeout": 60,
+                "env": {
+                    "PYTHONPATH": "."
+                }
+            }
+        ],
+        "Stop": [
+            {
+                "type": "command",
+                "command": "python .github/hooks/scripts/stop_hook.py",
+                "windows": "python .github\\hooks\\scripts\\stop_hook.py",
+                "timeout": 15,
+                "env": {
+                    "PYTHONPATH": "."
+                }
+            }
+        ],
+        "SubagentStop": [
+            {
+                "type": "command",
+                "command": "python .github/hooks/scripts/subagent_stop.py",
+                "windows": "python .github\\hooks\\scripts\\subagent_stop.py",
+                "timeout": 10,
+                "env": {
+                    "PYTHONPATH": "."
+                }
+            }
+        ]
+    }
+}

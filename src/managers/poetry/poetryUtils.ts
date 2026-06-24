@@ -3,11 +3,13 @@ import * as path from 'path';
 import { Uri } from 'vscode';
 import which from 'which';
 import { EnvironmentManager, PythonEnvironment, PythonEnvironmentApi, PythonEnvironmentInfo } from '../../api';
+import { execProcess } from '../../common/childProcess.apis';
 import { ENVS_EXTENSION_ID } from '../../common/constants';
 import { traceError, traceInfo } from '../../common/logging';
 import { getWorkspacePersistentState } from '../../common/persistentState';
-import { getUserHomeDir, untildify } from '../../common/utils/pathUtils';
-import { isWindows } from '../../common/utils/platformUtils';
+import { getUserHomeDir, normalizePath, untildify } from '../../common/utils/pathUtils';
+import { isMac, isWindows } from '../../common/utils/platformUtils';
+import { getSettingWorkspaceScope } from '../../features/settings/settingHelpers';
 import {
     isNativeEnvInfo,
     NativeEnvInfo,
@@ -15,7 +17,21 @@ import {
     NativePythonEnvironmentKind,
     NativePythonFinder,
 } from '../common/nativePythonFinder';
-import { getShellActivationCommands, shortVersion, sortEnvironments } from '../common/utils';
+import { getShellActivationCommands, shortenVersionString, sortEnvironments } from '../common/utils';
+
+/**
+ * Checks if the POETRY_VIRTUALENVS_IN_PROJECT environment variable is set to a truthy value.
+ * When true, Poetry creates virtualenvs in the project's `.venv` directory.
+ * Mirrors the PET server logic in `pet-poetry/src/env_variables.rs`.
+ * @param envValue Optional override for the env var value (used for testing).
+ */
+export function isPoetryVirtualenvsInProject(envValue?: string): boolean {
+    const value = envValue ?? process.env.POETRY_VIRTUALENVS_IN_PROJECT;
+    if (value === undefined) {
+        return false;
+    }
+    return value === '1' || value.toLowerCase() === 'true';
+}
 
 async function findPoetry(): Promise<string | undefined> {
     try {
@@ -34,6 +50,11 @@ export const POETRY_VIRTUALENVS_PATH_KEY = `${ENVS_EXTENSION_ID}:poetry:VIRTUALE
 
 let poetryPath: string | undefined;
 let poetryVirtualenvsPath: string | undefined;
+
+function getPoetryPathFromSettings(): string | undefined {
+    const poetryPath = getSettingWorkspaceScope<string>('python', 'poetryPath');
+    return poetryPath ? poetryPath : undefined;
+}
 
 export async function clearPoetryCache(): Promise<void> {
     // Reset in-memory cache
@@ -97,67 +118,70 @@ export async function setPoetryForWorkspaces(fsPath: string[], envPath: string |
     await state.set(POETRY_WORKSPACE_KEY, data);
 }
 
-export async function getPoetry(native?: NativePythonFinder): Promise<string | undefined> {
-    if (poetryPath) {
-        if (await fs.exists(untildify(poetryPath))) {
-            return untildify(poetryPath);
-        }
-        poetryPath = undefined;
-    }
-
-    const state = await getWorkspacePersistentState();
-    const storedPath = await state.get<string>(POETRY_PATH_KEY);
-    if (storedPath) {
-        if (await fs.exists(untildify(storedPath))) {
-            poetryPath = storedPath;
-            traceInfo(`Using poetry from persistent state: ${poetryPath}`);
-            // Also retrieve the virtualenvs path if we haven't already
-            if (!poetryVirtualenvsPath) {
-                getPoetryVirtualenvsPath(untildify(poetryPath)).catch((e) =>
-                    traceError(`Error getting Poetry virtualenvs path: ${e}`),
-                );
+export async function getPoetry(): Promise<string | undefined> {
+    try {
+        // Priority 1: Settings (if explicitly set and valid)
+        const settingPath = getPoetryPathFromSettings();
+        if (settingPath) {
+            if (await fs.exists(untildify(settingPath))) {
+                traceInfo(`Using poetry from settings: ${settingPath}`);
+                return untildify(settingPath);
             }
-            return untildify(poetryPath);
+            traceInfo(`Poetry path from settings does not exist: ${settingPath}`);
         }
-        await state.set(POETRY_PATH_KEY, undefined);
-    }
 
-    // Check in standard PATH locations
-    poetryPath = await findPoetry();
-    if (poetryPath) {
-        await setPoetry(poetryPath);
-        return poetryPath;
-    }
+        // Priority 2: In-memory cache
+        if (poetryPath) {
+            if (await fs.exists(untildify(poetryPath))) {
+                return untildify(poetryPath);
+            }
+            poetryPath = undefined;
+        }
 
-    // Check for user-installed poetry
-    const home = getUserHomeDir();
-    if (home) {
-        const poetryUserInstall = path.join(
-            home,
-            isWindows() ? 'AppData\\Roaming\\Python\\Scripts\\poetry.exe' : '.local/bin/poetry',
-        );
-        if (await fs.exists(poetryUserInstall)) {
-            poetryPath = poetryUserInstall;
+        // Priority 3: Persistent state
+        const state = await getWorkspacePersistentState();
+        const storedPath = await state.get<string>(POETRY_PATH_KEY);
+        if (storedPath) {
+            if (await fs.exists(untildify(storedPath))) {
+                poetryPath = storedPath;
+                traceInfo(`Using poetry from persistent state: ${poetryPath}`);
+                if (!poetryVirtualenvsPath) {
+                    getPoetryVirtualenvsPath(untildify(poetryPath)).catch((e) =>
+                        traceError(`Error getting Poetry virtualenvs path: ${e}`),
+                    );
+                }
+                return untildify(poetryPath);
+            }
+            await state.set(POETRY_PATH_KEY, undefined);
+        }
+
+        // Priority 4: PATH lookup
+        poetryPath = await findPoetry();
+        if (poetryPath) {
             await setPoetry(poetryPath);
             return poetryPath;
         }
-    }
 
-    if (native) {
-        const data = await native.refresh(false);
-        const managers = data
-            .filter((e) => !isNativeEnvInfo(e))
-            .map((e) => e as NativeEnvManagerInfo)
-            .filter((e) => e.tool.toLowerCase() === 'poetry');
-        if (managers.length > 0) {
-            poetryPath = managers[0].executable;
-            traceInfo(`Using poetry from native finder: ${poetryPath}`);
-            await setPoetry(poetryPath);
-            return poetryPath;
+        // Priority 5: Known user-install locations
+        const home = getUserHomeDir();
+        if (home) {
+            const poetryUserInstall = path.join(
+                home,
+                isWindows() ? 'AppData\\Roaming\\Python\\Scripts\\poetry.exe' : '.local/bin/poetry',
+            );
+            if (await fs.exists(poetryUserInstall)) {
+                poetryPath = poetryUserInstall;
+                await setPoetry(poetryPath);
+                return poetryPath;
+            }
         }
-    }
 
-    return undefined;
+        return undefined;
+    } catch (ex) {
+        const err = ex instanceof Error ? ex : new Error(String(ex));
+        (err as Error & { failureStage?: string }).failureStage = `getPoetry`;
+        throw err;
+    }
 }
 
 export async function getPoetryVirtualenvsPath(poetryExe?: string): Promise<string | undefined> {
@@ -176,18 +200,18 @@ export async function getPoetryVirtualenvsPath(poetryExe?: string): Promise<stri
     const poetry = poetryExe || (await getPoetry());
     if (poetry) {
         try {
-            const { stdout } = await exec(`"${poetry}" config virtualenvs.path`);
+            const { stdout } = await execProcess(`"${poetry}" config virtualenvs.path`);
             if (stdout) {
                 const venvPath = stdout.trim();
                 // Poetry might return the path with placeholders like {cache-dir}
-                // If it doesn't start with / or C:\ etc., assume it's using default
-                if (!path.isAbsolute(venvPath) || venvPath.includes('{')) {
-                    const home = getUserHomeDir();
-                    if (home) {
-                        poetryVirtualenvsPath = path.join(home, '.cache', 'pypoetry', 'virtualenvs');
-                    }
-                } else {
+                // Resolve the placeholder if present
+                if (venvPath.includes('{cache-dir}')) {
+                    poetryVirtualenvsPath = await resolveVirtualenvsPath(poetry, venvPath);
+                } else if (path.isAbsolute(venvPath)) {
                     poetryVirtualenvsPath = venvPath;
+                } else {
+                    // Not an absolute path and no placeholder, use platform-specific default
+                    poetryVirtualenvsPath = getDefaultPoetryVirtualenvsPath();
                 }
 
                 if (poetryVirtualenvsPath) {
@@ -200,10 +224,9 @@ export async function getPoetryVirtualenvsPath(poetryExe?: string): Promise<stri
         }
     }
 
-    // Fallback to default location
-    const home = getUserHomeDir();
-    if (home) {
-        poetryVirtualenvsPath = path.join(home, '.cache', 'pypoetry', 'virtualenvs');
+    // Fallback to platform-specific default location
+    poetryVirtualenvsPath = getDefaultPoetryVirtualenvsPath();
+    if (poetryVirtualenvsPath) {
         await state.set(POETRY_VIRTUALENVS_PATH_KEY, poetryVirtualenvsPath);
         return poetryVirtualenvsPath;
     }
@@ -211,26 +234,103 @@ export async function getPoetryVirtualenvsPath(poetryExe?: string): Promise<stri
     return undefined;
 }
 
-// These are now exported for use in main.ts or environment manager logic
-import * as cp from 'child_process';
-import { promisify } from 'util';
+/**
+ * Returns the default Poetry cache directory based on the current platform.
+ * - Windows: %LOCALAPPDATA%\pypoetry\Cache or %APPDATA%\pypoetry\Cache
+ * - macOS: ~/Library/Caches/pypoetry
+ * - Linux: ~/.cache/pypoetry
+ */
+export function getDefaultPoetryCacheDir(): string | undefined {
+    if (isWindows()) {
+        const localAppData = process.env.LOCALAPPDATA;
+        if (localAppData) {
+            return path.join(localAppData, 'pypoetry', 'Cache');
+        }
+        const appData = process.env.APPDATA;
+        if (appData) {
+            return path.join(appData, 'pypoetry', 'Cache');
+        }
+        return undefined;
+    }
 
-const exec = promisify(cp.exec);
+    const home = getUserHomeDir();
+    if (!home) {
+        return undefined;
+    }
+
+    if (isMac()) {
+        return path.join(home, 'Library', 'Caches', 'pypoetry');
+    }
+
+    // Linux default
+    return path.join(home, '.cache', 'pypoetry');
+}
+
+/**
+ * Returns the default Poetry virtualenvs path based on the current platform.
+ * - Windows: %LOCALAPPDATA%\pypoetry\Cache\virtualenvs or %APPDATA%\pypoetry\Cache\virtualenvs
+ * - macOS: ~/Library/Caches/pypoetry/virtualenvs
+ * - Linux: ~/.cache/pypoetry/virtualenvs
+ */
+export function getDefaultPoetryVirtualenvsPath(): string | undefined {
+    const cacheDir = getDefaultPoetryCacheDir();
+    if (cacheDir) {
+        return path.join(cacheDir, 'virtualenvs');
+    }
+    return undefined;
+}
+
+/**
+ * Resolves the {cache-dir} placeholder in a Poetry virtualenvs path.
+ * First tries to query Poetry's cache-dir config, then falls back to platform-specific default.
+ * @param poetry Path to the poetry executable
+ * @param virtualenvsPath The path possibly containing {cache-dir} placeholder
+ * @returns The resolved path, or undefined if the placeholder cannot be resolved
+ */
+async function resolveVirtualenvsPath(poetry: string, virtualenvsPath: string): Promise<string | undefined> {
+    if (!virtualenvsPath.includes('{cache-dir}')) {
+        return virtualenvsPath;
+    }
+
+    // Try to get the actual cache-dir from Poetry
+    try {
+        const { stdout } = await execProcess(`"${poetry}" config cache-dir`);
+        if (stdout) {
+            const cacheDir = stdout.trim();
+            if (cacheDir && path.isAbsolute(cacheDir)) {
+                const resolved = virtualenvsPath.replace('{cache-dir}', cacheDir);
+                return path.normalize(resolved);
+            }
+        }
+    } catch (e) {
+        traceError('Error getting Poetry cache-dir config', e);
+    }
+
+    // Fall back to platform-specific default cache dir
+    const defaultCacheDir = getDefaultPoetryCacheDir();
+    if (defaultCacheDir) {
+        const resolved = virtualenvsPath.replace('{cache-dir}', defaultCacheDir);
+        return path.normalize(resolved);
+    }
+
+    // Cannot resolve the placeholder - return undefined instead of unresolved path
+    return undefined;
+}
 
 export async function getPoetryVersion(poetry: string): Promise<string | undefined> {
     try {
-        const { stdout } = await exec(`"${poetry}" --version`);
+        const { stdout } = await execProcess(`"${poetry}" --version`);
         // Handle both formats:
         // Old: "Poetry version 1.5.1"
         // New: "Poetry (version 2.1.3)"
         traceInfo(`Poetry version output: ${stdout.trim()}`);
-        const match = stdout.match(/Poetry (?:version|[\(\s]+version[\s\)]+)([0-9]+\.[0-9]+\.[0-9]+)/i);
+        const match = stdout.match(/Poetry (?:version |[\(\s]+version[\s\)]+)([0-9]+\.[0-9]+\.[0-9]+)/i);
         return match ? match[1] : undefined;
     } catch {
         return undefined;
     }
 }
-async function nativeToPythonEnv(
+export async function nativeToPythonEnv(
     info: NativeEnvInfo,
     api: PythonEnvironmentApi,
     manager: EnvironmentManager,
@@ -241,29 +341,33 @@ async function nativeToPythonEnv(
         return undefined;
     }
 
-    const sv = shortVersion(info.version);
+    const sv = shortenVersionString(info.version);
     const name = info.name || info.displayName || path.basename(info.prefix);
     const displayName = info.displayName || `poetry (${sv})`;
 
     // Check if this is a global Poetry virtualenv by checking if it's in Poetry's virtualenvs directory
-    // We need to use path.normalize() to ensure consistent path format comparison
-    const normalizedPrefix = path.normalize(info.prefix);
+    // We use normalizePath() for case-insensitive path comparison on Windows
+    const normalizedPrefix = normalizePath(info.prefix);
 
     // Determine if the environment is in Poetry's global virtualenvs directory
     let isGlobalPoetryEnv = false;
-    const virtualenvsPath = poetryVirtualenvsPath; // Use the cached value if available
-    if (virtualenvsPath) {
-        const normalizedVirtualenvsPath = path.normalize(virtualenvsPath);
-        isGlobalPoetryEnv = normalizedPrefix.startsWith(normalizedVirtualenvsPath);
-    } else {
-        // Fall back to checking the default location if we haven't cached the path yet
-        const homeDir = getUserHomeDir();
-        if (homeDir) {
-            const defaultPath = path.normalize(path.join(homeDir, '.cache', 'pypoetry', 'virtualenvs'));
-            isGlobalPoetryEnv = normalizedPrefix.startsWith(defaultPath);
 
-            // Try to get the actual path asynchronously for next time
-            getPoetryVirtualenvsPath(_poetry).catch((e) => traceError(`Error getting Poetry virtualenvs path: ${e}`));
+    // If POETRY_VIRTUALENVS_IN_PROJECT is set and env has a project, it's an in-project env
+    if (!isPoetryVirtualenvsInProject() || !info.project) {
+        const virtualenvsPath = poetryVirtualenvsPath; // Use the cached value if available
+        if (virtualenvsPath) {
+            const normalizedVirtualenvsPath = normalizePath(virtualenvsPath);
+            isGlobalPoetryEnv = normalizedPrefix.startsWith(normalizedVirtualenvsPath);
+        } else {
+            // Fall back to checking the platform-specific default location if we haven't cached the path yet
+            const defaultPath = getDefaultPoetryVirtualenvsPath();
+            if (defaultPath) {
+                const normalizedDefaultPath = normalizePath(defaultPath);
+                isGlobalPoetryEnv = normalizedPrefix.startsWith(normalizedDefaultPath);
+
+                // Try to get the actual path asynchronously for next time
+                getPoetryVirtualenvsPath(_poetry).catch((e) => traceError('Error getting Poetry virtualenvs path', e));
+            }
         }
     }
 
@@ -351,7 +455,7 @@ export async function resolvePoetryPath(
         if (e.kind !== NativePythonEnvironmentKind.poetry) {
             return undefined;
         }
-        const poetry = await getPoetry(nativeFinder);
+        const poetry = await getPoetry();
         if (!poetry) {
             traceError('Poetry not found while resolving environment');
             return undefined;

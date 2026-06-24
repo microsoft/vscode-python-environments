@@ -8,13 +8,18 @@ import {
     getWorkspaceFolders,
     onDidChangeConfiguration,
     onDidChangeWorkspaceFolders,
+    onDidDeleteFiles,
+    onDidRenameFiles,
 } from '../common/workspace.apis';
 import { PythonProjectManager, PythonProjectSettings, PythonProjectsImpl } from '../internal.api';
+import { normalizePath } from '../common/utils/pathUtils';
 import {
     addPythonProjectSetting,
     EditProjectSettings,
     getDefaultEnvManagerSetting,
     getDefaultPkgManagerSetting,
+    removePythonProjectSetting,
+    updatePythonProjectSettingPath,
 } from './settings/settingHelpers';
 
 type ProjectArray = PythonProject[];
@@ -29,7 +34,9 @@ export class PythonProjectManagerImpl implements PythonProjectManager {
     private readonly updateDebounce = createSimpleDebounce(100, () => this.updateProjects());
 
     initialize(): void {
-        this.add(this.getInitialProjects());
+        // Load existing projects from settings without writing back to settings.
+        // This avoids overwriting user-configured project settings with defaults on reload.
+        this.loadProjects(this.getInitialProjects());
         this.disposables.push(
             this._onDidChangeProjects,
             new Disposable(() => this._projects.clear()),
@@ -45,7 +52,62 @@ export class PythonProjectManagerImpl implements PythonProjectManager {
                     this.updateDebounce.trigger();
                 }
             }),
+            onDidDeleteFiles((e) => {
+                this.handleDeletedFiles(e.files);
+            }),
+            onDidRenameFiles((e) => {
+                this.handleRenamedFiles(e.files);
+            }),
         );
+    }
+
+    /**
+     * Handles file deletion events. When a project folder is deleted,
+     * removes the project from the internal map and cleans up settings.
+     */
+    private async handleDeletedFiles(deletedUris: readonly Uri[]): Promise<void> {
+        const projectsToRemove: PythonProject[] = [];
+        const workspaces = getWorkspaceFolders() ?? [];
+
+        for (const uri of deletedUris) {
+            const project = this._projects.get(uri.toString());
+            if (project) {
+                // Skip workspace root folders - they're handled by onDidChangeWorkspaceFolders
+                const isWorkspaceRoot = workspaces.some((w) => w.uri.toString() === project.uri.toString());
+                if (!isWorkspaceRoot) {
+                    projectsToRemove.push(project);
+                }
+            }
+        }
+
+        if (projectsToRemove.length > 0) {
+            // Remove from internal map and fire change event
+            this.remove(projectsToRemove);
+            // Clean up settings
+            await removePythonProjectSetting(projectsToRemove.map((p) => ({ project: p })));
+        }
+    }
+
+    /**
+     * Handles file rename events. When a project folder is renamed/moved,
+     * updates the project path in settings.
+     */
+    private async handleRenamedFiles(renamedFiles: readonly { oldUri: Uri; newUri: Uri }[]): Promise<void> {
+        const workspaces = getWorkspaceFolders() ?? [];
+
+        for (const { oldUri, newUri } of renamedFiles) {
+            const project = this._projects.get(oldUri.toString());
+            if (project) {
+                // Skip workspace root folders - they're handled by onDidChangeWorkspaceFolders
+                const isWorkspaceRoot = workspaces.some((w) => w.uri.toString() === project.uri.toString());
+                if (!isWorkspaceRoot) {
+                    // Update settings with new path
+                    await updatePythonProjectSettingPath(oldUri, newUri);
+                    // Trigger update to refresh the in-memory projects
+                    this.updateDebounce.trigger();
+                }
+            }
+        }
     }
 
     /**
@@ -112,6 +174,20 @@ export class PythonProjectManagerImpl implements PythonProjectManager {
         projectsToAdd.forEach((w) => this._projects.set(w.uri.toString(), w));
 
         if (projectsToRemove.length > 0 || projectsToAdd.length > 0) {
+            this._onDidChangeProjects.fire(Array.from(this._projects.values()));
+        }
+    }
+
+    /**
+     * Loads projects into the internal map without writing to settings.
+     * Use this for initial loading from existing settings to avoid overwriting
+     * user-configured project settings with defaults.
+     */
+    private loadProjects(projects: ProjectArray): void {
+        projects.forEach((project) => {
+            this._projects.set(project.uri.toString(), project);
+        });
+        if (projects.length > 0) {
             this._onDidChangeProjects.fire(Array.from(this._projects.values()));
         }
     }
@@ -201,9 +277,9 @@ export class PythonProjectManagerImpl implements PythonProjectManager {
     private findProjectByUri(uri: Uri): PythonProject | undefined {
         const _projects = Array.from(this._projects.values()).sort((a, b) => b.uri.fsPath.length - a.uri.fsPath.length);
 
-        const normalizedUriPath = path.normalize(uri.fsPath);
+        const normalizedUriPath = normalizePath(uri.fsPath);
         for (const p of _projects) {
-            const normalizedProjectPath = path.normalize(p.uri.fsPath);
+            const normalizedProjectPath = normalizePath(p.uri.fsPath);
             if (this.isUriMatching(normalizedUriPath, normalizedProjectPath)) {
                 return p;
             }

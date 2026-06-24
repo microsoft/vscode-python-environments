@@ -9,17 +9,25 @@ import {
     PythonEnvironmentInfo,
 } from '../../api';
 import { showErrorMessageWithLogs } from '../../common/errors/utils';
-import { SysManagerStrings } from '../../common/localize';
-import { withProgress } from '../../common/window.apis';
+import { getExtension } from '../../common/extension.apis';
+import { Common, PixiStrings, SysManagerStrings } from '../../common/localize';
+import { traceInfo, traceVerbose } from '../../common/logging';
+import { getGlobalPersistentState } from '../../common/persistentState';
+import { showInformationMessage, withProgress } from '../../common/window.apis';
+import { openExtension } from '../../common/workbenchCommands';
 import {
     isNativeEnvInfo,
     NativeEnvInfo,
     NativePythonEnvironmentKind,
     NativePythonFinder,
 } from '../common/nativePythonFinder';
-import { shortVersion, sortEnvironments } from '../common/utils';
+import { shortenVersionString, sortEnvironments } from '../common/utils';
 import { runPython, runUV, shouldUseUv } from './helpers';
-import { parsePipList, PipPackage } from './pipListUtils';
+import { parsePipListJson, parseUvTree, PipPackage } from './pipListUtils';
+
+const PIXI_EXTENSION_ID = 'renan-r-santos.pixi-code';
+const PIXI_RECOMMEND_DONT_ASK_KEY = 'pixi-extension-recommend-dont-ask';
+let pixiRecommendationShown = false;
 
 function asPackageQuickPickItem(name: string, version?: string): QuickPickItem {
     return {
@@ -72,7 +80,7 @@ function getKindName(kind: NativePythonEnvironmentKind | undefined): string | un
 function getPythonInfo(env: NativeEnvInfo): PythonEnvironmentInfo {
     if (env.executable && env.version && env.prefix) {
         const kindName = getKindName(env.kind);
-        const sv = shortVersion(env.version);
+        const sv = shortenVersionString(env.version);
         const name = kindName ? `Python ${sv} (${kindName})` : `Python ${sv}`;
         const displayName = kindName ? `Python ${sv} (${kindName})` : `Python ${sv}`;
         const shortDisplayName = kindName ? `${sv} (${kindName})` : `${sv}`;
@@ -98,6 +106,38 @@ function getPythonInfo(env: NativeEnvInfo): PythonEnvironmentInfo {
     }
 }
 
+async function recommendPixiExtension(): Promise<void> {
+    if (pixiRecommendationShown) {
+        return;
+    }
+    pixiRecommendationShown = true;
+
+    if (getExtension(PIXI_EXTENSION_ID)) {
+        return;
+    }
+
+    const state = await getGlobalPersistentState();
+    const dontAsk = await state.get<boolean>(PIXI_RECOMMEND_DONT_ASK_KEY);
+    if (dontAsk) {
+        traceInfo('Skipping Pixi extension recommendation: user selected "Don\'t ask again"');
+        return;
+    }
+
+    const result = await showInformationMessage(
+        PixiStrings.pixiExtensionRecommendation,
+        PixiStrings.install,
+        Common.dontAskAgain,
+    );
+
+    if (result === PixiStrings.install) {
+        traceInfo(`Opening extension page: ${PIXI_EXTENSION_ID}`);
+        await openExtension(PIXI_EXTENSION_ID);
+    } else if (result === Common.dontAskAgain) {
+        await state.set(PIXI_RECOMMEND_DONT_ASK_KEY, true);
+        traceInfo('User selected "Don\'t ask again" for Pixi extension recommendation');
+    }
+}
+
 export async function refreshPythons(
     hardRefresh: boolean,
     nativeFinder: NativePythonFinder,
@@ -108,24 +148,29 @@ export async function refreshPythons(
 ): Promise<PythonEnvironment[]> {
     const collection: PythonEnvironment[] = [];
     const data = await nativeFinder.refresh(hardRefresh, uris);
-    const envs = data
-        .filter((e) => isNativeEnvInfo(e))
-        .map((e) => e as NativeEnvInfo)
-        .filter(
-            (e) =>
-                e.kind === undefined ||
-                (e.kind &&
-                    [
-                        NativePythonEnvironmentKind.globalPaths,
-                        NativePythonEnvironmentKind.homebrew,
-                        NativePythonEnvironmentKind.linuxGlobal,
-                        NativePythonEnvironmentKind.macCommandLineTools,
-                        NativePythonEnvironmentKind.macPythonOrg,
-                        NativePythonEnvironmentKind.macXCode,
-                        NativePythonEnvironmentKind.windowsRegistry,
-                        NativePythonEnvironmentKind.windowsStore,
-                    ].includes(e.kind)),
-        );
+    const allNativeEnvs = data.filter((e) => isNativeEnvInfo(e)).map((e) => e as NativeEnvInfo);
+
+    const hasPixiEnvs = allNativeEnvs.some((e) => e.kind === NativePythonEnvironmentKind.pixi);
+    if (hasPixiEnvs) {
+        recommendPixiExtension().catch((e) => log.error('Error recommending Pixi extension', e));
+    }
+
+    const envs = allNativeEnvs.filter(
+        (e) =>
+            e.kind === undefined ||
+            (e.kind &&
+                [
+                    NativePythonEnvironmentKind.globalPaths,
+                    NativePythonEnvironmentKind.homebrew,
+                    NativePythonEnvironmentKind.linuxGlobal,
+                    NativePythonEnvironmentKind.macCommandLineTools,
+                    NativePythonEnvironmentKind.macPythonOrg,
+                    NativePythonEnvironmentKind.macXCode,
+                    NativePythonEnvironmentKind.windowsRegistry,
+                    NativePythonEnvironmentKind.windowsStore,
+                    NativePythonEnvironmentKind.winpython,
+                ].includes(e.kind)),
+    );
     envs.forEach((env) => {
         try {
             const envInfo = getPythonInfo(env);
@@ -138,14 +183,29 @@ export async function refreshPythons(
     return sortEnvironments(collection);
 }
 
-async function refreshPipPackagesRaw(environment: PythonEnvironment, log?: LogOutputChannel): Promise<string> {
+const PIP_LIST_TIMEOUT_MS = 30_000;
+
+async function execPipList(environment: PythonEnvironment, log?: LogOutputChannel, args?: string[]): Promise<string> {
     // Use environmentPath directly for consistency with UV environment tracking
     const useUv = await shouldUseUv(log, environment.environmentPath.fsPath);
     if (useUv) {
-        return await runUV(['pip', 'list', '--python', environment.execInfo.run.executable], undefined, log);
+        return await runUV(
+            ['pip', 'list', '--python', environment.execInfo.run.executable, '--format=json', ...(args ?? [])],
+            undefined,
+            log,
+            undefined,
+            PIP_LIST_TIMEOUT_MS,
+        );
     }
     try {
-        return await runPython(environment.execInfo.run.executable, ['-m', 'pip', 'list'], undefined, log);
+        return await runPython(
+            environment.execInfo.run.executable,
+            ['-m', 'pip', 'list', '--format=json', ...(args ?? [])],
+            undefined,
+            log,
+            undefined,
+            PIP_LIST_TIMEOUT_MS,
+        );
     } catch (ex) {
         log?.error('Error running pip list', ex);
         log?.info(
@@ -168,14 +228,14 @@ export async function refreshPipPackages(
                     location: ProgressLocation.Notification,
                 },
                 async () => {
-                    return await refreshPipPackagesRaw(environment, log);
+                    return await execPipList(environment, log);
                 },
             );
         } else {
-            data = await refreshPipPackagesRaw(environment, log);
+            data = await execPipList(environment, log);
         }
 
-        return parsePipList(data);
+        return parsePipListJson(data, log);
     } catch (e) {
         log?.error('Error refreshing packages', e);
         showErrorMessageWithLogs(SysManagerStrings.packageRefreshError, log);
@@ -183,22 +243,40 @@ export async function refreshPipPackages(
     }
 }
 
-export async function refreshPackages(
+/**
+ * Returns names of packages with no installed dependents (leaf packages).
+ *
+ * Uses `pip list --not-required` (pip) or `uv pip tree --depth=0` (uv). These report
+ * packages that nothing else depends on, which is a proxy for "directly installed" but
+ * not equivalent — e.g., `pip install flask werkzeug` will report werkzeug as having
+ * dependents (flask) even though the user installed it explicitly.
+ */
+export async function refreshPipDirectPackageNames(
     environment: PythonEnvironment,
-    api: PythonEnvironmentApi,
-    manager: PackageManager,
-): Promise<Package[]> {
-    const data = await refreshPipPackages(environment, manager.log);
-    return (data ?? []).map((pkg) => api.createPackageItem(pkg, environment, manager));
+    log?: LogOutputChannel,
+): Promise<string[] | undefined> {
+    const useUv = await shouldUseUv(log, environment.environmentPath.fsPath);
+    if (useUv) {
+        const treeOutput = await runUV(
+            ['pip', 'tree', '--python', environment.execInfo.run.executable, '--depth=0'],
+            undefined,
+            log,
+            undefined,
+            PIP_LIST_TIMEOUT_MS,
+        );
+        return parseUvTree(treeOutput);
+    }
+    const data = await execPipList(environment, log, ['--not-required']);
+    const packages = parsePipListJson(data);
+    return packages.map((pkg) => pkg.name);
 }
 
 export async function managePackages(
     environment: PythonEnvironment,
     options: PackageManagementOptions,
-    api: PythonEnvironmentApi,
     manager: PackageManager,
     token?: CancellationToken,
-): Promise<Package[]> {
+): Promise<void> {
     if (environment.version.startsWith('2.')) {
         throw new Error('Python 2.* is not supported (deprecated)');
     }
@@ -250,8 +328,6 @@ export async function managePackages(
             );
         }
     }
-
-    return await refreshPackages(environment, api, manager);
 }
 
 /**
@@ -299,11 +375,20 @@ export async function resolveSystemPythonEnvironmentPath(
     api: PythonEnvironmentApi,
     manager: EnvironmentManager,
 ): Promise<PythonEnvironment | undefined> {
-    const resolved = await nativeFinder.resolve(fsPath);
+    try {
+        const resolved = await nativeFinder.resolve(fsPath);
 
-    // This is supposed to handle a python interpreter as long as we know some basic things about it
-    if (resolved.executable && resolved.version && resolved.prefix) {
-        const envInfo = getPythonInfo(resolved);
-        return api.createPythonEnvironmentItem(envInfo, manager);
+        // This is supposed to handle a python interpreter as long as we know some basic things about it
+        if (resolved.executable && resolved.version && resolved.prefix) {
+            const envInfo = getPythonInfo(resolved);
+            return api.createPythonEnvironmentItem(envInfo, manager);
+        }
+    } catch (ex) {
+        traceVerbose(`Failed to resolve env "${fsPath}": ${ex}`);
     }
+    return undefined;
+}
+
+export function normalizePackageName(name: string): string {
+    return name.replace(/[-_.]+/g, '-').toLowerCase();
 }

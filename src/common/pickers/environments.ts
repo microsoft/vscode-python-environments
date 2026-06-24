@@ -1,4 +1,4 @@
-import { ProgressLocation, QuickInputButtons, QuickPickItem, QuickPickItemKind, ThemeIcon, Uri } from 'vscode';
+import { ProgressLocation, QuickInputButtons, QuickPickItem, QuickPickItemKind, ThemeIcon, Uri, l10n } from 'vscode';
 import { CreateEnvironmentOptions, IconPath, PythonEnvironment, PythonProject } from '../../api';
 import { InternalEnvironmentManager } from '../../internal.api';
 import { Common, Interpreter, Pickers } from '../localize';
@@ -7,7 +7,13 @@ import { EventNames } from '../telemetry/constants';
 import { sendTelemetryEvent } from '../telemetry/sender';
 import { isWindows } from '../utils/platformUtils';
 import { handlePythonPath } from '../utils/pythonPath';
-import { showOpenDialog, showQuickPick, showQuickPickWithButtons, withProgress } from '../window.apis';
+import {
+    showErrorMessage,
+    showOpenDialog,
+    showQuickPick,
+    showQuickPickWithButtons,
+    withProgress,
+} from '../window.apis';
 import { pickEnvironmentManager } from './managers';
 
 type QuickPickIcon =
@@ -66,6 +72,11 @@ async function browseForPython(
             return env;
         },
     );
+
+    if (!environment) {
+        showErrorMessage(l10n.t('Selected file is not a valid Python interpreter: {0}', uri.fsPath));
+    }
+
     return environment;
 }
 

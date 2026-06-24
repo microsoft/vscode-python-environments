@@ -1,13 +1,15 @@
 import * as path from 'path';
-import { Disposable, env, Terminal, TerminalOptions, Uri } from 'vscode';
+import { Disposable, env, ExtensionTerminalOptions, tasks, Terminal, TerminalOptions, Uri } from 'vscode';
 import { PythonEnvironment, PythonProject, PythonProjectEnvironmentApi, PythonProjectGetterApi } from '../../api';
+import { traceVerbose } from '../../common/logging';
 import { timeout } from '../../common/utils/asyncUtils';
 import { createSimpleDebounce } from '../../common/utils/debounce';
 import { onDidChangeTerminalShellIntegration, onDidWriteTerminalData } from '../../common/window.apis';
 import { getConfiguration, getWorkspaceFolders } from '../../common/workspace.apis';
+import { identifyTerminalShell } from '../common/shellDetector';
+import { shellIntegrationSupportedShells } from './shells/common/shellUtils';
 
 export const SHELL_INTEGRATION_TIMEOUT = 500; // 0.5 seconds
-export const SHELL_INTEGRATION_POLL_INTERVAL = 20; // 0.02 seconds
 
 /**
  * Use `terminal.integrated.shellIntegration.timeout` setting if available.
@@ -25,10 +27,26 @@ export function getShellIntegrationTimeout(): number {
 }
 
 /**
- * Three conditions in a Promise.race:
- * 1. Timeout based on VS Code's terminal.integrated.shellIntegration.timeout setting
- * 2. Shell integration becoming available (window.onDidChangeTerminalShellIntegration event)
- * 3. Detection of common prompt patterns in terminal output
+ * Waits for shell integration to be ready on the given terminal, up to a timeout.
+ *
+ * Returns:
+ * - `true`  if shell integration is (or becomes) available.
+ * - `false` if the timeout is hit, a common prompt pattern is detected, the terminal
+ *           is undefined, or the shell is known not to support shell integration.
+ *
+ * Behavior:
+ * 1. Returns `true` immediately if `terminal.shellIntegration` is already set.
+ * 2. Returns `false` immediately when the shell type is identified and is NOT in
+ *    {@link shellIntegrationSupportedShells} (e.g. `nu`, `cmd`, `csh`, `tcsh`,
+ *    `ksh`, `xonsh`). VS Code does not provide shell integration for these
+ *    shells, so waiting up to 5s for an event that will never fire only delays
+ *    the fallback `terminal.sendText` activation.
+ *    If shell detection throws or returns `'unknown'`, we fall through to the
+ *    race below to preserve previous behavior.
+ * 3. Otherwise races three conditions:
+ *    a. Timeout based on VS Code's `terminal.integrated.shellIntegration.timeout` setting.
+ *    b. Shell integration becoming available (`window.onDidChangeTerminalShellIntegration`).
+ *    c. Detection of common prompt patterns in terminal output.
  */
 export async function waitForShellIntegration(terminal?: Terminal): Promise<boolean> {
     if (!terminal) {
@@ -36,6 +54,17 @@ export async function waitForShellIntegration(terminal?: Terminal): Promise<bool
     }
     if (terminal.shellIntegration) {
         return true;
+    }
+
+    // Skip the wait for shells that VS Code does not provide shell integration for.
+    try {
+        const shellType = identifyTerminalShell(terminal);
+        if (shellType !== 'unknown' && !shellIntegrationSupportedShells.includes(shellType)) {
+            traceVerbose(`Shell '${shellType}' does not support shell integration; skipping wait.`);
+            return false;
+        }
+    } catch {
+        // Detection failed — preserve original behavior by falling through to the race.
     }
 
     const timeoutMs = getShellIntegrationTimeout();
@@ -130,8 +159,9 @@ function detectsCommonPromptPattern(terminalData: string): boolean {
 }
 
 export function isTaskTerminal(terminal: Terminal): boolean {
-    // TODO: Need API for core for this https://github.com/microsoft/vscode/issues/234440
-    return terminal.name.toLowerCase().includes('task');
+    // Use tasks.taskExecutions API to check if terminal is associated with a task
+    // See: https://github.com/microsoft/vscode/issues/234440
+    return tasks.taskExecutions.some((execution) => execution.terminal === terminal);
 }
 
 export function getTerminalCwd(terminal: Terminal): string | undefined {
@@ -262,6 +292,52 @@ export async function setAutoActivationType(value: AutoActivationType): Promise<
     return await config.update('terminal.autoActivationType', value, true);
 }
 
+/**
+ * Determines whether activation commands should be sent to pre-existing terminals
+ * (terminals open before extension load).
+ *
+ * Checks the legacy `python.terminal.activateEnvInCurrentTerminal` setting using `inspect()`
+ * to distinguish between the default value and an explicitly user-set value.
+ *
+ * Priority: workspaceFolderValue > workspaceValue > globalRemoteValue > globalLocalValue > globalValue
+ * (matches the precedence used by getShellIntegrationEnabledCache and getAutoActivationType)
+ *
+ * - If the user has explicitly set the value to `false` at any scope, returns `false`.
+ * - Otherwise (default or explicitly `true`), returns `true`.
+ *
+ * @returns `false` only when the user has explicitly set the setting to `false`; `true` otherwise.
+ */
+export function shouldActivateInCurrentTerminal(): boolean {
+    const pythonConfig = getConfiguration('python');
+    const inspected = pythonConfig.inspect<boolean>('terminal.activateEnvInCurrentTerminal');
+
+    if (!inspected) {
+        return true;
+    }
+
+    // Only respect `false` when the user has deliberately set it.
+    // Priority: workspaceFolder > workspace > globalRemote > globalLocal > global
+    const inspectValue = inspected as Record<string, unknown>;
+
+    if (inspected.workspaceFolderValue === false) {
+        return false;
+    }
+    if (inspected.workspaceValue === false) {
+        return false;
+    }
+    if ('globalRemoteValue' in inspected && inspectValue.globalRemoteValue === false) {
+        return false;
+    }
+    if ('globalLocalValue' in inspected && inspectValue.globalLocalValue === false) {
+        return false;
+    }
+    if (inspected.globalValue === false) {
+        return false;
+    }
+
+    return true;
+}
+
 export async function getAllDistinctProjectEnvironments(
     api: PythonProjectGetterApi & PythonProjectEnvironmentApi,
 ): Promise<PythonEnvironment[] | undefined> {
@@ -308,4 +384,17 @@ export function removeAnsiEscapeCodes(str: string): string {
     }
 
     return str;
+}
+
+/**
+ * Determines if a terminal should be skipped for environment activation based on its creation options.
+ * Terminals that are hidden from the user or are PTY-based extension terminals are skipped.
+ * @param terminal The terminal to check.
+ * @returns `true` if the terminal should be skipped; `false` otherwise.
+ */
+export function shouldSkipTerminalActivation(terminal: Terminal): boolean {
+    return (
+        !!(terminal.creationOptions as TerminalOptions)?.hideFromUser ||
+        !!(terminal.creationOptions as ExtensionTerminalOptions)?.pty
+    );
 }

@@ -1,3 +1,5 @@
+import type { Pep440Version } from '@renovatebot/pep440';
+import { explain as parse } from '@renovatebot/pep440';
 import * as fsapi from 'fs-extra';
 import * as path from 'path';
 import {
@@ -5,6 +7,7 @@ import {
     CancellationToken,
     Event,
     EventEmitter,
+    l10n,
     LogOutputChannel,
     MarkdownString,
     ProgressLocation,
@@ -13,9 +16,9 @@ import {
 import { Disposable } from 'vscode-jsonrpc';
 import {
     DidChangePackagesEventArgs,
+    GetPackagesOptions,
     IconPath,
     Package,
-    PackageChangeKind,
     PackageManagementOptions,
     PackageManager,
     PythonEnvironment,
@@ -23,19 +26,10 @@ import {
 } from '../../api';
 import { spawnProcess } from '../../common/childProcess.apis';
 import { showErrorMessage, showInputBox, withProgress } from '../../common/window.apis';
+import { normalizePackageName } from '../builtin/utils';
+import { updatePackagesAndNotify } from '../common/packageChanges';
 import { PoetryManager } from './poetryManager';
-import { getPoetry } from './poetryUtils';
-
-function getChanges(before: Package[], after: Package[]): { kind: PackageChangeKind; pkg: Package }[] {
-    const changes: { kind: PackageChangeKind; pkg: Package }[] = [];
-    before.forEach((pkg) => {
-        changes.push({ kind: PackageChangeKind.remove, pkg });
-    });
-    after.forEach((pkg) => {
-        changes.push({ kind: PackageChangeKind.add, pkg });
-    });
-    return changes;
-}
+import { getPoetry, getPoetryVersion } from './poetryUtils';
 
 export class PoetryPackageManager implements PackageManager, Disposable {
     private readonly _onDidChangePackages = new EventEmitter<DidChangePackagesEventArgs>();
@@ -91,15 +85,15 @@ export class PoetryPackageManager implements PackageManager, Disposable {
             },
             async (_progress, token) => {
                 try {
-                    const before = this.packages.get(environment.envId.id) ?? [];
-                    const after = await this.managePackages(
+                    await this.runPoetryManage({ install: toInstall, uninstall: toUninstall }, token);
+                    await updatePackagesAndNotify(
+                        this,
                         environment,
-                        { install: toInstall, uninstall: toUninstall },
-                        token,
+                        this.packages.get(environment.envId.id),
+                        (changes) => {
+                            this._onDidChangePackages.fire({ environment, manager: this, changes });
+                        },
                     );
-                    const changes = getChanges(before, after);
-                    this.packages.set(environment.envId.id, after);
-                    this._onDidChangePackages.fire({ environment, manager: this, changes });
                 } catch (e) {
                     if (e instanceof CancellationError) {
                         throw e;
@@ -117,21 +111,22 @@ export class PoetryPackageManager implements PackageManager, Disposable {
         );
     }
 
-    async refresh(environment: PythonEnvironment): Promise<void> {
-        await withProgress(
+    async refresh(environment: PythonEnvironment): Promise<Package[] | undefined> {
+        return withProgress(
             {
                 location: ProgressLocation.Window,
                 title: 'Refreshing Poetry packages',
             },
             async () => {
                 try {
-                    const before = this.packages.get(environment.envId.id) ?? [];
-                    const after = await this.refreshPackages(environment);
-                    const changes = getChanges(before, after);
-                    this.packages.set(environment.envId.id, after);
-                    if (changes.length > 0) {
-                        this._onDidChangePackages.fire({ environment, manager: this, changes });
-                    }
+                    return await updatePackagesAndNotify(
+                        this,
+                        environment,
+                        this.packages.get(environment.envId.id),
+                        (changes) => {
+                            this._onDidChangePackages.fire({ environment, manager: this, changes });
+                        },
+                    );
                 } catch (error) {
                     this.log.error(`Failed to refresh packages: ${error}`);
                     // Show error to user but don't break the UI
@@ -141,16 +136,43 @@ export class PoetryPackageManager implements PackageManager, Disposable {
                             this.log.show();
                         }
                     });
+                    return undefined;
                 }
             },
         );
     }
 
-    async getPackages(environment: PythonEnvironment): Promise<Package[] | undefined> {
-        if (!this.packages.has(environment.envId.id)) {
-            await this.refresh(environment);
+    async getPackages(environment: PythonEnvironment, options?: GetPackagesOptions): Promise<Package[] | undefined> {
+        if (options?.skipCache || !this.packages.has(environment.envId.id)) {
+            const packages = await this.fetchPackagesFromTool(environment);
+            this.packages.set(environment.envId.id, packages);
+            return packages;
         }
         return this.packages.get(environment.envId.id);
+    }
+
+    async getVersion(_environment: PythonEnvironment): Promise<Pep440Version | undefined> {
+        const poetry = await getPoetry();
+        if (!poetry) {
+            return undefined;
+        }
+        const versionStr = await getPoetryVersion(poetry);
+        return versionStr ? (parse(versionStr) ?? undefined) : undefined;
+    }
+
+    async getPackageAvailableVersions(
+        _environment: PythonEnvironment,
+        _packageName: string,
+    ): Promise<Pep440Version[] | undefined> {
+        // Poetry doesn't have a native "list available versions" command.
+        // Poetry 2.x supports `poetry search` but it was disabled on PyPI.
+        // Return undefined to indicate this manager doesn't support version listing.
+        return undefined;
+    }
+
+    formatInstallSpec(packageName: string, version: string): string {
+        // Poetry uses `package@version` syntax for version-pinned installs
+        return `${packageName}@${version}`;
     }
 
     dispose(): void {
@@ -158,11 +180,19 @@ export class PoetryPackageManager implements PackageManager, Disposable {
         this.packages.clear();
     }
 
-    private async managePackages(
-        environment: PythonEnvironment,
+    private async runPoetryManage(
         options: { install?: string[]; uninstall?: string[] },
         token?: CancellationToken,
-    ): Promise<Package[]> {
+    ): Promise<void> {
+        const poetry = await getPoetry();
+        if (!poetry) {
+            throw new Error(
+                l10n.t(
+                    'Poetry executable not found. Install Poetry to manage packages, or set the "python.poetryPath" setting.',
+                ),
+            );
+        }
+
         // Handle uninstalls first
         if (options.uninstall && options.uninstall.length > 0) {
             try {
@@ -188,12 +218,18 @@ export class PoetryPackageManager implements PackageManager, Disposable {
                 throw err;
             }
         }
-
-        // Refresh the packages list after changes
-        return this.refreshPackages(environment);
     }
 
-    private async refreshPackages(environment: PythonEnvironment): Promise<Package[]> {
+    private async fetchPackagesFromTool(environment: PythonEnvironment): Promise<Package[]> {
+        const poetry = await getPoetry();
+        if (!poetry) {
+            throw new Error(
+                l10n.t(
+                    'Poetry executable not found. Install Poetry to manage packages, or set the "python.poetryPath" setting.',
+                ),
+            );
+        }
+
         let cwd = process.cwd();
         const projects = this.api.getPythonProjects();
         if (projects.length === 1) {
@@ -254,6 +290,22 @@ export class PoetryPackageManager implements PackageManager, Disposable {
 
         // Convert to Package objects using the API
         return poetryPackages.map((pkg) => this.api.createPackageItem(pkg, environment, this));
+    }
+
+    async getDirectPackageNames(_environment: PythonEnvironment): Promise<Set<string> | undefined> {
+        try {
+            const topLevelResult = await runPoetry(['show', '--no-ansi', '--top-level'], undefined, this.log);
+            const names = topLevelResult
+                .split('\n')
+                .map((line) => line.trim())
+                .map((line) => line.match(/^([a-zA-Z0-9._-]+)/)?.[1] ?? '')
+                .filter((name) => !!name)
+                .map(normalizePackageName);
+            return new Set(names);
+        } catch (err) {
+            this.log.error(`Error fetching direct package names with Poetry: ${err}`);
+            return undefined;
+        }
     }
 }
 

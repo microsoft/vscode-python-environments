@@ -1,3 +1,5 @@
+import type { Pep440Version } from '@renovatebot/pep440';
+import { explain as parse, rcompare } from '@renovatebot/pep440';
 import {
     CancellationError,
     Disposable,
@@ -9,9 +11,9 @@ import {
 } from 'vscode';
 import {
     DidChangePackagesEventArgs,
+    GetPackagesOptions,
     IconPath,
     Package,
-    PackageChangeKind,
     PackageManagementOptions,
     PackageManager,
     PythonEnvironment,
@@ -19,19 +21,10 @@ import {
 } from '../../api';
 import { showErrorMessageWithLogs } from '../../common/errors/utils';
 import { CondaStrings } from '../../common/localize';
+import { traceError } from '../../common/logging';
 import { withProgress } from '../../common/window.apis';
-import { getCommonCondaPackagesToInstall, managePackages, refreshPackages } from './condaUtils';
-
-function getChanges(before: Package[], after: Package[]): { kind: PackageChangeKind; pkg: Package }[] {
-    const changes: { kind: PackageChangeKind; pkg: Package }[] = [];
-    before.forEach((pkg) => {
-        changes.push({ kind: PackageChangeKind.remove, pkg });
-    });
-    after.forEach((pkg) => {
-        changes.push({ kind: PackageChangeKind.add, pkg });
-    });
-    return changes;
-}
+import { updatePackagesAndNotify } from '../common/packageChanges';
+import { getCommonCondaPackagesToInstall, managePackages, runCondaExecutable } from './condaUtils';
 
 export class CondaPackageManager implements PackageManager, Disposable {
     private readonly _onDidChangePackages = new EventEmitter<DidChangePackagesEventArgs>();
@@ -39,7 +32,10 @@ export class CondaPackageManager implements PackageManager, Disposable {
 
     private packages: Map<string, Package[]> = new Map();
 
-    constructor(public readonly api: PythonEnvironmentApi, public readonly log: LogOutputChannel) {
+    constructor(
+        public readonly api: PythonEnvironmentApi,
+        public readonly log: LogOutputChannel,
+    ) {
         this.name = 'conda';
         this.displayName = 'Conda';
         this.description = CondaStrings.condaPackageMgr;
@@ -78,11 +74,15 @@ export class CondaPackageManager implements PackageManager, Disposable {
             },
             async (_progress, token) => {
                 try {
-                    const before = this.packages.get(environment.envId.id) ?? [];
-                    const after = await managePackages(environment, manageOptions, this.api, this, token, this.log);
-                    const changes = getChanges(before, after);
-                    this.packages.set(environment.envId.id, after);
-                    this._onDidChangePackages.fire({ environment: environment, manager: this, changes });
+                    await managePackages(environment, manageOptions, token, this.log);
+                    await updatePackagesAndNotify(
+                        this,
+                        environment,
+                        this.packages.get(environment.envId.id),
+                        (changes) => {
+                            this._onDidChangePackages.fire({ environment, manager: this, changes });
+                        },
+                    );
                 } catch (e) {
                     if (e instanceof CancellationError) {
                         throw e;
@@ -97,29 +97,104 @@ export class CondaPackageManager implements PackageManager, Disposable {
         );
     }
 
-    async refresh(environment: PythonEnvironment): Promise<void> {
-        await withProgress(
+    async refresh(environment: PythonEnvironment): Promise<Package[] | undefined> {
+        return withProgress(
             {
                 location: ProgressLocation.Window,
                 title: CondaStrings.condaRefreshingPackages,
             },
             async () => {
-                const before = this.packages.get(environment.envId.id) ?? [];
-                const after = await refreshPackages(environment, this.api, this);
-                const changes = getChanges(before, after);
-                this.packages.set(environment.envId.id, after);
-                if (changes.length > 0) {
-                    this._onDidChangePackages.fire({ environment, manager: this, changes });
-                }
+                return updatePackagesAndNotify(
+                    this,
+                    environment,
+                    this.packages.get(environment.envId.id),
+                    (changes) => {
+                        this._onDidChangePackages.fire({ environment, manager: this, changes });
+                    },
+                );
             },
         );
     }
 
-    async getPackages(environment: PythonEnvironment): Promise<Package[] | undefined> {
-        if (!this.packages.has(environment.envId.id)) {
-            await this.refresh(environment);
+    async getPackages(environment: PythonEnvironment, options?: GetPackagesOptions): Promise<Package[] | undefined> {
+        if (options?.skipCache || !this.packages.has(environment.envId.id)) {
+            const args = ['list', '-p', environment.environmentPath.fsPath, '--json'];
+            const data = await runCondaExecutable(args);
+
+            let condaPackages: { name: string; version: string }[];
+            try {
+                condaPackages = JSON.parse(data) as { name: string; version: string }[];
+            } catch (e) {
+                traceError(`Failed to parse conda list JSON output: ${data}`, e);
+                return [];
+            }
+
+            const packages: Package[] = [];
+            for (const condaPkg of condaPackages) {
+                if (condaPkg.name && condaPkg.version) {
+                    packages.push(
+                        this.api.createPackageItem(
+                            {
+                                name: condaPkg.name,
+                                displayName: condaPkg.name,
+                                version: condaPkg.version,
+                                description: condaPkg.version,
+                            },
+                            environment,
+                            this,
+                        ),
+                    );
+                }
+            }
+            this.packages.set(environment.envId.id, packages);
+            return packages;
         }
         return this.packages.get(environment.envId.id);
+    }
+
+    formatInstallSpec(packageName: string, version: string): string {
+        // conda match spec syntax uses a single `=` for version pinning
+        return `${packageName}=${version}`;
+    }
+
+    async getVersion(_environment: PythonEnvironment): Promise<Pep440Version | undefined> {
+        try {
+            const output = await runCondaExecutable(['--version'], this.log);
+            // "conda X.Y.Z"
+            const match = output.match(/conda\s+(\d+\.\d+(?:\.\d+)*)/i);
+            return match ? (parse(match[1]) ?? undefined) : undefined;
+        } catch {
+            return undefined;
+        }
+    }
+
+    async getPackageAvailableVersions(
+        _environment: PythonEnvironment,
+        packageName: string,
+    ): Promise<Pep440Version[] | undefined> {
+        try {
+            const output = await runCondaExecutable(['search', packageName, '--json'], this.log);
+            const parsed = JSON.parse(output);
+            if (parsed && typeof parsed === 'object' && Array.isArray(parsed[packageName])) {
+                const uniqueVersions = new Map<string, Pep440Version>();
+                parsed[packageName]
+                    .filter((entry: { version?: string }) => !!entry.version?.trim())
+                    .map((entry: { version?: string }) => parse(entry.version!))
+                    .filter((v: Pep440Version | null): v is Pep440Version => v !== null)
+                    .forEach((version: Pep440Version) => {
+                        if (!uniqueVersions.has(version.public)) {
+                            uniqueVersions.set(version.public, version);
+                        }
+                    });
+
+                return Array.from(uniqueVersions.values()).sort((a: Pep440Version, b: Pep440Version) =>
+                    rcompare(a.public, b.public),
+                );
+            }
+            return undefined;
+        } catch {
+            return undefined;
+        }
     }
 
     dispose() {

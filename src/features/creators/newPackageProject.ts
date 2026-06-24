@@ -167,7 +167,7 @@ export class NewPackageProject implements PythonProjectCreator {
             }
 
             // 6. Set the Python environment for the package
-            this.envManagers.setEnvironment(createdPackage?.uri, createdEnv);
+            await this.envManagers.setEnvironment(createdPackage?.uri, createdEnv);
 
             // 7. add custom github copilot instructions
             if (createCopilotInstructions) {

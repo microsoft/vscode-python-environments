@@ -1,9 +1,46 @@
-import { Command, MarkdownString, ThemeIcon, TreeItem, TreeItemCollapsibleState } from 'vscode';
+import { Command, MarkdownString, ThemeIcon, TreeItem, TreeItemCollapsibleState, l10n } from 'vscode';
 import { EnvironmentGroupInfo, IconPath, Package, PythonEnvironment, PythonProject } from '../../api';
-import { EnvViewStrings } from '../../common/localize';
+import { EnvViewStrings, UvInstallStrings, VenvManagerStrings } from '../../common/localize';
 import { InternalEnvironmentManager, InternalPackageManager } from '../../internal.api';
 import { isActivatableEnvironment } from '../common/activation';
 import { removable } from './utils';
+
+/**
+ * Extracts the parent folder name from an environment path for disambiguation.
+ *
+ * This function handles various path formats including:
+ * - Unix paths with bin folder: /home/user/my-project/.venv/bin/python → my-project
+ * - Windows paths with Scripts folder: C:\Users\bob\project\.venv\Scripts\python.exe → project
+ * - Direct venv folder paths: /home/user/project/.venv → project
+ *
+ * @param environment The Python environment to extract the parent folder from
+ * @returns The name of the parent folder containing the virtual environment
+ */
+export function getEnvironmentParentDirName(environment: PythonEnvironment): string {
+    const envPath = environment.environmentPath.fsPath.replace(/\\/g, '/');
+    const parts = envPath.split('/').filter((p) => p.length > 0);
+
+    let venvFolderIndex = -1;
+
+    for (let i = parts.length - 1; i >= 0; i--) {
+        const part = parts[i].toLowerCase();
+        if (part === 'bin' || part === 'scripts') {
+            venvFolderIndex = i - 1;
+            break;
+        }
+        if (part.startsWith('python')) {
+            continue;
+        }
+        venvFolderIndex = i;
+        break;
+    }
+
+    if (venvFolderIndex > 0) {
+        return parts[venvFolderIndex - 1];
+    }
+
+    return parts.length >= 2 ? parts[parts.length - 2] : parts[0] || '';
+}
 
 export enum EnvTreeItemKind {
     manager = 'python-env-manager',
@@ -28,6 +65,7 @@ export class EnvManagerTreeItem implements EnvTreeItem {
     public readonly parent: undefined;
     constructor(public readonly manager: InternalEnvironmentManager) {
         const item = new TreeItem(manager.displayName, TreeItemCollapsibleState.Collapsed);
+        item.id = manager.id;
         item.contextValue = this.getContextValue();
         item.description = manager.description;
         item.tooltip = manager.tooltip ?? manager.description;
@@ -45,9 +83,13 @@ export class EnvManagerTreeItem implements EnvTreeItem {
 export class PythonGroupEnvTreeItem implements EnvTreeItem {
     public readonly kind = EnvTreeItemKind.environmentGroup;
     public readonly treeItem: TreeItem;
-    constructor(public readonly parent: EnvManagerTreeItem, public readonly group: string | EnvironmentGroupInfo) {
+    constructor(
+        public readonly parent: EnvManagerTreeItem,
+        public readonly group: string | EnvironmentGroupInfo,
+    ) {
         const label = typeof group === 'string' ? group : group.name;
         const item = new TreeItem(label, TreeItemCollapsibleState.Collapsed);
+        item.id = `${this.parent.manager.id}:${label}`;
         item.contextValue = `pythonEnvGroup;${this.parent.manager.id}:${label};`;
         this.treeItem = item;
 
@@ -62,13 +104,24 @@ export class PythonGroupEnvTreeItem implements EnvTreeItem {
 export class PythonEnvTreeItem implements EnvTreeItem {
     public readonly kind = EnvTreeItemKind.environment;
     public readonly treeItem: TreeItem;
+    /**
+     * Creates a tree item for a Python environment.
+     * @param environment The Python environment to display
+     * @param parent The parent tree item (manager or group)
+     * @param selected If set, indicates this environment is selected ('global' or workspace path)
+     * @param disambiguationSuffix If set, shown in description to distinguish similarly-named environments
+     */
     constructor(
         public readonly environment: PythonEnvironment,
         public readonly parent: EnvManagerTreeItem | PythonGroupEnvTreeItem,
         public readonly selected?: string,
+        public readonly disambiguationSuffix?: string,
     ) {
-        let name = environment.displayName ?? environment.name;
+        const name = environment.displayName ?? environment.name;
+
         let tooltip = environment.tooltip ?? environment.description;
+        const isBroken = !!environment.error;
+
         if (selected) {
             const selectedTooltip =
                 selected === 'global' ? EnvViewStrings.selectedGlobalTooltip : EnvViewStrings.selectedWorkspaceTooltip;
@@ -76,22 +129,40 @@ export class PythonEnvTreeItem implements EnvTreeItem {
         }
 
         const item = new TreeItem(name, TreeItemCollapsibleState.Collapsed);
+        item.id = environment.envId.id;
         item.contextValue = this.getContextValue();
-        item.description = environment.description;
-        item.tooltip = tooltip;
-        item.iconPath = environment.iconPath;
+
+        // Build description with optional [uv] indicator and disambiguation suffix
+        const uvIndicator = environment.description?.toLowerCase().includes('uv') ? '[uv]' : '';
+        const descriptionParts: string[] = [];
+        if (uvIndicator) {
+            descriptionParts.push(uvIndicator);
+        }
+        if (disambiguationSuffix) {
+            descriptionParts.push(disambiguationSuffix);
+        }
+        const computedDescription = descriptionParts.length > 0 ? descriptionParts.join(' ') : undefined;
+
+        // Use error message for broken environments, otherwise use computed description
+        item.description = isBroken ? environment.error : computedDescription;
+        item.tooltip = isBroken ? environment.error : tooltip;
+        // Show warning icon for broken environments
+        item.iconPath = isBroken ? new ThemeIcon('warning') : environment.iconPath;
         this.treeItem = item;
     }
 
     private getContextValue() {
-        const activatable = isActivatableEnvironment(this.environment) ? 'activatable' : '';
+        const isBroken = !!this.environment.error;
+        const activatable = !isBroken && isActivatableEnvironment(this.environment) ? 'activatable' : '';
         let remove = '';
         if (this.parent.kind === EnvTreeItemKind.environmentGroup) {
             remove = this.parent.parent.manager.supportsRemove ? 'remove' : '';
         } else if (this.parent.kind === EnvTreeItemKind.manager) {
             remove = this.parent.manager.supportsRemove ? 'remove' : '';
         }
-        const parts = ['pythonEnvironment', remove, activatable].filter(Boolean);
+        // Use different base context for broken environments so normal actions don't show
+        const baseContext = isBroken ? 'pythonBrokenEnvironment' : 'pythonEnvironment';
+        const parts = [baseContext, remove, activatable].filter(Boolean);
         return parts.join(';') + ';';
     }
 }
@@ -105,12 +176,16 @@ export class NoPythonEnvTreeItem implements EnvTreeItem {
         private readonly tooltip?: string | MarkdownString,
         private readonly iconPath?: string | IconPath,
     ) {
-        const item = new TreeItem(
-            this.parent.manager.supportsCreate
-                ? 'No environment found, click to create'
-                : 'No python environments found.',
-            TreeItemCollapsibleState.None,
-        );
+        // Use special message for system manager (Python installation)
+        const isSystemManager = this.parent.manager.name === 'system';
+        let label: string;
+        if (this.parent.manager.supportsCreate) {
+            label = isSystemManager ? UvInstallStrings.clickToInstallPython : VenvManagerStrings.noEnvClickToCreate;
+        } else {
+            label = VenvManagerStrings.noEnvFound;
+        }
+
+        const item = new TreeItem(label, TreeItemCollapsibleState.None);
         item.contextValue = 'python-no-environment';
         item.description = this.description;
         item.tooltip = this.tooltip;
@@ -118,7 +193,7 @@ export class NoPythonEnvTreeItem implements EnvTreeItem {
         if (this.parent.manager.supportsCreate) {
             item.command = {
                 command: 'python-envs.create',
-                title: 'Create Environment',
+                title: isSystemManager ? UvInstallStrings.installPython : VenvManagerStrings.createEnvironment,
                 arguments: [this.parent],
             };
         }
@@ -135,10 +210,13 @@ export class PackageTreeItem implements EnvTreeItem {
         public readonly manager: InternalPackageManager,
     ) {
         const item = new TreeItem(pkg.displayName);
-        item.iconPath = pkg.iconPath;
-        item.contextValue = 'python-package';
-        item.description = pkg.description ?? pkg.version;
-        item.tooltip = pkg.tooltip;
+        const defaultIcon = pkg.isTransitive ? new ThemeIcon('list-tree') : new ThemeIcon('package');
+        item.iconPath = pkg.iconPath ?? defaultIcon;
+        item.contextValue = pkg.isTransitive ? 'python-package-transitive' : 'python-package';
+        item.description = (pkg.isTransitive ? l10n.t('(transitive) ') : '') + (pkg.description ?? pkg.version);
+        item.tooltip = pkg.isTransitive
+            ? l10n.t('This package is a dependency of another installed package. It may also have been explicitly installed.')
+            : pkg.tooltip;
         this.treeItem = item;
     }
 }
@@ -240,16 +318,22 @@ export class ProjectEnvironment implements ProjectTreeItem {
     public readonly kind = ProjectTreeItemKind.environment;
     public readonly id: string;
     public readonly treeItem: TreeItem;
-    constructor(public readonly parent: ProjectItem, public readonly environment: PythonEnvironment) {
+    constructor(
+        public readonly parent: ProjectItem,
+        public readonly environment: PythonEnvironment,
+    ) {
         this.id = this.getId(parent, environment);
+        const isBroken = !!environment.error;
         const item = new TreeItem(
             this.environment.displayName ?? this.environment.name,
             TreeItemCollapsibleState.Collapsed,
         );
-        item.contextValue = 'python-env';
-        item.description = this.environment.description;
-        item.tooltip = this.environment.tooltip;
-        item.iconPath = this.environment.iconPath;
+        item.contextValue = isBroken ? 'python-env;broken;' : 'python-env';
+        // Show error message for broken environments
+        item.description = isBroken ? this.environment.error : this.environment.description;
+        item.tooltip = isBroken ? this.environment.error : this.environment.tooltip;
+        // Show warning icon for broken environments
+        item.iconPath = isBroken ? new ThemeIcon('warning') : this.environment.iconPath;
         this.treeItem = item;
     }
 
@@ -350,7 +434,7 @@ export class ProjectPackage implements ProjectTreeItem {
         this.id = ProjectPackage.getId(parent, pkg);
         const item = new TreeItem(this.pkg.displayName, TreeItemCollapsibleState.None);
         item.iconPath = this.pkg.iconPath;
-        item.contextValue = 'python-package';
+        item.contextValue = this.pkg.isTransitive ? 'python-package-transitive' : 'python-package';
         item.description = this.pkg.description ?? this.pkg.version;
         item.tooltip = this.pkg.tooltip;
         this.treeItem = item;

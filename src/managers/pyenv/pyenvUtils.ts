@@ -21,7 +21,22 @@ import {
     NativePythonEnvironmentKind,
     NativePythonFinder,
 } from '../common/nativePythonFinder';
-import { shortVersion, sortEnvironments } from '../common/utils';
+import { shortenVersionString, sortEnvironments } from '../common/utils';
+
+/**
+ * Returns the pyenv root directory from the pyenv executable path.
+ * Prefers `PYENV_ROOT` env var when set, otherwise goes up 2 levels from the binary.
+ * On POSIX, pyenv binary is at `<root>/bin/pyenv` (e.g. `~/.pyenv/bin/pyenv`).
+ * On Windows, pyenv-win binary is at `<root>/bin/pyenv.bat` (e.g. `~/.pyenv/pyenv-win/bin/pyenv.bat`,
+ * where `<root>` is `~/.pyenv/pyenv-win`).
+ */
+export function getPyenvDir(pyenv: string): string {
+    const pyenvRoot = process.env.PYENV_ROOT;
+    if (pyenvRoot) {
+        return pyenvRoot;
+    }
+    return path.dirname(path.dirname(pyenv));
+}
 
 async function findPyenv(): Promise<string | undefined> {
     try {
@@ -96,69 +111,63 @@ export async function setPyenvForWorkspaces(fsPath: string[], envPath: string | 
     await state.set(PYENV_WORKSPACE_KEY, data);
 }
 
-export async function getPyenv(native?: NativePythonFinder): Promise<string | undefined> {
-    if (pyenvPath) {
-        if (await fs.exists(untildify(pyenvPath))) {
-            return untildify(pyenvPath);
-        }
-        pyenvPath = undefined;
-    }
-
-    const state = await getWorkspacePersistentState();
-    const storedPath = await state.get<string>(PYENV_PATH_KEY);
-    if (storedPath) {
-        if (await fs.exists(untildify(storedPath))) {
-            pyenvPath = storedPath;
-            traceInfo(`Using pyenv from persistent state: ${pyenvPath}`);
-            return untildify(pyenvPath);
-        }
-        await state.set(PYENV_PATH_KEY, undefined);
-    }
-
-    const pyenvBin = isWindows() ? 'pyenv.exe' : 'pyenv';
-    const pyenvRoot = process.env.PYENV_ROOT;
-    if (pyenvRoot) {
-        const pyenvPath = path.join(pyenvRoot, 'bin', pyenvBin);
-        if (await fs.exists(pyenvPath)) {
-            return pyenvPath;
-        }
-    }
-
-    const home = getUserHomeDir();
-    if (home) {
-        const pyenvPath = path.join(home, '.pyenv', 'bin', pyenvBin);
-        if (await fs.exists(pyenvPath)) {
-            return pyenvPath;
+export async function getPyenv(): Promise<string | undefined> {
+    try {
+        if (pyenvPath) {
+            if (await fs.exists(untildify(pyenvPath))) {
+                return untildify(pyenvPath);
+            }
+            pyenvPath = undefined;
         }
 
-        if (isWindows()) {
-            const pyenvPathWin = path.join(home, '.pyenv', 'pyenv-win', 'bin', pyenvBin);
-            if (await fs.exists(pyenvPathWin)) {
-                return pyenvPathWin;
+        const state = await getWorkspacePersistentState();
+        const storedPath = await state.get<string>(PYENV_PATH_KEY);
+        if (storedPath) {
+            if (await fs.exists(untildify(storedPath))) {
+                pyenvPath = storedPath;
+                traceInfo(`Using pyenv from persistent state: ${pyenvPath}`);
+                return untildify(pyenvPath);
+            }
+            await state.set(PYENV_PATH_KEY, undefined);
+        }
+
+        // pyenv-win provides pyenv.bat, not pyenv.exe
+        // See: https://github.com/pyenv-win/pyenv-win
+        const pyenvBin = isWindows() ? 'pyenv.bat' : 'pyenv';
+        const pyenvRoot = process.env.PYENV_ROOT;
+        if (pyenvRoot) {
+            const pyenvPath = path.join(pyenvRoot, 'bin', pyenvBin);
+            if (await fs.exists(pyenvPath)) {
+                return pyenvPath;
             }
         }
-    }
 
-    pyenvPath = await findPyenv();
-    if (pyenvPath) {
-        return pyenvPath;
-    }
+        const home = getUserHomeDir();
+        if (home) {
+            const pyenvPath = path.join(home, '.pyenv', 'bin', pyenvBin);
+            if (await fs.exists(pyenvPath)) {
+                return pyenvPath;
+            }
 
-    if (native) {
-        const data = await native.refresh(false);
-        const managers = data
-            .filter((e) => !isNativeEnvInfo(e))
-            .map((e) => e as NativeEnvManagerInfo)
-            .filter((e) => e.tool.toLowerCase() === 'pyenv');
-        if (managers.length > 0) {
-            pyenvPath = managers[0].executable;
-            traceInfo(`Using pyenv from native finder: ${pyenvPath}`);
-            await state.set(PYENV_PATH_KEY, pyenvPath);
+            if (isWindows()) {
+                const pyenvPathWin = path.join(home, '.pyenv', 'pyenv-win', 'bin', pyenvBin);
+                if (await fs.exists(pyenvPathWin)) {
+                    return pyenvPathWin;
+                }
+            }
+        }
+
+        pyenvPath = await findPyenv();
+        if (pyenvPath) {
             return pyenvPath;
         }
-    }
 
-    return undefined;
+        return undefined;
+    } catch (ex) {
+        const err = ex instanceof Error ? ex : new Error(String(ex));
+        (err as Error & { failureStage?: string }).failureStage = `getPyenv`;
+        throw err;
+    }
 }
 
 function nativeToPythonEnv(
@@ -172,8 +181,9 @@ function nativeToPythonEnv(
         return undefined;
     }
 
-    const versionsPath = normalizePath(path.join(path.dirname(path.dirname(pyenv)), 'versions'));
-    const envsPaths = normalizePath(path.join(path.dirname(versionsPath), 'envs'));
+    const pyenvDir = getPyenvDir(pyenv);
+    const versionsPath = normalizePath(path.join(pyenvDir, 'versions'));
+    const envsPaths = normalizePath(path.join(pyenvDir, 'envs'));
     let group = undefined;
     const normPrefix = normalizePath(info.prefix);
     if (normPrefix.startsWith(versionsPath)) {
@@ -182,7 +192,7 @@ function nativeToPythonEnv(
         group = PYENV_ENVIRONMENTS;
     }
 
-    const sv = shortVersion(info.version);
+    const sv = shortenVersionString(info.version);
     const name = info.name || info.displayName || path.basename(info.prefix);
     let displayName = info.displayName || `pyenv (${sv})`;
     if (info.kind === NativePythonEnvironmentKind.pyenvVirtualEnv) {
@@ -269,10 +279,10 @@ export async function resolvePyenvPath(
 ): Promise<PythonEnvironment | undefined> {
     try {
         const e = await nativeFinder.resolve(fsPath);
-        if (e.kind !== NativePythonEnvironmentKind.pyenv) {
+        if (e.kind !== NativePythonEnvironmentKind.pyenv && e.kind !== NativePythonEnvironmentKind.pyenvVirtualEnv) {
             return undefined;
         }
-        const pyenv = await getPyenv(nativeFinder);
+        const pyenv = await getPyenv();
         if (!pyenv) {
             traceError('Pyenv not found while resolving environment');
             return undefined;

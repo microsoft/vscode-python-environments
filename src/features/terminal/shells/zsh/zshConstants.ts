@@ -1,0 +1,3 @@
+export const ZSH_ENV_KEY = 'VSCODE_PYTHON_ZSH_ACTIVATE';
+export const ZSH_OLD_ENV_KEY = 'VSCODE_ZSH_ACTIVATE';
+export const ZSH_SCRIPT_VERSION = '0.1.1';

@@ -2,18 +2,19 @@
     "name": "vscode-python-envs",
     "displayName": "Python Environments",
     "description": "Provides a unified python environment experience",
-    "version": "1.17.0",
+    "version": "1.37.0",
     "publisher": "ms-python",
     "preview": true,
     "engines": {
-        "vscode": "^1.106.0"
+        "vscode": "^1.110.0-20260204"
     },
     "categories": [
         "Other"
     ],
     "enabledApiProposals": [
         "terminalShellEnv",
-        "terminalDataWriteEvent"
+        "terminalDataWriteEvent",
+        "taskExecutionTerminal"
     ],
     "capabilities": {
         "untrustedWorkspaces": {
@@ -111,19 +112,22 @@
                     "default": false,
                     "scope": "resource"
                 },
-                "python-env.globalSearchPaths": {
+                "python-envs.globalSearchPaths": {
                     "type": "array",
-                    "markdownDescription": "%python-env.globalSearchPaths.description%",
+                    "markdownDescription": "%python-envs.globalSearchPaths.description%",
                     "default": [],
                     "scope": "machine",
                     "items": {
                         "type": "string"
                     }
                 },
-                "python-env.workspaceSearchPaths": {
+                "python-envs.workspaceSearchPaths": {
                     "type": "array",
-                    "description": "%python-env.workspaceSearchPaths.description%",
-                    "default": [],
+                    "description": "%python-envs.workspaceSearchPaths.description%",
+                    "default": [
+                        ".venv",
+                        "*/.venv"
+                    ],
                     "scope": "resource",
                     "items": {
                         "type": "string"
@@ -213,6 +217,12 @@
                 "icon": "$(refresh)"
             },
             {
+                "command": "python-envs.searchSettings",
+                "title": "%python-envs.searchSettings.title%",
+                "category": "Python",
+                "icon": "$(gear)"
+            },
+            {
                 "command": "python-envs.refreshPackages",
                 "title": "%python-envs.refreshPackages.title%",
                 "category": "Python",
@@ -273,6 +283,12 @@
                 "icon": "$(trash)"
             },
             {
+                "command": "python-envs.managePackageVersion",
+                "title": "%python-envs.managePackageVersion.title%",
+                "category": "Python Envs",
+                "icon": "$(gear)"
+            },
+            {
                 "command": "python-envs.copyEnvPath",
                 "title": "%python-envs.copyEnvPath.title%",
                 "category": "Python Envs",
@@ -312,6 +328,12 @@
                 "title": "%python-envs.revealProjectInExplorer.title%",
                 "category": "Python Envs",
                 "icon": "$(folder-opened)"
+            },
+            {
+                "command": "python-envs.revealEnvInManagerView",
+                "title": "%python-envs.revealEnvInManagerView.title%",
+                "category": "Python Envs",
+                "icon": "$(eye)"
             },
             {
                 "command": "python-envs.runPetInTerminal",
@@ -424,6 +446,10 @@
                     "when": "false"
                 },
                 {
+                    "command": "python-envs.revealEnvInManagerView",
+                    "when": "false"
+                },
+                {
                     "command": "python-envs.createNewProjectFromTemplate",
                     "when": "config.python.useEnvironmentsExtension != false"
                 },
@@ -445,6 +471,10 @@
                 {
                     "command": "python-envs.remove",
                     "when": "view == env-managers && viewItem =~ /.*pythonEnvironment.*;remove;.*/"
+                },
+                {
+                    "command": "python-envs.remove",
+                    "when": "view == env-managers && viewItem =~ /.*pythonBrokenEnvironment.*;remove;.*/"
                 },
                 {
                     "command": "python-envs.setEnv",
@@ -481,6 +511,21 @@
                     "when": "view == env-managers && viewItem =~ /.*pythonEnvironment.*/ && viewItem =~ /.*copied.*/"
                 },
                 {
+                    "command": "python-envs.copyEnvPath",
+                    "group": "inline",
+                    "when": "view == env-managers && viewItem =~ /.*pythonBrokenEnvironment.*/ && viewItem =~ /^((?!copied).)*$/"
+                },
+                {
+                    "command": "python-envs.copyEnvPathCopied",
+                    "group": "inline",
+                    "when": "view == env-managers && viewItem =~ /.*pythonBrokenEnvironment.*/ && viewItem =~ /.*copied.*/"
+                },
+                {
+                    "command": "python-envs.managePackageVersion",
+                    "group": "inline",
+                    "when": "view == env-managers && viewItem == python-package"
+                },
+                {
                     "command": "python-envs.uninstallPackage",
                     "group": "inline",
                     "when": "view == env-managers && viewItem == python-package"
@@ -509,11 +554,6 @@
                     "when": "view == python-projects && viewItem =~ /.*python-workspace.*/"
                 },
                 {
-                    "command": "python-envs.createTerminal",
-                    "group": "inline",
-                    "when": "view == python-projects && viewItem =~ /.*python-workspace.*/"
-                },
-                {
                     "command": "python-envs.copyProjectPath",
                     "group": "inline",
                     "when": "view == python-projects && viewItem =~ /.*python-workspace.*/ && viewItem =~ /^((?!copied).)*$/"
@@ -528,9 +568,19 @@
                     "when": "view == python-projects && viewItem =~ /.*python-workspace.*/"
                 },
                 {
+                    "command": "python-envs.managePackageVersion",
+                    "group": "inline",
+                    "when": "view == python-projects && viewItem == python-package"
+                },
+                {
                     "command": "python-envs.uninstallPackage",
                     "group": "inline",
                     "when": "view == python-projects && viewItem == python-package"
+                },
+                {
+                    "command": "python-envs.revealEnvInManagerView",
+                    "group": "inline",
+                    "when": "view == python-projects && viewItem == python-env"
                 }
             ],
             "view/title": [
@@ -541,6 +591,11 @@
                 },
                 {
                     "command": "python-envs.createAny",
+                    "group": "navigation",
+                    "when": "view == env-managers"
+                },
+                {
+                    "command": "python-envs.searchSettings",
                     "group": "navigation",
                     "when": "view == env-managers"
                 },
@@ -646,6 +701,10 @@
         "pretest": "npm run compile-tests && npm run compile",
         "lint": "eslint --config=eslint.config.mjs src",
         "unittest": "mocha --config=./build/.mocha.unittests.json",
+        "smoke-test": "vscode-test --label smokeTests",
+        "e2e-test": "vscode-test --label e2eTests --install-extensions ms-python.python",
+        "integration-test": "vscode-test --label integrationTests --install-extensions ms-python.python",
+        "integration-test-multiroot": "vscode-test --label integrationTestsMultiRoot --install-extensions ms-python.python",
         "vsce-package": "vsce package -o ms-python-envs-insiders.vsix"
     },
     "devDependencies": {
@@ -659,8 +718,8 @@
         "@types/which": "^3.0.4",
         "@typescript-eslint/eslint-plugin": "^8.16.0",
         "@typescript-eslint/parser": "^8.16.0",
-        "@vscode/test-electron": "^2.3.2",
-        "@vscode/vsce": "^2.24.0",
+        "@vscode/test-electron": "^2.5.2",
+        "@vscode/vsce": "^3.9.2",
         "eslint": "^9.15.0",
         "glob": "^8.1.0",
         "mocha": "^10.8.2",
@@ -669,11 +728,12 @@
         "ts-mockito": "^2.6.1",
         "typemoq": "^2.1.0",
         "typescript": "^5.1.3",
-        "webpack": "^5.85.0",
+        "webpack": "^5.105.0",
         "webpack-cli": "^5.1.1"
     },
     "dependencies": {
         "@iarna/toml": "^2.2.5",
+        "@renovatebot/pep440": "^4.2.4",
         "@vscode/extension-telemetry": "^0.9.7",
         "@vscode/test-cli": "^0.0.10",
         "dotenv": "^16.4.5",
@@ -681,5 +741,8 @@
         "stack-trace": "0.0.10",
         "vscode-jsonrpc": "^9.0.0-next.5",
         "which": "^4.0.0"
+    },
+    "overrides": {
+        "serialize-javascript": "^7.0.3"
     }
 }

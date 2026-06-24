@@ -1,6 +1,15 @@
 import * as fs from 'fs-extra';
 import * as path from 'path';
-import { commands, QuickInputButtons, TaskExecution, TaskRevealKind, Terminal, Uri, workspace } from 'vscode';
+import {
+    ProgressLocation,
+    QuickInputButtons,
+    TaskExecution,
+    TaskRevealKind,
+    Terminal,
+    Uri,
+    l10n,
+    workspace,
+} from 'vscode';
 import {
     CreateEnvironmentOptions,
     PythonEnvironment,
@@ -19,20 +28,34 @@ import {
 } from '../internal.api';
 import { removePythonProjectSetting, setEnvironmentManager, setPackageManager } from './settings/settingHelpers';
 
+import { valid as pep440Valid } from '@renovatebot/pep440';
+import { executeCommand } from '../common/command.api';
 import { clipboardWriteText } from '../common/env.apis';
-import {} from '../common/errors/utils';
+import { Pickers } from '../common/localize';
 import { pickEnvironment } from '../common/pickers/environments';
 import {
+    ENTER_INTERPRETER_PATH_ID,
     pickCreator,
     pickEnvironmentManager,
     pickPackageManager,
     pickWorkspaceFolder,
 } from '../common/pickers/managers';
 import { pickProject, pickProjectMany } from '../common/pickers/projects';
-import { activeTextEditor, showErrorMessage, showInformationMessage } from '../common/window.apis';
+import { isWindows } from '../common/utils/platformUtils';
+import { handlePythonPath } from '../common/utils/pythonPath';
+import {
+    activeTextEditor,
+    showErrorMessage,
+    showInformationMessage,
+    showInputBox,
+    showOpenDialog,
+    showQuickPick,
+    withProgress,
+} from '../common/window.apis';
 import { runAsTask } from './execution/runAsTask';
 import { runInTerminal } from './terminal/runInTerminal';
 import { TerminalManager } from './terminal/terminalManager';
+import { EnvManagerView } from './views/envManagersView';
 import {
     EnvManagerTreeItem,
     EnvTreeItemKind,
@@ -43,6 +66,50 @@ import {
     ProjectPackage,
     PythonEnvTreeItem,
 } from './views/treeViewItems';
+
+/**
+ * Opens a file dialog to browse for a Python interpreter and resolves it using available managers.
+ */
+async function browseAndResolveInterpreter(
+    em: EnvironmentManagers,
+    projectUris?: Uri[],
+): Promise<PythonEnvironment | undefined> {
+    const filters = isWindows() ? { python: ['exe'] } : undefined;
+    const uris = await showOpenDialog({
+        canSelectFiles: true,
+        canSelectFolders: false,
+        canSelectMany: false,
+        filters,
+        title: Pickers.Environments.selectExecutable,
+    });
+    if (!uris || uris.length === 0) {
+        return;
+    }
+    const interpreterUri = uris[0];
+
+    // Get project-specific managers if projectUris are provided
+    const projectEnvManagers = projectUris
+        ? projectUris
+              .map((uri) => em.getEnvironmentManager(uri))
+              .filter((m): m is InternalEnvironmentManager => m !== undefined)
+        : [];
+
+    const environment = await withProgress(
+        {
+            location: ProgressLocation.Notification,
+            cancellable: false,
+        },
+        async (reporter, token) => {
+            return await handlePythonPath(interpreterUri, em.managers, projectEnvManagers, reporter, token);
+        },
+    );
+
+    if (!environment) {
+        showErrorMessage(l10n.t('Selected file is not a valid Python interpreter: {0}', interpreterUri.fsPath));
+    }
+
+    return environment;
+}
 
 export async function refreshManagerCommand(context: unknown): Promise<void> {
     if (context instanceof EnvManagerTreeItem) {
@@ -133,7 +200,22 @@ export async function createAnyEnvironmentCommand(
     const select = options?.selectEnvironment;
     const projects = pm.getProjects(options?.uri ? [options?.uri] : undefined);
     if (projects.length === 0) {
-        const managerId = await pickEnvironmentManager(em.managers.filter((m) => m.supportsCreate));
+        const managerId = await pickEnvironmentManager(
+            em.managers.filter((m) => m.supportsCreate),
+            undefined,
+            undefined,
+            true, // showEnterInterpreterPath
+        );
+
+        // Handle "Enter Interpreter Path" selection
+        if (managerId === ENTER_INTERPRETER_PATH_ID) {
+            const env = await browseAndResolveInterpreter(em);
+            if (select && env) {
+                await em.setEnvironments('global', env);
+            }
+            return env;
+        }
+
         const manager = em.managers.find((m) => m.id === managerId);
         if (manager) {
             const env = await manager.create('global', { ...options });
@@ -165,7 +247,19 @@ export async function createAnyEnvironmentCommand(
                     em.managers.filter((m) => m.supportsCreate),
                     defaultManagers,
                     options?.showBackButton,
+                    true, // showEnterInterpreterPath
                 );
+
+                // Handle "Enter Interpreter Path" selection
+                if (managerId === ENTER_INTERPRETER_PATH_ID) {
+                    const projectUris = selected.map((p) => p.uri);
+                    const env = await browseAndResolveInterpreter(em, projectUris);
+                    if (select && env) {
+                        await em.setEnvironments(projectUris, env);
+                    }
+                    return env;
+                }
+
                 if (managerId?.startsWith('QuickCreate#')) {
                     quickCreate = true;
                     managerId = managerId.replace('QuickCreate#', '');
@@ -214,13 +308,109 @@ export async function removeEnvironmentCommand(context: unknown, managers: Envir
 
 export async function handlePackageUninstall(context: unknown, em: EnvironmentManagers) {
     if (context instanceof PackageTreeItem || context instanceof ProjectPackage) {
+        if (context.pkg.isTransitive) {
+            const confirm = await showInformationMessage(
+                l10n.t(
+                    'The package "{0}" is a transitive dependency. Uninstalling it may break other packages that depend on it.',
+                    context.pkg.name,
+                ),
+                { modal: true },
+                l10n.t('Uninstall Anyway'),
+                l10n.t('Cancel'),
+            );
+            if (confirm !== l10n.t('Uninstall Anyway')) {
+                return;
+            }
+        }
         const moduleName = context.pkg.name;
-        const environment = context instanceof ProjectPackage ? context.parent.environment : context.parent.environment;
+        const environment = context.parent.environment;
         const packageManager = em.getPackageManager(environment);
         await packageManager?.manage(environment, { uninstall: [moduleName], install: [] });
         return;
     }
     traceError(`Invalid context for uninstall command: ${typeof context}`);
+}
+
+/**
+ * Manages package versions by allowing the user to select from available versions or enter a specific version.
+ * If available versions can be fetched, a QuickPick is shown. Otherwise, an InputBox is used for free-text version entry.
+ */
+export async function managePackageVersion(context: unknown, em: EnvironmentManagers) {
+    if (context instanceof PackageTreeItem || context instanceof ProjectPackage) {
+        const pkg = context.pkg;
+        const environment = context.parent.environment;
+        const packageManager = em.getPackageManager(environment);
+
+        if (!packageManager) {
+            return;
+        }
+
+        if (pkg.isTransitive) {
+            const confirm = await showInformationMessage(
+                l10n.t(
+                    'The package "{0}" is a transitive dependency. Changing its version may cause unexpected behavior in packages that depend on it.',
+                    pkg.name,
+                ),
+                { modal: true },
+                l10n.t('Change Version'),
+                l10n.t('Cancel'),
+            );
+            if (confirm !== l10n.t('Change Version')) {
+                return;
+            }
+        }
+
+        let version: string | undefined;
+
+        // Try to fetch available versions for a QuickPick experience
+        const availableVersions = await withProgress(
+            { location: ProgressLocation.Window, title: l10n.t('Fetching available versions for {0}...', pkg.name) },
+            () => packageManager.getPackageAvailableVersions(environment, pkg.name),
+        );
+
+        if (availableVersions && availableVersions.length > 0) {
+            const items = availableVersions.map((v) => ({
+                label: v.public,
+                description: v.public === pkg.version ? `$(check) ${l10n.t('Installed')}` : undefined,
+            }));
+
+            const selected = await showQuickPick(items, {
+                title: l10n.t('Select version for {0}', pkg.name),
+                placeHolder: l10n.t('Choose a version or press Escape to cancel'),
+            });
+            version = selected?.label;
+        } else {
+            // Fallback to free-text input if version listing is not available
+            const inputVersion = await showInputBox({
+                title: l10n.t('Manage Package Version'),
+                prompt: l10n.t('Enter the version for {0}', pkg.name),
+                value: pkg.version,
+                placeHolder: l10n.t('e.g. 1.2.3'),
+                validateInput: (value) => {
+                    const trimmedValue = value.trim();
+                    if (trimmedValue.length === 0) {
+                        return l10n.t('Version cannot be empty');
+                    }
+                    if (!pep440Valid(trimmedValue)) {
+                        return l10n.t('Invalid PEP 440 version: {0}', trimmedValue);
+                    }
+                    return undefined;
+                },
+            });
+            version = inputVersion?.trim();
+        }
+
+        if (version === undefined || version === pkg.version) {
+            return;
+        }
+
+        await packageManager.manage(environment, {
+            install: [packageManager.formatInstallSpec(pkg.name, version)],
+            uninstall: [],
+        });
+    } else {
+        traceError(`Invalid context for manage package version command: ${typeof context}`);
+    }
 }
 
 export async function setEnvironmentCommand(
@@ -383,7 +573,7 @@ export async function addPythonProjectCommand(
             'Open Folder',
         );
         if (r === 'Open Folder') {
-            await commands.executeCommand('vscode.openFolder');
+            await executeCommand('vscode.openFolder');
             return;
         }
     }
@@ -514,8 +704,10 @@ export async function createTerminalCommand(
     api: PythonEnvironmentApi,
     tm: TerminalManager,
 ): Promise<Terminal | undefined> {
-    if (context === undefined) {
-        const pw = await pickProject(api.getPythonProjects());
+    const pythonProjects = api.getPythonProjects();
+    // If no context is provided, or there are multiple projects, prompt the user to select a project for the terminal's cwd
+    if (context === undefined || pythonProjects.length > 0) {
+        const pw = await pickProject(pythonProjects);
         if (pw) {
             const env = await api.getEnvironment(pw.uri);
             const cwd = await findParentIfFile(pw.uri.fsPath);
@@ -549,7 +741,7 @@ export async function createTerminalCommand(
         }
     } else if (context instanceof PythonEnvTreeItem) {
         const view = context as PythonEnvTreeItem;
-        const pw = await pickProject(api.getPythonProjects());
+        const pw = await pickProject(pythonProjects);
         if (pw) {
             const cwd = await findParentIfFile(pw.uri.fsPath);
             const terminal = await tm.create(view.environment, { cwd });
@@ -660,8 +852,21 @@ export async function copyPathToClipboard(item: unknown): Promise<void> {
 export async function revealProjectInExplorer(item: unknown): Promise<void> {
     if (item instanceof ProjectItem) {
         const projectUri = item.project.uri;
-        await commands.executeCommand('revealInExplorer', projectUri);
+        await executeCommand('revealInExplorer', projectUri);
     } else {
         traceVerbose(`Invalid context for reveal project in explorer: ${item}`);
     }
+}
+
+/**
+ * Focuses the Environment Managers view and reveals the given project environment.
+ */
+export async function revealEnvInManagerView(item: unknown, managerView: EnvManagerView): Promise<void> {
+    if (item instanceof ProjectEnvironment) {
+        await executeCommand('env-managers.focus');
+        await managerView.reveal(item.environment);
+        return;
+    }
+
+    traceVerbose(`Invalid context for reveal environment in manager view: ${item}`);
 }

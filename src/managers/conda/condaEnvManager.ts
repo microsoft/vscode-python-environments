@@ -20,19 +20,29 @@ import {
     SetEnvironmentScope,
 } from '../../api';
 import { CondaStrings } from '../../common/localize';
-import { traceError } from '../../common/logging';
+import { traceError, traceInfo } from '../../common/logging';
+import { StopWatch } from '../../common/stopWatch';
+import { EventNames } from '../../common/telemetry/constants';
+import { classifyError } from '../../common/telemetry/errorClassifier';
+import { sendTelemetryEvent } from '../../common/telemetry/sender';
 import { createDeferred, Deferred } from '../../common/utils/deferred';
-import { showErrorMessage, withProgress } from '../../common/window.apis';
+import { normalizePath } from '../../common/utils/pathUtils';
+import { showErrorMessage, showInformationMessage, withProgress } from '../../common/window.apis';
+import { PythonProjectManager } from '../../internal.api';
+import { getProjectFsPathForScope, tryFastPathGet } from '../common/fastPath';
 import { NativePythonFinder } from '../common/nativePythonFinder';
-import { CondaSourcingStatus } from './condaSourcingUtils';
+import { notifyMissingManagerIfDefault } from '../common/utils';
+import { constructCondaSourcingStatus, CondaSourcingStatus } from './condaSourcingUtils';
 import {
     checkForNoPythonCondaEnvironment,
     clearCondaCache,
     createCondaEnvironment,
     deleteCondaEnvironment,
     generateName,
+    getConda,
     getCondaForGlobal,
     getCondaForWorkspace,
+    getCondaPathSetting,
     getDefaultCondaPrefix,
     quickCreateConda,
     refreshCondaEnvs,
@@ -59,6 +69,7 @@ export class CondaEnvManager implements EnvironmentManager, Disposable {
         private readonly nativeFinder: NativePythonFinder,
         private readonly api: PythonEnvironmentApi,
         public readonly log: LogOutputChannel,
+        private readonly projectManager?: PythonProjectManager,
     ) {
         this.name = 'conda';
         this.displayName = 'Conda';
@@ -85,22 +96,85 @@ export class CondaEnvManager implements EnvironmentManager, Disposable {
         }
 
         this._initialized = createDeferred();
+        const stopWatch = new StopWatch();
+        let result: 'success' | 'tool_not_found' | 'error' = 'success';
+        let envCount = 0;
+        let toolSource = 'none';
+        let errorType: string | undefined;
 
-        await withProgress(
-            {
-                location: ProgressLocation.Window,
-                title: CondaStrings.condaDiscovering,
-            },
-            async () => {
-                this.collection = await refreshCondaEnvs(false, this.nativeFinder, this.api, this.log, this);
-                await this.loadEnvMap();
+        try {
+            // Check if tool is findable before PET refresh (settings/cache/persistent state/PATH only, no PET).
+            // Calling getConda() without a native finder skips the PET refresh path inside getCondaExecutable.
+            const hasExplicitSetting = !!getCondaPathSetting();
+            let condaTool: string | undefined;
+            try {
+                condaTool = await getConda();
+            } catch {
+                condaTool = undefined;
+            }
+            const preRefreshTool = condaTool;
+            if (preRefreshTool) {
+                toolSource = hasExplicitSetting ? 'settings' : 'local';
+            }
 
-                this._onDidChangeEnvironments.fire(
-                    this.collection.map((e) => ({ environment: e, kind: EnvironmentChangeKind.add })),
-                );
-            },
-        );
-        this._initialized.resolve();
+            await withProgress(
+                {
+                    location: ProgressLocation.Window,
+                    title: CondaStrings.condaDiscovering,
+                },
+                async () => {
+                    this.collection =
+                        (await refreshCondaEnvs(false, this.nativeFinder, this.api, this.log, this)) ?? [];
+                    await this.loadEnvMap();
+
+                    this._onDidChangeEnvironments.fire(
+                        this.collection.map((e) => ({ environment: e, kind: EnvironmentChangeKind.add })),
+                    );
+                },
+            );
+
+            envCount = this.collection.length;
+
+            // If tool wasn't found via local lookup, check if refresh discovered it via PET
+            // (refreshCondaEnvs persists the conda path it found from native data).
+            if (!preRefreshTool) {
+                try {
+                    condaTool = await getConda();
+                } catch {
+                    condaTool = undefined;
+                }
+                toolSource = condaTool ? 'pet' : 'none';
+            }
+
+            if (toolSource === 'none') {
+                result = 'tool_not_found';
+                traceInfo('Conda not found, conda features will be inactive.');
+                if (this.projectManager) {
+                    await notifyMissingManagerIfDefault('ms-python.python:conda', this.projectManager, this.api);
+                }
+            } else if (condaTool) {
+                // Conda was found — populate sourcing information for activation/shell support.
+                try {
+                    this.sourcingInformation = await constructCondaSourcingStatus(condaTool);
+                    traceInfo(this.sourcingInformation.toString());
+                } catch (ex) {
+                    traceError('Failed to construct conda sourcing status', ex);
+                }
+            }
+        } catch (ex) {
+            result = 'error';
+            errorType = classifyError(ex);
+            traceError('Conda lazy initialization failed', ex);
+        } finally {
+            sendTelemetryEvent(EventNames.MANAGER_LAZY_INIT, stopWatch.elapsedTime, {
+                managerName: 'conda',
+                result,
+                envCount,
+                toolSource,
+                errorType,
+            });
+            this._initialized.resolve();
+        }
     }
 
     async getEnvironments(scope: GetEnvironmentsScope): Promise<PythonEnvironment[]> {
@@ -111,9 +185,7 @@ export class CondaEnvManager implements EnvironmentManager, Disposable {
         }
 
         if (scope === 'global') {
-            return this.collection.filter((env) => {
-                env.name === 'base';
-            });
+            return this.collection.filter((env) => env.name === 'base');
         }
 
         if (scope instanceof Uri) {
@@ -192,7 +264,10 @@ export class CondaEnvManager implements EnvironmentManager, Disposable {
         } catch (error) {
             this.log.error('Failed to create conda environment:', error);
             showErrorMessage(
-                l10n.t('Failed to create conda environment: {0}', error instanceof Error ? error.message : String(error)),
+                l10n.t(
+                    'Failed to create conda environment: {0}',
+                    error instanceof Error ? error.message : String(error),
+                ),
             );
             return undefined;
         }
@@ -240,7 +315,7 @@ export class CondaEnvManager implements EnvironmentManager, Disposable {
                 async () => {
                     this.log.info('Refreshing Conda Environments');
                     const discard = this.collection.map((c) => c);
-                    this.collection = await refreshCondaEnvs(true, this.nativeFinder, this.api, this.log, this);
+                    this.collection = (await refreshCondaEnvs(true, this.nativeFinder, this.api, this.log, this)) ?? [];
 
                     await this.loadEnvMap();
 
@@ -255,15 +330,42 @@ export class CondaEnvManager implements EnvironmentManager, Disposable {
         }
     }
     async get(scope: GetEnvironmentScope): Promise<PythonEnvironment | undefined> {
+        const fastResult = await tryFastPathGet({
+            initialized: this._initialized,
+            setInitialized: (deferred) => {
+                this._initialized = deferred;
+            },
+            scope,
+            label: 'conda',
+            getProjectFsPath: (s) => getProjectFsPathForScope(this.api, s),
+            getPersistedPath: (fsPath) => getCondaForWorkspace(fsPath),
+            resolve: (p) => resolveCondaPath(p, this.nativeFinder, this.api, this.log, this),
+            startBackgroundInit: () =>
+                withProgress({ location: ProgressLocation.Window, title: CondaStrings.condaDiscovering }, async () => {
+                    this.collection =
+                        (await refreshCondaEnvs(false, this.nativeFinder, this.api, this.log, this)) ?? [];
+                    await this.loadEnvMap();
+                    this._onDidChangeEnvironments.fire(
+                        this.collection.map((e) => ({
+                            environment: e,
+                            kind: EnvironmentChangeKind.add,
+                        })),
+                    );
+                }),
+        });
+        if (fastResult) {
+            return fastResult.env;
+        }
+
         await this.initialize();
         if (scope instanceof Uri) {
-            let env = this.fsPathToEnv.get(scope.fsPath);
+            let env = this.fsPathToEnv.get(normalizePath(scope.fsPath));
             if (env) {
                 return env;
             }
             const project = this.api.getPythonProject(scope);
             if (project) {
-                env = this.fsPathToEnv.get(project.uri.fsPath);
+                env = this.fsPathToEnv.get(normalizePath(project.uri.fsPath));
                 if (env) {
                     return env;
                 }
@@ -279,17 +381,37 @@ export class CondaEnvManager implements EnvironmentManager, Disposable {
             : undefined;
 
         if (scope === undefined) {
+            const before = this.globalEnv;
+            this.globalEnv = checkedEnv;
             await setCondaForGlobal(checkedEnv?.environmentPath?.fsPath);
+            if (before?.envId.id !== checkedEnv?.envId.id) {
+                this._onDidChangeEnvironment.fire({ uri: undefined, old: before, new: checkedEnv });
+            }
         } else if (scope instanceof Uri) {
             const folder = this.api.getPythonProject(scope);
             const fsPath = folder?.uri?.fsPath ?? scope.fsPath;
             if (fsPath) {
+                // Notify user if CONDA_PREFIX is set and they're trying to select a different environment
+                if (process.env.CONDA_PREFIX && checkedEnv) {
+                    const condaPrefixPath = process.env.CONDA_PREFIX;
+                    const selectedPath = checkedEnv.environmentPath.fsPath;
+                    // Only show notification if they selected a different environment
+                    if (condaPrefixPath !== selectedPath) {
+                        showInformationMessage(CondaStrings.condaCondaPrefixActive);
+                    }
+                }
+
+                const normalizedFsPath = normalizePath(fsPath);
+                const before = this.fsPathToEnv.get(normalizedFsPath);
                 if (checkedEnv) {
-                    this.fsPathToEnv.set(fsPath, checkedEnv);
+                    this.fsPathToEnv.set(normalizedFsPath, checkedEnv);
                 } else {
-                    this.fsPathToEnv.delete(fsPath);
+                    this.fsPathToEnv.delete(normalizedFsPath);
                 }
                 await setCondaForWorkspace(fsPath, checkedEnv?.environmentPath.fsPath);
+                if (before?.envId.id !== checkedEnv?.envId.id) {
+                    this._onDidChangeEnvironment.fire({ uri: scope, old: before, new: checkedEnv });
+                }
             }
         } else if (Array.isArray(scope) && scope.every((u) => u instanceof Uri)) {
             const projects: PythonProject[] = [];
@@ -303,11 +425,12 @@ export class CondaEnvManager implements EnvironmentManager, Disposable {
 
             const before: Map<string, PythonEnvironment | undefined> = new Map();
             projects.forEach((p) => {
-                before.set(p.uri.fsPath, this.fsPathToEnv.get(p.uri.fsPath));
+                const normalizedPath = normalizePath(p.uri.fsPath);
+                before.set(p.uri.fsPath, this.fsPathToEnv.get(normalizedPath));
                 if (checkedEnv) {
-                    this.fsPathToEnv.set(p.uri.fsPath, checkedEnv);
+                    this.fsPathToEnv.set(normalizedPath, checkedEnv);
                 } else {
-                    this.fsPathToEnv.delete(p.uri.fsPath);
+                    this.fsPathToEnv.delete(normalizedPath);
                 }
             });
 
@@ -401,22 +524,24 @@ export class CondaEnvManager implements EnvironmentManager, Disposable {
             });
 
         // Try to find workspace environments
-        const paths = this.api.getPythonProjects().map((p) => p.uri.fsPath);
-        for (const p of paths) {
-            const env = await getCondaForWorkspace(p);
+        const projects = this.api.getPythonProjects();
+        for (const project of projects) {
+            const originalPath = project.uri.fsPath;
+            const normalizedPath = normalizePath(originalPath);
+            const env = await getCondaForWorkspace(originalPath);
 
             if (env) {
                 const found = this.findEnvironmentByPath(env);
 
                 if (found) {
-                    this.fsPathToEnv.set(p, found);
+                    this.fsPathToEnv.set(normalizedPath, found);
                 } else {
                     // If not found, resolve the conda path. Could be portable conda.
                     const resolved = await resolveCondaPath(env, this.nativeFinder, this.api, this.log, this);
 
                     if (resolved) {
                         // If resolved add it to the collection
-                        this.fsPathToEnv.set(p, resolved);
+                        this.fsPathToEnv.set(normalizedPath, resolved);
                         this.collection.push(resolved);
                     } else {
                         this.log.error(`Failed to resolve conda environment: ${env}`);
@@ -426,16 +551,16 @@ export class CondaEnvManager implements EnvironmentManager, Disposable {
                 // If there is not an environment already assigned by user to this project
                 // then see if there is one in the collection
                 if (pathSorted.length === 1) {
-                    this.fsPathToEnv.set(p, pathSorted[0]);
+                    this.fsPathToEnv.set(normalizedPath, pathSorted[0]);
                 } else {
                     // If there is more than one environment then we need to check if the project
                     // is a subfolder of one of the environments
                     const found = pathSorted.find((e) => {
                         const t = this.api.getPythonProject(e.environmentPath)?.uri.fsPath;
-                        return t && path.normalize(t) === p;
+                        return t && normalizePath(t) === normalizedPath;
                     });
                     if (found) {
-                        this.fsPathToEnv.set(p, found);
+                        this.fsPathToEnv.set(normalizedPath, found);
                     }
                 }
             }
@@ -444,7 +569,7 @@ export class CondaEnvManager implements EnvironmentManager, Disposable {
 
     private fromEnvMap(uri: Uri): PythonEnvironment | undefined {
         // Find environment directly using the URI mapping
-        const env = this.fsPathToEnv.get(uri.fsPath);
+        const env = this.fsPathToEnv.get(normalizePath(uri.fsPath));
         if (env) {
             return env;
         }
@@ -452,7 +577,7 @@ export class CondaEnvManager implements EnvironmentManager, Disposable {
         // Find environment using the Python project for the Uri
         const project = this.api.getPythonProject(uri);
         if (project) {
-            return this.fsPathToEnv.get(project.uri.fsPath);
+            return this.fsPathToEnv.get(normalizePath(project.uri.fsPath));
         }
 
         return undefined;
@@ -466,10 +591,21 @@ export class CondaEnvManager implements EnvironmentManager, Disposable {
     }
 
     private findEnvironmentByPath(fsPath: string): PythonEnvironment | undefined {
-        const normalized = path.normalize(fsPath);
+        const normalized = normalizePath(fsPath);
+
+        // Prefer exact match first to avoid ambiguous parent/grandparent collisions.
+        // E.g. base env at /miniconda3 must not be confused with a named env at
+        // /miniconda3/envs/<name> whose grandparent is also /miniconda3.
+        const exact = this.collection.find((e) => normalizePath(e.environmentPath.fsPath) === normalized);
+        if (exact) {
+            return exact;
+        }
+
         return this.collection.find((e) => {
-            const n = path.normalize(e.environmentPath.fsPath);
-            return n === normalized || path.dirname(n) === normalized || path.dirname(path.dirname(n)) === normalized;
+            return (
+                normalizePath(path.dirname(e.environmentPath.fsPath)) === normalized ||
+                normalizePath(path.dirname(path.dirname(e.environmentPath.fsPath))) === normalized
+            );
         });
     }
 

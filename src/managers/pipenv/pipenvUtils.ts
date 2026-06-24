@@ -1,6 +1,8 @@
 // Utility functions for Pipenv environment management
 
+import * as nativeFs from 'fs';
 import * as fs from 'fs-extra';
+import * as os from 'os';
 import * as path from 'path';
 import { Uri } from 'vscode';
 import which from 'which';
@@ -12,7 +14,7 @@ import {
     PythonEnvironmentInfo,
 } from '../../api';
 import { ENVS_EXTENSION_ID } from '../../common/constants';
-import { traceError, traceInfo } from '../../common/logging';
+import { traceError, traceInfo, traceVerbose } from '../../common/logging';
 import { getWorkspacePersistentState } from '../../common/persistentState';
 import { untildify } from '../../common/utils/pathUtils';
 import { getSettingWorkspaceScope } from '../../features/settings/settingHelpers';
@@ -23,7 +25,7 @@ import {
     NativePythonEnvironmentKind,
     NativePythonFinder,
 } from '../common/nativePythonFinder';
-import { getShellActivationCommands, shortVersion } from '../common/utils';
+import { getShellActivationCommands, shortenVersionString } from '../common/utils';
 
 export const PIPENV_PATH_KEY = `${ENVS_EXTENSION_ID}:pipenv:PIPENV_PATH`;
 export const PIPENV_WORKSPACE_KEY = `${ENVS_EXTENSION_ID}:pipenv:WORKSPACE_SELECTED`;
@@ -54,61 +56,53 @@ function getPipenvPathFromSettings(): string | undefined {
     return pipenvPath ? pipenvPath : undefined;
 }
 
-export async function getPipenv(native?: NativePythonFinder): Promise<string | undefined> {
-    if (pipenvPath) {
-        if (await fs.exists(untildify(pipenvPath))) {
-            return untildify(pipenvPath);
+export async function getPipenv(): Promise<string | undefined> {
+    try {
+        // Priority 1: Settings (if explicitly set and valid)
+        const settingPath = getPipenvPathFromSettings();
+        if (settingPath) {
+            if (await fs.exists(untildify(settingPath))) {
+                traceInfo(`Using pipenv from settings: ${settingPath}`);
+                return untildify(settingPath);
+            }
+            traceInfo(`Pipenv path from settings does not exist: ${settingPath}`);
         }
-        pipenvPath = undefined;
-    }
 
-    const state = await getWorkspacePersistentState();
-    const storedPath = await state.get<string>(PIPENV_PATH_KEY);
-    if (storedPath) {
-        if (await fs.exists(untildify(storedPath))) {
-            pipenvPath = storedPath;
-            traceInfo(`Using pipenv from persistent state: ${pipenvPath}`);
-            return untildify(pipenvPath);
+        // Priority 2: In-memory cache
+        if (pipenvPath) {
+            if (await fs.exists(untildify(pipenvPath))) {
+                return untildify(pipenvPath);
+            }
+            pipenvPath = undefined;
         }
-        await state.set(PIPENV_PATH_KEY, undefined);
-    }
 
-    // try to get from settings
-    const settingPath = getPipenvPathFromSettings();
-    if (settingPath) {
-        if (await fs.exists(untildify(settingPath))) {
-            pipenvPath = settingPath;
-            traceInfo(`Using pipenv from settings: ${settingPath}`);
-            return untildify(pipenvPath);
+        // Priority 3: Persistent state
+        const state = await getWorkspacePersistentState();
+        const storedPath = await state.get<string>(PIPENV_PATH_KEY);
+        if (storedPath) {
+            if (await fs.exists(untildify(storedPath))) {
+                pipenvPath = storedPath;
+                traceInfo(`Using pipenv from persistent state: ${pipenvPath}`);
+                return untildify(pipenvPath);
+            }
+            await state.set(PIPENV_PATH_KEY, undefined);
         }
-        traceInfo(`Pipenv path from settings does not exist: ${settingPath}`);
-    }
 
-    // Try to find pipenv in PATH
-    const foundPipenv = await findPipenv();
-    if (foundPipenv) {
-        pipenvPath = foundPipenv;
-        traceInfo(`Found pipenv in PATH: ${foundPipenv}`);
-        return foundPipenv;
-    }
-
-    // Use native finder as fallback
-    if (native) {
-        const data = await native.refresh(false);
-        const managers = data
-            .filter((e) => !isNativeEnvInfo(e))
-            .map((e) => e as NativeEnvManagerInfo)
-            .filter((e) => e.tool.toLowerCase() === 'pipenv');
-        if (managers.length > 0) {
-            pipenvPath = managers[0].executable;
-            traceInfo(`Using pipenv from native finder: ${pipenvPath}`);
-            await state.set(PIPENV_PATH_KEY, pipenvPath);
-            return pipenvPath;
+        // Priority 4: PATH lookup
+        const foundPipenv = await findPipenv();
+        if (foundPipenv) {
+            pipenvPath = foundPipenv;
+            traceInfo(`Found pipenv in PATH: ${foundPipenv}`);
+            return foundPipenv;
         }
-    }
 
-    traceInfo('Pipenv not found');
-    return undefined;
+        traceInfo('Pipenv not found via settings, cache, or PATH');
+        return undefined;
+    } catch (ex) {
+        const err = ex instanceof Error ? ex : new Error(String(ex));
+        (err as Error & { failureStage?: string }).failureStage = `getPipenv`;
+        throw err;
+    }
 }
 
 async function nativeToPythonEnv(
@@ -121,7 +115,7 @@ async function nativeToPythonEnv(
         return undefined;
     }
 
-    const sv = shortVersion(info.version);
+    const sv = shortenVersionString(info.version);
     const folderName = path.basename(info.prefix);
     const name = info.name || info.displayName || folderName;
     const displayName = info.displayName || `${folderName} (${sv})`;
@@ -191,12 +185,13 @@ export async function refreshPipenv(
 
     const collection: PythonEnvironment[] = [];
 
+    // Add environments even if pipenv CLI is not found.
+    // This allows users with existing pipenv environments to still see them
+    // for read-only management (e.g., selecting the environment, viewing info).
     for (const e of envs) {
-        if (pipenv) {
-            const environment = await nativeToPythonEnv(e, api, manager);
-            if (environment) {
-                collection.push(environment);
-            }
+        const environment = await nativeToPythonEnv(e, api, manager);
+        if (environment) {
+            collection.push(environment);
         }
     }
 
@@ -210,13 +205,16 @@ export async function resolvePipenvPath(
     api: PythonEnvironmentApi,
     manager: EnvironmentManager,
 ): Promise<PythonEnvironment | undefined> {
-    const resolved = await nativeFinder.resolve(fsPath);
+    try {
+        const resolved = await nativeFinder.resolve(fsPath);
 
-    if (resolved.kind === NativePythonEnvironmentKind.pipenv) {
-        const pipenv = await getPipenv(nativeFinder);
-        if (pipenv) {
+        // Resolve pipenv environments even if the pipenv CLI is not found.
+        // This allows proper environment identification for read-only scenarios.
+        if (resolved.kind === NativePythonEnvironmentKind.pipenv) {
             return await nativeToPythonEnv(resolved, api, manager);
         }
+    } catch (ex) {
+        traceVerbose(`Failed to resolve pipenv env "${fsPath}": ${ex}`);
     }
 
     return undefined;
@@ -268,4 +266,60 @@ export async function setPipenvForWorkspaces(fsPath: string[], envPath: string |
         }
     });
     await state.set(PIPENV_WORKSPACE_KEY, data);
+}
+
+/**
+ * Get the directories where pipenv virtualenvs may be stored.
+ *
+ * Pipenv can store virtualenvs in multiple locations with this priority:
+ * 1. WORKON_HOME (if set) - commonly shared with virtualenvwrapper
+ * 2. XDG_DATA_HOME/virtualenvs (Linux, if XDG_DATA_HOME is set)
+ * 3. ~/.local/share/virtualenvs (Linux/macOS default)
+ * 4. ~/.virtualenvs (Windows default)
+ *
+ * @returns Array of existing virtualenv directories
+ */
+export function getPipenvVirtualenvDirs(): string[] {
+    const dirs: string[] = [];
+
+    // WORKON_HOME takes precedence (shared with virtualenvwrapper)
+    const workonHome = process.env.WORKON_HOME;
+    if (workonHome) {
+        const resolved = untildify(workonHome);
+        if (nativeFs.existsSync(resolved)) {
+            dirs.push(resolved);
+            traceVerbose(`Pipenv: WORKON_HOME found at ${resolved}`);
+        } else {
+            traceVerbose(`Pipenv: WORKON_HOME set but does not exist: ${resolved}`);
+        }
+    }
+
+    // XDG_DATA_HOME/virtualenvs (primarily Linux, but check on all platforms)
+    const xdgDataHome = process.env.XDG_DATA_HOME;
+    if (xdgDataHome) {
+        const xdgVenvs = path.join(untildify(xdgDataHome), 'virtualenvs');
+        if (nativeFs.existsSync(xdgVenvs) && !dirs.includes(xdgVenvs)) {
+            dirs.push(xdgVenvs);
+            traceVerbose(`Pipenv: XDG_DATA_HOME/virtualenvs found at ${xdgVenvs}`);
+        }
+    }
+
+    // Platform-specific defaults
+    if (process.platform === 'linux' || process.platform === 'darwin') {
+        // Linux/macOS: ~/.local/share/virtualenvs
+        const defaultUnix = path.join(os.homedir(), '.local', 'share', 'virtualenvs');
+        if (nativeFs.existsSync(defaultUnix) && !dirs.includes(defaultUnix)) {
+            dirs.push(defaultUnix);
+            traceVerbose(`Pipenv: Platform default found at ${defaultUnix}`);
+        }
+    } else if (process.platform === 'win32') {
+        // Windows: ~/.virtualenvs
+        const defaultWin = path.join(os.homedir(), '.virtualenvs');
+        if (nativeFs.existsSync(defaultWin) && !dirs.includes(defaultWin)) {
+            dirs.push(defaultWin);
+            traceVerbose(`Pipenv: Platform default found at ${defaultWin}`);
+        }
+    }
+
+    return dirs;
 }

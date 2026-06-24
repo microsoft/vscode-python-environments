@@ -1,6 +1,8 @@
 import * as path from 'path';
 import { EventEmitter, LogOutputChannel, MarkdownString, ProgressLocation, ThemeIcon, Uri, window } from 'vscode';
 import {
+    CreateEnvironmentOptions,
+    CreateEnvironmentScope,
     DidChangeEnvironmentEventArgs,
     DidChangeEnvironmentsEventArgs,
     EnvironmentChangeKind,
@@ -17,6 +19,8 @@ import {
 } from '../../api';
 import { SysManagerStrings } from '../../common/localize';
 import { createDeferred, Deferred } from '../../common/utils/deferred';
+import { normalizePath } from '../../common/utils/pathUtils';
+import { getProjectFsPathForScope, tryFastPathGet } from '../common/fastPath';
 import { NativePythonFinder } from '../common/nativePythonFinder';
 import { getLatest } from '../common/utils';
 import {
@@ -28,6 +32,7 @@ import {
     setSystemEnvForWorkspaces,
 } from './cache';
 import { refreshPythons, resolveSystemPythonEnvironmentPath } from './utils';
+import { installPythonWithUv, promptInstallPythonViaUv, selectPythonVersionToInstall } from './uvPythonInstaller';
 
 export class SysPythonManager implements EnvironmentManager {
     private collection: PythonEnvironment[] = [];
@@ -68,9 +73,32 @@ export class SysPythonManager implements EnvironmentManager {
 
         this._initialized = createDeferred();
 
-        await this.internalRefresh(false, SysManagerStrings.sysManagerDiscovering);
+        try {
+            await this.internalRefresh(false, SysManagerStrings.sysManagerDiscovering);
 
-        this._initialized.resolve();
+            // If no Python environments were found, offer to install via uv
+            if (this.collection.length === 0) {
+                const pythonPath = await promptInstallPythonViaUv('activation', this.log);
+                if (pythonPath) {
+                    const resolved = await resolveSystemPythonEnvironmentPath(
+                        pythonPath,
+                        this.nativeFinder,
+                        this.api,
+                        this,
+                    );
+                    if (resolved) {
+                        this.collection.push(resolved);
+                        this.globalEnv = resolved;
+                        await setSystemEnvForGlobal(resolved.environmentPath.fsPath);
+                        this._onDidChangeEnvironments.fire([
+                            { environment: resolved, kind: EnvironmentChangeKind.add },
+                        ]);
+                    }
+                }
+            }
+        } finally {
+            this._initialized.resolve();
+        }
     }
 
     refresh(_scope: RefreshEnvironmentsScope): Promise<void> {
@@ -87,7 +115,8 @@ export class SysPythonManager implements EnvironmentManager {
                 const discard = this.collection.map((c) => c);
 
                 // hit here is fine...
-                this.collection = await refreshPythons(hardRefresh, this.nativeFinder, this.api, this.log, this);
+                this.collection =
+                    (await refreshPythons(hardRefresh, this.nativeFinder, this.api, this.log, this)) ?? [];
                 await this.loadEnvMap();
 
                 const args = [
@@ -108,7 +137,7 @@ export class SysPythonManager implements EnvironmentManager {
         }
 
         if (scope instanceof Uri) {
-            const env = this.fsPathToEnv.get(scope.fsPath);
+            const env = this.fsPathToEnv.get(normalizePath(scope.fsPath));
             if (env) {
                 return [env];
             }
@@ -118,6 +147,23 @@ export class SysPythonManager implements EnvironmentManager {
     }
 
     async get(scope: GetEnvironmentScope): Promise<PythonEnvironment | undefined> {
+        const fastResult = await tryFastPathGet({
+            initialized: this._initialized,
+            setInitialized: (deferred) => {
+                this._initialized = deferred;
+            },
+            scope,
+            label: 'system',
+            getProjectFsPath: (s) => getProjectFsPathForScope(this.api, s),
+            getPersistedPath: (fsPath) => getSystemEnvForWorkspace(fsPath),
+            getGlobalPersistedPath: () => getSystemEnvForGlobal(),
+            resolve: (p) => resolveSystemPythonEnvironmentPath(p, this.nativeFinder, this.api, this),
+            startBackgroundInit: () => this.internalRefresh(false, SysManagerStrings.sysManagerDiscovering),
+        });
+        if (fastResult) {
+            return fastResult.env;
+        }
+
         await this.initialize();
 
         if (scope instanceof Uri) {
@@ -139,16 +185,24 @@ export class SysPythonManager implements EnvironmentManager {
             const pw = this.api.getPythonProject(scope);
             if (!pw) {
                 this.log.warn(
-                    `Unable to set environment for ${scope.fsPath}: Not a python project, folder or PEP723 script.`,
-                    this.api.getPythonProjects().map((p) => p.uri.fsPath),
+                    `[SYS_SET] Unable to set environment for ${scope.fsPath}: Not a python project. ` +
+                        `Known projects: [${this.api
+                            .getPythonProjects()
+                            .map((p) => p.uri.fsPath)
+                            .join(', ')}]`,
                 );
                 return;
             }
 
+            const normalizedPwPath = normalizePath(pw.uri.fsPath);
+            this.log.info(
+                `[SYS_SET] scope=${scope.fsPath}, project=${pw.uri.fsPath}, ` +
+                    `normalizedKey=${normalizedPwPath}, env=${environment?.envId?.id ?? 'undefined'}`,
+            );
             if (environment) {
-                this.fsPathToEnv.set(pw.uri.fsPath, environment);
+                this.fsPathToEnv.set(normalizedPwPath, environment);
             } else {
-                this.fsPathToEnv.delete(pw.uri.fsPath);
+                this.fsPathToEnv.delete(normalizedPwPath);
             }
             await setSystemEnvForWorkspace(pw.uri.fsPath, environment?.environmentPath.fsPath);
         }
@@ -165,11 +219,12 @@ export class SysPythonManager implements EnvironmentManager {
 
             const before: Map<string, PythonEnvironment | undefined> = new Map();
             projects.forEach((p) => {
-                before.set(p.uri.fsPath, this.fsPathToEnv.get(p.uri.fsPath));
+                const normalizedPath = normalizePath(p.uri.fsPath);
+                before.set(p.uri.fsPath, this.fsPathToEnv.get(normalizedPath));
                 if (environment) {
-                    this.fsPathToEnv.set(p.uri.fsPath, environment);
+                    this.fsPathToEnv.set(normalizedPath, environment);
                 } else {
-                    this.fsPathToEnv.delete(p.uri.fsPath);
+                    this.fsPathToEnv.delete(normalizedPath);
                 }
             });
 
@@ -218,29 +273,78 @@ export class SysPythonManager implements EnvironmentManager {
         return resolved;
     }
 
+    /**
+     * Installs a global Python using uv.
+     * This method shows a QuickPick to select the Python version, then installs it.
+     */
+    async create(
+        _scope: CreateEnvironmentScope,
+        _options?: CreateEnvironmentOptions,
+    ): Promise<PythonEnvironment | undefined> {
+        // Show QuickPick to select Python version
+        const selectedVersion = await selectPythonVersionToInstall();
+        if (!selectedVersion) {
+            // User cancelled
+            return undefined;
+        }
+
+        const pythonPath = await installPythonWithUv(this.log, selectedVersion);
+
+        if (pythonPath) {
+            // Resolve the installed Python using NativePythonFinder instead of full refresh
+            const resolved = await resolveSystemPythonEnvironmentPath(pythonPath, this.nativeFinder, this.api, this);
+            if (resolved) {
+                // Add to collection, update global env, and fire change event
+                this.collection.push(resolved);
+                this.globalEnv = resolved;
+                await setSystemEnvForGlobal(resolved.environmentPath.fsPath);
+                this._onDidChangeEnvironments.fire([{ environment: resolved, kind: EnvironmentChangeKind.add }]);
+                return resolved;
+            }
+        }
+
+        return undefined;
+    }
+
     async clearCache(): Promise<void> {
         await clearSystemEnvCache();
     }
 
     private findEnvironmentByPath(fsPath: string): PythonEnvironment | undefined {
-        const normalized = path.normalize(fsPath); // /opt/homebrew/bin/python3.12
+        const normalized = normalizePath(fsPath);
         return this.collection.find((e) => {
-            const n = path.normalize(e.environmentPath.fsPath);
-            return n === normalized || path.dirname(n) === normalized || path.dirname(path.dirname(n)) === normalized;
+            const n = normalizePath(e.environmentPath.fsPath);
+            return (
+                n === normalized ||
+                normalizePath(path.dirname(e.environmentPath.fsPath)) === normalized ||
+                normalizePath(path.dirname(path.dirname(e.environmentPath.fsPath))) === normalized
+            );
         });
     }
 
     private fromEnvMap(uri: Uri): PythonEnvironment | undefined {
+        const normalizedUri = normalizePath(uri.fsPath);
         // Find environment directly using the URI mapping
-        const env = this.fsPathToEnv.get(uri.fsPath);
+        const env = this.fsPathToEnv.get(normalizedUri);
         if (env) {
             return env;
         }
 
         // Find environment using the Python project for the Uri
         const project = this.api.getPythonProject(uri);
-        if (project) {
-            return this.fsPathToEnv.get(project.uri.fsPath);
+        const projectKey = project ? normalizePath(project.uri.fsPath) : undefined;
+        const projectEnv = projectKey ? this.fsPathToEnv.get(projectKey) : undefined;
+
+        this.log.info(
+            `[SYS_GET] uri=${uri.fsPath}, normalizedKey=${normalizedUri}, ` +
+                `project=${project?.uri?.fsPath ?? 'none'}, projectKey=${projectKey ?? 'none'}, ` +
+                `mapKeys=[${Array.from(this.fsPathToEnv.keys()).join(', ')}], ` +
+                `directHit=${!!env}, projectHit=${!!projectEnv}, ` +
+                `fallbackToGlobal=${!projectEnv}, globalEnv=${this.globalEnv?.envId?.id ?? 'none'}`,
+        );
+
+        if (projectEnv) {
+            return projectEnv;
         }
 
         return this.globalEnv;
@@ -273,24 +377,26 @@ export class SysPythonManager implements EnvironmentManager {
         }
 
         // Try to find workspace environments
-        const paths = this.api.getPythonProjects().map((p) => p.uri.fsPath);
+        const projects = this.api.getPythonProjects();
 
-        // Iterate over each path
-        for (const p of paths) {
-            const env = await getSystemEnvForWorkspace(p);
+        // Iterate over each project
+        for (const project of projects) {
+            const originalPath = project.uri.fsPath;
+            const normalizedPath = normalizePath(originalPath);
+            const env = await getSystemEnvForWorkspace(originalPath);
 
             if (env) {
                 const found = this.findEnvironmentByPath(env);
 
                 if (found) {
-                    this.fsPathToEnv.set(p, found);
+                    this.fsPathToEnv.set(normalizedPath, found);
                 } else {
                     // If not found, resolve the path.
                     const resolved = await resolveSystemPythonEnvironmentPath(env, this.nativeFinder, this.api, this);
 
                     if (resolved) {
                         // If resolved add it to the collection.
-                        this.fsPathToEnv.set(p, resolved);
+                        this.fsPathToEnv.set(normalizedPath, resolved);
                         this.collection.push(resolved);
                     } else {
                         this.log.error(`Failed to resolve python environment: ${env}`);

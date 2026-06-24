@@ -27,6 +27,8 @@ import {
     TerminalShellExecutionStartEvent,
     TerminalShellIntegrationChangeEvent,
     TextEditor,
+    TreeView,
+    TreeViewOptions,
     Uri,
     window,
     WindowState,
@@ -376,4 +378,8 @@ export function onDidChangeWindowState(
     disposables?: Disposable[],
 ): Disposable {
     return window.onDidChangeWindowState(listener, thisArgs, disposables);
+}
+
+export function createTreeView<T>(viewId: string, options: TreeViewOptions<T>): TreeView<T> {
+    return window.createTreeView(viewId, options);
 }

@@ -6,6 +6,7 @@ import { traceInfo } from '../../common/logging';
 import { showErrorMessage, showQuickPickWithButtons, showWarningMessage } from '../../common/window.apis';
 import { findFiles } from '../../common/workspace.apis';
 import { PythonProjectManager, PythonProjectsImpl } from '../../internal.api';
+import { normalizePath } from '../../common/utils/pathUtils';
 
 function getUniqueUri(uris: Uri[]): {
     label: string;
@@ -73,8 +74,8 @@ export class AutoFindProjects implements PythonProjectCreator {
                 // Skip this project if:
                 // 1. There's already a project registered with exactly the same path
                 // 2. There's already a project registered with this project's parent directory path
-                const np = path.normalize(p.uri.fsPath);
-                const nf = path.normalize(uri.fsPath);
+                const np = normalizePath(p.uri.fsPath);
+                const nf = normalizePath(uri.fsPath);
                 const nfp = path.dirname(nf);
                 return np !== nf && np !== nfp;
             }

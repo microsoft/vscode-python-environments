@@ -1613,6 +1613,10 @@ export class ProcessExecution implements vscode.ProcessExecution {
 }
 
 export class ShellExecution implements vscode.ShellExecution {
+    private static idCounter = 0;
+
+    private _cachedId: string | undefined;
+
     private _commandLine = '';
 
     private _command: string | vscode.ShellQuotedString = '';
@@ -1706,7 +1710,13 @@ export class ShellExecution implements vscode.ShellExecution {
         //     }
         // }
         // return hash.digest('hex');
-        throw new Error('Not spported');
+        // Memoize the computed ID per instance to ensure consistent task matching
+        if (this._cachedId === undefined) {
+            const cmd = typeof this._command === 'string' ? this._command : (this._command?.value ?? '');
+            const argsStr = this._args?.map((a) => (typeof a === 'string' ? a : a.value)).join(',') ?? '';
+            this._cachedId = `shell-${cmd}-${argsStr}-${ShellExecution.idCounter++}`;
+        }
+        return this._cachedId;
     }
 }
 

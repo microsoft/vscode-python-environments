@@ -5,8 +5,11 @@ import {
     ConfigurationScope,
     Disposable,
     FileDeleteEvent,
+    FileRenameEvent,
     FileSystemWatcher,
     GlobPattern,
+    TextDocument,
+    TextDocumentChangeEvent,
     Uri,
     workspace,
     WorkspaceConfiguration,
@@ -62,4 +65,45 @@ export function onDidDeleteFiles(
     disposables?: Disposable[],
 ): Disposable {
     return workspace.onDidDeleteFiles(listener, thisArgs, disposables);
+}
+
+export function onDidRenameFiles(
+    listener: (e: FileRenameEvent) => any,
+    thisArgs?: any,
+    disposables?: Disposable[],
+): Disposable {
+    return workspace.onDidRenameFiles(listener, thisArgs, disposables);
+}
+
+export function onDidOpenTextDocument(
+    listener: (e: TextDocument) => any,
+    thisArgs?: any,
+    disposables?: Disposable[],
+): Disposable {
+    return workspace.onDidOpenTextDocument(listener, thisArgs, disposables);
+}
+
+export function onDidSaveTextDocument(
+    listener: (e: TextDocument) => any,
+    thisArgs?: any,
+    disposables?: Disposable[],
+): Disposable {
+    return workspace.onDidSaveTextDocument(listener, thisArgs, disposables);
+}
+
+export function onDidChangeTextDocument(
+    listener: (e: TextDocumentChangeEvent) => any,
+    thisArgs?: any,
+    disposables?: Disposable[],
+): Disposable {
+    return workspace.onDidChangeTextDocument(listener, thisArgs, disposables);
+}
+
+/**
+ * Snapshot of the text documents VS Code has already opened. Useful
+ * for extensions activated by `onLanguage:*` events, which miss the
+ * `onDidOpenTextDocument` fired for the activating document.
+ */
+export function getOpenTextDocuments(): readonly TextDocument[] {
+    return workspace.textDocuments;
 }

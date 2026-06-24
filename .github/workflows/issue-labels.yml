@@ -5,13 +5,12 @@ on:
     types: [opened, reopened]
 
 env:
-  TRIAGERS: '["karthiknadig","eleanorjboyd"]'
+  TRIAGERS: '["karthiknadig","eleanorjboyd","anthonykim1"]'
 
 permissions:
   issues: write
 
 jobs:
-  # From https://github.com/marketplace/actions/github-script#apply-a-label-to-an-issue.
   add-classify-label:
     name: "Add 'triage-needed' and remove assignees"
     runs-on: ubuntu-latest
@@ -22,6 +21,7 @@ jobs:
           repository: 'microsoft/vscode-github-triage-actions'
           ref: stable
           path: ./actions
+          persist-credentials: false
 
       - name: Install Actions
         run: npm install --production --prefix ./actions

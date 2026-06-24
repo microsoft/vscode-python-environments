@@ -1,3 +1,4 @@
+import { compare as pep440Compare, valid as pep440Valid } from '@renovatebot/pep440';
 import * as fse from 'fs-extra';
 import * as os from 'os';
 import * as path from 'path';
@@ -15,9 +16,7 @@ import {
 import which from 'which';
 import {
     EnvironmentManager,
-    Package,
     PackageManagementOptions,
-    PackageManager,
     PythonCommandRunConfiguration,
     PythonEnvironment,
     PythonEnvironmentApi,
@@ -53,9 +52,9 @@ import {
 } from '../common/nativePythonFinder';
 import { selectFromCommonPackagesToInstall } from '../common/pickers';
 import { Installable } from '../common/types';
-import { shortVersion, sortEnvironments } from '../common/utils';
+import { shortenVersionString, sortEnvironments } from '../common/utils';
 import { CondaEnvManager } from './condaEnvManager';
-import { getCondaHookPs1Path, getLocalActivationScript } from './condaSourcingUtils';
+import { getCondaHookPs1Path, getLocalActivationScript, ShellCondaInitStatus } from './condaSourcingUtils';
 import { createStepBasedCondaFlow } from './condaStepBasedFlow';
 
 export const CONDA_PATH_KEY = `${ENVS_EXTENSION_ID}:conda:CONDA_PATH`;
@@ -66,6 +65,7 @@ export const CONDA_GLOBAL_KEY = `${ENVS_EXTENSION_ID}:conda:GLOBAL_SELECTED`;
 let condaPath: string | undefined;
 export async function clearCondaCache(): Promise<void> {
     condaPath = undefined;
+    prefixes = undefined;
 }
 
 async function setConda(conda: string): Promise<void> {
@@ -81,15 +81,21 @@ export function getCondaPathSetting(): string | undefined {
 }
 
 export async function getCondaForWorkspace(fsPath: string): Promise<string | undefined> {
+    // Check persisted user selection first so explicit choices survive restarts
     const state = await getWorkspacePersistentState();
-    const data: { [key: string]: string } | undefined = await state.get(CONDA_WORKSPACE_KEY);
-    if (data) {
-        try {
-            return data[fsPath];
-        } catch {
-            return undefined;
+    const data = await state.get<unknown>(CONDA_WORKSPACE_KEY);
+    if (data && typeof data === 'object') {
+        const workspaceSelections = data as { [key: string]: string };
+        if (Object.prototype.hasOwnProperty.call(workspaceSelections, fsPath)) {
+            return workspaceSelections[fsPath];
         }
     }
+
+    // Fall back to CONDA_PREFIX only when no explicit selection exists
+    if (process.env.CONDA_PREFIX) {
+        return process.env.CONDA_PREFIX;
+    }
+
     return undefined;
 }
 
@@ -331,26 +337,13 @@ export async function getVersion(root: string): Promise<string> {
     throw new Error('Python version not found');
 }
 
-function isPrefixOf(roots: string[], e: string): boolean {
-    if (!roots || !Array.isArray(roots)) {
-        return false;
-    }
-    const t = path.normalize(e);
-    for (let r of roots.map((r) => path.normalize(r))) {
-        if (t.startsWith(r)) {
-            return true;
-        }
-    }
-    return false;
-}
-
 /**
  * Creates a PythonEnvironmentInfo object for a named conda environment.
  * @param name The name of the conda environment
  * @param prefix The installation prefix path for the environment
  * @param executable The path to the Python executable
  * @param version The Python version string
- * @param _conda The path to the conda executable (TODO: currently unused)
+ * @param conda The path to the conda executable (used for activation commands)
  * @param envManager The environment manager instance
  * @returns Promise resolving to a PythonEnvironmentInfo object
  */
@@ -359,11 +352,11 @@ export async function getNamedCondaPythonInfo(
     prefix: string,
     executable: string,
     version: string,
-    _conda: string, // TODO:: fix this, why is it not being used to build the info object
+    conda: string,
     envManager: EnvironmentManager,
 ): Promise<PythonEnvironmentInfo> {
     const { shellActivation, shellDeactivation } = await buildShellActivationMapForConda(prefix, envManager, name);
-    const sv = shortVersion(version);
+    const sv = shortenVersionString(version);
 
     return {
         name: name,
@@ -381,8 +374,8 @@ export async function getNamedCondaPythonInfo(
                 executable: path.join(executable),
                 args: [],
             },
-            activation: [{ executable: 'conda', args: ['activate', name] }],
-            deactivation: [{ executable: 'conda', args: ['deactivate'] }],
+            activation: [{ executable: conda, args: ['activate', name] }],
+            deactivation: [{ executable: conda, args: ['deactivate'] }],
             shellActivation,
             shellDeactivation,
         },
@@ -405,7 +398,7 @@ export async function getPrefixesCondaPythonInfo(
     conda: string,
     envManager: EnvironmentManager,
 ): Promise<PythonEnvironmentInfo> {
-    const sv = shortVersion(version);
+    const sv = shortenVersionString(version);
 
     const { shellActivation, shellDeactivation } = await buildShellActivationMapForConda(prefix, envManager);
 
@@ -520,20 +513,35 @@ async function buildShellActivationMapForConda(
         // P3: Handle Windows specifically ;this is carryover from vscode-python
         if (isWindows()) {
             logs.push('✓ Using Windows-specific activation configuration');
+            // Get conda.sh for bash-based shells on Windows (e.g., Git Bash)
+            const condaShPath = envManager.sourcingInformation.shellSourcingScripts?.sh;
+            if (!condaShPath) {
+                logs.push('conda.sh not found, using preferred sourcing script path for bash activation');
+            }
             shellMaps = await windowsExceptionGenerateConfig(
                 preferredSourcingPath,
                 envIdentifier,
                 envManager.sourcingInformation.condaFolder,
+                condaShPath,
             );
             return shellMaps;
         }
 
-        logs.push('✓ Using source command with preferred path');
-        const condaSourcingPathFirst = {
-            executable: 'source',
-            args: [preferredSourcingPath, envIdentifier],
-        };
-        shellMaps = await generateShellActivationMapFromConfig([condaSourcingPathFirst], [condaCommonDeactivate]);
+        logs.push('✓ Using shell-specific activation commands');
+        const condaShPath = envManager.sourcingInformation.shellSourcingScripts?.sh;
+        const condaFishPath = envManager.sourcingInformation.shellSourcingScripts?.fish;
+        const condaPs1Path = envManager.sourcingInformation.shellSourcingScripts?.ps1;
+
+        shellMaps = nonWindowsGenerateConfig(
+            preferredSourcingPath,
+            envIdentifier,
+            condaCommonDeactivate,
+            envManager.sourcingInformation.condaPath,
+            condaShPath,
+            condaFishPath,
+            condaPs1Path,
+            envManager.sourcingInformation.shellInitStatus,
+        );
         return shellMaps;
     } catch (error) {
         logs.push(
@@ -581,13 +589,22 @@ async function generateShellActivationMapFromConfig(
     shellActivation.set(ShellConstants.PWSH, activate);
     shellDeactivation.set(ShellConstants.PWSH, deactivate);
 
+    shellActivation.set(ShellConstants.FISH, activate);
+    shellDeactivation.set(ShellConstants.FISH, deactivate);
+
     return { shellActivation, shellDeactivation };
 }
 
-async function windowsExceptionGenerateConfig(
+/**
+ * Generates shell-specific activation configuration for Windows.
+ * Handles PowerShell, CMD, and Git Bash with appropriate scripts.
+ * @internal Exported for testing
+ */
+export async function windowsExceptionGenerateConfig(
     sourceInitPath: string,
     prefix: string,
     condaFolder: string,
+    condaShPath?: string,
 ): Promise<ShellCommandMaps> {
     const shellActivation: Map<string, PythonCommandRunConfiguration[]> = new Map();
     const shellDeactivation: Map<string, PythonCommandRunConfiguration[]> = new Map();
@@ -596,10 +613,31 @@ async function windowsExceptionGenerateConfig(
     traceVerbose(`PS1 hook path: ${ps1Hook ?? 'not found'}`);
     const activation = ps1Hook ? ps1Hook : sourceInitPath;
 
-    const pwshActivate = [{ executable: activation }, { executable: 'conda', args: ['activate', prefix] }];
-    const cmdActivate = [{ executable: sourceInitPath }, { executable: 'conda', args: ['activate', prefix] }];
+    // Quote the prefix path to handle spaces in paths (common on Windows)
+    const quotedPrefix = quoteStringIfNecessary(prefix);
+    const pwshActivate = [{ executable: activation }, { executable: 'conda', args: ['activate', quotedPrefix] }];
+    const cmdActivate = [{ executable: sourceInitPath }, { executable: 'conda', args: ['activate', quotedPrefix] }];
 
-    const bashActivate = [{ executable: 'source', args: [sourceInitPath.replace(/\\/g, '/'), prefix] }];
+    // When condaShPath is available, it is an initialization script (conda.sh) and does not
+    // itself activate an environment. In that case, first source conda.sh, then
+    // run "conda activate <envIdentifier>".
+    // When falling back to sourceInitPath, only emit a bash "source" command if the script
+    // is bash-compatible; on Windows, sourceInitPath may point to "activate.bat", which
+    // cannot be sourced by Git Bash, so in that case we skip emitting a Git Bash activation.
+    let bashActivate: PythonCommandRunConfiguration[];
+    if (condaShPath) {
+        bashActivate = [
+            { executable: 'source', args: [condaShPath.replace(/\\/g, '/')] },
+            { executable: 'conda', args: ['activate', quotedPrefix] },
+        ];
+    } else if (sourceInitPath.toLowerCase().endsWith('.bat')) {
+        traceVerbose(
+            `Skipping Git Bash activation fallback because sourceInitPath is a batch script: ${sourceInitPath}`,
+        );
+        bashActivate = [];
+    } else {
+        bashActivate = [{ executable: 'source', args: [sourceInitPath.replace(/\\/g, '/'), quotedPrefix] }];
+    }
     traceVerbose(
         `Windows activation commands: 
         PowerShell: ${JSON.stringify(pwshActivate)}, 
@@ -619,6 +657,113 @@ async function windowsExceptionGenerateConfig(
 
     shellActivation.set(ShellConstants.PWSH, pwshActivate);
     shellDeactivation.set(ShellConstants.PWSH, [condaCommonDeactivate]);
+
+    return { shellActivation, shellDeactivation };
+}
+
+/**
+ * Generates shell-specific activation configuration for non-Windows (Linux/macOS).
+ * Uses conda.sh for bash-like shells, conda.fish for Fish, and conda-hook.ps1 for PowerShell.
+ * Falls back to `source <activate-script> <env>` for bash-like shells when conda.sh is unavailable.
+ *
+ * For each shell, when the shell-specific sourcing script is not found, checks whether
+ * `conda init <shell>` has been run (via shellInitStatus). If it has, bare `conda` is used
+ * since the shell will set up the conda function on startup. Otherwise, the full conda path
+ * is used as the executable.
+ *
+ * @internal Exported for testing
+ */
+export function nonWindowsGenerateConfig(
+    sourceInitPath: string,
+    envIdentifier: string,
+    condaCommonDeactivate: PythonCommandRunConfiguration,
+    condaPath: string,
+    condaShPath?: string,
+    condaFishPath?: string,
+    condaPs1Path?: string,
+    shellInitStatus?: ShellCondaInitStatus,
+): ShellCommandMaps {
+    const shellActivation: Map<string, PythonCommandRunConfiguration[]> = new Map();
+    const shellDeactivation: Map<string, PythonCommandRunConfiguration[]> = new Map();
+    const deactivate = [condaCommonDeactivate];
+
+    // Helper: determine the conda executable for a given shell based on init status.
+    // If `conda init <shell>` has been run, the shell profile sets up `conda` as a shell
+    // function on startup, so bare `conda` works. Otherwise, use the full path to the
+    // conda binary (the user will see an actionable error if hooks aren't set up).
+    const condaExe = (shell: keyof ShellCondaInitStatus): string => (shellInitStatus?.[shell] ? 'conda' : condaPath);
+
+    // Bash-like shells: use conda.sh if available, otherwise fall back to source activate
+    let bashActivate: PythonCommandRunConfiguration[];
+    if (condaShPath) {
+        bashActivate = [
+            { executable: 'source', args: [condaShPath] },
+            { executable: 'conda', args: ['activate', envIdentifier] },
+        ];
+    } else {
+        bashActivate = [{ executable: 'source', args: [sourceInitPath, envIdentifier] }];
+    }
+
+    // POSIX sh (e.g. dash) does not support `source`; use `.` (dot) instead
+    let shActivate: PythonCommandRunConfiguration[];
+    if (condaShPath) {
+        shActivate = [
+            { executable: '.', args: [condaShPath] },
+            { executable: 'conda', args: ['activate', envIdentifier] },
+        ];
+    } else {
+        shActivate = [{ executable: '.', args: [sourceInitPath, envIdentifier] }];
+    }
+
+    shellActivation.set(ShellConstants.BASH, bashActivate);
+    shellDeactivation.set(ShellConstants.BASH, deactivate);
+
+    shellActivation.set(ShellConstants.SH, shActivate);
+    shellDeactivation.set(ShellConstants.SH, deactivate);
+
+    shellActivation.set(ShellConstants.ZSH, bashActivate);
+    shellDeactivation.set(ShellConstants.ZSH, deactivate);
+
+    shellActivation.set(ShellConstants.GITBASH, bashActivate);
+    shellDeactivation.set(ShellConstants.GITBASH, deactivate);
+
+    // Fish shell: use conda.fish if available. Otherwise, check if `conda init fish`
+    // was run — if so, bare `conda` works; if not, use the full conda path.
+    let fishActivate: PythonCommandRunConfiguration[];
+    if (condaFishPath) {
+        fishActivate = [
+            { executable: 'source', args: [condaFishPath] },
+            { executable: 'conda', args: ['activate', envIdentifier] },
+        ];
+    } else {
+        fishActivate = [{ executable: condaExe('fish'), args: ['activate', envIdentifier] }];
+    }
+
+    shellActivation.set(ShellConstants.FISH, fishActivate);
+    shellDeactivation.set(ShellConstants.FISH, deactivate);
+
+    // PowerShell: use conda-hook.ps1 if available. Otherwise, check if `conda init powershell`
+    // was run — if so, bare `conda` works; if not, use the full conda path.
+    let pwshActivate: PythonCommandRunConfiguration[];
+    if (condaPs1Path) {
+        pwshActivate = [
+            { executable: '&', args: [condaPs1Path] },
+            { executable: 'conda', args: ['activate', envIdentifier] },
+        ];
+    } else {
+        pwshActivate = [{ executable: condaExe('pwsh'), args: ['activate', envIdentifier] }];
+    }
+
+    shellActivation.set(ShellConstants.PWSH, pwshActivate);
+    shellDeactivation.set(ShellConstants.PWSH, deactivate);
+
+    traceVerbose(
+        `Non-Windows activation commands:
+        Bash: ${JSON.stringify(bashActivate)},
+        SH: ${JSON.stringify(shActivate)},
+        Fish: ${JSON.stringify(fishActivate)},
+        PowerShell: ${JSON.stringify(pwshActivate)}`,
+    );
 
     return { shellActivation, shellDeactivation };
 }
@@ -648,7 +793,6 @@ async function nativeToPythonEnv(
     manager: EnvironmentManager,
     log: LogOutputChannel,
     conda: string,
-    condaPrefixes: string[],
 ): Promise<PythonEnvironment | undefined> {
     // Defensive check: Validate NativeEnvInfo object
     if (!e) {
@@ -672,21 +816,24 @@ async function nativeToPythonEnv(
         );
         log.info(`Found base environment: ${e.prefix}`);
         return environment;
-    } else if (!isPrefixOf(condaPrefixes, e.prefix)) {
+    } else if (e.name) {
+        // Server explicitly provided a name - this is a named environment (created with -n/--name)
+        // Use name-based activation: conda activate <name>
+        const environment = api.createPythonEnvironmentItem(
+            await getNamedCondaPythonInfo(e.name, e.prefix, e.executable, e.version, conda, manager),
+            manager,
+        );
+        log.info(`Found named environment: ${e.name} at ${e.prefix}`);
+        return environment;
+    } else {
+        // Server returned undefined/null name - this is a prefix-based environment (created with -p/--prefix)
+        // Use prefix-based activation: conda activate <full-path>
+        // This aligns with the PR #331 fix in python-environment-tools
         const environment = api.createPythonEnvironmentItem(
             await getPrefixesCondaPythonInfo(e.prefix, e.executable, e.version, conda, manager),
             manager,
         );
         log.info(`Found prefix environment: ${e.prefix}`);
-        return environment;
-    } else {
-        const basename = path.basename(e.prefix);
-        const name = e.name ?? basename;
-        const environment = api.createPythonEnvironmentItem(
-            await getNamedCondaPythonInfo(name, e.prefix, e.executable, e.version, conda, manager),
-            manager,
-        );
-        log.info(`Found named environment: ${e.prefix}`);
         return environment;
     }
 }
@@ -704,8 +851,7 @@ export async function resolveCondaPath(
             return undefined;
         }
         const conda = await getConda();
-        const condaPrefixes = await getPrefixes();
-        return nativeToPythonEnv(e, api, manager, log, conda, condaPrefixes);
+        return nativeToPythonEnv(e, api, manager, log, conda);
     } catch {
         return undefined;
     }
@@ -764,7 +910,6 @@ export async function refreshCondaEnvs(
     const condaPath = conda;
 
     if (condaPath) {
-        const condaPrefixes = await getPrefixes();
         const envs = data
             .filter((e) => isNativeEnvInfo(e))
             .map((e) => e as NativeEnvInfo)
@@ -774,7 +919,7 @@ export async function refreshCondaEnvs(
         await Promise.all(
             envs.map(async (e) => {
                 try {
-                    const environment = await nativeToPythonEnv(e, api, manager, log, condaPath, condaPrefixes);
+                    const environment = await nativeToPythonEnv(e, api, manager, log, condaPath);
                     if (environment) {
                         collection.push(environment);
                     }
@@ -847,19 +992,12 @@ export async function pickPythonVersion(
         ),
     );
 
-    // Sort versions by major version (descending), ignoring minor/patch for simplicity
-    const parseMajorMinor = (v: string) => {
-        const m = v.match(/^(\d+)(?:\.(\d+))?/);
-        return { major: m ? Number(m[1]) : 0, minor: m && m[2] ? Number(m[2]) : 0 };
-    };
-
+    // Sort versions descending using PEP 440 comparison
     versions = versions.sort((a, b) => {
-        const pa = parseMajorMinor(a);
-        const pb = parseMajorMinor(b);
-        if (pa.major !== pb.major) {
-            return pb.major - pa.major;
-        } // desc by major
-        return pb.minor - pa.minor; // desc by minor
+        if (!pep440Valid(a) || !pep440Valid(b)) {
+            return 0;
+        }
+        return pep440Compare(b, a); // descending
     });
 
     if (!versions || versions.length === 0) {
@@ -936,7 +1074,7 @@ export async function createNamedCondaEnvironment(
         },
         async () => {
             try {
-                const bin = os.platform() === 'win32' ? 'python.exe' : 'python';
+                const bin = os.platform() === 'win32' ? 'python.exe' : path.join('bin', 'python');
                 const output = await runCondaExecutable(runArgs);
                 log.info(output);
 
@@ -1020,7 +1158,7 @@ export async function createPrefixCondaEnvironment(
             },
             async () => {
                 try {
-                    const bin = os.platform() === 'win32' ? 'python.exe' : 'python';
+                    const bin = os.platform() === 'win32' ? 'python.exe' : path.join('bin', 'python');
                     const output = await runCondaExecutable(runArgs);
                     log.info(output);
                     const version = await getVersion(prefix);
@@ -1056,6 +1194,7 @@ export async function createPrefixCondaEnvironment(
 export async function generateName(fsPath: string): Promise<string | undefined> {
     let attempts = 0;
     while (attempts < 5) {
+        attempts++;
         const randomStr = Math.random().toString(36).substring(2);
         const name = `env_${randomStr}`;
         const prefix = path.join(fsPath, name);
@@ -1084,32 +1223,16 @@ export async function quickCreateConda(
         },
         async () => {
             try {
+                const conda = await getConda();
                 await runCondaExecutable(['create', '--yes', '--prefix', prefix, 'python'], log);
                 if (additionalPackages && additionalPackages.length > 0) {
                     await runConda(['install', '--yes', '--prefix', prefix, ...additionalPackages], log);
                 }
                 const version = await getVersion(prefix);
 
+                // Use proper prefix-based activation with actual conda path
                 const environment = api.createPythonEnvironmentItem(
-                    {
-                        name: path.basename(prefix),
-                        environmentPath: Uri.file(prefix),
-                        displayName: `${version} (${name})`,
-                        displayPath: prefix,
-                        description: prefix,
-                        version,
-                        execInfo: {
-                            run: { executable: execPath },
-                            activatedRun: {
-                                executable: execPath,
-                                args: [],
-                            },
-                            activation: [{ executable: 'conda', args: ['activate', prefix] }],
-                            deactivation: [{ executable: 'conda', args: ['deactivate'] }],
-                        },
-                        sysPrefix: prefix,
-                        group: 'Prefix',
-                    },
+                    await getPrefixesCondaPythonInfo(prefix, execPath, version, conda, manager),
                     manager,
                 );
                 return environment;
@@ -1145,42 +1268,12 @@ export async function deleteCondaEnvironment(environment: PythonEnvironment, log
     );
 }
 
-export async function refreshPackages(
-    environment: PythonEnvironment,
-    api: PythonEnvironmentApi,
-    manager: PackageManager,
-): Promise<Package[]> {
-    let args = ['list', '-p', environment.environmentPath.fsPath];
-    const data = await runCondaExecutable(args);
-    const content = data.split(/\r?\n/).filter((l) => !l.startsWith('#'));
-    const packages: Package[] = [];
-    content.forEach((l) => {
-        const parts = l.split(' ').filter((p) => p.length > 0);
-        if (parts.length >= 3) {
-            const pkg = api.createPackageItem(
-                {
-                    name: parts[0],
-                    displayName: parts[0],
-                    version: parts[1],
-                    description: parts[1],
-                },
-                environment,
-                manager,
-            );
-            packages.push(pkg);
-        }
-    });
-    return packages;
-}
-
 export async function managePackages(
     environment: PythonEnvironment,
     options: PackageManagementOptions,
-    api: PythonEnvironmentApi,
-    manager: PackageManager,
     token: CancellationToken,
     log: LogOutputChannel,
-): Promise<Package[]> {
+): Promise<void> {
     if (options.uninstall && options.uninstall.length > 0) {
         await runCondaExecutable(
             ['remove', '--prefix', environment.environmentPath.fsPath, '--yes', ...options.uninstall],
@@ -1196,7 +1289,6 @@ export async function managePackages(
         args.push(...options.install);
         await runCondaExecutable(args, log, token);
     }
-    return refreshPackages(environment, api, manager);
 }
 
 async function getCommonPackages(): Promise<Installable[]> {
@@ -1302,7 +1394,7 @@ async function installPython(
     await nativeFinder.refresh(true, NativePythonEnvironmentKind.conda);
     const native = await nativeFinder.resolve(environment.sysPrefix);
     if (native.kind === NativePythonEnvironmentKind.conda) {
-        return nativeToPythonEnv(native, api, manager, log, await getConda(), await getPrefixes());
+        return nativeToPythonEnv(native, api, manager, log, await getConda());
     }
     return undefined;
 }

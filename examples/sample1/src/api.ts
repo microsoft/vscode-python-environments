@@ -611,9 +611,10 @@ export interface PackageManager {
     /**
      * Retrieves the list of packages for the specified Python environment.
      * @param environment - The Python environment for which to retrieve packages.
+     * @param options - Optional settings for package retrieval.
      * @returns An array of packages, or undefined if the packages could not be retrieved.
      */
-    getPackages(environment: PythonEnvironment): Promise<Package[] | undefined>;
+    getPackages(environment: PythonEnvironment, options?: GetPackagesOptions): Promise<Package[] | undefined>;
 
     /**
      * Event that is fired when packages change.
@@ -712,6 +713,17 @@ export interface DidChangePythonProjectsEventArgs {
      * The list of Python projects that were removed.
      */
     removed: PythonProject[];
+}
+
+/**
+ * Options for retrieving packages from a package manager.
+ */
+export interface GetPackagesOptions {
+    /**
+     * When `true`, bypasses the cache and fetches the latest packages from the underlying tool.
+     * Defaults to `false`.
+     */
+    skipCache?: boolean;
 }
 
 /**
@@ -818,10 +830,14 @@ export interface PythonEnvironmentManagerRegistrationApi {
      * Register an environment manager implementation.
      *
      * @param manager Environment Manager implementation to register.
+     * @param options Optional registration options.
+     * @param options.extensionId The extension ID of the calling extension. This is used as a fallback when
+     * automatic extension detection fails, such as during F5 debugging where the extension's file path
+     * does not contain its marketplace ID. If automatic detection succeeds, this value is ignored.
      * @returns A disposable that can be used to unregister the environment manager.
      * @see {@link EnvironmentManager}
      */
-    registerEnvironmentManager(manager: EnvironmentManager): Disposable;
+    registerEnvironmentManager(manager: EnvironmentManager, options?: { extensionId?: string }): Disposable;
 }
 
 export interface PythonEnvironmentItemApi {
@@ -911,7 +927,8 @@ export interface PythonProjectEnvironmentApi {
 }
 
 export interface PythonEnvironmentManagerApi
-    extends PythonEnvironmentManagerRegistrationApi,
+    extends
+        PythonEnvironmentManagerRegistrationApi,
         PythonEnvironmentItemApi,
         PythonEnvironmentManagementApi,
         PythonEnvironmentsApi,
@@ -922,10 +939,14 @@ export interface PythonPackageManagerRegistrationApi {
      * Register a package manager implementation.
      *
      * @param manager Package Manager implementation to register.
+     * @param options Optional registration options.
+     * @param options.extensionId The extension ID of the calling extension. This is used as a fallback when
+     * automatic extension detection fails, such as during F5 debugging where the extension's file path
+     * does not contain its marketplace ID. If automatic detection succeeds, this value is ignored.
      * @returns A disposable that can be used to unregister the package manager.
      * @see {@link PackageManager}
      */
-    registerPackageManager(manager: PackageManager): Disposable;
+    registerPackageManager(manager: PackageManager, options?: { extensionId?: string }): Disposable;
 }
 
 export interface PythonPackageGetterApi {
@@ -941,9 +962,10 @@ export interface PythonPackageGetterApi {
      * Get the list of packages in a Python Environment.
      *
      * @param environment The Python Environment for which the list of packages is required.
+     * @param options Optional settings for package retrieval.
      * @returns The list of packages in the Python Environment.
      */
-    getPackages(environment: PythonEnvironment): Promise<Package[] | undefined>;
+    getPackages(environment: PythonEnvironment, options?: GetPackagesOptions): Promise<Package[] | undefined>;
 
     /**
      * Event raised when the list of packages in a Python Environment changes.
@@ -976,7 +998,8 @@ export interface PythonPackageManagementApi {
 }
 
 export interface PythonPackageManagerApi
-    extends PythonPackageManagerRegistrationApi,
+    extends
+        PythonPackageManagerRegistrationApi,
         PythonPackageGetterApi,
         PythonPackageManagementApi,
         PythonPackageItemApi {}
@@ -1195,10 +1218,7 @@ export interface PythonBackgroundRunApi {
 }
 
 export interface PythonExecutionApi
-    extends PythonTerminalCreateApi,
-        PythonTerminalRunApi,
-        PythonTaskRunApi,
-        PythonBackgroundRunApi {}
+    extends PythonTerminalCreateApi, PythonTerminalRunApi, PythonTaskRunApi, PythonBackgroundRunApi {}
 
 /**
  * Event arguments for when the monitored `.env` files or any other sources change.
@@ -1247,7 +1267,8 @@ export interface PythonEnvironmentVariablesApi {
  * The API for interacting with Python environments, package managers, and projects.
  */
 export interface PythonEnvironmentApi
-    extends PythonEnvironmentManagerApi,
+    extends
+        PythonEnvironmentManagerApi,
         PythonPackageManagerApi,
         PythonProjectApi,
         PythonExecutionApi,

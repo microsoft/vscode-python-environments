@@ -1,37 +1,34 @@
+import { LogOutputChannel } from 'vscode';
+
 export interface PipPackage {
     name: string;
     version: string;
     displayName: string;
     description: string;
 }
-export function isValidVersion(version: string): boolean {
-    return /^([1-9][0-9]*!)?(0|[1-9][0-9]*)(\.(0|[1-9][0-9]*))*((a|b|rc)(0|[1-9][0-9]*))?(\.post(0|[1-9][0-9]*))?(\.dev(0|[1-9][0-9]*))?$/.test(
-        version,
-    );
+export function parseUvTree(data: string): string[] {
+    return data
+        .split('\n')
+        .map((line) => line.trim())
+        .map((line) => line.split(/\s+/, 1)[0])
+        .filter((name) => !!name);
 }
-export function parsePipList(data: string): PipPackage[] {
-    const collection: PipPackage[] = [];
 
-    const lines = data.split('\n').splice(2);
-    for (let line of lines) {
-        if (line.trim() === '' || line.startsWith('Package') || line.startsWith('----') || line.startsWith('[')) {
-            continue;
+export function parsePipListJson(data: string, log?: LogOutputChannel): PipPackage[] {
+    try {
+        const json = JSON.parse(data);
+        if (Array.isArray(json)) {
+            return json
+                .filter((item) => item.name && item.version)
+                .map(({ name, version }) => ({
+                    name,
+                    version,
+                    displayName: name,
+                    description: version,
+                }));
         }
-        const parts = line.split(' ').filter((e) => e);
-        if (parts.length === 2) {
-            const name = parts[0].trim();
-            const version = parts[1].trim();
-            if (!isValidVersion(version)) {
-                continue;
-            }
-            const pkg = {
-                name,
-                version,
-                displayName: name,
-                description: version,
-            };
-            collection.push(pkg);
-        }
+    } catch (ex) {
+        log?.error('Failed to parse pip list JSON output', ex);
     }
-    return collection;
+    return [];
 }

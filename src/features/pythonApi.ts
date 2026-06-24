@@ -1,35 +1,41 @@
-import { Uri, Disposable, Event, EventEmitter, Terminal, TaskExecution } from 'vscode';
+import { Disposable, Event, EventEmitter, TaskExecution, Terminal, Uri } from 'vscode';
 import {
-    PythonEnvironmentApi,
-    PythonEnvironment,
-    EnvironmentManager,
-    PackageManager,
+    CreateEnvironmentOptions,
+    CreateEnvironmentScope,
     DidChangeEnvironmentEventArgs,
     DidChangeEnvironmentsEventArgs,
-    DidChangePythonProjectsEventArgs,
-    GetEnvironmentsScope,
-    Package,
-    PythonEnvironmentInfo,
-    PythonProject,
-    RefreshEnvironmentsScope,
-    DidChangePackagesEventArgs,
-    PythonEnvironmentId,
-    CreateEnvironmentScope,
-    SetEnvironmentScope,
-    GetEnvironmentScope,
-    PackageInfo,
-    PackageId,
-    PythonProjectCreator,
-    ResolveEnvironmentContext,
-    PackageManagementOptions,
-    PythonProcess,
-    PythonTaskExecutionOptions,
-    PythonTerminalExecutionOptions,
-    PythonBackgroundRunOptions,
-    PythonTerminalCreateOptions,
     DidChangeEnvironmentVariablesEventArgs,
-    CreateEnvironmentOptions,
+    DidChangePackagesEventArgs,
+    DidChangePythonProjectsEventArgs,
+    EnvironmentManager,
+    GetEnvironmentScope,
+    GetEnvironmentsScope,
+    GetPackagesOptions,
+    Package,
+    PackageId,
+    PackageInfo,
+    PackageManagementOptions,
+    PackageManager,
+    PythonBackgroundRunOptions,
+    PythonEnvironment,
+    PythonEnvironmentApi,
+    PythonEnvironmentId,
+    PythonEnvironmentInfo,
+    PythonProcess,
+    PythonProject,
+    PythonProjectCreator,
+    PythonTaskExecutionOptions,
+    PythonTerminalCreateOptions,
+    PythonTerminalExecutionOptions,
+    RefreshEnvironmentsScope,
+    ResolveEnvironmentContext,
+    SetEnvironmentScope,
 } from '../api';
+import { traceError, traceInfo } from '../common/logging';
+import { pickEnvironmentManager } from '../common/pickers/managers';
+import { createDeferred } from '../common/utils/deferred';
+import { checkUri } from '../common/utils/pathUtils';
+import { handlePythonPath } from '../common/utils/pythonPath';
 import {
     EnvironmentManagers,
     InternalEnvironmentManager,
@@ -38,18 +44,13 @@ import {
     PythonPackageImpl,
     PythonProjectManager,
 } from '../internal.api';
-import { createDeferred } from '../common/utils/deferred';
-import { traceInfo, traceError } from '../common/logging';
 import { timeout } from '../common/utils/asyncUtils';
-import { pickEnvironmentManager } from '../common/pickers/managers';
-import { handlePythonPath } from '../common/utils/pythonPath';
-import { TerminalManager } from './terminal/terminalManager';
-import { runAsTask } from './execution/runAsTask';
-import { runInTerminal } from './terminal/runInTerminal';
-import { runInBackground } from './execution/runInBackground';
-import { EnvVarManager } from './execution/envVariableManager';
-import { checkUri } from '../common/utils/pathUtils';
 import { waitForAllEnvManagers, waitForEnvManager, waitForEnvManagerId } from './common/managerReady';
+import { EnvVarManager } from './execution/envVariableManager';
+import { runAsTask } from './execution/runAsTask';
+import { runInBackground } from './execution/runInBackground';
+import { runInTerminal } from './terminal/runInTerminal';
+import { TerminalManager } from './terminal/terminalManager';
 
 // Maximum time getEnvironment will block before serving the last-known environment while a
 // slow initial resolution/refresh continues in the background. Keeps consumers (e.g. Pylance's
@@ -78,7 +79,7 @@ class PythonEnvironmentApiImpl implements PythonEnvironmentApi {
             this._onDidChangePythonProjects,
             this._onDidChangePackages,
             this._onDidChangeEnvironmentVariables,
-            this.envManagers.onDidChangeEnvironmentFiltered((e) => {
+            this.envManagers.onDidChangeActiveEnvironment((e) => {
                 this._onDidChangeEnvironment.fire(e);
                 const location = e.uri?.fsPath ?? 'global';
                 traceInfo(
@@ -89,23 +90,23 @@ class PythonEnvironmentApiImpl implements PythonEnvironmentApi {
         );
     }
 
-    registerEnvironmentManager(manager: EnvironmentManager): Disposable {
+    registerEnvironmentManager(manager: EnvironmentManager, options?: { extensionId?: string }): Disposable {
         const disposables: Disposable[] = [];
-        disposables.push(this.envManagers.registerEnvironmentManager(manager));
+        disposables.push(this.envManagers.registerEnvironmentManager(manager, options));
         if (manager.onDidChangeEnvironments) {
             disposables.push(manager.onDidChangeEnvironments((e) => this._onDidChangeEnvironments.fire(e)));
         }
         if (manager.onDidChangeEnvironment) {
             disposables.push(
                 manager.onDidChangeEnvironment((e) => {
-                    setImmediate(async () => {
-                        // This will ensure that we use the right manager and only trigger the event
-                        // if the user selected manager decided to change the environment.
-                        // This ensures that if a unselected manager changes environment and raises events
-                        // we don't trigger the Python API event which can cause issues with the consumers.
-                        // This will trigger onDidChangeEnvironmentFiltered event in envManagers, which the Python
-                        // API listens to, and re-triggers the onDidChangeEnvironment event.
-                        await this.envManagers.getEnvironment(e.uri);
+                    setImmediate(() => {
+                        // Refresh the central cache for this scope. This ensures that only the
+                        // *selected* manager's changes propagate (refreshEnvironment checks
+                        // getEnvironmentManager(scope) internally). It updates the cache and
+                        // fires onDidChangeActiveEnvironment, which the Python API listens to.
+                        this.envManagers
+                            .refreshEnvironment(e.uri)
+                            .catch((err) => traceError('Failed to refresh environment on change:', err));
                     });
                 }),
             );
@@ -261,9 +262,9 @@ class PythonEnvironmentApiImpl implements PythonEnvironmentApi {
         return await handlePythonPath(context, this.envManagers.managers, projectEnvManagers);
     }
 
-    registerPackageManager(manager: PackageManager): Disposable {
+    registerPackageManager(manager: PackageManager, options?: { extensionId?: string }): Disposable {
         const disposables: Disposable[] = [];
-        disposables.push(this.envManagers.registerPackageManager(manager));
+        disposables.push(this.envManagers.registerPackageManager(manager, options));
         if (manager.onDidChangePackages) {
             disposables.push(manager.onDidChangePackages((e) => this._onDidChangePackages.fire(e)));
         }
@@ -277,7 +278,7 @@ class PythonEnvironmentApiImpl implements PythonEnvironmentApi {
         }
         return manager.manage(context, options);
     }
-    async refreshPackages(context: PythonEnvironment): Promise<void> {
+    async refreshPackages(context: PythonEnvironment): Promise<Package[] | undefined> {
         await waitForEnvManagerId([context.envId.managerId]);
         const manager = this.envManagers.getPackageManager(context);
         if (!manager) {
@@ -285,15 +286,16 @@ class PythonEnvironmentApiImpl implements PythonEnvironmentApi {
         }
         return manager.refresh(context);
     }
-    async getPackages(context: PythonEnvironment): Promise<Package[] | undefined> {
+    async getPackages(context: PythonEnvironment, options?: GetPackagesOptions): Promise<Package[] | undefined> {
         await waitForEnvManagerId([context.envId.managerId]);
         const manager = this.envManagers.getPackageManager(context);
         if (!manager) {
             return Promise.resolve(undefined);
         }
-        return manager.getPackages(context);
+        return manager.getPackages(context, options);
     }
     onDidChangePackages: Event<DidChangePackagesEventArgs> = this._onDidChangePackages.event;
+
     createPackageItem(info: PackageInfo, environment: PythonEnvironment, manager: PackageManager): Package {
         const mgr = this.envManagers.packageManagers.find((m) => m.equals(manager));
         if (!mgr) {

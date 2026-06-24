@@ -1,3 +1,4 @@
+import { major, minor, patch, compare as pep440Compare, valid as pep440Valid } from '@renovatebot/pep440';
 import * as fs from 'fs-extra';
 import path from 'path';
 import { commands, ConfigurationTarget, l10n, window, workspace } from 'vscode';
@@ -21,55 +22,34 @@ export function isNumber(obj: unknown): obj is number {
     return typeof obj === 'number' && !isNaN(obj);
 }
 
-export function shortVersion(version: string): string {
-    const pattern = /(\d)\.(\d+)(?:\.(\d+)?)?/gm;
-    const match = pattern.exec(version);
-    if (match) {
-        if (match[3]) {
-            return `${match[1]}.${match[2]}.${match[3]}`;
-        }
-        return `${match[1]}.${match[2]}.x`;
+/**
+ * Returns a short display string: "X.Y.Z" if micro is present, otherwise "X.Y.x".
+ * Returns `input` unchanged if it is not a valid PEP 440 version.
+ */
+export function shortenVersionString(input: string): string {
+    if (!pep440Valid(input)) {
+        return input;
     }
-    return version;
-}
-
-export function isGreater(a: string | undefined, b: string | undefined): boolean {
-    if (!a && !b) {
-        return false;
-    }
-    if (!a) {
-        return false;
-    }
-    if (!b) {
-        return true;
-    }
-
-    try {
-        const aParts = a.split('.');
-        const bParts = b.split('.');
-        for (let i = 0; i < aParts.length; i++) {
-            if (i >= bParts.length) {
-                return true;
-            }
-            const aPart = parseInt(aParts[i], 10);
-            const bPart = parseInt(bParts[i], 10);
-            if (aPart > bPart) {
-                return true;
-            }
-            if (aPart < bPart) {
-                return false;
-            }
-        }
-    } catch {
-        return false;
-    }
-    return false;
+    const p = patch(input);
+    return p !== 0 || input.split('.').length >= 3
+        ? `${major(input)}.${minor(input)}.${p}`
+        : `${major(input)}.${minor(input)}.x`;
 }
 
 export function sortEnvironments(collection: PythonEnvironment[]): PythonEnvironment[] {
     return collection.sort((a, b) => {
+        // Environments with errors should be sorted to the end
+        if (a.error && !b.error) {
+            return 1;
+        }
+        if (!a.error && b.error) {
+            return -1;
+        }
         if (a.version !== b.version) {
-            return isGreater(a.version, b.version) ? -1 : 1;
+            if (pep440Valid(a.version) && pep440Valid(b.version)) {
+                return pep440Compare(b.version, a.version); // descending
+            }
+            return a.version ? 1 : -1;
         }
         const value = a.name.localeCompare(b.name);
         if (value !== 0) {
@@ -83,9 +63,13 @@ export function getLatest(collection: PythonEnvironment[]): PythonEnvironment | 
     if (collection.length === 0) {
         return undefined;
     }
-    let latest = collection[0];
-    for (const env of collection) {
-        if (isGreater(env.version, latest.version)) {
+    // Filter out environments with errors first, then find latest
+    const nonErroredEnvs = collection.filter((e) => !e.error);
+    const candidates = nonErroredEnvs.length > 0 ? nonErroredEnvs : collection;
+
+    let latest = candidates[0];
+    for (const env of candidates) {
+        if (pep440Valid(env.version) && pep440Valid(latest.version) && pep440Compare(env.version, latest.version) > 0) {
             latest = env;
         }
     }
@@ -103,29 +87,16 @@ export function pathForGitBash(binPath: string): string {
     return isWindows() ? binPath.replace(/\\/g, '/').replace(/^([a-zA-Z]):/, '/$1') : binPath;
 }
 
-/**
- * Compares two semantic version strings. Support sonly simple 1.1.1 style versions.
- * @param version1 First version
- * @param version2 Second version
- * @returns -1 if version1 < version2, 0 if equal, 1 if version1 > version2
- */
-export function compareVersions(version1: string, version2: string): number {
-    const v1Parts = version1.split('.').map(Number);
-    const v2Parts = version2.split('.').map(Number);
-
-    for (let i = 0; i < Math.max(v1Parts.length, v2Parts.length); i++) {
-        const v1Part = v1Parts[i] || 0;
-        const v2Part = v2Parts[i] || 0;
-
-        if (v1Part > v2Part) {
-            return 1;
-        }
-        if (v1Part < v2Part) {
-            return -1;
-        }
+function buildPwshActivationCommands(ps1Path: string): PythonCommandRunConfiguration[] {
+    const commands: PythonCommandRunConfiguration[] = [];
+    if (isWindows()) {
+        commands.push({
+            executable: 'Set-ExecutionPolicy',
+            args: ['-Scope', 'Process', '-ExecutionPolicy', 'RemoteSigned'],
+        });
     }
-
-    return 0;
+    commands.push({ executable: '&', args: [ps1Path] });
+    return commands;
 }
 
 export async function getShellActivationCommands(binDir: string): Promise<{
@@ -161,10 +132,10 @@ export async function getShellActivationCommands(binDir: string): Promise<{
     shellDeactivation.set(ShellConstants.KSH, [{ executable: 'deactivate' }]);
 
     if (await fs.pathExists(path.join(binDir, 'Activate.ps1'))) {
-        shellActivation.set(ShellConstants.PWSH, [{ executable: '&', args: [path.join(binDir, `Activate.ps1`)] }]);
+        shellActivation.set(ShellConstants.PWSH, buildPwshActivationCommands(path.join(binDir, 'Activate.ps1')));
         shellDeactivation.set(ShellConstants.PWSH, [{ executable: 'deactivate' }]);
     } else if (await fs.pathExists(path.join(binDir, 'activate.ps1'))) {
-        shellActivation.set(ShellConstants.PWSH, [{ executable: '&', args: [path.join(binDir, `activate.ps1`)] }]);
+        shellActivation.set(ShellConstants.PWSH, buildPwshActivationCommands(path.join(binDir, 'activate.ps1')));
         shellDeactivation.set(ShellConstants.PWSH, [{ executable: 'deactivate' }]);
     }
 

@@ -83,7 +83,7 @@ extends:
         displayName: Update telemetry in package.json
 
       - script: python ./build/update_ext_version.py --for-publishing
-        displayName: Update build number
+        displayName: Validate version number
 
       - bash: |
           mkdir -p $(Build.SourcesDirectory)/python-env-tools/bin

@@ -1,5 +1,5 @@
 import * as path from 'path';
-import { Disposable, EventEmitter, MarkdownString, ProgressLocation, Uri } from 'vscode';
+import { Disposable, EventEmitter, MarkdownString, ProgressLocation, Uri, workspace } from 'vscode';
 import {
     DidChangeEnvironmentEventArgs,
     DidChangeEnvironmentsEventArgs,
@@ -17,12 +17,19 @@ import {
 } from '../../api';
 import { PoetryStrings } from '../../common/localize';
 import { traceError, traceInfo } from '../../common/logging';
+import { StopWatch } from '../../common/stopWatch';
+import { EventNames } from '../../common/telemetry/constants';
+import { classifyError } from '../../common/telemetry/errorClassifier';
+import { sendTelemetryEvent } from '../../common/telemetry/sender';
 import { createDeferred, Deferred } from '../../common/utils/deferred';
+import { normalizePath } from '../../common/utils/pathUtils';
 import { withProgress } from '../../common/window.apis';
+import { PythonProjectManager } from '../../internal.api';
 import { NativePythonFinder } from '../common/nativePythonFinder';
-import { getLatest } from '../common/utils';
+import { getLatest, notifyMissingManagerIfDefault } from '../common/utils';
 import {
     clearPoetryCache,
+    getPoetry,
     getPoetryForGlobal,
     getPoetryForWorkspace,
     POETRY_GLOBAL,
@@ -44,7 +51,11 @@ export class PoetryManager implements EnvironmentManager, Disposable {
     private readonly _onDidChangeEnvironments = new EventEmitter<DidChangeEnvironmentsEventArgs>();
     public readonly onDidChangeEnvironments = this._onDidChangeEnvironments.event;
 
-    constructor(private readonly nativeFinder: NativePythonFinder, private readonly api: PythonEnvironmentApi) {
+    constructor(
+        private readonly nativeFinder: NativePythonFinder,
+        private readonly api: PythonEnvironmentApi,
+        private readonly projectManager?: PythonProjectManager,
+    ) {
         this.name = 'poetry';
         this.displayName = 'Poetry';
         this.preferredPackageManagerId = 'ms-python.python:poetry';
@@ -68,24 +79,64 @@ export class PoetryManager implements EnvironmentManager, Disposable {
         if (this._initialized) {
             return this._initialized.promise;
         }
-
         this._initialized = createDeferred();
+        const stopWatch = new StopWatch();
+        let result: 'success' | 'tool_not_found' | 'error' = 'success';
+        let envCount = 0;
+        let toolSource = 'none';
+        let errorType: string | undefined;
 
-        await withProgress(
-            {
-                location: ProgressLocation.Window,
-                title: PoetryStrings.poetryDiscovering,
-            },
-            async () => {
-                this.collection = await refreshPoetry(false, this.nativeFinder, this.api, this);
-                await this.loadEnvMap();
+        try {
+            // Check if tool is findable before PET refresh (settings/cache/PATH only, no PET)
+            const hasExplicitSetting = !!workspace.getConfiguration('python').get<string>('poetryPath');
+            const preRefreshTool = await getPoetry();
+            if (preRefreshTool) {
+                toolSource = hasExplicitSetting ? 'settings' : 'local';
+            }
 
-                this._onDidChangeEnvironments.fire(
-                    this.collection.map((e) => ({ environment: e, kind: EnvironmentChangeKind.add })),
-                );
-            },
-        );
-        this._initialized.resolve();
+            await withProgress(
+                {
+                    location: ProgressLocation.Window,
+                    title: PoetryStrings.poetryDiscovering,
+                },
+                async () => {
+                    this.collection = (await refreshPoetry(false, this.nativeFinder, this.api, this)) ?? [];
+                    await this.loadEnvMap();
+
+                    this._onDidChangeEnvironments.fire(
+                        this.collection.map((e) => ({ environment: e, kind: EnvironmentChangeKind.add })),
+                    );
+                },
+            );
+
+            envCount = this.collection.length;
+
+            // If tool wasn't found via local lookup, check if refresh discovered it via PET
+            if (!preRefreshTool) {
+                const postRefreshTool = await getPoetry();
+                toolSource = postRefreshTool ? 'pet' : 'none';
+            }
+
+            if (toolSource === 'none') {
+                result = 'tool_not_found';
+                if (this.projectManager) {
+                    await notifyMissingManagerIfDefault('ms-python.python:poetry', this.projectManager, this.api);
+                }
+            }
+        } catch (ex) {
+            result = 'error';
+            errorType = classifyError(ex);
+            traceError('Poetry lazy initialization failed', ex);
+        } finally {
+            sendTelemetryEvent(EventNames.MANAGER_LAZY_INIT, stopWatch.elapsedTime, {
+                managerName: 'poetry',
+                result,
+                envCount,
+                toolSource,
+                errorType,
+            });
+            this._initialized.resolve();
+        }
     }
 
     async getEnvironments(scope: GetEnvironmentsScope): Promise<PythonEnvironment[]> {
@@ -121,7 +172,7 @@ export class PoetryManager implements EnvironmentManager, Disposable {
                 async () => {
                     traceInfo('Refreshing Poetry Environments');
                     const discard = this.collection.map((c) => c);
-                    this.collection = await refreshPoetry(true, this.nativeFinder, this.api, this);
+                    this.collection = (await refreshPoetry(true, this.nativeFinder, this.api, this)) ?? [];
 
                     await this.loadEnvMap();
 
@@ -139,13 +190,13 @@ export class PoetryManager implements EnvironmentManager, Disposable {
     async get(scope: GetEnvironmentScope): Promise<PythonEnvironment | undefined> {
         await this.initialize();
         if (scope instanceof Uri) {
-            let env = this.fsPathToEnv.get(scope.fsPath);
+            let env = this.fsPathToEnv.get(normalizePath(scope.fsPath));
             if (env) {
                 return env;
             }
             const project = this.api.getPythonProject(scope);
             if (project) {
-                env = this.fsPathToEnv.get(project.uri.fsPath);
+                env = this.fsPathToEnv.get(normalizePath(project.uri.fsPath));
                 if (env) {
                     return env;
                 }
@@ -162,10 +213,11 @@ export class PoetryManager implements EnvironmentManager, Disposable {
             const folder = this.api.getPythonProject(scope);
             const fsPath = folder?.uri?.fsPath ?? scope.fsPath;
             if (fsPath) {
+                const normalizedFsPath = normalizePath(fsPath);
                 if (environment) {
-                    this.fsPathToEnv.set(fsPath, environment);
+                    this.fsPathToEnv.set(normalizedFsPath, environment);
                 } else {
-                    this.fsPathToEnv.delete(fsPath);
+                    this.fsPathToEnv.delete(normalizedFsPath);
                 }
                 await setPoetryForWorkspace(fsPath, environment?.environmentPath?.fsPath);
             }
@@ -181,11 +233,12 @@ export class PoetryManager implements EnvironmentManager, Disposable {
 
             const before: Map<string, PythonEnvironment | undefined> = new Map();
             projects.forEach((p) => {
-                before.set(p.uri.fsPath, this.fsPathToEnv.get(p.uri.fsPath));
+                const normalizedPath = normalizePath(p.uri.fsPath);
+                before.set(p.uri.fsPath, this.fsPathToEnv.get(normalizedPath));
                 if (environment) {
-                    this.fsPathToEnv.set(p.uri.fsPath, environment);
+                    this.fsPathToEnv.set(normalizedPath, environment);
                 } else {
-                    this.fsPathToEnv.delete(p.uri.fsPath);
+                    this.fsPathToEnv.delete(normalizedPath);
                 }
             });
 
@@ -265,22 +318,24 @@ export class PoetryManager implements EnvironmentManager, Disposable {
             });
 
         // Try to find workspace environments
-        const paths = this.api.getPythonProjects().map((p) => p.uri.fsPath);
-        for (const p of paths) {
-            const env = await getPoetryForWorkspace(p);
+        const projects = this.api.getPythonProjects();
+        for (const project of projects) {
+            const originalPath = project.uri.fsPath;
+            const normalizedPath = normalizePath(originalPath);
+            const env = await getPoetryForWorkspace(originalPath);
 
             if (env) {
                 const found = this.findEnvironmentByPath(env);
 
                 if (found) {
-                    this.fsPathToEnv.set(p, found);
+                    this.fsPathToEnv.set(normalizedPath, found);
                 } else {
                     // If not found, resolve the poetry path
                     const resolved = await resolvePoetryPath(env, this.nativeFinder, this.api, this);
 
                     if (resolved) {
                         // If resolved add it to the collection
-                        this.fsPathToEnv.set(p, resolved);
+                        this.fsPathToEnv.set(normalizedPath, resolved);
                         this.collection.push(resolved);
                     } else {
                         traceError(`Failed to resolve poetry environment: ${env}`);
@@ -290,16 +345,16 @@ export class PoetryManager implements EnvironmentManager, Disposable {
                 // If there is not an environment already assigned by user to this project
                 // then see if there is one in the collection
                 if (pathSorted.length === 1) {
-                    this.fsPathToEnv.set(p, pathSorted[0]);
+                    this.fsPathToEnv.set(normalizedPath, pathSorted[0]);
                 } else {
                     // If there is more than one environment then we need to check if the project
                     // is a subfolder of one of the environments
                     const found = pathSorted.find((e) => {
                         const t = this.api.getPythonProject(e.environmentPath)?.uri.fsPath;
-                        return t && path.normalize(t) === p;
+                        return t && normalizePath(t) === normalizedPath;
                     });
                     if (found) {
-                        this.fsPathToEnv.set(p, found);
+                        this.fsPathToEnv.set(normalizedPath, found);
                     }
                 }
             }
@@ -308,7 +363,7 @@ export class PoetryManager implements EnvironmentManager, Disposable {
 
     private fromEnvMap(uri: Uri): PythonEnvironment | undefined {
         // Find environment directly using the URI mapping
-        const env = this.fsPathToEnv.get(uri.fsPath);
+        const env = this.fsPathToEnv.get(normalizePath(uri.fsPath));
         if (env) {
             return env;
         }
@@ -316,17 +371,21 @@ export class PoetryManager implements EnvironmentManager, Disposable {
         // Find environment using the Python project for the Uri
         const project = this.api.getPythonProject(uri);
         if (project) {
-            return this.fsPathToEnv.get(project.uri.fsPath);
+            return this.fsPathToEnv.get(normalizePath(project.uri.fsPath));
         }
 
         return undefined;
     }
 
     private findEnvironmentByPath(fsPath: string): PythonEnvironment | undefined {
-        const normalized = path.normalize(fsPath);
+        const normalized = normalizePath(fsPath);
         return this.collection.find((e) => {
-            const n = path.normalize(e.environmentPath.fsPath);
-            return n === normalized || path.dirname(n) === normalized || path.dirname(path.dirname(n)) === normalized;
+            const n = normalizePath(e.environmentPath.fsPath);
+            return (
+                n === normalized ||
+                normalizePath(path.dirname(e.environmentPath.fsPath)) === normalized ||
+                normalizePath(path.dirname(path.dirname(e.environmentPath.fsPath))) === normalized
+            );
         });
     }
 }

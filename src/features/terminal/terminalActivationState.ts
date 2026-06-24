@@ -11,7 +11,7 @@ import { PythonEnvironment } from '../../api';
 import { traceError, traceInfo, traceVerbose } from '../../common/logging';
 import { onDidEndTerminalShellExecution, onDidStartTerminalShellExecution } from '../../common/window.apis';
 import { getActivationCommand, getDeactivationCommand } from '../common/activation';
-import { getShellIntegrationTimeout, isTaskTerminal } from './utils';
+import { getShellIntegrationTimeout, isTaskTerminal, shouldSkipTerminalActivation } from './utils';
 
 export interface DidChangeTerminalActivationStateEvent {
     terminal: Terminal;
@@ -86,6 +86,11 @@ export class TerminalActivationImpl implements TerminalActivationInternal {
     }
 
     async activate(terminal: Terminal, environment: PythonEnvironment): Promise<void> {
+        if (shouldSkipTerminalActivation(terminal)) {
+            traceVerbose('Skipping activation for this terminal');
+            return;
+        }
+
         if (isTaskTerminal(terminal)) {
             traceVerbose('Cannot activate environment in a task terminal');
             return;

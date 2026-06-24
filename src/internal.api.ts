@@ -1,3 +1,4 @@
+import type { Pep440Version } from '@renovatebot/pep440';
 import { CancellationError, Disposable, Event, LogOutputChannel, MarkdownString, Uri } from 'vscode';
 import {
     CreateEnvironmentOptions,
@@ -9,6 +10,7 @@ import {
     EnvironmentManager,
     GetEnvironmentScope,
     GetEnvironmentsScope,
+    GetPackagesOptions,
     IconPath,
     Package,
     PackageChangeKind,
@@ -27,8 +29,12 @@ import {
     ResolveEnvironmentContext,
     SetEnvironmentScope,
 } from './api';
+import { ISSUES_URL } from './common/constants';
 import { CreateEnvironmentNotSupported, RemoveEnvironmentNotSupported } from './common/errors/NotSupportedError';
+import { traceWarn } from './common/logging';
+import { StopWatch } from './common/stopWatch';
 import { EventNames } from './common/telemetry/constants';
+import { classifyError } from './common/telemetry/errorClassifier';
 import { sendTelemetryEvent } from './common/telemetry/sender';
 
 export type EnvironmentManagerScope = undefined | string | Uri | PythonEnvironment;
@@ -72,8 +78,8 @@ export interface InternalDidChangeEnvironmentsEventArgs {
 }
 
 export interface EnvironmentManagers extends Disposable {
-    registerEnvironmentManager(manager: EnvironmentManager): Disposable;
-    registerPackageManager(manager: PackageManager): Disposable;
+    registerEnvironmentManager(manager: EnvironmentManager, options?: { extensionId?: string }): Disposable;
+    registerPackageManager(manager: PackageManager, options?: { extensionId?: string }): Disposable;
 
     /**
      * This event is fired when any environment manager changes its collection of environments.
@@ -82,20 +88,19 @@ export interface EnvironmentManagers extends Disposable {
     onDidChangeEnvironments: Event<InternalDidChangeEnvironmentsEventArgs>;
 
     /**
-     * This event is fired when an environment manager changes the environment for
-     * a particular scope (global, uri, workspace, etc). This can be any environment manager even if it is not the
-     * one selected by the user for the workspace. It is also fired if the change
-     * involves unselected to selected or selected to unselected.
+     * Fires when ANY registered environment manager reports a selection change for a scope,
+     * regardless of whether that manager is the one currently selected by the user.
+     * Use this for UI refresh (e.g., status bar updates) that should react to all manager activity.
      */
-    onDidChangeEnvironment: Event<DidChangeEnvironmentEventArgs>;
+    onDidChangeManagerEnvironment: Event<DidChangeEnvironmentEventArgs>;
 
     /**
-     * This event is fired when a selected environment manager changes the environment
-     * for a particular scope (global, uri, workspace, etc). This is also only fired if
-     * the previous and current environments are different. It is also fired if the change
-     * involves unselected to selected or selected to unselected.
+     * Fires only when the *selected* (active) environment for a scope actually changes.
+     * This is the authoritative "the user's environment changed" event. Consumers that
+     * need to react to the effective interpreter (terminal activation, language server,
+     * Python API clients) should use this event.
      */
-    onDidChangeEnvironmentFiltered: Event<DidChangeEnvironmentEventArgs>;
+    onDidChangeActiveEnvironment: Event<DidChangeEnvironmentEventArgs>;
     onDidChangePackages: Event<InternalDidChangePackagesEventArgs>;
 
     onDidChangeEnvironmentManager: Event<DidChangeEnvironmentManagerEventArgs>;
@@ -109,10 +114,31 @@ export interface EnvironmentManagers extends Disposable {
 
     clearCache(scope: EnvironmentManagerScope): Promise<void>;
 
-    setEnvironment(scope: SetEnvironmentScope, environment?: PythonEnvironment): Promise<void>;
-    setEnvironments(scope: Uri[] | string, environment?: PythonEnvironment): Promise<void>;
+    /**
+     * Sets the environment for a scope.
+     * @param scope - The scope to set the environment for
+     * @param environment - The environment to set (optional)
+     * @param shouldPersistSettings - Whether to persist to settings.json (default: true)
+     */
+    setEnvironment(
+        scope: SetEnvironmentScope,
+        environment?: PythonEnvironment,
+        shouldPersistSettings?: boolean,
+    ): Promise<void>;
+    /**
+     * Sets environments for multiple scopes.
+     * @param scope - Array of URIs or 'global'
+     * @param environment - The environment to set (optional)
+     * @param shouldPersistSettings - Whether to persist to settings.json (default: true)
+     */
+    setEnvironments(
+        scope: Uri[] | string,
+        environment?: PythonEnvironment,
+        shouldPersistSettings?: boolean,
+    ): Promise<void>;
     setEnvironmentsIfUnset(scope: Uri[] | string, environment?: PythonEnvironment): Promise<void>;
     getEnvironment(scope: GetEnvironmentScope): Promise<PythonEnvironment | undefined>;
+    refreshEnvironment(scope: GetEnvironmentScope): Promise<void>;
 
     /**
      * Synchronously returns the last-known environment for a scope without triggering a refresh.
@@ -125,7 +151,10 @@ export interface EnvironmentManagers extends Disposable {
 }
 
 export class InternalEnvironmentManager implements EnvironmentManager {
-    public constructor(public readonly id: string, private readonly manager: EnvironmentManager) {}
+    public constructor(
+        public readonly id: string,
+        private readonly manager: EnvironmentManager,
+    ) {}
 
     public get name(): string {
         return this.manager.name;
@@ -185,8 +214,51 @@ export class InternalEnvironmentManager implements EnvironmentManager {
             : Promise.reject(new RemoveEnvironmentNotSupported(`Remove Environment not supported by: ${this.id}`));
     }
 
-    refresh(options: RefreshEnvironmentsScope): Promise<void> {
-        return this.manager.refresh(options);
+    async refresh(options: RefreshEnvironmentsScope): Promise<void> {
+        const sw = new StopWatch();
+        const SLOW_DISCOVERY_THRESHOLD_MS = 15000;
+        try {
+            await this.manager.refresh(options);
+            const envs = await this.manager.getEnvironments('all').catch(() => []);
+            const duration = sw.elapsedTime;
+            sendTelemetryEvent(EventNames.ENVIRONMENT_DISCOVERY, duration, {
+                managerId: this.id,
+                result: 'success',
+                envCount: envs.length,
+            });
+
+            // Log warning for slow discovery
+            if (duration > SLOW_DISCOVERY_THRESHOLD_MS) {
+                traceWarn(
+                    `[${this.displayName}] Environment discovery took ${(duration / 1000).toFixed(1)}s (found ${envs.length} environments). ` +
+                        `If this is causing problems, please report it: ${ISSUES_URL}/new`,
+                );
+            }
+        } catch (ex) {
+            const duration = sw.elapsedTime;
+            const errorType = classifyError(ex);
+            sendTelemetryEvent(
+                EventNames.ENVIRONMENT_DISCOVERY,
+                duration,
+                {
+                    managerId: this.id,
+                    result: errorType === 'canceled' || errorType === 'spawn_timeout' ? 'timeout' : 'error',
+                    errorType,
+                },
+                ex instanceof Error ? ex : undefined,
+            );
+
+            // Log verbose failure message to help users report issues
+            const errorMessage = ex instanceof Error ? ex.message : String(ex);
+            traceWarn(
+                `[${this.displayName}] Environment discovery failed after ${(duration / 1000).toFixed(1)}s.\n` +
+                    `  Error: ${errorType} - ${errorMessage}\n` +
+                    `  If environments are not being detected correctly, please report this issue:\n` +
+                    `  ${ISSUES_URL}/new`,
+            );
+
+            throw ex;
+        }
     }
 
     getEnvironments(options: GetEnvironmentsScope): Promise<PythonEnvironment[]> {
@@ -229,8 +301,28 @@ export class InternalEnvironmentManager implements EnvironmentManager {
     }
 }
 
+function inferPackageManagementTrigger(
+    options: PackageManagementOptions,
+): 'ui' | 'requirements' | 'package' | 'uninstall' {
+    const hasInstall = options.install && options.install.length > 0;
+    const hasUninstall = options.uninstall && options.uninstall.length > 0;
+    if (!hasInstall && hasUninstall) {
+        return 'uninstall';
+    }
+    if (!hasInstall) {
+        return 'ui'; // empty install list opens the package picker UI
+    }
+    if (options.install?.some((arg) => arg === '-r' || arg === '--requirement')) {
+        return 'requirements';
+    }
+    return 'package';
+}
+
 export class InternalPackageManager implements PackageManager {
-    public constructor(public readonly id: string, private readonly manager: PackageManager) {}
+    public constructor(
+        public readonly id: string,
+        private readonly manager: PackageManager,
+    ) {}
 
     public get name(): string {
         return this.manager.name;
@@ -252,28 +344,40 @@ export class InternalPackageManager implements PackageManager {
     }
 
     async manage(environment: PythonEnvironment, options: PackageManagementOptions): Promise<void> {
+        const stopWatch = new StopWatch();
+        const triggerSource = inferPackageManagementTrigger(options);
         try {
             await this.manager.manage(environment, options);
-            sendTelemetryEvent(EventNames.PACKAGE_MANAGEMENT, undefined, { managerId: this.id, result: 'success' });
+            sendTelemetryEvent(EventNames.PACKAGE_MANAGEMENT, stopWatch.elapsedTime, {
+                managerId: this.id,
+                result: 'success',
+                triggerSource,
+            });
         } catch (error) {
             if (error instanceof CancellationError) {
-                sendTelemetryEvent(EventNames.PACKAGE_MANAGEMENT, undefined, {
+                sendTelemetryEvent(EventNames.PACKAGE_MANAGEMENT, stopWatch.elapsedTime, {
                     managerId: this.id,
                     result: 'cancelled',
+                    triggerSource,
                 });
                 throw error;
             }
-            sendTelemetryEvent(EventNames.PACKAGE_MANAGEMENT, undefined, { managerId: this.id, result: 'error' });
+            sendTelemetryEvent(EventNames.PACKAGE_MANAGEMENT, stopWatch.elapsedTime, {
+                managerId: this.id,
+                result: 'error',
+                errorType: error instanceof Error ? error.name : 'unknown',
+                triggerSource,
+            });
             throw error;
         }
     }
 
-    refresh(environment: PythonEnvironment): Promise<void> {
+    refresh(environment: PythonEnvironment): Promise<Package[] | undefined> {
         return this.manager.refresh(environment);
     }
 
-    getPackages(environment: PythonEnvironment): Promise<Package[] | undefined> {
-        return this.manager.getPackages(environment);
+    getPackages(environment: PythonEnvironment, options?: GetPackagesOptions): Promise<Package[] | undefined> {
+        return this.manager.getPackages(environment, options);
     }
 
     onDidChangePackages(handler: (e: DidChangePackagesEventArgs) => void): Disposable {
@@ -282,6 +386,25 @@ export class InternalPackageManager implements PackageManager {
 
     equals(other: PackageManager): boolean {
         return this.manager === other;
+    }
+
+    getVersion(environment: PythonEnvironment): Promise<Pep440Version | undefined> {
+        return this.manager.getVersion ? this.manager.getVersion(environment) : Promise.resolve(undefined);
+    }
+
+    getPackageAvailableVersions(
+        environment: PythonEnvironment,
+        packageName: string,
+    ): Promise<Pep440Version[] | undefined> {
+        return this.manager.getPackageAvailableVersions
+            ? this.manager.getPackageAvailableVersions(environment, packageName)
+            : Promise.resolve(undefined);
+    }
+
+    formatInstallSpec(packageName: string, version: string): string {
+        return this.manager.formatInstallSpec
+            ? this.manager.formatInstallSpec(packageName, version)
+            : `${packageName}==${version}`;
     }
 }
 
@@ -319,8 +442,12 @@ export class PythonEnvironmentImpl implements PythonEnvironment {
     public readonly execInfo: PythonEnvironmentExecutionInfo;
     public readonly sysPrefix: string;
     public readonly group?: string | EnvironmentGroupInfo;
+    public readonly error?: string;
 
-    constructor(public readonly envId: PythonEnvironmentId, info: PythonEnvironmentInfo) {
+    constructor(
+        public readonly envId: PythonEnvironmentId,
+        info: PythonEnvironmentInfo,
+    ) {
         this.name = info.name;
         this.displayName = info.displayName ?? this.name;
         this.shortDisplayName = info.shortDisplayName;
@@ -333,6 +460,7 @@ export class PythonEnvironmentImpl implements PythonEnvironment {
         this.execInfo = info.execInfo;
         this.sysPrefix = info.sysPrefix;
         this.group = info.group;
+        this.error = info.error;
     }
 }
 
@@ -345,7 +473,12 @@ export class PythonPackageImpl implements Package {
     public readonly iconPath?: IconPath;
     public readonly uris?: readonly Uri[];
 
-    constructor(public readonly pkgId: PackageId, info: PackageInfo) {
+    public readonly isTransitive?: boolean;
+
+    constructor(
+        public readonly pkgId: PackageId,
+        info: PackageInfo,
+    ) {
         this.name = info.name;
         this.displayName = info.displayName ?? this.name;
         this.version = info.version;
@@ -353,6 +486,7 @@ export class PythonPackageImpl implements Package {
         this.tooltip = info.tooltip;
         this.iconPath = info.iconPath;
         this.uris = info.uris;
+        this.isTransitive = info.isTransitive;
     }
 }
 
