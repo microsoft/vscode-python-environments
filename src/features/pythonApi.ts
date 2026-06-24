@@ -44,12 +44,19 @@ import {
     PythonPackageImpl,
     PythonProjectManager,
 } from '../internal.api';
+import { timeout } from '../common/utils/asyncUtils';
 import { waitForAllEnvManagers, waitForEnvManager, waitForEnvManagerId } from './common/managerReady';
 import { EnvVarManager } from './execution/envVariableManager';
 import { runAsTask } from './execution/runAsTask';
 import { runInBackground } from './execution/runInBackground';
 import { runInTerminal } from './terminal/runInTerminal';
 import { TerminalManager } from './terminal/terminalManager';
+
+// Maximum time getEnvironment will block before serving the last-known environment while a
+// slow initial resolution/refresh continues in the background. Keeps consumers (e.g. Pylance's
+// workspace/configuration handler) from hanging on the full environment enumeration at startup.
+const GET_ENVIRONMENT_TIMEOUT_MS = 1000;
+const GET_ENVIRONMENT_TIMED_OUT = Symbol('getEnvironmentTimedOut');
 
 class PythonEnvironmentApiImpl implements PythonEnvironmentApi {
     private readonly _onDidChangeEnvironments = new EventEmitter<DidChangeEnvironmentsEventArgs>();
@@ -216,8 +223,29 @@ class PythonEnvironmentApiImpl implements PythonEnvironmentApi {
     }
     async getEnvironment(scope: GetEnvironmentScope): Promise<PythonEnvironment | undefined> {
         const currentScope = checkUri(scope) as GetEnvironmentScope;
-        await waitForEnvManager(currentScope ? [currentScope] : undefined);
-        return this.envManagers.getEnvironment(currentScope);
+
+        // Don't block callers (notably Pylance's workspace/configuration handler) on a potentially
+        // slow initial environment resolution/refresh. Race the real resolution against a short
+        // timeout; if it doesn't complete promptly, return the last-known environment for the scope.
+        // The resolution continues in the background and consumers are notified of the real value
+        // via onDidChangeEnvironment once it settles.
+        const resolution = (async () => {
+            await waitForEnvManager(currentScope ? [currentScope] : undefined);
+            return this.envManagers.getEnvironment(currentScope);
+        })();
+
+        const result = await Promise.race([
+            resolution,
+            timeout(GET_ENVIRONMENT_TIMEOUT_MS).then(() => GET_ENVIRONMENT_TIMED_OUT),
+        ]);
+        if (result !== GET_ENVIRONMENT_TIMED_OUT) {
+            return result as PythonEnvironment | undefined;
+        }
+
+        // Keep the background resolution alive so the cache/last-known value gets populated and the
+        // change event fires once it finishes.
+        resolution.catch((ex) => traceError('Failed to resolve environment in background', ex));
+        return this.envManagers.getLastKnownEnvironment(currentScope);
     }
     onDidChangeEnvironment: Event<DidChangeEnvironmentEventArgs> = this._onDidChangeEnvironment.event;
     async resolveEnvironment(context: ResolveEnvironmentContext): Promise<PythonEnvironment | undefined> {

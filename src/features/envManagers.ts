@@ -605,6 +605,12 @@ export class PythonEnvironmentManagers implements EnvironmentManagers {
         }
     }
 
+    getLastKnownEnvironment(scope: GetEnvironmentScope): PythonEnvironment | undefined {
+        const project = scope ? this.pm.get(scope) : undefined;
+        const key = project ? project.uri.toString() : 'global';
+        return this._activeSelection.get(key);
+    }
+
     getProjectEnvManagers(uris: Uri[]): InternalEnvironmentManager[] {
         const projectEnvManagers: InternalEnvironmentManager[] = [];
         uris.forEach((uri) => {
