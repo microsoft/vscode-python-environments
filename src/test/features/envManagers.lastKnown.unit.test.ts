@@ -7,7 +7,6 @@
  * runs in the background (avoids blocking consumers such as Pylance's configuration handler).
  */
 
-/* eslint-disable @typescript-eslint/no-explicit-any */
 import { Extension } from 'vscode';
 
 import * as assert from 'assert';
