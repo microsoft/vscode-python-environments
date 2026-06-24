@@ -232,13 +232,29 @@ for many scripts at once?
 
 - **Bulk creation** — user runs `Python Envs: Set Up Environments for Inline Script Files` from the command palette to discover all of them, list every detected inline-script files in a multi-select quick-pick.
 
-- **Single-script creation entry points** — Add the inline-script creation to a **top-level item** in the existing `Select Interpreter` quick-pick. Only shown when the active file is a PEP 723 script with parsed metadata; ordinary `.py` files see no change.
+- **Single-script creation entry points** — two surfaces, both shown
+  only when the active file is a PEP 723 script with parsed metadata
+  and no matching inline env is currently associated. Ordinary `.py`
+  files and scripts already bound to an up-to-date inline env see no
+  change.
+
+  - **CodeLens above the inline metadata block** 
+    Anchored to the first line of the `# /// script` block:
+
+    ```
+    📦 Set up environment for this script
+    # /// script
+    # dependencies = ["requests"]
+    # ///
+    ```
+
+  - **`Select Interpreter` quick-pick top-level item** 
 
 Question for single-script creation entry points: Today the status bar shows the workspace's env (or
 "Select Python Interpreter" on yellow) for any focused `.py` file. When
 a PEP 723 file has metadata but no dedicated env yet, what does the status bar show?
 
-(A) Don't change it. Status bar shows `Python 3.11 ('.venv')` like any other file. 
+(A) Don't change it. Status bar shows `Python 3.11 ('.venv')` like any other file. **Becomes the natural choice now that the CodeLens carries discoverability** — the status bar stays predictable and the lens handles the "this file wants its own env" affordance.
 
 (B) Append a hint. E.g., `$(warning) Python 3.11 ('.venv')` with a tooltip "demo.py declares inline metadata not present in this env.". Same click.
 
