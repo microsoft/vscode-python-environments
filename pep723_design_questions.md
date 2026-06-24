@@ -93,11 +93,24 @@ mapping.
 
 ### Hash inputs
 
-- **Sorted, whitespace-normalized dependency list.** Sort
-  alphabetically and strip internal whitespace so `["rich",
-  "requests"]` and `["requests", "rich"]` and `"requests <3"` vs
-  `"requests<3"` all produce the same hash. Without this the cache
-  fragments on trivial differences.
+- **Canonicalized, sorted, whitespace-normalized dependency list.**
+  Three normalization passes before sorting and hashing:
+  1. **PEP 503 name canonicalization** on the project name and on
+     each extra: lowercase, then collapse runs of `[._-]` to a
+     single `-`. Per PEP 503 this is the comparison rule pip / uv /
+     PyPI use, so `Django`, `django`, `Django-Extensions`, and
+     `django_extensions` are all the same project and
+     `requests[Socks]` ≡ `requests[socks]`. Without this the cache
+     fragments the moment a user changes casing or a copy-paste
+     uses underscores instead of dashes.
+  2. **Strip internal whitespace in the version specifier** so
+     `"requests <3"` and `"requests<3"` collide.
+  3. **Sort the resulting list alphabetically** so `["rich",
+     "requests"]` and `["requests", "rich"]` produce the same hash.
+
+  The version specifier itself is left case-sensitive (PEP 440
+  local-version identifiers and pre-release markers are
+  case-sensitive in general).
 - **Absolute path to the chosen Python interpreter**
   (e.g. `c:\Python313\python.exe`). Including this means changing
   the interpreter (system reinstall, switching between two
@@ -112,11 +125,12 @@ mapping.
   is never shown in the UI; users find it via "Reveal in Explorer"
   if they ever need to.
 
-### Honoring `requires-python` (where we differ from pipx)
+### Honoring `requires-python` and validating cache hits
 
 Pipx ignores `requires-python` entirely. We don't, because the IDE
 experience (Pylance completions, Run, F5) depends on the interpreter
-matching the script's declaration. Three pieces:
+matching the script's declaration. Four pieces — steps 1–2 happen at
+build time; steps 3–4 are cache-hit guards:
 
 1. **At build time, pick a compatible interpreter.** Enumerate
    installed Pythons via `nativeFinder`, filter by
@@ -139,6 +153,18 @@ matching the script's declaration. Three pieces:
    `==3.11.7` while the interpreter is 3.11.9), treat as a cache
    miss and rebuild. Catches the edge where deps and interpreter
    path are unchanged but the version specifier became stricter.
+
+4. **On cache hit, verify the base interpreter still exists on
+   disk.** Stat the env's launcher — POSIX: `bin/python` (follows
+   the symlink); Windows: parse `home = ...` out of `pyvenv.cfg`
+   and stat `<home>\python.exe`. If the target file is gone, treat
+   as a cache miss and rebuild against a fresh interpreter pick
+   from step 1. Common triggers: `pyenv uninstall 3.11.7`,
+   `uv python uninstall 3.11`, `brew uninstall python@3.11`,
+   `apt remove python3.11`, Windows uninstall via Add/Remove
+   Programs. Step 2's path hash does **not** catch this case — the
+   recorded path is unchanged; only the file at the path is gone.
+   Cost is one `fs.stat` per cache hit.
 
 ### Display name in status bar
 
