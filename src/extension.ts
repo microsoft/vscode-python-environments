@@ -98,6 +98,7 @@ import { ProjectItem, PythonEnvTreeItem } from './features/views/treeViewItems';
 import { collectEnvironmentInfo, getEnvManagerAndPackageManagerConfigLevels, runPetInTerminalImpl } from './helpers';
 import { EnvironmentManagers, ProjectCreators, PythonProjectManager } from './internal.api';
 import { registerSystemPythonFeatures } from './managers/builtin/main';
+import { registerInlineScriptFeatures } from './managers/builtin/inlineScriptMain';
 import { SysPythonManager } from './managers/builtin/sysPythonManager';
 import {
     createNativePythonFinder,
@@ -656,6 +657,7 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
                     'poetry',
                     registerPoetryFeatures(nativeFinder, context.subscriptions, outputChannel, projectManager),
                 ),
+                safeRegister('inlineScript', registerInlineScriptFeatures(context.subscriptions, outputChannel)),
                 safeRegister('shellStartupVars', shellStartupVarsMgr.initialize()),
             ]);
 
