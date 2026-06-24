@@ -12,6 +12,7 @@ import {
     onDidRenameFiles,
 } from '../common/workspace.apis';
 import { PythonProjectManager, PythonProjectSettings, PythonProjectsImpl } from '../internal.api';
+import { normalizePath } from '../common/utils/pathUtils';
 import {
     addPythonProjectSetting,
     EditProjectSettings,
@@ -276,9 +277,9 @@ export class PythonProjectManagerImpl implements PythonProjectManager {
     private findProjectByUri(uri: Uri): PythonProject | undefined {
         const _projects = Array.from(this._projects.values()).sort((a, b) => b.uri.fsPath.length - a.uri.fsPath.length);
 
-        const normalizedUriPath = path.normalize(uri.fsPath);
+        const normalizedUriPath = normalizePath(uri.fsPath);
         for (const p of _projects) {
-            const normalizedProjectPath = path.normalize(p.uri.fsPath);
+            const normalizedProjectPath = normalizePath(p.uri.fsPath);
             if (this.isUriMatching(normalizedUriPath, normalizedProjectPath)) {
                 return p;
             }

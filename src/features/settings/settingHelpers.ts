@@ -4,6 +4,7 @@ import { PythonProject } from '../../api';
 import { DEFAULT_ENV_MANAGER_ID, DEFAULT_PACKAGE_MANAGER_ID, SYSTEM_MANAGER_ID } from '../../common/constants';
 import { traceError, traceInfo, traceVerbose, traceWarn } from '../../common/logging';
 import { getGlobalPersistentState } from '../../common/persistentState';
+import { normalizePath } from '../../common/utils/pathUtils';
 import { EventNames } from '../../common/telemetry/constants';
 import { sendTelemetryEvent } from '../../common/telemetry/sender';
 import * as workspaceApis from '../../common/workspace.apis';
@@ -20,8 +21,8 @@ function getSettings(
         const pw = wm.get(scope);
         const w = workspaceApis.getWorkspaceFolder(scope);
         if (pw && w) {
-            const pwPath = path.normalize(pw.uri.fsPath);
-            return overrides.find((s) => path.resolve(w.uri.fsPath, s.path) === pwPath);
+            const pwPath = normalizePath(pw.uri.fsPath);
+            return overrides.find((s) => normalizePath(path.resolve(w.uri.fsPath, s.path)) === pwPath);
         }
     }
     return undefined;
@@ -140,9 +141,9 @@ export async function setAllManagerSettings(edits: EditAllManagerSettings[]): Pr
         const originalOverridesLength = overrides.length;
 
         es.forEach((e) => {
-            const pwPath = path.normalize(e.project.uri.fsPath);
-            const isRoot = path.normalize(w.uri.fsPath) === pwPath;
-            const index = overrides.findIndex((s) => path.resolve(w.uri.fsPath, s.path) === pwPath);
+            const pwPath = normalizePath(e.project.uri.fsPath);
+            const isRoot = normalizePath(w.uri.fsPath) === pwPath;
+            const index = overrides.findIndex((s) => normalizePath(path.resolve(w.uri.fsPath, s.path)) === pwPath);
 
             // For workspace root in single-folder workspaces (no workspaceFile),
             // use default settings instead of pythonProjects entries
@@ -250,8 +251,8 @@ export async function setEnvironmentManager(edits: EditEnvManagerSettings[]): Pr
         let projectsModified = false;
 
         es.forEach((e) => {
-            const pwPath = path.normalize(e.project.uri.fsPath);
-            const index = overrides.findIndex((s) => path.resolve(w.uri.fsPath, s.path) === pwPath);
+            const pwPath = normalizePath(e.project.uri.fsPath);
+            const index = overrides.findIndex((s) => normalizePath(path.resolve(w.uri.fsPath, s.path)) === pwPath);
             if (index >= 0) {
                 overrides[index].envManager = e.envManager;
                 projectsModified = true;
@@ -311,8 +312,8 @@ export async function setPackageManager(edits: EditPackageManagerSettings[]): Pr
         let projectsModified = false;
 
         es.forEach((e) => {
-            const pwPath = path.normalize(e.project.uri.fsPath);
-            const index = overrides.findIndex((s) => path.resolve(w.uri.fsPath, s.path) === pwPath);
+            const pwPath = normalizePath(e.project.uri.fsPath);
+            const index = overrides.findIndex((s) => normalizePath(path.resolve(w.uri.fsPath, s.path)) === pwPath);
             if (index >= 0) {
                 overrides[index].packageManager = e.packageManager;
                 projectsModified = true;
@@ -367,14 +368,16 @@ export async function addPythonProjectSetting(edits: EditProjectSettings[]): Pro
         const overrides = config.get<PythonProjectSettings[]>('pythonProjects', []);
         let overridesModified = false;
         es.forEach((e) => {
-            const pwPath = path.normalize(e.project.uri.fsPath);
-            const isRoot = path.normalize(w.uri.fsPath) === pwPath;
+            const pwPath = normalizePath(e.project.uri.fsPath);
+            const isRoot = normalizePath(w.uri.fsPath) === pwPath;
 
             // For workspace root projects in single-folder workspaces, use default settings
             // instead of adding to pythonProjects with empty path
             if (isRoot && !isMultiroot) {
                 // Remove existing entry if present (migration from buggy empty path)
-                const existingIndex = overrides.findIndex((s) => path.resolve(w.uri.fsPath, s.path) === pwPath);
+                const existingIndex = overrides.findIndex(
+                    (s) => normalizePath(path.resolve(w.uri.fsPath, s.path)) === pwPath,
+                );
                 if (existingIndex >= 0) {
                     overrides.splice(existingIndex, 1);
                     overridesModified = true;
@@ -398,9 +401,9 @@ export async function addPythonProjectSetting(edits: EditProjectSettings[]): Pro
             const index = overrides.findIndex((s) => {
                 if (s.workspace) {
                     // If the workspace is set, check workspace and path in existing overrides
-                    return s.workspace === w.name && path.resolve(w.uri.fsPath, s.path) === pwPath;
+                    return s.workspace === w.name && normalizePath(path.resolve(w.uri.fsPath, s.path)) === pwPath;
                 }
-                return path.resolve(w.uri.fsPath, s.path) === pwPath;
+                return normalizePath(path.resolve(w.uri.fsPath, s.path)) === pwPath;
             });
             if (index >= 0) {
                 // Preserve existing manager settings if not explicitly provided
@@ -454,8 +457,8 @@ export async function removePythonProjectSetting(edits: EditProjectSettings[]): 
         const config = workspaceApis.getConfiguration('python-envs', w.uri);
         const overrides = config.get<PythonProjectSettings[]>('pythonProjects', []);
         es.forEach((e) => {
-            const pwPath = path.normalize(e.project.uri.fsPath);
-            const index = overrides.findIndex((s) => path.resolve(w.uri.fsPath, s.path) === pwPath);
+            const pwPath = normalizePath(e.project.uri.fsPath);
+            const index = overrides.findIndex((s) => normalizePath(path.resolve(w.uri.fsPath, s.path)) === pwPath);
             if (index >= 0) {
                 overrides.splice(index, 1);
             }
@@ -480,8 +483,8 @@ export async function updatePythonProjectSettingPath(oldUri: Uri, newUri: Uri): 
     // Find the workspace folder that contains the old path
     let targetWorkspace: WorkspaceFolder | undefined;
     for (const w of workspaceFolders) {
-        const oldPath = path.normalize(oldUri.fsPath);
-        if (oldPath.startsWith(path.normalize(w.uri.fsPath))) {
+        const oldPath = normalizePath(oldUri.fsPath);
+        if (oldPath.startsWith(normalizePath(w.uri.fsPath))) {
             targetWorkspace = w;
             break;
         }
@@ -494,9 +497,11 @@ export async function updatePythonProjectSettingPath(oldUri: Uri, newUri: Uri): 
 
     const config = workspaceApis.getConfiguration('python-envs', targetWorkspace.uri);
     const overrides = config.get<PythonProjectSettings[]>('pythonProjects', []);
-    const oldNormalizedPath = path.normalize(oldUri.fsPath);
+    const oldNormalizedPath = normalizePath(oldUri.fsPath);
 
-    const index = overrides.findIndex((s) => path.resolve(targetWorkspace!.uri.fsPath, s.path) === oldNormalizedPath);
+    const index = overrides.findIndex(
+        (s) => normalizePath(path.resolve(targetWorkspace!.uri.fsPath, s.path)) === oldNormalizedPath,
+    );
     if (index >= 0) {
         // Update the path to the new location
         const newRelativePath = path.relative(targetWorkspace.uri.fsPath, newUri.fsPath).replace(/\\/g, '/');
