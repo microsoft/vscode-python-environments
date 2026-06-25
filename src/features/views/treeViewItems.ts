@@ -213,7 +213,7 @@ export class PackageTreeItem implements EnvTreeItem {
         const defaultIcon = pkg.isTransitive ? new ThemeIcon('list-tree') : new ThemeIcon('package');
         item.iconPath = pkg.iconPath ?? defaultIcon;
         item.contextValue = pkg.isTransitive ? 'python-package-transitive' : 'python-package';
-        item.description = (pkg.isTransitive ? l10n.t('(transitive) ') : '') + (pkg.description ?? pkg.version);
+        item.description = (pkg.isTransitive ? l10n.t('(transitive) ') : '') + (pkg.description ?? pkg.version ?? '');
         item.tooltip = pkg.isTransitive
             ? l10n.t('This package is a dependency of another installed package. It may also have been explicitly installed.')
             : pkg.tooltip;
@@ -433,10 +433,16 @@ export class ProjectPackage implements ProjectTreeItem {
     ) {
         this.id = ProjectPackage.getId(parent, pkg);
         const item = new TreeItem(this.pkg.displayName, TreeItemCollapsibleState.None);
-        item.iconPath = this.pkg.iconPath;
+        const defaultIcon = this.pkg.isTransitive ? new ThemeIcon('list-tree') : new ThemeIcon('package');
+        item.iconPath = this.pkg.iconPath ?? defaultIcon;
         item.contextValue = this.pkg.isTransitive ? 'python-package-transitive' : 'python-package';
-        item.description = this.pkg.description ?? this.pkg.version;
-        item.tooltip = this.pkg.tooltip;
+        item.description =
+            (this.pkg.isTransitive ? l10n.t('(transitive) ') : '') + (this.pkg.description ?? this.pkg.version ?? '');
+        item.tooltip = this.pkg.isTransitive
+            ? l10n.t(
+                  'This package is a dependency of another installed package. It may also have been explicitly installed.',
+              )
+            : this.pkg.tooltip;
         this.treeItem = item;
     }
 
