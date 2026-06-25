@@ -523,6 +523,7 @@ async function buildShellActivationMapForConda(
                 envIdentifier,
                 envManager.sourcingInformation.condaFolder,
                 condaShPath,
+                envManager.sourcingInformation.shellInitStatus,
             );
             return shellMaps;
         }
@@ -605,6 +606,7 @@ export async function windowsExceptionGenerateConfig(
     prefix: string,
     condaFolder: string,
     condaShPath?: string,
+    shellInitStatus?: ShellCondaInitStatus,
 ): Promise<ShellCommandMaps> {
     const shellActivation: Map<string, PythonCommandRunConfiguration[]> = new Map();
     const shellDeactivation: Map<string, PythonCommandRunConfiguration[]> = new Map();
@@ -625,7 +627,12 @@ export async function windowsExceptionGenerateConfig(
     // is bash-compatible; on Windows, sourceInitPath may point to "activate.bat", which
     // cannot be sourced by Git Bash, so in that case we skip emitting a Git Bash activation.
     let bashActivate: PythonCommandRunConfiguration[];
-    if (condaShPath) {
+    if (shellInitStatus?.bash) {
+        traceVerbose(
+            'Skipping `source conda.sh` for Git Bash because `conda init bash` was detected in the user shell profile',
+        );
+        bashActivate = [{ executable: 'conda', args: ['activate', quotedPrefix] }];
+    } else if (condaShPath) {
         bashActivate = [
             { executable: 'source', args: [condaShPath.replace(/\\/g, '/')] },
             { executable: 'conda', args: ['activate', quotedPrefix] },
