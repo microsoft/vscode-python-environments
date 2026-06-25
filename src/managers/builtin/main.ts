@@ -4,6 +4,7 @@ import { createSimpleDebounce } from '../../common/utils/debounce';
 import { createFileSystemWatcher, onDidDeleteFiles } from '../../common/workspace.apis';
 import { getPythonApi } from '../../features/pythonApi';
 import { NativePythonFinder } from '../common/nativePythonFinder';
+import { registerPackageWatcherForManager } from '../common/packageWatcher';
 import { PipPackageManager } from './pipPackageManager';
 import { SysPythonManager } from './sysPythonManager';
 import { VenvManager } from './venvManager';
@@ -41,38 +42,8 @@ export async function registerSystemPythonFeatures(
         }),
     );
 
-    const packageDebouncedRefresh = createSimpleDebounce(500, async () => {
-        const projects = await api.getPythonProjects();
-        await Promise.all(
-            projects.map(async (project) => {
-                const env = await api.getEnvironment(project.uri);
-                if (!env) {
-                    return;
-                }
-                try {
-                    await api.refreshPackages(env);
-                } catch (ex) {
-                    log.error(
-                        `Failed to refresh packages for environment ${env.envId}: ${ex instanceof Error ? ex.message : String(ex)}`,
-                    );
-                }
-            }),
-        );
-    });
-    const packageWatcher = createFileSystemWatcher(
-        '**/site-packages/*.dist-info/METADATA',
-        false, // don't ignore create events    (pip install)
-        true, // ignore change events          (content changes in METADATA don't affect package list)
-        false, // don't ignore delete events    (pip uninstall)
-    );
     disposables.push(
-        packageDebouncedRefresh,
-        packageWatcher,
-        packageWatcher.onDidCreate(() => {
-            packageDebouncedRefresh.trigger();
-        }),
-        packageWatcher.onDidDelete(() => {
-            packageDebouncedRefresh.trigger();
-        }),
+        registerPackageWatcherForManager(envManager, pkgManager, log),
+        registerPackageWatcherForManager(venvManager, pkgManager, log),
     );
 }
