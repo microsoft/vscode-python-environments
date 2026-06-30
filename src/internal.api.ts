@@ -1,3 +1,4 @@
+import type { Pep440Version } from '@renovatebot/pep440';
 import { CancellationError, Disposable, Event, LogOutputChannel, MarkdownString, Uri } from 'vscode';
 import {
     CreateEnvironmentOptions,
@@ -138,6 +139,13 @@ export interface EnvironmentManagers extends Disposable {
     setEnvironmentsIfUnset(scope: Uri[] | string, environment?: PythonEnvironment): Promise<void>;
     getEnvironment(scope: GetEnvironmentScope): Promise<PythonEnvironment | undefined>;
     refreshEnvironment(scope: GetEnvironmentScope): Promise<void>;
+
+    /**
+     * Synchronously returns the last-known environment for a scope without triggering a refresh.
+     * Used to serve a value promptly while a slow initial environment resolution runs in the
+     * background. Returns undefined if no environment has been resolved for the scope yet.
+     */
+    getLastKnownEnvironment(scope: GetEnvironmentScope): PythonEnvironment | undefined;
 
     getProjectEnvManagers(uris: Uri[]): InternalEnvironmentManager[];
 }
@@ -378,6 +386,25 @@ export class InternalPackageManager implements PackageManager {
 
     equals(other: PackageManager): boolean {
         return this.manager === other;
+    }
+
+    getVersion(environment: PythonEnvironment): Promise<Pep440Version | undefined> {
+        return this.manager.getVersion ? this.manager.getVersion(environment) : Promise.resolve(undefined);
+    }
+
+    getPackageAvailableVersions(
+        environment: PythonEnvironment,
+        packageName: string,
+    ): Promise<Pep440Version[] | undefined> {
+        return this.manager.getPackageAvailableVersions
+            ? this.manager.getPackageAvailableVersions(environment, packageName)
+            : Promise.resolve(undefined);
+    }
+
+    formatInstallSpec(packageName: string, version: string): string {
+        return this.manager.formatInstallSpec
+            ? this.manager.formatInstallSpec(packageName, version)
+            : `${packageName}==${version}`;
     }
 }
 

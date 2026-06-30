@@ -5,6 +5,7 @@ import { ProjectCreatorString } from '../../common/localize';
 import { traceInfo, traceLog } from '../../common/logging';
 import { showOpenDialog, showWarningMessage } from '../../common/window.apis';
 import { PythonProjectManager, PythonProjectsImpl } from '../../internal.api';
+import { normalizePath } from '../../common/utils/pathUtils';
 
 export class ExistingProjects implements PythonProjectCreator {
     public readonly name = 'existingProjects';
@@ -47,8 +48,8 @@ export class ExistingProjects implements PythonProjectCreator {
             const p = this.pm.get(uri);
             if (p) {
                 // Skip this project if there's already a project registered with exactly the same path
-                const np = path.normalize(p.uri.fsPath);
-                const nf = path.normalize(uri.fsPath);
+                const np = normalizePath(p.uri.fsPath);
+                const nf = normalizePath(uri.fsPath);
                 return np !== nf;
             }
             return true;

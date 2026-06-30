@@ -10,6 +10,7 @@ import { StopWatch } from '../common/stopWatch';
 import { EventNames } from '../common/telemetry/constants';
 import { sendTelemetryEvent } from '../common/telemetry/sender';
 import { resolveVariables } from '../common/utils/internalVariables';
+import { normalizePath } from '../common/utils/pathUtils';
 import { showWarningMessage } from '../common/window.apis';
 import {
     getConfiguration,
@@ -534,8 +535,8 @@ function getProjectSpecificEnvManager(projectManager: PythonProjectManager, scop
         const pw = projectManager.get(scope);
         const w = getWorkspaceFolder(scope);
         if (pw && w) {
-            const pwPath = path.resolve(pw.uri.fsPath);
-            const matching = overrides.find((s) => path.resolve(w.uri.fsPath, s.path) === pwPath);
+            const pwPath = normalizePath(path.resolve(pw.uri.fsPath));
+            const matching = overrides.find((s) => normalizePath(path.resolve(w.uri.fsPath, s.path)) === pwPath);
             if (matching && matching.envManager && matching.envManager.length > 0) {
                 return matching.envManager;
             }

@@ -2,7 +2,7 @@
     "name": "vscode-python-envs",
     "displayName": "Python Environments",
     "description": "Provides a unified python environment experience",
-    "version": "1.36.0",
+    "version": "1.37.0",
     "publisher": "ms-python",
     "preview": true,
     "engines": {
@@ -136,6 +136,12 @@
                 "python-envs.alwaysUseUv": {
                     "type": "boolean",
                     "description": "%python-envs.alwaysUseUv.description%",
+                    "default": true,
+                    "scope": "machine"
+                },
+                "python-envs.packageWatchers": {
+                    "type": "boolean",
+                    "description": "%python-envs.packageWatchers.description%",
                     "default": true,
                     "scope": "machine"
                 }
@@ -281,6 +287,12 @@
                 "title": "%python-envs.uninstallPackage.title%",
                 "category": "Python Envs",
                 "icon": "$(trash)"
+            },
+            {
+                "command": "python-envs.managePackageVersion",
+                "title": "%python-envs.managePackageVersion.title%",
+                "category": "Python Envs",
+                "icon": "$(gear)"
             },
             {
                 "command": "python-envs.copyEnvPath",
@@ -515,6 +527,11 @@
                     "when": "view == env-managers && viewItem =~ /.*pythonBrokenEnvironment.*/ && viewItem =~ /.*copied.*/"
                 },
                 {
+                    "command": "python-envs.managePackageVersion",
+                    "group": "inline",
+                    "when": "view == env-managers && viewItem == python-package"
+                },
+                {
                     "command": "python-envs.uninstallPackage",
                     "group": "inline",
                     "when": "view == env-managers && viewItem == python-package"
@@ -555,6 +572,11 @@
                 {
                     "command": "python-envs.revealProjectInExplorer",
                     "when": "view == python-projects && viewItem =~ /.*python-workspace.*/"
+                },
+                {
+                    "command": "python-envs.managePackageVersion",
+                    "group": "inline",
+                    "when": "view == python-projects && viewItem == python-package"
                 },
                 {
                     "command": "python-envs.uninstallPackage",

@@ -21,8 +21,7 @@ python environments extension begins activation
    1. sets up a JSON-RPC connection to it over stdin/stdout
 2. register all built-in managers in parallel (Promise.all):
    - system: create SysPythonManager + VenvManager + PipPackageManager, register immediately (✅ NO PET call, sets up file watcher)
-   - conda: `getConda(nativeFinder)` checks settings → cache → persistent state → PATH
-   - pyenv & pipenv & poetry: create PyEnvManager, register immediately
+   - conda & pyenv & pipenv & poetry: create manager, register immediately
      - ✅ NO PET call — always registers unconditionally (lazy discovery)
    - shellStartupVars: initialize
    - all managers fire `onDidChangeEnvironmentManager` → ManagerReady resolves

@@ -23,6 +23,7 @@ export interface PyprojectToml {
         requires?: unknown;
     };
 }
+
 export function validatePyprojectToml(toml: PyprojectToml): string | undefined {
     // 1. Validate required "requires" field in [build-system] section (PEP 518)
     const buildSystem = toml['build-system'];
