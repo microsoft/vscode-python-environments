@@ -198,19 +198,7 @@ export enum EventNames {
      */
     PET_RESOLVE = 'PET.RESOLVE',
     /**
-     * Telemetry event for the one-time migration that removes a stale
-     * `python-envs.defaultEnvManager: system` value from User (global) settings.
-     * Fires only on the activation when the migration actually runs (not on subsequent runs).
-     * Properties:
-     * - outcome: 'removed' (was set to system, all user-scope slots cleared)
-     *          | 'partial' (cleared current context's slot but another user-scope slot still has it; will retry)
-     *          | 'not_set' (no user-scope slot of system found, nothing to do)
-     *          | 'failed' (attempted removal threw)
-     * - errorType: string (only when outcome === 'failed')
-     */
-    MIGRATION_SYSTEM_ENV_MANAGER = 'MIGRATION.SYSTEM_ENV_MANAGER',
-    /**
-     * Telemetry event fired once per session, per URI, the first time a `.py`
+    * Telemetry event fired once per session, per URI, the first time a `.py`
      * file with a valid PEP 723 `# /// script` block is observed by the lazy
      * detector. Used to size the population of users who actually see inline
      * script files — the denominator for the "view vs edit" question.
@@ -693,17 +681,6 @@ export interface IEventNamePropertyMapping {
         petBuildId?: string;
         /** PET source git commit SHA reported by the `info` RPC. 'unknown' if unavailable. */
         petCommitSha?: string;
-    };
-
-    /* __GDPR__
-        "migration.system_env_manager": {
-            "outcome": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "owner": "eleanorjboyd" },
-            "errorType": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "owner": "eleanorjboyd" }
-        }
-    */
-    [EventNames.MIGRATION_SYSTEM_ENV_MANAGER]: {
-        outcome: 'removed' | 'partial' | 'not_set' | 'failed';
-        errorType?: string;
     };
 
     /* __GDPR__
