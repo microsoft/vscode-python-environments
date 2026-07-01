@@ -15,8 +15,14 @@ import type {
     ThemeIcon,
     Uri,
 } from 'vscode';
+import { extensions } from 'vscode';
 
 export type { Pep440Version } from '@renovatebot/pep440';
+
+/*
+ * Do not introduce any breaking changes to this API.
+ * This is the public API for other extensions to interact with the Python Environments extension.
+ */
 
 /**
  * The path to an icon, or a theme-specific configuration of icons.
@@ -722,7 +728,8 @@ export interface PackageManager {
     clearCache?(): Promise<void>;
 
     /**
-     * Returns the version of the underlying package management tool (e.g., pip, conda).
+     * Returns the version of the underlying package management tool (e.g., pip, uv, conda).
+     * @param environment - The Python environment context.
      * @returns A promise that resolves to a {@link Pep440Version} object, or `undefined` if not available.
      */
     getVersion?(environment: PythonEnvironment): Promise<Pep440Version | undefined>;
@@ -1407,3 +1414,22 @@ export interface PythonEnvironmentApi
         PythonProjectApi,
         PythonExecutionApi,
         PythonEnvironmentVariablesApi {}
+
+export const EXTENSION_ID = 'ms-python.vscode-python-envs';
+
+export namespace PythonEnvironments {
+    /**
+     * Returns the API exposed by the Python Environments extension in VS Code.
+     */
+    export async function api(): Promise<PythonEnvironmentApi> {
+        const extension = extensions.getExtension(EXTENSION_ID);
+        if (extension === undefined) {
+            throw new Error(`Python Environments extension is not installed or is disabled`);
+        }
+        if (!extension.isActive) {
+            await extension.activate();
+        }
+        const pythonEnvsApi: PythonEnvironmentApi = extension.exports;
+        return pythonEnvsApi;
+    }
+}

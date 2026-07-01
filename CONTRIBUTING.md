@@ -89,6 +89,14 @@ This project requires contributors to sign a Contributor License Agreement (CLA)
 
 This project has adopted the [Microsoft Open Source Code of Conduct](https://opensource.microsoft.com/codeofconduct/). For more information, see the [Code of Conduct FAQ](https://opensource.microsoft.com/codeofconduct/faq/) or contact [opencode@microsoft.com](mailto:opencode@microsoft.com) with questions.
 
+## Public API package (`@vscode/python-environments`)
+
+The npm package under [`api/`](./api) is the public API facade other extensions consume. Its entry point, `api/src/main.ts`, is a **copy** of [`src/api.ts`](./src/api.ts) — the single source of truth — and is **not committed** (see [`api/.gitignore`](./api/.gitignore)).
+
+- Edit the API only in `src/api.ts`. This file contains the full public surface, including the runtime `PythonEnvironments.api()` helper and `EXTENSION_ID`. `api/src/main.ts` is a build artifact — never edit or commit it.
+- `api/src/main.ts` is produced by the publish pipeline ([`build/azure-pipeline.npm.yml`](./build/azure-pipeline.npm.yml)), which copies `src/api.ts` to `api/src/main.ts` before compiling. The api package is therefore built in CI only; to build it locally, copy the file first (e.g. `cp src/api.ts api/src/main.ts`).
+- `src/api.ts` itself is validated on every PR by the extension's own lint and TypeScript compile.
+
 ## Questions or Issues?
 
 - **Questions**: Start a [discussion](https://github.com/microsoft/vscode-python/discussions/categories/q-a)

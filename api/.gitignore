@@ -1,0 +1,4 @@
+# Copied from ../src/api.ts by the publish pipeline (build/azure-pipeline.npm.yml).
+# This is the published package entry point; it is produced at publish time and
+# intentionally NOT committed. src/api.ts is the single source of truth.
+src/main.ts

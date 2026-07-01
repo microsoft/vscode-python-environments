@@ -75,6 +75,10 @@ extends:
                 workingDirectory: $(Build.SourcesDirectory)/api
                 displayName: Install package dependencies
 
+              - script: cp ../src/api.ts src/main.ts
+                workingDirectory: $(Build.SourcesDirectory)/api
+                displayName: Copy src/api.ts to API package entry point
+
               - script: npm run compile
                 workingDirectory: $(Build.SourcesDirectory)/api
                 displayName: Compile TypeScript
