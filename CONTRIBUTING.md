@@ -96,6 +96,7 @@ The npm package under [`api/`](./api) is the public API facade other extensions 
 - Edit the API only in `src/api.ts`. This file contains the full public surface, including the runtime `PythonEnvironments.api()` helper and `EXTENSION_ID`. `api/src/main.ts` is a build artifact — never edit or commit it.
 - `api/src/main.ts` is produced by the publish pipeline ([`build/azure-pipeline.npm.yml`](./build/azure-pipeline.npm.yml)), which copies `src/api.ts` to `api/src/main.ts` before compiling. The api package is therefore built in CI only; to build it locally, copy the file first (e.g. `cp src/api.ts api/src/main.ts`).
 - `src/api.ts` itself is validated on every PR by the extension's own lint and TypeScript compile.
+- **Versioning:** the published package version in [`api/package.json`](./api/package.json) must always match the extension version in [`package.json`](./package.json). CI enforces this via [`scripts/compare_package_versions.py`](./scripts/compare_package_versions.py). Additionally, any PR that edits `src/api.ts` must bump `api/package.json` (use the `skip api version` label to bypass). When bumping, update both files so they stay in sync.
 
 ## Questions or Issues?
 

@@ -41,3 +41,28 @@ jobs:
             src/**/*.unit.test.ts
           skip-label: 'skip tests'
           failure-message: 'TypeScript code was edited without also editing a test file (the ${skip-label} label can be used to pass this check)'
+
+      - name: 'Public API changes require a version bump'
+        uses: brettcannon/check-for-changed-files@871d7b8b5917a4f6f06662e2262e8ffc51dff6d1 # v1.2.1
+        with:
+          prereq-pattern: 'src/api.ts'
+          file-pattern: 'api/package.json'
+          skip-label: 'skip api version'
+          failure-message: 'The public API (${prereq-pattern}) was changed without bumping the package version in ${file-pattern} (the ${skip-label} label can be used to pass this check)'
+
+  version-match:
+    name: 'Extension and API package versions match'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+
+      - name: 'Compare package.json versions'
+        run: python scripts/compare_package_versions.py
