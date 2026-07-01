@@ -63,7 +63,7 @@ def main() -> int:
     if extension_version != api_version:
         print(
             f"::error::Version mismatch: package.json is {extension_version} but "
-            f"api/package.json is {api_version}. Update api/package.json to match."
+            f"api/package.json is {api_version}. Update package.json and/or api/package.json so both versions match."
         )
         return 1
 
