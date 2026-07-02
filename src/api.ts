@@ -1422,13 +1422,19 @@ export namespace PythonEnvironments {
      * Returns the API exposed by the Python Environments extension in VS Code.
      */
     export async function api(): Promise<PythonEnvironmentApi> {
-        const extension = extensions.getExtension<PythonEnvironmentApi>(EXTENSION_ID);
+        const extension = extensions.getExtension<PythonEnvironmentApi | undefined>(EXTENSION_ID);
         if (extension === undefined) {
             throw new Error(`Python Environments extension (${EXTENSION_ID}) is not installed or is disabled`);
         }
         if (!extension.isActive) {
             await extension.activate();
         }
-        return extension.exports;
+        const api = extension.exports;
+        if (!api) {
+            throw new Error(
+                `Python Environments extension (${EXTENSION_ID}) did not expose its API. Ensure "python.useEnvironmentsExtension" is enabled and reload the window.`,
+            );
+        }
+        return api;
     }
 }
