@@ -1,13 +1,5 @@
-import { CommandConstructorOptions, InstallCommand } from '../../base/commands/index';
+import { CommandConstructorOptions, InstallCommand, type InstallEphemeralArgs } from '../../base/commands/index';
 import { runCondaExecutable } from '../condaUtils';
-
-/**
- * Ephemeral arguments for install command (change per execution).
- */
-interface InstallEphemeralArgs {
-    packages: { packageName: string; version?: string }[];
-    upgrade?: boolean;
-}
 
 /**
  * Conda install command.
@@ -44,8 +36,8 @@ export class CondaInstallCommand extends InstallCommand {
         return args;
     }
 
-    async execute(packages: { packageName: string; version?: string }[], upgrade?: boolean): Promise<void> {
-        const args = this.buildCommand({ packages, upgrade });
+    async execute(ephemeralArgs: InstallEphemeralArgs): Promise<void> {
+        const args = this.buildCommand(ephemeralArgs);
 
         await runCondaExecutable(args, this.log, this.cancellationToken);
     }

@@ -24,5 +24,5 @@ export abstract class AvailableVersionsCommand extends PackageManagerCommand {
 
     protected abstract buildCommand(ephemeralArgs: AvailableVersionsEphemeralArgs): string[];
 
-    abstract execute(packageName: string, pythonVersion: string, includePrerelease?: boolean): Promise<string[]>;
+    abstract execute(ephemeralArgs: AvailableVersionsEphemeralArgs): Promise<string[]>;
 }

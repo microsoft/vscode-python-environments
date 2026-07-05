@@ -22,5 +22,5 @@ export abstract class UninstallCommand extends PackageManagerCommand {
 
     protected abstract buildCommand(ephemeralArgs: UninstallEphemeralArgs): string[];
 
-    abstract execute(packages: { packageName: string; version?: string }[]): Promise<void>;
+    abstract execute(ephemeralArgs: UninstallEphemeralArgs): Promise<void>;
 }

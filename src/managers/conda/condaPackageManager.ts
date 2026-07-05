@@ -86,7 +86,7 @@ export class CondaPackageManager implements PackageManager, Disposable {
                             cancellationToken: token,
                         });
                         const packages = parsePackageSpecs(toUninstall);
-                        await uninstallCmd.execute(packages);
+                        await uninstallCmd.execute({ packages });
                     }
 
                     // Execute install if needed
@@ -97,7 +97,7 @@ export class CondaPackageManager implements PackageManager, Disposable {
                             cancellationToken: token,
                         });
                         const packages = parsePackageSpecs(toInstall);
-                        await installCmd.execute(packages, options.upgrade);
+                        await installCmd.execute({ packages, upgrade: options.upgrade });
                     }
 
                     await updatePackagesAndNotify(
@@ -185,7 +185,7 @@ export class CondaPackageManager implements PackageManager, Disposable {
                 log: this.log,
                 cancellationToken: undefined,
             });
-            const versionStrings = await availableVersionsCmd.execute(packageName, '');
+            const versionStrings = await availableVersionsCmd.execute({ packageName, pythonVersion: '' });
             return versionStrings.map((v) => parse(v)).filter((parsed) => parsed !== undefined) as Pep440Version[];
         } catch {
             return undefined;

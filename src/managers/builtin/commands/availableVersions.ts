@@ -1,4 +1,8 @@
-import { AvailableVersionsCommand, CommandConstructorOptions, type AvailableVersionsEphemeralArgs } from '../../base/commands/index';
+import {
+    AvailableVersionsCommand,
+    CommandConstructorOptions,
+    type AvailableVersionsEphemeralArgs,
+} from '../../base/commands/index';
 import { runPython } from '../helpers';
 
 /**
@@ -20,7 +24,7 @@ export class PipAvailableVersionsCommand extends AvailableVersionsCommand {
         return ['-m', 'pip', 'index', 'versions', ephemeralArgs.packageName, '--json', '--python-version', baseVersion];
     }
 
-    async execute(packageName: string, pythonVersion: string, includePrerelease?: boolean): Promise<string[]> {
+    async execute(ephemeralArgs: AvailableVersionsEphemeralArgs): Promise<string[]> {
         let availableVersions: string[] = [];
 
         const parser = (output: string): void => {
@@ -32,7 +36,7 @@ export class PipAvailableVersionsCommand extends AvailableVersionsCommand {
             try {
                 const parsed = JSON.parse(match[0]) as { versions?: string[] };
                 let versions = Array.isArray(parsed.versions) ? parsed.versions.filter((v) => !!v.trim()) : [];
-                if (!includePrerelease) {
+                if (!ephemeralArgs.includePrerelease) {
                     versions = versions.filter((version) => !/[ab]|rc|dev/i.test(version));
                 }
                 availableVersions = versions;
@@ -41,7 +45,7 @@ export class PipAvailableVersionsCommand extends AvailableVersionsCommand {
             }
         };
 
-        const args = this.buildCommand({ packageName, pythonVersion, includePrerelease });
+        const args = this.buildCommand(ephemeralArgs);
 
         const output = await runPython(
             this.pythonExecutable,
@@ -77,7 +81,7 @@ export class UvAvailableVersionsCommand extends AvailableVersionsCommand {
         return ['pip', 'index', 'versions', ephemeralArgs.packageName, '--json', '--python-version', baseVersion];
     }
 
-    async execute(packageName: string, pythonVersion: string, includePrerelease?: boolean): Promise<string[]> {
+    async execute(ephemeralArgs: AvailableVersionsEphemeralArgs): Promise<string[]> {
         let availableVersions: string[] = [];
 
         const parser = (output: string): void => {
@@ -89,7 +93,7 @@ export class UvAvailableVersionsCommand extends AvailableVersionsCommand {
             try {
                 const parsed = JSON.parse(match[0]) as { versions?: string[] };
                 let versions = Array.isArray(parsed.versions) ? parsed.versions.filter((v) => !!v.trim()) : [];
-                if (!includePrerelease) {
+                if (!ephemeralArgs.includePrerelease) {
                     versions = versions.filter((version) => !/[ab]|rc|dev/i.test(version));
                 }
                 availableVersions = versions;
@@ -98,7 +102,7 @@ export class UvAvailableVersionsCommand extends AvailableVersionsCommand {
             }
         };
 
-        const args = this.buildCommand({ packageName, pythonVersion, includePrerelease });
+        const args = this.buildCommand(ephemeralArgs);
 
         const output = await runPython(
             this.pythonExecutable,

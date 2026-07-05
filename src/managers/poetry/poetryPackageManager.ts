@@ -211,7 +211,7 @@ export class PoetryPackageManager implements PackageManager, Disposable {
                 cancellationToken: token,
             });
             const packages = parsePackageSpecs(options.uninstall);
-            await removeCmd.execute(packages);
+            await removeCmd.execute({ packages });
         }
 
         // Handle installs
@@ -222,7 +222,7 @@ export class PoetryPackageManager implements PackageManager, Disposable {
                 cancellationToken: token,
             });
             const packages = parsePackageSpecs(options.install);
-            await addCmd.execute(packages);
+            await addCmd.execute({ packages });
         }
     }
 

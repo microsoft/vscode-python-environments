@@ -1,12 +1,5 @@
-import { CommandConstructorOptions, UninstallCommand } from '../../base/commands/index';
+import { CommandConstructorOptions, UninstallCommand, type UninstallEphemeralArgs } from '../../base/commands/index';
 import { runPoetry } from '../poetryPackageManager';
-
-/**
- * Ephemeral arguments for poetry remove command (change per execution).
- */
-interface RemoveEphemeralArgs {
-    packages: { packageName: string; version?: string }[];
-}
 
 /**
  * Poetry remove command.
@@ -22,12 +15,12 @@ export class PoetryRemoveCommand extends UninstallCommand {
         super(options);
     }
 
-    protected buildCommand(ephemeralArgs: RemoveEphemeralArgs): string[] {
+    protected buildCommand(ephemeralArgs: UninstallEphemeralArgs): string[] {
         return ['remove', ...ephemeralArgs.packages.map((pkg) => pkg.packageName)];
     }
 
-    async execute(packages: { packageName: string; version?: string }[]): Promise<void> {
-        const args = this.buildCommand({ packages });
+    async execute(ephemeralArgs: UninstallEphemeralArgs): Promise<void> {
+        const args = this.buildCommand(ephemeralArgs);
         await runPoetry(args, undefined, this.log, this.cancellationToken);
     }
 }

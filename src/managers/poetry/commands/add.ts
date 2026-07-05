@@ -1,13 +1,5 @@
-import { CommandConstructorOptions, InstallCommand } from '../../base/commands/index';
+import { CommandConstructorOptions, InstallCommand, type InstallEphemeralArgs } from '../../base/commands/index';
 import { runPoetry } from '../poetryPackageManager';
-
-/**
- * Ephemeral arguments for poetry add command (change per execution).
- */
-interface AddEphemeralArgs {
-    packages: { packageName: string; version?: string }[];
-    upgrade?: boolean;
-}
 
 /**
  * Poetry add command.
@@ -23,7 +15,7 @@ export class PoetryAddCommand extends InstallCommand {
         super(options);
     }
 
-    protected buildCommand(ephemeralArgs: AddEphemeralArgs): string[] {
+    protected buildCommand(ephemeralArgs: InstallEphemeralArgs): string[] {
         const args = ['add'];
 
         if (ephemeralArgs.upgrade) {
@@ -42,8 +34,8 @@ export class PoetryAddCommand extends InstallCommand {
         return args;
     }
 
-    async execute(packages: { packageName: string; version?: string }[], upgrade?: boolean): Promise<void> {
-        const args = this.buildCommand({ packages, upgrade });
+    async execute(ephemeralArgs: InstallEphemeralArgs): Promise<void> {
+        const args = this.buildCommand(ephemeralArgs);
         await runPoetry(args, undefined, this.log, this.cancellationToken);
     }
 }

@@ -18,8 +18,8 @@ export class PipUninstallCommand extends UninstallCommand {
         return ['-m', 'pip', 'uninstall', '-y', ...ephemeralArgs.packages.map((pkg) => pkg.packageName)];
     }
 
-    async execute(packages: { packageName: string; version?: string }[]): Promise<void> {
-        const args = this.buildCommand({ packages });
+    async execute(ephemeralArgs: UninstallEphemeralArgs): Promise<void> {
+        const args = this.buildCommand(ephemeralArgs);
 
         await runPython(this.pythonExecutable, args, undefined, this.log, this.cancellationToken, this.timeout);
     }
@@ -46,8 +46,8 @@ export class UvUninstallCommand extends UninstallCommand {
         return args;
     }
 
-    async execute(packages: { packageName: string; version?: string }[]): Promise<void> {
-        const args = this.buildCommand({ packages });
+    async execute(ephemeralArgs: UninstallEphemeralArgs): Promise<void> {
+        const args = this.buildCommand(ephemeralArgs);
 
         await runPython(this.pythonExecutable, args, undefined, this.log, this.cancellationToken, this.timeout);
     }

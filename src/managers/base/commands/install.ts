@@ -23,5 +23,5 @@ export abstract class InstallCommand extends PackageManagerCommand {
 
     protected abstract buildCommand(ephemeralArgs: InstallEphemeralArgs): string[];
 
-    abstract execute(packages: { packageName: string; version?: string }[], upgrade?: boolean): Promise<void>;
+    abstract execute(ephemeralArgs: InstallEphemeralArgs): Promise<void>;
 }

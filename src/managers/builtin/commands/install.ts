@@ -38,8 +38,8 @@ export class PipInstallCommand extends InstallCommand {
         return args;
     }
 
-    async execute(packages: { packageName: string; version?: string }[], upgrade?: boolean): Promise<void> {
-        const args = this.buildCommand({ packages, upgrade });
+    async execute(ephemeralArgs: InstallEphemeralArgs): Promise<void> {
+        const args = this.buildCommand(ephemeralArgs);
 
         await runPython(this.pythonExecutable, args, undefined, this.log, this.cancellationToken, this.timeout);
     }
@@ -81,8 +81,8 @@ export class UvInstallCommand extends InstallCommand {
         return args;
     }
 
-    async execute(packages: { packageName: string; version?: string }[], upgrade?: boolean): Promise<void> {
-        const args = this.buildCommand({ packages, upgrade });
+    async execute(ephemeralArgs: InstallEphemeralArgs): Promise<void> {
+        const args = this.buildCommand(ephemeralArgs);
 
         await runPython(this.pythonExecutable, args, undefined, this.log, this.cancellationToken, this.timeout);
     }

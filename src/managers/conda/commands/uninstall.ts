@@ -1,12 +1,5 @@
-import { CommandConstructorOptions, UninstallCommand } from '../../base/commands/index';
+import { CommandConstructorOptions, UninstallCommand, type UninstallEphemeralArgs } from '../../base/commands/index';
 import { runCondaExecutable } from '../condaUtils';
-
-/**
- * Ephemeral arguments for uninstall command (change per execution).
- */
-interface UninstallEphemeralArgs {
-    packages: { packageName: string; version?: string }[];
-}
 
 /**
  * Conda uninstall command.
@@ -27,8 +20,8 @@ export class CondaUninstallCommand extends UninstallCommand {
         return ['remove', '-y', ...ephemeralArgs.packages.map((pkg) => pkg.packageName)];
     }
 
-    async execute(packages: { packageName: string; version?: string }[]): Promise<void> {
-        const args = this.buildCommand({ packages });
+    async execute(ephemeralArgs: UninstallEphemeralArgs): Promise<void> {
+        const args = this.buildCommand(ephemeralArgs);
 
         await runCondaExecutable(args, this.log, this.cancellationToken);
     }
