@@ -1438,3 +1438,153 @@ export namespace PythonEnvironments {
         return api;
     }
 }
+// ============================================================================
+// Package Manager Command Classes (Base Classes for Extension Developers)
+// ============================================================================
+
+/**
+ * Base class for all package manager commands.
+ *
+ * This is the foundation for implementing command execution across different package managers
+ * (pip, UV, conda, poetry). Extensions can extend these classes to integrate with package
+ * manager operations or implement custom command types.
+ *
+ * @see {@link InstallCommand}
+ * @see {@link UninstallCommand}
+ * @see {@link ListCommand}
+ * @see {@link VersionCommand}
+ * @see {@link AvailableVersionsCommand}
+ * @see {@link ListDirectNamesCommand}
+ */
+export type {
+    CommandConstructorOptions,
+    CommandResult,
+    CommandSettings,
+    CommandType,
+    PackageManagerCommand,
+} from './managers/base/commands/commandSettings';
+
+/**
+ * Abstract base class for install command implementations.
+ *
+ * Implement this interface to support package installation in your package manager.
+ * The command handles executing the install operation and returning the exit code.
+ *
+ * @example
+ * ```typescript
+ * class MyInstallCommand extends InstallCommand {
+ *   async execute(): Promise<number> {
+ *     // Implementation: run package install command
+ *     return exitCode;
+ *   }
+ * }
+ * ```
+ *
+ * @see {@link PackageManager.manage}
+ */
+export type { InstallCommand } from './managers/base/commands/install';
+
+/**
+ * Abstract base class for uninstall command implementations.
+ *
+ * Implement this interface to support package uninstallation in your package manager.
+ * The command handles executing the uninstall operation and returning the exit code.
+ *
+ * @example
+ * ```typescript
+ * class MyUninstallCommand extends UninstallCommand {
+ *   async execute(): Promise<number> {
+ *     // Implementation: run package uninstall command
+ *     return exitCode;
+ *   }
+ * }
+ * ```
+ *
+ * @see {@link PackageManager.manage}
+ */
+export type { UninstallCommand } from './managers/base/commands/uninstall';
+
+/**
+ * Abstract base class for list command implementations.
+ *
+ * Implement this interface to retrieve the list of installed packages.
+ * The command executes and returns a collection of Package objects.
+ *
+ * @example
+ * ```typescript
+ * class MyListCommand extends ListCommand {
+ *   async execute(): Promise<Package[]> {
+ *     // Implementation: run list command and parse output
+ *     return packages;
+ *   }
+ * }
+ * ```
+ *
+ * @see {@link PackageManager.getPackages}
+ */
+export type { ListCommand } from './managers/base/commands/list';
+
+/**
+ * Abstract base class for version command implementations.
+ *
+ * Implement this interface to retrieve the version of the underlying package management tool.
+ * Returns a semantic version object.
+ *
+ * @example
+ * ```typescript
+ * class MyVersionCommand extends VersionCommand {
+ *   async execute(): Promise<Pep440Version> {
+ *     // Implementation: run version command and parse output
+ *     return versionObject;
+ *   }
+ * }
+ * ```
+ *
+ * @see {@link PackageManager.getVersion}
+ */
+export type { VersionCommand } from './managers/base/commands/version';
+
+/**
+ * Abstract base class for available versions command implementations.
+ *
+ * Implement this interface to retrieve the list of available versions for a package.
+ * Returns an array of semantic version objects sorted newest first.
+ *
+ * @example
+ * ```typescript
+ * class MyAvailableVersionsCommand extends AvailableVersionsCommand {
+ *   async execute(): Promise<Pep440Version[]> {
+ *     // Implementation: query PyPI or other registry for available versions
+ *     return versions;
+ *   }
+ * }
+ * ```
+ *
+ * @see {@link PackageManager.getPackageAvailableVersions}
+ */
+export type { AvailableVersionsCommand } from './managers/base/commands/availableVersions';
+
+/**
+ * Abstract base class for list direct names command implementations.
+ *
+ * Implement this interface to retrieve the names of direct (non-transitive) packages
+ * installed in an environment. Returns a set of package names.
+ *
+ * @remarks
+ * Most package managers cannot track user install intent. For pip, this uses
+ * `pip list --not-required` which returns packages with no installed dependents,
+ * not necessarily packages the user explicitly installed. This is a best-effort approximation.
+ *
+ * @example
+ * ```typescript
+ * class MyListDirectNamesCommand extends ListDirectNamesCommand {
+ *   async execute(): Promise<Set<string>> {
+ *     // Implementation: run command and return direct package names
+ *     return packageNames;
+ *   }
+ * }
+ * ```
+ *
+ * @see {@link PackageManager.getDirectPackageNames}
+ */
+export type { ListDirectNamesCommand } from './managers/base/commands/listDirectNames';
