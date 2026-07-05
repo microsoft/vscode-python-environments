@@ -13,7 +13,9 @@ import { findFiles } from '../../common/workspace.apis';
 import { selectFromCommonPackagesToInstall, selectFromInstallableToInstall } from '../common/pickers';
 import { Installable } from '../common/types';
 import { mergePackages } from '../common/utils';
-import { normalizePackageName, refreshPipPackages } from './utils';
+import { normalizePackageName } from './utils';
+import { PipListCommand, UvListCommand } from './commands/index';
+import { shouldUseUv } from './helpers';
 
 export interface PyprojectToml {
     project?: {
@@ -275,7 +277,23 @@ export async function getWorkspacePackagesToInstall(
     let common = await getCommonPackages();
     let installed: string[] | undefined;
     if (environment) {
-        installed = (await refreshPipPackages(environment, log, { showProgress: true }))?.map((pkg) => pkg.name);
+        const pythonExecutable = environment.execInfo?.run?.executable;
+        if (pythonExecutable) {
+            const useUv = await shouldUseUv(log, environment.environmentPath.fsPath);
+            const ListCmd = useUv ? UvListCommand : PipListCommand;
+            const listCmd = new ListCmd({
+                pythonExecutable,
+                log,
+                cancellationToken: undefined,
+            });
+            const data = await withProgress(
+                {
+                    location: ProgressLocation.Notification,
+                },
+                async () => await listCmd.execute(),
+            );
+            installed = data?.map((pkg) => pkg.name);
+        }
         common = mergePackages(common, installed ?? []);
     }
     return selectWorkspaceOrCommon(installableResult, common, !!options.showSkipOption, installed ?? []);

@@ -1,11 +1,10 @@
-import { LogOutputChannel, ProgressLocation, QuickPickItem, Uri, window } from 'vscode';
+import { LogOutputChannel, QuickPickItem, Uri, window } from 'vscode';
 import { EnvironmentManager, Package, PythonEnvironment, PythonEnvironmentApi, PythonEnvironmentInfo } from '../../api';
-import { showErrorMessageWithLogs } from '../../common/errors/utils';
 import { getExtension } from '../../common/extension.apis';
 import { Common, PixiStrings, SysManagerStrings } from '../../common/localize';
 import { traceInfo, traceVerbose } from '../../common/logging';
 import { getGlobalPersistentState } from '../../common/persistentState';
-import { showInformationMessage, withProgress } from '../../common/window.apis';
+import { showInformationMessage } from '../../common/window.apis';
 import { openExtension } from '../../common/workbenchCommands';
 import {
     isNativeEnvInfo,
@@ -14,8 +13,6 @@ import {
     NativePythonFinder,
 } from '../common/nativePythonFinder';
 import { shortenVersionString, sortEnvironments } from '../common/utils';
-import { runPython, runUV, shouldUseUv } from './helpers';
-import { parsePipListJson, parseUvTree, PipPackage } from './pipListUtils';
 
 const PIXI_EXTENSION_ID = 'renan-r-santos.pixi-code';
 const PIXI_RECOMMEND_DONT_ASK_KEY = 'pixi-extension-recommend-dont-ask';
@@ -184,94 +181,6 @@ export async function refreshPythons(
         }
     });
     return sortEnvironments(collection);
-}
-
-const PIP_LIST_TIMEOUT_MS = 30_000;
-
-async function execPipList(environment: PythonEnvironment, log?: LogOutputChannel, args?: string[]): Promise<string> {
-    // Use environmentPath directly for consistency with UV environment tracking
-    const useUv = await shouldUseUv(log, environment.environmentPath.fsPath);
-    if (useUv) {
-        return await runUV(
-            ['pip', 'list', '--python', environment.execInfo.run.executable, '--format=json', ...(args ?? [])],
-            undefined,
-            log,
-            undefined,
-            PIP_LIST_TIMEOUT_MS,
-        );
-    }
-    try {
-        return await runPython(
-            environment.execInfo.run.executable,
-            ['-m', 'pip', 'list', '--format=json', ...(args ?? [])],
-            undefined,
-            log,
-            undefined,
-            PIP_LIST_TIMEOUT_MS,
-        );
-    } catch (ex) {
-        log?.error('Error running pip list', ex);
-        log?.info(
-            'Package list retrieval attempted using pip, action can be done with uv if installed and setting `alwaysUseUv` is enabled.',
-        );
-        throw ex;
-    }
-}
-
-export async function refreshPipPackages(
-    environment: PythonEnvironment,
-    log?: LogOutputChannel,
-    options?: { showProgress: boolean },
-): Promise<PipPackage[] | undefined> {
-    let data: string;
-    try {
-        if (options?.showProgress) {
-            data = await withProgress(
-                {
-                    location: ProgressLocation.Notification,
-                },
-                async () => {
-                    return await execPipList(environment, log);
-                },
-            );
-        } else {
-            data = await execPipList(environment, log);
-        }
-
-        return parsePipListJson(data, log);
-    } catch (e) {
-        log?.error('Error refreshing packages', e);
-        showErrorMessageWithLogs(SysManagerStrings.packageRefreshError, log);
-        return undefined;
-    }
-}
-
-/**
- * Returns names of packages with no installed dependents (leaf packages).
- *
- * Uses `pip list --not-required` (pip) or `uv pip tree --depth=0` (uv). These report
- * packages that nothing else depends on, which is a proxy for "directly installed" but
- * not equivalent — e.g., `pip install flask werkzeug` will report werkzeug as having
- * dependents (flask) even though the user installed it explicitly.
- */
-export async function refreshPipDirectPackageNames(
-    environment: PythonEnvironment,
-    log?: LogOutputChannel,
-): Promise<string[] | undefined> {
-    const useUv = await shouldUseUv(log, environment.environmentPath.fsPath);
-    if (useUv) {
-        const treeOutput = await runUV(
-            ['pip', 'tree', '--python', environment.execInfo.run.executable, '--depth=0'],
-            undefined,
-            log,
-            undefined,
-            PIP_LIST_TIMEOUT_MS,
-        );
-        return parseUvTree(treeOutput);
-    }
-    const data = await execPipList(environment, log, ['--not-required']);
-    const packages = parsePipListJson(data);
-    return packages.map((pkg) => pkg.name);
 }
 
 /**
