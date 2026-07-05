@@ -3,6 +3,14 @@ import { CommandConstructorOptions, ListCommand } from '../../base/commands/inde
 import { runPoetry } from '../poetryPackageManager';
 
 /**
+ * Poetry show command.
+ *
+ * Parsed Command: `poetry show --no-ansi`
+ *
+ * Official Documentation: https://python-poetry.org/docs/cli/#show
+ * The `poetry show` command displays information about the installed packages.
+ * The `--no-ansi` flag disables ANSI color output for easier parsing.
+ *
  * Concrete poetry show command.
  * Builds poetry-specific show arguments and returns PackageInfo[].
  */

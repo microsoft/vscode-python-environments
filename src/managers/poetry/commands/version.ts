@@ -2,6 +2,14 @@ import { CommandConstructorOptions, VersionCommand } from '../../base/commands/i
 import { getPoetryVersion } from '../poetryUtils';
 
 /**
+ * Poetry version command.
+ *
+ * Parsed Command: `poetry --version`
+ *
+ * Official Documentation: https://python-poetry.org/docs/cli/#options
+ * The `--version` option displays the current version of Poetry.
+ * Returns output in format: "Poetry (version X.Y.Z)" which is parsed to extract the version string.
+ *
  * Concrete poetry version command.
  * Gets poetry version and returns version string.
  */

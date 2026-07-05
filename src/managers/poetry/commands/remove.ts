@@ -2,6 +2,14 @@ import { CommandConstructorOptions, UninstallCommand } from '../../base/commands
 import { runPoetry } from '../poetryPackageManager';
 
 /**
+ * Poetry remove command.
+ *
+ * Parsed Command: `poetry remove <package> [<package> ...]`
+ *
+ * Official Documentation: https://python-poetry.org/docs/cli/#remove
+ * The `poetry remove` command removes packages from your pyproject.toml and uninstalls them
+ * from your virtual environment. It removes both the dependency declaration and the installed package.
+ *
  * Ephemeral arguments for poetry remove command (change per execution).
  */
 interface RemoveEphemeralArgs {

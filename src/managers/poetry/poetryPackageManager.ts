@@ -26,7 +26,13 @@ import { spawnProcess } from '../../common/childProcess.apis';
 import { showErrorMessage, showInputBox, withProgress } from '../../common/window.apis';
 import { normalizePackageName, parsePackageSpecs } from '../builtin/utils';
 import { updatePackagesAndNotify } from '../common/packageChanges';
-import { PoetryAddCommand, PoetryRemoveCommand, PoetryShowCommand, PoetryShowTopLevelCommand, PoetryVersionCommand } from './commands/index';
+import {
+    PoetryAddCommand,
+    PoetryRemoveCommand,
+    PoetryShowCommand,
+    PoetryShowTopLevelCommand,
+    PoetryVersionCommand,
+} from './commands/index';
 import { PoetryManager } from './poetryManager';
 import { getPoetry } from './poetryUtils';
 
