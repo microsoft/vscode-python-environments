@@ -1,7 +1,7 @@
 import { getConfiguration } from '../../../common/workspace.apis';
+import { CommandConstructorOptions, InstallCommand } from '../../base/commands/index';
 import { runPython } from '../helpers';
 import { processEditableInstallArgs } from '../utils';
-import { CommandConstructorOptions, InstallCommand } from '../../base/commands/index';
 
 /**
  * Ephemeral arguments for install command (change per execution).
@@ -35,18 +35,13 @@ export class PipInstallCommand extends InstallCommand {
             args.push('--upgrade');
         }
 
-        const processedArgs = processEditableInstallArgs(
-            ephemeralArgs.packages.map((pkg) => pkg.packageName),
-        );
+        const processedArgs = processEditableInstallArgs(ephemeralArgs.packages.map((pkg) => pkg.packageName));
         args.push(...processedArgs);
 
         return args;
     }
 
-    async execute(
-        packages: { packageName: string; version?: string }[],
-        upgrade?: boolean,
-    ): Promise<void> {
+    async execute(packages: { packageName: string; version?: string }[], upgrade?: boolean): Promise<void> {
         const args = this.buildCommand({ packages, upgrade });
 
         await runPython(
@@ -74,7 +69,7 @@ export class UvInstallCommand extends InstallCommand {
     }
 
     protected buildCommand(ephemeralArgs: InstallEphemeralArgs): string[] {
-        let args = ['pip', 'install'];
+        let args = ['pip', 'install', '--python', this.pythonExecutable];
 
         if (this.indexUrl) {
             args.push('--index-url', this.indexUrl);
@@ -84,18 +79,13 @@ export class UvInstallCommand extends InstallCommand {
             args.push('--upgrade');
         }
 
-        const processedArgs = processEditableInstallArgs(
-            ephemeralArgs.packages.map((pkg) => pkg.packageName),
-        );
+        const processedArgs = processEditableInstallArgs(ephemeralArgs.packages.map((pkg) => pkg.packageName));
         args.push(...processedArgs);
 
         return args;
     }
 
-    async execute(
-        packages: { packageName: string; version?: string }[],
-        upgrade?: boolean,
-    ): Promise<void> {
+    async execute(packages: { packageName: string; version?: string }[], upgrade?: boolean): Promise<void> {
         const args = this.buildCommand({ packages, upgrade });
 
         await runPython(

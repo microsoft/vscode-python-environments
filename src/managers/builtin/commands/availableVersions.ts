@@ -126,3 +126,4 @@ export class UvAvailableVersionsCommand extends AvailableVersionsCommand {
         parser(output);
         return availableVersions;
     }
+}

@@ -20,8 +20,5 @@ export abstract class InstallCommand extends PackageManagerCommand {
         };
     }
 
-    abstract execute(
-        packages: { packageName: string; version?: string }[],
-        upgrade?: boolean,
-    ): Promise<void>;
+    abstract execute(packages: { packageName: string; version?: string }[], upgrade?: boolean): Promise<void>;
 }

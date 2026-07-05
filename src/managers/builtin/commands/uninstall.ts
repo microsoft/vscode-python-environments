@@ -1,5 +1,5 @@
-import { runPython } from '../helpers';
 import { CommandConstructorOptions, UninstallCommand } from '../../base/commands/index';
+import { runPython } from '../helpers';
 
 /**
  * Ephemeral arguments for uninstall command (change per execution).
@@ -44,7 +44,9 @@ export class UvUninstallCommand extends UninstallCommand {
     }
 
     protected buildCommand(ephemeralArgs: UninstallEphemeralArgs): string[] {
-        return ['pip', 'uninstall', '-y', ...ephemeralArgs.packages.map((pkg) => pkg.packageName)];
+        const args = ['pip', 'uninstall', '-y', '--python', this.pythonExecutable];
+        args.push(...ephemeralArgs.packages.map((pkg) => pkg.packageName));
+        return args;
     }
 
     async execute(packages: { packageName: string; version?: string }[]): Promise<void> {

@@ -1,6 +1,6 @@
 import { PackageInfo } from '../../../api';
-import { runPython } from '../helpers';
 import { CommandConstructorOptions, ListCommand } from '../../base/commands/index';
+import { runPython } from '../helpers';
 
 /**
  * Concrete pip list command.

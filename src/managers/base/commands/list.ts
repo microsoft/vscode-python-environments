@@ -1,5 +1,5 @@
-import { getConfiguration } from '../../../common/workspace.apis';
 import { PackageInfo } from '../../../api';
+import { getConfiguration } from '../../../common/workspace.apis';
 import { CommandConstructorOptions, CommandSettings, PackageManagerCommand } from './commandSettings';
 
 /**

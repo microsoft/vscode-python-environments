@@ -1,5 +1,5 @@
-import { runPython } from '../helpers';
 import { CommandConstructorOptions, ListDirectNamesCommand } from '../../base/commands/index';
+import { runPython } from '../helpers';
 
 /**
  * Concrete pip listDirectNames command.

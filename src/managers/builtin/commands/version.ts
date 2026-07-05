@@ -1,5 +1,5 @@
-import { runPython } from '../helpers';
 import { CommandConstructorOptions, VersionCommand } from '../../base/commands/index';
+import { runPython } from '../helpers';
 
 /**
  * Concrete pip version command.
@@ -18,7 +18,8 @@ export class PipVersionCommand extends VersionCommand {
 
         const parser = (output: string): void => {
             // "pip X.Y.Z from /path/to/pip (python X.Y)"
-            const match = output.match(/^pip\s+(\d+\.\d+(?:\.\d+)*)/);            versionString = match ? match[1] : '';
+            const match = output.match(/^pip\s+(\d+\.\d+(?:\.\d+)*)/);
+            versionString = match ? match[1] : '';
         };
 
         const args = this.buildCommand();
@@ -55,7 +56,8 @@ export class UvVersionCommand extends VersionCommand {
 
         const parser = (output: string): void => {
             // "uv X.Y.Z" format
-            const match = output.match(/(\d+\.\d+(?:\.\d+)*)/);            versionString = match ? match[1] : '';
+            const match = output.match(/(\d+\.\d+(?:\.\d+)*)/);
+            versionString = match ? match[1] : '';
         };
 
         const args = this.buildCommand();

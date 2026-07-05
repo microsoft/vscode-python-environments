@@ -1,7 +1,9 @@
 # Class-Based Command Architecture with Three-Level Hierarchy
 
 ## Overview
+
 Implemented package management commands using a three-level class hierarchy that separates concerns cleanly:
+
 1. **Base class** (`PackageManagerCommand`) — minimal shared interface
 2. **Template classes** (`InstallCommand`, `ListCommand`, etc.) — load command-specific settings
 3. **Concrete classes** (`PipInstallCommand`, `CondaInstallCommand`, etc.) — implement package-manager-specific logic
@@ -11,6 +13,7 @@ This approach stores persisting arguments (like `indexUrl`) as instance properti
 ## Architecture Components
 
 ### 1. Base Class
+
 **File**: `src/managers/builtin/commands/commandSettings.ts`
 
 ```typescript
@@ -38,12 +41,15 @@ abstract class PackageManagerCommand {
 Minimal interface: only shared across all commands.
 
 ### 2. Template Classes
+
 Each command type (install, uninstall, list, etc.) has a template class that:
+
 - Loads its own command-specific settings from VS Code config
 - Defines the execute() interface (signature varies per command)
 - Is abstract (not instantiable directly)
 
 #### InstallCommand Template
+
 ```typescript
 abstract class InstallCommand extends PackageManagerCommand {
     protected settings: CommandSettings;
@@ -59,25 +65,24 @@ abstract class InstallCommand extends PackageManagerCommand {
         };
     }
 
-    abstract execute(
-        packages: { packageName: string; version?: string }[],
-        upgrade?: boolean,
-    ): Promise<void>;
+    abstract execute(packages: { packageName: string; version?: string }[], upgrade?: boolean): Promise<void>;
 }
 ```
 
 ### 3. Concrete Classes
+
 Each concrete class implements `buildCommand()` and `execute()` with package-manager-specific logic.
 
 #### PipInstallCommand (Concrete)
+
 ```typescript
 export class PipInstallCommand extends InstallCommand {
-    private indexUrl?: string;  // Persisting argument
+    private indexUrl?: string; // Persisting argument
 
     constructor(options: CommandConstructorOptions) {
         super(options);
         const config = getConfiguration('python-envs.packageManager');
-        this.indexUrl = config.get<string>('indexUrl');  // Load global config
+        this.indexUrl = config.get<string>('indexUrl'); // Load global config
     }
 
     // buildCommand uses persisting args (indexUrl) + ephemeral args (packages, upgrade)
@@ -92,19 +97,14 @@ export class PipInstallCommand extends InstallCommand {
             args.push('--upgrade');
         }
 
-        const processedArgs = processEditableInstallArgs(
-            ephemeralArgs.packages.map((pkg) => pkg.packageName),
-        );
+        const processedArgs = processEditableInstallArgs(ephemeralArgs.packages.map((pkg) => pkg.packageName));
         args.push(...processedArgs);
 
         return args;
     }
 
     // execute() spawns subprocess directly with runPython
-    async execute(
-        packages: { packageName: string; version?: string }[],
-        upgrade?: boolean,
-    ): Promise<void> {
+    async execute(packages: { packageName: string; version?: string }[], upgrade?: boolean): Promise<void> {
         const args = this.buildCommand({ packages, upgrade });
 
         await runPython(
@@ -120,6 +120,7 @@ export class PipInstallCommand extends InstallCommand {
 ```
 
 #### CondaInstallCommand (Concrete, Different Package Manager)
+
 ```typescript
 export class CondaInstallCommand extends InstallCommand {
     protected buildCommand(ephemeralArgs: InstallEphemeralArgs): string[] {
@@ -134,14 +135,11 @@ export class CondaInstallCommand extends InstallCommand {
         return args;
     }
 
-    async execute(
-        packages: { packageName: string; version?: string }[],
-        upgrade?: boolean,
-    ): Promise<void> {
+    async execute(packages: { packageName: string; version?: string }[], upgrade?: boolean): Promise<void> {
         const args = this.buildCommand({ packages, upgrade });
 
         await runPython(
-            this.pythonExecutable,  // conda executable
+            this.pythonExecutable, // conda executable
             args,
             undefined,
             this.log,
@@ -155,11 +153,13 @@ export class CondaInstallCommand extends InstallCommand {
 ## Separation of Concerns
 
 ### Persisting Arguments (Constructor)
+
 - Loaded once, reused across multiple executions
 - Stored as instance properties
 - Examples: `pythonExecutable`, `indexUrl`, `settings`, `log`
 
 ### Ephemeral Arguments (Execute)
+
 - Change per invocation
 - Passed to `execute()` method
 - Examples: `packages`, `packageName`, `pythonVersion`, `upgrade`
@@ -173,46 +173,48 @@ const install = new PipInstallCommand({
 
 // execute(): pass ephemeral args
 await install.execute([{ packageName: 'numpy' }], true);
-await install.execute([{ packageName: 'pandas' }], false);  // Same indexUrl reused
+await install.execute([{ packageName: 'pandas' }], false); // Same indexUrl reused
 ```
 
 ## Usage Flow
 
 1. **Executor creates command instance** with persisting options:
-   ```typescript
-   const install = new PipInstallCommand({
-       pythonExecutable,
-       log: context.log,
-       cancellationToken: context.cancellationToken,
-   });
-   ```
+
+    ```typescript
+    const install = new PipInstallCommand({
+        pythonExecutable,
+        log: context.log,
+        cancellationToken: context.cancellationToken,
+    });
+    ```
 
 2. **Constructor**:
-   - Calls `super(options)` to set pythonExecutable, log, cancellationToken
-   - Loads indexUrl from global config (persisting)
-   - Loads command-specific settings (timeout, retry, verbose)
+    - Calls `super(options)` to set pythonExecutable, log, cancellationToken
+    - Loads indexUrl from global config (persisting)
+    - Loads command-specific settings (timeout, retry, verbose)
 
 3. **Caller invokes execute()** with ephemeral args:
-   ```typescript
-   await install.execute(packages, upgrade);
-   ```
+
+    ```typescript
+    await install.execute(packages, upgrade);
+    ```
 
 4. **execute()**:
-   - Calls `buildCommand()` with ephemeral args
-   - Calls `runPython()` directly (no intermediate executeCommand function)
-   - Settings applied via `this.settings.executionTimeout`
+    - Calls `buildCommand()` with ephemeral args
+    - Calls `runPython()` directly (no intermediate executeCommand function)
+    - Settings applied via `this.settings.executionTimeout`
 
 ## Command Files
 
-| File | Template | Concrete(s) |
-|------|----------|------------|
-| `commandSettings.ts` | — | `PackageManagerCommand` base, `CommandSettings` interface |
-| `install.ts` | `InstallCommand` | `PipInstallCommand` |
-| `uninstall.ts` | `UninstallCommand` | `PipUninstallCommand` |
-| `list.ts` | `ListCommand` | `PipListCommand` |
-| `version.ts` | `VersionCommand` | `PipVersionCommand` |
-| `availableVersions.ts` | `AvailableVersionsCommand` | `PipAvailableVersionsCommand` |
-| `listDirectNames.ts` | `ListDirectNamesCommand` | `PipListDirectNamesCommand` |
+| File                   | Template                   | Concrete(s)                                               |
+| ---------------------- | -------------------------- | --------------------------------------------------------- |
+| `commandSettings.ts`   | —                          | `PackageManagerCommand` base, `CommandSettings` interface |
+| `install.ts`           | `InstallCommand`           | `PipInstallCommand`                                       |
+| `uninstall.ts`         | `UninstallCommand`         | `PipUninstallCommand`                                     |
+| `list.ts`              | `ListCommand`              | `PipListCommand`                                          |
+| `version.ts`           | `VersionCommand`           | `PipVersionCommand`                                       |
+| `availableVersions.ts` | `AvailableVersionsCommand` | `PipAvailableVersionsCommand`                             |
+| `listDirectNames.ts`   | `ListDirectNamesCommand`   | `PipListDirectNamesCommand`                               |
 
 ## Future: Conda and Poetry
 
@@ -250,9 +252,10 @@ Same template interface, different implementations per package manager.
 ✅ **Direct runPython**: No executeCommand intermediate function  
 ✅ **Command-specific indexUrl**: Only loaded by install commands, others ignore  
 ✅ **No stored results**: Commands return data directly, don't cache on instance  
-✅ **Extensible**: Easy to add conda, poetry, uv variants by extending templates  
+✅ **Extensible**: Easy to add conda, poetry, uv variants by extending templates
 
 ## Executor Integration
+
 **File**: `src/managers/builtin/commands/builtinCommandExecutor.ts`
 
 ```typescript
@@ -293,4 +296,5 @@ export class BuiltinCommandExecutor {
 ## Architecture Components
 
 ### 1. Base Class
+
 **File**: `src/managers/builtin/commands/commandSettings.ts`

@@ -22,9 +22,10 @@ import {
     PythonEnvironmentApi,
 } from '../../api';
 import { updatePackagesAndNotify } from '../common/packageChanges';
+import { PipInstallCommand, PipUninstallCommand, UvInstallCommand, UvUninstallCommand } from './commands/index';
 import { runPython, runUV, shouldUseUv } from './helpers';
 import { getWorkspacePackagesToInstall } from './pipUtils';
-import { managePackages, normalizePackageName, refreshPipDirectPackageNames, refreshPipPackages } from './utils';
+import { normalizePackageName, parsePackageSpecs, refreshPipDirectPackageNames, refreshPipPackages } from './utils';
 import { VenvManager } from './venvManager';
 
 export class PipPackageManager implements PackageManager, Disposable {
@@ -65,11 +66,6 @@ export class PipPackageManager implements PackageManager, Disposable {
             }
         }
 
-        const manageOptions = {
-            ...options,
-            install: toInstall,
-            uninstall: toUninstall,
-        };
         await window.withProgress(
             {
                 location: ProgressLocation.Notification,
@@ -78,7 +74,38 @@ export class PipPackageManager implements PackageManager, Disposable {
             },
             async (_progress, token) => {
                 try {
-                    await managePackages(environment, manageOptions, this, token);
+                    const pythonExecutable = environment.execInfo?.run?.executable;
+                    if (!pythonExecutable) {
+                        throw new Error('Unable to determine Python executable path');
+                    }
+
+                    // Detect whether to use UV
+                    const useUv = await shouldUseUv(this.log, environment.environmentPath.fsPath);
+
+                    // Execute uninstall if needed
+                    if (toUninstall.length > 0) {
+                        const UninstallCommand = useUv ? UvUninstallCommand : PipUninstallCommand;
+                        const uninstallCmd = new UninstallCommand({
+                            pythonExecutable,
+                            log: this.log,
+                            cancellationToken: token,
+                        });
+                        const packages = parsePackageSpecs(toUninstall);
+                        await uninstallCmd.execute(packages);
+                    }
+
+                    // Execute install if needed
+                    if (toInstall.length > 0) {
+                        const InstallCommand = useUv ? UvInstallCommand : PipInstallCommand;
+                        const installCmd = new InstallCommand({
+                            pythonExecutable,
+                            log: this.log,
+                            cancellationToken: token,
+                        });
+                        const packages = parsePackageSpecs(toInstall);
+                        await installCmd.execute(packages, options.upgrade);
+                    }
+
                     await updatePackagesAndNotify(
                         this,
                         environment,
