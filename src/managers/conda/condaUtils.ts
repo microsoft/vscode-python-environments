@@ -1275,7 +1275,6 @@ export async function deleteCondaEnvironment(environment: PythonEnvironment, log
     );
 }
 
-
 async function getCommonPackages(): Promise<Installable[]> {
     try {
         const pipData = path.join(EXTENSION_ROOT_DIR, 'files', 'conda_packages.json');

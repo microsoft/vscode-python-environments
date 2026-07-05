@@ -1,5 +1,5 @@
 import type { Pep440Version } from '@renovatebot/pep440';
-import { compare, explain as parse, rcompare } from '@renovatebot/pep440';
+import { compare, explain as parse } from '@renovatebot/pep440';
 import {
     CancellationError,
     Disposable,
@@ -22,10 +22,23 @@ import {
     PythonEnvironmentApi,
 } from '../../api';
 import { updatePackagesAndNotify } from '../common/packageChanges';
-import { PipInstallCommand, PipUninstallCommand, UvInstallCommand, UvUninstallCommand } from './commands/index';
-import { runPython, runUV, shouldUseUv } from './helpers';
+import {
+    PipAvailableVersionsCommand,
+    PipInstallCommand,
+    PipListCommand,
+    PipListDirectNamesCommand,
+    PipUninstallCommand,
+    PipVersionCommand,
+    UvAvailableVersionsCommand,
+    UvInstallCommand,
+    UvListCommand,
+    UvListDirectNamesCommand,
+    UvUninstallCommand,
+    UvVersionCommand,
+} from './commands/index';
+import { shouldUseUv } from './helpers';
 import { getWorkspacePackagesToInstall } from './pipUtils';
-import { normalizePackageName, parsePackageSpecs, refreshPipDirectPackageNames, refreshPipPackages } from './utils';
+import { normalizePackageName, parsePackageSpecs } from './utils';
 import { VenvManager } from './venvManager';
 
 export class PipPackageManager implements PackageManager, Disposable {
@@ -152,7 +165,19 @@ export class PipPackageManager implements PackageManager, Disposable {
 
     async getPackages(environment: PythonEnvironment, options?: GetPackagesOptions): Promise<Package[] | undefined> {
         if (options?.skipCache || !this.packages.has(environment.envId.id)) {
-            const data = await refreshPipPackages(environment, this.log);
+            const pythonExecutable = environment.execInfo?.run?.executable;
+            if (!pythonExecutable) {
+                return undefined;
+            }
+
+            const useUv = await shouldUseUv(this.log, environment.environmentPath.fsPath);
+            const ListCmd = useUv ? UvListCommand : PipListCommand;
+            const listCmd = new ListCmd({
+                pythonExecutable,
+                log: this.log,
+                cancellationToken: undefined,
+            });
+            const data = await listCmd.execute();
             const packages = (data ?? []).map((pkg) => this.api.createPackageItem(pkg, environment, this));
             this.packages.set(environment.envId.id, packages);
             return packages;
@@ -162,22 +187,20 @@ export class PipPackageManager implements PackageManager, Disposable {
 
     async getVersion(environment: PythonEnvironment): Promise<Pep440Version | undefined> {
         try {
-            const useUv = await shouldUseUv(this.log, environment.environmentPath.fsPath);
-            if (useUv) {
-                const result = await runUV(['--version'], undefined, this.log);
-                // "uv X.Y.Z"
-                const match = result.match(/^uv\s+(\d+\.\d+(?:\.\d+)*)/);
-                return match ? (parse(match[1]) ?? undefined) : undefined;
+            const pythonExecutable = environment.execInfo?.run?.executable;
+            if (!pythonExecutable) {
+                return undefined;
             }
-            const result = await runPython(
-                environment.execInfo?.run?.executable ?? 'python',
-                ['-m', 'pip', '--version'],
-                undefined,
-                this.log,
-            );
-            // "pip X.Y.Z from /path/to/pip (python X.Y)"
-            const match = result.match(/^pip\s+(\d+\.\d+(?:\.\d+)*)/);
-            return match ? (parse(match[1]) ?? undefined) : undefined;
+
+            const useUv = await shouldUseUv(this.log, environment.environmentPath.fsPath);
+            const VersionCmd = useUv ? UvVersionCommand : PipVersionCommand;
+            const versionCmd = new VersionCmd({
+                pythonExecutable,
+                log: this.log,
+                cancellationToken: undefined,
+            });
+            const versionString = await versionCmd.execute();
+            return versionString ? (parse(versionString) ?? undefined) : undefined;
         } catch {
             return undefined;
         }
@@ -188,8 +211,8 @@ export class PipPackageManager implements PackageManager, Disposable {
         packageName: string,
     ): Promise<Pep440Version[] | undefined> {
         try {
-            const python = environment.execInfo?.run?.executable;
-            if (!python) {
+            const pythonExecutable = environment.execInfo?.run?.executable;
+            if (!pythonExecutable) {
                 return undefined;
             }
 
@@ -197,30 +220,26 @@ export class PipPackageManager implements PackageManager, Disposable {
             if (!baseVersion) {
                 return undefined;
             }
-            // uv - Run pip via `uv tool run pip`
+
             const useUv = await shouldUseUv(this.log, environment.environmentPath.fsPath);
-            if (useUv) {
-                const output = await runUV(
-                    ['tool', 'run', 'pip', 'index', 'versions', packageName, '--json', '--python-version', baseVersion],
-                    undefined,
-                    this.log,
-                );
-                return parsePipIndexVersionsJson(output);
+            const AvailableVersionsCmd = useUv ? UvAvailableVersionsCommand : PipAvailableVersionsCommand;
+            const availableVersionsCmd = new AvailableVersionsCmd({
+                pythonExecutable,
+                log: this.log,
+                cancellationToken: undefined,
+            });
+
+            // For pip < 21.2.0, check version first
+            if (!useUv) {
+                const pipVersion = await this.getVersion(environment);
+                if (!pipVersion || compare(pipVersion.public, '21.2.0') < 0) {
+                    // pip <= 20.3.4 - version picking is undefined; no reliable machine-readable API exists.
+                    return undefined;
+                }
             }
 
-            // pip >= 21.2.0 - use `pip index versions <package> --json` to get available versions in a machine readable format.
-            const pipVersion = await this.getVersion(environment);
-            if (pipVersion && compare(pipVersion.public, '21.2.0') >= 0) {
-                const output = await runPython(
-                    python,
-                    ['-m', 'pip', 'index', 'versions', packageName, '--json', '--python-version', baseVersion],
-                    undefined,
-                    this.log,
-                );
-                return parsePipIndexVersionsJson(output);
-            }
-
-            // pip <= 20.3.4 - version picking is undefined; no reliable machine-readable API exists.
+            const versionStrings = await availableVersionsCmd.execute(packageName, environment.version);
+            return versionStrings.map((v) => parse(v)).filter((parsed) => parsed !== undefined) as Pep440Version[];
         } catch {
             return undefined;
         }
@@ -232,38 +251,25 @@ export class PipPackageManager implements PackageManager, Disposable {
     }
 
     /**
-     * Returns direct (non-transitive) package names using `pip list --not-required` or `uv pip tree --depth=0`.
+     * Returns direct (non-transitive) package names using `pip list --not-required` or `uv pip list --not-required`.
      *
      * Note: These commands return packages with no installed dependents (leaf packages), not packages
      * the user explicitly installed. pip/uv do not track install intent.
      */
     async getDirectPackageNames(environment: PythonEnvironment): Promise<Set<string> | undefined> {
-        const data = await refreshPipDirectPackageNames(environment, this.log);
-        return data ? new Set(data.map(normalizePackageName)) : undefined;
-    }
-}
-
-/**
- * Parses JSON output from `pip index versions <package> --json`.
- * Expected format: { "name": "...", "versions": ["1.2.3", "1.2.2", ...] }
- */
-export function parsePipIndexVersionsJson(output: string): Pep440Version[] | undefined {
-    // Only capture output between braces
-    const match = output.match(/{[\s\S]*}/);
-    if (!match) {
-        return undefined;
-    }
-    try {
-        const parsed = JSON.parse(match[0]);
-        if (parsed && Array.isArray(parsed.versions) && parsed.versions.length > 0) {
-            return (parsed.versions as string[])
-                .filter((v) => !!v.trim())
-                .map((v) => parse(v.trim()))
-                .filter((v): v is Pep440Version => v !== null)
-                .sort((a, b) => rcompare(a.public, b.public));
+        const pythonExecutable = environment.execInfo?.run?.executable;
+        if (!pythonExecutable) {
+            return undefined;
         }
-        return undefined;
-    } catch {
-        return undefined;
+
+        const useUv = await shouldUseUv(this.log, environment.environmentPath.fsPath);
+        const ListDirectNamesCmd = useUv ? UvListDirectNamesCommand : PipListDirectNamesCommand;
+        const listDirectNamesCmd = new ListDirectNamesCmd({
+            pythonExecutable,
+            log: this.log,
+            cancellationToken: undefined,
+        });
+        const data = await listDirectNamesCmd.execute();
+        return data ? new Set(data.map(normalizePackageName)) : undefined;
     }
 }
