@@ -9,8 +9,15 @@ interface AvailableVersionsEphemeralArgs {
 }
 
 /**
- * Concrete conda availableVersions command.
- * Builds conda-specific availableVersions arguments, parses JSON output, and returns version strings.
+ * Conda available versions command.
+ *
+ * Parsed Command: `conda search <package> --json`
+ *
+ * Official Documentation: https://conda.io/projects/conda/en/latest/commands/search.html
+ * The `conda search` command searches for packages in the conda channels.
+ * The `--json` flag outputs results in JSON format for structured parsing.
+ * Returns all builds of all versions available; deduplication is performed in the command.
+ * NOTE: The pythonVersion parameter is ignored for conda (unlike pip) as conda doesn't filter by Python version.
  */
 export class CondaAvailableVersionsCommand extends AvailableVersionsCommand {
     constructor(options: CommandConstructorOptions) {

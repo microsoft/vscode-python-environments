@@ -10,8 +10,14 @@ interface ListEphemeralArgs {
 }
 
 /**
- * Concrete conda list command.
- * Builds conda-specific list arguments and returns PackageInfo[].
+ * Conda list command.
+ *
+ * Parsed Command: `conda list -p <environment_path> --json`
+ *
+ * Official Documentation: https://conda.io/projects/conda/en/latest/commands/list.html
+ * The `conda list` command shows all installed packages in a conda environment.
+ * The `-p` flag specifies the environment path (can be absolute or relative).
+ * The `--json` flag outputs the package list in JSON format for structured parsing.
  */
 export class CondaListCommand extends ListCommand {
     constructor(options: CommandConstructorOptions) {

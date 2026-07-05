@@ -3,8 +3,13 @@ import { CommandConstructorOptions, ListCommand } from '../../base/commands/inde
 import { runPython } from '../helpers';
 
 /**
- * Concrete pip list command.
- * Builds pip-specific list arguments, parses JSON output, and returns PackageInfo[].
+ * Pip list command.
+ *
+ * Parsed Command: `python -m pip list --format=json`
+ *
+ * Official Documentation: https://pip.pypa.io/en/stable/cli/pip_list/
+ * The `pip list` command shows all installed packages in the current environment.
+ * The `--format=json` flag outputs the list in JSON format for structured parsing.
  */
 export class PipListCommand extends ListCommand {
     constructor(options: CommandConstructorOptions) {
@@ -50,8 +55,13 @@ export class PipListCommand extends ListCommand {
 }
 
 /**
- * Concrete uv list command.
- * Builds uv-specific list arguments, parses JSON output, and returns PackageInfo[].
+ * UV list command.
+ *
+ * Parsed Command: `uv pip list --format=json`
+ *
+ * Official Documentation: https://docs.astral.sh/uv/pip/
+ * The `uv pip list` command shows all installed packages via UV's pip interface.
+ * The `--format=json` flag outputs the list in JSON format for structured parsing.
  */
 export class UvListCommand extends ListCommand {
     constructor(options: CommandConstructorOptions) {

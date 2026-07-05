@@ -2,8 +2,13 @@ import { CommandConstructorOptions, VersionCommand } from '../../base/commands/i
 import { runPython } from '../helpers';
 
 /**
- * Concrete pip version command.
- * Builds pip-specific version arguments, parses output, and returns version string.
+ * Pip version command.
+ *
+ * Parsed Command: `python -m pip --version`
+ *
+ * Official Documentation: https://pip.pypa.io/en/stable/cli/pip/
+ * The `pip --version` command displays the current version of pip.
+ * Output format: "pip X.Y.Z from /path/to/pip (python X.Y)"
  */
 export class PipVersionCommand extends VersionCommand {
     constructor(options: CommandConstructorOptions) {
@@ -39,8 +44,13 @@ export class PipVersionCommand extends VersionCommand {
 }
 
 /**
- * Concrete uv version command.
- * Builds uv-specific version arguments, parses output, and returns version string.
+ * UV version command.
+ *
+ * Parsed Command: `uv --version`
+ *
+ * Official Documentation: https://docs.astral.sh/uv/
+ * The `uv --version` command displays the current version of UV.
+ * Output format: "uv X.Y.Z"
  */
 export class UvVersionCommand extends VersionCommand {
     constructor(options: CommandConstructorOptions) {
