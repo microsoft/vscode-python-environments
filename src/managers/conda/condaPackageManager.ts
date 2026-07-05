@@ -146,7 +146,7 @@ export class CondaPackageManager implements PackageManager, Disposable {
                 pythonExecutable: 'conda',
                 log: this.log,
             });
-            const data = await listCmd.execute({ environmentPath: environment.environmentPath.fsPath } as any);
+            const data = await listCmd.execute();
             const packages = (data ?? []).map((pkg) => this.api.createPackageItem(pkg, environment, this));
             this.packages.set(environment.envId.id, packages);
             return packages;
