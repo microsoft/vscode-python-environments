@@ -1,5 +1,5 @@
+import { AvailableVersionsCommand, CommandConstructorOptions } from '../../base/commands/index';
 import { runPython } from '../helpers';
-import { CommandConstructorOptions, AvailableVersionsCommand } from '../../base/commands/index';
 
 /**
  * Ephemeral arguments for availableVersions command (change per execution).
@@ -20,16 +20,7 @@ export class PipAvailableVersionsCommand extends AvailableVersionsCommand {
     }
     protected buildCommand(ephemeralArgs: AvailableVersionsEphemeralArgs): string[] {
         const baseVersion = ephemeralArgs.pythonVersion.split('.').slice(0, 2).join('.');
-        return [
-            '-m',
-            'pip',
-            'index',
-            'versions',
-            ephemeralArgs.packageName,
-            '--json',
-            '--python-version',
-            baseVersion,
-        ];
+        return ['-m', 'pip', 'index', 'versions', ephemeralArgs.packageName, '--json', '--python-version', baseVersion];
     }
 
     async execute(packageName: string, pythonVersion: string, includePrerelease?: boolean): Promise<string[]> {
@@ -80,15 +71,7 @@ export class UvAvailableVersionsCommand extends AvailableVersionsCommand {
 
     protected buildCommand(ephemeralArgs: AvailableVersionsEphemeralArgs): string[] {
         const baseVersion = ephemeralArgs.pythonVersion.split('.').slice(0, 2).join('.');
-        return [
-            'pip',
-            'index',
-            'versions',
-            ephemeralArgs.packageName,
-            '--json',
-            '--python-version',
-            baseVersion,
-        ];
+        return ['pip', 'index', 'versions', ephemeralArgs.packageName, '--json', '--python-version', baseVersion];
     }
 
     async execute(packageName: string, pythonVersion: string, includePrerelease?: boolean): Promise<string[]> {

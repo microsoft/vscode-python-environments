@@ -282,65 +282,6 @@ export async function refreshPipDirectPackageNames(
     return packages.map((pkg) => pkg.name);
 }
 
-export async function managePackages(
-    environment: PythonEnvironment,
-    options: PackageManagementOptions,
-    manager: PackageManager,
-    token?: CancellationToken,
-): Promise<void> {
-    if (environment.version.startsWith('2.')) {
-        throw new Error('Python 2.* is not supported (deprecated)');
-    }
-
-    // Use environmentPath directly for consistency with UV environment tracking
-    const useUv = await shouldUseUv(manager.log, environment.environmentPath.fsPath);
-    const uninstallArgs = ['pip', 'uninstall'];
-    if (options.uninstall && options.uninstall.length > 0) {
-        if (useUv) {
-            await runUV(
-                [...uninstallArgs, '--python', environment.execInfo.run.executable, ...options.uninstall],
-                undefined,
-                manager.log,
-                token,
-            );
-        } else {
-            uninstallArgs.push('--yes');
-            await runPython(
-                environment.execInfo.run.executable,
-                ['-m', ...uninstallArgs, ...options.uninstall],
-                undefined,
-                manager.log,
-                token,
-            );
-        }
-    }
-
-    const installArgs = ['pip', 'install'];
-    if (options.upgrade) {
-        installArgs.push('--upgrade');
-    }
-    if (options.install && options.install.length > 0) {
-        const processedInstallArgs = processEditableInstallArgs(options.install);
-
-        if (useUv) {
-            await runUV(
-                [...installArgs, '--python', environment.execInfo.run.executable, ...processedInstallArgs],
-                undefined,
-                manager.log,
-                token,
-            );
-        } else {
-            await runPython(
-                environment.execInfo.run.executable,
-                ['-m', ...installArgs, ...processedInstallArgs],
-                undefined,
-                manager.log,
-                token,
-            );
-        }
-    }
-}
-
 /**
  * Process pip install arguments to correctly handle editable installs with extras
  * This function will combine consecutive -e arguments that represent the same package with extras
