@@ -1,14 +1,5 @@
-import { AvailableVersionsCommand, CommandConstructorOptions } from '../../base/commands/index';
+import { AvailableVersionsCommand, CommandConstructorOptions, type AvailableVersionsEphemeralArgs } from '../../base/commands/index';
 import { runPython } from '../helpers';
-
-/**
- * Ephemeral arguments for availableVersions command (change per execution).
- */
-interface AvailableVersionsEphemeralArgs {
-    packageName: string;
-    pythonVersion: string;
-    includePrerelease?: boolean;
-}
 
 /**
  * Pip available versions command.

@@ -1,15 +1,7 @@
 import { getConfiguration } from '../../../common/workspace.apis';
-import { CommandConstructorOptions, InstallCommand } from '../../base/commands/index';
+import { CommandConstructorOptions, InstallCommand, type InstallEphemeralArgs } from '../../base/commands/index';
 import { runPython } from '../helpers';
 import { processEditableInstallArgs } from '../utils';
-
-/**
- * Ephemeral arguments for install command (change per execution).
- */
-interface InstallEphemeralArgs {
-    packages: { packageName: string; version?: string }[];
-    upgrade?: boolean;
-}
 
 /**
  * Pip install command.

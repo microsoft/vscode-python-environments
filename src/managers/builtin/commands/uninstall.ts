@@ -1,12 +1,5 @@
-import { CommandConstructorOptions, UninstallCommand } from '../../base/commands/index';
+import { CommandConstructorOptions, UninstallCommand, type UninstallEphemeralArgs } from '../../base/commands/index';
 import { runPython } from '../helpers';
-
-/**
- * Ephemeral arguments for uninstall command (change per execution).
- */
-interface UninstallEphemeralArgs {
-    packages: { packageName: string; version?: string }[];
-}
 
 /**
  * Pip uninstall command.

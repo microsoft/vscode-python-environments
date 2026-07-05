@@ -2,6 +2,13 @@ import { getConfiguration } from '../../../common/workspace.apis';
 import { CommandConstructorOptions, PackageManagerCommand } from './commandSettings';
 
 /**
+ * Ephemeral arguments for uninstall command (change per execution).
+ */
+export interface UninstallEphemeralArgs {
+    packages: { packageName: string; version?: string }[];
+}
+
+/**
  * Template class for uninstall commands.
  * Subclasses implement concrete package-manager-specific logic.
  */
@@ -12,6 +19,8 @@ export abstract class UninstallCommand extends PackageManagerCommand {
     constructor(options: CommandConstructorOptions) {
         super(options);
     }
+
+    protected abstract buildCommand(ephemeralArgs: UninstallEphemeralArgs): string[];
 
     abstract execute(packages: { packageName: string; version?: string }[]): Promise<void>;
 }
