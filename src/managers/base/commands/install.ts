@@ -1,4 +1,3 @@
-import { getConfiguration } from '../../../common/workspace.apis';
 import { CommandConstructorOptions, PackageManagerCommand } from './packageManagerCommand';
 
 /**
@@ -14,10 +13,8 @@ export interface InstallExecuteArgs {
  * Subclasses implement concrete package-manager-specific logic.
  */
 export abstract class InstallCommand extends PackageManagerCommand {
-    protected config = getConfiguration('python-envs.packageManager.installCommandArgs');
-
     constructor(options: CommandConstructorOptions) {
-        super(options);
+        super({ ...options, configSection: 'installCommandArgs' });
     }
 
     protected abstract buildCommand(executeArgs: InstallExecuteArgs): string[];

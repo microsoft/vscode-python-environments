@@ -1,4 +1,3 @@
-import { getConfiguration } from '../../../common/workspace.apis';
 import { CommandConstructorOptions, PackageManagerCommand } from './packageManagerCommand';
 
 /**
@@ -15,10 +14,8 @@ export interface AvailableVersionsExecuteArgs {
  * Subclasses implement concrete package-manager-specific logic.
  */
 export abstract class AvailableVersionsCommand extends PackageManagerCommand {
-    protected config = getConfiguration('python-envs.packageManager.availableVersionsCommandArgs');
-
     constructor(options: CommandConstructorOptions) {
-        super(options);
+        super({ ...options, configSection: 'availableVersionsCommandArgs' });
     }
 
     protected abstract buildCommand(executeArgs: AvailableVersionsExecuteArgs): string[];

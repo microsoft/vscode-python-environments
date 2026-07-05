@@ -1,4 +1,3 @@
-import { getConfiguration } from '../../../common/workspace.apis';
 import { CommandConstructorOptions, PackageManagerCommand } from './packageManagerCommand';
 
 /**
@@ -13,10 +12,8 @@ export interface UninstallExecuteArgs {
  * Subclasses implement concrete package-manager-specific logic.
  */
 export abstract class UninstallCommand extends PackageManagerCommand {
-    protected config = getConfiguration('python-envs.packageManager.uninstallCommandArgs');
-
     constructor(options: CommandConstructorOptions) {
-        super(options);
+        super({ ...options, configSection: 'uninstallCommandArgs' });
     }
 
     protected abstract buildCommand(executeArgs: UninstallExecuteArgs): string[];
