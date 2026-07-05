@@ -35,7 +35,7 @@ export class PipVersionCommand extends VersionCommand {
             undefined,
             this.log,
             this.cancellationToken,
-            300000,
+            this.timeout,
         );
 
         parser(output);
@@ -78,7 +78,7 @@ export class UvVersionCommand extends VersionCommand {
             undefined,
             this.log,
             this.cancellationToken,
-            300000,
+            this.timeout,
         );
 
         parser(output);

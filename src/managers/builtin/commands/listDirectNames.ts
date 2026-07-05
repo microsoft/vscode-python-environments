@@ -38,7 +38,7 @@ export class PipListDirectNamesCommand extends ListDirectNamesCommand {
             undefined,
             this.log,
             this.cancellationToken,
-            300000,
+            this.timeout,
         );
 
         parser(output);
@@ -84,7 +84,7 @@ export class UvListDirectNamesCommand extends ListDirectNamesCommand {
             undefined,
             this.log,
             this.cancellationToken,
-            300000,
+            this.timeout,
         );
 
         parser(output);

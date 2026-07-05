@@ -28,14 +28,7 @@ export class PipUninstallCommand extends UninstallCommand {
     async execute(packages: { packageName: string; version?: string }[]): Promise<void> {
         const args = this.buildCommand({ packages });
 
-        await runPython(
-            this.pythonExecutable,
-            args,
-            undefined,
-            this.log,
-            this.cancellationToken,
-            300000,
-        );
+        await runPython(this.pythonExecutable, args, undefined, this.log, this.cancellationToken, this.timeout);
     }
 }
 
@@ -63,13 +56,6 @@ export class UvUninstallCommand extends UninstallCommand {
     async execute(packages: { packageName: string; version?: string }[]): Promise<void> {
         const args = this.buildCommand({ packages });
 
-        await runPython(
-            this.pythonExecutable,
-            args,
-            undefined,
-            this.log,
-            this.cancellationToken,
-            300000,
-        );
+        await runPython(this.pythonExecutable, args, undefined, this.log, this.cancellationToken, this.timeout);
     }
 }
