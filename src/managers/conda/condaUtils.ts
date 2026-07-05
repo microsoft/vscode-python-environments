@@ -1275,28 +1275,6 @@ export async function deleteCondaEnvironment(environment: PythonEnvironment, log
     );
 }
 
-export async function managePackages(
-    environment: PythonEnvironment,
-    options: PackageManagementOptions,
-    token: CancellationToken,
-    log: LogOutputChannel,
-): Promise<void> {
-    if (options.uninstall && options.uninstall.length > 0) {
-        await runCondaExecutable(
-            ['remove', '--prefix', environment.environmentPath.fsPath, '--yes', ...options.uninstall],
-            log,
-            token,
-        );
-    }
-    if (options.install && options.install.length > 0) {
-        const args = ['install', '--prefix', environment.environmentPath.fsPath, '--yes'];
-        if (options.upgrade) {
-            args.push('--update-all');
-        }
-        args.push(...options.install);
-        await runCondaExecutable(args, log, token);
-    }
-}
 
 async function getCommonPackages(): Promise<Installable[]> {
     try {

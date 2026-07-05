@@ -25,8 +25,10 @@ import { showErrorMessageWithLogs } from '../../common/errors/utils';
 import { CondaStrings } from '../../common/localize';
 import { traceError } from '../../common/logging';
 import { withProgress } from '../../common/window.apis';
+import { parsePackageSpecs } from '../builtin/utils';
 import { updatePackagesAndNotify } from '../common/packageChanges';
-import { getCommonCondaPackagesToInstall, managePackages, runCondaExecutable } from './condaUtils';
+import { CondaInstallCommand, CondaUninstallCommand } from './commands/index';
+import { getCommonCondaPackagesToInstall, runCondaExecutable } from './condaUtils';
 
 export class CondaPackageManager implements PackageManager, Disposable {
     private readonly _onDidChangePackages = new EventEmitter<DidChangePackagesEventArgs>();
@@ -63,11 +65,6 @@ export class CondaPackageManager implements PackageManager, Disposable {
             }
         }
 
-        const manageOptions = {
-            ...options,
-            install: toInstall,
-            uninstall: toUninstall,
-        };
         await withProgress(
             {
                 location: ProgressLocation.Notification,
@@ -76,7 +73,28 @@ export class CondaPackageManager implements PackageManager, Disposable {
             },
             async (_progress, token) => {
                 try {
-                    await managePackages(environment, manageOptions, token, this.log);
+                    // Execute uninstall if needed
+                    if (toUninstall.length > 0) {
+                        const uninstallCmd = new CondaUninstallCommand({
+                            pythonExecutable: 'conda',
+                            log: this.log,
+                            cancellationToken: token,
+                        });
+                        const packages = parsePackageSpecs(toUninstall);
+                        await uninstallCmd.execute(packages);
+                    }
+
+                    // Execute install if needed
+                    if (toInstall.length > 0) {
+                        const installCmd = new CondaInstallCommand({
+                            pythonExecutable: 'conda',
+                            log: this.log,
+                            cancellationToken: token,
+                        });
+                        const packages = parsePackageSpecs(toInstall);
+                        await installCmd.execute(packages, options.upgrade);
+                    }
+
                     await updatePackagesAndNotify(
                         this,
                         environment,

@@ -1,13 +1,5 @@
-import { CancellationToken, LogOutputChannel, ProgressLocation, QuickPickItem, Uri, window } from 'vscode';
-import {
-    EnvironmentManager,
-    Package,
-    PackageManagementOptions,
-    PackageManager,
-    PythonEnvironment,
-    PythonEnvironmentApi,
-    PythonEnvironmentInfo,
-} from '../../api';
+import { LogOutputChannel, ProgressLocation, QuickPickItem, Uri, window } from 'vscode';
+import { EnvironmentManager, Package, PythonEnvironment, PythonEnvironmentApi, PythonEnvironmentInfo } from '../../api';
 import { showErrorMessageWithLogs } from '../../common/errors/utils';
 import { getExtension } from '../../common/extension.apis';
 import { Common, PixiStrings, SysManagerStrings } from '../../common/localize';
