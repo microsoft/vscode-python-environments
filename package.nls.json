@@ -47,5 +47,11 @@
     "python-envs.runPetInTerminal.title": "Run Python Environment Tool (PET) in Terminal...",
     "python-envs.managePackageVersion.title": "Manage Package Version",
     "python-envs.alwaysUseUv.description": "When set to true, uv will be used to manage all virtual environments if available. When set to false, uv will only manage virtual environments explicitly created by uv.",
-    "python-envs.packageWatchers.description": "When enabled, file system watchers monitor site-packages for install/uninstall changes and automatically refresh the package list. Disable this if you experience performance issues in large workspaces."
+    "python-envs.packageWatchers.description": "When enabled, file system watchers monitor site-packages for install/uninstall changes and automatically refresh the package list. Disable this if you experience performance issues in large workspaces.",
+    "python-envs.packageManager.installCommandArgs.description": "Arguments and settings for the install command (pip/uv install).",
+    "python-envs.packageManager.uninstallCommandArgs.description": "Arguments and settings for the uninstall command (pip/uv uninstall).",
+    "python-envs.packageManager.listCommandArgs.description": "Arguments and settings for the list command (pip/uv list).",
+    "python-envs.packageManager.versionCommandArgs.description": "Arguments and settings for the version command (pip/uv --version).",
+    "python-envs.packageManager.availableVersionsCommandArgs.description": "Arguments and settings for the availableVersions command (pip index versions).",
+    "python-envs.packageManager.listDirectNamesCommandArgs.description": "Arguments and settings for the listDirectNames command (pip list --not-required)."
 }

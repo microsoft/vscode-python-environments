@@ -144,6 +144,192 @@
                     "description": "%python-envs.packageWatchers.description%",
                     "default": true,
                     "scope": "machine"
+                },
+                "python-envs.packageManager.installCommandArgs": {
+                    "type": "object",
+                    "markdownDescription": "%python-envs.packageManager.installCommandArgs.description%",
+                    "scope": "machine",
+                    "properties": {
+                        "executionTimeout": {
+                            "type": "integer",
+                            "description": "Timeout in milliseconds (0 = no timeout). Default: 5 minutes.",
+                            "default": 300000,
+                            "minimum": 0
+                        },
+                        "verboseOutput": {
+                            "type": "boolean",
+                            "description": "Display full output from the install command.",
+                            "default": false
+                        },
+                        "retryOnFailure": {
+                            "type": "boolean",
+                            "description": "Retry the install command once on failure.",
+                            "default": true
+                        },
+                        "maxRetries": {
+                            "type": "integer",
+                            "description": "Maximum number of retry attempts (0-3).",
+                            "default": 1,
+                            "minimum": 0,
+                            "maximum": 3
+                        }
+                    },
+                    "additionalProperties": false
+                },
+                "python-envs.packageManager.uninstallCommandArgs": {
+                    "type": "object",
+                    "markdownDescription": "%python-envs.packageManager.uninstallCommandArgs.description%",
+                    "scope": "machine",
+                    "properties": {
+                        "executionTimeout": {
+                            "type": "integer",
+                            "description": "Timeout in milliseconds (0 = no timeout). Default: 5 minutes.",
+                            "default": 300000,
+                            "minimum": 0
+                        },
+                        "verboseOutput": {
+                            "type": "boolean",
+                            "description": "Display full output from the uninstall command.",
+                            "default": false
+                        },
+                        "retryOnFailure": {
+                            "type": "boolean",
+                            "description": "Retry the uninstall command once on failure.",
+                            "default": true
+                        },
+                        "maxRetries": {
+                            "type": "integer",
+                            "description": "Maximum number of retry attempts (0-3).",
+                            "default": 1,
+                            "minimum": 0,
+                            "maximum": 3
+                        }
+                    },
+                    "additionalProperties": false
+                },
+                "python-envs.packageManager.listCommandArgs": {
+                    "type": "object",
+                    "markdownDescription": "%python-envs.packageManager.listCommandArgs.description%",
+                    "scope": "machine",
+                    "properties": {
+                        "executionTimeout": {
+                            "type": "integer",
+                            "description": "Timeout in milliseconds (0 = no timeout). Default: 5 minutes.",
+                            "default": 300000,
+                            "minimum": 0
+                        },
+                        "verboseOutput": {
+                            "type": "boolean",
+                            "description": "Display full output from the list command.",
+                            "default": false
+                        },
+                        "retryOnFailure": {
+                            "type": "boolean",
+                            "description": "Retry the list command once on failure.",
+                            "default": true
+                        },
+                        "maxRetries": {
+                            "type": "integer",
+                            "description": "Maximum number of retry attempts (0-3).",
+                            "default": 1,
+                            "minimum": 0,
+                            "maximum": 3
+                        }
+                    },
+                    "additionalProperties": false
+                },
+                "python-envs.packageManager.versionCommandArgs": {
+                    "type": "object",
+                    "markdownDescription": "%python-envs.packageManager.versionCommandArgs.description%",
+                    "scope": "machine",
+                    "properties": {
+                        "executionTimeout": {
+                            "type": "integer",
+                            "description": "Timeout in milliseconds (0 = no timeout). Default: 5 minutes.",
+                            "default": 300000,
+                            "minimum": 0
+                        },
+                        "verboseOutput": {
+                            "type": "boolean",
+                            "description": "Display full output from the version command.",
+                            "default": false
+                        },
+                        "retryOnFailure": {
+                            "type": "boolean",
+                            "description": "Retry the version command once on failure.",
+                            "default": true
+                        },
+                        "maxRetries": {
+                            "type": "integer",
+                            "description": "Maximum number of retry attempts (0-3).",
+                            "default": 1,
+                            "minimum": 0,
+                            "maximum": 3
+                        }
+                    },
+                    "additionalProperties": false
+                },
+                "python-envs.packageManager.availableVersionsCommandArgs": {
+                    "type": "object",
+                    "markdownDescription": "%python-envs.packageManager.availableVersionsCommandArgs.description%",
+                    "scope": "machine",
+                    "properties": {
+                        "executionTimeout": {
+                            "type": "integer",
+                            "description": "Timeout in milliseconds (0 = no timeout). Default: 5 minutes.",
+                            "default": 300000,
+                            "minimum": 0
+                        },
+                        "verboseOutput": {
+                            "type": "boolean",
+                            "description": "Display full output from the availableVersions command.",
+                            "default": false
+                        },
+                        "retryOnFailure": {
+                            "type": "boolean",
+                            "description": "Retry the availableVersions command once on failure.",
+                            "default": true
+                        },
+                        "maxRetries": {
+                            "type": "integer",
+                            "description": "Maximum number of retry attempts (0-3).",
+                            "default": 1,
+                            "minimum": 0,
+                            "maximum": 3
+                        }
+                    },
+                    "additionalProperties": false
+                },
+                "python-envs.packageManager.listDirectNamesCommandArgs": {
+                    "type": "object",
+                    "markdownDescription": "%python-envs.packageManager.listDirectNamesCommandArgs.description%",
+                    "scope": "machine",
+                    "properties": {
+                        "executionTimeout": {
+                            "type": "integer",
+                            "description": "Timeout in milliseconds (0 = no timeout). Default: 5 minutes.",
+                            "default": 300000,
+                            "minimum": 0
+                        },
+                        "verboseOutput": {
+                            "type": "boolean",
+                            "description": "Display full output from the listDirectNames command.",
+                            "default": false
+                        },
+                        "retryOnFailure": {
+                            "type": "boolean",
+                            "description": "Retry the listDirectNames command once on failure.",
+                            "default": true
+                        },
+                        "maxRetries": {
+                            "type": "integer",
+                            "description": "Maximum number of retry attempts (0-3).",
+                            "default": 1,
+                            "minimum": 0,
+                            "maximum": 3
+                        }
+                    },
+                    "additionalProperties": false
                 }
             }
         },
