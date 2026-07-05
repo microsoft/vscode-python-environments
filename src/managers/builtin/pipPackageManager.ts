@@ -1,7 +1,6 @@
 import type { Pep440Version } from '@renovatebot/pep440';
 import { compare, explain as parse } from '@renovatebot/pep440';
 import {
-    CancellationError,
     Disposable,
     Event,
     EventEmitter,
@@ -80,67 +79,53 @@ export class PipPackageManager implements PackageManager, Disposable {
             }
         }
 
-        await window.withProgress(
-            {
-                location: ProgressLocation.Notification,
-                title: 'Installing packages',
-                cancellable: true,
-            },
-            async (_progress, token) => {
-                try {
-                    const pythonExecutable = environment.execInfo?.run?.executable;
-                    if (!pythonExecutable) {
-                        throw new Error('Unable to determine Python executable path');
-                    }
+        try {
+            const pythonExecutable = environment.execInfo?.run?.executable;
+            if (!pythonExecutable) {
+                throw new Error('Unable to determine Python executable path');
+            }
 
-                    // Detect whether to use UV
-                    const useUv = await shouldUseUv(this.log, environment.environmentPath.fsPath);
+            // Detect whether to use UV
+            const useUv = await shouldUseUv(this.log, environment.environmentPath.fsPath);
 
-                    // Centralize command options for install/uninstall operations
-                    const manageCommandOptions: CommandConstructorOptions = {
-                        pythonExecutable,
-                        log: this.log,
-                    };
+            // Centralize command options for install/uninstall operations
+            const manageCommandOptions: CommandConstructorOptions = {
+                pythonExecutable,
+                log: this.log,
+            };
 
-                    // Execute uninstall if needed
-                    if (toUninstall.length > 0) {
-                        const UninstallCommand = useUv ? UvUninstallCommand : PipUninstallCommand;
-                        const uninstallCmd = new UninstallCommand(manageCommandOptions);
-                        const packages = parsePackageSpecs(toUninstall);
-                        await uninstallCmd.execute({ packages, cancellationToken: token });
-                    }
+            // Execute uninstall if needed
+            if (toUninstall.length > 0) {
+                const UninstallCommand = useUv ? UvUninstallCommand : PipUninstallCommand;
+                const uninstallCmd = new UninstallCommand(manageCommandOptions);
+                const packages = parsePackageSpecs(toUninstall);
+                await uninstallCmd.executeWithProgress({ packages, showProgress: true }, 'Installing packages');
+            }
 
-                    // Execute install if needed
-                    if (toInstall.length > 0) {
-                        const InstallCommand = useUv ? UvInstallCommand : PipInstallCommand;
-                        const installCmd = new InstallCommand(manageCommandOptions);
-                        const packages = parsePackageSpecs(toInstall);
-                        await installCmd.execute({ packages, upgrade: options.upgrade, cancellationToken: token });
-                    }
+            // Execute install if needed
+            if (toInstall.length > 0) {
+                const InstallCommand = useUv ? UvInstallCommand : PipInstallCommand;
+                const installCmd = new InstallCommand(manageCommandOptions);
+                const packages = parsePackageSpecs(toInstall);
+                await installCmd.executeWithProgress(
+                    { packages, upgrade: options.upgrade, showProgress: true },
+                    'Installing packages',
+                );
+            }
 
-                    await updatePackagesAndNotify(
-                        this,
-                        environment,
-                        this.packages.get(environment.envId.id),
-                        (changes) => {
-                            this._onDidChangePackages.fire({ environment, manager: this, changes });
-                        },
-                    );
-                } catch (e) {
-                    if (e instanceof CancellationError) {
-                        throw e;
-                    }
-                    this.log.error('Error managing packages', e);
-                    setImmediate(async () => {
-                        const result = await window.showErrorMessage('Error managing packages', 'View Output');
-                        if (result === 'View Output') {
-                            this.log.show();
-                        }
-                    });
-                    throw e;
+            await updatePackagesAndNotify(this, environment, this.packages.get(environment.envId.id), (changes) => {
+                this._onDidChangePackages.fire({ environment, manager: this, changes });
+            });
+        } catch (e) {
+            this.log.error('Error managing packages', e);
+            setImmediate(async () => {
+                const result = await window.showErrorMessage('Error managing packages', 'View Output');
+                if (result === 'View Output') {
+                    this.log.show();
                 }
-            },
-        );
+            });
+            throw e;
+        }
     }
 
     async refresh(environment: PythonEnvironment): Promise<Package[] | undefined> {

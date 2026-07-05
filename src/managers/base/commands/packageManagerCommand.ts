@@ -1,4 +1,4 @@
-import { CancellationToken, LogOutputChannel, WorkspaceConfiguration } from 'vscode';
+import { CancellationToken, l10n, LogOutputChannel, ProgressLocation, window, WorkspaceConfiguration } from 'vscode';
 import { getConfiguration } from '../../../common/workspace.apis';
 
 /**
@@ -7,6 +7,7 @@ import { getConfiguration } from '../../../common/workspace.apis';
  */
 export interface BaseExecuteArgs {
     cancellationToken?: CancellationToken;
+    showProgress?: boolean;
 }
 
 /**
@@ -35,6 +36,33 @@ export abstract class PackageManagerCommand {
             ? getConfiguration(`python-envs.packageManager.${options.configSection}`)
             : getConfiguration('python-envs.packageManager');
     }
+
+    /**
+     * Executes this command and optionally wraps execution with a progress indicator.
+     */
+    public executeWithProgress<T = unknown, A extends BaseExecuteArgs = BaseExecuteArgs>(
+        executeArgs?: A,
+        title?: string,
+    ): Promise<T> {
+        if (!executeArgs?.showProgress) {
+            return this.execute(executeArgs) as Promise<T>;
+        }
+
+        return Promise.resolve(
+            window.withProgress(
+                {
+                    location: ProgressLocation.Notification,
+                    title: title ?? l10n.t('Running package manager command'),
+                },
+                () => this.execute(executeArgs) as Promise<T>,
+            ),
+        );
+    }
+
+    /**
+     * Subclasses implement command execution.
+     */
+    abstract execute(executeArgs?: BaseExecuteArgs): Promise<unknown>;
 
     /**
      * Subclasses implement to build the command arguments.

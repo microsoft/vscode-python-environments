@@ -282,12 +282,7 @@ export async function getWorkspacePackagesToInstall(
             const useUv = await shouldUseUv(log, environment.environmentPath.fsPath);
             const ListCmd = useUv ? UvListCommand : PipListCommand;
             const listCmd = new ListCmd({ pythonExecutable, log });
-            const data = await withProgress(
-                {
-                    location: ProgressLocation.Notification,
-                },
-                async () => await listCmd.execute(),
-            );
+            const data = await listCmd.executeWithProgress<{ name: string }[]>({ showProgress: true });
             installed = data?.map((pkg) => pkg.name);
         }
         common = mergePackages(common, installed ?? []);
