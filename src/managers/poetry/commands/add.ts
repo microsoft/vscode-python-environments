@@ -2,14 +2,6 @@ import { CommandConstructorOptions, InstallCommand } from '../../base/commands/i
 import { runPoetry } from '../poetryPackageManager';
 
 /**
- * Poetry add command.
- *
- * Parsed Command: `poetry add [--allow-prereleases] <package> [<package> ...]`
- *
- * Official Documentation: https://python-poetry.org/docs/cli/#add
- * The `poetry add` command adds required packages to your pyproject.toml and installs them.
- * It's the primary way to add dependencies to a Poetry project.
- *
  * Ephemeral arguments for poetry add command (change per execution).
  */
 interface AddEphemeralArgs {
@@ -18,8 +10,13 @@ interface AddEphemeralArgs {
 }
 
 /**
- * Concrete poetry add command.
- * Builds poetry-specific add arguments and executes via runPoetry.
+ * Poetry add command.
+ *
+ * Parsed Command: `poetry add [--allow-prereleases] <package> [<package> ...]`
+ *
+ * Official Documentation: https://python-poetry.org/docs/cli/#add
+ * The `poetry add` command adds required packages to your pyproject.toml and installs them.
+ * It's the primary way to add dependencies to a Poetry project.
  */
 export class PoetryAddCommand extends InstallCommand {
     constructor(options: CommandConstructorOptions) {

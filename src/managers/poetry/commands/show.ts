@@ -10,9 +10,6 @@ import { runPoetry } from '../poetryPackageManager';
  * Official Documentation: https://python-poetry.org/docs/cli/#show
  * The `poetry show` command displays information about the installed packages.
  * The `--no-ansi` flag disables ANSI color output for easier parsing.
- *
- * Concrete poetry show command.
- * Builds poetry-specific show arguments and returns PackageInfo[].
  */
 export class PoetryShowCommand extends ListCommand {
     constructor(options: CommandConstructorOptions) {

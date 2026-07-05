@@ -9,9 +9,6 @@ import { getPoetryVersion } from '../poetryUtils';
  * Official Documentation: https://python-poetry.org/docs/cli/#options
  * The `--version` option displays the current version of Poetry.
  * Returns output in format: "Poetry (version X.Y.Z)" which is parsed to extract the version string.
- *
- * Concrete poetry version command.
- * Gets poetry version and returns version string.
  */
 export class PoetryVersionCommand extends VersionCommand {
     constructor(options: CommandConstructorOptions) {

@@ -10,9 +10,6 @@ import { runPoetry } from '../poetryPackageManager';
  * The `poetry show` command with `--top-level` flag displays only the top-level (directly installed)
  * packages. The `--no-ansi` flag disables ANSI color output for easier parsing.
  * This is useful for determining which packages were explicitly installed vs. dependencies.
- *
- * Concrete poetry show --top-level command.
- * Builds poetry-specific show command and returns top-level package names.
  */
 export class PoetryShowTopLevelCommand extends ListDirectNamesCommand {
     constructor(options: CommandConstructorOptions) {
