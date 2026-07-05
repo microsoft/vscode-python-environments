@@ -13,6 +13,7 @@ import {
 } from 'vscode';
 import { Disposable } from 'vscode-jsonrpc';
 import {
+    CommandConstructorOptions,
     DidChangePackagesEventArgs,
     GetPackagesOptions,
     IconPath,
@@ -203,24 +204,23 @@ export class PoetryPackageManager implements PackageManager, Disposable {
             );
         }
 
+        // Centralize command options for install/uninstall operations
+        const manageCommandOptions: CommandConstructorOptions = {
+            pythonExecutable: poetry,
+            log: this.log,
+            cancellationToken: token,
+        };
+
         // Handle uninstalls first
         if (options.uninstall && options.uninstall.length > 0) {
-            const removeCmd = new PoetryRemoveCommand({
-                pythonExecutable: poetry,
-                log: this.log,
-                cancellationToken: token,
-            });
+            const removeCmd = new PoetryRemoveCommand(manageCommandOptions);
             const packages = parsePackageSpecs(options.uninstall);
             await removeCmd.execute({ packages });
         }
 
         // Handle installs
         if (options.install && options.install.length > 0) {
-            const addCmd = new PoetryAddCommand({
-                pythonExecutable: poetry,
-                log: this.log,
-                cancellationToken: token,
-            });
+            const addCmd = new PoetryAddCommand(manageCommandOptions);
             const packages = parsePackageSpecs(options.install);
             await addCmd.execute({ packages });
         }

@@ -12,6 +12,7 @@ import {
     window,
 } from 'vscode';
 import {
+    CommandConstructorOptions,
     DidChangePackagesEventArgs,
     GetPackagesOptions,
     IconPath,
@@ -95,14 +96,17 @@ export class PipPackageManager implements PackageManager, Disposable {
                     // Detect whether to use UV
                     const useUv = await shouldUseUv(this.log, environment.environmentPath.fsPath);
 
+                    // Centralize command options for install/uninstall operations
+                    const manageCommandOptions: CommandConstructorOptions = {
+                        pythonExecutable,
+                        log: this.log,
+                        cancellationToken: token,
+                    };
+
                     // Execute uninstall if needed
                     if (toUninstall.length > 0) {
                         const UninstallCommand = useUv ? UvUninstallCommand : PipUninstallCommand;
-                        const uninstallCmd = new UninstallCommand({
-                            pythonExecutable,
-                            log: this.log,
-                            cancellationToken: token,
-                        });
+                        const uninstallCmd = new UninstallCommand(manageCommandOptions);
                         const packages = parsePackageSpecs(toUninstall);
                         await uninstallCmd.execute({ packages });
                     }
@@ -110,11 +114,7 @@ export class PipPackageManager implements PackageManager, Disposable {
                     // Execute install if needed
                     if (toInstall.length > 0) {
                         const InstallCommand = useUv ? UvInstallCommand : PipInstallCommand;
-                        const installCmd = new InstallCommand({
-                            pythonExecutable,
-                            log: this.log,
-                            cancellationToken: token,
-                        });
+                        const installCmd = new InstallCommand(manageCommandOptions);
                         const packages = parsePackageSpecs(toInstall);
                         await installCmd.execute({ packages, upgrade: options.upgrade });
                     }

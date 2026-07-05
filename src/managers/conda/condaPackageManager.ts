@@ -12,6 +12,7 @@ import {
     RelativePattern,
 } from 'vscode';
 import {
+    CommandConstructorOptions,
     DidChangePackagesEventArgs,
     GetPackagesOptions,
     IconPath,
@@ -78,24 +79,23 @@ export class CondaPackageManager implements PackageManager, Disposable {
             },
             async (_progress, token) => {
                 try {
+                    // Centralize command options for install/uninstall operations
+                    const manageCommandOptions: CommandConstructorOptions = {
+                        pythonExecutable: 'conda',
+                        log: this.log,
+                        cancellationToken: token,
+                    };
+
                     // Execute uninstall if needed
                     if (toUninstall.length > 0) {
-                        const uninstallCmd = new CondaUninstallCommand({
-                            pythonExecutable: 'conda',
-                            log: this.log,
-                            cancellationToken: token,
-                        });
+                        const uninstallCmd = new CondaUninstallCommand(manageCommandOptions);
                         const packages = parsePackageSpecs(toUninstall);
                         await uninstallCmd.execute({ packages });
                     }
 
                     // Execute install if needed
                     if (toInstall.length > 0) {
-                        const installCmd = new CondaInstallCommand({
-                            pythonExecutable: 'conda',
-                            log: this.log,
-                            cancellationToken: token,
-                        });
+                        const installCmd = new CondaInstallCommand(manageCommandOptions);
                         const packages = parsePackageSpecs(toInstall);
                         await installCmd.execute({ packages, upgrade: options.upgrade });
                     }
