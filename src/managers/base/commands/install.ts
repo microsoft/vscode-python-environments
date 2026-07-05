@@ -14,7 +14,6 @@ export interface InstallExecuteArgs {
  * Subclasses implement concrete package-manager-specific logic.
  */
 export abstract class InstallCommand extends PackageManagerCommand {
-    protected timeout: number = 300000;
     protected config = getConfiguration('python-envs.packageManager.installCommandArgs');
 
     constructor(options: CommandConstructorOptions) {

@@ -13,7 +13,6 @@ export interface UninstallExecuteArgs {
  * Subclasses implement concrete package-manager-specific logic.
  */
 export abstract class UninstallCommand extends PackageManagerCommand {
-    protected timeout: number = 300000;
     protected config = getConfiguration('python-envs.packageManager.uninstallCommandArgs');
 
     constructor(options: CommandConstructorOptions) {

@@ -17,6 +17,7 @@ export abstract class PackageManagerCommand {
     protected pythonExecutable: string;
     protected log?: LogOutputChannel;
     protected cancellationToken?: CancellationToken;
+    protected timeout: number = 300000;
 
     constructor(options: CommandConstructorOptions) {
         this.pythonExecutable = options.pythonExecutable;

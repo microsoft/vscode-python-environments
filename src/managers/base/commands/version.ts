@@ -6,7 +6,6 @@ import { CommandConstructorOptions, PackageManagerCommand } from './packageManag
  * Subclasses implement concrete package-manager-specific logic.
  */
 export abstract class VersionCommand extends PackageManagerCommand {
-    protected timeout: number = 300000;
     protected config = getConfiguration('python-envs.packageManager.versionCommandArgs');
 
     constructor(options: CommandConstructorOptions) {
