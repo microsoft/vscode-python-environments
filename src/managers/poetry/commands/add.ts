@@ -1,4 +1,4 @@
-import { CommandConstructorOptions, InstallCommand, type InstallEphemeralArgs } from '../../base/commands/index';
+import { CommandConstructorOptions, InstallCommand, type InstallExecuteArgs } from '../../base/commands/index';
 import { runPoetry } from '../poetryPackageManager';
 
 /**
@@ -15,15 +15,15 @@ export class PoetryAddCommand extends InstallCommand {
         super(options);
     }
 
-    protected buildCommand(ephemeralArgs: InstallEphemeralArgs): string[] {
+    protected buildCommand(executeArgs: InstallExecuteArgs): string[] {
         const args = ['add'];
 
-        if (ephemeralArgs.upgrade) {
+        if (executeArgs.upgrade) {
             args.push('--allow-prereleases');
         }
 
         args.push(
-            ...ephemeralArgs.packages.map((pkg) => {
+            ...executeArgs.packages.map((pkg) => {
                 if (pkg.version) {
                     return `${pkg.packageName}@${pkg.version}`;
                 }
@@ -34,8 +34,8 @@ export class PoetryAddCommand extends InstallCommand {
         return args;
     }
 
-    async execute(ephemeralArgs: InstallEphemeralArgs): Promise<void> {
-        const args = this.buildCommand(ephemeralArgs);
+    async execute(executeArgs: InstallExecuteArgs): Promise<void> {
+        const args = this.buildCommand(executeArgs);
         await runPoetry(args, undefined, this.log, this.cancellationToken);
     }
 }

@@ -1,7 +1,7 @@
 import {
     AvailableVersionsCommand,
     CommandConstructorOptions,
-    type AvailableVersionsEphemeralArgs,
+    type AvailableVersionsExecuteArgs,
 } from '../../base/commands/index';
 import { runCondaExecutable } from '../condaUtils';
 
@@ -21,19 +21,19 @@ export class CondaAvailableVersionsCommand extends AvailableVersionsCommand {
         super(options);
     }
 
-    protected buildCommand(ephemeralArgs: AvailableVersionsEphemeralArgs): string[] {
-        return ['search', ephemeralArgs.packageName, '--json'];
+    protected buildCommand(executeArgs: AvailableVersionsExecuteArgs): string[] {
+        return ['search', executeArgs.packageName, '--json'];
     }
 
-    async execute(ephemeralArgs: AvailableVersionsEphemeralArgs): Promise<string[]> {
-        const args = this.buildCommand(ephemeralArgs);
+    async execute(executeArgs: AvailableVersionsExecuteArgs): Promise<string[]> {
+        const args = this.buildCommand(executeArgs);
         const output = await runCondaExecutable(args, this.log, this.cancellationToken);
 
         try {
             const parsed = JSON.parse(output);
-            if (parsed && typeof parsed === 'object' && Array.isArray(parsed[ephemeralArgs.packageName])) {
+            if (parsed && typeof parsed === 'object' && Array.isArray(parsed[executeArgs.packageName])) {
                 const uniqueVersions = new Map<string, string>();
-                (parsed[ephemeralArgs.packageName] as Array<{ version?: string }>)
+                (parsed[executeArgs.packageName] as Array<{ version?: string }>)
                     .filter((entry) => !!entry.version?.trim())
                     .forEach((entry) => {
                         const version = entry.version!.trim();

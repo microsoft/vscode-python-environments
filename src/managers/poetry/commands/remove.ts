@@ -1,4 +1,4 @@
-import { CommandConstructorOptions, UninstallCommand, type UninstallEphemeralArgs } from '../../base/commands/index';
+import { CommandConstructorOptions, UninstallCommand, type UninstallExecuteArgs } from '../../base/commands/index';
 import { runPoetry } from '../poetryPackageManager';
 
 /**
@@ -15,12 +15,12 @@ export class PoetryRemoveCommand extends UninstallCommand {
         super(options);
     }
 
-    protected buildCommand(ephemeralArgs: UninstallEphemeralArgs): string[] {
-        return ['remove', ...ephemeralArgs.packages.map((pkg) => pkg.packageName)];
+    protected buildCommand(executeArgs: UninstallExecuteArgs): string[] {
+        return ['remove', ...executeArgs.packages.map((pkg) => pkg.packageName)];
     }
 
-    async execute(ephemeralArgs: UninstallEphemeralArgs): Promise<void> {
-        const args = this.buildCommand(ephemeralArgs);
+    async execute(executeArgs: UninstallExecuteArgs): Promise<void> {
+        const args = this.buildCommand(executeArgs);
         await runPoetry(args, undefined, this.log, this.cancellationToken);
     }
 }

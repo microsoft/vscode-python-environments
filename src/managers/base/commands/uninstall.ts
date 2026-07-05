@@ -2,9 +2,9 @@ import { getConfiguration } from '../../../common/workspace.apis';
 import { CommandConstructorOptions, PackageManagerCommand } from './commandSettings';
 
 /**
- * Ephemeral arguments for uninstall command (change per execution).
+ * Arguments for uninstall command execution (change per execution).
  */
-export interface UninstallEphemeralArgs {
+export interface UninstallExecuteArgs {
     packages: { packageName: string; version?: string }[];
 }
 
@@ -20,7 +20,7 @@ export abstract class UninstallCommand extends PackageManagerCommand {
         super(options);
     }
 
-    protected abstract buildCommand(ephemeralArgs: UninstallEphemeralArgs): string[];
+    protected abstract buildCommand(executeArgs: UninstallExecuteArgs): string[];
 
-    abstract execute(ephemeralArgs: UninstallEphemeralArgs): Promise<void>;
+    abstract execute(executeArgs: UninstallExecuteArgs): Promise<void>;
 }

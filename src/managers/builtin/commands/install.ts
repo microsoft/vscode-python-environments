@@ -1,5 +1,5 @@
 import { getConfiguration } from '../../../common/workspace.apis';
-import { CommandConstructorOptions, InstallCommand, type InstallEphemeralArgs } from '../../base/commands/index';
+import { CommandConstructorOptions, InstallCommand, type InstallExecuteArgs } from '../../base/commands/index';
 import { runPython } from '../helpers';
 import { processEditableInstallArgs } from '../utils';
 
@@ -21,25 +21,25 @@ export class PipInstallCommand extends InstallCommand {
         this.indexUrl = config.get<string>('indexUrl');
     }
 
-    protected buildCommand(ephemeralArgs: InstallEphemeralArgs): string[] {
+    protected buildCommand(executeArgs: InstallExecuteArgs): string[] {
         let args = ['-m', 'pip', 'install'];
 
         if (this.indexUrl) {
             args.push('--index-url', this.indexUrl);
         }
 
-        if (ephemeralArgs.upgrade) {
+        if (executeArgs.upgrade) {
             args.push('--upgrade');
         }
 
-        const processedArgs = processEditableInstallArgs(ephemeralArgs.packages.map((pkg) => pkg.packageName));
+        const processedArgs = processEditableInstallArgs(executeArgs.packages.map((pkg) => pkg.packageName));
         args.push(...processedArgs);
 
         return args;
     }
 
-    async execute(ephemeralArgs: InstallEphemeralArgs): Promise<void> {
-        const args = this.buildCommand(ephemeralArgs);
+    async execute(executeArgs: InstallExecuteArgs): Promise<void> {
+        const args = this.buildCommand(executeArgs);
 
         await runPython(this.pythonExecutable, args, undefined, this.log, this.cancellationToken, this.timeout);
     }
@@ -64,25 +64,25 @@ export class UvInstallCommand extends InstallCommand {
         this.indexUrl = config.get<string>('indexUrl');
     }
 
-    protected buildCommand(ephemeralArgs: InstallEphemeralArgs): string[] {
+    protected buildCommand(executeArgs: InstallExecuteArgs): string[] {
         let args = ['pip', 'install', '--python', this.pythonExecutable];
 
         if (this.indexUrl) {
             args.push('--index-url', this.indexUrl);
         }
 
-        if (ephemeralArgs.upgrade) {
+        if (executeArgs.upgrade) {
             args.push('--upgrade');
         }
 
-        const processedArgs = processEditableInstallArgs(ephemeralArgs.packages.map((pkg) => pkg.packageName));
+        const processedArgs = processEditableInstallArgs(executeArgs.packages.map((pkg) => pkg.packageName));
         args.push(...processedArgs);
 
         return args;
     }
 
-    async execute(ephemeralArgs: InstallEphemeralArgs): Promise<void> {
-        const args = this.buildCommand(ephemeralArgs);
+    async execute(executeArgs: InstallExecuteArgs): Promise<void> {
+        const args = this.buildCommand(executeArgs);
 
         await runPython(this.pythonExecutable, args, undefined, this.log, this.cancellationToken, this.timeout);
     }

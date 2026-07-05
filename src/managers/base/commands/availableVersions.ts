@@ -2,9 +2,9 @@ import { getConfiguration } from '../../../common/workspace.apis';
 import { CommandConstructorOptions, PackageManagerCommand } from './commandSettings';
 
 /**
- * Ephemeral arguments for available versions command (change per execution).
+ * Arguments for available versions command execution (change per execution).
  */
-export interface AvailableVersionsEphemeralArgs {
+export interface AvailableVersionsExecuteArgs {
     packageName: string;
     pythonVersion: string;
     includePrerelease?: boolean;
@@ -22,7 +22,7 @@ export abstract class AvailableVersionsCommand extends PackageManagerCommand {
         super(options);
     }
 
-    protected abstract buildCommand(ephemeralArgs: AvailableVersionsEphemeralArgs): string[];
+    protected abstract buildCommand(executeArgs: AvailableVersionsExecuteArgs): string[];
 
-    abstract execute(ephemeralArgs: AvailableVersionsEphemeralArgs): Promise<string[]>;
+    abstract execute(executeArgs: AvailableVersionsExecuteArgs): Promise<string[]>;
 }

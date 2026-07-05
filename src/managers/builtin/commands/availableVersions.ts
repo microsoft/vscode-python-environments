@@ -1,7 +1,7 @@
 import {
     AvailableVersionsCommand,
     CommandConstructorOptions,
-    type AvailableVersionsEphemeralArgs,
+    type AvailableVersionsExecuteArgs,
 } from '../../base/commands/index';
 import { runPython } from '../helpers';
 
@@ -19,12 +19,12 @@ export class PipAvailableVersionsCommand extends AvailableVersionsCommand {
     constructor(options: CommandConstructorOptions) {
         super(options);
     }
-    protected buildCommand(ephemeralArgs: AvailableVersionsEphemeralArgs): string[] {
-        const baseVersion = ephemeralArgs.pythonVersion.split('.').slice(0, 2).join('.');
-        return ['-m', 'pip', 'index', 'versions', ephemeralArgs.packageName, '--json', '--python-version', baseVersion];
+    protected buildCommand(executeArgs: AvailableVersionsExecuteArgs): string[] {
+        const baseVersion = executeArgs.pythonVersion.split('.').slice(0, 2).join('.');
+        return ['-m', 'pip', 'index', 'versions', executeArgs.packageName, '--json', '--python-version', baseVersion];
     }
 
-    async execute(ephemeralArgs: AvailableVersionsEphemeralArgs): Promise<string[]> {
+    async execute(executeArgs: AvailableVersionsExecuteArgs): Promise<string[]> {
         let availableVersions: string[] = [];
 
         const parser = (output: string): void => {
@@ -36,7 +36,7 @@ export class PipAvailableVersionsCommand extends AvailableVersionsCommand {
             try {
                 const parsed = JSON.parse(match[0]) as { versions?: string[] };
                 let versions = Array.isArray(parsed.versions) ? parsed.versions.filter((v) => !!v.trim()) : [];
-                if (!ephemeralArgs.includePrerelease) {
+                if (!executeArgs.includePrerelease) {
                     versions = versions.filter((version) => !/[ab]|rc|dev/i.test(version));
                 }
                 availableVersions = versions;
@@ -45,7 +45,7 @@ export class PipAvailableVersionsCommand extends AvailableVersionsCommand {
             }
         };
 
-        const args = this.buildCommand(ephemeralArgs);
+        const args = this.buildCommand(executeArgs);
 
         const output = await runPython(
             this.pythonExecutable,
@@ -76,12 +76,12 @@ export class UvAvailableVersionsCommand extends AvailableVersionsCommand {
         super(options);
     }
 
-    protected buildCommand(ephemeralArgs: AvailableVersionsEphemeralArgs): string[] {
-        const baseVersion = ephemeralArgs.pythonVersion.split('.').slice(0, 2).join('.');
-        return ['pip', 'index', 'versions', ephemeralArgs.packageName, '--json', '--python-version', baseVersion];
+    protected buildCommand(executeArgs: AvailableVersionsExecuteArgs): string[] {
+        const baseVersion = executeArgs.pythonVersion.split('.').slice(0, 2).join('.');
+        return ['pip', 'index', 'versions', executeArgs.packageName, '--json', '--python-version', baseVersion];
     }
 
-    async execute(ephemeralArgs: AvailableVersionsEphemeralArgs): Promise<string[]> {
+    async execute(executeArgs: AvailableVersionsExecuteArgs): Promise<string[]> {
         let availableVersions: string[] = [];
 
         const parser = (output: string): void => {
@@ -93,7 +93,7 @@ export class UvAvailableVersionsCommand extends AvailableVersionsCommand {
             try {
                 const parsed = JSON.parse(match[0]) as { versions?: string[] };
                 let versions = Array.isArray(parsed.versions) ? parsed.versions.filter((v) => !!v.trim()) : [];
-                if (!ephemeralArgs.includePrerelease) {
+                if (!executeArgs.includePrerelease) {
                     versions = versions.filter((version) => !/[ab]|rc|dev/i.test(version));
                 }
                 availableVersions = versions;
@@ -102,7 +102,7 @@ export class UvAvailableVersionsCommand extends AvailableVersionsCommand {
             }
         };
 
-        const args = this.buildCommand(ephemeralArgs);
+        const args = this.buildCommand(executeArgs);
 
         const output = await runPython(
             this.pythonExecutable,

@@ -2,9 +2,9 @@ import { getConfiguration } from '../../../common/workspace.apis';
 import { CommandConstructorOptions, PackageManagerCommand } from './commandSettings';
 
 /**
- * Ephemeral arguments for install command (change per execution).
+ * Arguments for install command execution (change per execution).
  */
-export interface InstallEphemeralArgs {
+export interface InstallExecuteArgs {
     packages: { packageName: string; version?: string }[];
     upgrade?: boolean;
 }
@@ -21,7 +21,7 @@ export abstract class InstallCommand extends PackageManagerCommand {
         super(options);
     }
 
-    protected abstract buildCommand(ephemeralArgs: InstallEphemeralArgs): string[];
+    protected abstract buildCommand(executeArgs: InstallExecuteArgs): string[];
 
-    abstract execute(ephemeralArgs: InstallEphemeralArgs): Promise<void>;
+    abstract execute(executeArgs: InstallExecuteArgs): Promise<void>;
 }

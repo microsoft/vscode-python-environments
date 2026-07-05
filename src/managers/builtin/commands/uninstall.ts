@@ -1,4 +1,4 @@
-import { CommandConstructorOptions, UninstallCommand, type UninstallEphemeralArgs } from '../../base/commands/index';
+import { CommandConstructorOptions, UninstallCommand, type UninstallExecuteArgs } from '../../base/commands/index';
 import { runPython } from '../helpers';
 
 /**
@@ -14,12 +14,12 @@ export class PipUninstallCommand extends UninstallCommand {
     constructor(options: CommandConstructorOptions) {
         super(options);
     }
-    protected buildCommand(ephemeralArgs: UninstallEphemeralArgs): string[] {
-        return ['-m', 'pip', 'uninstall', '-y', ...ephemeralArgs.packages.map((pkg) => pkg.packageName)];
+    protected buildCommand(executeArgs: UninstallExecuteArgs): string[] {
+        return ['-m', 'pip', 'uninstall', '-y', ...executeArgs.packages.map((pkg) => pkg.packageName)];
     }
 
-    async execute(ephemeralArgs: UninstallEphemeralArgs): Promise<void> {
-        const args = this.buildCommand(ephemeralArgs);
+    async execute(executeArgs: UninstallExecuteArgs): Promise<void> {
+        const args = this.buildCommand(executeArgs);
 
         await runPython(this.pythonExecutable, args, undefined, this.log, this.cancellationToken, this.timeout);
     }
@@ -40,14 +40,14 @@ export class UvUninstallCommand extends UninstallCommand {
         super(options);
     }
 
-    protected buildCommand(ephemeralArgs: UninstallEphemeralArgs): string[] {
+    protected buildCommand(executeArgs: UninstallExecuteArgs): string[] {
         const args = ['pip', 'uninstall', '-y', '--python', this.pythonExecutable];
-        args.push(...ephemeralArgs.packages.map((pkg) => pkg.packageName));
+        args.push(...executeArgs.packages.map((pkg) => pkg.packageName));
         return args;
     }
 
-    async execute(ephemeralArgs: UninstallEphemeralArgs): Promise<void> {
-        const args = this.buildCommand(ephemeralArgs);
+    async execute(executeArgs: UninstallExecuteArgs): Promise<void> {
+        const args = this.buildCommand(executeArgs);
 
         await runPython(this.pythonExecutable, args, undefined, this.log, this.cancellationToken, this.timeout);
     }
