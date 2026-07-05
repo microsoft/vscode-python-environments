@@ -1,14 +1,6 @@
 import { CancellationToken, LogOutputChannel } from 'vscode';
 
 /**
- * Result type for commands that parse output and return data.
- */
-export interface CommandResult<T> {
-    readonly data: T;
-    readonly rawOutput: string;
-}
-
-/**
  * Constructor options shared by all package manager commands.
  */
 export interface CommandConstructorOptions {
@@ -35,5 +27,5 @@ export abstract class PackageManagerCommand {
     /**
      * Subclasses implement to build the command arguments.
      */
-    protected abstract buildCommand(ephemeralArgs: unknown): string[];
+    protected abstract buildCommand(executeArgs: unknown): string[];
 }

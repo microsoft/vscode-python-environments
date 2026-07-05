@@ -1,6 +1,6 @@
 import { PackageInfo } from '../../../api';
 import { getConfiguration } from '../../../common/workspace.apis';
-import { CommandConstructorOptions, PackageManagerCommand } from './commandSettings';
+import { CommandConstructorOptions, PackageManagerCommand } from './packageManagerCommand';
 
 /**
  * Template class for list commands.

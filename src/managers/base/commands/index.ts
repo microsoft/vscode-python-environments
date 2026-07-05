@@ -1,5 +1,5 @@
 export { AvailableVersionsCommand, type AvailableVersionsExecuteArgs } from './availableVersions';
-export { CommandConstructorOptions, CommandResult, PackageManagerCommand } from './commandSettings';
+export { CommandConstructorOptions, PackageManagerCommand } from './packageManagerCommand';
 export { InstallCommand, type InstallExecuteArgs } from './install';
 export { ListCommand } from './list';
 export { ListDirectNamesCommand } from './listDirectNames';

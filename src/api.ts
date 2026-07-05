@@ -1458,9 +1458,8 @@ export namespace PythonEnvironments {
  */
 export type {
     CommandConstructorOptions,
-    CommandResult,
     PackageManagerCommand,
-} from './managers/base/commands/commandSettings';
+} from './managers/base/commands/packageManagerCommand';
 
 /**
  * Abstract base class for install command implementations.

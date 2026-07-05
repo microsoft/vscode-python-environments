@@ -1,5 +1,5 @@
 import { getConfiguration } from '../../../common/workspace.apis';
-import { CommandConstructorOptions, PackageManagerCommand } from './commandSettings';
+import { CommandConstructorOptions, PackageManagerCommand } from './packageManagerCommand';
 
 /**
  * Arguments for install command execution (change per execution).
