@@ -46,7 +46,7 @@ export class PipListCommand extends ListCommand {
             undefined,
             this.log,
             this.cancellationToken,
-            this.settings.executionTimeout,
+            300000,
         );
 
         parser(output);
@@ -99,7 +99,7 @@ export class UvListCommand extends ListCommand {
             undefined,
             this.log,
             this.cancellationToken,
-            this.settings.executionTimeout,
+            300000,
         );
 
         parser(output);

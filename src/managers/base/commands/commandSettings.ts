@@ -1,32 +1,5 @@
 import { CancellationToken, LogOutputChannel } from 'vscode';
 
-export type CommandType = 'install' | 'uninstall' | 'list' | 'version' | 'availableVersions' | 'listDirectNames';
-
-/**
- * Settings that apply to a specific package manager command.
- */
-export interface CommandSettings {
-    /**
-     * Timeout in milliseconds for command execution. 0 = no timeout.
-     */
-    readonly executionTimeout: number;
-
-    /**
-     * Whether to include verbose output from the package manager command.
-     */
-    readonly verboseOutput: boolean;
-
-    /**
-     * Whether to retry a failed command once before raising an error.
-     */
-    readonly retryOnFailure: boolean;
-
-    /**
-     * Maximum number of retry attempts for failed operations.
-     */
-    readonly maxRetries: number;
-}
-
 /**
  * Result type for commands that parse output and return data.
  */

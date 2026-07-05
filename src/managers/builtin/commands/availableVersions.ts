@@ -58,7 +58,7 @@ export class PipAvailableVersionsCommand extends AvailableVersionsCommand {
             undefined,
             this.log,
             this.cancellationToken,
-            this.settings.executionTimeout,
+            300000,
         );
 
         parser(output);
@@ -115,7 +115,7 @@ export class UvAvailableVersionsCommand extends AvailableVersionsCommand {
             undefined,
             this.log,
             this.cancellationToken,
-            this.settings.executionTimeout,
+            300000,
         );
 
         parser(output);

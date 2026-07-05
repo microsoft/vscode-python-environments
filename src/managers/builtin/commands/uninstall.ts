@@ -34,7 +34,7 @@ export class PipUninstallCommand extends UninstallCommand {
             undefined,
             this.log,
             this.cancellationToken,
-            this.settings.executionTimeout,
+            300000,
         );
     }
 }
@@ -69,7 +69,7 @@ export class UvUninstallCommand extends UninstallCommand {
             undefined,
             this.log,
             this.cancellationToken,
-            this.settings.executionTimeout,
+            300000,
         );
     }
 }

@@ -55,7 +55,7 @@ export class PipInstallCommand extends InstallCommand {
             undefined,
             this.log,
             this.cancellationToken,
-            this.settings.executionTimeout,
+            300000,
         );
     }
 }
@@ -105,7 +105,7 @@ export class UvInstallCommand extends InstallCommand {
             undefined,
             this.log,
             this.cancellationToken,
-            this.settings.executionTimeout,
+            300000,
         );
     }
 }
