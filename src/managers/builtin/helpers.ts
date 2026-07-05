@@ -131,9 +131,7 @@ export async function runPython(
             log?.append(`python: ${s}`);
         });
         proc.stderr?.on('data', (data) => {
-            const s = data.toString('utf-8');
-            builder += s;
-            log?.append(`python: ${s}`);
+            log?.append(data.toString('utf-8'));
         });
         proc.on('close', () => {
             resolve(builder);
