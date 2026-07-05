@@ -1,4 +1,4 @@
-import { CommandConstructorOptions, VersionCommand } from '../../base/commands/index';
+import { CommandConstructorOptions, VersionCommand, type BaseExecuteArgs } from '../../base/commands/index';
 import { runCondaExecutable } from '../condaUtils';
 
 /**
@@ -19,9 +19,9 @@ export class CondaVersionCommand extends VersionCommand {
         return ['--version'];
     }
 
-    async execute(): Promise<string> {
+    async execute(executeArgs?: BaseExecuteArgs): Promise<string> {
         const args = this.buildCommand();
-        const output = await runCondaExecutable(args, this.log, this.cancellationToken);
+        const output = await runCondaExecutable(args, this.log, executeArgs?.cancellationToken);
 
         // "conda X.Y.Z"
         const match = output.match(/conda\s+(\d+\.\d+(?:\.\d+)*)/i);

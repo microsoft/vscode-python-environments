@@ -1,9 +1,9 @@
-import { CommandConstructorOptions, PackageManagerCommand } from './packageManagerCommand';
+import { BaseExecuteArgs, CommandConstructorOptions, PackageManagerCommand } from './packageManagerCommand';
 
 /**
  * Arguments for install command execution (change per execution).
  */
-export interface InstallExecuteArgs {
+export interface InstallExecuteArgs extends BaseExecuteArgs {
     packages: { packageName: string; version?: string }[];
     upgrade?: boolean;
 }

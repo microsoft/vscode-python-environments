@@ -1,9 +1,9 @@
-import { CommandConstructorOptions, PackageManagerCommand } from './packageManagerCommand';
+import { BaseExecuteArgs, CommandConstructorOptions, PackageManagerCommand } from './packageManagerCommand';
 
 /**
  * Arguments for available versions command execution (change per execution).
  */
-export interface AvailableVersionsExecuteArgs {
+export interface AvailableVersionsExecuteArgs extends BaseExecuteArgs {
     packageName: string;
     pythonVersion: string;
     includePrerelease?: boolean;

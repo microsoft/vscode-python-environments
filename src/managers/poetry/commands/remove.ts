@@ -21,6 +21,6 @@ export class PoetryRemoveCommand extends UninstallCommand {
 
     async execute(executeArgs: UninstallExecuteArgs): Promise<void> {
         const args = this.buildCommand(executeArgs);
-        await runPoetry(args, undefined, this.log, this.cancellationToken);
+        await runPoetry(args, undefined, this.log, executeArgs.cancellationToken);
     }
 }

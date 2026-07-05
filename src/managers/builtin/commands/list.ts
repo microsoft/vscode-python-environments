@@ -1,5 +1,5 @@
 import { PackageInfo } from '../../../api';
-import { CommandConstructorOptions, ListCommand } from '../../base/commands/index';
+import { CommandConstructorOptions, ListCommand, type BaseExecuteArgs } from '../../base/commands/index';
 import { runPython } from '../helpers';
 
 /**
@@ -19,7 +19,7 @@ export class PipListCommand extends ListCommand {
         return ['-m', 'pip', 'list', '--format=json'];
     }
 
-    async execute(): Promise<PackageInfo[]> {
+    async execute(executeArgs?: BaseExecuteArgs): Promise<PackageInfo[]> {
         const packages: PackageInfo[] = [];
 
         const parser = (output: string): void => {
@@ -45,7 +45,7 @@ export class PipListCommand extends ListCommand {
             args,
             undefined,
             this.log,
-            this.cancellationToken,
+            executeArgs?.cancellationToken,
             this.timeout,
         );
 
@@ -72,7 +72,7 @@ export class UvListCommand extends ListCommand {
         return ['pip', 'list', '--format=json'];
     }
 
-    async execute(): Promise<PackageInfo[]> {
+    async execute(executeArgs?: BaseExecuteArgs): Promise<PackageInfo[]> {
         const packages: PackageInfo[] = [];
 
         const parser = (output: string): void => {
@@ -98,7 +98,7 @@ export class UvListCommand extends ListCommand {
             args,
             undefined,
             this.log,
-            this.cancellationToken,
+            executeArgs?.cancellationToken,
             this.timeout,
         );
 

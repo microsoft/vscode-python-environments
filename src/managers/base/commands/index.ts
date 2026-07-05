@@ -2,6 +2,6 @@ export { AvailableVersionsCommand, type AvailableVersionsExecuteArgs } from './a
 export { InstallCommand, type InstallExecuteArgs } from './install';
 export { ListCommand } from './list';
 export { ListDirectNamesCommand } from './listDirectNames';
-export { CommandConstructorOptions, PackageManagerCommand } from './packageManagerCommand';
+export { BaseExecuteArgs, CommandConstructorOptions, PackageManagerCommand } from './packageManagerCommand';
 export { UninstallCommand, type UninstallExecuteArgs } from './uninstall';
 export { VersionCommand } from './version';

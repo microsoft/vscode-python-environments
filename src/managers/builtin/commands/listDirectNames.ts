@@ -1,4 +1,4 @@
-import { CommandConstructorOptions, ListDirectNamesCommand } from '../../base/commands/index';
+import { CommandConstructorOptions, ListDirectNamesCommand, type BaseExecuteArgs } from '../../base/commands/index';
 import { runPython } from '../helpers';
 
 /**
@@ -19,7 +19,7 @@ export class PipListDirectNamesCommand extends ListDirectNamesCommand {
         return ['-m', 'pip', 'list', '--format=json', '--not-required'];
     }
 
-    async execute(): Promise<string[]> {
+    async execute(executeArgs?: BaseExecuteArgs): Promise<string[]> {
         let directNames: string[] = [];
 
         const parser = (output: string): void => {
@@ -37,7 +37,7 @@ export class PipListDirectNamesCommand extends ListDirectNamesCommand {
             args,
             undefined,
             this.log,
-            this.cancellationToken,
+            executeArgs?.cancellationToken,
             this.timeout,
         );
 
@@ -65,7 +65,7 @@ export class UvListDirectNamesCommand extends ListDirectNamesCommand {
         return ['pip', 'list', '--format=json', '--not-required'];
     }
 
-    async execute(): Promise<string[]> {
+    async execute(executeArgs?: BaseExecuteArgs): Promise<string[]> {
         let directNames: string[] = [];
 
         const parser = (output: string): void => {
@@ -83,7 +83,7 @@ export class UvListDirectNamesCommand extends ListDirectNamesCommand {
             args,
             undefined,
             this.log,
-            this.cancellationToken,
+            executeArgs?.cancellationToken,
             this.timeout,
         );
 

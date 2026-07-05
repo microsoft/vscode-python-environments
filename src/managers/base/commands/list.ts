@@ -1,5 +1,5 @@
 import { PackageInfo } from '../../../api';
-import { CommandConstructorOptions, PackageManagerCommand } from './packageManagerCommand';
+import { BaseExecuteArgs, CommandConstructorOptions, PackageManagerCommand } from './packageManagerCommand';
 
 /**
  * Template class for list commands.
@@ -10,5 +10,5 @@ export abstract class ListCommand extends PackageManagerCommand {
         super({ ...options, configSection: 'listCommandArgs' });
     }
 
-    abstract execute(): Promise<PackageInfo[]>;
+    abstract execute(executeArgs?: BaseExecuteArgs): Promise<PackageInfo[]>;
 }

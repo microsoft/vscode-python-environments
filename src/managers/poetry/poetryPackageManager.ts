@@ -13,7 +13,6 @@ import {
 } from 'vscode';
 import { Disposable } from 'vscode-jsonrpc';
 import {
-    CommandConstructorOptions,
     DidChangePackagesEventArgs,
     GetPackagesOptions,
     IconPath,
@@ -165,7 +164,6 @@ export class PoetryPackageManager implements PackageManager, Disposable {
         const versionCmd = new PoetryVersionCommand({
             pythonExecutable: poetry,
             log: this.log,
-            cancellationToken: undefined,
         });
         const versionString = await versionCmd.execute();
         return versionString ? (parse(versionString) ?? undefined) : undefined;
@@ -204,25 +202,24 @@ export class PoetryPackageManager implements PackageManager, Disposable {
             );
         }
 
-        // Centralize command options for install/uninstall operations
-        const manageCommandOptions: CommandConstructorOptions = {
-            pythonExecutable: poetry,
-            log: this.log,
-            cancellationToken: token,
-        };
-
         // Handle uninstalls first
         if (options.uninstall && options.uninstall.length > 0) {
-            const removeCmd = new PoetryRemoveCommand(manageCommandOptions);
+            const removeCmd = new PoetryRemoveCommand({
+                pythonExecutable: poetry,
+                log: this.log,
+            });
             const packages = parsePackageSpecs(options.uninstall);
-            await removeCmd.execute({ packages });
+            await removeCmd.execute({ packages, cancellationToken: token });
         }
 
         // Handle installs
         if (options.install && options.install.length > 0) {
-            const addCmd = new PoetryAddCommand(manageCommandOptions);
+            const addCmd = new PoetryAddCommand({
+                pythonExecutable: poetry,
+                log: this.log,
+            });
             const packages = parsePackageSpecs(options.install);
-            await addCmd.execute({ packages });
+            await addCmd.execute({ packages, cancellationToken: token });
         }
     }
 
@@ -239,7 +236,6 @@ export class PoetryPackageManager implements PackageManager, Disposable {
         const showCmd = new PoetryShowCommand({
             pythonExecutable: poetry,
             log: this.log,
-            cancellationToken: undefined,
         });
         const data = await showCmd.execute();
         return (data ?? []).map((pkg) => this.api.createPackageItem(pkg, environment, this));
@@ -254,7 +250,6 @@ export class PoetryPackageManager implements PackageManager, Disposable {
             const showTopLevelCmd = new PoetryShowTopLevelCommand({
                 pythonExecutable: poetry,
                 log: this.log,
-                cancellationToken: undefined,
             });
             const names = await showTopLevelCmd.execute();
             return names ? new Set(names.map(normalizePackageName)) : undefined;

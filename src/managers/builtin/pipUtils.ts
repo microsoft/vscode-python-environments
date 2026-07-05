@@ -281,11 +281,7 @@ export async function getWorkspacePackagesToInstall(
         if (pythonExecutable) {
             const useUv = await shouldUseUv(log, environment.environmentPath.fsPath);
             const ListCmd = useUv ? UvListCommand : PipListCommand;
-            const listCmd = new ListCmd({
-                pythonExecutable,
-                log,
-                cancellationToken: undefined,
-            });
+            const listCmd = new ListCmd({ pythonExecutable, log });
             const data = await withProgress(
                 {
                     location: ProgressLocation.Notification,

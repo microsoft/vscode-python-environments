@@ -1456,7 +1456,11 @@ export namespace PythonEnvironments {
  * @see {@link AvailableVersionsCommand}
  * @see {@link ListDirectNamesCommand}
  */
-export type { CommandConstructorOptions, PackageManagerCommand } from './managers/base/commands/packageManagerCommand';
+export type {
+    BaseExecuteArgs,
+    CommandConstructorOptions,
+    PackageManagerCommand,
+} from './managers/base/commands/packageManagerCommand';
 
 /**
  * Abstract base class for install command implementations.

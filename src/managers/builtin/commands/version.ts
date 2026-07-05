@@ -1,4 +1,4 @@
-import { CommandConstructorOptions, VersionCommand } from '../../base/commands/index';
+import { CommandConstructorOptions, VersionCommand, type BaseExecuteArgs } from '../../base/commands/index';
 import { runPython } from '../helpers';
 
 /**
@@ -18,7 +18,7 @@ export class PipVersionCommand extends VersionCommand {
         return ['-m', 'pip', '--version'];
     }
 
-    async execute(): Promise<string> {
+    async execute(executeArgs?: BaseExecuteArgs): Promise<string> {
         let versionString: string = '';
 
         const parser = (output: string): void => {
@@ -34,7 +34,7 @@ export class PipVersionCommand extends VersionCommand {
             args,
             undefined,
             this.log,
-            this.cancellationToken,
+            executeArgs?.cancellationToken,
             this.timeout,
         );
 
@@ -61,7 +61,7 @@ export class UvVersionCommand extends VersionCommand {
         return ['--version'];
     }
 
-    async execute(): Promise<string> {
+    async execute(executeArgs?: BaseExecuteArgs): Promise<string> {
         let versionString: string = '';
 
         const parser = (output: string): void => {
@@ -77,7 +77,7 @@ export class UvVersionCommand extends VersionCommand {
             args,
             undefined,
             this.log,
-            this.cancellationToken,
+            executeArgs?.cancellationToken,
             this.timeout,
         );
 

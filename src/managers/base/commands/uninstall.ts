@@ -1,9 +1,9 @@
-import { CommandConstructorOptions, PackageManagerCommand } from './packageManagerCommand';
+import { BaseExecuteArgs, CommandConstructorOptions, PackageManagerCommand } from './packageManagerCommand';
 
 /**
  * Arguments for uninstall command execution (change per execution).
  */
-export interface UninstallExecuteArgs {
+export interface UninstallExecuteArgs extends BaseExecuteArgs {
     packages: { packageName: string; version?: string }[];
 }
 

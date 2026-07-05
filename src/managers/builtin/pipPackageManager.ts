@@ -100,7 +100,6 @@ export class PipPackageManager implements PackageManager, Disposable {
                     const manageCommandOptions: CommandConstructorOptions = {
                         pythonExecutable,
                         log: this.log,
-                        cancellationToken: token,
                     };
 
                     // Execute uninstall if needed
@@ -108,7 +107,7 @@ export class PipPackageManager implements PackageManager, Disposable {
                         const UninstallCommand = useUv ? UvUninstallCommand : PipUninstallCommand;
                         const uninstallCmd = new UninstallCommand(manageCommandOptions);
                         const packages = parsePackageSpecs(toUninstall);
-                        await uninstallCmd.execute({ packages });
+                        await uninstallCmd.execute({ packages, cancellationToken: token });
                     }
 
                     // Execute install if needed
@@ -116,7 +115,7 @@ export class PipPackageManager implements PackageManager, Disposable {
                         const InstallCommand = useUv ? UvInstallCommand : PipInstallCommand;
                         const installCmd = new InstallCommand(manageCommandOptions);
                         const packages = parsePackageSpecs(toInstall);
-                        await installCmd.execute({ packages, upgrade: options.upgrade });
+                        await installCmd.execute({ packages, upgrade: options.upgrade, cancellationToken: token });
                     }
 
                     await updatePackagesAndNotify(
@@ -175,7 +174,6 @@ export class PipPackageManager implements PackageManager, Disposable {
             const listCmd = new ListCmd({
                 pythonExecutable,
                 log: this.log,
-                cancellationToken: undefined,
             });
             const data = await listCmd.execute();
             const packages = (data ?? []).map((pkg) => this.api.createPackageItem(pkg, environment, this));
@@ -197,7 +195,6 @@ export class PipPackageManager implements PackageManager, Disposable {
             const versionCmd = new VersionCmd({
                 pythonExecutable,
                 log: this.log,
-                cancellationToken: undefined,
             });
             const versionString = await versionCmd.execute();
             return versionString ? (parse(versionString) ?? undefined) : undefined;
@@ -226,7 +223,6 @@ export class PipPackageManager implements PackageManager, Disposable {
             const availableVersionsCmd = new AvailableVersionsCmd({
                 pythonExecutable,
                 log: this.log,
-                cancellationToken: undefined,
             });
 
             // For pip < 21.2.0, check version first
@@ -270,7 +266,6 @@ export class PipPackageManager implements PackageManager, Disposable {
         const listDirectNamesCmd = new ListDirectNamesCmd({
             pythonExecutable,
             log: this.log,
-            cancellationToken: undefined,
         });
         const data = await listDirectNamesCmd.execute();
         return data ? new Set(data.map(normalizePackageName)) : undefined;

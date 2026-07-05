@@ -83,21 +83,20 @@ export class CondaPackageManager implements PackageManager, Disposable {
                     const manageCommandOptions: CommandConstructorOptions = {
                         pythonExecutable: 'conda',
                         log: this.log,
-                        cancellationToken: token,
                     };
 
                     // Execute uninstall if needed
                     if (toUninstall.length > 0) {
                         const uninstallCmd = new CondaUninstallCommand(manageCommandOptions);
                         const packages = parsePackageSpecs(toUninstall);
-                        await uninstallCmd.execute({ packages });
+                        await uninstallCmd.execute({ packages, cancellationToken: token });
                     }
 
                     // Execute install if needed
                     if (toInstall.length > 0) {
                         const installCmd = new CondaInstallCommand(manageCommandOptions);
                         const packages = parsePackageSpecs(toInstall);
-                        await installCmd.execute({ packages, upgrade: options.upgrade });
+                        await installCmd.execute({ packages, upgrade: options.upgrade, cancellationToken: token });
                     }
 
                     await updatePackagesAndNotify(
@@ -146,9 +145,8 @@ export class CondaPackageManager implements PackageManager, Disposable {
             const listCmd = new CondaListCommand({
                 pythonExecutable: 'conda',
                 log: this.log,
-                cancellationToken: undefined,
             });
-            const data = await listCmd.execute(environment.environmentPath.fsPath);
+            const data = await listCmd.execute({ environmentPath: environment.environmentPath.fsPath } as any);
             const packages = (data ?? []).map((pkg) => this.api.createPackageItem(pkg, environment, this));
             this.packages.set(environment.envId.id, packages);
             return packages;
@@ -166,7 +164,6 @@ export class CondaPackageManager implements PackageManager, Disposable {
             const versionCmd = new CondaVersionCommand({
                 pythonExecutable: 'conda',
                 log: this.log,
-                cancellationToken: undefined,
             });
             const versionString = await versionCmd.execute();
             return versionString ? (parse(versionString) ?? undefined) : undefined;
@@ -183,7 +180,6 @@ export class CondaPackageManager implements PackageManager, Disposable {
             const availableVersionsCmd = new CondaAvailableVersionsCommand({
                 pythonExecutable: 'conda',
                 log: this.log,
-                cancellationToken: undefined,
             });
             const versionStrings = await availableVersionsCmd.execute({ packageName, pythonVersion: '' });
             return versionStrings.map((v) => parse(v)).filter((parsed) => parsed !== undefined) as Pep440Version[];

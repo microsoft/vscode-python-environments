@@ -1,4 +1,4 @@
-import { CommandConstructorOptions, PackageManagerCommand } from './packageManagerCommand';
+import { BaseExecuteArgs, CommandConstructorOptions, PackageManagerCommand } from './packageManagerCommand';
 
 /**
  * Template class for version commands.
@@ -9,5 +9,5 @@ export abstract class VersionCommand extends PackageManagerCommand {
         super({ ...options, configSection: 'versionCommandArgs' });
     }
 
-    abstract execute(): Promise<string>;
+    abstract execute(executeArgs?: BaseExecuteArgs): Promise<string>;
 }

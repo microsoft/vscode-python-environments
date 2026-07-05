@@ -1,5 +1,5 @@
 import { PackageInfo } from '../../../api';
-import { CommandConstructorOptions, ListCommand } from '../../base/commands/index';
+import { CommandConstructorOptions, ListCommand, type BaseExecuteArgs } from '../../base/commands/index';
 import { runPoetry } from '../poetryPackageManager';
 
 /**
@@ -20,9 +20,9 @@ export class PoetryShowCommand extends ListCommand {
         return ['show', '--no-ansi'];
     }
 
-    async execute(): Promise<PackageInfo[]> {
+    async execute(executeArgs?: BaseExecuteArgs): Promise<PackageInfo[]> {
         const args = this.buildCommand();
-        const output = await runPoetry(args, undefined, this.log, this.cancellationToken);
+        const output = await runPoetry(args, undefined, this.log, executeArgs?.cancellationToken);
 
         const packages: PackageInfo[] = [];
 
