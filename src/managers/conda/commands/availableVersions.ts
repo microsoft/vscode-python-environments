@@ -1,4 +1,8 @@
-import { AvailableVersionsCommand, CommandConstructorOptions, type AvailableVersionsEphemeralArgs } from '../../base/commands/index';
+import {
+    AvailableVersionsCommand,
+    CommandConstructorOptions,
+    type AvailableVersionsEphemeralArgs,
+} from '../../base/commands/index';
 import { runCondaExecutable } from '../condaUtils';
 
 /**
