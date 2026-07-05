@@ -186,9 +186,7 @@ export class CondaPackageManager implements PackageManager, Disposable {
                 cancellationToken: undefined,
             });
             const versionStrings = await availableVersionsCmd.execute(packageName, '');
-            return versionStrings
-                .map((v) => parse(v))
-                .filter((parsed) => parsed !== undefined) as Pep440Version[];
+            return versionStrings.map((v) => parse(v)).filter((parsed) => parsed !== undefined) as Pep440Version[];
         } catch {
             return undefined;
         }
