@@ -583,6 +583,8 @@ export interface IEventNamePropertyMapping {
         "pet.refresh": {
             "result": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "owner": "eleanorjboyd" },
             "envCount": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "isMeasurement": true, "owner": "eleanorjboyd" },
+            "condaEnvCount": { "classification": "SystemMetaData", "purpose": "PerformanceAndHealth", "isMeasurement": true, "owner": "eleanorjboyd" },
+            "managerCount": { "classification": "SystemMetaData", "purpose": "PerformanceAndHealth", "isMeasurement": true, "owner": "eleanorjboyd" },
             "unresolvedCount": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "isMeasurement": true, "owner": "eleanorjboyd" },
             "workspaceDirCount": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "isMeasurement": true, "owner": "eleanorjboyd" },
             "searchPathCount": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "isMeasurement": true, "owner": "eleanorjboyd" },
@@ -602,6 +604,10 @@ export interface IEventNamePropertyMapping {
     [EventNames.PET_REFRESH]: {
         result: 'success' | 'timeout' | 'error';
         envCount?: number;
+        /** Number of discovered environments whose kind is Conda. Lets us slice refresh duration by conda footprint. */
+        condaEnvCount?: number;
+        /** Number of discovered environment managers (conda/pyenv/poetry/etc.). */
+        managerCount?: number;
         unresolvedCount?: number;
         workspaceDirCount?: number;
         searchPathCount?: number;
