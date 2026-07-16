@@ -92,7 +92,7 @@ function isUsableBaseInterpreter(env: PythonEnvironment, requiresPython: string 
 }
 
 function parseLeadingMajor(version: string): number | undefined {
-    const m = version.match(/^\s*v?(\d+)/i);
+    const m = version.match(/^\s*(\d+)/);
     if (!m) {
         return undefined;
     }

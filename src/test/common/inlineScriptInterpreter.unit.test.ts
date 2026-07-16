@@ -98,13 +98,6 @@ suite('inlineScriptInterpreter', () => {
             assert.strictEqual(pickCompatibleInterpreter(envs, undefined), undefined);
         });
 
-        test('tolerates a leading "v" prefix when ranking versions', () => {
-            const envs = [makeEnv('v3.12.0', 'v3'), makeEnv('3.11.0')];
-            const picked = pickCompatibleInterpreter(envs, undefined);
-            assert.ok(picked);
-            assert.strictEqual(picked.version, 'v3.12.0');
-        });
-
         test('breaks version ties by input order (stable sort)', () => {
             const a = makeEnv('3.12.4', 'first-3.12.4');
             const b = makeEnv('3.12.4', 'second-3.12.4');
