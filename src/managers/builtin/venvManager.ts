@@ -1,7 +1,6 @@
 import * as fs from 'fs/promises';
 import * as path from 'path';
 import {
-    commands,
     EventEmitter,
     l10n,
     LogOutputChannel,
@@ -28,6 +27,7 @@ import {
     ResolveEnvironmentContext,
     SetEnvironmentScope,
 } from '../../api';
+import { executeCommand } from '../../common/command.api';
 import { PYTHON_EXTENSION_ID } from '../../common/constants';
 import { VenvManagerStrings } from '../../common/localize';
 import { traceError, traceWarn } from '../../common/logging';
@@ -238,7 +238,7 @@ export class VenvManager implements EnvironmentManager {
                 // Open the parent folder of the venv in the current window immediately after creation
                 const envParent = environment.sysPrefix;
                 try {
-                    await commands.executeCommand('revealInExplorer', Uri.file(envParent));
+                    await executeCommand('revealInExplorer', Uri.file(envParent));
                 } catch (error) {
                     showErrorMessage(
                         l10n.t(

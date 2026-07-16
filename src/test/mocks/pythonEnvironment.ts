@@ -11,8 +11,10 @@ import { PythonEnvironmentImpl } from '../../internal.api';
 export interface MockPythonEnvironmentOptions {
     /** Environment name, e.g. `myenv`. Defaults to `test-env`. */
     name?: string;
-    /** Filesystem path for `environmentPath`, `displayPath`, and `sysPrefix`. */
+    /** Filesystem path for `environmentPath` and `displayPath`. */
     envPath: string;
+    /** Filesystem path for `sysPrefix`. Defaults to `envPath`. */
+    sysPrefix?: string;
     /** Version string. Defaults to `3.12.0`. */
     version?: string;
     /** Manager id. Defaults to `ms-python.python:conda`. */
@@ -38,6 +40,7 @@ export function createMockPythonEnvironment(options: MockPythonEnvironmentOption
     const {
         name = 'test-env',
         envPath,
+        sysPrefix = envPath,
         version = '3.12.0',
         managerId = 'ms-python.python:conda',
         id = `${name}-test`,
@@ -55,7 +58,7 @@ export function createMockPythonEnvironment(options: MockPythonEnvironmentOption
             version,
             description,
             environmentPath: Uri.file(envPath),
-            sysPrefix: envPath,
+            sysPrefix,
             execInfo: {
                 run: { executable: 'python' },
                 ...(hasActivation && {
