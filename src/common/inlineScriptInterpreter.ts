@@ -7,8 +7,9 @@ import { traceWarn } from './logging';
 
 /**
  * Pick the newest installed Python that can serve as a base interpreter for
- * a PEP 723 script. Returns `undefined` if no candidate is usable (the
- * caller is then expected to prompt for a uv install or surface an error).
+ * a PEP 723 script. Returns `undefined` if no candidate is usable. This
+ * result is not user consent to install anything: the caller must use the
+ * consent-gated uv install prompt or surface an actionable error.
  *
  * **Caller contract**: `installed` must contain only BASE interpreters
  * (system Pythons, pyenv-installed, uv-installed, conda `base`) — never
