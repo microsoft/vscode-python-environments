@@ -33,6 +33,7 @@ import {
 } from '../api';
 import { traceError, traceInfo } from '../common/logging';
 import { pickEnvironmentManager } from '../common/pickers/managers';
+import { timeout } from '../common/utils/asyncUtils';
 import { createDeferred } from '../common/utils/deferred';
 import { checkUri } from '../common/utils/pathUtils';
 import { handlePythonPath } from '../common/utils/pythonPath';
@@ -44,7 +45,6 @@ import {
     PythonPackageImpl,
     PythonProjectManager,
 } from '../internal.api';
-import { timeout } from '../common/utils/asyncUtils';
 import { waitForAllEnvManagers, waitForEnvManager, waitForEnvManagerId } from './common/managerReady';
 import { EnvVarManager } from './execution/envVariableManager';
 import { runAsTask } from './execution/runAsTask';
@@ -58,12 +58,15 @@ import { TerminalManager } from './terminal/terminalManager';
 const GET_ENVIRONMENT_TIMEOUT_MS = 1000;
 const GET_ENVIRONMENT_TIMED_OUT = Symbol('getEnvironmentTimedOut');
 
-class PythonEnvironmentApiImpl implements PythonEnvironmentApi {
+export class PythonEnvironmentApiImpl implements PythonEnvironmentApi {
     private readonly _onDidChangeEnvironments = new EventEmitter<DidChangeEnvironmentsEventArgs>();
     private readonly _onDidChangeEnvironment = new EventEmitter<DidChangeEnvironmentEventArgs>();
     private readonly _onDidChangePythonProjects = new EventEmitter<DidChangePythonProjectsEventArgs>();
     private readonly _onDidChangePackages = new EventEmitter<DidChangePackagesEventArgs>();
     private readonly _onDidChangeEnvironmentVariables = new EventEmitter<DidChangeEnvironmentVariablesEventArgs>();
+    // Tracks the last-known project set so we can compute an added/removed delta
+    // whenever the underlying project manager reports a change (fix for #1599).
+    private previousProjects: readonly PythonProject[] = [];
 
     constructor(
         private readonly envManagers: EnvironmentManagers,
@@ -73,6 +76,8 @@ class PythonEnvironmentApiImpl implements PythonEnvironmentApi {
         private readonly envVarManager: EnvVarManager,
         private readonly disposables: Disposable[] = [],
     ) {
+        this.previousProjects = this.projectManager.getProjects();
+
         this.disposables.push(
             this._onDidChangeEnvironment,
             this._onDidChangeEnvironments,
@@ -87,6 +92,22 @@ class PythonEnvironmentApiImpl implements PythonEnvironmentApi {
                 );
             }),
             this.envVarManager.onDidChangeEnvironmentVariables((e) => this._onDidChangeEnvironmentVariables.fire(e)),
+            this.projectManager.onDidChangeProjects(() => {
+                const current = this.projectManager.getProjects();
+                const added = current.filter(
+                    (c) => !this.previousProjects.some((p) => p.uri.toString() === c.uri.toString()),
+                );
+                const removed = this.previousProjects.filter(
+                    (p) => !current.some((c) => c.uri.toString() === p.uri.toString()),
+                );
+                this.previousProjects = current;
+                if (added.length > 0 || removed.length > 0) {
+                    traceInfo(
+                        `Python API: Projects changed. Added: ${added.length}, Removed: ${removed.length}`,
+                    );
+                    this._onDidChangePythonProjects.fire({ added, removed });
+                }
+            }),
         );
     }
 
