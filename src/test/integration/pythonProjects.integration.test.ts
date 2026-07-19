@@ -373,4 +373,54 @@ suite('Integration: Python Projects', function () {
         assert.ok(fileEnv, 'File should get environment from project');
         assert.strictEqual(fileEnv.envId.id, env.envId.id, 'File should use project environment');
     });
+
+    /**
+     * Test: onDidChangePythonProjects fires when a project is added or removed
+     */
+    test('onDidChangePythonProjects fires when a project is added or removed', async function () {
+        const testUri = vscode.Uri.file('/tmp/test-project-' + Math.random().toString(36).substring(2));
+        const testProject = {
+            name: 'Test Project',
+            uri: testUri,
+        };
+
+        const addedPromise = new Promise<void>((resolve, reject) => {
+            const timeout = setTimeout(() => {
+                sub.dispose();
+                reject(new Error('onDidChangePythonProjects did not fire for added project within 5s'));
+            }, 5000);
+
+            const sub = api.onDidChangePythonProjects((e) => {
+                if (e.added.some((p) => p.uri.toString() === testUri.toString())) {
+                    clearTimeout(timeout);
+                    sub.dispose();
+                    resolve();
+                }
+            });
+        });
+
+        // Add project
+        api.addPythonProject(testProject);
+        await addedPromise;
+
+        const removedPromise = new Promise<void>((resolve, reject) => {
+            const timeout = setTimeout(() => {
+                sub.dispose();
+                reject(new Error('onDidChangePythonProjects did not fire for removed project within 5s'));
+            }, 5000);
+
+            const sub = api.onDidChangePythonProjects((e) => {
+                if (e.removed.some((p) => p.uri.toString() === testUri.toString())) {
+                    clearTimeout(timeout);
+                    sub.dispose();
+                    resolve();
+                }
+            });
+        });
+
+        // Remove project
+        api.removePythonProject(testProject);
+        await removedPromise;
+    });
 });
+

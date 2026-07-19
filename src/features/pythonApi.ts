@@ -58,12 +58,13 @@ import { TerminalManager } from './terminal/terminalManager';
 const GET_ENVIRONMENT_TIMEOUT_MS = 1000;
 const GET_ENVIRONMENT_TIMED_OUT = Symbol('getEnvironmentTimedOut');
 
-class PythonEnvironmentApiImpl implements PythonEnvironmentApi {
+export class PythonEnvironmentApiImpl implements PythonEnvironmentApi {
     private readonly _onDidChangeEnvironments = new EventEmitter<DidChangeEnvironmentsEventArgs>();
     private readonly _onDidChangeEnvironment = new EventEmitter<DidChangeEnvironmentEventArgs>();
     private readonly _onDidChangePythonProjects = new EventEmitter<DidChangePythonProjectsEventArgs>();
     private readonly _onDidChangePackages = new EventEmitter<DidChangePackagesEventArgs>();
     private readonly _onDidChangeEnvironmentVariables = new EventEmitter<DidChangeEnvironmentVariablesEventArgs>();
+    private _previousProjects: PythonProject[] = [];
 
     constructor(
         private readonly envManagers: EnvironmentManagers,
@@ -73,6 +74,7 @@ class PythonEnvironmentApiImpl implements PythonEnvironmentApi {
         private readonly envVarManager: EnvVarManager,
         private readonly disposables: Disposable[] = [],
     ) {
+        this._previousProjects = [...this.projectManager.getProjects()];
         this.disposables.push(
             this._onDidChangeEnvironment,
             this._onDidChangeEnvironments,
@@ -87,6 +89,19 @@ class PythonEnvironmentApiImpl implements PythonEnvironmentApi {
                 );
             }),
             this.envVarManager.onDidChangeEnvironmentVariables((e) => this._onDidChangeEnvironmentVariables.fire(e)),
+            this.projectManager.onDidChangeProjects((currentProjects) => {
+                const current = currentProjects ?? [];
+                const added = current.filter(
+                    (p) => !this._previousProjects.some((prev) => prev.uri.toString() === p.uri.toString()),
+                );
+                const removed = this._previousProjects.filter(
+                    (prev) => !current.some((p) => p.uri.toString() === prev.uri.toString()),
+                );
+                this._previousProjects = [...current];
+                if (added.length > 0 || removed.length > 0) {
+                    this._onDidChangePythonProjects.fire({ added, removed });
+                }
+            }),
         );
     }
 
