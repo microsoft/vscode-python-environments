@@ -2,6 +2,7 @@
 // Licensed under the MIT License.
 
 import { createHash } from 'crypto';
+import { normalizePackageName } from '../managers/builtin/utils';
 import { normalizePath } from './utils/pathUtils';
 
 /** Length, in hex chars, of the cache key returned by {@link computeCacheKey}. 16 = 64 bits of SHA-256; fixed-length and filesystem-safe. */
@@ -20,16 +21,12 @@ export interface CacheKeyInputs {
     readonly interpreterPath: string;
 }
 
-function normalizePep503Name(name: string): string {
-    return name.replace(/[-_.]+/g, '-').toLowerCase();
-}
-
 function normalizeExtras(inner: string): string {
     const items = inner
         .split(',')
         .map((e) => e.trim())
         .filter((e) => e.length > 0)
-        .map((e) => normalizePep503Name(e));
+        .map((e) => normalizePackageName(e));
     const deduped = Array.from(new Set(items)).sort();
     return deduped.length > 0 ? `[${deduped.join(',')}]` : '';
 }
@@ -63,7 +60,7 @@ export function normalizeDependency(dep: string): string {
         // hash stays deterministic without pretending to parse it.
         return trimmed;
     }
-    const name = normalizePep503Name(nameMatch[0]);
+    const name = normalizePackageName(nameMatch[0]);
     let rest = trimmed.slice(nameMatch[0].length);
 
     let extras = '';
