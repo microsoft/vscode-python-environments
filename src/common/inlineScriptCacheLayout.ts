@@ -44,6 +44,15 @@ export function getMetaJsonPath(envDir: Uri): Uri {
 
 const MAX_META_JSON_BYTES = 1024 * 1024;
 
+/**
+ * Read and validate the extension-owned `.meta.json` sidecar in a cached
+ * environment directory.
+ *
+ * This function is intentionally non-destructive. Missing, malformed, or
+ * unreadable sidecars return `undefined` so callers can treat the entry as a
+ * cache miss. Deleting invalid entries belongs to the dedicated, guarded cache
+ * cleanup path because read and permission failures may be transient.
+ */
 export async function readMetaJson(envDir: Uri): Promise<InlineScriptEnvMeta | undefined> {
     const metaPath = getMetaJsonPath(envDir).fsPath;
 
@@ -140,7 +149,7 @@ export function selectStaleEntries(entries: ReadonlyArray<CacheEntrySummary>, no
 /**
  * Verify that a cached env's base interpreter still exists on disk.
  */
-export async function verifyEnvUsable(envDir: Uri): Promise<boolean> {
+export async function verifyBaseInterpreterExists(envDir: Uri): Promise<boolean> {
     if (isWindows()) {
         return verifyWindowsBaseInterpreter(envDir);
     }

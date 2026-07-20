@@ -18,7 +18,7 @@ import {
     getScriptEnvDir,
     readMetaJson,
     selectStaleEntries,
-    verifyEnvUsable,
+    verifyBaseInterpreterExists,
     writeMetaJson,
 } from '../../common/inlineScriptCacheLayout';
 import * as logging from '../../common/logging';
@@ -180,6 +180,11 @@ suite('inlineScriptCacheLayout', () => {
             const result = await readMetaJson(envDir);
             assert.strictEqual(result, undefined);
             assert.ok(traceWarnStub.called);
+            assert.strictEqual(
+                await fs.pathExists(getMetaJsonPath(envDir).fsPath),
+                true,
+                'reading malformed metadata must not delete it',
+            );
         });
 
         test('returns undefined for an unknown schemaVersion', async () => {
@@ -348,7 +353,7 @@ suite('inlineScriptCacheLayout', () => {
         });
     });
 
-    suite('verifyEnvUsable', () => {
+    suite('verifyBaseInterpreterExists', () => {
         let tmpDir: string;
         let envDir: Uri;
 
@@ -371,7 +376,7 @@ suite('inlineScriptCacheLayout', () => {
                 const binDir = path.join(envDir.fsPath, 'bin');
                 await fs.ensureDir(binDir);
                 await fs.writeFile(path.join(binDir, 'python'), '');
-                assert.strictEqual(await verifyEnvUsable(envDir), true);
+                assert.strictEqual(await verifyBaseInterpreterExists(envDir), true);
                 assert.strictEqual(traceWarnStub.called, false, 'no warn on success');
             });
 
@@ -383,7 +388,7 @@ suite('inlineScriptCacheLayout', () => {
                     const target = path.join(tmpDir, 'real-python');
                     await fs.writeFile(target, '');
                     await fs.symlink(target, path.join(binDir, 'python'));
-                    assert.strictEqual(await verifyEnvUsable(envDir), true);
+                    assert.strictEqual(await verifyBaseInterpreterExists(envDir), true);
                 });
 
                 test('returns false for a symlink whose target was removed (base uninstalled)', async () => {
@@ -393,7 +398,7 @@ suite('inlineScriptCacheLayout', () => {
                     await fs.writeFile(target, '');
                     await fs.symlink(target, path.join(binDir, 'python'));
                     await fs.remove(target);
-                    assert.strictEqual(await verifyEnvUsable(envDir), false);
+                    assert.strictEqual(await verifyBaseInterpreterExists(envDir), false);
                     assert.ok(
                         traceWarnStub.getCalls().some((c) => String(c.args[0]).includes('missing')),
                         'expected a missing-launcher warn',
@@ -402,7 +407,7 @@ suite('inlineScriptCacheLayout', () => {
             });
 
             test('returns false when bin/python does not exist', async () => {
-                assert.strictEqual(await verifyEnvUsable(envDir), false);
+                assert.strictEqual(await verifyBaseInterpreterExists(envDir), false);
                 assert.ok(
                     traceWarnStub.getCalls().some((c) => String(c.args[0]).includes('missing')),
                     'expected an ENOENT-shaped warn',
@@ -412,7 +417,7 @@ suite('inlineScriptCacheLayout', () => {
             test('returns false when bin/python is a directory', async () => {
                 const launcher = path.join(envDir.fsPath, 'bin', 'python');
                 await fs.ensureDir(launcher);
-                assert.strictEqual(await verifyEnvUsable(envDir), false);
+                assert.strictEqual(await verifyBaseInterpreterExists(envDir), false);
                 assert.ok(
                     traceWarnStub.getCalls().some((c) => String(c.args[0]).includes('not a regular file')),
                 );
@@ -433,7 +438,7 @@ suite('inlineScriptCacheLayout', () => {
                 await fs.ensureDir(homeDir);
                 await fs.writeFile(path.join(homeDir, 'python.exe'), '');
                 await writePyvenvCfg(`home = ${homeDir}\ninclude-system-site-packages = false\nversion = 3.13.0\n`);
-                assert.strictEqual(await verifyEnvUsable(envDir), true);
+                assert.strictEqual(await verifyBaseInterpreterExists(envDir), true);
                 assert.strictEqual(traceWarnStub.called, false, 'no warn on success');
             });
 
@@ -441,7 +446,7 @@ suite('inlineScriptCacheLayout', () => {
                 const homeDir = path.join(tmpDir, 'Python313');
                 await fs.ensureDir(homeDir);
                 await writePyvenvCfg(`home = ${homeDir}\n`);
-                assert.strictEqual(await verifyEnvUsable(envDir), false);
+                assert.strictEqual(await verifyBaseInterpreterExists(envDir), false);
                 assert.ok(
                     traceWarnStub.getCalls().some((c) => String(c.args[0]).includes('missing')),
                     'expected a missing-launcher warn',
@@ -449,7 +454,7 @@ suite('inlineScriptCacheLayout', () => {
             });
 
             test('returns false when pyvenv.cfg is missing entirely', async () => {
-                assert.strictEqual(await verifyEnvUsable(envDir), false);
+                assert.strictEqual(await verifyBaseInterpreterExists(envDir), false);
                 assert.ok(
                     traceWarnStub
                         .getCalls()
@@ -460,7 +465,7 @@ suite('inlineScriptCacheLayout', () => {
 
             test('returns false when pyvenv.cfg has no `home =` line', async () => {
                 await writePyvenvCfg('include-system-site-packages = false\nversion = 3.13.0\n');
-                assert.strictEqual(await verifyEnvUsable(envDir), false);
+                assert.strictEqual(await verifyBaseInterpreterExists(envDir), false);
                 assert.ok(
                     traceWarnStub.getCalls().some((c) => String(c.args[0]).includes("no 'home =' line")),
                 );
@@ -468,7 +473,7 @@ suite('inlineScriptCacheLayout', () => {
 
             test('returns false when pyvenv.cfg has an empty home value', async () => {
                 await writePyvenvCfg('home =\n');
-                assert.strictEqual(await verifyEnvUsable(envDir), false);
+                assert.strictEqual(await verifyBaseInterpreterExists(envDir), false);
                 assert.ok(
                     traceWarnStub.getCalls().some((c) => String(c.args[0]).includes("no 'home =' line")),
                 );
@@ -479,7 +484,7 @@ suite('inlineScriptCacheLayout', () => {
                 await fs.ensureDir(homeDir);
                 await fs.writeFile(path.join(homeDir, 'python.exe'), '');
                 await writePyvenvCfg(`  home   =   ${homeDir}   \n`);
-                assert.strictEqual(await verifyEnvUsable(envDir), true);
+                assert.strictEqual(await verifyBaseInterpreterExists(envDir), true);
             });
 
             test('tolerates CRLF line endings', async () => {
@@ -487,7 +492,7 @@ suite('inlineScriptCacheLayout', () => {
                 await fs.ensureDir(homeDir);
                 await fs.writeFile(path.join(homeDir, 'python.exe'), '');
                 await writePyvenvCfg(`home = ${homeDir}\r\nversion = 3.13.0\r\n`);
-                assert.strictEqual(await verifyEnvUsable(envDir), true);
+                assert.strictEqual(await verifyBaseInterpreterExists(envDir), true);
             });
         });
     });
