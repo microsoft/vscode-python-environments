@@ -4,6 +4,7 @@
 import { PythonEnvironment } from '../api';
 import { matchesPythonVersion } from './inlineScriptMetadata';
 import { traceWarn } from './logging';
+import { compareReleaseSegments, parseReleaseSegments } from './utils/pep440Release';
 
 /**
  * Pick the newest installed Python that can serve as a base interpreter for
@@ -98,29 +99,6 @@ function parseLeadingMajor(version: string): number | undefined {
     }
     const n = Number.parseInt(m[1], 10);
     return Number.isNaN(n) ? undefined : n;
-}
-
-function parseReleaseSegments(version: string): number[] | undefined {
-    const m = version.match(/^v?(\d+(?:\.\d+)*)/i);
-    if (!m) {
-        return undefined;
-    }
-    return m[1].split('.').map((s) => Number.parseInt(s, 10));
-}
-
-function compareReleaseSegments(a: ReadonlyArray<number>, b: ReadonlyArray<number>): number {
-    const n = Math.max(a.length, b.length);
-    for (let i = 0; i < n; i++) {
-        const av = a[i] ?? 0;
-        const bv = b[i] ?? 0;
-        if (av < bv) {
-            return -1;
-        }
-        if (av > bv) {
-            return 1;
-        }
-    }
-    return 0;
 }
 
 function compareVersionsDescending(a: string, b: string): number {
