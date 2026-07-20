@@ -262,57 +262,28 @@ export async function runCondaExecutable(
     return await _runConda(conda, args, log, token);
 }
 
-interface CondaInfo {
-    envs_dirs: string[];
-}
-
-/**
- * Runs `conda info --envs --json` and parses the result.
- * Validates the JSON response structure at the parsing boundary.
- * @returns Validated CondaInfo object
- * @throws Error if conda command fails or returns invalid JSON structure
- */
-async function getCondaInfo(): Promise<CondaInfo> {
-    const raw = await runConda(['info', '--envs', '--json']);
-    const parsed = JSON.parse(raw);
-
-    // Validate at the JSON→TypeScript boundary
-    if (!parsed || typeof parsed !== 'object') {
-        traceWarn(`conda info returned invalid data: ${typeof parsed}`);
-        throw new Error(`conda info returned invalid data type: ${typeof parsed}`);
-    }
-
-    const envsDirs = parsed['envs_dirs'];
-    if (envsDirs === undefined || envsDirs === null) {
-        traceWarn('conda info envs_dirs is undefined/null');
-        return { envs_dirs: [] };
-    }
-    if (!Array.isArray(envsDirs)) {
-        traceWarn(`conda info envs_dirs is not an array (type: ${typeof envsDirs})`);
-        return { envs_dirs: [] };
-    }
-
-    traceVerbose(`conda info returned ${envsDirs.length} environment directories`);
-    return { envs_dirs: envsDirs };
-}
-
 let prefixes: string[] | undefined;
 export async function getPrefixes(): Promise<string[]> {
-    if (prefixes) {
+    if (prefixes?.length) {
         return prefixes;
     }
 
     const state = await getWorkspacePersistentState();
     const storedPrefixes = await state.get<string[]>(CONDA_PREFIXES_KEY);
-    if (storedPrefixes && Array.isArray(storedPrefixes)) {
+    if (Array.isArray(storedPrefixes) && storedPrefixes.length > 0) {
         prefixes = storedPrefixes;
         return prefixes;
     }
 
     try {
-        const data = await getCondaInfo();
-        prefixes = data.envs_dirs;
-        await state.set(CONDA_PREFIXES_KEY, prefixes);
+        const { envs_dirs: envsDirs } = JSON.parse(await runConda(['info', '--json']));
+        if (!Array.isArray(envsDirs)) {
+            throw new Error('conda info returned invalid envs_dirs');
+        }
+        prefixes = envsDirs;
+        if (prefixes.length > 0) {
+            await state.set(CONDA_PREFIXES_KEY, prefixes);
+        }
     } catch (error) {
         traceError('Failed to get conda environment prefixes', error);
         prefixes = [];
@@ -1041,6 +1012,18 @@ export async function createCondaEnvironment(
     return createStepBasedCondaFlow(api, log, manager, uris);
 }
 
+function getCondaCreatePrefix(output: string): string {
+    const parsed = JSON.parse(output) as {
+        prefix?: unknown;
+        actions?: { PREFIX?: unknown };
+    };
+    const prefix = parsed?.prefix ?? parsed?.actions?.PREFIX;
+    if (typeof prefix !== 'string' || prefix.trim().length === 0) {
+        throw new Error('conda create did not return an environment prefix');
+    }
+    return prefix;
+}
+
 export async function createNamedCondaEnvironment(
     api: PythonEnvironmentApi,
     log: LogOutputChannel,
@@ -1067,7 +1050,7 @@ export async function createNamedCondaEnvironment(
     }
 
     const envName: string = name;
-    const runArgs = ['create', '--yes', '--name', envName];
+    const runArgs = ['create', '--yes', '--quiet', '--json', '--name', envName];
     if (pythonVersion) {
         runArgs.push(`python=${pythonVersion}`);
     } else {
@@ -1084,15 +1067,7 @@ export async function createNamedCondaEnvironment(
                 const bin = os.platform() === 'win32' ? 'python.exe' : path.join('bin', 'python');
                 const output = await runCondaExecutable(runArgs);
                 log.info(output);
-
-                const prefixes = await getPrefixes();
-                let envPath = '';
-                for (let prefix of prefixes) {
-                    if (await fse.pathExists(path.join(prefix, envName))) {
-                        envPath = path.join(prefix, envName);
-                        break;
-                    }
-                }
+                const envPath = getCondaCreatePrefix(output);
                 const version = await getVersion(envPath);
 
                 const environment = api.createPythonEnvironmentItem(
