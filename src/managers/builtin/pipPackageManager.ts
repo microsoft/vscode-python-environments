@@ -126,7 +126,10 @@ export class PipPackageManager implements PackageManager, Disposable {
     async getPackages(environment: PythonEnvironment, options?: GetPackagesOptions): Promise<Package[] | undefined> {
         if (options?.skipCache || !this.packages.has(environment.envId.id)) {
             const data = await refreshPipPackages(environment, this.log);
-            const packages = (data ?? []).map((pkg) => this.api.createPackageItem(pkg, environment, this));
+            if (data === undefined) {
+                return undefined;
+            }
+            const packages = data.map((pkg) => this.api.createPackageItem(pkg, environment, this));
             this.packages.set(environment.envId.id, packages);
             return packages;
         }
