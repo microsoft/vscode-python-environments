@@ -24,17 +24,19 @@ export interface CommandConstructorOptions {
  * Provides common properties and minimal interface for subclasses.
  */
 export abstract class PackageManagerCommand {
+    protected static readonly configSection?: string;
+
     protected pythonExecutable: string;
     protected log?: LogOutputChannel;
     protected timeout: number = 300000;
-    protected config: WorkspaceConfiguration;
+    protected config?: WorkspaceConfiguration;
 
     constructor(options: CommandConstructorOptions) {
         this.pythonExecutable = options.pythonExecutable;
         this.log = options.log;
-        this.config = options.configSection
-            ? getConfiguration(`python-envs.packageManager.${options.configSection}`)
-            : getConfiguration('python-envs.packageManager');
+        const configSection =
+            options.configSection ?? (this.constructor as typeof PackageManagerCommand).configSection;
+        this.config = configSection ? getConfiguration(`python-envs.packageManager.${configSection}`) : undefined;
     }
 
     /**

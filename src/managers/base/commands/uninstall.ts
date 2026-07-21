@@ -1,4 +1,4 @@
-import { BaseExecuteArgs, CommandConstructorOptions, PackageManagerCommand } from './packageManagerCommand';
+import { BaseExecuteArgs, PackageManagerCommand } from './packageManagerCommand';
 
 /**
  * Arguments for uninstall command execution (change per execution).
@@ -12,9 +12,7 @@ export interface UninstallExecuteArgs extends BaseExecuteArgs {
  * Subclasses implement concrete package-manager-specific logic.
  */
 export abstract class UninstallCommand extends PackageManagerCommand {
-    constructor(options: CommandConstructorOptions) {
-        super({ ...options, configSection: 'uninstallCommandArgs' });
-    }
+    protected static readonly configSection = 'uninstallCommandArgs';
 
     protected abstract buildCommand(executeArgs: UninstallExecuteArgs): string[];
 

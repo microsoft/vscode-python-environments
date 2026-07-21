@@ -1,4 +1,4 @@
-import { BaseExecuteArgs, CommandConstructorOptions, PackageManagerCommand } from './packageManagerCommand';
+import { BaseExecuteArgs, PackageManagerCommand } from './packageManagerCommand';
 
 /**
  * Arguments for available versions command execution (change per execution).
@@ -14,9 +14,7 @@ export interface AvailableVersionsExecuteArgs extends BaseExecuteArgs {
  * Subclasses implement concrete package-manager-specific logic.
  */
 export abstract class AvailableVersionsCommand extends PackageManagerCommand {
-    constructor(options: CommandConstructorOptions) {
-        super({ ...options, configSection: 'availableVersionsCommandArgs' });
-    }
+    protected static readonly configSection = 'availableVersionsCommandArgs';
 
     protected abstract buildCommand(executeArgs: AvailableVersionsExecuteArgs): string[];
 
