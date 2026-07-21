@@ -23,11 +23,32 @@ export const META_JSON_FILENAME = '.meta.json';
  * Schema version embedded in every {@link InlineScriptEnvMeta}.
  */
 export const META_SCHEMA_VERSION = 1 as const;
+
+const MAX_META_JSON_BYTES = 1024 * 1024;
+
+/**
+ * Validated on-disk schema for a cached inline-script environment's
+ * `.meta.json` sidecar.
+ */
 export interface InlineScriptEnvMeta {
+    /** Version of the serialized metadata schema. */
     readonly schemaVersion: typeof META_SCHEMA_VERSION;
+    /** Filesystem path of the script recorded for lifecycle bookkeeping. */
     readonly scriptFsPath: string;
+    /** Last successful use as a canonical UTC string produced by `Date.toISOString()`. */
     readonly lastUsedAt: string;
+    /** The script's `requires-python` declaration, when present. */
     readonly requiresPython?: string;
+}
+
+/**
+ * In-memory summary of one cached entry, populated by the separate disk walk.
+ */
+export interface CacheEntrySummary {
+    /** Filesystem path of the cached environment directory. */
+    readonly envDirPath: string;
+    /** Parsed last-use time, or `undefined` when no valid timestamp is available. */
+    readonly lastUsedAt: Date | undefined;
 }
 
 export function getScriptEnvCacheRoot(globalStorageUri: Uri): Uri {
@@ -41,8 +62,6 @@ export function getScriptEnvDir(globalStorageUri: Uri, cacheKey: string): Uri {
 export function getMetaJsonPath(envDir: Uri): Uri {
     return Uri.joinPath(envDir, META_JSON_FILENAME);
 }
-
-const MAX_META_JSON_BYTES = 1024 * 1024;
 
 /**
  * Read and validate the extension-owned `.meta.json` sidecar in a cached
@@ -120,15 +139,6 @@ export async function writeMetaJson(envDir: Uri, meta: InlineScriptEnvMeta): Pro
 }
 
 /**
- * Snapshot of one cached entry, populated by the (separate, I/O-doing) disk
- * walk.
- */
-export interface CacheEntrySummary {
-    readonly envDirPath: string;
-    readonly lastUsedAt: Date | undefined;
-}
-
-/**
  * Pure selector: returns the env-dir paths whose age exceeds `ttlMs`.
  */
 export function selectStaleEntries(entries: ReadonlyArray<CacheEntrySummary>, now: Date, ttlMs: number): string[] {
@@ -150,15 +160,12 @@ export function selectStaleEntries(entries: ReadonlyArray<CacheEntrySummary>, no
  * Verify that a cached env's base interpreter still exists on disk.
  */
 export async function verifyBaseInterpreterExists(envDir: Uri): Promise<boolean> {
-    if (isWindows()) {
-        return verifyWindowsBaseInterpreter(envDir);
-    }
-    return verifyPosixBaseInterpreter(envDir);
+    return isWindows() ? verifyWindowsBaseInterpreter(envDir) : verifyPosixBaseInterpreter(envDir);
 }
 
 async function verifyPosixBaseInterpreter(envDir: Uri): Promise<boolean> {
     const launcherPath = Uri.joinPath(envDir, 'bin', 'python').fsPath;
-    return statRegularFile(launcherPath, 'base interpreter');
+    return isRegularFile(launcherPath, 'base interpreter');
 }
 
 async function verifyWindowsBaseInterpreter(envDir: Uri): Promise<boolean> {
@@ -181,10 +188,10 @@ async function verifyWindowsBaseInterpreter(envDir: Uri): Promise<boolean> {
         return false;
     }
     const launcherPath = path.join(home, 'python.exe');
-    return statRegularFile(launcherPath, 'base interpreter');
+    return isRegularFile(launcherPath, 'base interpreter');
 }
 
-async function statRegularFile(filePath: string, label: string): Promise<boolean> {
+async function isRegularFile(filePath: string, label: string): Promise<boolean> {
     try {
         const stat = await fsapi.stat(filePath);
         if (!stat.isFile()) {
