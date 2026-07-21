@@ -1,5 +1,5 @@
 import { CommandConstructorOptions, UninstallCommand, type UninstallExecuteArgs } from '../../base/commands/index';
-import { runPoetry } from '../poetryPackageManager';
+import { runPoetry } from '../poetryUtils';
 
 /**
  * Poetry remove command.

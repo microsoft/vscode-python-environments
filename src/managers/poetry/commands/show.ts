@@ -1,6 +1,6 @@
 import { PackageInfo } from '../../../api';
 import { CommandConstructorOptions, ListCommand, type BaseExecuteArgs } from '../../base/commands/index';
-import { runPoetry } from '../poetryPackageManager';
+import { runPoetry } from '../poetryUtils';
 
 /**
  * Poetry show command.

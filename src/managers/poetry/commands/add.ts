@@ -1,5 +1,5 @@
 import { CommandConstructorOptions, InstallCommand, type InstallExecuteArgs } from '../../base/commands/index';
-import { runPoetry } from '../poetryPackageManager';
+import { runPoetry } from '../poetryUtils';
 
 /**
  * Poetry add command.

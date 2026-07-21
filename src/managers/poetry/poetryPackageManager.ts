@@ -1,16 +1,6 @@
 import type { Pep440Version } from '@renovatebot/pep440';
 import { explain as parse } from '@renovatebot/pep440';
-import {
-    CancellationError,
-    CancellationToken,
-    Event,
-    EventEmitter,
-    l10n,
-    LogOutputChannel,
-    MarkdownString,
-    ProgressLocation,
-    ThemeIcon,
-} from 'vscode';
+import { Event, EventEmitter, l10n, LogOutputChannel, MarkdownString, ProgressLocation, ThemeIcon } from 'vscode';
 import { Disposable } from 'vscode-jsonrpc';
 import {
     DidChangePackagesEventArgs,
@@ -22,7 +12,6 @@ import {
     PythonEnvironment,
     PythonEnvironmentApi,
 } from '../../api';
-import { spawnProcess } from '../../common/childProcess.apis';
 import { showErrorMessage, showInputBox, withProgress } from '../../common/window.apis';
 import { normalizePackageName, parsePackageSpecs } from '../builtin/utils';
 import { updatePackagesAndNotify } from '../common/packageChanges';
@@ -238,49 +227,4 @@ export class PoetryPackageManager implements PackageManager, Disposable {
             return undefined;
         }
     }
-}
-
-export async function runPoetry(
-    args: string[],
-    cwd?: string,
-    log?: LogOutputChannel,
-    token?: CancellationToken,
-): Promise<string> {
-    const poetry = await getPoetry();
-    if (!poetry) {
-        throw new Error('Poetry executable not found');
-    }
-
-    log?.info(`Running: ${poetry} ${args.join(' ')}`);
-
-    return new Promise<string>((resolve, reject) => {
-        const proc = spawnProcess(poetry, args, { cwd });
-        token?.onCancellationRequested(() => {
-            proc.kill();
-            reject(new CancellationError());
-        });
-        let builder = '';
-        proc.stdout?.on('data', (data) => {
-            const s = data.toString('utf-8');
-            builder += s;
-            log?.append(`poetry: ${s}`);
-        });
-        proc.stderr?.on('data', (data) => {
-            const s = data.toString('utf-8');
-            builder += s;
-            log?.append(`poetry: ${s}`);
-        });
-        proc.on('close', () => {
-            resolve(builder);
-        });
-        proc.on('error', (error) => {
-            log?.error(`Error executing poetry command: ${error}`);
-            reject(error);
-        });
-        proc.on('exit', (code) => {
-            if (code !== 0) {
-                reject(new Error(`Failed to run poetry ${args.join(' ')}`));
-            }
-        });
-    });
 }

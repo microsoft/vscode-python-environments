@@ -1,5 +1,5 @@
 import { CommandConstructorOptions, ListDirectNamesCommand, type BaseExecuteArgs } from '../../base/commands/index';
-import { runPoetry } from '../poetryPackageManager';
+import { runPoetry } from '../poetryUtils';
 
 /**
  * Poetry show --top-level command.
