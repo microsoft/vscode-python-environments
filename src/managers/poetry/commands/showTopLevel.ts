@@ -1,6 +1,10 @@
 import { CommandConstructorOptions, ListDirectNamesCommand, type BaseExecuteArgs } from '../../base/commands/index';
 import { runPoetry } from '../poetryUtils';
 
+export interface PoetryShowTopLevelExecuteArgs extends BaseExecuteArgs {
+    cwd?: string;
+}
+
 /**
  * Poetry show --top-level command.
  *
@@ -20,9 +24,9 @@ export class PoetryShowTopLevelCommand extends ListDirectNamesCommand {
         return ['show', '--no-ansi', '--top-level'];
     }
 
-    async execute(executeArgs?: BaseExecuteArgs): Promise<string[]> {
+    async execute(executeArgs?: PoetryShowTopLevelExecuteArgs): Promise<string[]> {
         const args = this.buildCommand();
-        const output = await runPoetry(args, undefined, this.log, executeArgs?.cancellationToken);
+        const output = await runPoetry(args, executeArgs?.cwd, this.log, executeArgs?.cancellationToken);
 
         try {
             const names = output

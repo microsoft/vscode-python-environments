@@ -1,5 +1,7 @@
 import type { Pep440Version } from '@renovatebot/pep440';
 import { explain as parse } from '@renovatebot/pep440';
+import * as fsapi from 'fs-extra';
+import * as path from 'path';
 import { Event, EventEmitter, l10n, LogOutputChannel, MarkdownString, ProgressLocation, ThemeIcon } from 'vscode';
 import { Disposable } from 'vscode-jsonrpc';
 import {
@@ -206,11 +208,12 @@ export class PoetryPackageManager implements PackageManager, Disposable {
             pythonExecutable: poetry,
             log: this.log,
         });
-        const data = await showCmd.execute();
+        const cwd = await this.getPoetryCwdForEnvironment(environment);
+        const data = await showCmd.execute({ cwd });
         return (data ?? []).map((pkg) => this.api.createPackageItem(pkg, environment, this));
     }
 
-    async getDirectPackageNames(_environment: PythonEnvironment): Promise<Set<string> | undefined> {
+    async getDirectPackageNames(environment: PythonEnvironment): Promise<Set<string> | undefined> {
         try {
             const poetry = await getPoetry();
             if (!poetry) {
@@ -220,11 +223,54 @@ export class PoetryPackageManager implements PackageManager, Disposable {
                 pythonExecutable: poetry,
                 log: this.log,
             });
-            const names = await showTopLevelCmd.execute();
+            const cwd = await this.getPoetryCwdForEnvironment(environment);
+            const names = await showTopLevelCmd.execute({ cwd });
             return names ? new Set(names.map(normalizePackageName)) : undefined;
         } catch (err) {
             this.log.error(`Error fetching direct package names with Poetry: ${err}`);
             return undefined;
         }
+    }
+
+    /**
+     * Compute the best working directory for poetry commands for a given environment.
+     * Poetry command behavior depends on running inside the project containing pyproject.toml.
+     */
+    private async getPoetryCwdForEnvironment(environment: PythonEnvironment): Promise<string | undefined> {
+        const projects = this.api.getPythonProjects();
+        if (projects.length === 0) {
+            return undefined;
+        }
+
+        const toDirectory = async (fsPath: string): Promise<string> => {
+            try {
+                const stat = await fsapi.stat(fsPath);
+                return stat.isDirectory() ? fsPath : path.dirname(fsPath);
+            } catch {
+                return path.dirname(fsPath);
+            }
+        };
+
+        if (projects.length === 1) {
+            return toDirectory(projects[0].uri.fsPath);
+        }
+
+        const dirs = new Set<string>();
+        await Promise.all(
+            projects.map(async (project) => {
+                const projectEnv = await this.api.getEnvironment(project.uri);
+                if (projectEnv?.envId.id === environment.envId.id) {
+                    const dir = await toDirectory(project.uri.fsPath);
+                    dirs.add(dir);
+                }
+            }),
+        );
+
+        if (dirs.size > 0) {
+            // Prefer deepest matching project to handle nested workspace layouts.
+            return Array.from(dirs).sort((a, b) => b.length - a.length)[0];
+        }
+
+        return toDirectory(projects[0].uri.fsPath);
     }
 }
