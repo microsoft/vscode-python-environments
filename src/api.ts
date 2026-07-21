@@ -1526,8 +1526,7 @@ export type { ListCommand } from './managers/base/commands/list';
  * Abstract base class for version command implementations.
  *
  * Implement this interface to retrieve the version of the underlying package management tool.
- * Returns a semantic version object.
- *
+ * Returns the parsed version string (best-effort).
  * @example
  * ```typescript
  * class MyVersionCommand extends VersionCommand {
