@@ -1,5 +1,5 @@
 import type { Pep440Version } from '@renovatebot/pep440';
-import { explain as parse } from '@renovatebot/pep440';
+import { compare, explain as parse } from '@renovatebot/pep440';
 import * as path from 'path';
 import {
     Disposable,
@@ -169,7 +169,10 @@ export class CondaPackageManager implements PackageManager, Disposable {
                 log: this.log,
             });
             const versionStrings = await availableVersionsCmd.execute({ packageName, pythonVersion: '' });
-            return versionStrings.map((v) => parse(v)).filter((parsed) => parsed !== undefined) as Pep440Version[];
+            return versionStrings
+                .map((v) => parse(v)!)
+                .filter((parsed) => parsed !== undefined)
+                .sort((a, b) => compare(a!.public, b!.public));
         } catch {
             return undefined;
         }
