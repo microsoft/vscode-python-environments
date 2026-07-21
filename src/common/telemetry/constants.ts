@@ -311,7 +311,7 @@ export interface IEventNamePropertyMapping {
         }
     */
     [EventNames.UV_PYTHON_INSTALL_PROMPTED]: {
-        trigger: 'activation' | 'createEnvironment';
+        trigger: 'activation' | 'createEnvironment' | 'inlineScript';
     };
 
     /* __GDPR__

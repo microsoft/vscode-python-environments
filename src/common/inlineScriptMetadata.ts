@@ -5,6 +5,7 @@ import * as tomljs from '@iarna/toml';
 import * as fs from 'fs/promises';
 import { Uri } from 'vscode';
 import { traceVerbose, traceWarn } from './logging';
+import { compareReleaseSegments, parseReleaseSegments } from './utils/pep440Release';
 
 /**
  * Parsed and validated PEP 723 `script` metadata block.
@@ -317,8 +318,8 @@ function matchSingleClause(clause: string, version: string): boolean {
             );
             return false;
         }
-        const prefix = parseRelease(specVersion.slice(0, -2));
-        const ver = parseRelease(version);
+        const prefix = parseReleaseSegments(specVersion.slice(0, -2));
+        const ver = parseReleaseSegments(version);
         if (prefix === undefined || ver === undefined) {
             traceWarn(`inline script metadata: cannot parse version for clause ${JSON.stringify(clause)}`);
             return false;
@@ -327,14 +328,14 @@ function matchSingleClause(clause: string, version: string): boolean {
         return op === '==' ? isPrefixMatch : !isPrefixMatch;
     }
 
-    const specSegs = parseRelease(specVersion);
-    const verSegs = parseRelease(version);
+    const specSegs = parseReleaseSegments(specVersion);
+    const verSegs = parseReleaseSegments(version);
     if (specSegs === undefined || verSegs === undefined) {
         traceWarn(`inline script metadata: cannot parse version for clause ${JSON.stringify(clause)}`);
         return false;
     }
 
-    const cmp = compareReleases(verSegs, specSegs);
+    const cmp = compareReleaseSegments(verSegs, specSegs);
     switch (op) {
         case '==':
             return cmp === 0;
@@ -371,36 +372,4 @@ function matchSingleClause(clause: string, version: string): boolean {
             // Unreachable — SPECIFIER_RE only matches the operators above.
             return false;
     }
-}
-
-function parseRelease(v: string): number[] | undefined {
-    let s = v.trim().replace(/^v/i, '');
-    // Strip optional epoch prefix `N!`.
-    const epoch = s.match(/^(\d+)!(.*)$/);
-    if (epoch) {
-        s = epoch[2];
-    }
-    // Take only the leading dotted-integer segments; PEP 440 release
-    // segments must be integers. Pre/post/dev/local suffixes are
-    // dropped, which is sufficient for `requires-python` matching.
-    const m = s.match(/^(\d+(?:\.\d+)*)/);
-    if (!m) {
-        return undefined;
-    }
-    return m[1].split('.').map((x) => parseInt(x, 10));
-}
-
-function compareReleases(a: readonly number[], b: readonly number[]): number {
-    const n = Math.max(a.length, b.length);
-    for (let i = 0; i < n; i++) {
-        const av = a[i] ?? 0;
-        const bv = b[i] ?? 0;
-        if (av < bv) {
-            return -1;
-        }
-        if (av > bv) {
-            return 1;
-        }
-    }
-    return 0;
 }
