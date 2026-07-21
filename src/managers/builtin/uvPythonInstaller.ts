@@ -22,17 +22,23 @@ import { isUvInstalled, resetUvInstallationCache } from './helpers';
 
 export const UV_INSTALL_PYTHON_DONT_ASK_KEY = 'python-envs:uv:UV_INSTALL_PYTHON_DONT_ASK';
 
+const MAX_PROMPT_DETAIL_LENGTH = 120;
+const TASK_TIMEOUT_MS = 5 * 60 * 1000;
+
+// Accept only numeric release segments before forwarding script-controlled input to uv.
+const INSTALLABLE_PYTHON_VERSION = /^\d+(?:\.\d+)*$/;
+
+// Remove C0/C1 controls and Unicode zero-width/bidirectional formatting characters
+// before displaying script-controlled text in a modal prompt.
+const PROMPT_CONTROL_CHARACTERS =
+    /[\u0000-\u001f\u007f-\u009f\u061c\u200b-\u200f\u202a-\u202e\u2060-\u206f\ufeff]/g;
+
 export type UvPythonInstallTrigger = 'activation' | 'createEnvironment' | 'inlineScript';
 
 export interface UvPythonInstallPromptOptions {
     readonly version?: string;
     readonly requiresPython?: string;
 }
-
-const MAX_PROMPT_DETAIL_LENGTH = 120;
-const INSTALLABLE_PYTHON_VERSION = /^\d+(?:\.\d+)*$/;
-const PROMPT_CONTROL_CHARACTERS =
-    /[\u0000-\u001f\u007f-\u009f\u061c\u200b-\u200f\u202a-\u202e\u2060-\u206f\ufeff]/g;
 
 function sanitizePromptDetail(value: string | undefined): string | undefined {
     const normalized = value?.replace(PROMPT_CONTROL_CHARACTERS, ' ').replace(/\s+/g, ' ').trim();
@@ -110,9 +116,6 @@ async function getUvInstallCommand(): Promise<{ executable: string; args: string
         args: ['-c', 'curl -LsSf https://astral.sh/uv/install.sh | sh'],
     };
 }
-
-// Timeout for task completion (5 minutes)
-const TASK_TIMEOUT_MS = 5 * 60 * 1000;
 
 /**
  * Runs a shell command as a visible VS Code task and waits for completion.
@@ -389,13 +392,13 @@ export async function promptInstallPythonViaUv(
             : uvInstalled
               ? UvInstallStrings.installPythonPrompt
               : UvInstallStrings.installPythonAndUvPrompt;
-    const installAction = !uvInstalled
+    const installAction = uvInstalled
         ? version
-            ? UvInstallStrings.installUvAndPythonVersion(version)
-            : UvInstallStrings.installUvAndPython
+            ? UvInstallStrings.installPythonVersion(version)
+            : UvInstallStrings.installPython
         : version
-          ? UvInstallStrings.installPythonVersion(version)
-          : UvInstallStrings.installPython;
+          ? UvInstallStrings.installUvAndPythonVersion(version)
+          : UvInstallStrings.installUvAndPython;
 
     const result =
         trigger === 'inlineScript'

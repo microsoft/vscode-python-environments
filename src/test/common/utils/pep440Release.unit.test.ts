@@ -17,6 +17,10 @@ suite('pep440Release', () => {
         test('returns undefined when no release segment is present', () => {
             assert.strictEqual(parseReleaseSegments('not-a-version'), undefined);
         });
+
+        test('returns undefined for an invalid PEP 440 suffix', () => {
+            assert.strictEqual(parseReleaseSegments('3.12.not-a-version'), undefined);
+        });
     });
 
     suite('compareReleaseSegments', () => {

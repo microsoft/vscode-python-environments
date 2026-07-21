@@ -1,6 +1,8 @@
 // Copyright (c) Microsoft Corporation. All rights reserved.
 // Licensed under the MIT License.
 
+import { clean as cleanPep440Version, explain as explainPep440Version } from '@renovatebot/pep440';
+
 /**
  * Parse the release segments from a PEP 440 version string.
  *
@@ -10,16 +12,8 @@
  * local-version suffixes are intentionally omitted.
  */
 export function parseReleaseSegments(version: string): number[] | undefined {
-    let normalized = version.trim().replace(/^v/i, '');
-    const epoch = normalized.match(/^\d+!(.*)$/);
-    if (epoch) {
-        normalized = epoch[1];
-    }
-    const match = normalized.match(/^(\d+(?:\.\d+)*)/);
-    if (!match) {
-        return undefined;
-    }
-    return match[1].split('.').map((segment) => Number.parseInt(segment, 10));
+    const normalized = cleanPep440Version(version);
+    return normalized ? (explainPep440Version(normalized)?.release ?? undefined) : undefined;
 }
 
 /**
