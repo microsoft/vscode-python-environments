@@ -403,10 +403,7 @@ export async function getProjectInstallable(
                                           !path.isAbsolute(relative))
                                   );
                               })
-                              .sort(
-                                  (a, b) =>
-                                      path.dirname(b.fsPath).length - path.dirname(a.fsPath).length,
-                              )
+                              .sort((a, b) => path.dirname(b.fsPath).length - path.dirname(a.fsPath).length)
                         : [];
 
                     if (preferredCandidates.length > 0) {
