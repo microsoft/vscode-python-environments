@@ -1,5 +1,5 @@
 import { CommandConstructorOptions, ListDirectNamesCommand, type BaseExecuteArgs } from '../../base/commands/index';
-import { runPython } from '../helpers';
+import { runPython, runUV } from '../helpers';
 
 /**
  * Pip list direct names command.
@@ -49,12 +49,13 @@ export class PipListDirectNamesCommand extends ListDirectNamesCommand {
 /**
  * UV list direct names command.
  *
- * Parsed Command: `uv pip list --format=json --not-required`
+ * Parsed Command: `uv pip list --format=json --not-required --python <path>`
  *
  * Official Documentation: https://docs.astral.sh/uv/pip/
  * The `uv pip list --not-required` command lists only top-level (directly installed) packages.
  * Excludes transitive dependencies that are installed as requirements of other packages.
  * The `--format=json` flag outputs results in JSON format for structured parsing.
+ * The `--python` flag specifies the target Python interpreter.
  */
 export class UvListDirectNamesCommand extends ListDirectNamesCommand {
     constructor(options: CommandConstructorOptions) {
@@ -62,7 +63,7 @@ export class UvListDirectNamesCommand extends ListDirectNamesCommand {
     }
 
     protected buildCommand(): string[] {
-        return ['pip', 'list', '--format=json', '--not-required'];
+        return ['pip', 'list', '--format=json', '--not-required', '--python', this.pythonExecutable];
     }
 
     async execute(executeArgs?: BaseExecuteArgs): Promise<string[]> {
@@ -78,14 +79,7 @@ export class UvListDirectNamesCommand extends ListDirectNamesCommand {
 
         const args = this.buildCommand();
 
-        const output = await runPython(
-            this.pythonExecutable,
-            args,
-            undefined,
-            this.log,
-            executeArgs?.cancellationToken,
-            this.timeout,
-        );
+        const output = await runUV(args, undefined, this.log, executeArgs?.cancellationToken, this.timeout);
 
         parser(output);
         return directNames;

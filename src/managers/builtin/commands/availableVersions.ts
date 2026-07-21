@@ -3,7 +3,7 @@ import {
     CommandConstructorOptions,
     type AvailableVersionsExecuteArgs,
 } from '../../base/commands/index';
-import { runPython } from '../helpers';
+import { runPython, runUV } from '../helpers';
 
 /**
  * Pip available versions command.
@@ -104,14 +104,7 @@ export class UvAvailableVersionsCommand extends AvailableVersionsCommand {
 
         const args = this.buildCommand(executeArgs);
 
-        const output = await runPython(
-            this.pythonExecutable,
-            args,
-            undefined,
-            this.log,
-            executeArgs.cancellationToken,
-            this.timeout,
-        );
+        const output = await runUV(args, undefined, this.log, executeArgs.cancellationToken, this.timeout);
 
         parser(output);
         return availableVersions;

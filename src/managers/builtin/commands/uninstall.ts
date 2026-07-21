@@ -1,5 +1,5 @@
 import { CommandConstructorOptions, UninstallCommand, type UninstallExecuteArgs } from '../../base/commands/index';
-import { runPython } from '../helpers';
+import { runPython, runUV } from '../helpers';
 
 /**
  * Pip uninstall command.
@@ -49,6 +49,6 @@ export class UvUninstallCommand extends UninstallCommand {
     async execute(executeArgs: UninstallExecuteArgs): Promise<void> {
         const args = this.buildCommand(executeArgs);
 
-        await runPython(this.pythonExecutable, args, undefined, this.log, executeArgs.cancellationToken, this.timeout);
+        await runUV(args, undefined, this.log, executeArgs.cancellationToken, this.timeout);
     }
 }

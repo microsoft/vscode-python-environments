@@ -1,6 +1,6 @@
 import { PackageInfo } from '../../../api';
 import { CommandConstructorOptions, ListCommand, type BaseExecuteArgs } from '../../base/commands/index';
-import { runPython } from '../helpers';
+import { runPython, runUV } from '../helpers';
 
 /**
  * Pip list command.
@@ -57,10 +57,11 @@ export class PipListCommand extends ListCommand {
 /**
  * UV list command.
  *
- * Parsed Command: `uv pip list --format=json`
+ * Parsed Command: `uv pip list --format=json --python <path>`
  *
  * Official Documentation: https://docs.astral.sh/uv/pip/
  * The `uv pip list` command shows all installed packages via UV's pip interface.
+ * The `--python` flag specifies the target Python interpreter.
  * The `--format=json` flag outputs the list in JSON format for structured parsing.
  */
 export class UvListCommand extends ListCommand {
@@ -69,7 +70,7 @@ export class UvListCommand extends ListCommand {
     }
 
     protected buildCommand(): string[] {
-        return ['pip', 'list', '--format=json'];
+        return ['pip', 'list', '--format=json', '--python', this.pythonExecutable];
     }
 
     async execute(executeArgs?: BaseExecuteArgs): Promise<PackageInfo[]> {
@@ -93,14 +94,7 @@ export class UvListCommand extends ListCommand {
 
         const args = this.buildCommand();
 
-        const output = await runPython(
-            this.pythonExecutable,
-            args,
-            undefined,
-            this.log,
-            executeArgs?.cancellationToken,
-            this.timeout,
-        );
+        const output = await runUV(args, undefined, this.log, executeArgs?.cancellationToken, this.timeout);
 
         parser(output);
         return packages;

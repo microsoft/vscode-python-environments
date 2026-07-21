@@ -1,6 +1,6 @@
 import { getConfiguration } from '../../../common/workspace.apis';
 import { CommandConstructorOptions, InstallCommand, type InstallExecuteArgs } from '../../base/commands/index';
-import { runPython } from '../helpers';
+import { runPython, runUV } from '../helpers';
 import { processEditableInstallArgs } from '../utils';
 
 /**
@@ -84,6 +84,6 @@ export class UvInstallCommand extends InstallCommand {
     async execute(executeArgs: InstallExecuteArgs): Promise<void> {
         const args = this.buildCommand(executeArgs);
 
-        await runPython(this.pythonExecutable, args, undefined, this.log, executeArgs.cancellationToken, this.timeout);
+        await runUV(args, undefined, this.log, executeArgs.cancellationToken, this.timeout);
     }
 }

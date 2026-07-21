@@ -1,5 +1,5 @@
 import { CommandConstructorOptions, VersionCommand, type BaseExecuteArgs } from '../../base/commands/index';
-import { runPython } from '../helpers';
+import { runPython, runUV } from '../helpers';
 
 /**
  * Pip version command.
@@ -72,14 +72,7 @@ export class UvVersionCommand extends VersionCommand {
 
         const args = this.buildCommand();
 
-        const output = await runPython(
-            this.pythonExecutable,
-            args,
-            undefined,
-            this.log,
-            executeArgs?.cancellationToken,
-            this.timeout,
-        );
+        const output = await runUV(args, undefined, this.log, executeArgs?.cancellationToken, this.timeout);
 
         parser(output);
         return versionString;
