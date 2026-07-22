@@ -21,10 +21,10 @@ import {
     PythonEnvironment,
     PythonEnvironmentApi,
 } from '../../api';
-import { CommandConstructorOptions } from '../base/commands/index';
 import { showErrorMessageWithLogs } from '../../common/errors/utils';
 import { CondaStrings } from '../../common/localize';
 import { withProgress } from '../../common/window.apis';
+import { CommandConstructorOptions } from '../base/commands/index';
 import { parsePackageSpecs } from '../builtin/utils';
 import { updatePackagesAndNotify } from '../common/packageChanges';
 import {
@@ -161,8 +161,7 @@ export class CondaPackageManager implements PackageManager, Disposable {
                 pythonExecutable: 'conda',
                 log: this.log,
             });
-            const versionString = await versionCmd.execute();
-            return versionString ? (parse(versionString) ?? undefined) : undefined;
+            return await versionCmd.execute();
         } catch {
             return undefined;
         }

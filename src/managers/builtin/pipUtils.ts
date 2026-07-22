@@ -13,9 +13,8 @@ import { findFiles } from '../../common/workspace.apis';
 import { selectFromCommonPackagesToInstall, selectFromInstallableToInstall } from '../common/pickers';
 import { Installable } from '../common/types';
 import { mergePackages } from '../common/utils';
+import { BuiltinListCommandFactory } from './commands/list';
 import { normalizePackageName } from './utils';
-import { PipListCommand, UvListCommand } from './commands/index';
-import { shouldUseUv } from './helpers';
 
 export interface PyprojectToml {
     project?: {
@@ -279,9 +278,7 @@ export async function getWorkspacePackagesToInstall(
     if (environment) {
         const pythonExecutable = environment.execInfo?.run?.executable;
         if (pythonExecutable) {
-            const useUv = await shouldUseUv(log, environment.environmentPath.fsPath);
-            const ListCmd = useUv ? UvListCommand : PipListCommand;
-            const listCmd = new ListCmd({ pythonExecutable, log });
+            const listCmd = await BuiltinListCommandFactory({ pythonExecutable, log });
             const data = await listCmd.executeWithProgress<{ name: string }[]>({ showProgress: true });
             installed = data?.map((pkg) => pkg.name);
         }

@@ -1,8 +1,16 @@
 import type { Pep440Version } from '@renovatebot/pep440';
-import { explain as parse } from '@renovatebot/pep440';
 import * as fsapi from 'fs-extra';
 import * as path from 'path';
-import { CancellationError, Event, EventEmitter, l10n, LogOutputChannel, MarkdownString, ProgressLocation, ThemeIcon } from 'vscode';
+import {
+    CancellationError,
+    Event,
+    EventEmitter,
+    l10n,
+    LogOutputChannel,
+    MarkdownString,
+    ProgressLocation,
+    ThemeIcon,
+} from 'vscode';
 import { Disposable } from 'vscode-jsonrpc';
 import {
     DidChangePackagesEventArgs,
@@ -143,8 +151,7 @@ export class PoetryPackageManager implements PackageManager, Disposable {
             pythonExecutable: poetry,
             log: this.log,
         });
-        const versionString = await versionCmd.execute();
-        return versionString ? (parse(versionString) ?? undefined) : undefined;
+        return await versionCmd.execute();
     }
 
     async getPackageAvailableVersions(

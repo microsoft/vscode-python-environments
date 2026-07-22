@@ -1,4 +1,6 @@
-import { CommandConstructorOptions, VersionCommand } from '../../base/commands/index';
+import type { Pep440Version } from '@renovatebot/pep440';
+import { explain as parsePep440Version } from '@renovatebot/pep440';
+import { CommandConstructorOptions, VersionCommand, type BaseExecuteArgs } from '../../base/commands/index';
 import { getPoetryVersion } from '../poetryUtils';
 
 /**
@@ -19,14 +21,14 @@ export class PoetryVersionCommand extends VersionCommand {
         return ['--version'];
     }
 
-    async execute(): Promise<string> {
+    async execute(_executeArgs?: BaseExecuteArgs): Promise<Pep440Version | undefined> {
         try {
             // Poetry version is obtained via getPoetryVersion utility which handles poetry --version
             // We pass the pythonExecutable as the poetry path since it was set to the poetry executable
             const versionString = await getPoetryVersion(this.pythonExecutable);
-            return versionString || '';
+            return versionString ? (parsePep440Version(versionString) ?? undefined) : undefined;
         } catch {
-            return '';
+            return undefined;
         }
     }
 }

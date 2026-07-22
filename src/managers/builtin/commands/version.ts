@@ -1,5 +1,7 @@
+import type { Pep440Version } from '@renovatebot/pep440';
+import { explain as parsePep440Version } from '@renovatebot/pep440';
 import { CommandConstructorOptions, VersionCommand, type BaseExecuteArgs } from '../../base/commands/index';
-import { runPython, runUV } from '../helpers';
+import { runPython, runUV, shouldUseUv } from '../helpers';
 
 /**
  * Pip version command.
@@ -18,13 +20,13 @@ export class PipVersionCommand extends VersionCommand {
         return ['-m', 'pip', '--version'];
     }
 
-    async execute(executeArgs?: BaseExecuteArgs): Promise<string> {
-        let versionString: string = '';
+    async execute(executeArgs?: BaseExecuteArgs): Promise<Pep440Version | undefined> {
+        let parsedVersion: Pep440Version | undefined;
 
         const parser = (output: string): void => {
             // "pip X.Y.Z from /path/to/pip (python X.Y)"
             const match = output.match(/^pip\s+(\d+\.\d+(?:\.\d+)*)/);
-            versionString = match ? match[1] : '';
+            parsedVersion = match ? (parsePep440Version(match[1]) ?? undefined) : undefined;
         };
 
         const args = this.buildCommand();
@@ -39,7 +41,7 @@ export class PipVersionCommand extends VersionCommand {
         );
 
         parser(output);
-        return versionString;
+        return parsedVersion;
     }
 }
 
@@ -61,13 +63,13 @@ export class UvVersionCommand extends VersionCommand {
         return ['--version'];
     }
 
-    async execute(executeArgs?: BaseExecuteArgs): Promise<string> {
-        let versionString: string = '';
+    async execute(executeArgs?: BaseExecuteArgs): Promise<Pep440Version | undefined> {
+        let parsedVersion: Pep440Version | undefined;
 
         const parser = (output: string): void => {
             // "uv X.Y.Z" format
             const match = output.match(/(\d+\.\d+(?:\.\d+)*)/);
-            versionString = match ? match[1] : '';
+            parsedVersion = match ? (parsePep440Version(match[1]) ?? undefined) : undefined;
         };
 
         const args = this.buildCommand();
@@ -75,6 +77,13 @@ export class UvVersionCommand extends VersionCommand {
         const output = await runUV(args, undefined, this.log, executeArgs?.cancellationToken, this.timeout);
 
         parser(output);
-        return versionString;
+        return parsedVersion;
     }
+}
+
+export async function BuiltinVersionCommandFactory(options: CommandConstructorOptions): Promise<VersionCommand> {
+    if (await shouldUseUv(options.log, options.pythonExecutable)) {
+        return new UvVersionCommand(options);
+    }
+    return new PipVersionCommand(options);
 }

@@ -1,6 +1,6 @@
 import { PackageInfo } from '../../../api';
 import { CommandConstructorOptions, ListCommand, type BaseExecuteArgs } from '../../base/commands/index';
-import { runPython, runUV } from '../helpers';
+import { runPython, runUV, shouldUseUv } from '../helpers';
 
 /**
  * Pip list command.
@@ -113,4 +113,11 @@ export class UvListCommand extends ListCommand {
         parser(output);
         return packages;
     }
+}
+
+export async function BuiltinListCommandFactory(options: CommandConstructorOptions): Promise<ListCommand> {
+    if (await shouldUseUv(options.log, options.pythonExecutable)) {
+        return new UvListCommand(options);
+    }
+    return new PipListCommand(options);
 }

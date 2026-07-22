@@ -23,21 +23,13 @@ import {
 } from '../../api';
 import { CommandConstructorOptions } from '../base/commands/index';
 import { updatePackagesAndNotify } from '../common/packageChanges';
-import {
-    PipAvailableVersionsCommand,
-    PipInstallCommand,
-    PipListCommand,
-    PipListDirectNamesCommand,
-    PipUninstallCommand,
-    PipVersionCommand,
-    UvAvailableVersionsCommand,
-    UvInstallCommand,
-    UvListCommand,
-    UvListDirectNamesCommand,
-    UvUninstallCommand,
-    UvVersionCommand,
-} from './commands/index';
-import { shouldUseUv } from './helpers';
+import { BuiltinAvailableVersionsCommandFactory } from './commands/availableVersions';
+import { PipAvailableVersionsCommand } from './commands/index';
+import { BuiltinInstallCommandFactory } from './commands/install';
+import { BuiltinListCommandFactory } from './commands/list';
+import { BuiltinListDirectNamesCommandFactory } from './commands/listDirectNames';
+import { BuiltinUninstallCommandFactory } from './commands/uninstall';
+import { BuiltinVersionCommandFactory } from './commands/version';
 import { getWorkspacePackagesToInstall } from './pipUtils';
 import { normalizePackageName, parsePackageSpecs } from './utils';
 import { VenvManager } from './venvManager';
@@ -86,9 +78,6 @@ export class PipPackageManager implements PackageManager, Disposable {
                 throw new Error('Unable to determine Python executable path');
             }
 
-            // Detect whether to use UV
-            const useUv = await shouldUseUv(this.log, environment.environmentPath.fsPath);
-
             // Centralize command options for install/uninstall operations
             const manageCommandOptions: CommandConstructorOptions = {
                 pythonExecutable,
@@ -97,16 +86,14 @@ export class PipPackageManager implements PackageManager, Disposable {
 
             // Execute uninstall if needed
             if (toUninstall.length > 0) {
-                const UninstallCommand = useUv ? UvUninstallCommand : PipUninstallCommand;
-                const uninstallCmd = new UninstallCommand(manageCommandOptions);
+                const uninstallCmd = await BuiltinUninstallCommandFactory(manageCommandOptions);
                 const packages = parsePackageSpecs(toUninstall);
                 await uninstallCmd.executeWithProgress({ packages, showProgress: true }, 'Installing packages');
             }
 
             // Execute install if needed
             if (toInstall.length > 0) {
-                const InstallCommand = useUv ? UvInstallCommand : PipInstallCommand;
-                const installCmd = new InstallCommand(manageCommandOptions);
+                const installCmd = await BuiltinInstallCommandFactory(manageCommandOptions);
                 const packages = parsePackageSpecs(toInstall);
                 await installCmd.executeWithProgress(
                     { packages, upgrade: options.upgrade, showProgress: true },
@@ -158,10 +145,7 @@ export class PipPackageManager implements PackageManager, Disposable {
             if (!pythonExecutable) {
                 return undefined;
             }
-
-            const useUv = await shouldUseUv(this.log, environment.environmentPath.fsPath);
-            const ListCmd = useUv ? UvListCommand : PipListCommand;
-            const listCmd = new ListCmd({
+            const listCmd = await BuiltinListCommandFactory({
                 pythonExecutable,
                 log: this.log,
             });
@@ -179,15 +163,11 @@ export class PipPackageManager implements PackageManager, Disposable {
             if (!pythonExecutable) {
                 return undefined;
             }
-
-            const useUv = await shouldUseUv(this.log, environment.environmentPath.fsPath);
-            const VersionCmd = useUv ? UvVersionCommand : PipVersionCommand;
-            const versionCmd = new VersionCmd({
+            const versionCmd = await BuiltinVersionCommandFactory({
                 pythonExecutable,
                 log: this.log,
             });
-            const versionString = await versionCmd.execute();
-            return versionString ? (parse(versionString) ?? undefined) : undefined;
+            return await versionCmd.execute();
         } catch {
             return undefined;
         }
@@ -208,15 +188,13 @@ export class PipPackageManager implements PackageManager, Disposable {
                 return undefined;
             }
 
-            const useUv = await shouldUseUv(this.log, environment.environmentPath.fsPath);
-            const AvailableVersionsCmd = useUv ? UvAvailableVersionsCommand : PipAvailableVersionsCommand;
-            const availableVersionsCmd = new AvailableVersionsCmd({
+            const availableVersionsCmd = await BuiltinAvailableVersionsCommandFactory({
                 pythonExecutable,
                 log: this.log,
             });
 
             // For pip < 21.2.0, check version first
-            if (!useUv) {
+            if (availableVersionsCmd instanceof PipAvailableVersionsCommand) {
                 const pipVersion = await this.getVersion(environment);
                 if (!pipVersion || compare(pipVersion.public, '21.2.0') < 0) {
                     // pip <= 20.3.4 - version picking is undefined; no reliable machine-readable API exists.
@@ -228,9 +206,7 @@ export class PipPackageManager implements PackageManager, Disposable {
                 packageName,
                 pythonVersion: environment.version,
             });
-            return versionStrings
-                .map((v) => parse(v))
-                .filter((parsed): parsed is Pep440Version => parsed !== null);
+            return versionStrings.map((v) => parse(v)).filter((parsed): parsed is Pep440Version => parsed !== null);
         } catch {
             return undefined;
         }
@@ -252,10 +228,7 @@ export class PipPackageManager implements PackageManager, Disposable {
         if (!pythonExecutable) {
             return undefined;
         }
-
-        const useUv = await shouldUseUv(this.log, environment.environmentPath.fsPath);
-        const ListDirectNamesCmd = useUv ? UvListDirectNamesCommand : PipListDirectNamesCommand;
-        const listDirectNamesCmd = new ListDirectNamesCmd({
+        const listDirectNamesCmd = await BuiltinListDirectNamesCommandFactory({
             pythonExecutable,
             log: this.log,
         });
