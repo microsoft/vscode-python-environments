@@ -12,7 +12,6 @@ import {
     RelativePattern,
 } from 'vscode';
 import {
-    CommandConstructorOptions,
     DidChangePackagesEventArgs,
     GetPackagesOptions,
     IconPath,
@@ -22,6 +21,7 @@ import {
     PythonEnvironment,
     PythonEnvironmentApi,
 } from '../../api';
+import { CommandConstructorOptions } from '../base/commands/index';
 import { showErrorMessageWithLogs } from '../../common/errors/utils';
 import { CondaStrings } from '../../common/localize';
 import { withProgress } from '../../common/window.apis';
