@@ -2,6 +2,7 @@ import type { Pep440Version } from '@renovatebot/pep440';
 import { compare, explain as parse } from '@renovatebot/pep440';
 import * as path from 'path';
 import {
+    CancellationError,
     Disposable,
     Event,
     EventEmitter,
@@ -82,7 +83,7 @@ export class CondaPackageManager implements PackageManager, Disposable {
                 const uninstallCmd = new CondaUninstallCommand(manageCommandOptions);
                 const packages = parsePackageSpecs(toUninstall);
                 await uninstallCmd.executeWithProgress(
-                    { packages, showProgress: true },
+                    { packages, environmentPath: environment.environmentPath.fsPath, showProgress: true },
                     CondaStrings.condaInstallingPackages,
                 );
             }
@@ -92,7 +93,12 @@ export class CondaPackageManager implements PackageManager, Disposable {
                 const installCmd = new CondaInstallCommand(manageCommandOptions);
                 const packages = parsePackageSpecs(toInstall);
                 await installCmd.executeWithProgress(
-                    { packages, upgrade: options.upgrade, showProgress: true },
+                    {
+                        packages,
+                        upgrade: options.upgrade,
+                        environmentPath: environment.environmentPath.fsPath,
+                        showProgress: true,
+                    },
                     CondaStrings.condaInstallingPackages,
                 );
             }
@@ -101,6 +107,9 @@ export class CondaPackageManager implements PackageManager, Disposable {
                 this._onDidChangePackages.fire({ environment, manager: this, changes });
             });
         } catch (e) {
+            if (e instanceof CancellationError) {
+                throw e;
+            }
             this.log.error('Error installing packages', e);
             setImmediate(async () => {
                 await showErrorMessageWithLogs(CondaStrings.condaInstallError, this.log);
@@ -133,7 +142,7 @@ export class CondaPackageManager implements PackageManager, Disposable {
                 pythonExecutable: 'conda',
                 log: this.log,
             });
-            const data = await listCmd.execute();
+            const data = await listCmd.execute({ environmentPath: environment.environmentPath.fsPath });
             const packages = (data ?? []).map((pkg) => this.api.createPackageItem(pkg, environment, this));
             this.packages.set(environment.envId.id, packages);
             return packages;
@@ -170,9 +179,9 @@ export class CondaPackageManager implements PackageManager, Disposable {
             });
             const versionStrings = await availableVersionsCmd.execute({ packageName, pythonVersion: '' });
             return versionStrings
-                .map((v) => parse(v)!)
-                .filter((parsed) => parsed !== undefined)
-                .sort((a, b) => compare(a!.public, b!.public));
+                .map((v) => parse(v))
+                .filter((parsed): parsed is Pep440Version => parsed !== null)
+                .sort((a, b) => compare(a.public, b.public));
         } catch {
             return undefined;
         }

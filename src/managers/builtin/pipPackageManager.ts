@@ -1,6 +1,7 @@
 import type { Pep440Version } from '@renovatebot/pep440';
 import { compare, explain as parse } from '@renovatebot/pep440';
 import {
+    CancellationError,
     Disposable,
     Event,
     EventEmitter,
@@ -117,6 +118,10 @@ export class PipPackageManager implements PackageManager, Disposable {
                 this._onDidChangePackages.fire({ environment, manager: this, changes });
             });
         } catch (e) {
+            if (e instanceof CancellationError) {
+                // Cancellation is a normal control-flow exit; do not surface an error.
+                return;
+            }
             this.log.error('Error managing packages', e);
             setImmediate(async () => {
                 const result = await window.showErrorMessage('Error managing packages', 'View Output');
@@ -223,7 +228,9 @@ export class PipPackageManager implements PackageManager, Disposable {
                 packageName,
                 pythonVersion: environment.version,
             });
-            return versionStrings.map((v) => parse(v)).filter((parsed) => parsed !== undefined) as Pep440Version[];
+            return versionStrings
+                .map((v) => parse(v))
+                .filter((parsed): parsed is Pep440Version => parsed !== null);
         } catch {
             return undefined;
         }

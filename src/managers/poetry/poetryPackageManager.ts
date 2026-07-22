@@ -2,7 +2,7 @@ import type { Pep440Version } from '@renovatebot/pep440';
 import { explain as parse } from '@renovatebot/pep440';
 import * as fsapi from 'fs-extra';
 import * as path from 'path';
-import { Event, EventEmitter, l10n, LogOutputChannel, MarkdownString, ProgressLocation, ThemeIcon } from 'vscode';
+import { CancellationError, Event, EventEmitter, l10n, LogOutputChannel, MarkdownString, ProgressLocation, ThemeIcon } from 'vscode';
 import { Disposable } from 'vscode-jsonrpc';
 import {
     DidChangePackagesEventArgs,
@@ -79,6 +79,10 @@ export class PoetryPackageManager implements PackageManager, Disposable {
                 this._onDidChangePackages.fire({ environment, manager: this, changes });
             });
         } catch (e) {
+            if (e instanceof CancellationError) {
+                // Cancellation is not an error; rethrow without surfacing an error message.
+                throw e;
+            }
             this.log.error('Error managing packages with Poetry', e);
             setImmediate(async () => {
                 const result = await showErrorMessage('Error managing packages with Poetry', 'View Output');

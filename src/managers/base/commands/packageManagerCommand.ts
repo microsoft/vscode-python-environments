@@ -36,6 +36,10 @@ export abstract class PackageManagerCommand {
         this.log = options.log;
         const configSection = options.configSection ?? (this.constructor as typeof PackageManagerCommand).configSection;
         this.config = configSection ? getConfiguration(`python-envs.packageManager.${configSection}`) : undefined;
+        const configuredTimeout = this.config?.get<number>('executionTimeout');
+        if (configuredTimeout !== undefined) {
+            this.timeout = configuredTimeout;
+        }
     }
 
     /**
@@ -54,8 +58,13 @@ export abstract class PackageManagerCommand {
                 {
                     location: ProgressLocation.Notification,
                     title: title ?? l10n.t('Running package manager command'),
+                    cancellable: true,
                 },
-                () => this.execute(executeArgs) as Promise<T>,
+                (_progress, token) =>
+                    this.execute({
+                        ...executeArgs,
+                        cancellationToken: executeArgs.cancellationToken ?? token,
+                    }) as Promise<T>,
             ),
         );
     }

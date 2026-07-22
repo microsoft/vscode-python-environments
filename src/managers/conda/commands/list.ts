@@ -5,7 +5,7 @@ import { runCondaExecutable } from '../condaUtils';
 /**
  * Conda list command execute arguments (includes environment path and cancellation token).
  */
-interface CondaListExecuteArgs extends BaseExecuteArgs {
+export interface CondaListExecuteArgs extends BaseExecuteArgs {
     environmentPath: string;
 }
 
@@ -24,19 +24,17 @@ export class CondaListCommand extends ListCommand {
         super(options);
     }
 
-    protected buildCommand(executeArgs: BaseExecuteArgs): string[] {
-        const args = executeArgs as CondaListExecuteArgs;
-        return ['list', '-p', args.environmentPath, '--json'];
+    protected buildCommand(executeArgs: CondaListExecuteArgs): string[] {
+        return ['list', '-p', executeArgs.environmentPath, '--json'];
     }
 
-    async execute(executeArgs?: BaseExecuteArgs): Promise<PackageInfo[]> {
-        const args = executeArgs as CondaListExecuteArgs | undefined;
-        if (!args?.environmentPath) {
+    async execute(executeArgs?: CondaListExecuteArgs): Promise<PackageInfo[]> {
+        if (!executeArgs?.environmentPath) {
             return [];
         }
 
-        const cmdArgs = this.buildCommand(executeArgs!);
-        const output = await runCondaExecutable(cmdArgs, this.log, executeArgs?.cancellationToken);
+        const cmdArgs = this.buildCommand(executeArgs);
+        const output = await runCondaExecutable(cmdArgs, this.log, executeArgs.cancellationToken);
 
         let condaPackages: { name: string; version: string }[];
         try {

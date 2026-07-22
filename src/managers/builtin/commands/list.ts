@@ -23,9 +23,16 @@ export class PipListCommand extends ListCommand {
         const packages: PackageInfo[] = [];
 
         const parser = (output: string): void => {
-            const json = JSON.parse(output);
+            let json: unknown;
+            try {
+                json = JSON.parse(output);
+            } catch (e) {
+                this.log?.error(`Failed to parse pip list output: ${e}`);
+                return;
+            }
             if (!Array.isArray(json)) {
-                throw new Error('Invalid output from pip list command');
+                this.log?.error('Invalid output from pip list command');
+                return;
             }
             const parsed = json
                 .filter(({ name, version }) => name && version)
@@ -77,9 +84,16 @@ export class UvListCommand extends ListCommand {
         const packages: PackageInfo[] = [];
 
         const parser = (output: string): void => {
-            const json = JSON.parse(output);
+            let json: unknown;
+            try {
+                json = JSON.parse(output);
+            } catch (e) {
+                this.log?.error(`Failed to parse uv pip list output: ${e}`);
+                return;
+            }
             if (!Array.isArray(json)) {
-                throw new Error('Invalid output from uv pip list command');
+                this.log?.error('Invalid output from uv pip list command');
+                return;
             }
             const parsed = json
                 .filter(({ name, version }) => name && version)

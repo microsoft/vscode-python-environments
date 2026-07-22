@@ -53,5 +53,19 @@
     "python-envs.packageManager.listCommandArgs.description": "Arguments and settings for the list command (pip/uv list).",
     "python-envs.packageManager.versionCommandArgs.description": "Arguments and settings for the version command (pip/uv --version).",
     "python-envs.packageManager.availableVersionsCommandArgs.description": "Arguments and settings for the availableVersions command (pip index versions).",
-    "python-envs.packageManager.listDirectNamesCommandArgs.description": "Arguments and settings for the listDirectNames command (pip list --not-required)."
+    "python-envs.packageManager.listDirectNamesCommandArgs.description": "Arguments and settings for the listDirectNames command (pip list --not-required).",
+    "python-envs.packageManager.executionTimeout.description": "Timeout in milliseconds (0 = no timeout). Default: 5 minutes.",
+    "python-envs.packageManager.maxRetries.description": "Maximum number of retry attempts (0-3).",
+    "python-envs.packageManager.installCommandArgs.verboseOutput.description": "Display full output from the install command.",
+    "python-envs.packageManager.installCommandArgs.retryOnFailure.description": "Retry the install command once on failure.",
+    "python-envs.packageManager.uninstallCommandArgs.verboseOutput.description": "Display full output from the uninstall command.",
+    "python-envs.packageManager.uninstallCommandArgs.retryOnFailure.description": "Retry the uninstall command once on failure.",
+    "python-envs.packageManager.listCommandArgs.verboseOutput.description": "Display full output from the list command.",
+    "python-envs.packageManager.listCommandArgs.retryOnFailure.description": "Retry the list command once on failure.",
+    "python-envs.packageManager.versionCommandArgs.verboseOutput.description": "Display full output from the version command.",
+    "python-envs.packageManager.versionCommandArgs.retryOnFailure.description": "Retry the version command once on failure.",
+    "python-envs.packageManager.availableVersionsCommandArgs.verboseOutput.description": "Display full output from the availableVersions command.",
+    "python-envs.packageManager.availableVersionsCommandArgs.retryOnFailure.description": "Retry the availableVersions command once on failure.",
+    "python-envs.packageManager.listDirectNamesCommandArgs.verboseOutput.description": "Display full output from the listDirectNames command.",
+    "python-envs.packageManager.listDirectNamesCommandArgs.retryOnFailure.description": "Retry the listDirectNames command once on failure."
 }

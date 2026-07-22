@@ -23,9 +23,16 @@ export class PipListDirectNamesCommand extends ListDirectNamesCommand {
         let directNames: string[] = [];
 
         const parser = (output: string): void => {
-            const packages = JSON.parse(output);
+            let packages: unknown;
+            try {
+                packages = JSON.parse(output);
+            } catch (e) {
+                this.log?.error(`Failed to parse pip list output: ${e}`);
+                return;
+            }
             if (!Array.isArray(packages)) {
-                throw new Error('Invalid output from pip list command');
+                this.log?.error('Invalid output from pip list command');
+                return;
             }
             directNames = packages.filter(({ name }) => name).map(({ name }) => name);
         };
@@ -70,9 +77,16 @@ export class UvListDirectNamesCommand extends ListDirectNamesCommand {
         let directNames: string[] = [];
 
         const parser = (output: string): void => {
-            const packages = JSON.parse(output);
+            let packages: unknown;
+            try {
+                packages = JSON.parse(output);
+            } catch (e) {
+                this.log?.error(`Failed to parse uv pip list output: ${e}`);
+                return;
+            }
             if (!Array.isArray(packages)) {
-                throw new Error('Invalid output from uv pip list command');
+                this.log?.error('Invalid output from uv pip list command');
+                return;
             }
             directNames = packages.filter(({ name }) => name).map(({ name }) => name);
         };

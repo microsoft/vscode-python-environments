@@ -14,24 +14,25 @@ This approach stores persisting arguments (like `indexUrl`) as instance properti
 
 ### 1. Base Class
 
-**File**: `src/managers/builtin/commands/commandSettings.ts`
+**File**: `src/managers/base/commands/packageManagerCommand.ts`
 
 ```typescript
 interface CommandConstructorOptions {
     pythonExecutable: string;
+    configSection?: string;
     log?: LogOutputChannel;
-    cancellationToken?: CancellationToken;
 }
 
 abstract class PackageManagerCommand {
     protected pythonExecutable: string;
     protected log?: LogOutputChannel;
-    protected cancellationToken?: CancellationToken;
+    protected timeout: number = 300000;
+    protected config?: WorkspaceConfiguration;
 
     constructor(options: CommandConstructorOptions) {
         this.pythonExecutable = options.pythonExecutable;
         this.log = options.log;
-        this.cancellationToken = options.cancellationToken;
+        // load command-specific settings (including executionTimeout) from configuration
     }
 
     protected abstract buildCommand(ephemeralArgs: unknown): string[];
