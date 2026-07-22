@@ -206,7 +206,10 @@ export class PipPackageManager implements PackageManager, Disposable {
                 packageName,
                 pythonVersion: environment.version,
             });
-            return versionStrings.map((v) => parse(v)).filter((parsed): parsed is Pep440Version => parsed !== null);
+            return versionStrings
+                .map((v) => parse(v))
+                .filter((parsed): parsed is Pep440Version => parsed !== null)
+                .sort((a, b) => compare(b.public, a.public));
         } catch {
             return undefined;
         }

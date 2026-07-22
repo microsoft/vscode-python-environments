@@ -496,17 +496,16 @@ export async function runPoetry(
             builder += s;
             log?.append(`poetry: ${s}`);
         });
-        proc.on('close', () => {
+        proc.on('close', (code) => {
+            if (code !== 0) {
+                reject(new Error(`Failed to run poetry ${args.join(' ')}`));
+                return;
+            }
             resolve(builder);
         });
         proc.on('error', (error) => {
             log?.error(`Error executing poetry command: ${error}`);
             reject(error);
-        });
-        proc.on('exit', (code) => {
-            if (code !== 0) {
-                reject(new Error(`Failed to run poetry ${args.join(' ')}`));
-            }
         });
     });
 }
