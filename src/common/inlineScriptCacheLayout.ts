@@ -5,16 +5,14 @@ import * as crypto from 'crypto';
 import * as fsapi from 'fs-extra';
 import * as path from 'path';
 import { Uri } from 'vscode';
+import type { PythonEnvironment } from '../api';
+import { PYTHON_EXTENSION_ID } from './constants';
 import { traceWarn } from './logging';
+import { normalizePath } from './utils/pathUtils';
 import { isWindows } from './utils/platformUtils';
+import { getVenvPythonPath } from './utils/virtualEnvironment';
 
-/**
- * Versioned name of the cache root under the extension's `globalStorageUri`.
- *
- * Bump the `-v1` suffix together with {@link META_SCHEMA_VERSION} on any
- * incompatible on-disk change, so old envs sit unread and TTL out naturally
- * instead of being migrated in place.
- */
+/** Bump with {@link META_SCHEMA_VERSION} for incompatible cache formats. */
 export const INLINE_SCRIPT_CACHE_DIR_NAME = 'script-envs-v1';
 
 export const META_JSON_FILENAME = '.meta.json';
@@ -25,6 +23,7 @@ export const META_JSON_FILENAME = '.meta.json';
 export const META_SCHEMA_VERSION = 1 as const;
 
 const MAX_META_JSON_BYTES = 1024 * 1024;
+const INLINE_SCRIPT_MANAGER_ID = `${PYTHON_EXTENSION_ID}:inline-script`;
 
 /**
  * Validated on-disk schema for a cached inline-script environment's
@@ -33,13 +32,20 @@ const MAX_META_JSON_BYTES = 1024 * 1024;
 export interface InlineScriptEnvMeta {
     /** Version of the serialized metadata schema. */
     readonly schemaVersion: typeof META_SCHEMA_VERSION;
-    /** Filesystem path of the script recorded for lifecycle bookkeeping. */
-    readonly scriptFsPath: string;
+    /** Canonical base-interpreter path. */
+    readonly baseInterpreterPath: string;
+    /** Base-interpreter version. */
+    readonly baseInterpreterVersion: string;
     /** Last successful use as a canonical UTC string produced by `Date.toISOString()`. */
     readonly lastUsedAt: string;
-    /** The script's `requires-python` declaration, when present. */
-    readonly requiresPython?: string;
 }
+
+export type InlineScriptMetaReadResult =
+    | { readonly kind: 'valid'; readonly metadata: InlineScriptEnvMeta }
+    | { readonly kind: 'missing' | 'invalid' | 'unavailable' };
+
+export type BaseInterpreterStatus = 'available' | 'missing' | 'unavailable';
+export type CacheEnvironmentInspection = 'expected' | 'stale' | 'uncertain';
 
 /**
  * In-memory summary of one cached entry, populated by the separate disk walk.
@@ -63,36 +69,77 @@ export function getMetaJsonPath(envDir: Uri): Uri {
     return Uri.joinPath(envDir, META_JSON_FILENAME);
 }
 
-/**
- * Read and validate the extension-owned `.meta.json` sidecar in a cached
- * environment directory.
- *
- * This function is intentionally non-destructive. Missing, malformed, or
- * unreadable sidecars return `undefined` so callers can treat the entry as a
- * cache miss. Deleting invalid entries belongs to the dedicated, guarded cache
- * cleanup path because read and permission failures may be transient.
- */
+/** Resolve a cache entry only when it is the requested direct child of the physical cache root. */
+export async function resolveCacheEntryPath(cacheRoot: Uri, envDir: Uri): Promise<string | undefined> {
+    const [resolvedRoot, resolvedEntry] = await Promise.all([
+        fsapi.realpath(cacheRoot.fsPath),
+        fsapi.realpath(envDir.fsPath),
+    ]);
+    const expectedEntry = path.join(resolvedRoot, path.basename(envDir.fsPath));
+    return isDescendantPath(resolvedRoot, resolvedEntry) &&
+        normalizePath(path.resolve(resolvedEntry)) === normalizePath(path.resolve(expectedEntry))
+        ? resolvedEntry
+        : undefined;
+}
+
+/** Verify that a resolved environment is owned by the expected physical cache entry. */
+export async function inspectOwnedCacheEntry(
+    environment: PythonEnvironment,
+    cacheRoot: Uri,
+    envDir: Uri,
+): Promise<CacheEnvironmentInspection> {
+    if (environment.envId.managerId !== INLINE_SCRIPT_MANAGER_ID) {
+        return 'uncertain';
+    }
+    try {
+        const [expectedDir, resolvedPrefix, expectedPython, resolvedPython] = await Promise.all([
+            resolveCacheEntryPath(cacheRoot, envDir),
+            fsapi.realpath(environment.sysPrefix),
+            fsapi.realpath(getVenvPythonPath(envDir.fsPath)),
+            fsapi.realpath(environment.environmentPath.fsPath),
+        ]);
+        if (!expectedDir) {
+            return 'uncertain';
+        }
+        return normalizePath(expectedDir) === normalizePath(resolvedPrefix) &&
+            normalizePath(expectedPython) === normalizePath(resolvedPython)
+            ? 'expected'
+            : 'stale';
+    } catch (error) {
+        traceWarn('inline-script env: failed to inspect cache-entry ownership:', error);
+        return 'uncertain';
+    }
+}
+
+/** Read validated sidecar metadata, returning `undefined` for non-valid state. */
 export async function readMetaJson(envDir: Uri): Promise<InlineScriptEnvMeta | undefined> {
+    const result = await inspectMetaJson(envDir);
+    return result.kind === 'valid' ? result.metadata : undefined;
+}
+
+/** Classify sidecar state; only `unavailable` denotes transient I/O. */
+export async function inspectMetaJson(envDir: Uri): Promise<InlineScriptMetaReadResult> {
     const metaPath = getMetaJsonPath(envDir).fsPath;
 
     try {
-        const stat = await fsapi.stat(metaPath);
+        const stat = await fsapi.lstat(metaPath);
         if (!stat.isFile()) {
             traceWarn(`inline-script meta: not a regular file at ${metaPath}`);
-            return undefined;
+            return { kind: 'invalid' };
         }
         if (stat.size > MAX_META_JSON_BYTES) {
             traceWarn(`inline-script meta: refusing to read ${metaPath} (${stat.size} bytes > cap)`);
-            return undefined;
+            return { kind: 'invalid' };
         }
     } catch (err) {
         if (isFileNotFoundError(err)) {
             traceWarn(`inline-script meta: not found at ${metaPath}`);
+            return { kind: 'missing' };
         } else {
             const code = (err as NodeJS.ErrnoException | undefined)?.code ?? 'unknown';
             traceWarn(`inline-script meta: failed to stat ${metaPath} (code=${code}):`, err);
+            return { kind: 'unavailable' };
         }
-        return undefined;
     }
 
     let raw: string;
@@ -101,7 +148,7 @@ export async function readMetaJson(envDir: Uri): Promise<InlineScriptEnvMeta | u
     } catch (err) {
         const code = (err as NodeJS.ErrnoException | undefined)?.code ?? 'unknown';
         traceWarn(`inline-script meta: failed to read ${metaPath} (code=${code}):`, err);
-        return undefined;
+        return { kind: isFileNotFoundError(err) ? 'missing' : 'unavailable' };
     }
 
     let parsed: unknown;
@@ -109,15 +156,15 @@ export async function readMetaJson(envDir: Uri): Promise<InlineScriptEnvMeta | u
         parsed = JSON.parse(raw);
     } catch (err) {
         traceWarn(`inline-script meta: malformed JSON in ${metaPath}:`, err);
-        return undefined;
+        return { kind: 'invalid' };
     }
 
     const validated = validateMeta(parsed);
     if (!validated) {
         traceWarn(`inline-script meta: invalid shape in ${metaPath}`);
-        return undefined;
+        return { kind: 'invalid' };
     }
-    return validated;
+    return { kind: 'valid', metadata: validated };
 }
 
 /**
@@ -160,15 +207,20 @@ export function selectStaleEntries(entries: ReadonlyArray<CacheEntrySummary>, no
  * Verify that a cached env's base interpreter still exists on disk.
  */
 export async function verifyBaseInterpreterExists(envDir: Uri): Promise<boolean> {
-    return isWindows() ? verifyWindowsBaseInterpreter(envDir) : verifyPosixBaseInterpreter(envDir);
+    return (await getBaseInterpreterStatus(envDir)) === 'available';
 }
 
-async function verifyPosixBaseInterpreter(envDir: Uri): Promise<boolean> {
+/** Classify the base interpreter; `unavailable` denotes transient I/O. */
+export async function getBaseInterpreterStatus(envDir: Uri): Promise<BaseInterpreterStatus> {
+    return isWindows() ? getWindowsBaseInterpreterStatus(envDir) : getPosixBaseInterpreterStatus(envDir);
+}
+
+async function getPosixBaseInterpreterStatus(envDir: Uri): Promise<BaseInterpreterStatus> {
     const launcherPath = Uri.joinPath(envDir, 'bin', 'python').fsPath;
-    return isRegularFile(launcherPath, 'base interpreter');
+    return getRegularFileStatus(launcherPath, 'base interpreter');
 }
 
-async function verifyWindowsBaseInterpreter(envDir: Uri): Promise<boolean> {
+async function getWindowsBaseInterpreterStatus(envDir: Uri): Promise<BaseInterpreterStatus> {
     const pyvenvPath = Uri.joinPath(envDir, 'pyvenv.cfg').fsPath;
     let raw: string;
     try {
@@ -176,37 +228,39 @@ async function verifyWindowsBaseInterpreter(envDir: Uri): Promise<boolean> {
     } catch (err) {
         if (isFileNotFoundError(err)) {
             traceWarn(`inline-script env: missing pyvenv.cfg at ${pyvenvPath}`);
+            return 'missing';
         } else {
             const code = (err as NodeJS.ErrnoException | undefined)?.code ?? 'unknown';
             traceWarn(`inline-script env: failed to read ${pyvenvPath} (code=${code}):`, err);
+            return 'unavailable';
         }
-        return false;
     }
     const home = parsePyvenvHome(raw);
     if (home === undefined) {
         traceWarn(`inline-script env: no 'home =' line in ${pyvenvPath}`);
-        return false;
+        return 'missing';
     }
     const launcherPath = path.join(home, 'python.exe');
-    return isRegularFile(launcherPath, 'base interpreter');
+    return getRegularFileStatus(launcherPath, 'base interpreter');
 }
 
-async function isRegularFile(filePath: string, label: string): Promise<boolean> {
+async function getRegularFileStatus(filePath: string, label: string): Promise<BaseInterpreterStatus> {
     try {
         const stat = await fsapi.stat(filePath);
         if (!stat.isFile()) {
             traceWarn(`inline-script env: ${label} is not a regular file at ${filePath}`);
-            return false;
+            return 'missing';
         }
-        return true;
+        return 'available';
     } catch (err) {
         if (isFileNotFoundError(err)) {
             traceWarn(`inline-script env: ${label} missing at ${filePath}`);
+            return 'missing';
         } else {
             const code = (err as NodeJS.ErrnoException | undefined)?.code ?? 'unknown';
             traceWarn(`inline-script env: failed to stat ${filePath} (code=${code}):`, err);
+            return 'unavailable';
         }
-        return false;
     }
 }
 
@@ -224,6 +278,13 @@ function isFileNotFoundError(err: unknown): boolean {
     return typeof err === 'object' && err !== null && 'code' in err && (err as NodeJS.ErrnoException).code === 'ENOENT';
 }
 
+function isDescendantPath(rootPath: string, candidatePath: string): boolean {
+    const relative = path.relative(rootPath, candidatePath);
+    return (
+        relative.length > 0 && relative !== '..' && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative)
+    );
+}
+
 function validateMeta(value: unknown): InlineScriptEnvMeta | undefined {
     if (typeof value !== 'object' || value === null || Array.isArray(value)) {
         return undefined;
@@ -232,21 +293,30 @@ function validateMeta(value: unknown): InlineScriptEnvMeta | undefined {
     if (obj.schemaVersion !== META_SCHEMA_VERSION) {
         return undefined;
     }
-    if (typeof obj.scriptFsPath !== 'string' || obj.scriptFsPath.length === 0) {
+    if (
+        typeof obj.baseInterpreterPath !== 'string' ||
+        obj.baseInterpreterPath.length === 0 ||
+        obj.baseInterpreterPath.trim() !== obj.baseInterpreterPath ||
+        !path.isAbsolute(obj.baseInterpreterPath)
+    ) {
+        return undefined;
+    }
+    if (
+        typeof obj.baseInterpreterVersion !== 'string' ||
+        obj.baseInterpreterVersion.trim().length === 0 ||
+        obj.baseInterpreterVersion.trim() !== obj.baseInterpreterVersion
+    ) {
         return undefined;
     }
     if (!isCanonicalIsoTimestamp(obj.lastUsedAt)) {
         return undefined;
     }
-    if (obj.requiresPython !== undefined && typeof obj.requiresPython !== 'string') {
-        return undefined;
-    }
 
     return {
         schemaVersion: META_SCHEMA_VERSION,
-        scriptFsPath: obj.scriptFsPath,
+        baseInterpreterPath: obj.baseInterpreterPath,
+        baseInterpreterVersion: obj.baseInterpreterVersion,
         lastUsedAt: obj.lastUsedAt,
-        requiresPython: obj.requiresPython,
     };
 }
 
