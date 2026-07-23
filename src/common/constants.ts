@@ -2,6 +2,8 @@ import * as path from 'path';
 
 export const ENVS_EXTENSION_ID = 'ms-python.vscode-python-envs';
 export const PYTHON_EXTENSION_ID = 'ms-python.python';
+export const CONDA_MANAGER_ID = `${PYTHON_EXTENSION_ID}:conda`;
+export const INLINE_SCRIPT_MANAGER_ID = `${PYTHON_EXTENSION_ID}:inline-script`;
 export const JUPYTER_EXTENSION_ID = 'ms-toolsai.jupyter';
 export const EXTENSION_ROOT_DIR = path.dirname(__dirname);
 export const ISSUES_URL = 'https://github.com/microsoft/vscode-python-environments/issues';

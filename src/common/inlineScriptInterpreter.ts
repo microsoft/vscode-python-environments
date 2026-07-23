@@ -24,7 +24,8 @@ export function pickCompatibleInterpreter(
     installed: ReadonlyArray<PythonEnvironment>,
     requiresPython: string | undefined,
 ): PythonEnvironment | undefined {
-    const constraint = requiresPython && requiresPython.length > 0 ? requiresPython : undefined;
+    const trimmedConstraint = requiresPython?.trim();
+    const constraint = trimmedConstraint ? trimmedConstraint : undefined;
     const candidates = installed.filter((env) => isUsableBaseInterpreter(env, constraint));
     if (candidates.length === 0) {
         return undefined;
