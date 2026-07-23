@@ -10,7 +10,7 @@ import {
     PythonProject,
     SetEnvironmentScope,
 } from '../api';
-import { SYSTEM_MANAGER_ID } from '../common/constants';
+import { INLINE_SCRIPT_MANAGER_ID, SYSTEM_MANAGER_ID } from '../common/constants';
 import {
     EnvironmentManagerAlreadyRegisteredError,
     PackageManagerAlreadyRegisteredError,
@@ -20,6 +20,7 @@ import { StopWatch } from '../common/stopWatch';
 import { EventNames } from '../common/telemetry/constants';
 import { sendTelemetryEvent } from '../common/telemetry/sender';
 import { getCallingExtension } from '../common/utils/frameUtils';
+import { normalizePath } from '../common/utils/pathUtils';
 import {
     DidChangeEnvironmentManagerEventArgs,
     DidChangePackageManagerEventArgs,
@@ -62,6 +63,7 @@ export class PythonEnvironmentManagers implements EnvironmentManagers {
      * Only mutated by setEnvironment() / setEnvironments() / refreshEnvironment().
      */
     private readonly _activeSelection = new Map<string, PythonEnvironment | undefined>();
+    private readonly _selectionRevisions = new Map<string, number>();
 
     private _onDidChangeEnvironmentManager = new EventEmitter<DidChangeEnvironmentManagerEventArgs>();
     private _onDidChangePackageManager = new EventEmitter<DidChangePackageManagerEventArgs>();
@@ -216,8 +218,11 @@ export class PythonEnvironmentManagers implements EnvironmentManagers {
 
             // Fall back to cached environment's manager if no user-configured settings
             const project = context ? this.pm.get(context) : undefined;
-            const key = project ? project.uri.toString() : 'global';
-            const cachedEnv = this._activeSelection.get(key);
+            const cachedEnv =
+                (context instanceof Uri
+                    ? this._activeSelection.get(this.getInlineScriptSelectionKey(context))
+                    : undefined) ??
+                this._activeSelection.get(project ? project.uri.toString() : 'global');
             if (cachedEnv) {
                 const cachedManager = this._environmentManagers.get(cachedEnv.envId.managerId);
                 if (cachedManager) {
@@ -335,9 +340,11 @@ export class PythonEnvironmentManagers implements EnvironmentManagers {
             traceError(this.managers.map((m) => m.id).join(', '));
             return;
         }
-        await manager.set(scope, environment);
-
         const project = scope ? this.pm.get(scope) : undefined;
+        const key = this.getActiveSelectionKey(scope, manager, project);
+        await manager.set(scope, environment);
+        this.bumpSelectionRevision(key);
+
         // Only persist to settings when explicitly requested
         if (shouldPersistSettings && scope) {
             const packageManager = this.getPackageManager(environment);
@@ -359,7 +366,6 @@ export class PythonEnvironmentManagers implements EnvironmentManagers {
             );
         }
 
-        const key = project ? project.uri.toString() : 'global';
         const oldEnv = this._activeSelection.get(key);
         if (oldEnv?.envId.id !== environment?.envId.id) {
             this._activeSelection.set(key, environment);
@@ -367,7 +373,7 @@ export class PythonEnvironmentManagers implements EnvironmentManagers {
                 setImmediate(() => {
                     try {
                         this._onDidChangeActiveEnvironment.fire({
-                            uri: project?.uri,
+                            uri: this.getActiveSelectionUri(scope, manager, project),
                             new: environment,
                             old: oldEnv,
                         });
@@ -407,11 +413,14 @@ export class PythonEnvironmentManagers implements EnvironmentManagers {
                 return;
             }
 
-            const promises: Promise<void>[] = [];
             const settings: EditAllManagerSettings[] = [];
             const events: DidChangeEnvironmentEventArgs[] = [];
             if (Array.isArray(scope) && scope.every((s) => s instanceof Uri)) {
-                promises.push(manager.set(scope, environment));
+                await manager.set(scope, environment);
+                scope.forEach((uri) => {
+                    const project = this.pm.get(uri);
+                    this.bumpSelectionRevision(this.getActiveSelectionKey(uri, manager, project));
+                });
                 scope.forEach((uri) => {
                     const m = this.getEnvironmentManager(uri);
                     // Always add settings when persisting, OR when manager differs
@@ -424,16 +433,21 @@ export class PythonEnvironmentManagers implements EnvironmentManagers {
                     }
 
                     const project = this.pm.get(uri);
-                    const key = project ? project.uri.toString() : 'global';
+                    const key = this.getActiveSelectionKey(uri, manager, project);
                     const oldEnv = this._activeSelection.get(key);
                     if (oldEnv?.envId.id !== environment?.envId.id) {
                         this._activeSelection.set(key, environment);
-                        events.push({ uri: project?.uri, new: environment, old: oldEnv });
+                        events.push({
+                            uri: this.getActiveSelectionUri(uri, manager, project),
+                            new: environment,
+                            old: oldEnv,
+                        });
                     }
                 });
             } else if (typeof scope === 'string' && scope === 'global') {
                 const m = this.getEnvironmentManager(undefined);
-                promises.push(manager.set(undefined, environment));
+                await manager.set(undefined, environment);
+                this.bumpSelectionRevision('global');
                 // Always add settings when persisting, OR when manager differs
                 if (shouldPersistSettings || manager.id !== m?.id) {
                     settings.push({
@@ -449,7 +463,6 @@ export class PythonEnvironmentManagers implements EnvironmentManagers {
                     events.push({ uri: undefined, new: environment, old: oldEnv });
                 }
             }
-            await Promise.all(promises);
             // Only persist to settings when explicitly requested
             if (shouldPersistSettings) {
                 await setAllManagerSettings(settings);
@@ -467,49 +480,51 @@ export class PythonEnvironmentManagers implements EnvironmentManagers {
                 });
             }
         } else {
-            const promises: Promise<void>[] = [];
             const events: DidChangeEnvironmentEventArgs[] = [];
             if (Array.isArray(scope) && scope.every((s) => s instanceof Uri)) {
+                const groupedScopes = new Map<InternalEnvironmentManager, Uri[]>();
                 scope.forEach((uri) => {
                     const manager = this.getEnvironmentManager(uri);
                     if (manager) {
-                        const setAndAddEvent = async () => {
-                            await manager.set(uri);
-
+                        groupedScopes.set(manager, [...(groupedScopes.get(manager) ?? []), uri]);
+                    }
+                });
+                for (const [manager, uris] of groupedScopes) {
+                    await manager.set(uris);
+                    uris.forEach((uri) => {
+                        const project = this.pm.get(uri);
+                        this.bumpSelectionRevision(this.getActiveSelectionKey(uri, manager, project));
+                    });
+                    await Promise.all(
+                        uris.map(async (uri) => {
                             const project = this.pm.get(uri);
-
-                            // Always get the new first, then compare with the old. This has minor impact on the ordering of
-                            // events. But it ensures that we always get the latest environment at the time of this call.
                             const newEnv = await manager.get(uri);
-                            const key = project ? project.uri.toString() : 'global';
+                            const key = this.getActiveSelectionKey(uri, manager, project);
                             const oldEnv = this._activeSelection.get(key);
                             if (oldEnv?.envId.id !== newEnv?.envId.id) {
                                 this._activeSelection.set(key, newEnv);
-                                events.push({ uri: project?.uri, new: newEnv, old: oldEnv });
+                                events.push({
+                                    uri: this.getActiveSelectionUri(uri, manager, project),
+                                    new: newEnv,
+                                    old: oldEnv,
+                                });
                             }
-                        };
-                        promises.push(setAndAddEvent());
-                    }
-                });
+                        }),
+                    );
+                }
             } else if (typeof scope === 'string' && scope === 'global') {
                 const manager = this.getEnvironmentManager(undefined);
                 if (manager) {
-                    const setAndAddEvent = async () => {
-                        await manager.set(undefined);
-
-                        // Always get the new first, then compare with the old. This has minor impact on the ordering of
-                        // events. But it ensures that we always get the latest environment at the time of this call.
-                        const newEnv = await manager.get(undefined);
-                        const oldEnv = this._activeSelection.get('global');
-                        if (oldEnv?.envId.id !== newEnv?.envId.id) {
-                            this._activeSelection.set('global', newEnv);
-                            events.push({ uri: undefined, new: newEnv, old: oldEnv });
-                        }
-                    };
-                    promises.push(setAndAddEvent());
+                    await manager.set(undefined);
+                    this.bumpSelectionRevision('global');
+                    const newEnv = await manager.get(undefined);
+                    const oldEnv = this._activeSelection.get('global');
+                    if (oldEnv?.envId.id !== newEnv?.envId.id) {
+                        this._activeSelection.set('global', newEnv);
+                        events.push({ uri: undefined, new: newEnv, old: oldEnv });
+                    }
                 }
             }
-            await Promise.all(promises);
             if (events.length > 0) {
                 await new Promise<void>((resolve, reject) => {
                     setImmediate(() => {
@@ -593,22 +608,65 @@ export class PythonEnvironmentManagers implements EnvironmentManagers {
         }
 
         const project = scope ? this.pm.get(scope) : undefined;
+        const key = this.getActiveSelectionKey(scope, manager, project);
+        const revision = (this._selectionRevisions.get(key) ?? 0) + 1;
         const newEnv = await manager.get(scope);
+        if (
+            this.getEnvironmentManager(scope) !== manager ||
+            (this._selectionRevisions.get(key) ?? 0) >= revision
+        ) {
+            return;
+        }
+        this._selectionRevisions.set(key, revision);
 
-        const key = project ? project.uri.toString() : 'global';
         const oldEnv = this._activeSelection.get(key);
         if (oldEnv?.envId.id !== newEnv?.envId.id) {
             this._activeSelection.set(key, newEnv);
             setImmediate(() =>
-                this._onDidChangeActiveEnvironment.fire({ uri: project?.uri, new: newEnv, old: oldEnv }),
+                this._onDidChangeActiveEnvironment.fire({
+                    uri: this.getActiveSelectionUri(scope, manager, project),
+                    new: newEnv,
+                    old: oldEnv,
+                }),
             );
         }
     }
 
     getLastKnownEnvironment(scope: GetEnvironmentScope): PythonEnvironment | undefined {
         const project = scope ? this.pm.get(scope) : undefined;
-        const key = project ? project.uri.toString() : 'global';
+        const manager = this.getEnvironmentManager(scope);
+        const key = this.getActiveSelectionKey(scope, manager, project);
         return this._activeSelection.get(key);
+    }
+
+    private getActiveSelectionKey(
+        scope: GetEnvironmentScope,
+        manager: InternalEnvironmentManager | undefined,
+        project: PythonProject | undefined,
+    ): string {
+        return scope instanceof Uri && manager?.id === INLINE_SCRIPT_MANAGER_ID
+            ? this.getInlineScriptSelectionKey(scope)
+            : project
+              ? project.uri.toString()
+              : 'global';
+    }
+
+    private getActiveSelectionUri(
+        scope: GetEnvironmentScope,
+        manager: InternalEnvironmentManager,
+        project: PythonProject | undefined,
+    ): Uri | undefined {
+        return scope instanceof Uri && manager.id === INLINE_SCRIPT_MANAGER_ID ? scope : project?.uri;
+    }
+
+    private getInlineScriptSelectionKey(scope: Uri): string {
+        return `inline-script:${normalizePath(scope.fsPath)}`;
+    }
+
+    private bumpSelectionRevision(key: string): number {
+        const revision = (this._selectionRevisions.get(key) ?? 0) + 1;
+        this._selectionRevisions.set(key, revision);
+        return revision;
     }
 
     getProjectEnvManagers(uris: Uri[]): InternalEnvironmentManager[] {

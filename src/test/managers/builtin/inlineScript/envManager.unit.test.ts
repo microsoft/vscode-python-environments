@@ -12,9 +12,14 @@ import * as cacheKey from '../../../../common/inlineScript/cacheKey';
 import * as cacheLayout from '../../../../common/inlineScript/cacheLayout';
 import * as metadataReader from '../../../../common/inlineScript/metadata';
 import * as lockfileApis from '../../../../common/lockfile.apis';
+import * as persistentState from '../../../../common/persistentState';
 import { isWindows } from '../../../../common/utils/platformUtils';
+import { normalizePath } from '../../../../common/utils/pathUtils';
 import { getVenvPythonPath } from '../../../../common/utils/virtualEnvironment';
-import { InlineScriptEnvManager } from '../../../../managers/builtin/inlineScript/envManager';
+import {
+    InlineScriptEnvManager,
+    INLINE_SCRIPT_ENVS_KEY,
+} from '../../../../managers/builtin/inlineScript/envManager';
 import * as builtinUtils from '../../../../managers/builtin/utils';
 import * as uvPythonInstaller from '../../../../managers/builtin/uvPythonInstaller';
 import * as venvUtils from '../../../../managers/builtin/venvUtils';
@@ -89,6 +94,7 @@ suite('InlineScriptEnvManager', () => {
     let baseExecutable: string;
     let baseManager: EnvironmentManager;
     let computeCacheKeyStub: sinon.SinonStub;
+    let clock: sinon.SinonFakeTimers;
     let createWithProgressStub: sinon.SinonStub;
     let getAvailablePythonVersionsStub: sinon.SinonStub;
     let ensureUvForVersionLookupStub: sinon.SinonStub;
@@ -106,6 +112,12 @@ suite('InlineScriptEnvManager', () => {
     let tempRoot: string;
     let baseInterpreterStatusStub: sinon.SinonStub;
     let writeMetaStub: sinon.SinonStub;
+    let workspaceState: {
+        get: sinon.SinonStub;
+        set: sinon.SinonStub;
+        clear: sinon.SinonStub;
+    };
+    let persistedAssociations: unknown;
 
     setup(async () => {
         tempRoot = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'inline-script-manager-')));
@@ -122,6 +134,19 @@ suite('InlineScriptEnvManager', () => {
         } as unknown as PythonEnvironmentApi;
         nativeFinder = {} as NativePythonFinder;
         baseManager = {} as EnvironmentManager;
+        persistedAssociations = undefined;
+        workspaceState = {
+            get: sinon.stub().callsFake(async (key: string) => {
+                return key === INLINE_SCRIPT_ENVS_KEY ? persistedAssociations : undefined;
+            }),
+            set: sinon.stub().callsFake(async (key: string, value: unknown) => {
+                if (key === INLINE_SCRIPT_ENVS_KEY) {
+                    persistedAssociations = value;
+                }
+            }),
+            clear: sinon.stub(),
+        };
+        sinon.stub(persistentState, 'getWorkspacePersistentState').resolves(workspaceState);
 
         readMetadataStub = sinon.stub(metadataReader, 'readInlineScriptMetadataFromFile').resolves(VALID_METADATA);
         computeCacheKeyStub = sinon.stub(cacheKey, 'computeCacheKey').returns(CACHE_KEY);
@@ -154,7 +179,7 @@ suite('InlineScriptEnvManager', () => {
             };
         });
 
-        sinon.useFakeTimers({ now: NOW, toFake: ['Date'] });
+        clock = sinon.useFakeTimers({ now: NOW, toFake: ['Date'] });
         manager = new InlineScriptEnvManager(nativeFinder, api, baseManager, globalStorageUri, makeFakeLog());
     });
 
@@ -174,6 +199,33 @@ suite('InlineScriptEnvManager', () => {
 
     function setSidecar(metadata: cacheLayout.InlineScriptEnvMeta): void {
         inspectMetaStub.resolves({ kind: 'valid', metadata });
+    }
+
+    async function createOwnedEnvironment(
+        cacheKey: string = CACHE_KEY,
+        envId: string = `inline-${cacheKey}`,
+    ): Promise<PythonEnvironment> {
+        const location = cacheLayout.getScriptEnvDir(globalStorageUri, cacheKey).fsPath;
+        const executable = getVenvPythonPath(location);
+        await fs.outputFile(executable, '');
+        return {
+            ...makeEnvironment('ms-python.python:inline-script', '3.12.4', executable, location),
+            envId: { managerId: 'ms-python.python:inline-script', id: envId },
+        };
+    }
+
+    async function waitForStubCall(stub: sinon.SinonStub): Promise<void> {
+        for (let attempt = 0; attempt < 20; attempt += 1) {
+            if (stub.called) {
+                return;
+            }
+            await new Promise((resolve) => setTimeout(resolve, 5));
+        }
+        assert.fail('Expected the stub to be called');
+    }
+
+    function nextTurn(): Promise<void> {
+        return new Promise((resolve) => setImmediate(resolve));
     }
 
     suite('static metadata and deferred methods', () => {
@@ -1430,6 +1482,569 @@ suite('InlineScriptEnvManager', () => {
         test('dispose is idempotent', () => {
             manager.dispose();
             assert.doesNotThrow(() => manager.dispose());
+        });
+    });
+
+    suite('script association persistence', () => {
+        test('sets, gets, unsets, persists, and reports only actual selection changes', async () => {
+            const uri = scriptUri();
+            const environment = await createOwnedEnvironment();
+            const listener = sinon.spy();
+            manager.onDidChangeEnvironment(listener);
+
+            await manager.set(uri, environment);
+
+            assert.strictEqual(await manager.get(uri), environment);
+            assert.deepStrictEqual(persistedAssociations, {
+                [normalizePath(uri.fsPath)]: environment.environmentPath.fsPath,
+            });
+            assert.strictEqual(workspaceState.set.firstCall.args[0], INLINE_SCRIPT_ENVS_KEY);
+            assert.strictEqual(listener.callCount, 1);
+            assert.deepStrictEqual(listener.firstCall.args[0], { uri, old: undefined, new: environment });
+
+            await manager.set(uri, environment);
+            assert.strictEqual(listener.callCount, 1);
+
+            await manager.set(uri, undefined);
+            assert.deepStrictEqual(persistedAssociations, {});
+            assert.strictEqual(listener.callCount, 2);
+            assert.deepStrictEqual(listener.secondCall.args[0], { uri, old: environment, new: undefined });
+        });
+
+        test('persists a batch atomically and reports each distinct script URI exactly once', async () => {
+            const first = scriptUri('first.py');
+            const second = scriptUri('second.py');
+            const environment = await createOwnedEnvironment();
+            const listener = sinon.spy();
+            manager.onDidChangeEnvironment(listener);
+
+            await manager.set([first, second, first], environment);
+
+            assert.deepStrictEqual(persistedAssociations, {
+                [normalizePath(first.fsPath)]: environment.environmentPath.fsPath,
+                [normalizePath(second.fsPath)]: environment.environmentPath.fsPath,
+            });
+            assert.strictEqual(workspaceState.set.callCount, 1);
+            assert.strictEqual(listener.callCount, 2);
+            assert.strictEqual(listener.firstCall.args[0].uri, first);
+            assert.strictEqual(listener.secondCall.args[0].uri, second);
+            assert.strictEqual(await manager.get(first), environment);
+            assert.strictEqual(await manager.get(second), environment);
+        });
+
+        test('serializes concurrent selections so neither persisted association is lost', async () => {
+            const firstUri = scriptUri('first.py');
+            const secondUri = scriptUri('second.py');
+            const firstEnvironment = await createOwnedEnvironment();
+            const secondEnvironment = await createOwnedEnvironment('fedcba9876543210');
+
+            await Promise.all([
+                manager.set(firstUri, firstEnvironment),
+                manager.set(secondUri, secondEnvironment),
+            ]);
+
+            assert.deepStrictEqual(persistedAssociations, {
+                [normalizePath(firstUri.fsPath)]: firstEnvironment.environmentPath.fsPath,
+                [normalizePath(secondUri.fsPath)]: secondEnvironment.environmentPath.fsPath,
+            });
+            assert.strictEqual(await manager.get(firstUri), firstEnvironment);
+            assert.strictEqual(await manager.get(secondUri), secondEnvironment);
+        });
+
+        test('rehydrates a persisted owned association on demand after restart', async () => {
+            const uri = scriptUri();
+            const persistedEnvironment = await createOwnedEnvironment();
+            persistedAssociations = { [normalizePath(uri.fsPath)]: persistedEnvironment.environmentPath.fsPath };
+            const rehydrated = { ...persistedEnvironment, envId: { ...persistedEnvironment.envId, id: 'rehydrated' } };
+            resolveVenvStub.resolves(rehydrated);
+            const restarted = new InlineScriptEnvManager(nativeFinder, api, baseManager, globalStorageUri, makeFakeLog());
+
+            assert.strictEqual(await restarted.get(uri), rehydrated);
+            assert.strictEqual(resolveVenvStub.callCount, 1);
+            assert.deepStrictEqual(persistedAssociations, {
+                [normalizePath(uri.fsPath)]: persistedEnvironment.environmentPath.fsPath,
+            });
+
+            const listener = sinon.spy();
+            restarted.onDidChangeEnvironment(listener);
+            await restarted.set(uri, persistedEnvironment);
+            assert.strictEqual(listener.callCount, 0, 'different generated IDs for the same executable are not a change');
+
+            restarted.dispose();
+        });
+
+        test('notifies when a slow persisted association finishes rehydrating', async () => {
+            const uri = scriptUri();
+            const environment = await createOwnedEnvironment();
+            persistedAssociations = { [normalizePath(uri.fsPath)]: environment.environmentPath.fsPath };
+            let resolveRehydration: ((value: PythonEnvironment) => void) | undefined;
+            resolveVenvStub.callsFake(
+                () =>
+                    new Promise<PythonEnvironment>((resolve) => {
+                        resolveRehydration = resolve;
+                    }),
+            );
+            const listener = sinon.spy();
+            manager.onDidChangeEnvironment(listener);
+
+            const pending = manager.get(uri);
+            await waitForStubCall(resolveVenvStub);
+            assert.strictEqual(listener.callCount, 0);
+            resolveRehydration!(environment);
+
+            assert.strictEqual(await pending, environment);
+            sinon.assert.calledOnceWithExactly(listener, { uri, old: undefined, new: environment });
+        });
+
+        test('does not rewrite or notify when a restart reselects the same persisted executable', async () => {
+            const uri = scriptUri();
+            const environment = await createOwnedEnvironment();
+            persistedAssociations = { [normalizePath(uri.fsPath)]: environment.environmentPath.fsPath };
+            const restarted = new InlineScriptEnvManager(nativeFinder, api, baseManager, globalStorageUri, makeFakeLog());
+            const listener = sinon.spy();
+            restarted.onDidChangeEnvironment(listener);
+
+            await restarted.set(uri, environment);
+
+            assert.deepStrictEqual(persistedAssociations, {
+                [normalizePath(uri.fsPath)]: environment.environmentPath.fsPath,
+            });
+            assert.strictEqual(workspaceState.set.callCount, 0);
+            assert.strictEqual(listener.callCount, 0);
+            assert.strictEqual(resolveVenvStub.callCount, 0);
+
+            restarted.dispose();
+        });
+
+        test('does not return a retained association when current metadata no longer accepts its Python version', async () => {
+            const uri = scriptUri();
+            const environment = await createOwnedEnvironment();
+            await manager.set(uri, environment);
+            readMetadataStub.resolves({ ...VALID_METADATA, requiresPython: '==3.11.*' });
+
+            assert.strictEqual(await manager.get(uri), undefined);
+            assert.deepStrictEqual(persistedAssociations, {
+                [normalizePath(uri.fsPath)]: environment.environmentPath.fsPath,
+            });
+
+            readMetadataStub.resolves(VALID_METADATA);
+            assert.strictEqual(await manager.get(uri), environment);
+        });
+
+        test('does not resolve or discard an association when metadata is absent or unreadable', async () => {
+            const uri = scriptUri();
+            const environment = await createOwnedEnvironment();
+            persistedAssociations = { [normalizePath(uri.fsPath)]: environment.environmentPath.fsPath };
+            readMetadataStub.resolves(undefined);
+
+            assert.strictEqual(await manager.get(uri), undefined);
+            assert.strictEqual(resolveVenvStub.callCount, 0);
+            assert.deepStrictEqual(persistedAssociations, {
+                [normalizePath(uri.fsPath)]: environment.environmentPath.fsPath,
+            });
+        });
+
+        test('preserves a cold persisted association while its cache entry is locked', async () => {
+            const uri = scriptUri();
+            const environment = await createOwnedEnvironment();
+            persistedAssociations = { [normalizePath(uri.fsPath)]: environment.environmentPath.fsPath };
+            const lockPath = `${path.resolve(environment.sysPrefix)}.lock`;
+            await fs.ensureDir(lockPath);
+
+            assert.strictEqual(await manager.get(uri), undefined);
+            assert.deepStrictEqual(persistedAssociations, {
+                [normalizePath(uri.fsPath)]: environment.environmentPath.fsPath,
+            });
+            assert.strictEqual(workspaceState.set.callCount, 0);
+            assert.strictEqual(resolveVenvStub.callCount, 0);
+        });
+
+        test('removes and notifies for a warm association whose executable was deleted', async () => {
+            const uri = scriptUri();
+            const environment = await createOwnedEnvironment();
+            await manager.set(uri, environment);
+            const listener = sinon.spy();
+            manager.onDidChangeEnvironment(listener);
+            await fs.remove(environment.environmentPath.fsPath);
+            clock.tick(5_000);
+
+            assert.strictEqual(await manager.get(uri), undefined);
+            assert.deepStrictEqual(persistedAssociations, {});
+            sinon.assert.calledOnceWithExactly(listener, { uri, old: environment, new: undefined });
+        });
+
+        test('preserves a warm association while its cache entry is locked', async () => {
+            const uri = scriptUri();
+            const environment = await createOwnedEnvironment();
+            await manager.set(uri, environment);
+            const listener = sinon.spy();
+            manager.onDidChangeEnvironment(listener);
+            await fs.remove(environment.environmentPath.fsPath);
+            await fs.ensureDir(`${path.resolve(environment.sysPrefix)}.lock`);
+            clock.tick(5_000);
+
+            assert.strictEqual(await manager.get(uri), undefined);
+            assert.deepStrictEqual(persistedAssociations, {
+                [normalizePath(uri.fsPath)]: environment.environmentPath.fsPath,
+            });
+            assert.strictEqual(listener.callCount, 0);
+        });
+
+        test('refreshes a warm association rebuilt at the same cache path', async () => {
+            const uri = scriptUri();
+            const environment = await createOwnedEnvironment();
+            await manager.set(uri, environment);
+            const rebuilt = {
+                ...environment,
+                envId: { ...environment.envId, id: 'rebuilt' },
+                version: '3.13.1',
+            };
+            resolveVenvStub.resolves(rebuilt);
+            const listener = sinon.spy();
+            manager.onDidChangeEnvironment(listener);
+            clock.tick(5_000);
+
+            assert.strictEqual(await manager.get(uri), rebuilt);
+            sinon.assert.calledOnceWithExactly(listener, { uri, old: environment, new: rebuilt });
+        });
+
+        test('retains warm environment identity when validation finds the same version', async () => {
+            const uri = scriptUri();
+            const environment = await createOwnedEnvironment();
+            await manager.set(uri, environment);
+            resolveVenvStub.resolves({
+                ...environment,
+                envId: { ...environment.envId, id: 'new-generated-id' },
+            });
+            const listener = sinon.spy();
+            manager.onDidChangeEnvironment(listener);
+            clock.tick(5_000);
+
+            assert.strictEqual(await manager.get(uri), environment);
+            assert.strictEqual(listener.callCount, 0);
+        });
+
+        test('coalesces concurrent validation of an expired warm association', async () => {
+            const uri = scriptUri();
+            const environment = await createOwnedEnvironment();
+            await manager.set(uri, environment);
+            const rebuilt = {
+                ...environment,
+                envId: { ...environment.envId, id: 'rebuilt' },
+                version: '3.13.1',
+            };
+            let resolveValidation: ((value: PythonEnvironment) => void) | undefined;
+            resolveVenvStub.callsFake(
+                () =>
+                    new Promise<PythonEnvironment>((resolve) => {
+                        resolveValidation = resolve;
+                    }),
+            );
+            const listener = sinon.spy();
+            manager.onDidChangeEnvironment(listener);
+            clock.tick(5_000);
+
+            const first = manager.get(uri);
+            const second = manager.get(uri);
+            await waitForStubCall(resolveVenvStub);
+            resolveValidation!(rebuilt);
+
+            assert.deepStrictEqual(await Promise.all([first, second]), [rebuilt, rebuilt]);
+            assert.strictEqual(resolveVenvStub.callCount, 1);
+            sinon.assert.calledOnceWithExactly(listener, { uri, old: environment, new: rebuilt });
+        });
+
+        test('unsets a persisted association after transient rehydration failure', async () => {
+            const uri = scriptUri();
+            const environment = await createOwnedEnvironment();
+            const listener = sinon.spy();
+            manager.onDidChangeEnvironment(listener);
+            persistedAssociations = { [normalizePath(uri.fsPath)]: environment.environmentPath.fsPath };
+            resolveVenvStub.resolves(undefined);
+
+            assert.strictEqual(await manager.get(uri), undefined);
+            assert.strictEqual(resolveVenvStub.callCount, 1);
+
+            await manager.set(uri, undefined);
+            assert.deepStrictEqual(persistedAssociations, {});
+            assert.strictEqual(listener.callCount, 1);
+
+            resolveVenvStub.resetHistory();
+            assert.strictEqual(await manager.get(uri), undefined);
+            assert.strictEqual(resolveVenvStub.callCount, 0);
+        });
+
+        test('removes definitively stale or corrupt persisted paths but preserves transient resolution failures', async () => {
+            const staleUri = scriptUri('stale.py');
+            persistedAssociations = { [normalizePath(staleUri.fsPath)]: path.join(tempRoot, 'missing-python') };
+
+            assert.strictEqual(await manager.get(staleUri), undefined);
+            assert.deepStrictEqual(persistedAssociations, {});
+
+            const corruptUri = scriptUri('corrupt.py');
+            persistedAssociations = { [normalizePath(corruptUri.fsPath)]: 'not-an-absolute-path' };
+            assert.strictEqual(await manager.get(corruptUri), undefined);
+            assert.deepStrictEqual(persistedAssociations, {});
+
+            const transientUri = scriptUri('transient.py');
+            const environment = await createOwnedEnvironment();
+            persistedAssociations = { [normalizePath(transientUri.fsPath)]: environment.environmentPath.fsPath };
+            resolveVenvStub.resolves(undefined);
+
+            assert.strictEqual(await manager.get(transientUri), undefined);
+            assert.deepStrictEqual(persistedAssociations, {
+                [normalizePath(transientUri.fsPath)]: environment.environmentPath.fsPath,
+            });
+
+            persistedAssociations = ['corrupt state'];
+            assert.strictEqual(await manager.get(scriptUri('corrupt-state.py')), undefined);
+            assert.deepStrictEqual(persistedAssociations, {});
+        });
+
+        test('does not let stale corrupt-state repair delete a newer valid association', async () => {
+            const uri = scriptUri();
+            const environment = await createOwnedEnvironment();
+            const scriptPath = normalizePath(uri.fsPath);
+            persistedAssociations = { [scriptPath]: 42 };
+            workspaceState.get.onSecondCall().callsFake(async () => {
+                persistedAssociations = { [scriptPath]: environment.environmentPath.fsPath };
+                return persistedAssociations;
+            });
+
+            assert.strictEqual(await manager.get(uri), undefined);
+            assert.deepStrictEqual(persistedAssociations, {
+                [scriptPath]: environment.environmentPath.fsPath,
+            });
+            assert.strictEqual(workspaceState.set.callCount, 0);
+        });
+
+        test('preserves an association when fallback resolution reports another manager', async () => {
+            const uri = scriptUri();
+            const environment = await createOwnedEnvironment();
+            persistedAssociations = { [normalizePath(uri.fsPath)]: environment.environmentPath.fsPath };
+            resolveVenvStub.resolves({
+                ...environment,
+                envId: { ...environment.envId, managerId: 'ms-python.python:system' },
+            });
+
+            assert.strictEqual(await manager.get(uri), undefined);
+            assert.deepStrictEqual(persistedAssociations, {
+                [normalizePath(uri.fsPath)]: environment.environmentPath.fsPath,
+            });
+            assert.strictEqual(workspaceState.set.callCount, 0);
+        });
+
+        test('rejects resolved and selected environments that are outside the owned cache', async () => {
+            const uri = scriptUri();
+            const listener = sinon.spy();
+            manager.onDidChangeEnvironment(listener);
+            const outsideDir = path.join(tempRoot, 'outside');
+            const outsideExecutable = getVenvPythonPath(outsideDir);
+            await fs.outputFile(outsideExecutable, '');
+            await fs.ensureDir(cacheLayout.getScriptEnvCacheRoot(globalStorageUri).fsPath);
+            const unowned = makeEnvironment(
+                'ms-python.python:inline-script',
+                '3.12.4',
+                outsideExecutable,
+                outsideDir,
+            );
+            persistedAssociations = { [normalizePath(uri.fsPath)]: outsideExecutable };
+            resolveVenvStub.resolves(unowned);
+
+            assert.strictEqual(await manager.get(uri), undefined);
+            assert.deepStrictEqual(persistedAssociations, {});
+            workspaceState.set.resetHistory();
+
+            await assert.rejects(manager.set(uri, unowned), /not an owned cache entry/);
+            assert.deepStrictEqual(persistedAssociations, {});
+            assert.strictEqual(workspaceState.set.callCount, 0);
+            assert.strictEqual(listener.callCount, 0);
+        });
+
+        test('normalizes script paths and treats same-ID environments at different paths as different selections', async function () {
+            if (!isWindows()) {
+                this.skip();
+            }
+            const uri = scriptUri('CaseSensitive.py');
+            const differentlyCased = Uri.file(uri.fsPath.toUpperCase());
+            const first = await createOwnedEnvironment(CACHE_KEY, 'duplicate-id');
+            const second = await createOwnedEnvironment('fedcba9876543210', 'duplicate-id');
+            const listener = sinon.spy();
+            manager.onDidChangeEnvironment(listener);
+
+            await manager.set(uri, first);
+            assert.strictEqual(await manager.get(differentlyCased), first);
+
+            await manager.set(differentlyCased, second);
+            assert.strictEqual(await manager.get(uri), second);
+            assert.strictEqual(listener.callCount, 2);
+            assert.strictEqual(listener.secondCall.args[0].uri, differentlyCased);
+            assert.strictEqual(listener.secondCall.args[0].old, first);
+            assert.strictEqual(listener.secondCall.args[0].new, second);
+        });
+
+        test('keeps the prior in-memory association and emits no event when persistence fails', async () => {
+            const uri = scriptUri();
+            const first = await createOwnedEnvironment();
+            const second = await createOwnedEnvironment('fedcba9876543210');
+            const listener = sinon.spy();
+            manager.onDidChangeEnvironment(listener);
+
+            await manager.set(uri, first);
+            workspaceState.set.onSecondCall().rejects(new Error('Memento unavailable'));
+            await assert.rejects(manager.set(uri, second), /Memento unavailable/);
+
+            assert.strictEqual(await manager.get(uri), first);
+            assert.deepStrictEqual(persistedAssociations, {
+                [normalizePath(uri.fsPath)]: first.environmentPath.fsPath,
+            });
+            assert.strictEqual(listener.callCount, 1);
+        });
+
+        test('rejects a failed unset without changing its in-memory association or firing an event', async () => {
+            const uri = scriptUri();
+            const environment = await createOwnedEnvironment();
+            const listener = sinon.spy();
+            manager.onDidChangeEnvironment(listener);
+
+            await manager.set(uri, environment);
+            workspaceState.set.onSecondCall().rejects(new Error('Memento unavailable'));
+
+            await assert.rejects(manager.set(uri, undefined), /Memento unavailable/);
+            assert.strictEqual(await manager.get(uri), environment);
+            assert.deepStrictEqual(persistedAssociations, {
+                [normalizePath(uri.fsPath)]: environment.environmentPath.fsPath,
+            });
+            assert.strictEqual(listener.callCount, 1);
+        });
+
+        test('does not block a cached lookup behind another script rehydration', async () => {
+            const slowUri = scriptUri('slow.py');
+            const cachedUri = scriptUri('cached.py');
+            const slowEnvironment = await createOwnedEnvironment();
+            const cachedEnvironment = await createOwnedEnvironment('fedcba9876543210');
+            persistedAssociations = { [normalizePath(slowUri.fsPath)]: slowEnvironment.environmentPath.fsPath };
+            await manager.set(cachedUri, cachedEnvironment);
+
+            let resolveSlow: ((value: PythonEnvironment | undefined) => void) | undefined;
+            resolveVenvStub.callsFake(
+                () =>
+                    new Promise<PythonEnvironment | undefined>((resolve) => {
+                        resolveSlow = resolve;
+                    }),
+            );
+            const slowGet = manager.get(slowUri);
+            await waitForStubCall(resolveVenvStub);
+
+            const cachedResult = await Promise.race([
+                manager.get(cachedUri).then((value) => ({ kind: 'cached' as const, value })),
+                nextTurn().then(() => ({ kind: 'blocked' as const, value: undefined })),
+            ]);
+            assert.strictEqual(cachedResult.kind, 'cached');
+            assert.strictEqual(cachedResult.value, cachedEnvironment);
+
+            resolveSlow!(slowEnvironment);
+            assert.strictEqual(await slowGet, slowEnvironment);
+        });
+
+        test('lets an unset win over a pending stale rehydration', async () => {
+            const uri = scriptUri();
+            const environment = await createOwnedEnvironment();
+            persistedAssociations = { [normalizePath(uri.fsPath)]: environment.environmentPath.fsPath };
+
+            let resolvePending: ((value: PythonEnvironment | undefined) => void) | undefined;
+            resolveVenvStub.callsFake(
+                () =>
+                    new Promise<PythonEnvironment | undefined>((resolve) => {
+                        resolvePending = resolve;
+                    }),
+            );
+            const pendingGet = manager.get(uri);
+            await waitForStubCall(resolveVenvStub);
+
+            await manager.set(uri, undefined);
+            assert.deepStrictEqual(persistedAssociations, {});
+
+            resolvePending!(environment);
+            assert.strictEqual(await pendingGet, undefined);
+            assert.strictEqual(await manager.get(uri), undefined);
+        });
+
+        test('lets a same-path selection supersede a pending stale rehydration', async () => {
+            const uri = scriptUri();
+            const environment = await createOwnedEnvironment();
+            persistedAssociations = { [normalizePath(uri.fsPath)]: environment.environmentPath.fsPath };
+
+            let resolvePending: ((value: PythonEnvironment | undefined) => void) | undefined;
+            resolveVenvStub.callsFake(
+                () =>
+                    new Promise<PythonEnvironment | undefined>((resolve) => {
+                        resolvePending = resolve;
+                    }),
+            );
+            const pendingGet = manager.get(uri);
+            await waitForStubCall(resolveVenvStub);
+
+            await manager.set(uri, environment);
+            const stale = {
+                ...environment,
+                envId: { ...environment.envId, managerId: 'ms-python.python:system' },
+            };
+            resolvePending!(stale);
+
+            assert.strictEqual(await pendingGet, environment);
+            assert.strictEqual(await manager.get(uri), environment);
+            assert.deepStrictEqual(persistedAssociations, {
+                [normalizePath(uri.fsPath)]: environment.environmentPath.fsPath,
+            });
+            assert.strictEqual(workspaceState.set.callCount, 0);
+        });
+
+        test('retains a pending rehydration when a competing persistence write fails', async () => {
+            const uri = scriptUri();
+            const oldEnvironment = await createOwnedEnvironment();
+            const newEnvironment = await createOwnedEnvironment('fedcba9876543210');
+            persistedAssociations = { [normalizePath(uri.fsPath)]: oldEnvironment.environmentPath.fsPath };
+            const listener = sinon.spy();
+            manager.onDidChangeEnvironment(listener);
+
+            let resolvePending: ((value: PythonEnvironment | undefined) => void) | undefined;
+            resolveVenvStub.callsFake(
+                () =>
+                    new Promise<PythonEnvironment | undefined>((resolve) => {
+                        resolvePending = resolve;
+                    }),
+            );
+            const pendingGet = manager.get(uri);
+            await waitForStubCall(resolveVenvStub);
+
+            workspaceState.set.onFirstCall().rejects(new Error('Memento unavailable'));
+            await assert.rejects(manager.set(uri, newEnvironment), /Memento unavailable/);
+
+            resolvePending!(oldEnvironment);
+            assert.strictEqual(await pendingGet, oldEnvironment);
+            assert.strictEqual(await manager.get(uri), oldEnvironment);
+            assert.deepStrictEqual(persistedAssociations, {
+                [normalizePath(uri.fsPath)]: oldEnvironment.environmentPath.fsPath,
+            });
+            sinon.assert.calledOnceWithExactly(listener, { uri, old: undefined, new: oldEnvironment });
+        });
+
+        test('rejects invalid scopes atomically and never writes workspace state', async () => {
+            const environment = await createOwnedEnvironment();
+            const valid = scriptUri();
+
+            await assert.rejects(manager.set(undefined, environment), /one or more local file URIs/);
+            await assert.rejects(manager.set(Uri.parse('untitled:script.py'), environment), /one or more local file URIs/);
+            await assert.rejects(
+                manager.set([valid, Uri.parse('untitled:script.py')], environment),
+                /one or more local file URIs/,
+            );
+
+            assert.strictEqual(workspaceState.set.callCount, 0);
+            assert.strictEqual(await manager.get(valid), undefined);
+            assert.strictEqual(await manager.get(undefined), undefined);
+            assert.strictEqual(await manager.get(Uri.parse('untitled:script.py')), undefined);
         });
     });
 });

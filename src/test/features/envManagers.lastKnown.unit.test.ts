@@ -69,18 +69,22 @@ suite('PythonEnvironmentManagers getLastKnownEnvironment', () => {
         envManagers.dispose();
     });
 
-    function registerManager(getImpl: (scope: GetEnvironmentScope) => Promise<PythonEnvironment | undefined>): string {
+    function registerManager(
+        getImpl: (scope: GetEnvironmentScope) => Promise<PythonEnvironment | undefined>,
+        setImpl: EnvironmentManager['set'] = async () => undefined,
+        name = 'test-env-mgr',
+    ): string {
         const onDidChangeEnvironment = new EventEmitter<DidChangeEnvironmentEventArgs>();
         const onDidChangeEnvironments = new EventEmitter<DidChangeEnvironmentsEventArgs>();
         const manager = {
-            name: 'test-env-mgr',
+            name,
             displayName: 'Test Env Manager',
             preferredPackageManagerId: 'ms-python.python:pip',
             onDidChangeEnvironment: onDidChangeEnvironment.event,
             onDidChangeEnvironments: onDidChangeEnvironments.event,
             get: getImpl,
             getEnvironments: async () => [],
-            set: async () => undefined,
+            set: setImpl,
             resolve: async () => undefined,
             refresh: async () => undefined,
         } as unknown as EnvironmentManager;
@@ -118,5 +122,140 @@ suite('PythonEnvironmentManagers getLastKnownEnvironment', () => {
         current = makeEnv('env2');
         await envManagers.refreshEnvironment(undefined);
         assert.strictEqual(envManagers.getLastKnownEnvironment(undefined)?.envId.id, 'env2');
+    });
+
+    test('does not update selection, settings, or events when a registered manager rejects a selection', async () => {
+        const scope = Uri.file('/workspace/script.py');
+        const project = { name: 'script.py', uri: scope };
+        projectManager.setup((pm) => pm.get(scope)).returns(() => project);
+        const managerSet = sinon.stub().rejects(new Error('Inline-script environment is not an owned cache entry.'));
+        const managerId = registerManager(async () => undefined, managerSet);
+        const rejected = {
+            ...makeEnv('unowned'),
+            envId: { id: 'unowned', managerId },
+        };
+        const settings = sinon.stub(settingHelpers, 'setAllManagerSettings').resolves();
+        const events: DidChangeEnvironmentEventArgs[] = [];
+        envManagers.onDidChangeActiveEnvironment((event) => events.push(event));
+
+        await assert.rejects(envManagers.setEnvironment(scope, rejected), /not an owned cache entry/);
+        await new Promise((resolve) => setImmediate(resolve));
+
+        assert.strictEqual(envManagers.getLastKnownEnvironment(scope), undefined);
+        assert.strictEqual(settings.callCount, 0);
+        assert.strictEqual(events.length, 0);
+    });
+
+    test('does not publish batch or global selections when the manager rejects', async () => {
+        const scope = Uri.file('/workspace/script.py');
+        const managerSet = sinon.stub().rejects(new Error('selection rejected'));
+        const managerId = registerManager(async () => undefined, managerSet);
+        const rejected = {
+            ...makeEnv('rejected'),
+            envId: { id: 'rejected', managerId },
+        };
+        const settings = sinon.stub(settingHelpers, 'setAllManagerSettings').resolves();
+        const events: DidChangeEnvironmentEventArgs[] = [];
+        envManagers.onDidChangeActiveEnvironment((event) => events.push(event));
+
+        await assert.rejects(envManagers.setEnvironments([scope], rejected, false), /selection rejected/);
+        await assert.rejects(envManagers.setEnvironments('global', rejected, false), /selection rejected/);
+        await new Promise((resolve) => setImmediate(resolve));
+
+        assert.strictEqual(envManagers.getLastKnownEnvironment(scope), undefined);
+        assert.strictEqual(envManagers.getLastKnownEnvironment(undefined), undefined);
+        assert.strictEqual(settings.callCount, 0);
+        assert.strictEqual(events.length, 0);
+    });
+
+    test('passes same-manager batch unsets to the manager atomically', async () => {
+        const first = Uri.file('/workspace/first.py');
+        const second = Uri.file('/workspace/second.py');
+        const managerSet = sinon.stub().resolves();
+        registerManager(async () => undefined, managerSet);
+
+        await envManagers.setEnvironments([first, second], undefined, false);
+
+        sinon.assert.calledOnceWithExactly(managerSet, [first, second], undefined);
+    });
+
+    test('does not let an older same-manager refresh overwrite a newer selection', async () => {
+        const initial = makeEnv('initial');
+        let resolveStaleRefresh: ((environment: PythonEnvironment) => void) | undefined;
+        const staleRefresh = new Promise<PythonEnvironment>((resolve) => {
+            resolveStaleRefresh = resolve;
+        });
+        const managerGet = sinon.stub();
+        managerGet.onFirstCall().resolves(initial);
+        managerGet.onSecondCall().returns(staleRefresh);
+        const managerId = registerManager(managerGet);
+        const selected = {
+            ...makeEnv('selected'),
+            envId: { id: 'selected', managerId },
+        };
+
+        await envManagers.refreshEnvironment(undefined);
+        const refresh = envManagers.refreshEnvironment(undefined);
+        await envManagers.setEnvironment(undefined, selected, false);
+        resolveStaleRefresh!(initial);
+        await refresh;
+
+        assert.strictEqual(envManagers.getLastKnownEnvironment(undefined), selected);
+    });
+
+    test('retains an in-flight refresh when a concurrent selection fails', async () => {
+        const refreshed = makeEnv('refreshed');
+        let resolveRefresh: ((environment: PythonEnvironment) => void) | undefined;
+        const managerGet = sinon.stub().returns(
+            new Promise<PythonEnvironment>((resolve) => {
+                resolveRefresh = resolve;
+            }),
+        );
+        const managerId = registerManager(managerGet, sinon.stub().rejects(new Error('selection rejected')));
+        const rejected = {
+            ...makeEnv('rejected'),
+            envId: { id: 'rejected', managerId },
+        };
+
+        const refresh = envManagers.refreshEnvironment(undefined);
+        await assert.rejects(envManagers.setEnvironment(undefined, rejected, false), /selection rejected/);
+        resolveRefresh!(refreshed);
+        await refresh;
+
+        assert.strictEqual(envManagers.getLastKnownEnvironment(undefined), refreshed);
+    });
+
+    test('tracks inline-script selections independently for scripts in the same project', async () => {
+        const firstUri = Uri.file('/workspace/first.py');
+        const secondUri = Uri.file('/workspace/second.py');
+        const managerId = registerManager(async () => undefined, async () => undefined, 'inline-script');
+        const first = { ...makeEnv('first'), envId: { id: 'first', managerId } };
+        const second = { ...makeEnv('second'), envId: { id: 'second', managerId } };
+
+        await envManagers.setEnvironment(firstUri, first, false);
+        await envManagers.setEnvironment(secondUri, second, false);
+
+        assert.strictEqual(envManagers.getLastKnownEnvironment(firstUri), first);
+        assert.strictEqual(envManagers.getLastKnownEnvironment(secondUri), second);
+    });
+
+    test('retains an earlier successful refresh when a later refresh fails', async () => {
+        const refreshed = makeEnv('refreshed');
+        let resolveFirst: ((environment: PythonEnvironment) => void) | undefined;
+        const managerGet = sinon.stub();
+        managerGet.onFirstCall().returns(
+            new Promise<PythonEnvironment>((resolve) => {
+                resolveFirst = resolve;
+            }),
+        );
+        managerGet.onSecondCall().rejects(new Error('refresh rejected'));
+        registerManager(managerGet);
+
+        const first = envManagers.refreshEnvironment(undefined);
+        await assert.rejects(envManagers.refreshEnvironment(undefined), /refresh rejected/);
+        resolveFirst!(refreshed);
+        await first;
+
+        assert.strictEqual(envManagers.getLastKnownEnvironment(undefined), refreshed);
     });
 });
