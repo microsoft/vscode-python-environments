@@ -106,6 +106,17 @@ suite('inlineScriptCacheKey', () => {
             );
         });
 
+        test('whitespace inside quoted marker values is preserved exactly', () => {
+            assert.strictEqual(
+                normalizeDependency('pkg; platform_version == "X  Y"'),
+                'pkg; platform_version=="X  Y"',
+            );
+            assert.notStrictEqual(
+                normalizeDependency('pkg; platform_version == "X Y"'),
+                normalizeDependency('pkg; platform_version == "X  Y"'),
+            );
+        });
+
         test('empty and whitespace-only entries normalize to empty string', () => {
             assert.strictEqual(normalizeDependency(''), '');
             assert.strictEqual(normalizeDependency('   '), '');
@@ -117,6 +128,14 @@ suite('inlineScriptCacheKey', () => {
             const result = normalizeDependency(input);
             assert.strictEqual(result, normalizeDependency(input), 'must be idempotent');
             assert.ok(result.includes('requests'), 'leading name should still appear');
+        });
+
+        test('direct-reference URL and marker boundaries are preserved exactly', () => {
+            const conditional = "pkg @ https://example.invalid/pkg! ;python_version == '0'";
+            const unconditional = "pkg @ https://example.invalid/pkg!;python_version=='0'";
+            assert.strictEqual(normalizeDependency(conditional), conditional);
+            assert.strictEqual(normalizeDependency(unconditional), unconditional);
+            assert.notStrictEqual(normalizeDependency(conditional), normalizeDependency(unconditional));
         });
 
         test('leading and trailing whitespace is stripped', () => {
@@ -238,6 +257,30 @@ suite('inlineScriptCacheKey', () => {
             const a = computeCacheKey({ dependencies: ['requests<3'], interpreterPath: interpreter });
             const b = computeCacheKey({ dependencies: ['requests<4'], interpreterPath: interpreter });
             assert.notStrictEqual(a, b);
+        });
+
+        test('meaningful whitespace inside quoted marker values changes the key', () => {
+            const a = computeCacheKey({
+                dependencies: ['pkg; platform_version == "X Y"'],
+                interpreterPath: interpreter,
+            });
+            const b = computeCacheKey({
+                dependencies: ['pkg; platform_version == "X  Y"'],
+                interpreterPath: interpreter,
+            });
+            assert.notStrictEqual(a, b);
+        });
+
+        test('direct-reference URL terminator whitespace changes the key', () => {
+            const conditional = computeCacheKey({
+                dependencies: ["pkg @ https://example.invalid/pkg! ;python_version == '0'"],
+                interpreterPath: interpreter,
+            });
+            const unconditional = computeCacheKey({
+                dependencies: ["pkg @ https://example.invalid/pkg!;python_version=='0'"],
+                interpreterPath: interpreter,
+            });
+            assert.notStrictEqual(conditional, unconditional);
         });
 
         test('changing the interpreter path changes the key', () => {
