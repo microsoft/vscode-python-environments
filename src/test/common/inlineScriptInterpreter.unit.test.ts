@@ -156,6 +156,13 @@ suite('inlineScriptInterpreter', () => {
             assert.strictEqual(picked.version, '3.12.4');
         });
 
+        test('whitespace-only requiresPython is treated as no constraint', () => {
+            const envs = [makeEnv('3.10.0'), makeEnv('3.12.4')];
+            const picked = pickCompatibleInterpreter(envs, '   ');
+            assert.ok(picked, 'whitespace-only constraint must not silently reject all envs');
+            assert.strictEqual(picked.version, '3.12.4');
+        });
+
         test('ranks versions with pre-release / dev / local suffixes by release segments only', () => {
             // 3.12.0a1 and 3.12.0.dev1 both parse to [3,12,0]; stable sort
             // means the first-listed 3.12 entry wins.

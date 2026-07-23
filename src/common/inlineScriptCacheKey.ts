@@ -31,6 +31,40 @@ function normalizeExtras(inner: string): string {
     return deduped.length > 0 ? `[${deduped.join(',')}]` : '';
 }
 
+function normalizeRequirementTail(value: string): string {
+    let result = '';
+    let unquoted = '';
+    let quote: "'" | '"' | undefined;
+    let escaped = false;
+
+    const flushUnquoted = () => {
+        result += unquoted.replace(/\s+/g, ' ').replace(/\s*([<>=!~]=?)\s*/g, '$1');
+        unquoted = '';
+    };
+
+    // Preserve PEP 508 marker literals verbatim; a backslash escapes the next character.
+    for (const character of value) {
+        if (quote) {
+            result += character;
+            if (character === quote && !escaped) {
+                quote = undefined;
+            }
+            escaped = character === '\\' && !escaped;
+            if (character !== '\\') {
+                escaped = false;
+            }
+        } else if (character === "'" || character === '"') {
+            flushUnquoted();
+            quote = character;
+            result += character;
+        } else {
+            unquoted += character;
+        }
+    }
+    flushUnquoted();
+    return result.trim();
+}
+
 /**
  * Canonicalize a PEP 723 dependency entry so common variants of the same
  * requirement produce identical strings. Not a full PEP 508 parser — only
@@ -70,10 +104,12 @@ export function normalizeDependency(dep: string): string {
         rest = rest.slice(extrasMatch[0].length);
     }
 
-    const compactedRest = rest
-        .replace(/\s+/g, ' ')
-        .replace(/\s*([<>=!~]=?)\s*/g, '$1')
-        .trim();
+    const directReference = rest.trim();
+    if (directReference.startsWith('@')) {
+        return `${name}${extras} ${directReference}`;
+    }
+
+    const compactedRest = normalizeRequirementTail(rest);
 
     return `${name}${extras}${compactedRest}`;
 }
