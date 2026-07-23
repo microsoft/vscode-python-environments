@@ -3,11 +3,12 @@
 
 import assert from 'assert';
 import * as sinon from 'sinon';
-import { Disposable, LogOutputChannel } from 'vscode';
-import { PythonEnvironmentApi } from '../../../api';
+import { Disposable, LogOutputChannel, Uri } from 'vscode';
+import { EnvironmentManager, PythonEnvironmentApi } from '../../../api';
 import * as pythonApi from '../../../features/pythonApi';
 import * as helpers from '../../../helpers';
 import { registerInlineScriptFeatures } from '../../../managers/builtin/inlineScriptMain';
+import { NativePythonFinder } from '../../../managers/common/nativePythonFinder';
 
 function makeFakeLog(): LogOutputChannel {
     return {
@@ -30,6 +31,9 @@ suite('registerInlineScriptFeatures (feature-flag gate)', () => {
     let isEnabledStub: sinon.SinonStub;
     let getPythonApiStub: sinon.SinonStub;
     let registerEnvironmentManagerStub: sinon.SinonStub;
+    const nativeFinder = {} as NativePythonFinder;
+    const baseManager = {} as EnvironmentManager;
+    const globalStorageUri = Uri.file('inline-script-global-storage');
 
     setup(() => {
         isEnabledStub = sinon.stub(helpers, 'isInlineScriptsFeatureEnabled');
@@ -47,7 +51,7 @@ suite('registerInlineScriptFeatures (feature-flag gate)', () => {
         isEnabledStub.returns(false);
         const disposables: Disposable[] = [];
 
-        await registerInlineScriptFeatures(disposables, makeFakeLog());
+        await registerInlineScriptFeatures(nativeFinder, disposables, makeFakeLog(), baseManager, globalStorageUri);
 
         assert.strictEqual(disposables.length, 0, 'no disposables should be added when flag is off');
         assert.strictEqual(getPythonApiStub.called, false, 'should not even call getPythonApi when gated off');
@@ -58,10 +62,12 @@ suite('registerInlineScriptFeatures (feature-flag gate)', () => {
         isEnabledStub.returns(true);
         const disposables: Disposable[] = [];
 
-        await registerInlineScriptFeatures(disposables, makeFakeLog());
+        await registerInlineScriptFeatures(nativeFinder, disposables, makeFakeLog(), baseManager, globalStorageUri);
 
         assert.strictEqual(getPythonApiStub.callCount, 1);
         assert.strictEqual(registerEnvironmentManagerStub.callCount, 1);
         assert.strictEqual(disposables.length, 2, 'expected manager + registration disposable');
+        const manager = registerEnvironmentManagerStub.firstCall.args[0];
+        assert.strictEqual(typeof manager.create, 'function');
     });
 });
