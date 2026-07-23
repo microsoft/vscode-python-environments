@@ -36,10 +36,6 @@ export abstract class PackageManagerCommand {
         this.log = options.log;
         const configSection = options.configSection ?? (this.constructor as typeof PackageManagerCommand).configSection;
         this.config = configSection ? getConfiguration(`python-envs.packageManager.${configSection}`) : undefined;
-        const configuredTimeout = this.config?.get<number>('executionTimeout');
-        if (configuredTimeout !== undefined) {
-            this.timeout = configuredTimeout;
-        }
     }
 
     /**

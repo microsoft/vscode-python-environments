@@ -54,7 +54,6 @@
     "python-envs.packageManager.versionCommandArgs.description": "Arguments and settings for the version command (pip/uv --version).",
     "python-envs.packageManager.availableVersionsCommandArgs.description": "Arguments and settings for the availableVersions command (pip index versions).",
     "python-envs.packageManager.listDirectNamesCommandArgs.description": "Arguments and settings for the listDirectNames command (pip list --not-required).",
-    "python-envs.packageManager.executionTimeout.description": "Timeout in milliseconds (0 = no timeout). Default: 5 minutes.",
     "python-envs.packageManager.maxRetries.description": "Maximum number of retry attempts (0-3).",
     "python-envs.packageManager.installCommandArgs.verboseOutput.description": "Display full output from the install command.",
     "python-envs.packageManager.installCommandArgs.retryOnFailure.description": "Retry the install command once on failure.",

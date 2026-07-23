@@ -150,12 +150,6 @@
                     "markdownDescription": "%python-envs.packageManager.installCommandArgs.description%",
                     "scope": "machine",
                     "properties": {
-                        "executionTimeout": {
-                            "type": "integer",
-                            "description": "%python-envs.packageManager.executionTimeout.description%",
-                            "default": 300000,
-                            "minimum": 0
-                        },
                         "verboseOutput": {
                             "type": "boolean",
                             "description": "%python-envs.packageManager.installCommandArgs.verboseOutput.description%",
@@ -181,12 +175,6 @@
                     "markdownDescription": "%python-envs.packageManager.uninstallCommandArgs.description%",
                     "scope": "machine",
                     "properties": {
-                        "executionTimeout": {
-                            "type": "integer",
-                            "description": "%python-envs.packageManager.executionTimeout.description%",
-                            "default": 300000,
-                            "minimum": 0
-                        },
                         "verboseOutput": {
                             "type": "boolean",
                             "description": "%python-envs.packageManager.uninstallCommandArgs.verboseOutput.description%",
@@ -212,12 +200,6 @@
                     "markdownDescription": "%python-envs.packageManager.listCommandArgs.description%",
                     "scope": "machine",
                     "properties": {
-                        "executionTimeout": {
-                            "type": "integer",
-                            "description": "%python-envs.packageManager.executionTimeout.description%",
-                            "default": 300000,
-                            "minimum": 0
-                        },
                         "verboseOutput": {
                             "type": "boolean",
                             "description": "%python-envs.packageManager.listCommandArgs.verboseOutput.description%",
@@ -243,12 +225,6 @@
                     "markdownDescription": "%python-envs.packageManager.versionCommandArgs.description%",
                     "scope": "machine",
                     "properties": {
-                        "executionTimeout": {
-                            "type": "integer",
-                            "description": "%python-envs.packageManager.executionTimeout.description%",
-                            "default": 300000,
-                            "minimum": 0
-                        },
                         "verboseOutput": {
                             "type": "boolean",
                             "description": "%python-envs.packageManager.versionCommandArgs.verboseOutput.description%",
@@ -274,12 +250,6 @@
                     "markdownDescription": "%python-envs.packageManager.availableVersionsCommandArgs.description%",
                     "scope": "machine",
                     "properties": {
-                        "executionTimeout": {
-                            "type": "integer",
-                            "description": "%python-envs.packageManager.executionTimeout.description%",
-                            "default": 300000,
-                            "minimum": 0
-                        },
                         "verboseOutput": {
                             "type": "boolean",
                             "description": "%python-envs.packageManager.availableVersionsCommandArgs.verboseOutput.description%",
@@ -305,12 +275,6 @@
                     "markdownDescription": "%python-envs.packageManager.listDirectNamesCommandArgs.description%",
                     "scope": "machine",
                     "properties": {
-                        "executionTimeout": {
-                            "type": "integer",
-                            "description": "%python-envs.packageManager.executionTimeout.description%",
-                            "default": 300000,
-                            "minimum": 0
-                        },
                         "verboseOutput": {
                             "type": "boolean",
                             "description": "%python-envs.packageManager.listDirectNamesCommandArgs.verboseOutput.description%",
