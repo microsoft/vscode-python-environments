@@ -94,12 +94,16 @@ export class PythonEnvironmentApiImpl implements PythonEnvironmentApi {
             this.envVarManager.onDidChangeEnvironmentVariables((e) => this._onDidChangeEnvironmentVariables.fire(e)),
             this.projectManager.onDidChangeProjects(() => {
                 const current = this.projectManager.getProjects();
-                const added = current.filter(
-                    (c) => !this.previousProjects.some((p) => p.uri.toString() === c.uri.toString()),
-                );
-                const removed = this.previousProjects.filter(
-                    (p) => !current.some((c) => c.uri.toString() === p.uri.toString()),
-                );
+                const currentByUri = new Map(current.map((p) => [p.uri.toString(), p] as const));
+                const previousByUri = new Map(this.previousProjects.map((p) => [p.uri.toString(), p] as const));
+
+                const added = [...currentByUri.entries()]
+                    .filter(([uri]) => !previousByUri.has(uri))
+                    .map(([, project]) => project);
+                const removed = [...previousByUri.entries()]
+                    .filter(([uri]) => !currentByUri.has(uri))
+                    .map(([, project]) => project);
+
                 this.previousProjects = current;
                 if (added.length > 0 || removed.length > 0) {
                     traceInfo(
