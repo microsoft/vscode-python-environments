@@ -21,6 +21,7 @@ import {
 } from '../../api';
 import { computeCacheKey } from '../../common/inlineScriptCacheKey';
 import {
+    CacheEnvironmentInspection,
     InlineScriptEnvMeta,
     META_SCHEMA_VERSION,
     getBaseInterpreterStatus,
@@ -37,8 +38,15 @@ import {
     matchesPythonVersion,
     readInlineScriptMetadataFromFile,
 } from '../../common/inlineScriptMetadata';
-import { CONDA_MANAGER_ID, PYTHON_EXTENSION_ID, SYSTEM_MANAGER_ID } from '../../common/constants';
+import {
+    CONDA_MANAGER_ID,
+    ENVS_EXTENSION_ID,
+    INLINE_SCRIPT_MANAGER_ID,
+    PYTHON_EXTENSION_ID,
+    SYSTEM_MANAGER_ID,
+} from '../../common/constants';
 import { acquireFileLock, AcquiredFileLock } from '../../common/lockfile.apis';
+import { getWorkspacePersistentState, PersistentState } from '../../common/persistentState';
 import { normalizePath } from '../../common/utils/pathUtils';
 import { compareReleaseSegments, parseReleaseSegments } from '../../common/utils/pep440Release';
 import { getVenvPythonPath } from '../../common/utils/virtualEnvironment';
@@ -53,10 +61,26 @@ const BASE_INTERPRETER_MANAGER_IDS = new Set([
 
 const CACHE_LOCK_TIMEOUT_MS = 5 * 60 * 1000;
 const CACHE_LOCK_RETRY_MS = 500;
+/** Workspace-state key for PEP 723 script path to environment executable associations. */
+export const INLINE_SCRIPT_ENVS_KEY = `${ENVS_EXTENSION_ID}:inline-script:SCRIPT_ENVIRONMENTS`;
+
+type PersistedInlineScriptEnvironments = Record<string, string>;
+
+interface PersistedAssociationChange {
+    readonly scriptPath: string;
+    readonly environmentPath?: string;
+    readonly expectedEnvironmentPath?: string;
+}
 
 /** Manages extension-owned PEP 723 script environments. */
 export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
     private readonly pendingCreations = new Map<string, Promise<PythonEnvironment | undefined>>();
+    private readonly pendingRehydrations = new Map<string, Promise<PythonEnvironment | undefined>>();
+    private readonly fsPathToEnv = new Map<string, PythonEnvironment>();
+    private readonly fsPathToPersistedEnvPath = new Map<string, string>();
+    private readonly associationRevisions = new Map<string, number>();
+    private persistenceQueue: Promise<void> = Promise.resolve();
+    private selectionQueue: Promise<void> = Promise.resolve();
 
     private readonly _onDidChangeEnvironments = new EventEmitter<DidChangeEnvironmentsEventArgs>();
     public readonly onDidChangeEnvironments: Event<DidChangeEnvironmentsEventArgs> =
@@ -145,12 +169,12 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
         return [];
     }
 
-    async set(_scope: SetEnvironmentScope, _environment?: PythonEnvironment): Promise<void> {
-        return;
+    async set(scope: SetEnvironmentScope, environment?: PythonEnvironment): Promise<void> {
+        return this.enqueueSelection(() => this.setInternal(scope, environment));
     }
 
-    async get(_scope: GetEnvironmentScope): Promise<PythonEnvironment | undefined> {
-        return undefined;
+    async get(scope: GetEnvironmentScope): Promise<PythonEnvironment | undefined> {
+        return this.getInternal(scope);
     }
 
     async resolve(_context: ResolveEnvironmentContext): Promise<PythonEnvironment | undefined> {
@@ -160,6 +184,349 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
     private getScriptUri(scope: CreateEnvironmentScope): Uri | undefined {
         const uri = scope instanceof Uri ? scope : Array.isArray(scope) && scope.length === 1 ? scope[0] : undefined;
         return uri?.scheme === 'file' ? uri : undefined;
+    }
+
+    private async setInternal(scope: SetEnvironmentScope, environment?: PythonEnvironment): Promise<void> {
+        const scripts = this.getScriptUris(scope);
+        if (scripts.length === 0) {
+            return;
+        }
+
+        let environmentPath: string | undefined;
+        if (environment) {
+            const ownership = await this.inspectAssociationOwnership(environment);
+            if (ownership !== 'expected') {
+                const message = `Inline-script environment is not an owned cache entry: ${environment.environmentPath.fsPath}.`;
+                this.log.warn(message);
+                throw new Error(message);
+            }
+            environmentPath = environment.environmentPath.fsPath;
+        }
+
+        const changes: {
+            readonly uri: Uri;
+            readonly scriptPath: string;
+            readonly before: PythonEnvironment | undefined;
+        }[] = [];
+        for (const script of scripts) {
+            const before = await this.getAssociationForMutation(script.scriptPath);
+            const hadPersistedAssociation = this.fsPathToPersistedEnvPath.has(script.scriptPath);
+            const hasSamePersistedEnvironment =
+                environmentPath !== undefined &&
+                normalizePath(this.fsPathToPersistedEnvPath.get(script.scriptPath) ?? '') ===
+                    normalizePath(environmentPath);
+            if (
+                (!this.isSameEnvironment(before, environment) && !hasSamePersistedEnvironment) ||
+                (!environment && hadPersistedAssociation)
+            ) {
+                changes.push({ ...script, before });
+            }
+        }
+        if (changes.length === 0) {
+            return;
+        }
+
+        try {
+            await this.updatePersistedAssociations(
+                changes.map((change) => ({
+                    scriptPath: change.scriptPath,
+                    environmentPath,
+                })),
+            );
+        } catch (error) {
+            this.log.error(`Failed to persist inline-script environment association: ${this.errorMessage(error)}`);
+            throw error;
+        }
+
+        for (const change of changes) {
+            this.bumpAssociationRevision(change.scriptPath);
+            if (environment) {
+                this.fsPathToEnv.set(change.scriptPath, environment);
+                this.fsPathToPersistedEnvPath.set(change.scriptPath, environmentPath!);
+            } else {
+                this.fsPathToEnv.delete(change.scriptPath);
+                this.fsPathToPersistedEnvPath.delete(change.scriptPath);
+            }
+            this._onDidChangeEnvironment.fire({ uri: change.uri, old: change.before, new: environment });
+        }
+    }
+
+    private async getInternal(scope: GetEnvironmentScope): Promise<PythonEnvironment | undefined> {
+        if (!(scope instanceof Uri) || scope.scheme !== 'file') {
+            return undefined;
+        }
+
+        // An unreadable or invalid metadata block is indistinguishable from a transient
+        // read failure, so retain the association but do not return it.
+        const metadata = await readInlineScriptMetadataFromFile(scope);
+        if (!metadata) {
+            return undefined;
+        }
+
+        const environment = await this.getAssociation(normalizePath(scope.fsPath));
+        if (!environment) {
+            return undefined;
+        }
+
+        const requiresPython = metadata.requiresPython?.trim();
+        return requiresPython && !matchesPythonVersion(requiresPython, environment.version) ? undefined : environment;
+    }
+
+    private getScriptUris(scope: SetEnvironmentScope): { readonly uri: Uri; readonly scriptPath: string }[] {
+        const candidates = scope instanceof Uri ? [scope] : Array.isArray(scope) ? scope : [];
+        const scripts: { readonly uri: Uri; readonly scriptPath: string }[] = [];
+        const seen = new Set<string>();
+        for (const candidate of candidates) {
+            if (!(candidate instanceof Uri) || candidate.scheme !== 'file') {
+                continue;
+            }
+            const scriptPath = normalizePath(candidate.fsPath);
+            if (!seen.has(scriptPath)) {
+                seen.add(scriptPath);
+                scripts.push({ uri: candidate, scriptPath });
+            }
+        }
+        return scripts;
+    }
+
+    private async getAssociation(scriptPath: string): Promise<PythonEnvironment | undefined> {
+        const cached = this.fsPathToEnv.get(scriptPath);
+        if (cached) {
+            return cached;
+        }
+
+        const pending = this.pendingRehydrations.get(scriptPath);
+        if (pending) {
+            return pending;
+        }
+
+        const revision = this.associationRevisions.get(scriptPath) ?? 0;
+        const rehydration = this.rehydrateAssociation(scriptPath, revision);
+        this.pendingRehydrations.set(scriptPath, rehydration);
+        try {
+            return await rehydration;
+        } finally {
+            if (this.pendingRehydrations.get(scriptPath) === rehydration) {
+                this.pendingRehydrations.delete(scriptPath);
+            }
+        }
+    }
+
+    private async getAssociationForMutation(scriptPath: string): Promise<PythonEnvironment | undefined> {
+        const cached = this.fsPathToEnv.get(scriptPath);
+        if (cached) {
+            return cached;
+        }
+        await this.getPersistedAssociation(scriptPath);
+        return this.fsPathToEnv.get(scriptPath);
+    }
+
+    private async rehydrateAssociation(scriptPath: string, revision: number): Promise<PythonEnvironment | undefined> {
+        let environmentPath: string | undefined;
+        try {
+            environmentPath = await this.getPersistedAssociation(scriptPath);
+        } catch (error) {
+            this.log.warn(`Failed to read inline-script environment association: ${this.errorMessage(error)}`);
+            return undefined;
+        }
+        if (!environmentPath) {
+            return undefined;
+        }
+        if (!this.isCurrentAssociationRevision(scriptPath, revision)) {
+            return this.fsPathToEnv.get(scriptPath);
+        }
+        if (!path.isAbsolute(environmentPath)) {
+            await this.removeStalePersistedAssociation(scriptPath, environmentPath, revision);
+            return undefined;
+        }
+
+        try {
+            const stat = await fs.stat(environmentPath);
+            if (!stat.isFile()) {
+                await this.removeStalePersistedAssociation(scriptPath, environmentPath, revision);
+                return undefined;
+            }
+        } catch (error) {
+            if (this.isDefinitivelyStalePathError(error)) {
+                await this.removeStalePersistedAssociation(scriptPath, environmentPath, revision);
+            } else {
+                this.log.warn(
+                    `Unable to inspect persisted inline-script environment ${environmentPath}: ${this.errorMessage(error)}`,
+                );
+            }
+            return undefined;
+        }
+
+        const resolved = await resolveVenvPythonEnvironmentPath(
+            environmentPath,
+            this.nativeFinder,
+            this.api,
+            this,
+            this.baseManager,
+        );
+        if (!resolved) {
+            // PET/API resolution can fail transiently. Keep the association for a later retry.
+            return undefined;
+        }
+
+        if (!this.isCurrentAssociationRevision(scriptPath, revision)) {
+            return this.fsPathToEnv.get(scriptPath);
+        }
+        const ownership = await this.inspectAssociationOwnership(resolved);
+        if (ownership === 'stale') {
+            await this.removeStalePersistedAssociation(scriptPath, environmentPath, revision);
+            return undefined;
+        }
+        if (ownership !== 'expected') {
+            return undefined;
+        }
+
+        if (!this.isCurrentAssociationRevision(scriptPath, revision) || this.fsPathToEnv.has(scriptPath)) {
+            return this.fsPathToEnv.get(scriptPath);
+        }
+        this.fsPathToEnv.set(scriptPath, resolved);
+        return resolved;
+    }
+
+    private async inspectAssociationOwnership(environment: PythonEnvironment): Promise<CacheEnvironmentInspection> {
+        if (environment.envId.managerId !== INLINE_SCRIPT_MANAGER_ID || !path.isAbsolute(environment.sysPrefix)) {
+            return 'stale';
+        }
+        const cacheRoot = getScriptEnvCacheRoot(this.globalStorageUri);
+        const envDir = Uri.file(environment.sysPrefix);
+        try {
+            if (!(await resolveCacheEntryPath(cacheRoot, envDir))) {
+                return 'stale';
+            }
+        } catch {
+            return 'uncertain';
+        }
+        return inspectOwnedCacheEntry(
+            environment,
+            cacheRoot,
+            envDir,
+        );
+    }
+
+    private async getPersistedAssociation(scriptPath: string): Promise<string | undefined> {
+        await this.persistenceQueue;
+        const state = await getWorkspacePersistentState();
+        const raw = await state.get<unknown>(INLINE_SCRIPT_ENVS_KEY);
+        if (raw === undefined) {
+            this.fsPathToPersistedEnvPath.delete(scriptPath);
+            return undefined;
+        }
+        const associations = this.asPersistedAssociations(raw);
+        if (!associations) {
+            await this.updatePersistedAssociations([{ scriptPath }]);
+            this.fsPathToPersistedEnvPath.delete(scriptPath);
+            return undefined;
+        }
+        const rawValue = (raw as Record<string, unknown>)[scriptPath];
+        if (rawValue !== undefined && (typeof rawValue !== 'string' || rawValue.length === 0)) {
+            await this.updatePersistedAssociations([{ scriptPath }]);
+            this.fsPathToPersistedEnvPath.delete(scriptPath);
+            return undefined;
+        }
+        const environmentPath = associations[scriptPath];
+        if (environmentPath) {
+            this.fsPathToPersistedEnvPath.set(scriptPath, environmentPath);
+        } else {
+            this.fsPathToPersistedEnvPath.delete(scriptPath);
+        }
+        return environmentPath;
+    }
+
+    private async removeStalePersistedAssociation(
+        scriptPath: string,
+        expectedEnvironmentPath: string,
+        revision: number,
+    ): Promise<void> {
+        if (!this.isCurrentAssociationRevision(scriptPath, revision)) {
+            return;
+        }
+        try {
+            await this.updatePersistedAssociations([{ scriptPath, expectedEnvironmentPath }]);
+            if (this.fsPathToPersistedEnvPath.get(scriptPath) === expectedEnvironmentPath) {
+                this.fsPathToPersistedEnvPath.delete(scriptPath);
+            }
+        } catch (error) {
+            this.log.warn(
+                `Failed to remove stale inline-script environment association: ${this.errorMessage(error)}`,
+            );
+        }
+    }
+
+    private updatePersistedAssociations(changes: readonly PersistedAssociationChange[]): Promise<void> {
+        return this.enqueuePersistence(async (state) => {
+            const raw = await state.get<unknown>(INLINE_SCRIPT_ENVS_KEY);
+            const associations = { ...(this.asPersistedAssociations(raw) ?? {}) };
+            for (const change of changes) {
+                const current = associations[change.scriptPath];
+                if (change.environmentPath) {
+                    associations[change.scriptPath] = change.environmentPath;
+                } else if (
+                    change.expectedEnvironmentPath === undefined ||
+                    (current !== undefined &&
+                        normalizePath(current) === normalizePath(change.expectedEnvironmentPath))
+                ) {
+                    delete associations[change.scriptPath];
+                }
+            }
+            await state.set(INLINE_SCRIPT_ENVS_KEY, associations);
+        });
+    }
+
+    private asPersistedAssociations(value: unknown): PersistedInlineScriptEnvironments | undefined {
+        if (!value || typeof value !== 'object' || Array.isArray(value)) {
+            return undefined;
+        }
+        const associations: PersistedInlineScriptEnvironments = {};
+        for (const [scriptPath, environmentPath] of Object.entries(value)) {
+            if (typeof environmentPath === 'string' && environmentPath.length > 0) {
+                associations[scriptPath] = environmentPath;
+            }
+        }
+        return associations;
+    }
+
+    private enqueuePersistence(operation: (state: PersistentState) => Promise<void>): Promise<void> {
+        const run = this.persistenceQueue.then(async () => operation(await getWorkspacePersistentState()));
+        this.persistenceQueue = run.catch(() => undefined);
+        return run;
+    }
+
+    private enqueueSelection<T>(operation: () => Promise<T>): Promise<T> {
+        const run = this.selectionQueue.then(operation);
+        this.selectionQueue = run.then(
+            () => undefined,
+            () => undefined,
+        );
+        return run;
+    }
+
+    private bumpAssociationRevision(scriptPath: string): void {
+        this.associationRevisions.set(scriptPath, (this.associationRevisions.get(scriptPath) ?? 0) + 1);
+    }
+
+    private isCurrentAssociationRevision(scriptPath: string, revision: number): boolean {
+        return (this.associationRevisions.get(scriptPath) ?? 0) === revision;
+    }
+
+    private isSameEnvironment(
+        first: PythonEnvironment | undefined,
+        second: PythonEnvironment | undefined,
+    ): boolean {
+        if (first === second) {
+            return true;
+        }
+        if (!first || !second) {
+            return false;
+        }
+        return (
+            first.envId.managerId === second.envId.managerId &&
+            normalizePath(first.environmentPath.fsPath) === normalizePath(second.environmentPath.fsPath)
+        );
     }
 
     private async selectBaseInterpreter(metadata: InlineScriptMetadata): Promise<SelectedBaseInterpreter | undefined> {
@@ -426,6 +793,18 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
             error !== null &&
             'code' in error &&
             (error as NodeJS.ErrnoException).code === 'ENOENT'
+        );
+    }
+
+    private isDefinitivelyStalePathError(error: unknown): boolean {
+        if (this.isFileNotFoundError(error)) {
+            return true;
+        }
+        return (
+            typeof error === 'object' &&
+            error !== null &&
+            'code' in error &&
+            ['ENOTDIR', 'EINVAL', 'ERR_INVALID_ARG_VALUE'].includes((error as NodeJS.ErrnoException).code ?? '')
         );
     }
 
