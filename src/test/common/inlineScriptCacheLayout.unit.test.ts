@@ -2,34 +2,41 @@
 // Licensed under the MIT License.
 
 import assert from 'assert';
+import fsExtra from 'fs-extra';
 import * as fs from 'fs-extra';
 import * as os from 'os';
 import * as path from 'path';
 import * as sinon from 'sinon';
 import { Uri } from 'vscode';
+import { PythonEnvironment } from '../../api';
 import {
     CacheEntrySummary,
     INLINE_SCRIPT_CACHE_DIR_NAME,
     InlineScriptEnvMeta,
     META_JSON_FILENAME,
     META_SCHEMA_VERSION,
+    getBaseInterpreterStatus,
     getMetaJsonPath,
     getScriptEnvCacheRoot,
     getScriptEnvDir,
+    inspectOwnedCacheEntry,
+    inspectMetaJson,
     readMetaJson,
+    resolveCacheEntryPath,
     selectStaleEntries,
     verifyBaseInterpreterExists,
     writeMetaJson,
 } from '../../common/inlineScriptCacheLayout';
 import * as logging from '../../common/logging';
 import * as platformUtils from '../../common/utils/platformUtils';
+import { getVenvPythonPath } from '../../common/utils/virtualEnvironment';
 
 function makeMeta(overrides: Partial<InlineScriptEnvMeta> = {}): InlineScriptEnvMeta {
     return {
         schemaVersion: META_SCHEMA_VERSION,
-        scriptFsPath: '/tmp/script.py',
+        baseInterpreterPath: Uri.file(path.join(os.tmpdir(), 'base-python')).fsPath,
+        baseInterpreterVersion: '3.12.4',
         lastUsedAt: '2026-06-18T22:45:12.000Z',
-        requiresPython: '>=3.11',
         ...overrides,
     };
 }
@@ -133,14 +140,13 @@ suite('inlineScriptCacheLayout', () => {
             );
         });
 
-        test('writeMetaJson serializes optional requiresPython as undefined-erased', async () => {
-            const meta = makeMeta({ requiresPython: undefined });
+        test('writeMetaJson only serializes environment-level metadata', async () => {
+            const meta = makeMeta();
             await writeMetaJson(envDir, meta);
             const onDisk = JSON.parse(await fs.readFile(getMetaJsonPath(envDir).fsPath, 'utf8'));
+            assert.strictEqual(onDisk.baseInterpreterPath, meta.baseInterpreterPath);
+            assert.strictEqual('scriptFsPath' in onDisk, false);
             assert.strictEqual('requiresPython' in onDisk, false);
-            const read = await readMetaJson(envDir);
-            assert.ok(read);
-            assert.strictEqual(read.requiresPython, undefined);
         });
 
         test('writeMetaJson produces human-readable, indented JSON', async () => {
@@ -175,6 +181,46 @@ suite('inlineScriptCacheLayout', () => {
             assert.ok(traceWarnStub.called, 'expected a traceWarn');
         });
 
+        test('classifies missing, malformed, and valid metadata distinctly', async () => {
+            assert.deepStrictEqual(await inspectMetaJson(envDir), { kind: 'missing' });
+            await writeRaw('this is not json');
+            assert.deepStrictEqual(await inspectMetaJson(envDir), { kind: 'invalid' });
+            const metadata = makeMeta();
+            await writeRaw(JSON.stringify(metadata));
+            assert.deepStrictEqual(await inspectMetaJson(envDir), { kind: 'valid', metadata });
+        });
+
+        test('classifies non-ENOENT sidecar stat failures as unavailable', async () => {
+            sinon.stub(fsExtra, 'lstat').rejects(Object.assign(new Error('permission denied'), { code: 'EACCES' }));
+            assert.deepStrictEqual(await inspectMetaJson(envDir), { kind: 'unavailable' });
+        });
+
+        test('classifies non-ENOENT sidecar read failures as unavailable', async () => {
+            await writeRaw(JSON.stringify(makeMeta()));
+            sinon.stub(fsExtra, 'readFile').rejects(Object.assign(new Error('I/O error'), { code: 'EIO' }));
+            assert.deepStrictEqual(await inspectMetaJson(envDir), { kind: 'unavailable' });
+        });
+
+        test('does not follow a sidecar symlink outside the environment', async function () {
+            const externalMetaPath = path.join(tmpDir, 'external-meta.json');
+            const sidecarPath = getMetaJsonPath(envDir).fsPath;
+            await fs.writeJson(externalMetaPath, makeMeta());
+            try {
+                await fs.symlink(externalMetaPath, sidecarPath, 'file');
+            } catch (error) {
+                const code = (error as NodeJS.ErrnoException).code;
+                if (code === 'EPERM' || code === 'EACCES') {
+                    this.skip();
+                    return;
+                }
+                throw error;
+            }
+
+            assert.deepStrictEqual(await inspectMetaJson(envDir), { kind: 'invalid' });
+            assert.strictEqual(await readMetaJson(envDir), undefined);
+            assert.deepStrictEqual(await fs.readJson(externalMetaPath), makeMeta());
+        });
+
         test('returns undefined for malformed JSON', async () => {
             await writeRaw('this is not json');
             const result = await readMetaJson(envDir);
@@ -194,17 +240,37 @@ suite('inlineScriptCacheLayout', () => {
             assert.ok(traceWarnStub.called);
         });
 
-        test('returns undefined when scriptFsPath is missing', async () => {
-            const { scriptFsPath: _omit, ...partial } = makeMeta();
+        test('returns undefined when baseInterpreterPath is missing', async () => {
+            const { baseInterpreterPath: _omit, ...partial } = makeMeta();
             await writeRaw(JSON.stringify(partial));
             const result = await readMetaJson(envDir);
             assert.strictEqual(result, undefined);
         });
 
-        test('returns undefined when scriptFsPath is an empty string', async () => {
-            await writeRaw(JSON.stringify({ ...makeMeta(), scriptFsPath: '' }));
+        test('returns undefined when baseInterpreterPath is an empty string', async () => {
+            await writeRaw(JSON.stringify({ ...makeMeta(), baseInterpreterPath: '' }));
             const result = await readMetaJson(envDir);
             assert.strictEqual(result, undefined);
+        });
+
+        test('returns undefined when baseInterpreterPath is relative', async () => {
+            await writeRaw(JSON.stringify({ ...makeMeta(), baseInterpreterPath: path.join('relative', 'python') }));
+            const result = await readMetaJson(envDir);
+            assert.strictEqual(result, undefined);
+        });
+
+        test('returns undefined when baseInterpreterPath is not a string', async () => {
+            await writeRaw(JSON.stringify({ ...makeMeta(), baseInterpreterPath: 312 }));
+            const result = await readMetaJson(envDir);
+            assert.strictEqual(result, undefined);
+        });
+
+        test('returns undefined when baseInterpreterVersion is missing or blank', async () => {
+            const { baseInterpreterVersion: _omit, ...partial } = makeMeta();
+            await writeRaw(JSON.stringify(partial));
+            assert.strictEqual(await readMetaJson(envDir), undefined);
+            await writeRaw(JSON.stringify({ ...makeMeta(), baseInterpreterVersion: '   ' }));
+            assert.strictEqual(await readMetaJson(envDir), undefined);
         });
 
         test('returns undefined when lastUsedAt is not parseable', async () => {
@@ -213,18 +279,24 @@ suite('inlineScriptCacheLayout', () => {
             assert.strictEqual(result, undefined);
         });
 
-        test('returns undefined when requiresPython is present but not a string', async () => {
-            await writeRaw(JSON.stringify({ ...makeMeta(), requiresPython: 311 }));
-            const result = await readMetaJson(envDir);
-            assert.strictEqual(result, undefined);
-        });
-
-        test('accepts a meta with requiresPython explicitly omitted', async () => {
-            const { requiresPython: _omit, ...partial } = makeMeta();
-            await writeRaw(JSON.stringify(partial));
+        test('drops legacy script-specific fields', async () => {
+            await writeRaw(JSON.stringify({ ...makeMeta(), scriptFsPath: 'script.py', requiresPython: '>=3.11' }));
             const result = await readMetaJson(envDir);
             assert.ok(result);
-            assert.strictEqual(result.requiresPython, undefined);
+            assert.strictEqual('scriptFsPath' in result, false);
+            assert.strictEqual('requiresPython' in result, false);
+        });
+
+        test('rejects the provisional pre-writer v1 sidecar shape', async () => {
+            await writeRaw(
+                JSON.stringify({
+                    schemaVersion: 1,
+                    scriptFsPath: Uri.file(path.join(os.tmpdir(), 'script.py')).fsPath,
+                    lastUsedAt: '2026-06-18T22:45:12.000Z',
+                    requiresPython: '>=3.11',
+                }),
+            );
+            assert.strictEqual(await readMetaJson(envDir), undefined);
         });
 
         test('returns undefined for a top-level non-object payload', async () => {
@@ -243,11 +315,6 @@ suite('inlineScriptCacheLayout', () => {
             // tolerated and dropped on read. Pin that null doesn't
             // break the validator.
             assert.ok(await readMetaJson(envDir));
-        });
-
-        test('returns undefined when requiresPython is explicitly null', async () => {
-            await writeRaw(JSON.stringify({ ...makeMeta(), requiresPython: null }));
-            assert.strictEqual(await readMetaJson(envDir), undefined);
         });
 
         test('returns undefined for a non-canonical ISO timestamp (e.g. "2026")', async () => {
@@ -292,6 +359,28 @@ suite('inlineScriptCacheLayout', () => {
                 args.some((a) => a.includes('not found')),
                 `expected an ENOENT-specific warn; saw: ${JSON.stringify(args)}`,
             );
+        });
+    });
+
+    suite('getBaseInterpreterStatus classification', () => {
+        let tmpDir: string;
+        let envDir: Uri;
+
+        setup(async () => {
+            tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'isclayout-base-status-'));
+            envDir = Uri.file(path.join(tmpDir, 'env'));
+            await fs.ensureDir(envDir.fsPath);
+            sinon.stub(platformUtils, 'isWindows').returns(false);
+        });
+
+        teardown(async () => {
+            await fs.remove(tmpDir);
+        });
+
+        test('distinguishes a missing base interpreter from an unavailable stat', async () => {
+            assert.strictEqual(await getBaseInterpreterStatus(envDir), 'missing');
+            sinon.stub(fsExtra, 'stat').rejects(Object.assign(new Error('I/O error'), { code: 'EIO' }));
+            assert.strictEqual(await getBaseInterpreterStatus(envDir), 'unavailable');
         });
     });
 
@@ -350,6 +439,107 @@ suite('inlineScriptCacheLayout', () => {
             const future = new Date(now.getTime() + TTL_MS);
             const stale = selectStaleEntries([entry('a', future)], now, TTL_MS);
             assert.deepStrictEqual(stale, []);
+        });
+    });
+
+    suite('resolveCacheEntryPath', () => {
+        let tmpDir: string;
+        let cacheRoot: Uri;
+
+        setup(async () => {
+            tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'isclayout-containment-'));
+            cacheRoot = Uri.file(path.join(tmpDir, 'script-envs-v1'));
+            await fs.ensureDir(cacheRoot.fsPath);
+        });
+
+        teardown(async () => {
+            await fs.remove(tmpDir);
+        });
+
+        test('resolves a direct cache entry', async () => {
+            const envDir = Uri.joinPath(cacheRoot, '0123456789abcdef');
+            await fs.ensureDir(envDir.fsPath);
+
+            assert.strictEqual(await resolveCacheEntryPath(cacheRoot, envDir), await fs.realpath(envDir.fsPath));
+        });
+
+        test('rejects the cache root and paths outside it', async () => {
+            const externalEnv = Uri.file(path.join(tmpDir, '0123456789abcdef'));
+            await fs.ensureDir(externalEnv.fsPath);
+
+            assert.strictEqual(await resolveCacheEntryPath(cacheRoot, cacheRoot), undefined);
+            assert.strictEqual(await resolveCacheEntryPath(cacheRoot, externalEnv), undefined);
+        });
+
+        test('surfaces a missing entry', async () => {
+            await assert.rejects(
+                resolveCacheEntryPath(cacheRoot, Uri.joinPath(cacheRoot, '0123456789abcdef')),
+                (error: NodeJS.ErrnoException) => error.code === 'ENOENT',
+            );
+        });
+    });
+
+    suite('inspectOwnedCacheEntry', () => {
+        let tmpDir: string;
+        let cacheRoot: Uri;
+        let envDir: Uri;
+        let environment: PythonEnvironment;
+
+        setup(async () => {
+            tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'isclayout-ownership-'));
+            cacheRoot = Uri.file(path.join(tmpDir, 'script-envs-v1'));
+            envDir = Uri.joinPath(cacheRoot, '0123456789abcdef');
+            const pythonPath = getVenvPythonPath(envDir.fsPath);
+            await fs.outputFile(pythonPath, '');
+            environment = {
+                envId: { id: 'inline-env', managerId: 'ms-python.python:inline-script' },
+                name: 'Python 3.12.4',
+                displayName: 'Python 3.12.4',
+                displayPath: pythonPath,
+                version: '3.12.4',
+                environmentPath: Uri.file(pythonPath),
+                execInfo: { run: { executable: pythonPath } },
+                sysPrefix: envDir.fsPath,
+            };
+        });
+
+        teardown(async () => {
+            await fs.remove(tmpDir);
+        });
+
+        test('accepts an inline-owned environment at the expected cache entry', async () => {
+            assert.strictEqual(await inspectOwnedCacheEntry(environment, cacheRoot, envDir), 'expected');
+        });
+
+        test('does not claim environments owned by another manager', async () => {
+            const otherManager = {
+                ...environment,
+                envId: { ...environment.envId, managerId: 'ms-python.python:system' },
+            };
+            assert.strictEqual(await inspectOwnedCacheEntry(otherManager, cacheRoot, envDir), 'uncertain');
+        });
+
+        test('classifies an inline environment resolving elsewhere as stale', async () => {
+            const externalPrefix = path.join(tmpDir, 'external-env');
+            const externalPython = getVenvPythonPath(externalPrefix);
+            await fs.outputFile(externalPython, '');
+            const mismatched = {
+                ...environment,
+                sysPrefix: externalPrefix,
+                environmentPath: Uri.file(externalPython),
+            };
+
+            assert.strictEqual(await inspectOwnedCacheEntry(mismatched, cacheRoot, envDir), 'stale');
+        });
+
+        test('preserves ownership as uncertain when paths cannot be inspected', async () => {
+            const missing = {
+                ...environment,
+                environmentPath: Uri.file(path.join(tmpDir, 'missing-python')),
+            };
+
+            assert.strictEqual(await inspectOwnedCacheEntry(missing, cacheRoot, envDir), 'uncertain');
+            assert.ok(traceWarnStub.called);
         });
     });
 
