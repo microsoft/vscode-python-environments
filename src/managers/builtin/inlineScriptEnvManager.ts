@@ -31,7 +31,7 @@ import {
     resolveCacheEntryPath,
     writeMetaJson,
 } from '../../common/inlineScriptCacheLayout';
-import { pickCompatibleInterpreter } from '../../common/inlineScriptInterpreter';
+import { extractLowerBoundVersion, pickCompatibleInterpreter } from '../../common/inlineScriptInterpreter';
 import {
     InlineScriptMetadata,
     matchesPythonVersion,
@@ -43,6 +43,7 @@ import { normalizePath } from '../../common/utils/pathUtils';
 import { compareReleaseSegments, parseReleaseSegments } from '../../common/utils/pep440Release';
 import { getVenvPythonPath } from '../../common/utils/virtualEnvironment';
 import { NativePythonFinder } from '../common/nativePythonFinder';
+import * as uvPythonInstaller from './uvPythonInstaller';
 import { createWithProgress, resolveVenvPythonEnvironmentPath } from './venvUtils';
 
 const BASE_INTERPRETER_MANAGER_IDS = new Set([
@@ -57,6 +58,7 @@ const CACHE_LOCK_RETRY_MS = 500;
 /** Manages extension-owned PEP 723 script environments. */
 export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
     private readonly pendingCreations = new Map<string, Promise<PythonEnvironment | undefined>>();
+    private readonly pendingBaseInterpreterInstallations = new Map<string, Promise<boolean>>();
 
     private readonly _onDidChangeEnvironments = new EventEmitter<DidChangeEnvironmentsEventArgs>();
     public readonly onDidChangeEnvironments: Event<DidChangeEnvironmentsEventArgs> =
@@ -108,9 +110,12 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
                 return undefined;
             }
 
-            const selectedBase = await this.selectBaseInterpreter(metadata);
+            let selectedBase = await this.selectBaseInterpreter(metadata);
             if (!selectedBase) {
-                this.log.warn(`No installed Python satisfies the inline-script requirements for ${scriptUri.fsPath}.`);
+                selectedBase = await this.installAndSelectBaseInterpreter(metadata);
+            }
+            if (!selectedBase) {
+                this.log.warn(`No compatible Python is available for inline-script environment creation: ${scriptUri.fsPath}.`);
                 return undefined;
             }
             const cacheKey = computeCacheKey({
@@ -207,6 +212,62 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
         }
 
         return undefined;
+    }
+
+    private async installAndSelectBaseInterpreter(
+        metadata: InlineScriptMetadata,
+    ): Promise<SelectedBaseInterpreter | undefined> {
+        const requiresPython = metadata.requiresPython?.trim() || undefined;
+        const version = extractLowerBoundVersion(requiresPython);
+        if (requiresPython && !version) {
+            this.log.warn(
+                'Cannot install a Python for this inline script because its requires-python constraint has no safe lower bound.',
+            );
+            return undefined;
+        }
+
+        const installKey = version ?? 'latest';
+        let installation = this.pendingBaseInterpreterInstallations.get(installKey);
+        if (!installation) {
+            installation = this.installPythonAndRefresh(requiresPython, version);
+            this.pendingBaseInterpreterInstallations.set(installKey, installation);
+            void installation.finally(() => {
+                if (this.pendingBaseInterpreterInstallations.get(installKey) === installation) {
+                    this.pendingBaseInterpreterInstallations.delete(installKey);
+                }
+            });
+        }
+
+        if (!(await installation)) {
+            return undefined;
+        }
+
+        const selected = await this.selectBaseInterpreter(metadata);
+        if (!selected) {
+            this.log.warn(
+                'Python was installed for an inline script, but no compatible base interpreter was discovered after refreshing environments.',
+            );
+        }
+        return selected;
+    }
+
+    private async installPythonAndRefresh(requiresPython: string | undefined, version: string | undefined): Promise<boolean> {
+        try {
+            const installedPath = await uvPythonInstaller.promptInstallPythonViaUv('inlineScript', this.log, {
+                requiresPython,
+                version,
+            });
+            if (!installedPath) {
+                this.log.warn('Python installation for inline-script environment creation was declined or did not complete.');
+                return false;
+            }
+
+            await this.api.refreshEnvironments(undefined);
+            return true;
+        } catch (error) {
+            this.log.error(`Failed to install or discover Python for an inline script: ${this.errorMessage(error)}`);
+            return false;
+        }
     }
 
     private async createOrReuseEnvironment(

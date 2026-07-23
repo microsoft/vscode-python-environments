@@ -15,6 +15,7 @@ import * as metadataReader from '../../../common/inlineScriptMetadata';
 import { isWindows } from '../../../common/utils/platformUtils';
 import { getVenvPythonPath } from '../../../common/utils/virtualEnvironment';
 import { InlineScriptEnvManager } from '../../../managers/builtin/inlineScriptEnvManager';
+import * as uvPythonInstaller from '../../../managers/builtin/uvPythonInstaller';
 import * as venvUtils from '../../../managers/builtin/venvUtils';
 import { NativePythonFinder } from '../../../managers/common/nativePythonFinder';
 
@@ -67,6 +68,7 @@ const venvPythonPath = getVenvPythonPath;
 suite('InlineScriptEnvManager', () => {
     let api: PythonEnvironmentApi;
     let apiGetEnvironmentsStub: sinon.SinonStub;
+    let apiRefreshEnvironmentsStub: sinon.SinonStub;
     let baseEnvironment: PythonEnvironment;
     let baseExecutable: string;
     let baseManager: EnvironmentManager;
@@ -76,6 +78,7 @@ suite('InlineScriptEnvManager', () => {
     let lockStub: sinon.SinonStub;
     let manager: InlineScriptEnvManager;
     let nativeFinder: NativePythonFinder;
+    let promptInstallPythonViaUvStub: sinon.SinonStub;
     let readMetadataStub: sinon.SinonStub;
     let inspectMetaStub: sinon.SinonStub;
     let retainLockStub: sinon.SinonStub;
@@ -93,12 +96,17 @@ suite('InlineScriptEnvManager', () => {
         baseEnvironment = makeEnvironment('ms-python.python:system', '3.12.4', baseExecutable);
 
         apiGetEnvironmentsStub = sinon.stub().resolves([baseEnvironment]);
-        api = { getEnvironments: apiGetEnvironmentsStub } as unknown as PythonEnvironmentApi;
+        apiRefreshEnvironmentsStub = sinon.stub().resolves();
+        api = {
+            getEnvironments: apiGetEnvironmentsStub,
+            refreshEnvironments: apiRefreshEnvironmentsStub,
+        } as unknown as PythonEnvironmentApi;
         nativeFinder = {} as NativePythonFinder;
         baseManager = {} as EnvironmentManager;
 
         readMetadataStub = sinon.stub(metadataReader, 'readInlineScriptMetadataFromFile').resolves(VALID_METADATA);
         computeCacheKeyStub = sinon.stub(cacheKey, 'computeCacheKey').returns(CACHE_KEY);
+        promptInstallPythonViaUvStub = sinon.stub(uvPythonInstaller, 'promptInstallPythonViaUv');
         inspectMetaStub = sinon.stub(cacheLayout, 'inspectMetaJson').resolves({ kind: 'missing' });
         baseInterpreterStatusStub = sinon.stub(cacheLayout, 'getBaseInterpreterStatus').resolves('available');
         writeMetaStub = sinon.stub(cacheLayout, 'writeMetaJson').resolves();
@@ -110,11 +118,12 @@ suite('InlineScriptEnvManager', () => {
         resolveVenvStub = sinon.stub(venvUtils, 'resolveVenvPythonEnvironmentPath').resolves(undefined);
         createWithProgressStub = sinon.stub(venvUtils, 'createWithProgress').callsFake(async (...args: unknown[]) => {
             const envDir = args[6] as string;
+            const selectedBase = args[4] as PythonEnvironment;
             await fs.outputFile(getVenvPythonPath(envDir), '');
             return {
                 environment: makeEnvironment(
                     'ms-python.python:inline-script',
-                    '3.12.4',
+                    selectedBase.version,
                     getVenvPythonPath(envDir),
                     envDir,
                 ),
@@ -278,6 +287,175 @@ suite('InlineScriptEnvManager', () => {
                 dependencies: ['requests'],
                 interpreterPath: await fs.realpath(baseExecutable),
             });
+        });
+    });
+
+    suite('uv base interpreter fallback', () => {
+        test('installs the requirement lower bound, refreshes, and uses the discovered base interpreter', async () => {
+            const uvExecutable = path.join(tempRoot, 'uv-python', isWindows() ? 'python.exe' : 'python');
+            await fs.outputFile(uvExecutable, '');
+            const uvBase = makeEnvironment('ms-python.python:system', '3.13.2', uvExecutable);
+            readMetadataStub.resolves({ ...VALID_METADATA, requiresPython: '>=3.13' });
+            apiGetEnvironmentsStub.onFirstCall().resolves([baseEnvironment]);
+            apiGetEnvironmentsStub.onSecondCall().resolves([uvBase]);
+            promptInstallPythonViaUvStub.resolves(uvExecutable);
+
+            assert.ok(await manager.create(scriptUri()));
+
+            sinon.assert.calledOnceWithExactly(promptInstallPythonViaUvStub, 'inlineScript', manager.log, {
+                requiresPython: '>=3.13',
+                version: '3.13',
+            });
+            sinon.assert.calledOnceWithExactly(apiRefreshEnvironmentsStub, undefined);
+            assert.strictEqual(apiGetEnvironmentsStub.callCount, 2);
+            assert.strictEqual(createWithProgressStub.firstCall.args[4], uvBase);
+        });
+
+        test('asks uv for the latest Python when requires-python is absent', async () => {
+            const uvExecutable = path.join(tempRoot, 'uv-python', isWindows() ? 'python.exe' : 'python');
+            await fs.outputFile(uvExecutable, '');
+            const uvBase = makeEnvironment('ms-python.python:system', '3.14.0', uvExecutable);
+            readMetadataStub.resolves({ ...VALID_METADATA, requiresPython: undefined });
+            apiGetEnvironmentsStub.onFirstCall().resolves([]);
+            apiGetEnvironmentsStub.onSecondCall().resolves([uvBase]);
+            promptInstallPythonViaUvStub.resolves(uvExecutable);
+
+            assert.ok(await manager.create(scriptUri()));
+
+            sinon.assert.calledOnceWithExactly(promptInstallPythonViaUvStub, 'inlineScript', manager.log, {
+                requiresPython: undefined,
+                version: undefined,
+            });
+            sinon.assert.calledOnceWithExactly(apiRefreshEnvironmentsStub, undefined);
+            assert.strictEqual(apiGetEnvironmentsStub.callCount, 2);
+            assert.strictEqual(createWithProgressStub.firstCall.args[4], uvBase);
+        });
+
+        test('does not mutate the cache when the user declines installation', async () => {
+            readMetadataStub.resolves({ ...VALID_METADATA, requiresPython: '>=3.13' });
+            promptInstallPythonViaUvStub.resolves(undefined);
+
+            assert.strictEqual(await manager.create(scriptUri()), undefined);
+
+            assert.strictEqual(apiRefreshEnvironmentsStub.callCount, 0);
+            assert.strictEqual(lockStub.callCount, 0);
+            assert.strictEqual(createWithProgressStub.callCount, 0);
+            assert.strictEqual(await fs.pathExists(cacheLayout.getScriptEnvCacheRoot(globalStorageUri).fsPath), false);
+        });
+
+        test('does not mutate the cache when installation fails', async () => {
+            readMetadataStub.resolves({ ...VALID_METADATA, requiresPython: '>=3.13' });
+            promptInstallPythonViaUvStub.rejects(new Error('uv failed'));
+
+            assert.strictEqual(await manager.create(scriptUri()), undefined);
+
+            assert.strictEqual(apiRefreshEnvironmentsStub.callCount, 0);
+            assert.strictEqual(lockStub.callCount, 0);
+            assert.strictEqual(createWithProgressStub.callCount, 0);
+        });
+
+        test('does not mutate the cache when environment refresh fails', async () => {
+            readMetadataStub.resolves({ ...VALID_METADATA, requiresPython: '>=3.13' });
+            promptInstallPythonViaUvStub.resolves(baseExecutable);
+            apiRefreshEnvironmentsStub.rejects(new Error('discovery failed'));
+
+            assert.strictEqual(await manager.create(scriptUri()), undefined);
+
+            sinon.assert.calledOnceWithExactly(apiRefreshEnvironmentsStub, undefined);
+            assert.strictEqual(lockStub.callCount, 0);
+            assert.strictEqual(createWithProgressStub.callCount, 0);
+        });
+
+        test('does not prompt when requires-python has no safe lower bound', async () => {
+            readMetadataStub.resolves({ ...VALID_METADATA, requiresPython: '<3.13' });
+            apiGetEnvironmentsStub.resolves([
+                makeEnvironment('ms-python.python:system', '3.13.0', baseExecutable),
+            ]);
+
+            assert.strictEqual(await manager.create(scriptUri()), undefined);
+
+            assert.strictEqual(promptInstallPythonViaUvStub.callCount, 0);
+            assert.strictEqual(apiRefreshEnvironmentsStub.callCount, 0);
+            assert.strictEqual(lockStub.callCount, 0);
+            assert.strictEqual(createWithProgressStub.callCount, 0);
+        });
+
+        for (const [description, refreshedEnvironments] of [
+            ['the installed interpreter is not compatible', [baseEnvironment]],
+            ['no installed interpreter is reported', []],
+        ] as const) {
+            test(`does not build when ${description} after refresh`, async () => {
+                readMetadataStub.resolves({ ...VALID_METADATA, requiresPython: '>=3.13' });
+                apiGetEnvironmentsStub.onFirstCall().resolves([baseEnvironment]);
+                apiGetEnvironmentsStub.onSecondCall().resolves(refreshedEnvironments);
+                promptInstallPythonViaUvStub.resolves(baseExecutable);
+
+                assert.strictEqual(await manager.create(scriptUri()), undefined);
+
+                sinon.assert.calledOnceWithExactly(apiRefreshEnvironmentsStub, undefined);
+                assert.strictEqual(lockStub.callCount, 0);
+                assert.strictEqual(createWithProgressStub.callCount, 0);
+            });
+        }
+
+        test('does not prompt when a compatible installed interpreter is available', async () => {
+            assert.ok(await manager.create(scriptUri()));
+
+            assert.strictEqual(promptInstallPythonViaUvStub.callCount, 0);
+            assert.strictEqual(apiRefreshEnvironmentsStub.callCount, 0);
+        });
+
+        test('coalesces simultaneous fallback requests for the same Python version', async () => {
+            const uvExecutable = path.join(tempRoot, 'uv-python', isWindows() ? 'python.exe' : 'python');
+            await fs.outputFile(uvExecutable, '');
+            const uvBase = makeEnvironment('ms-python.python:system', '3.13.1', uvExecutable);
+            readMetadataStub.resolves({ ...VALID_METADATA, requiresPython: '>=3.13' });
+
+            let isInstalled = false;
+            let initialQueries = 0;
+            let signalSecondInitialQuery: (() => void) | undefined;
+            const secondInitialQuery = new Promise<void>((resolve) => {
+                signalSecondInitialQuery = resolve;
+            });
+            apiGetEnvironmentsStub.callsFake(async () => {
+                if (isInstalled) {
+                    return [uvBase];
+                }
+                initialQueries += 1;
+                if (initialQueries === 2) {
+                    signalSecondInitialQuery!();
+                }
+                return [];
+            });
+
+            let releaseInstall: (() => void) | undefined;
+            let signalPrompt: (() => void) | undefined;
+            const promptShown = new Promise<void>((resolve) => {
+                signalPrompt = resolve;
+            });
+            const installGate = new Promise<void>((resolve) => {
+                releaseInstall = resolve;
+            });
+            promptInstallPythonViaUvStub.callsFake(async () => {
+                signalPrompt!();
+                await installGate;
+                isInstalled = true;
+                return uvExecutable;
+            });
+
+            const first = manager.create(scriptUri('a.py'));
+            await promptShown;
+            const second = manager.create(scriptUri('b.py'));
+            await secondInitialQuery;
+            await Promise.resolve();
+            releaseInstall!();
+            const [firstResult, secondResult] = await Promise.all([first, second]);
+
+            assert.ok(firstResult);
+            assert.strictEqual(firstResult, secondResult);
+            assert.strictEqual(promptInstallPythonViaUvStub.callCount, 1);
+            assert.strictEqual(apiRefreshEnvironmentsStub.callCount, 1);
+            assert.strictEqual(createWithProgressStub.callCount, 1);
         });
     });
 
