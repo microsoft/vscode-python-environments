@@ -40,7 +40,7 @@ suite('PythonEnvironmentApiImpl - onDidChangePythonProjects', () => {
         });
 
         // 6. Simulate adding a project
-        const newProject = { uri: Uri.file('/fake/path') } as unknown as PythonProject;
+        const newProject = { uri: Uri.joinPath(Uri.file(process.cwd()), 'fake', 'path') } as unknown as PythonProject;
         currentProjects = [newProject]; // Update the mock's state
         
         // Fire the internal event
@@ -51,5 +51,15 @@ suite('PythonEnvironmentApiImpl - onDidChangePythonProjects', () => {
         assert.strictEqual((firedEventPayload as { added: PythonProject[] }).added.length, 1, 'Should have 1 added project');
         assert.strictEqual((firedEventPayload as { added: PythonProject[] }).added[0].uri.fsPath, newProject.uri.fsPath);
         assert.strictEqual((firedEventPayload as { removed: PythonProject[] }).removed.length, 0, 'Should have 0 removed projects');
+
+        // 8. Simulate removing the project
+        firedEventPayload = null;
+        currentProjects = [];
+        onDidChangeProjectsEmitter.fire();
+
+        assert.ok(firedEventPayload, 'Event should have fired');
+        assert.strictEqual((firedEventPayload as { added: PythonProject[] }).added.length, 0, 'Should have 0 added projects');
+        assert.strictEqual((firedEventPayload as { removed: PythonProject[] }).removed.length, 1, 'Should have 1 removed project');
+        assert.strictEqual((firedEventPayload as { removed: PythonProject[] }).removed[0].uri.fsPath, newProject.uri.fsPath);
     });
 });
