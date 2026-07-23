@@ -11,6 +11,7 @@ import * as windowApis from '../../../common/window.apis';
 import * as helpers from '../../../managers/builtin/helpers';
 import {
     clearDontAskAgain,
+    ensureUvForInlineScriptVersionLookup,
     getAvailablePythonVersions,
     getUvPythonPath,
     isDontAskAgainSet,
@@ -190,6 +191,32 @@ suite('uvPythonInstaller - promptInstallPythonViaUv', () => {
 
         assert(showInformationMessageStub.notCalled, 'Should not display or install an untrusted version value');
         assert(isUvInstalledStub.notCalled, 'Should stop before checking or installing uv');
+    });
+
+    test('should allow a validated prerelease install version', async () => {
+        mockState.get.resolves(false);
+        isUvInstalledStub.resolves(true);
+        showInformationMessageStub.resolves(undefined);
+
+        await promptInstallPythonViaUv('inlineScript', mockLog, {
+            requiresPython: '>=3.15.0a1',
+            version: '3.15.0a1',
+        });
+
+        assert(showInformationMessageStub.calledOnce, 'Should offer the requested prerelease');
+    });
+
+    test('should request consent before installing uv for version lookup', async () => {
+        isUvInstalledStub.resolves(false);
+        showInformationMessageStub.resolves(undefined);
+
+        assert.strictEqual(await ensureUvForInlineScriptVersionLookup('>=3.13,<3.14', mockLog), false);
+        sinon.assert.calledOnceWithExactly(
+            showInformationMessageStub,
+            UvInstallStrings.inlineScriptInstallUvForVersionLookupPrompt('>=3.13,<3.14'),
+            { modal: true },
+            UvInstallStrings.installUv,
+        );
     });
 
     test('should trim inline-script context before displaying it', async () => {

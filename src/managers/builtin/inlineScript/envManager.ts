@@ -3,6 +3,7 @@
 
 import * as fs from 'fs-extra';
 import * as path from 'path';
+import { clean as cleanPep440, satisfies as satisfiesPep440 } from '@renovatebot/pep440';
 import { Disposable, Event, EventEmitter, l10n, LogOutputChannel, MarkdownString, ThemeIcon, Uri } from 'vscode';
 import {
     CreateEnvironmentOptions,
@@ -31,12 +32,8 @@ import {
     resolveCacheEntryPath,
     writeMetaJson,
 } from '../../../common/inlineScript/cacheLayout';
-import { pickCompatibleInterpreter } from '../../../common/inlineScript/interpreter';
-import {
-    InlineScriptMetadata,
-    matchesPythonVersion,
-    readInlineScriptMetadataFromFile,
-} from '../../../common/inlineScript/metadata';
+import { extractLowerBoundVersion, pickCompatibleInterpreter } from '../../../common/inlineScript/interpreter';
+import { InlineScriptMetadata, readInlineScriptMetadataFromFile } from '../../../common/inlineScript/metadata';
 import { CONDA_MANAGER_ID, PYENV_MANAGER_ID, SYSTEM_MANAGER_ID } from '../../../common/constants';
 import { acquireFileLock, AcquiredFileLock } from '../../../common/lockfile.apis';
 import { isFileNotFoundError } from '../../../common/utils/filesystem';
@@ -44,6 +41,8 @@ import { normalizePath } from '../../../common/utils/pathUtils';
 import { compareReleaseSegments, parseReleaseSegments } from '../../../common/utils/pep440Release';
 import { getVenvPythonPath } from '../../../common/utils/virtualEnvironment';
 import { NativePythonFinder } from '../../common/nativePythonFinder';
+import { resolveSystemPythonEnvironmentPath } from '../utils';
+import * as uvPythonInstaller from '../uvPythonInstaller';
 import { createWithProgress, resolveVenvPythonEnvironmentPath } from '../venvUtils';
 
 const BASE_INTERPRETER_MANAGER_IDS = new Set([
@@ -79,6 +78,8 @@ type CacheEntryInspection =
 /** Manages extension-owned PEP 723 script environments. */
 export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
     private readonly pendingCreations = new Map<string, Promise<PythonEnvironment | undefined>>();
+    private readonly directlyResolvedBaseInterpreters = new Map<string, PythonEnvironment>();
+    private baseInterpreterInstallationQueue: Promise<void> = Promise.resolve();
 
     private readonly _onDidChangeEnvironments = new EventEmitter<DidChangeEnvironmentsEventArgs>();
     public readonly onDidChangeEnvironments: Event<DidChangeEnvironmentsEventArgs> =
@@ -131,9 +132,12 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
                 return undefined;
             }
 
-            const selectedBase = await this.selectBaseInterpreter(metadata);
+            let selectedBase = await this.selectBaseInterpreter(metadata);
+            if (!selectedBase && options?.quickCreate !== true) {
+                selectedBase = await this.installAndSelectBaseInterpreter(metadata);
+            }
             if (!selectedBase) {
-                this.log.warn(`No installed Python satisfies the inline-script requirements for ${scriptUri.fsPath}.`);
+                this.log.warn(`No compatible Python is available for inline-script environment creation: ${scriptUri.fsPath}.`);
                 return undefined;
             }
 
@@ -192,12 +196,24 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
     }
 
     private async selectBaseInterpreter(metadata: InlineScriptMetadata): Promise<SelectedBaseInterpreter | undefined> {
-        const globalEnvironments = await this.api.getEnvironments('global');
-        const reported = globalEnvironments.filter(
-            (environment) =>
-                BASE_INTERPRETER_MANAGER_IDS.has(environment.envId.managerId) &&
-                (environment.envId.managerId !== CONDA_MANAGER_ID || environment.name === 'base'),
-        );
+        let globalEnvironments: readonly PythonEnvironment[] = [];
+        try {
+            globalEnvironments = await this.api.getEnvironments('global');
+        } catch (error) {
+            this.log.warn(`Unable to query discovered base interpreters: ${getErrorMessage(error)}`);
+        }
+        const reported = [
+            ...globalEnvironments.filter(
+                (environment) =>
+                    BASE_INTERPRETER_MANAGER_IDS.has(environment.envId.managerId) &&
+                    (environment.envId.managerId !== CONDA_MANAGER_ID || environment.name === 'base'),
+            ),
+            ...[...this.directlyResolvedBaseInterpreters.values()].filter(
+                (environment) =>
+                    !metadata.requiresPython ||
+                    this.matchesInstallConstraint(metadata.requiresPython, environment.version),
+            ),
+        ];
         const derivedChecks = await Promise.all(
             reported.map(async (environment) => {
                 if (!path.isAbsolute(environment.sysPrefix)) {
@@ -214,10 +230,15 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
         );
         let candidates = derivedChecks
             .filter((candidate) => !candidate.derived)
-            .map((candidate) => candidate.environment);
+            .map((candidate) => candidate.environment)
+            .filter(
+                (candidate) =>
+                    !metadata.requiresPython ||
+                    this.matchesInstallConstraint(metadata.requiresPython, candidate.version),
+            );
 
         while (candidates.length > 0) {
-            const environment = pickCompatibleInterpreter(candidates, metadata.requiresPython);
+            const environment = pickCompatibleInterpreter(candidates, undefined);
             if (!environment) {
                 return undefined;
             }
@@ -237,6 +258,191 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
         }
 
         return undefined;
+    }
+
+    private async installAndSelectBaseInterpreter(
+        metadata: InlineScriptMetadata,
+    ): Promise<SelectedBaseInterpreter | undefined> {
+        const run = this.baseInterpreterInstallationQueue.then(() =>
+            this.installAndSelectBaseInterpreterSerially(metadata),
+        );
+        this.baseInterpreterInstallationQueue = run.then(
+            () => undefined,
+            () => undefined,
+        );
+        return run;
+    }
+
+    private async installAndSelectBaseInterpreterSerially(
+        metadata: InlineScriptMetadata,
+    ): Promise<SelectedBaseInterpreter | undefined> {
+        const existing = await this.selectBaseInterpreter(metadata);
+        if (existing) {
+            return existing;
+        }
+
+        const requiresPython = metadata.requiresPython?.trim() || undefined;
+        const lowerBound = extractLowerBoundVersion(requiresPython);
+        const version = await this.selectInstallablePythonVersion(requiresPython, lowerBound);
+        if (requiresPython && !version) {
+            this.log.warn(
+                'Cannot install a Python for this inline script because no compatible install version could be selected.',
+            );
+            return undefined;
+        }
+
+        const installedPath = await this.installPythonAndRefresh(requiresPython, version);
+        if (!installedPath) {
+            return undefined;
+        }
+
+        let selected: SelectedBaseInterpreter | undefined;
+        try {
+            selected = await this.selectBaseInterpreter(metadata);
+        } catch (error) {
+            this.log.warn(
+                `Unable to refresh base-interpreter discovery after installing Python: ${getErrorMessage(error)}`,
+            );
+        }
+        if (!selected) {
+            const resolved = await resolveSystemPythonEnvironmentPath(
+                installedPath,
+                this.nativeFinder,
+                this.api,
+                this.baseManager,
+            );
+            const executable = resolved?.execInfo?.run.executable;
+            if (resolved && executable && pickCompatibleInterpreter([resolved], metadata.requiresPython)) {
+                try {
+                    const canonicalPath = await fs.realpath(executable);
+                    if (!requiresPython || this.matchesInstallConstraint(requiresPython, resolved.version)) {
+                        this.directlyResolvedBaseInterpreters.set(canonicalPath, resolved);
+                        selected = {
+                            environment: resolved,
+                            canonicalPath,
+                        };
+                    }
+                } catch (error) {
+                    this.log.warn(
+                        `Unable to resolve the Python installed for an inline script at ${executable}: ${getErrorMessage(error)}`,
+                    );
+                }
+            }
+        }
+        if (!selected) {
+            this.log.warn(
+                'Python was installed for an inline script, but no compatible base interpreter was discovered after refreshing environments.',
+            );
+        }
+        return selected;
+    }
+
+    private async selectInstallablePythonVersion(
+        requiresPython: string | undefined,
+        lowerBound: string | undefined,
+    ): Promise<string | undefined> {
+        if (!requiresPython) {
+            return lowerBound;
+        }
+        const prereleaseLowerBound = this.extractPrereleaseLowerBound(requiresPython);
+        if (prereleaseLowerBound) {
+            return prereleaseLowerBound;
+        }
+        const lowerBoundRelease = lowerBound ? parseReleaseSegments(lowerBound) : undefined;
+        if (lowerBound && lowerBoundRelease?.[0] === 3) {
+            if (/^>=\s*[^,]+$/.test(requiresPython) && this.matchesInstallConstraint(requiresPython, lowerBound)) {
+                return lowerBound;
+            }
+            if (/^==\s*[^,*]+$/.test(requiresPython) && this.matchesInstallConstraint(requiresPython, lowerBound)) {
+                return lowerBound;
+            }
+        }
+
+        let available: uvPythonInstaller.UvPythonVersion[];
+        try {
+            if (!(await uvPythonInstaller.ensureUvForInlineScriptVersionLookup(requiresPython, this.log))) {
+                return undefined;
+            }
+            available = await uvPythonInstaller.getAvailablePythonVersions();
+        } catch (error) {
+            this.log.warn(`Unable to query Python versions available from uv: ${getErrorMessage(error)}`);
+            return undefined;
+        }
+        return available
+            .filter(
+                (candidate) =>
+                    candidate.implementation === 'cpython' &&
+                    candidate.variant === 'default' &&
+                    candidate.version_parts.major === 3 &&
+                    this.matchesInstallConstraint(requiresPython, candidate.version),
+            )
+            .sort((left, right) => {
+                const leftRelease = parseReleaseSegments(left.version);
+                const rightRelease = parseReleaseSegments(right.version);
+                if (!leftRelease || !rightRelease) {
+                    return 0;
+                }
+                return compareReleaseSegments(rightRelease, leftRelease);
+            })[0]?.version;
+    }
+
+    private matchesInstallConstraint(requiresPython: string, version: string): boolean {
+        try {
+            return satisfiesPep440(version, requiresPython, {
+                prereleases: /(?:(?:a|alpha|b|beta|c|rc|pre|preview)[._-]?\d+|dev[._-]?\d+)/i.test(
+                    requiresPython,
+                ),
+            });
+        } catch (error) {
+            this.log.warn(`Unable to evaluate requires-python '${requiresPython}': ${getErrorMessage(error)}`);
+            return false;
+        }
+    }
+
+    private extractPrereleaseLowerBound(requiresPython: string): string | undefined {
+        return requiresPython
+            .split(',')
+            .map((clause) =>
+                clause
+                    .trim()
+                    .match(
+                        /^(?:>=|==|~=)\s*(\d+(?:\.\d+)*(?:(?:a|alpha|b|beta|c|rc|pre|preview)[._-]?\d+|[._-]?dev[._-]?\d+))$/i,
+                    )?.[1],
+            )
+            .map((version) => (version ? cleanPep440(version) : undefined))
+            .filter((version): version is string => !!version)
+            .find((version) => this.matchesInstallConstraint(requiresPython, version));
+    }
+
+    private async installPythonAndRefresh(
+        requiresPython: string | undefined,
+        version: string | undefined,
+    ): Promise<string | undefined> {
+        let installedPath: string | undefined;
+        try {
+            installedPath = await uvPythonInstaller.promptInstallPythonViaUv('inlineScript', this.log, {
+                requiresPython,
+                version,
+            });
+            if (!installedPath) {
+                this.log.warn(
+                    'Python installation for inline-script environment creation was declined or did not complete.',
+                );
+                return undefined;
+            }
+        } catch (error) {
+            this.log.error(`Failed to install Python for an inline script: ${getErrorMessage(error)}`);
+            return undefined;
+        }
+
+        try {
+            await this.api.refreshEnvironments(undefined);
+        } catch (error) {
+            this.log.warn(
+                `Python was installed for an inline script, but environment discovery could not be refreshed: ${getErrorMessage(error)}`,
+            );
+        }
+        return installedPath;
     }
 
     private async createOrReuseEnvironment({
@@ -363,7 +569,7 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
             return { kind: 'stale' };
         }
         const requiresPython = metadata.requiresPython?.trim();
-        if (requiresPython && !matchesPythonVersion(requiresPython, environment.version)) {
+        if (requiresPython && !this.matchesInstallConstraint(requiresPython, environment.version)) {
             return { kind: 'stale' };
         }
 
