@@ -445,7 +445,10 @@ export async function quickCreateVenv(
     const project = api.getPythonProject(venvRoot);
 
     sendTelemetryEvent(EventNames.VENV_CREATION, undefined, { creationType: 'quick' });
-    const result = await getProjectInstallable(api, project ? [project] : undefined);
+    const result = await getProjectInstallable(api, project ? [project] : undefined, {
+        deduplicateProjectPackages: true,
+        preferredRoot: venvRoot,
+    });
     const installables = result.installables;
     const allPackages = [];
     allPackages.push(...(installables?.flatMap((i) => i.args ?? []) ?? []));

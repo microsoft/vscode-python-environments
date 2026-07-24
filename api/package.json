@@ -1,7 +1,7 @@
 {
     "name": "@vscode/python-environments",
     "description": "An API facade for the Python Environments extension in VS Code",
-    "version": "1.0.0",
+    "version": "1.37.0",
     "author": {
         "name": "Microsoft Corporation"
     },

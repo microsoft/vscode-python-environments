@@ -238,6 +238,49 @@ export namespace UvInstallStrings {
         'No Python found. Would you like to install uv and use it to install Python? This will download and run an installer from https://astral.sh.',
     );
     export const installPython = l10n.t('Install Python');
+    export const installUvAndPython = l10n.t('Install uv and Python');
+    export function installPythonVersion(version: string): string {
+        return l10n.t('Install Python {0}', version);
+    }
+    export function installUvAndPythonVersion(version: string): string {
+        return l10n.t('Install uv and Python {0}', version);
+    }
+    export function inlineScriptInstallPythonPrompt(requiresPython?: string, version?: string): string {
+        if (requiresPython && version) {
+            return l10n.t(
+                'No installed Python satisfies this script\'s requirement ({0}). Would you like to install Python {1} using uv?',
+                requiresPython,
+                version,
+            );
+        }
+        if (version) {
+            return l10n.t(
+                'No compatible Python is installed for this script. Would you like to install Python {0} using uv?',
+                version,
+            );
+        }
+        return l10n.t(
+            'No Python installation is available for this script. Would you like to install Python using uv?',
+        );
+    }
+    export function inlineScriptInstallPythonAndUvPrompt(requiresPython?: string, version?: string): string {
+        if (requiresPython && version) {
+            return l10n.t(
+                'No installed Python satisfies this script\'s requirement ({0}). Would you like to install uv and use it to install Python {1}? This will download and run an installer from https://astral.sh.',
+                requiresPython,
+                version,
+            );
+        }
+        if (version) {
+            return l10n.t(
+                'No compatible Python is installed for this script. Would you like to install uv and use it to install Python {0}? This will download and run an installer from https://astral.sh.',
+                version,
+            );
+        }
+        return l10n.t(
+            'No Python installation is available for this script. Would you like to install uv and use it to install Python? This will download and run an installer from https://astral.sh.',
+        );
+    }
     export const installingUv = l10n.t('Installing uv...');
     export const installingPython = l10n.t('Installing Python via uv...');
     export const installComplete = l10n.t('Python installed successfully');

@@ -1,11 +1,12 @@
 import assert from 'assert';
 import * as sinon from 'sinon';
-import { LogOutputChannel } from 'vscode';
+import { CancellationToken, LogOutputChannel, ShellExecution, TaskExecution, TaskProcessEndEvent } from 'vscode';
 import * as childProcessApis from '../../../common/childProcess.apis';
 import { Common, UvInstallStrings } from '../../../common/localize';
 import * as persistentState from '../../../common/persistentState';
 import { EventNames } from '../../../common/telemetry/constants';
 import * as telemetrySender from '../../../common/telemetry/sender';
+import * as taskApis from '../../../common/tasks.apis';
 import * as windowApis from '../../../common/window.apis';
 import * as helpers from '../../../managers/builtin/helpers';
 import {
@@ -84,7 +85,7 @@ suite('uvPythonInstaller - promptInstallPythonViaUv', () => {
             showInformationMessageStub.calledWith(
                 UvInstallStrings.installPythonAndUvPrompt,
                 { modal: true },
-                UvInstallStrings.installPython,
+                UvInstallStrings.installUvAndPython,
                 Common.dontAskAgain,
             ),
             'Should show install Python AND uv prompt when uv is not installed',
@@ -125,6 +126,204 @@ suite('uvPythonInstaller - promptInstallPythonViaUv', () => {
             }),
             'Should send telemetry with createEnvironment trigger',
         );
+    });
+
+    test('should explain the requirement and requested version for an inline script', async () => {
+        mockState.get.resolves(true);
+        isUvInstalledStub.resolves(true);
+        showInformationMessageStub.resolves(undefined);
+
+        await promptInstallPythonViaUv('inlineScript', mockLog, {
+            requiresPython: '>=3.13',
+            version: '3.13',
+        });
+
+        assert(
+            showInformationMessageStub.calledWithExactly(
+                UvInstallStrings.inlineScriptInstallPythonPrompt('>=3.13', '3.13'),
+                { modal: true },
+                UvInstallStrings.installPythonVersion('3.13'),
+            ),
+            'Should explain why the inline script needs another Python',
+        );
+        assert(mockState.get.notCalled, 'Explicit inline-script setup should not be suppressed by another workflow');
+    });
+
+    test('should disclose that uv will also be installed for an inline script', async () => {
+        mockState.get.resolves(false);
+        isUvInstalledStub.resolves(false);
+        showInformationMessageStub.resolves(undefined);
+
+        await promptInstallPythonViaUv('inlineScript', mockLog, {
+            requiresPython: '>=3.13',
+            version: '3.13',
+        });
+
+        assert(
+            showInformationMessageStub.calledWithExactly(
+                UvInstallStrings.inlineScriptInstallPythonAndUvPrompt('>=3.13', '3.13'),
+                { modal: true },
+                UvInstallStrings.installUvAndPythonVersion('3.13'),
+            ),
+            'Should disclose both installations before asking for consent',
+        );
+    });
+
+    test('should not offer an install when no compatible version can be derived', async () => {
+        mockState.get.resolves(false);
+        isUvInstalledStub.resolves(true);
+
+        await promptInstallPythonViaUv('inlineScript', mockLog, { requiresPython: '<3.13' });
+
+        assert(showInformationMessageStub.notCalled, 'Should not offer an install that may violate the requirement');
+        assert(isUvInstalledStub.notCalled, 'Should stop before checking or installing uv');
+        assert(sendTelemetryEventStub.notCalled, 'Should not record a prompt that was not shown');
+    });
+
+    test('should reject a non-numeric install version before prompting', async () => {
+        mockState.get.resolves(false);
+
+        await promptInstallPythonViaUv('inlineScript', mockLog, {
+            requiresPython: '>=3.13',
+            version: 'latest\nInstall anyway',
+        });
+
+        assert(showInformationMessageStub.notCalled, 'Should not display or install an untrusted version value');
+        assert(isUvInstalledStub.notCalled, 'Should stop before checking or installing uv');
+    });
+
+    test('should trim inline-script context before displaying it', async () => {
+        mockState.get.resolves(false);
+        isUvInstalledStub.resolves(true);
+        showInformationMessageStub.resolves(undefined);
+
+        await promptInstallPythonViaUv('inlineScript', mockLog, {
+            requiresPython: '  >=3.13  ',
+            version: '  3.13  ',
+        });
+
+        assert(
+            showInformationMessageStub.calledWithExactly(
+                UvInstallStrings.inlineScriptInstallPythonPrompt('>=3.13', '3.13'),
+                { modal: true },
+                UvInstallStrings.installPythonVersion('3.13'),
+            ),
+            'Should display normalized prompt values',
+        );
+    });
+
+    test('should flatten and cap a long requirement before displaying it', async () => {
+        mockState.get.resolves(false);
+        isUvInstalledStub.resolves(true);
+        showInformationMessageStub.resolves(undefined);
+        const requirement = `>=3.13\n${'a'.repeat(200)}`;
+        const displayedRequirement = `>=3.13 ${'a'.repeat(110)}...`;
+
+        await promptInstallPythonViaUv('inlineScript', mockLog, {
+            requiresPython: requirement,
+            version: '3.13',
+        });
+
+        assert(
+            showInformationMessageStub.calledWithExactly(
+                UvInstallStrings.inlineScriptInstallPythonPrompt(displayedRequirement, '3.13'),
+                { modal: true },
+                UvInstallStrings.installPythonVersion('3.13'),
+            ),
+            'Should keep script-controlled prompt text compact and single-line',
+        );
+    });
+
+    test('should strip invisible and bidirectional controls from the displayed requirement', async () => {
+        mockState.get.resolves(false);
+        isUvInstalledStub.resolves(true);
+        showInformationMessageStub.resolves(undefined);
+
+        await promptInstallPythonViaUv('inlineScript', mockLog, {
+            requiresPython: '>=3.13\u202e deceptive\u2069\u0000 text',
+            version: '3.13',
+        });
+
+        assert(
+            showInformationMessageStub.calledWithExactly(
+                UvInstallStrings.inlineScriptInstallPythonPrompt('>=3.13 deceptive text', '3.13'),
+                { modal: true },
+                UvInstallStrings.installPythonVersion('3.13'),
+            ),
+            'Should not let script metadata visually reorder or hide consent text',
+        );
+    });
+
+    test('should send telemetry with the inline-script trigger', async () => {
+        mockState.get.resolves(false);
+        isUvInstalledStub.resolves(true);
+        showInformationMessageStub.resolves(undefined);
+
+        await promptInstallPythonViaUv('inlineScript', mockLog, { requiresPython: '>=3.13', version: '3.13' });
+
+        assert(
+            sendTelemetryEventStub.calledWith(EventNames.UV_PYTHON_INSTALL_PROMPTED, undefined, {
+                trigger: 'inlineScript',
+            }),
+            'Should identify inline-script prompts in telemetry',
+        );
+    });
+
+    test('should pass the approved inline-script version to uv', async () => {
+        mockState.get.resolves(false);
+        isUvInstalledStub.resolves(true);
+        const installAction = UvInstallStrings.installPythonVersion('3.13');
+        showInformationMessageStub.onFirstCall().resolves(installAction);
+        sinon.stub(windowApis, 'withProgress').callsFake(async (_options, task) =>
+            task(
+                { report: () => undefined },
+                {
+                    isCancellationRequested: false,
+                    onCancellationRequested: () => ({ dispose: () => undefined }),
+                } as CancellationToken,
+            ),
+        );
+
+        let taskEndListener: ((event: TaskProcessEndEvent) => unknown) | undefined;
+        sinon.stub(taskApis, 'onDidEndTaskProcess').callsFake((listener) => {
+            taskEndListener = listener;
+            return { dispose: () => undefined };
+        });
+        const executeTaskStub = sinon.stub(taskApis, 'executeTask').callsFake(async (task) => {
+            setTimeout(() => {
+                taskEndListener?.({ execution: { task } as TaskExecution, exitCode: 0 } as TaskProcessEndEvent);
+            }, 0);
+            return { task, terminate: () => undefined } as TaskExecution;
+        });
+
+        const versions: UvPythonVersion[] = [
+            makeUvPythonVersion({ version: '3.13.1', path: '/usr/bin/python3.13' }),
+        ];
+        const mockProcess = new MockChildProcess('uv', [
+            'python',
+            'list',
+            '--only-installed',
+            '--managed-python',
+            '--output-format',
+            'json',
+        ]);
+        const spawnStub: sinon.SinonStub = sinon.stub(childProcessApis, 'spawnProcess');
+        spawnStub.returns(mockProcess);
+
+        const resultPromise = promptInstallPythonViaUv('inlineScript', mockLog, {
+            requiresPython: '>=3.13',
+            version: '3.13',
+        });
+        setTimeout(() => {
+            mockProcess.stdout?.emit('data', JSON.stringify(versions));
+            mockProcess.emit('exit', 0, null);
+        }, 10);
+
+        assert.strictEqual(await resultPromise, '/usr/bin/python3.13');
+        const installTask = executeTaskStub.firstCall.args[0];
+        const execution = installTask.execution as ShellExecution;
+        assert.strictEqual(execution.command, 'uv');
+        assert.deepStrictEqual(execution.args, ['python', 'install', '3.13']);
     });
 });
 
@@ -262,6 +461,34 @@ suite('uvPythonInstaller - getUvPythonPath', () => {
         const result = await resultPromise;
 
         assert.strictEqual(result, '/usr/bin/python3.12', 'Should return the matching version');
+    });
+
+    test('should match requested versions on release-segment boundaries', async () => {
+        const versions: UvPythonVersion[] = [
+            makeUvPythonVersion({ version: '3.13.1', path: '/usr/bin/python3.13' }),
+            makeUvPythonVersion({ version: '3.1.9', path: '/usr/bin/python3.1' }),
+        ];
+
+        const mockProcess = new MockChildProcess('uv', [
+            'python',
+            'list',
+            '--only-installed',
+            '--managed-python',
+            '--output-format',
+            'json',
+        ]);
+        spawnStub.returns(mockProcess);
+
+        const resultPromise = getUvPythonPath('3.1');
+
+        setTimeout(() => {
+            mockProcess.stdout?.emit('data', JSON.stringify(versions));
+            mockProcess.emit('exit', 0, null);
+        }, 10);
+
+        const result = await resultPromise;
+
+        assert.strictEqual(result, '/usr/bin/python3.1', 'Should not mistake Python 3.13 for Python 3.1');
     });
 
     test('should return undefined when specified version is not found', async () => {

@@ -2,6 +2,8 @@ import assert from 'assert';
 import * as path from 'path';
 import * as sinon from 'sinon';
 import { CancellationToken, Progress, ProgressOptions, Uri } from 'vscode';
+import * as fse from 'fs-extra';
+import * as os from 'os';
 import { PythonEnvironmentApi, PythonProject } from '../../../api';
 import * as winapi from '../../../common/window.apis';
 import * as wapi from '../../../common/workspace.apis';
@@ -233,5 +235,367 @@ suite('Pip Utils - getProjectInstallable', () => {
             [rootReqPath, subdirReqPath, deepReqPath],
             'Files should be ordered by depth relative to the project root',
         );
+    });
+});
+
+suite('Pip Utils - getProjectInstallable duplicate pyproject.toml handling', () => {
+    let findFilesStub: sinon.SinonStub;
+    let withProgressStub: sinon.SinonStub;
+    let mockApi: { getPythonProject: (uri: Uri) => PythonProject | undefined };
+
+    let tmpRoot: string;
+    let projectRoot: string;
+
+    // Builds a valid, pip-installable pyproject.toml with the given package name.
+    function tomlFor(name: string, version = '0.1.0'): string {
+        return [
+            '[project]',
+            `name = "${name}"`,
+            `version = "${version}"`,
+            '',
+            '[build-system]',
+            'requires = ["setuptools"]',
+            'build-backend = "setuptools.build_meta"',
+            '',
+        ].join('\n');
+    }
+
+    // Writes a pyproject.toml under <projectRoot>/<relDir> and returns its path.
+    async function writeToml(relDir: string, name: string): Promise<string> {
+        return writeTomlContent(relDir, tomlFor(name));
+    }
+
+    async function writeTomlContent(relDir: string, content: string): Promise<string> {
+        const dir = path.join(projectRoot, relDir);
+        await fse.mkdirp(dir);
+        const file = path.join(dir, 'pyproject.toml');
+        await fse.writeFile(file, content);
+        return file;
+    }
+
+    function automaticOptions(preferredRoot: string = projectRoot) {
+        return {
+            deduplicateProjectPackages: true,
+            preferredRoot: Uri.file(preferredRoot),
+        };
+    }
+
+    setup(async () => {
+        findFilesStub = sinon.stub(wapi, 'findFiles').resolves([]);
+        withProgressStub = sinon.stub(winapi, 'withProgress');
+        withProgressStub.callsFake(
+            async (
+                _options: ProgressOptions,
+                callback: (
+                    progress: Progress<{ message?: string; increment?: number }>,
+                    token: CancellationToken,
+                ) => Thenable<unknown>,
+            ) => {
+                return await callback(
+                    {} as Progress<{ message?: string; increment?: number }>,
+                    { isCancellationRequested: false } as CancellationToken,
+                );
+            },
+        );
+
+        // Use real temp files because fs-extra's readFile cannot be stubbed
+        // (non-configurable), and getProjectInstallable parses the toml contents.
+        tmpRoot = await fse.mkdtemp(path.join(os.tmpdir(), 'piputils-'));
+        // Normalize through Uri.file so drive-letter casing matches the paths that
+        // getProjectInstallable derives from the discovered Uris on Windows.
+        projectRoot = Uri.file(path.join(tmpRoot, 'myapp')).fsPath;
+        await fse.mkdirp(projectRoot);
+
+        mockApi = {
+            getPythonProject: (uri: Uri) => {
+                // Every file under the project root belongs to the same project.
+                if (uri.fsPath.startsWith(projectRoot)) {
+                    return { name: 'myapp', uri: Uri.file(projectRoot) };
+                }
+                return undefined;
+            },
+        };
+    });
+
+    teardown(async () => {
+        sinon.restore();
+        if (tmpRoot) {
+            await fse.remove(tmpRoot);
+        }
+    });
+
+    test('omits ambiguous editable installs from sibling git worktrees', async () => {
+        // Two git worktrees checked out as sibling folders under the project root,
+        // both declaring the same package name (issue #1627).
+        const mainToml = await writeToml('main', 'myapp');
+        const copilotToml = await writeToml('copilot', 'myapp');
+
+        findFilesStub.callsFake((pattern: string) => {
+            if (pattern === '**/pyproject.toml') {
+                return Promise.resolve([Uri.file(mainToml), Uri.file(copilotToml)]);
+            }
+            return Promise.resolve([]);
+        });
+
+        const projects = [{ name: 'myapp', uri: Uri.file(projectRoot) }];
+        const result = (
+            await getProjectInstallable(mockApi as PythonEnvironmentApi, projects, automaticOptions())
+        ).installables;
+
+        const editable = result.filter((r) => r.args?.[0] === '-e');
+        assert.strictEqual(editable.length, 0, 'Quick Create should not choose an arbitrary worktree');
+    });
+
+    test('duplicate detection is case- and separator-insensitive (PEP 503)', async () => {
+        const firstToml = await writeToml('main', 'My_App');
+        const secondToml = await writeToml('worktree', 'my-app');
+
+        findFilesStub.callsFake((pattern: string) => {
+            if (pattern === '**/pyproject.toml') {
+                return Promise.resolve([Uri.file(firstToml), Uri.file(secondToml)]);
+            }
+            return Promise.resolve([]);
+        });
+
+        const projects = [{ name: 'myapp', uri: Uri.file(projectRoot) }];
+        const result = (
+            await getProjectInstallable(mockApi as PythonEnvironmentApi, projects, automaticOptions())
+        ).installables;
+
+        const editable = result.filter((r) => r.args?.[0] === '-e');
+        assert.strictEqual(
+            editable.length,
+            0,
+            '"My_App" and "my-app" normalize to the same ambiguous package name',
+        );
+    });
+
+    test('uses the candidate containing the creation root', async () => {
+        const invalidToml = await writeTomlContent(
+            'a-invalid',
+            tomlFor('myapp').replace('version = "0.1.0"', 'version = "not a version"'),
+        );
+        const validToml = await writeToml('z-valid', 'myapp');
+
+        findFilesStub.callsFake((pattern: string) => {
+            if (pattern === '**/pyproject.toml') {
+                return Promise.resolve([Uri.file(invalidToml), Uri.file(validToml)]);
+            }
+            return Promise.resolve([]);
+        });
+
+        const projects = [{ name: 'myapp', uri: Uri.file(projectRoot) }];
+        const result = await getProjectInstallable(
+            mockApi as PythonEnvironmentApi,
+            projects,
+            automaticOptions(path.join(projectRoot, 'z-valid')),
+        );
+
+        const editable = result.installables.filter((item) => item.args?.[0] === '-e');
+        assert.strictEqual(editable.length, 1);
+        assert.strictEqual(editable[0].args?.[1], path.join(projectRoot, 'z-valid'));
+        assert.strictEqual(result.validationError, undefined, 'ignored duplicates should not surface validation errors');
+    });
+
+    test('reports validation from the preferred candidate instead of substituting another worktree', async () => {
+        const invalidToml = await writeTomlContent(
+            'main',
+            tomlFor('myapp').replace('version = "0.1.0"', 'version = "not a version"'),
+        );
+        const validToml = await writeToml('copilot', 'myapp');
+
+        findFilesStub.callsFake((pattern: string) => {
+            if (pattern === '**/pyproject.toml') {
+                return Promise.resolve([Uri.file(validToml), Uri.file(invalidToml)]);
+            }
+            return Promise.resolve([]);
+        });
+
+        const projects = [{ name: 'myapp', uri: Uri.file(projectRoot) }];
+        const result = await getProjectInstallable(
+            mockApi as PythonEnvironmentApi,
+            projects,
+            automaticOptions(path.join(projectRoot, 'main')),
+        );
+
+        const editable = result.installables.filter((item) => item.args?.[0] === '-e');
+        assert.strictEqual(editable.length, 1);
+        assert.strictEqual(editable[0].args?.[1], path.join(projectRoot, 'main'));
+        assert.strictEqual(result.validationError?.fileUri.fsPath, invalidToml);
+    });
+
+    test('does not let a metadata-only TOML with optional dependencies suppress an installable duplicate', async () => {
+        const metadataToml = await writeTomlContent(
+            'a-metadata',
+            [
+                '[project]',
+                'name = "myapp"',
+                'version = "0.1.0"',
+                '',
+                '[project.optional-dependencies]',
+                'dev = ["pytest"]',
+                '',
+            ].join('\n'),
+        );
+        const installableToml = await writeToml('z-installable', 'myapp');
+
+        findFilesStub.callsFake((pattern: string) => {
+            if (pattern === '**/pyproject.toml') {
+                return Promise.resolve([Uri.file(metadataToml), Uri.file(installableToml)]);
+            }
+            return Promise.resolve([]);
+        });
+
+        const projects = [{ name: 'myapp', uri: Uri.file(projectRoot) }];
+        const result = (
+            await getProjectInstallable(
+                mockApi as PythonEnvironmentApi,
+                projects,
+                automaticOptions(path.join(projectRoot, 'z-installable')),
+            )
+        ).installables;
+
+        const editable = result.filter((item) => item.args?.[0] === '-e');
+        assert.strictEqual(editable.length, 1);
+        assert.strictEqual(editable[0].args?.[1], path.join(projectRoot, 'z-installable'));
+    });
+
+    test('prefers metadata that emits optional dependencies over an empty peer', async () => {
+        const emptyToml = await writeTomlContent(
+            'a-empty',
+            ['[project]', 'name = "myapp"', 'version = "0.1.0"', ''].join('\n'),
+        );
+        const optionalToml = await writeTomlContent(
+            'z-optional',
+            [
+                '[project]',
+                'name = "myapp"',
+                'version = "0.1.0"',
+                '',
+                '[project.optional-dependencies]',
+                'dev = ["pytest"]',
+                '',
+            ].join('\n'),
+        );
+
+        findFilesStub.callsFake((pattern: string) => {
+            if (pattern === '**/pyproject.toml') {
+                return Promise.resolve([Uri.file(emptyToml), Uri.file(optionalToml)]);
+            }
+            return Promise.resolve([]);
+        });
+
+        const projects = [{ name: 'myapp', uri: Uri.file(projectRoot) }];
+        const result = (
+            await getProjectInstallable(mockApi as PythonEnvironmentApi, projects, automaticOptions())
+        ).installables;
+
+        const editable = result.filter((item) => item.args?.[0] === '-e');
+        assert.strictEqual(editable.length, 1);
+        assert.strictEqual(editable[0].args?.[1], `${path.join(projectRoot, 'z-optional')}[dev]`);
+    });
+
+    test('prefers the containing worktree regardless of discovery order or path characters', async () => {
+        const zToml = await writeToml('z-worktree', 'myapp');
+        const accentedToml = await writeToml('ä-worktree', 'myapp');
+
+        findFilesStub.callsFake((pattern: string) => {
+            if (pattern === '**/pyproject.toml') {
+                return Promise.resolve([Uri.file(accentedToml), Uri.file(zToml)]);
+            }
+            return Promise.resolve([]);
+        });
+
+        const projects = [{ name: 'myapp', uri: Uri.file(projectRoot) }];
+        const result = (
+            await getProjectInstallable(
+                mockApi as PythonEnvironmentApi,
+                projects,
+                automaticOptions(path.join(projectRoot, 'z-worktree')),
+            )
+        ).installables;
+
+        const editable = result.filter((item) => item.args?.[0] === '-e');
+        assert.strictEqual(editable.length, 1);
+        assert.strictEqual(editable[0].args?.[1], path.join(projectRoot, 'z-worktree'));
+    });
+
+    test('keeps distinct packages in a monorepo (different names are not de-duplicated)', async () => {
+        const pkgAToml = await writeToml(path.join('packages', 'a'), 'pkg-a');
+        const pkgBToml = await writeToml(path.join('packages', 'b'), 'pkg-b');
+
+        findFilesStub.callsFake((pattern: string) => {
+            if (pattern === '**/pyproject.toml') {
+                return Promise.resolve([Uri.file(pkgAToml), Uri.file(pkgBToml)]);
+            }
+            return Promise.resolve([]);
+        });
+
+        const projects = [{ name: 'myapp', uri: Uri.file(projectRoot) }];
+        const result = (
+            await getProjectInstallable(mockApi as PythonEnvironmentApi, projects, automaticOptions())
+        ).installables;
+
+        const editableDirs = result.filter((r) => r.args?.[0] === '-e').map((r) => r.args?.[1]);
+        assert.strictEqual(editableDirs.length, 2, 'Distinct package names should both be kept');
+        assert.deepStrictEqual(
+            editableDirs.sort(),
+            [path.join(projectRoot, 'packages', 'a'), path.join(projectRoot, 'packages', 'b')].sort(),
+        );
+    });
+
+    test('does not de-duplicate requirements.txt files by name', async () => {
+        // requirements files are not project packages; identical basenames in
+        // different folders must all be preserved.
+        const rootReq = path.join(projectRoot, 'requirements.txt');
+        const subReq = path.join(projectRoot, 'subdir', 'requirements.txt');
+
+        findFilesStub.callsFake((pattern: string) => {
+            if (pattern === '**/*requirements*.txt') {
+                return Promise.resolve([Uri.file(subReq)]);
+            }
+            if (pattern === '*requirements*.txt') {
+                return Promise.resolve([Uri.file(rootReq)]);
+            }
+            return Promise.resolve([]);
+        });
+
+        const projects = [{ name: 'myapp', uri: Uri.file(projectRoot) }];
+        const result = (
+            await getProjectInstallable(mockApi as PythonEnvironmentApi, projects, automaticOptions())
+        ).installables;
+
+        const reqs = result.filter((r) => r.args?.[0] === '-r');
+        assert.strictEqual(reqs.length, 2, 'Both requirements.txt files should be preserved');
+    });
+
+    test('keeps same-named packages from separate projects in the manual picker', async () => {
+        const firstProjectRoot = path.join(projectRoot, 'first');
+        const secondProjectRoot = path.join(projectRoot, 'second');
+        const firstToml = await writeToml('first', 'shared-name');
+        const secondToml = await writeToml('second', 'shared-name');
+        mockApi.getPythonProject = (uri: Uri) => {
+            if (uri.fsPath.startsWith(firstProjectRoot)) {
+                return { name: 'first', uri: Uri.file(firstProjectRoot) };
+            }
+            if (uri.fsPath.startsWith(secondProjectRoot)) {
+                return { name: 'second', uri: Uri.file(secondProjectRoot) };
+            }
+            return undefined;
+        };
+        findFilesStub.callsFake((pattern: string) => {
+            if (pattern === '**/pyproject.toml') {
+                return Promise.resolve([Uri.file(firstToml), Uri.file(secondToml)]);
+            }
+            return Promise.resolve([]);
+        });
+
+        const projects = [
+            { name: 'first', uri: Uri.file(firstProjectRoot) },
+            { name: 'second', uri: Uri.file(secondProjectRoot) },
+        ];
+        const result = (await getProjectInstallable(mockApi as PythonEnvironmentApi, projects)).installables;
+
+        assert.strictEqual(result.filter((item) => item.args?.[0] === '-e').length, 2);
     });
 });

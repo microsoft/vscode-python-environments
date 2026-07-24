@@ -803,6 +803,32 @@ class NativePythonFinderImpl implements NativePythonFinder {
         };
     }
 
+    /**
+     * Computes environment-shape counts from a refresh result for telemetry. These let us slice
+     * refresh duration by how many environments (and how many conda environments) were discovered,
+     * to test whether the slow-refresh cohort is dominated by conda-heavy / many-env setups.
+     */
+    private getEnvShapeProperties(nativeInfo: NativeInfo[]): {
+        envCount: number;
+        condaEnvCount: number;
+        managerCount: number;
+    } {
+        let envCount = 0;
+        let condaEnvCount = 0;
+        let managerCount = 0;
+        for (const info of nativeInfo) {
+            if (isNativeEnvInfo(info)) {
+                envCount++;
+                if (info.kind === NativePythonEnvironmentKind.conda) {
+                    condaEnvCount++;
+                }
+            } else {
+                managerCount++;
+            }
+        }
+        return { envCount, condaEnvCount, managerCount };
+    }
+
     private async doRefresh(options?: NativePythonEnvironmentKind | Uri[]): Promise<NativeInfo[]> {
         let lastError: unknown;
 
@@ -933,7 +959,7 @@ class NativePythonFinderImpl implements NativePythonFinder {
                 },
                 {
                     result: 'success',
-                    envCount: nativeInfo.filter((e) => isNativeEnvInfo(e)).length,
+                    ...this.getEnvShapeProperties(nativeInfo),
                     unresolvedCount,
                     workspaceDirCount,
                     searchPathCount,
@@ -949,7 +975,7 @@ class NativePythonFinderImpl implements NativePythonFinder {
                 sw.elapsedTime,
                 {
                     result: errorType === 'spawn_timeout' ? 'timeout' : 'error',
-                    envCount: nativeInfo.filter((e) => isNativeEnvInfo(e)).length,
+                    ...this.getEnvShapeProperties(nativeInfo),
                     unresolvedCount,
                     attempt,
                     errorType,
