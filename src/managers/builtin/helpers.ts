@@ -66,40 +66,14 @@ export async function runUV(
     token?: CancellationToken,
     timeout?: number,
 ): Promise<string> {
-    log?.info(`Running: uv ${args.join(' ')}`);
-    return new Promise<string>((resolve, reject) => {
-        const spawnOptions: { cwd?: string; timeout?: number } = { cwd };
-        if (timeout !== undefined) {
-            spawnOptions.timeout = timeout;
-        }
-        const proc = spawnProcess('uv', args, spawnOptions);
-        token?.onCancellationRequested(() => {
-            proc.kill();
-            reject(new CancellationError());
-        });
-
-        proc.on('error', (err) => {
-            log?.error(`Error spawning uv: ${err}`);
-            reject(new Error(`Error spawning uv: ${err.message}`));
-        });
-
-        let builder = '';
-        proc.stdout?.on('data', (data) => {
-            const s = data.toString('utf-8');
-            builder += s;
-            log?.append(s);
-        });
-        proc.stderr?.on('data', (data) => {
-            log?.append(data.toString('utf-8'));
-        });
-        proc.on('close', () => {
-            resolve(builder);
-        });
-        proc.on('exit', (code) => {
-            if (code !== 0) {
-                reject(new Error(`Failed to run uv ${args.join(' ')}`));
-            }
-        });
+    return runProcess('uv', args, {
+        cwd,
+        displayName: 'uv',
+        log,
+        token,
+        timeout,
+        collectStderr: false,
+        logPrefix: '',
     });
 }
 
@@ -111,37 +85,75 @@ export async function runPython(
     token?: CancellationToken,
     timeout?: number,
 ): Promise<string> {
-    log?.info(`Running: ${python} ${args.join(' ')}`);
+    return runProcess(python, args, {
+        cwd,
+        displayName: 'python',
+        log,
+        token,
+        timeout,
+        collectStderr: true,
+        logPrefix: 'python: ',
+    });
+}
+
+function runProcess(executable: string, args: string[], options: RunProcessOptions): Promise<string> {
+    options.log?.info(`Running: ${executable} ${args.join(' ')}`);
     return new Promise<string>((resolve, reject) => {
-        const proc = spawnProcess(python, args, { cwd: cwd, timeout });
-        token?.onCancellationRequested(() => {
-            proc.kill();
+        const spawnOptions: { cwd?: string; timeout?: number } = { cwd: options.cwd };
+        if (options.timeout !== undefined) {
+            spawnOptions.timeout = options.timeout;
+        }
+        const proc = spawnProcess(executable, args, spawnOptions);
+        let cancellationRequested = false;
+        options.token?.onCancellationRequested(() => {
+            cancellationRequested = true;
+            try {
+                proc.kill();
+            } catch {
+                // Preserve cancellation when signaling fails.
+            }
             reject(new CancellationError());
         });
 
         proc.on('error', (err) => {
-            log?.error(`Error spawning python: ${err}`);
-            reject(new Error(`Error spawning python: ${err.message}`));
+            if (cancellationRequested) {
+                reject(new CancellationError());
+                return;
+            }
+            options.log?.error(`Error spawning ${options.displayName}: ${err}`);
+            reject(new Error(`Error spawning ${options.displayName}: ${err.message}`));
         });
 
         let builder = '';
         proc.stdout?.on('data', (data) => {
             const s = data.toString('utf-8');
             builder += s;
-            log?.append(`python: ${s}`);
+            options.log?.append(`${options.logPrefix}${s}`);
         });
         proc.stderr?.on('data', (data) => {
             const s = data.toString('utf-8');
-            builder += s;
-            log?.append(`python: ${s}`);
+            if (options.collectStderr) {
+                builder += s;
+            }
+            options.log?.append(`${options.logPrefix}${s}`);
         });
         proc.on('close', () => {
             resolve(builder);
         });
         proc.on('exit', (code) => {
             if (code !== 0) {
-                reject(new Error(`Failed to run python ${args.join(' ')}`));
+                reject(new Error(`Failed to run ${options.displayName} ${args.join(' ')}`));
             }
         });
     });
+}
+
+interface RunProcessOptions {
+    readonly cwd?: string;
+    readonly displayName: 'python' | 'uv';
+    readonly log?: LogOutputChannel;
+    readonly token?: CancellationToken;
+    readonly timeout?: number;
+    readonly collectStderr: boolean;
+    readonly logPrefix: string;
 }
