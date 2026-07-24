@@ -13,7 +13,9 @@ import { findFiles } from '../../common/workspace.apis';
 import { selectFromCommonPackagesToInstall, selectFromInstallableToInstall } from '../common/pickers';
 import { Installable } from '../common/types';
 import { mergePackages } from '../common/utils';
-import { normalizePackageName, refreshPipPackages } from './utils';
+import { createPipOrUvCommand } from './commands/factory';
+import { PipListCommand, UvListCommand } from './commands/index';
+import { normalizePackageName } from './utils';
 
 export interface PyprojectToml {
     project?: {
@@ -275,7 +277,16 @@ export async function getWorkspacePackagesToInstall(
     let common = await getCommonPackages();
     let installed: string[] | undefined;
     if (environment) {
-        installed = (await refreshPipPackages(environment, log, { showProgress: true }))?.map((pkg) => pkg.name);
+        const pythonExecutable = environment.execInfo?.run?.executable;
+        if (pythonExecutable) {
+            const listCmd: PipListCommand | UvListCommand = await createPipOrUvCommand(
+                { pythonExecutable, log },
+                PipListCommand,
+                UvListCommand,
+            );
+            const data = await listCmd.executeWithProgress<{ name: string }[]>({ showProgress: true });
+            installed = data?.map((pkg) => pkg.name);
+        }
         common = mergePackages(common, installed ?? []);
     }
     return selectWorkspaceOrCommon(installableResult, common, !!options.showSkipOption, installed ?? []);
@@ -394,10 +405,7 @@ export async function getProjectInstallable(
                                           !path.isAbsolute(relative))
                                   );
                               })
-                              .sort(
-                                  (a, b) =>
-                                      path.dirname(b.fsPath).length - path.dirname(a.fsPath).length,
-                              )
+                              .sort((a, b) => path.dirname(b.fsPath).length - path.dirname(a.fsPath).length)
                         : [];
 
                     if (preferredCandidates.length > 0) {
@@ -501,18 +509,4 @@ export async function shouldProceedAfterPyprojectValidation(
     }
 
     return false;
-}
-
-export function isPipInstallCommand(command: string): boolean {
-    // Regex to match pip install commands, capturing variations like:
-    // pip install package
-    // python -m pip install package
-    // pip3 install package
-    // py -m pip install package
-    // pip install -r requirements.txt
-    // uv pip install package
-    // poetry run pip install package
-    // pipx run pip install package
-    // Any other tool that might wrap pip install
-    return /(?:^|\s)(?:\S+\s+)*(?:pip\d*)\s+(install|uninstall)\b/.test(command);
 }

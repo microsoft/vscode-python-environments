@@ -144,6 +144,156 @@
                     "description": "%python-envs.packageWatchers.description%",
                     "default": true,
                     "scope": "machine"
+                },
+                "python-envs.packageManager.installCommandArgs": {
+                    "type": "object",
+                    "markdownDescription": "%python-envs.packageManager.installCommandArgs.description%",
+                    "scope": "machine",
+                    "properties": {
+                        "verboseOutput": {
+                            "type": "boolean",
+                            "description": "%python-envs.packageManager.installCommandArgs.verboseOutput.description%",
+                            "default": false
+                        },
+                        "retryOnFailure": {
+                            "type": "boolean",
+                            "description": "%python-envs.packageManager.installCommandArgs.retryOnFailure.description%",
+                            "default": true
+                        },
+                        "maxRetries": {
+                            "type": "integer",
+                            "description": "%python-envs.packageManager.maxRetries.description%",
+                            "default": 1,
+                            "minimum": 0,
+                            "maximum": 3
+                        }
+                    },
+                    "additionalProperties": false
+                },
+                "python-envs.packageManager.uninstallCommandArgs": {
+                    "type": "object",
+                    "markdownDescription": "%python-envs.packageManager.uninstallCommandArgs.description%",
+                    "scope": "machine",
+                    "properties": {
+                        "verboseOutput": {
+                            "type": "boolean",
+                            "description": "%python-envs.packageManager.uninstallCommandArgs.verboseOutput.description%",
+                            "default": false
+                        },
+                        "retryOnFailure": {
+                            "type": "boolean",
+                            "description": "%python-envs.packageManager.uninstallCommandArgs.retryOnFailure.description%",
+                            "default": true
+                        },
+                        "maxRetries": {
+                            "type": "integer",
+                            "description": "%python-envs.packageManager.maxRetries.description%",
+                            "default": 1,
+                            "minimum": 0,
+                            "maximum": 3
+                        }
+                    },
+                    "additionalProperties": false
+                },
+                "python-envs.packageManager.listCommandArgs": {
+                    "type": "object",
+                    "markdownDescription": "%python-envs.packageManager.listCommandArgs.description%",
+                    "scope": "machine",
+                    "properties": {
+                        "verboseOutput": {
+                            "type": "boolean",
+                            "description": "%python-envs.packageManager.listCommandArgs.verboseOutput.description%",
+                            "default": false
+                        },
+                        "retryOnFailure": {
+                            "type": "boolean",
+                            "description": "%python-envs.packageManager.listCommandArgs.retryOnFailure.description%",
+                            "default": true
+                        },
+                        "maxRetries": {
+                            "type": "integer",
+                            "description": "%python-envs.packageManager.maxRetries.description%",
+                            "default": 1,
+                            "minimum": 0,
+                            "maximum": 3
+                        }
+                    },
+                    "additionalProperties": false
+                },
+                "python-envs.packageManager.versionCommandArgs": {
+                    "type": "object",
+                    "markdownDescription": "%python-envs.packageManager.versionCommandArgs.description%",
+                    "scope": "machine",
+                    "properties": {
+                        "verboseOutput": {
+                            "type": "boolean",
+                            "description": "%python-envs.packageManager.versionCommandArgs.verboseOutput.description%",
+                            "default": false
+                        },
+                        "retryOnFailure": {
+                            "type": "boolean",
+                            "description": "%python-envs.packageManager.versionCommandArgs.retryOnFailure.description%",
+                            "default": true
+                        },
+                        "maxRetries": {
+                            "type": "integer",
+                            "description": "%python-envs.packageManager.maxRetries.description%",
+                            "default": 1,
+                            "minimum": 0,
+                            "maximum": 3
+                        }
+                    },
+                    "additionalProperties": false
+                },
+                "python-envs.packageManager.availableVersionsCommandArgs": {
+                    "type": "object",
+                    "markdownDescription": "%python-envs.packageManager.availableVersionsCommandArgs.description%",
+                    "scope": "machine",
+                    "properties": {
+                        "verboseOutput": {
+                            "type": "boolean",
+                            "description": "%python-envs.packageManager.availableVersionsCommandArgs.verboseOutput.description%",
+                            "default": false
+                        },
+                        "retryOnFailure": {
+                            "type": "boolean",
+                            "description": "%python-envs.packageManager.availableVersionsCommandArgs.retryOnFailure.description%",
+                            "default": true
+                        },
+                        "maxRetries": {
+                            "type": "integer",
+                            "description": "%python-envs.packageManager.maxRetries.description%",
+                            "default": 1,
+                            "minimum": 0,
+                            "maximum": 3
+                        }
+                    },
+                    "additionalProperties": false
+                },
+                "python-envs.packageManager.listDirectNamesCommandArgs": {
+                    "type": "object",
+                    "markdownDescription": "%python-envs.packageManager.listDirectNamesCommandArgs.description%",
+                    "scope": "machine",
+                    "properties": {
+                        "verboseOutput": {
+                            "type": "boolean",
+                            "description": "%python-envs.packageManager.listDirectNamesCommandArgs.verboseOutput.description%",
+                            "default": false
+                        },
+                        "retryOnFailure": {
+                            "type": "boolean",
+                            "description": "%python-envs.packageManager.listDirectNamesCommandArgs.retryOnFailure.description%",
+                            "default": true
+                        },
+                        "maxRetries": {
+                            "type": "integer",
+                            "description": "%python-envs.packageManager.maxRetries.description%",
+                            "default": 1,
+                            "minimum": 0,
+                            "maximum": 3
+                        }
+                    },
+                    "additionalProperties": false
                 }
             }
         },
