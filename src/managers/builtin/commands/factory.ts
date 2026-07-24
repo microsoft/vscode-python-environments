@@ -8,8 +8,7 @@ export async function createPipOrUvCommand<T, P extends T, U extends T>(
     PipCommand: CommandConstructor<P>,
     UvCommand: CommandConstructor<U>,
 ): Promise<T> {
-    if (await shouldUseUv(options.log, options.pythonExecutable)) {
-        return new UvCommand(options);
-    }
-    return new PipCommand(options);
+    return (await shouldUseUv(options.log, options.pythonExecutable))
+        ? new UvCommand(options)
+        : new PipCommand(options);
 }
