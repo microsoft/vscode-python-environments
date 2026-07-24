@@ -1,4 +1,3 @@
-import { getConfiguration } from '../../../common/workspace.apis';
 import { CommandConstructorOptions, InstallCommand, type InstallExecuteArgs } from '../../base/commands/index';
 import { runPython, runUV } from '../helpers';
 import { processEditableInstallArgs } from '../utils';
@@ -13,20 +12,12 @@ import { processEditableInstallArgs } from '../utils';
  * Supports version pinning via `package==version` syntax and index URL configuration.
  */
 export class PipInstallCommand extends InstallCommand {
-    private indexUrl?: string;
-
     constructor(options: CommandConstructorOptions) {
         super(options);
-        const config = getConfiguration('python-envs.packageManager');
-        this.indexUrl = config.get<string>('indexUrl');
     }
 
     protected buildCommand(executeArgs: InstallExecuteArgs): string[] {
         let args = ['-m', 'pip', 'install'];
-
-        if (this.indexUrl) {
-            args.push('--index-url', this.indexUrl);
-        }
 
         if (executeArgs.upgrade) {
             args.push('--upgrade');
@@ -56,20 +47,12 @@ export class PipInstallCommand extends InstallCommand {
  * The `--python` flag specifies the target Python interpreter.
  */
 export class UvInstallCommand extends InstallCommand {
-    private indexUrl?: string;
-
     constructor(options: CommandConstructorOptions) {
         super(options);
-        const config = getConfiguration('python-envs.packageManager');
-        this.indexUrl = config.get<string>('indexUrl');
     }
 
     protected buildCommand(executeArgs: InstallExecuteArgs): string[] {
         let args = ['pip', 'install', '--python', this.pythonExecutable];
-
-        if (this.indexUrl) {
-            args.push('--index-url', this.indexUrl);
-        }
 
         if (executeArgs.upgrade) {
             args.push('--upgrade');

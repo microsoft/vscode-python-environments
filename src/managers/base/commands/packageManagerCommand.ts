@@ -15,7 +15,6 @@ export interface BaseExecuteArgs {
  */
 export interface CommandConstructorOptions {
     pythonExecutable: string;
-    configSection?: string;
     log?: LogOutputChannel;
 }
 
@@ -34,7 +33,7 @@ export abstract class PackageManagerCommand {
     constructor(options: CommandConstructorOptions) {
         this.pythonExecutable = options.pythonExecutable;
         this.log = options.log;
-        const configSection = options.configSection ?? (this.constructor as typeof PackageManagerCommand).configSection;
+        const configSection = (this.constructor as typeof PackageManagerCommand).configSection;
         this.config = configSection ? getConfiguration(`python-envs.packageManager.${configSection}`) : undefined;
     }
 
