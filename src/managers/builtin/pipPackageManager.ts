@@ -23,13 +23,21 @@ import {
 } from '../../api';
 import { CommandConstructorOptions } from '../base/commands/index';
 import { updatePackagesAndNotify } from '../common/packageChanges';
-import { BuiltinAvailableVersionsCommandFactory } from './commands/availableVersions';
-import { PipAvailableVersionsCommand } from './commands/index';
-import { BuiltinInstallCommandFactory } from './commands/install';
-import { BuiltinListCommandFactory } from './commands/list';
-import { BuiltinListDirectNamesCommandFactory } from './commands/listDirectNames';
-import { BuiltinUninstallCommandFactory } from './commands/uninstall';
-import { BuiltinVersionCommandFactory } from './commands/version';
+import { createPipOrUvCommand } from './commands/factory';
+import {
+    PipAvailableVersionsCommand,
+    PipInstallCommand,
+    PipListCommand,
+    PipListDirectNamesCommand,
+    PipUninstallCommand,
+    PipVersionCommand,
+    UvAvailableVersionsCommand,
+    UvInstallCommand,
+    UvListCommand,
+    UvListDirectNamesCommand,
+    UvUninstallCommand,
+    UvVersionCommand,
+} from './commands/index';
 import { getWorkspacePackagesToInstall } from './pipUtils';
 import { normalizePackageName, parsePackageSpecs } from './utils';
 import { VenvManager } from './venvManager';
@@ -86,14 +94,22 @@ export class PipPackageManager implements PackageManager, Disposable {
 
             // Execute uninstall if needed
             if (toUninstall.length > 0) {
-                const uninstallCmd = await BuiltinUninstallCommandFactory(manageCommandOptions);
+                const uninstallCmd: PipUninstallCommand | UvUninstallCommand = await createPipOrUvCommand(
+                    manageCommandOptions,
+                    PipUninstallCommand,
+                    UvUninstallCommand,
+                );
                 const packages = parsePackageSpecs(toUninstall);
                 await uninstallCmd.executeWithProgress({ packages, showProgress: true }, 'Installing packages');
             }
 
             // Execute install if needed
             if (toInstall.length > 0) {
-                const installCmd = await BuiltinInstallCommandFactory(manageCommandOptions);
+                const installCmd: PipInstallCommand | UvInstallCommand = await createPipOrUvCommand(
+                    manageCommandOptions,
+                    PipInstallCommand,
+                    UvInstallCommand,
+                );
                 const packages = parsePackageSpecs(toInstall);
                 await installCmd.executeWithProgress(
                     { packages, upgrade: options.upgrade, showProgress: true },
@@ -145,10 +161,14 @@ export class PipPackageManager implements PackageManager, Disposable {
             if (!pythonExecutable) {
                 return undefined;
             }
-            const listCmd = await BuiltinListCommandFactory({
-                pythonExecutable,
-                log: this.log,
-            });
+            const listCmd: PipListCommand | UvListCommand = await createPipOrUvCommand(
+                {
+                    pythonExecutable,
+                    log: this.log,
+                },
+                PipListCommand,
+                UvListCommand,
+            );
             const data = await listCmd.execute();
             const packages = (data ?? []).map((pkg) => this.api.createPackageItem(pkg, environment, this));
             this.packages.set(environment.envId.id, packages);
@@ -163,10 +183,11 @@ export class PipPackageManager implements PackageManager, Disposable {
             if (!pythonExecutable) {
                 return undefined;
             }
-            const versionCmd = await BuiltinVersionCommandFactory({
-                pythonExecutable,
-                log: this.log,
-            });
+            const versionCmd: PipVersionCommand | UvVersionCommand = await createPipOrUvCommand(
+                { pythonExecutable, log: this.log },
+                PipVersionCommand,
+                UvVersionCommand,
+            );
             return await versionCmd.execute();
         } catch {
             return undefined;
@@ -188,10 +209,12 @@ export class PipPackageManager implements PackageManager, Disposable {
                 return undefined;
             }
 
-            const availableVersionsCmd = await BuiltinAvailableVersionsCommandFactory({
-                pythonExecutable,
-                log: this.log,
-            });
+            const availableVersionsCmd: PipAvailableVersionsCommand | UvAvailableVersionsCommand =
+                await createPipOrUvCommand(
+                    { pythonExecutable, log: this.log },
+                    PipAvailableVersionsCommand,
+                    UvAvailableVersionsCommand,
+                );
 
             // For pip < 21.2.0, check version first
             if (availableVersionsCmd instanceof PipAvailableVersionsCommand) {
@@ -231,10 +254,11 @@ export class PipPackageManager implements PackageManager, Disposable {
         if (!pythonExecutable) {
             return undefined;
         }
-        const listDirectNamesCmd = await BuiltinListDirectNamesCommandFactory({
-            pythonExecutable,
-            log: this.log,
-        });
+        const listDirectNamesCmd: PipListDirectNamesCommand | UvListDirectNamesCommand = await createPipOrUvCommand(
+            { pythonExecutable, log: this.log },
+            PipListDirectNamesCommand,
+            UvListDirectNamesCommand,
+        );
         const data = await listDirectNamesCmd.execute();
         return data ? new Set(data.map(normalizePackageName)) : undefined;
     }

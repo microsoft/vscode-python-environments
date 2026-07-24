@@ -3,7 +3,7 @@ import {
     CommandConstructorOptions,
     type AvailableVersionsExecuteArgs,
 } from '../../base/commands/index';
-import { runPython, runUV, shouldUseUv } from '../helpers';
+import { runPython, runUV } from '../helpers';
 
 /**
  * Pip available versions command.
@@ -109,13 +109,4 @@ export class UvAvailableVersionsCommand extends AvailableVersionsCommand {
         parser(output);
         return availableVersions;
     }
-}
-
-export async function BuiltinAvailableVersionsCommandFactory(
-    options: CommandConstructorOptions,
-): Promise<AvailableVersionsCommand> {
-    if (await shouldUseUv(options.log, options.pythonExecutable)) {
-        return new UvAvailableVersionsCommand(options);
-    }
-    return new PipAvailableVersionsCommand(options);
 }

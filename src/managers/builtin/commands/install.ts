@@ -1,6 +1,6 @@
 import { getConfiguration } from '../../../common/workspace.apis';
 import { CommandConstructorOptions, InstallCommand, type InstallExecuteArgs } from '../../base/commands/index';
-import { runPython, runUV, shouldUseUv } from '../helpers';
+import { runPython, runUV } from '../helpers';
 import { processEditableInstallArgs } from '../utils';
 
 /**
@@ -86,11 +86,4 @@ export class UvInstallCommand extends InstallCommand {
 
         await runUV(args, undefined, this.log, executeArgs.cancellationToken, this.timeout);
     }
-}
-
-export async function BuiltinInstallCommandFactory(options: CommandConstructorOptions): Promise<InstallCommand> {
-    if (await shouldUseUv(options.log, options.pythonExecutable)) {
-        return new UvInstallCommand(options);
-    }
-    return new PipInstallCommand(options);
 }

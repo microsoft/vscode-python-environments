@@ -1,5 +1,5 @@
 import { CommandConstructorOptions, ListDirectNamesCommand, type BaseExecuteArgs } from '../../base/commands/index';
-import { runPython, runUV, shouldUseUv } from '../helpers';
+import { runPython, runUV } from '../helpers';
 
 /**
  * Pip list direct names command.
@@ -98,13 +98,4 @@ export class UvListDirectNamesCommand extends ListDirectNamesCommand {
         parser(output);
         return directNames;
     }
-}
-
-export async function BuiltinListDirectNamesCommandFactory(
-    options: CommandConstructorOptions,
-): Promise<ListDirectNamesCommand> {
-    if (await shouldUseUv(options.log, options.pythonExecutable)) {
-        return new UvListDirectNamesCommand(options);
-    }
-    return new PipListDirectNamesCommand(options);
 }

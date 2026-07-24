@@ -1,7 +1,7 @@
 import type { Pep440Version } from '@renovatebot/pep440';
 import { explain as parsePep440Version } from '@renovatebot/pep440';
 import { CommandConstructorOptions, VersionCommand, type BaseExecuteArgs } from '../../base/commands/index';
-import { runPython, runUV, shouldUseUv } from '../helpers';
+import { runPython, runUV } from '../helpers';
 
 /**
  * Pip version command.
@@ -79,11 +79,4 @@ export class UvVersionCommand extends VersionCommand {
         parser(output);
         return parsedVersion;
     }
-}
-
-export async function BuiltinVersionCommandFactory(options: CommandConstructorOptions): Promise<VersionCommand> {
-    if (await shouldUseUv(options.log, options.pythonExecutable)) {
-        return new UvVersionCommand(options);
-    }
-    return new PipVersionCommand(options);
 }
