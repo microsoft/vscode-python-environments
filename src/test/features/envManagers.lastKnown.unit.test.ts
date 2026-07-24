@@ -69,7 +69,10 @@ suite('PythonEnvironmentManagers getLastKnownEnvironment', () => {
         envManagers.dispose();
     });
 
-    function registerManager(getImpl: (scope: GetEnvironmentScope) => Promise<PythonEnvironment | undefined>): string {
+    function registerManager(
+        getImpl: (scope: GetEnvironmentScope) => Promise<PythonEnvironment | undefined>,
+        setImpl: EnvironmentManager['set'] = async () => undefined,
+    ): string {
         const onDidChangeEnvironment = new EventEmitter<DidChangeEnvironmentEventArgs>();
         const onDidChangeEnvironments = new EventEmitter<DidChangeEnvironmentsEventArgs>();
         const manager = {
@@ -80,7 +83,7 @@ suite('PythonEnvironmentManagers getLastKnownEnvironment', () => {
             onDidChangeEnvironments: onDidChangeEnvironments.event,
             get: getImpl,
             getEnvironments: async () => [],
-            set: async () => undefined,
+            set: setImpl,
             resolve: async () => undefined,
             refresh: async () => undefined,
         } as unknown as EnvironmentManager;
@@ -118,5 +121,27 @@ suite('PythonEnvironmentManagers getLastKnownEnvironment', () => {
         current = makeEnv('env2');
         await envManagers.refreshEnvironment(undefined);
         assert.strictEqual(envManagers.getLastKnownEnvironment(undefined)?.envId.id, 'env2');
+    });
+
+    test('does not update selection, settings, or events when a registered manager rejects a selection', async () => {
+        const scope = Uri.file('/workspace/script.py');
+        const project = { name: 'script.py', uri: scope };
+        projectManager.setup((pm) => pm.get(scope)).returns(() => project);
+        const managerSet = sinon.stub().rejects(new Error('Inline-script environment is not an owned cache entry.'));
+        const managerId = registerManager(async () => undefined, managerSet);
+        const rejected = {
+            ...makeEnv('unowned'),
+            envId: { id: 'unowned', managerId },
+        };
+        const settings = sinon.stub(settingHelpers, 'setAllManagerSettings').resolves();
+        const events: DidChangeEnvironmentEventArgs[] = [];
+        envManagers.onDidChangeActiveEnvironment((event) => events.push(event));
+
+        await assert.rejects(envManagers.setEnvironment(scope, rejected), /not an owned cache entry/);
+        await new Promise((resolve) => setImmediate(resolve));
+
+        assert.strictEqual(envManagers.getLastKnownEnvironment(scope), undefined);
+        assert.strictEqual(settings.callCount, 0);
+        assert.strictEqual(events.length, 0);
     });
 });
