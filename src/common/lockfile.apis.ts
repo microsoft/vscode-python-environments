@@ -5,6 +5,19 @@ import * as crypto from 'crypto';
 import * as fsapi from 'fs-extra';
 import * as path from 'path';
 
+export interface AcquireFileLockOptions {
+    readonly timeoutMs: number;
+    readonly retryIntervalMs: number;
+}
+
+export interface AcquiredFileLock {
+    readonly release: () => Promise<void>;
+    /** Keep the lock and make later acquisition attempts fail immediately. */
+    readonly retain: () => Promise<void>;
+}
+
+type LockState = 'held' | 'released' | 'retained';
+
 /** Acquire an atomic lock released only explicitly; interrupted operations remain locked. */
 export async function acquireFileLock(filePath: string, options: AcquireFileLockOptions): Promise<AcquiredFileLock> {
     const lockPath = `${path.resolve(filePath)}.lock`;
@@ -40,13 +53,13 @@ export async function acquireFileLock(filePath: string, options: AcquireFileLock
                     try {
                         await fsapi.writeFile(retainedMarker, '', { flag: 'wx' });
                     } catch (error) {
-                        if (isAlreadyExistsError(error)) {
+                        if (hasErrorCode(error, 'EEXIST')) {
                             return;
                         }
                         try {
                             await fsapi.rename(ownerMarker, retainedMarker);
                         } catch (renameError) {
-                            if (!isAlreadyExistsError(renameError)) {
+                            if (!hasErrorCode(renameError, 'EEXIST')) {
                                 throw createLockError(
                                     'Failed to mark the lock as retained',
                                     'ERETAINFAILED',
@@ -64,7 +77,7 @@ export async function acquireFileLock(filePath: string, options: AcquireFileLock
                     try {
                         await fsapi.unlink(ownerMarker);
                     } catch (error) {
-                        if (isFileNotFoundError(error)) {
+                        if (hasErrorCode(error, 'ENOENT')) {
                             throw createLockError('Lock ownership was compromised', 'ECOMPROMISED', lockPath);
                         }
                         throw error;
@@ -73,7 +86,7 @@ export async function acquireFileLock(filePath: string, options: AcquireFileLock
                 },
             };
         } catch (error) {
-            if (!isAlreadyExistsError(error)) {
+            if (!hasErrorCode(error, 'EEXIST')) {
                 throw error;
             }
             if (await isRetainedLock(lockPath)) {
@@ -87,20 +100,12 @@ export async function acquireFileLock(filePath: string, options: AcquireFileLock
     }
 }
 
-function isAlreadyExistsError(error: unknown): boolean {
-    return hasErrorCode(error, 'EEXIST');
-}
-
-function isFileNotFoundError(error: unknown): boolean {
-    return hasErrorCode(error, 'ENOENT');
-}
-
 async function isRetainedLock(lockPath: string): Promise<boolean> {
     try {
         await fsapi.lstat(path.join(lockPath, 'retained'));
         return true;
     } catch (error) {
-        if (isFileNotFoundError(error)) {
+        if (hasErrorCode(error, 'ENOENT')) {
             return false;
         }
         throw error;
@@ -120,16 +125,3 @@ function createLockError(message: string, code: string, lockPath: string): NodeJ
 async function delay(milliseconds: number): Promise<void> {
     return new Promise((resolve) => setTimeout(resolve, milliseconds));
 }
-
-export interface AcquireFileLockOptions {
-    readonly timeoutMs: number;
-    readonly retryIntervalMs: number;
-}
-
-export interface AcquiredFileLock {
-    readonly release: () => Promise<void>;
-    /** Keep the lock and make later acquisition attempts fail immediately. */
-    readonly retain: () => Promise<void>;
-}
-
-type LockState = 'held' | 'released' | 'retained';

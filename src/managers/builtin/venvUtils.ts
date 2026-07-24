@@ -67,11 +67,6 @@ export interface CreateEnvironmentResult {
     pkgInstallationCancelled?: boolean;
 }
 
-export interface CreateWithProgressOptions {
-    /** Whether to record uv-created environments in workspace state. Defaults to true. */
-    readonly trackUvEnvironment?: boolean;
-}
-
 export async function clearVenvCache(): Promise<void> {
     const keys = [VENV_WORKSPACE_KEY, VENV_GLOBAL_KEY, UV_ENVS_KEY];
     const state = await getWorkspacePersistentState();
@@ -358,7 +353,7 @@ export async function createWithProgress(
     venvRoot: Uri,
     envPath: string,
     packages?: PipPackages,
-    options?: CreateWithProgressOptions,
+    trackUvEnvironment = true,
 ): Promise<CreateEnvironmentResult | undefined> {
     const pythonPath = getVenvPythonPath(envPath);
 
@@ -401,7 +396,7 @@ export async function createWithProgress(
                 const env = api.createPythonEnvironmentItem(await getPythonInfo(resolved), manager);
 
                 if (
-                    options?.trackUvEnvironment !== false &&
+                    trackUvEnvironment &&
                     useUv &&
                     (resolved.kind === NativePythonEnvironmentKind.venvUv ||
                         resolved.kind === NativePythonEnvironmentKind.uvWorkspace)

@@ -16,7 +16,7 @@ import { createWithProgress } from '../../../managers/builtin/venvUtils';
 import { NativePythonEnvironmentKind, NativePythonFinder } from '../../../managers/common/nativePythonFinder';
 import * as managerUtils from '../../../managers/common/utils';
 
-suite('createWithProgress uv tracking options', () => {
+suite('createWithProgress uv tracking', () => {
     let addUvEnvironmentStub: sinon.SinonStub;
     let api: PythonEnvironmentApi;
     let baseEnvironment: PythonEnvironment;
@@ -105,7 +105,7 @@ suite('createWithProgress uv tracking options', () => {
             Uri.file(tempRoot),
             envPath,
             undefined,
-            { trackUvEnvironment: false },
+            false, // trackUvEnvironment
         );
 
         assert.ok(result?.environment);
@@ -124,7 +124,7 @@ suite('createWithProgress uv tracking options', () => {
             Uri.file(tempRoot),
             envPath,
             { install: ['requests'], uninstall: [] },
-            { trackUvEnvironment: false },
+            false, // trackUvEnvironment
         );
 
         assert.ok(result?.environment);
