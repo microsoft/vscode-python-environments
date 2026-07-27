@@ -4,7 +4,6 @@
     "description": "Provides a unified python environment experience",
     "version": "1.37.0",
     "publisher": "ms-python",
-    "preview": true,
     "engines": {
         "vscode": "^1.110.0-20260204"
     },
