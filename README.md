@@ -1,6 +1,4 @@
-# Python Environments (preview)
-
-> **Note:** The Python Environments icon may no longer appear in the Activity Bar due to the ongoing rollout of the Python Environments extension. To restore the extension, add `"python.useEnvironmentsExtension": true` to your User settings. This setting is temporarily necessary until the rollout is complete!
+# Python Environments
 
 ## Overview
 
@@ -10,8 +8,6 @@ The Python Environments extension for VS Code helps you manage Python environmen
 -   📦 Install and uninstall packages within the selected environment
 -   ✅ Create activated terminals
 -   🖌️ Add and create new Python projects
-
-> **Note:** This extension is in preview, and its APIs and features are subject to change as the project evolves.
 
 > **Important:** This extension requires version `2024.23`, or later, of the Python extension (`ms-python.python`).
 
