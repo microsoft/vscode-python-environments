@@ -1,7 +1,16 @@
 import * as fsapi from 'fs-extra';
 import * as os from 'os';
 import * as path from 'path';
-import { l10n, LogOutputChannel, ProgressLocation, QuickPickItem, QuickPickItemKind, ThemeIcon, Uri } from 'vscode';
+import {
+    CancellationError,
+    l10n,
+    LogOutputChannel,
+    ProgressLocation,
+    QuickPickItem,
+    QuickPickItemKind,
+    ThemeIcon,
+    Uri,
+} from 'vscode';
 import { EnvironmentManager, PythonEnvironment, PythonEnvironmentApi, PythonEnvironmentInfo } from '../../api';
 import { ENVS_EXTENSION_ID } from '../../common/constants';
 import { Common, VenvManagerStrings } from '../../common/localize';
@@ -10,6 +19,7 @@ import { getWorkspacePersistentState } from '../../common/persistentState';
 import { EventNames } from '../../common/telemetry/constants';
 import { sendTelemetryEvent } from '../../common/telemetry/sender';
 import { normalizePath } from '../../common/utils/pathUtils';
+import { getVenvPythonPath } from '../../common/utils/virtualEnvironment';
 import {
     showErrorMessage,
     showOpenDialog,
@@ -52,6 +62,9 @@ export interface CreateEnvironmentResult {
      * Exists if error occurred while installing packages and includes error description.
      */
     pkgInstallationErr?: string;
+
+    /** Cancellation may leave package processes running. */
+    pkgInstallationCancelled?: boolean;
 }
 
 export async function clearVenvCache(): Promise<void> {
@@ -340,9 +353,9 @@ export async function createWithProgress(
     venvRoot: Uri,
     envPath: string,
     packages?: PipPackages,
+    trackUvEnvironment = true,
 ): Promise<CreateEnvironmentResult | undefined> {
-    const pythonPath =
-        os.platform() === 'win32' ? path.join(envPath, 'Scripts', 'python.exe') : path.join(envPath, 'bin', 'python');
+    const pythonPath = getVenvPythonPath(envPath);
 
     return await withProgress(
         {
@@ -383,6 +396,7 @@ export async function createWithProgress(
                 const env = api.createPythonEnvironmentItem(await getPythonInfo(resolved), manager);
 
                 if (
+                    trackUvEnvironment &&
                     useUv &&
                     (resolved.kind === NativePythonEnvironmentKind.venvUv ||
                         resolved.kind === NativePythonEnvironmentKind.uvWorkspace)
@@ -401,6 +415,7 @@ export async function createWithProgress(
                     } catch (e) {
                         // error occurred while installing packages
                         result.pkgInstallationErr = e instanceof Error ? e.message : String(e);
+                        result.pkgInstallationCancelled = e instanceof CancellationError;
                     }
                 }
                 result.environment = env;

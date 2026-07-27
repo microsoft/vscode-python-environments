@@ -73,12 +73,22 @@ export async function runUV(
             spawnOptions.timeout = timeout;
         }
         const proc = spawnProcess('uv', args, spawnOptions);
+        let cancellationRequested = false;
         token?.onCancellationRequested(() => {
-            proc.kill();
+            cancellationRequested = true;
+            try {
+                proc.kill();
+            } catch {
+                // Preserve cancellation when signaling fails.
+            }
             reject(new CancellationError());
         });
 
         proc.on('error', (err) => {
+            if (cancellationRequested) {
+                reject(new CancellationError());
+                return;
+            }
             log?.error(`Error spawning uv: ${err}`);
             reject(new Error(`Error spawning uv: ${err.message}`));
         });
@@ -114,12 +124,22 @@ export async function runPython(
     log?.info(`Running: ${python} ${args.join(' ')}`);
     return new Promise<string>((resolve, reject) => {
         const proc = spawnProcess(python, args, { cwd: cwd, timeout });
+        let cancellationRequested = false;
         token?.onCancellationRequested(() => {
-            proc.kill();
+            cancellationRequested = true;
+            try {
+                proc.kill();
+            } catch {
+                // Preserve cancellation when signaling fails.
+            }
             reject(new CancellationError());
         });
 
         proc.on('error', (err) => {
+            if (cancellationRequested) {
+                reject(new CancellationError());
+                return;
+            }
             log?.error(`Error spawning python: ${err}`);
             reject(new Error(`Error spawning python: ${err.message}`));
         });
