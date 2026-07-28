@@ -284,6 +284,10 @@ function isDescendantPath(rootPath: string, candidatePath: string): boolean {
     );
 }
 
+function isNonEmptyTrimmedString(value: unknown): value is string {
+    return typeof value === 'string' && value.length > 0 && value.trim() === value;
+}
+
 function validateMeta(value: unknown): InlineScriptEnvMeta | undefined {
     if (typeof value !== 'object' || value === null || Array.isArray(value)) {
         return undefined;
@@ -292,19 +296,10 @@ function validateMeta(value: unknown): InlineScriptEnvMeta | undefined {
     if (obj.schemaVersion !== META_SCHEMA_VERSION) {
         return undefined;
     }
-    if (
-        typeof obj.baseInterpreterPath !== 'string' ||
-        obj.baseInterpreterPath.length === 0 ||
-        obj.baseInterpreterPath.trim() !== obj.baseInterpreterPath ||
-        !path.isAbsolute(obj.baseInterpreterPath)
-    ) {
+    if (!isNonEmptyTrimmedString(obj.baseInterpreterPath) || !path.isAbsolute(obj.baseInterpreterPath)) {
         return undefined;
     }
-    if (
-        typeof obj.baseInterpreterVersion !== 'string' ||
-        obj.baseInterpreterVersion.trim().length === 0 ||
-        obj.baseInterpreterVersion.trim() !== obj.baseInterpreterVersion
-    ) {
+    if (!isNonEmptyTrimmedString(obj.baseInterpreterVersion)) {
         return undefined;
     }
     if (!isCanonicalIsoTimestamp(obj.lastUsedAt)) {

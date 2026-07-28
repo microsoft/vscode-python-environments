@@ -31,6 +31,7 @@ function normalizeExtras(inner: string): string {
     return deduped.length > 0 ? `[${deduped.join(',')}]` : '';
 }
 
+/** ` >=  2 ; python_version  <  "3.13"` becomes `>=2 ; python_version<"3.13"`. */
 function normalizeRequirementTail(value: string): string {
     let result = '';
     let unquoted = '';

@@ -471,6 +471,13 @@ suite('inlineScriptCacheLayout', () => {
             assert.strictEqual(await resolveCacheEntryPath(cacheRoot, externalEnv), undefined);
         });
 
+        test('rejects a nested descendant of the cache root', async () => {
+            const nestedEnv = Uri.joinPath(cacheRoot, 'nested', '0123456789abcdef');
+            await fs.ensureDir(nestedEnv.fsPath);
+
+            assert.strictEqual(await resolveCacheEntryPath(cacheRoot, nestedEnv), undefined);
+        });
+
         test('surfaces a missing entry', async () => {
             await assert.rejects(
                 resolveCacheEntryPath(cacheRoot, Uri.joinPath(cacheRoot, '0123456789abcdef')),
@@ -519,13 +526,23 @@ suite('inlineScriptCacheLayout', () => {
             assert.strictEqual(await inspectOwnedCacheEntry(otherManager, cacheRoot, envDir), 'uncertain');
         });
 
-        test('classifies an inline environment resolving elsewhere as stale', async () => {
+        test('classifies an inline environment with a mismatched sysPrefix as stale', async () => {
+            const externalPrefix = path.join(tmpDir, 'external-env');
+            await fs.ensureDir(externalPrefix);
+            const mismatched = {
+                ...environment,
+                sysPrefix: externalPrefix,
+            };
+
+            assert.strictEqual(await inspectOwnedCacheEntry(mismatched, cacheRoot, envDir), 'stale');
+        });
+
+        test('classifies an inline environment with a mismatched environmentPath as stale', async () => {
             const externalPrefix = path.join(tmpDir, 'external-env');
             const externalPython = getVenvPythonPath(externalPrefix);
             await fs.outputFile(externalPython, '');
             const mismatched = {
                 ...environment,
-                sysPrefix: externalPrefix,
                 environmentPath: Uri.file(externalPython),
             };
 
