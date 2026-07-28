@@ -23,7 +23,7 @@ export abstract class AvailableVersionsCommand extends PackageManagerCommand {
             .map((version) => parsePep440Version(version.trim()))
             .filter((version): version is Pep440Version => version !== null);
         if (includePrerelease === false) {
-            parsed = parsed.filter((version) => !/[ab]|rc|dev/i.test(version.public));
+            parsed = parsed.filter((version) => !version.is_prerelease);
         }
         return parsed;
     }
