@@ -239,14 +239,11 @@ export class PipPackageManager implements PackageManager, Disposable {
                 }
             }
 
-            const versionStrings = await availableVersionsCmd.execute({
+            const versions = await availableVersionsCmd.execute({
                 packageName,
                 pythonVersion: baseVersion,
             });
-            return versionStrings
-                .map((v) => parse(v))
-                .filter((parsed): parsed is Pep440Version => parsed !== null)
-                .sort((a, b) => compare(b.public, a.public));
+            return versions.sort((a, b) => compare(b.public, a.public));
         } catch {
             return undefined;
         }

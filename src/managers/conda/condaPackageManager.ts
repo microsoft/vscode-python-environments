@@ -1,5 +1,5 @@
 import type { Pep440Version } from '@renovatebot/pep440';
-import { compare, explain as parse } from '@renovatebot/pep440';
+import { compare } from '@renovatebot/pep440';
 import * as path from 'path';
 import {
     CancellationError,
@@ -186,11 +186,8 @@ export class CondaPackageManager implements PackageManager, Disposable {
                 pythonExecutable: 'conda',
                 log: this.log,
             });
-            const versionStrings = await availableVersionsCmd.execute({ packageName, pythonVersion: '' });
-            return versionStrings
-                .map((v) => parse(v))
-                .filter((parsed): parsed is Pep440Version => parsed !== null)
-                .sort((a, b) => compare(b.public, a.public));
+            const versions = await availableVersionsCmd.execute({ packageName, pythonVersion: '' });
+            return versions.sort((a, b) => compare(b.public, a.public));
         } catch {
             return undefined;
         }
