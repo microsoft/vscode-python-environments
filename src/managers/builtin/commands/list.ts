@@ -4,12 +4,12 @@ import { runPython, runUV } from '../helpers';
 
 /**
  * Pip list command.
- * Parsed command: `python -m pip list --format=json`
+ * Parsed command: `python -m pip list --format=json` --disable-pip-version-check
  * Official documentation: https://pip.pypa.io/en/stable/cli/pip_list/
  */
 export class PipListCommand extends ListCommand {
     protected buildCommand(): string[] {
-        return ['-m', 'pip', 'list', '--format=json'];
+        return ['-m', 'pip', 'list', '--format=json', '--disable-pip-version-check'];
     }
 
     async execute(executeArgs?: BaseExecuteArgs): Promise<PackageInfo[]> {
