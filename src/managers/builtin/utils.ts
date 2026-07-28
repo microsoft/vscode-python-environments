@@ -185,12 +185,18 @@ export async function refreshPythons(
 
 const PIP_LIST_TIMEOUT_MS = 30_000;
 
+function getUvEnvironmentTarget(environment: PythonEnvironment): string {
+    // A virtual environment's executable may resolve to its base interpreter. uv accepts
+    // the environment directory directly, which preserves the environment boundary.
+    return environment.environmentPath.fsPath;
+}
+
 async function execPipList(environment: PythonEnvironment, log?: LogOutputChannel, args?: string[]): Promise<string> {
     // Use environmentPath directly for consistency with UV environment tracking
     const useUv = await shouldUseUv(log, environment.environmentPath.fsPath);
     if (useUv) {
         return await runUV(
-            ['pip', 'list', '--python', environment.execInfo.run.executable, '--format=json', ...(args ?? [])],
+            ['pip', 'list', '--python', getUvEnvironmentTarget(environment), '--format=json', ...(args ?? [])],
             undefined,
             log,
             undefined,
@@ -258,7 +264,7 @@ export async function refreshPipDirectPackageNames(
     const useUv = await shouldUseUv(log, environment.environmentPath.fsPath);
     if (useUv) {
         const treeOutput = await runUV(
-            ['pip', 'tree', '--python', environment.execInfo.run.executable, '--depth=0'],
+            ['pip', 'tree', '--python', getUvEnvironmentTarget(environment), '--depth=0'],
             undefined,
             log,
             undefined,
@@ -287,7 +293,7 @@ export async function managePackages(
     if (options.uninstall && options.uninstall.length > 0) {
         if (useUv) {
             await runUV(
-                [...uninstallArgs, '--python', environment.execInfo.run.executable, ...options.uninstall],
+                [...uninstallArgs, '--python', getUvEnvironmentTarget(environment), ...options.uninstall],
                 undefined,
                 manager.log,
                 token,
@@ -313,7 +319,7 @@ export async function managePackages(
 
         if (useUv) {
             await runUV(
-                [...installArgs, '--python', environment.execInfo.run.executable, ...processedInstallArgs],
+                [...installArgs, '--python', getUvEnvironmentTarget(environment), ...processedInstallArgs],
                 undefined,
                 manager.log,
                 token,
