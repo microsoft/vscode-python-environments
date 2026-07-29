@@ -1,4 +1,5 @@
-name: PR files
+- name: Cache
+  uses: actions/cache@v6.1.0name: PR files
 
 on:
   pull_request:
