@@ -363,7 +363,7 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
                 cacheRoot,
                 envDir.fsPath,
                 { install: [...packages], uninstall: [] },
-                { trackUvEnvironment: false },
+                false, // trackUvEnvironment
             );
         } catch (error) {
             this.log.error(`Failed to build inline-script environment: ${this.errorMessage(error)}`);

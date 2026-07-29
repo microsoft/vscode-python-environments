@@ -309,7 +309,11 @@ suite('InlineScriptEnvManager', () => {
                     lastUsedAt: NOW.toISOString(),
                 },
             ]);
-            assert.deepStrictEqual(createWithProgressStub.firstCall.args[8], { trackUvEnvironment: false });
+            assert.strictEqual(
+                createWithProgressStub.firstCall.args[8],
+                false,
+                'inline-script cache entries must not be tracked as workspace uv environments',
+            );
             assert.ok(releaseLockStub.calledOnce);
         });
 
