@@ -68,6 +68,11 @@ suite('registerInlineScriptFeatures (feature-flag gate)', () => {
         assert.strictEqual(registerEnvironmentManagerStub.callCount, 1);
         assert.strictEqual(disposables.length, 2, 'expected manager + registration disposable');
         const manager = registerEnvironmentManagerStub.firstCall.args[0];
+        assert.ok(disposables.includes(manager), 'manager itself should be disposed');
+        assert.ok(
+            disposables.includes(registerEnvironmentManagerStub.firstCall.returnValue),
+            'registration disposable should be disposed',
+        );
         assert.strictEqual(typeof manager.create, 'function');
     });
 });

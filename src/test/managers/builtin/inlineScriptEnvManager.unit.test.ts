@@ -86,7 +86,7 @@ suite('InlineScriptEnvManager', () => {
     let writeMetaStub: sinon.SinonStub;
 
     setup(async () => {
-        tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'inline-script-manager-'));
+        tempRoot = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'inline-script-manager-')));
         globalStorageUri = Uri.file(path.join(tempRoot, 'global-storage'));
         baseExecutable = path.join(tempRoot, 'base-python', isWindows() ? 'python.exe' : 'python');
         await fs.outputFile(baseExecutable, '');
@@ -430,6 +430,25 @@ suite('InlineScriptEnvManager', () => {
 
             assert.strictEqual(await manager.create(scriptUri()), cached);
             assert.strictEqual(createWithProgressStub.callCount, 0);
+        });
+
+        test('preserves a valid cache entry when its environment cannot be resolved', async () => {
+            await fs.outputFile(venvPythonPath(envDir().fsPath), '');
+            const markerPath = path.join(envDir().fsPath, 'keep.txt');
+            await fs.outputFile(markerPath, 'keep');
+            setSidecar({
+                schemaVersion: cacheLayout.META_SCHEMA_VERSION,
+                baseInterpreterPath: baseExecutable,
+                baseInterpreterVersion: baseEnvironment.version,
+                lastUsedAt: NOW.toISOString(),
+            });
+            resolveVenvStub.resolves(undefined);
+
+            assert.strictEqual(await manager.create(scriptUri()), undefined);
+            assert.strictEqual(await fs.readFile(markerPath, 'utf8'), 'keep');
+            assert.strictEqual(resolveVenvStub.callCount, 1);
+            assert.strictEqual(createWithProgressStub.callCount, 0);
+            assert.strictEqual(writeMetaStub.callCount, 0);
         });
 
         test('removes and rebuilds a cache entry whose sidecar names another base', async () => {
