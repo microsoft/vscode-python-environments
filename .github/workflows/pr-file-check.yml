@@ -1,5 +1,4 @@
- name: Cache
-  uses: actions/cache@v6.1.0name: PR files
+name: PR files
 
 on:
   pull_request:
@@ -18,7 +17,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: 'package-lock.json matches package.json'
-        uses: brettcannon/check-for-changed-files@871d7b8b5917a4f6f06662e2262e8ffc51dff6d1 # v1.2.1
+        uses: brettcannon/check-for-changed-files@v1.2.1
         with:
           prereq-pattern: 'package.json'
           file-pattern: 'package-lock.json'
@@ -26,7 +25,7 @@ jobs:
           failure-message: '${prereq-pattern} was edited but ${file-pattern} was not (the ${skip-label} label can be used to pass this check)'
 
       - name: 'package.json matches package-lock.json'
-        uses: brettcannon/check-for-changed-files@871d7b8b5917a4f6f06662e2262e8ffc51dff6d1 # v1.2.1
+        uses: brettcannon/check-for-changed-files@v1.2.1
         with:
           prereq-pattern: 'package-lock.json'
           file-pattern: 'package.json'
@@ -34,9 +33,9 @@ jobs:
           failure-message: '${prereq-pattern} was edited but ${file-pattern} was not (the ${skip-label} label can be used to pass this check)'
 
       - name: 'Tests'
-        uses: brettcannon/check-for-changed-files@871d7b8b5917a4f6f06662e2262e8ffc51dff6d1 # v1.2.1
+        uses: brettcannon/check-for-changed-files@v1.2.1
         with:
-          prereq-pattern: src/**/*.ts
+          prereq-pattern: 'src/**/*.ts'
           file-pattern: |
             src/**/*.test.ts
             src/**/*.unit.test.ts
@@ -44,7 +43,7 @@ jobs:
           failure-message: 'TypeScript code was edited without also editing a test file (the ${skip-label} label can be used to pass this check)'
 
       - name: 'Public API changes require a version bump'
-        uses: brettcannon/check-for-changed-files@871d7b8b5917a4f6f06662e2262e8ffc51dff6d1 # v1.2.1
+        uses: brettcannon/check-for-changed-files@v1.2.1
         with:
           prereq-pattern: 'src/api.ts'
           file-pattern: 'api/package.json'
@@ -52,7 +51,7 @@ jobs:
           failure-message: 'The public API (${prereq-pattern}) was changed without bumping the package version in ${file-pattern} (the ${skip-label} label can be used to pass this check)'
 
       - name: 'Public API changes require a changelog entry'
-        uses: brettcannon/check-for-changed-files@871d7b8b5917a4f6f06662e2262e8ffc51dff6d1 # v1.2.1
+        uses: brettcannon/check-for-changed-files@v1.2.1
         with:
           prereq-pattern: 'src/api.ts'
           file-pattern: 'api/CHANGELOG.md'
