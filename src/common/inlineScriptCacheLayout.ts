@@ -8,6 +8,7 @@ import { Uri } from 'vscode';
 import type { PythonEnvironment } from '../api';
 import { INLINE_SCRIPT_MANAGER_ID } from './constants';
 import { traceWarn } from './logging';
+import { isFileNotFoundError } from './utils/filesystem';
 import { normalizePath } from './utils/pathUtils';
 import { isWindows } from './utils/platformUtils';
 import { getVenvPythonPath } from './utils/virtualEnvironment';
@@ -271,10 +272,6 @@ function parsePyvenvHome(raw: string): string | undefined {
         }
     }
     return undefined;
-}
-
-function isFileNotFoundError(err: unknown): boolean {
-    return typeof err === 'object' && err !== null && 'code' in err && (err as NodeJS.ErrnoException).code === 'ENOENT';
 }
 
 function isDescendantPath(rootPath: string, candidatePath: string): boolean {

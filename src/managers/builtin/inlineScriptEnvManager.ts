@@ -21,7 +21,6 @@ import {
 } from '../../api';
 import { computeCacheKey } from '../../common/inlineScriptCacheKey';
 import {
-    InlineScriptEnvMeta,
     META_SCHEMA_VERSION,
     getBaseInterpreterStatus,
     getScriptEnvCacheRoot,
@@ -37,8 +36,9 @@ import {
     matchesPythonVersion,
     readInlineScriptMetadataFromFile,
 } from '../../common/inlineScriptMetadata';
-import { CONDA_MANAGER_ID, PYTHON_EXTENSION_ID, SYSTEM_MANAGER_ID } from '../../common/constants';
+import { CONDA_MANAGER_ID, PYENV_MANAGER_ID, SYSTEM_MANAGER_ID } from '../../common/constants';
 import { acquireFileLock, AcquiredFileLock } from '../../common/lockfile.apis';
+import { isFileNotFoundError } from '../../common/utils/filesystem';
 import { normalizePath } from '../../common/utils/pathUtils';
 import { compareReleaseSegments, parseReleaseSegments } from '../../common/utils/pep440Release';
 import { getVenvPythonPath } from '../../common/utils/virtualEnvironment';
@@ -48,11 +48,32 @@ import { createWithProgress, resolveVenvPythonEnvironmentPath } from './venvUtil
 const BASE_INTERPRETER_MANAGER_IDS = new Set([
     SYSTEM_MANAGER_ID,
     CONDA_MANAGER_ID,
-    `${PYTHON_EXTENSION_ID}:pyenv`,
+    PYENV_MANAGER_ID,
 ]);
 
 const CACHE_LOCK_TIMEOUT_MS = 5 * 60 * 1000;
 const CACHE_LOCK_RETRY_MS = 500;
+
+interface SelectedBaseInterpreter {
+    readonly environment: PythonEnvironment;
+    readonly canonicalPath: string;
+}
+
+interface CreateOrReuseEnvironmentOptions {
+    readonly cacheKey: string;
+    readonly packages: ReadonlyArray<string>;
+    readonly metadata: InlineScriptMetadata;
+    readonly selectedBase: SelectedBaseInterpreter;
+}
+
+interface BuildCacheEntryResult {
+    readonly environment?: PythonEnvironment;
+    readonly retainLock?: boolean;
+}
+
+type CacheEntryInspection =
+    | { readonly kind: 'absent' | 'stale' | 'uncertain' }
+    | { readonly kind: 'reusable'; readonly environment: PythonEnvironment };
 
 /** Manages extension-owned PEP 723 script environments. */
 export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
@@ -100,9 +121,10 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
                 return undefined;
             }
 
-            const packages = [...(metadata.dependencies ?? []), ...(options?.additionalPackages ?? [])].map((value) =>
-                value.trim(),
-            );
+            const packages = [
+                ...(metadata.dependencies ?? []),
+                ...(options?.additionalPackages ?? []),
+            ].map((value) => value.trim());
             if (packages.some((value) => value.length === 0)) {
                 this.log.warn(`Inline-script dependencies must not contain empty entries: ${scriptUri.fsPath}.`);
                 return undefined;
@@ -113,6 +135,7 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
                 this.log.warn(`No installed Python satisfies the inline-script requirements for ${scriptUri.fsPath}.`);
                 return undefined;
             }
+
             const cacheKey = computeCacheKey({
                 dependencies: packages,
                 interpreterPath: selectedBase.canonicalPath,
@@ -122,7 +145,12 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
                 return await pending;
             }
 
-            const creation = this.createOrReuseEnvironment(cacheKey, packages, metadata, selectedBase);
+            const creation = this.createOrReuseEnvironment({
+                cacheKey,
+                packages,
+                metadata,
+                selectedBase,
+            });
             this.pendingCreations.set(cacheKey, creation);
             try {
                 return await creation;
@@ -163,7 +191,8 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
     }
 
     private async selectBaseInterpreter(metadata: InlineScriptMetadata): Promise<SelectedBaseInterpreter | undefined> {
-        const reported = (await this.api.getEnvironments('global')).filter(
+        const globalEnvironments = await this.api.getEnvironments('global');
+        const reported = globalEnvironments.filter(
             (environment) =>
                 BASE_INTERPRETER_MANAGER_IDS.has(environment.envId.managerId) &&
                 (environment.envId.managerId !== CONDA_MANAGER_ID || environment.name === 'base'),
@@ -209,12 +238,12 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
         return undefined;
     }
 
-    private async createOrReuseEnvironment(
-        cacheKey: string,
-        packages: ReadonlyArray<string>,
-        metadata: InlineScriptMetadata,
-        selectedBase: SelectedBaseInterpreter,
-    ): Promise<PythonEnvironment | undefined> {
+    private async createOrReuseEnvironment({
+        cacheKey,
+        packages,
+        metadata,
+        selectedBase,
+    }: CreateOrReuseEnvironmentOptions): Promise<PythonEnvironment | undefined> {
         const cacheRoot = getScriptEnvCacheRoot(this.globalStorageUri);
         const envDir = getScriptEnvDir(this.globalStorageUri, cacheKey);
         await fs.ensureDir(cacheRoot.fsPath);
@@ -279,7 +308,7 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
                 return { kind: 'uncertain' };
             }
         } catch (error) {
-            return this.isFileNotFoundError(error) ? { kind: 'absent' } : { kind: 'uncertain' };
+            return isFileNotFoundError(error) ? { kind: 'absent' } : { kind: 'uncertain' };
         }
 
         let resolvedEntry: string | undefined;
@@ -329,8 +358,7 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
         if (environmentStatus !== 'expected') {
             return { kind: environmentStatus };
         }
-        const releaseComparison = this.comparePythonReleases(environment.version, selectedBase.environment.version);
-        if (releaseComparison !== 'same') {
+        if (!this.areEqualPythonReleases(environment.version, selectedBase.environment.version)) {
             return { kind: 'stale' };
         }
         const requiresPython = metadata.requiresPython?.trim();
@@ -385,7 +413,7 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
             return {};
         }
         if (
-            this.comparePythonReleases(result.environment.version, selectedBase.environment.version) !== 'same' ||
+            !this.areEqualPythonReleases(result.environment.version, selectedBase.environment.version) ||
             (await inspectOwnedCacheEntry(result.environment, cacheRoot, envDir)) !== 'expected'
         ) {
             this.log.error('Created inline-script environment does not match the requested cache entry.');
@@ -393,14 +421,13 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
             return {};
         }
 
-        const sidecar: InlineScriptEnvMeta = {
-            schemaVersion: META_SCHEMA_VERSION,
-            baseInterpreterPath: selectedBase.canonicalPath,
-            baseInterpreterVersion: selectedBase.environment.version,
-            lastUsedAt: new Date().toISOString(),
-        };
         try {
-            await writeMetaJson(envDir, sidecar);
+            await writeMetaJson(envDir, {
+                schemaVersion: META_SCHEMA_VERSION,
+                baseInterpreterPath: selectedBase.canonicalPath,
+                baseInterpreterVersion: selectedBase.environment.version,
+                lastUsedAt: new Date().toISOString(),
+            });
         } catch (error) {
             this.log.error(`Failed to record inline-script cache metadata: ${this.errorMessage(error)}`);
             await this.removeCacheEntry(envDir);
@@ -420,22 +447,13 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
         }
     }
 
-    private isFileNotFoundError(error: unknown): boolean {
-        return (
-            typeof error === 'object' &&
-            error !== null &&
-            'code' in error &&
-            (error as NodeJS.ErrnoException).code === 'ENOENT'
-        );
-    }
-
-    private comparePythonReleases(actual: string, expected: string): PythonReleaseComparison {
+    private areEqualPythonReleases(actual: string, expected: string): boolean {
         const actualRelease = parseReleaseSegments(actual);
         const expectedRelease = parseReleaseSegments(expected);
         if (actualRelease === undefined || expectedRelease === undefined) {
-            return 'uncertain';
+            return false;
         }
-        return compareReleaseSegments(actualRelease, expectedRelease) === 0 ? 'same' : 'different';
+        return compareReleaseSegments(actualRelease, expectedRelease) === 0;
     }
 
     private errorMessage(error: unknown): string {
@@ -447,19 +465,3 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
         this._onDidChangeEnvironment.dispose();
     }
 }
-
-interface SelectedBaseInterpreter {
-    readonly environment: PythonEnvironment;
-    readonly canonicalPath: string;
-}
-
-interface BuildCacheEntryResult {
-    readonly environment?: PythonEnvironment;
-    readonly retainLock?: boolean;
-}
-
-type CacheEntryInspection =
-    | { readonly kind: 'absent' | 'stale' | 'uncertain' }
-    | { readonly kind: 'reusable'; readonly environment: PythonEnvironment };
-
-type PythonReleaseComparison = 'same' | 'different' | 'uncertain';

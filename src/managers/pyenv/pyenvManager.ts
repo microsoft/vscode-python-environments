@@ -15,6 +15,7 @@ import {
     ResolveEnvironmentContext,
     SetEnvironmentScope,
 } from '../../api';
+import { PYENV_MANAGER_ID } from '../../common/constants';
 import { PyenvStrings } from '../../common/localize';
 import { traceError, traceInfo } from '../../common/logging';
 import { StopWatch } from '../../common/stopWatch';
@@ -120,7 +121,7 @@ export class PyEnvManager implements EnvironmentManager, Disposable {
             if (toolSource === 'none') {
                 result = 'tool_not_found';
                 if (this.projectManager) {
-                    await notifyMissingManagerIfDefault('ms-python.python:pyenv', this.projectManager, this.api);
+                    await notifyMissingManagerIfDefault(PYENV_MANAGER_ID, this.projectManager, this.api);
                 }
             }
         } catch (ex) {
