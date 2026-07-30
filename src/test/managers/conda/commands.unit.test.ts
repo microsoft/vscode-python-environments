@@ -26,48 +26,59 @@ suite('Conda commands', () => {
         sinon.restore();
     });
 
-    test('CondaAvailableVersionsCommand executes without error', async () => {
-        runCondaStub.resolves(JSON.stringify({ package: [{ version: '1.0.0' }] }));
+    // Mutation commands have no output to parse; unit coverage is a smoke test that
+    // execute() resolves. Their concrete command strings are exercised by integration tests.
+    suite('mutation commands execute without error', () => {
+        test('CondaInstallCommand', async () => {
+            const command = new CondaInstallCommand({
+                pythonExecutable: 'conda',
+                condaEnvironmentPath: 'environment',
+                log: mockLog,
+            });
+            await assert.doesNotReject(() => command.execute({ packages: [{ packageName: 'package' }] }));
+        });
+
+        test('CondaUninstallCommand', async () => {
+            const command = new CondaUninstallCommand({
+                pythonExecutable: 'conda',
+                condaEnvironmentPath: 'environment',
+                log: mockLog,
+            });
+            await assert.doesNotReject(() => command.execute({ packages: [{ packageName: 'package' }] }));
+        });
+    });
+
+    test('CondaAvailableVersionsCommand parses versions keyed by package name', async () => {
+        runCondaStub.resolves(JSON.stringify({ package: [{ version: '1.0.0' }, { version: '2.0.0' }] }));
         const command = new CondaAvailableVersionsCommand({ pythonExecutable: 'conda', log: mockLog });
 
-        await assert.doesNotReject(() => command.execute({ packageName: 'package', pythonVersion: '' }));
+        const result = await command.execute({ packageName: 'package', pythonVersion: '' });
+
+        assert.deepStrictEqual(result.map((v) => v.public), ['1.0.0', '2.0.0']);
     });
 
-    test('CondaInstallCommand executes without error', async () => {
-        const command = new CondaInstallCommand({
-            pythonExecutable: 'conda',
-            condaEnvironmentPath: 'environment',
-            log: mockLog,
-        });
-
-        await assert.doesNotReject(() => command.execute({ packages: [{ packageName: 'package' }] }));
-    });
-
-    test('CondaUninstallCommand executes without error', async () => {
-        const command = new CondaUninstallCommand({
-            pythonExecutable: 'conda',
-            condaEnvironmentPath: 'environment',
-            log: mockLog,
-        });
-
-        await assert.doesNotReject(() => command.execute({ packages: [{ packageName: 'package' }] }));
-    });
-
-    test('CondaListCommand executes without error', async () => {
-        runCondaStub.resolves(JSON.stringify([{ name: 'package', version: '1.0.0' }]));
+    test('CondaListCommand parses packages and drops entries missing a version', async () => {
+        runCondaStub.resolves(JSON.stringify([{ name: 'package', version: '1.0.0' }, { name: 'broken' }]));
         const command = new CondaListCommand({
             pythonExecutable: 'conda',
             condaEnvironmentPath: 'environment',
             log: mockLog,
         });
 
-        await assert.doesNotReject(() => command.execute());
+        const result = await command.execute();
+
+        assert.deepStrictEqual(
+            result.map((p) => ({ name: p.name, version: p.version })),
+            [{ name: 'package', version: '1.0.0' }],
+        );
     });
 
-    test('CondaVersionCommand executes without error', async () => {
+    test('CondaVersionCommand parses the version from conda --version output', async () => {
         runCondaStub.resolves('conda 24.1.2');
         const command = new CondaVersionCommand({ pythonExecutable: 'conda', log: mockLog });
 
-        await assert.doesNotReject(() => command.execute());
+        const result = await command.execute();
+
+        assert.strictEqual(result?.public, '24.1.2');
     });
 });

@@ -29,83 +29,109 @@ suite('Pip and UV commands', () => {
         sinon.restore();
     });
 
-    test('PipAvailableVersionsCommand executes without error', async () => {
-        runPythonStub.resolves(JSON.stringify({ versions: ['1.0.0'] }));
+    // Mutation commands have no output to parse; unit coverage is a smoke test that
+    // execute() resolves. Their concrete command strings are exercised by integration tests.
+    suite('mutation commands execute without error', () => {
+        test('PipInstallCommand', async () => {
+            const command = new PipInstallCommand({ pythonExecutable: 'python', log: mockLog });
+            await assert.doesNotReject(() => command.execute({ packages: [{ packageName: 'package' }] }));
+        });
+
+        test('UvInstallCommand', async () => {
+            const command = new UvInstallCommand({ pythonExecutable: 'python', log: mockLog });
+            await assert.doesNotReject(() => command.execute({ packages: [{ packageName: 'package' }] }));
+        });
+
+        test('PipUninstallCommand', async () => {
+            const command = new PipUninstallCommand({ pythonExecutable: 'python', log: mockLog });
+            await assert.doesNotReject(() => command.execute({ packages: [{ packageName: 'package' }] }));
+        });
+
+        test('UvUninstallCommand', async () => {
+            const command = new UvUninstallCommand({ pythonExecutable: 'python', log: mockLog });
+            await assert.doesNotReject(() => command.execute({ packages: [{ packageName: 'package' }] }));
+        });
+    });
+
+    test('PipAvailableVersionsCommand parses versions and filters prereleases', async () => {
+        runPythonStub.resolves(JSON.stringify({ versions: ['2.0.0rc1', '1.0.0'] }));
         const command = new PipAvailableVersionsCommand({ pythonExecutable: 'python', log: mockLog });
 
-        await assert.doesNotReject(() => command.execute({ packageName: 'package', pythonVersion: '3.13.1' }));
+        const result = await command.execute({
+            packageName: 'package',
+            pythonVersion: '3.13.1',
+            includePrerelease: false,
+        });
+
+        assert.deepStrictEqual(result.map((v) => v.public), ['1.0.0']);
     });
 
-    test('UvAvailableVersionsCommand executes without error', async () => {
-        runUvStub.resolves(JSON.stringify({ versions: ['1.0.0'] }));
+    test('UvAvailableVersionsCommand parses versions from embedded JSON', async () => {
+        runUvStub.resolves(`Some preamble\n${JSON.stringify({ versions: ['1.0.0'] })}`);
         const command = new UvAvailableVersionsCommand({ pythonExecutable: 'python', log: mockLog });
 
-        await assert.doesNotReject(() => command.execute({ packageName: 'package', pythonVersion: '3.13.1' }));
+        const result = await command.execute({ packageName: 'package', pythonVersion: '3.13.1' });
+
+        assert.deepStrictEqual(result.map((v) => v.public), ['1.0.0']);
     });
 
-    test('PipInstallCommand executes without error', async () => {
-        const command = new PipInstallCommand({ pythonExecutable: 'python', log: mockLog });
-
-        await assert.doesNotReject(() => command.execute({ packages: [{ packageName: 'package' }] }));
-    });
-
-    test('UvInstallCommand executes without error', async () => {
-        const command = new UvInstallCommand({ pythonExecutable: 'python', log: mockLog });
-
-        await assert.doesNotReject(() => command.execute({ packages: [{ packageName: 'package' }] }));
-    });
-
-    test('PipUninstallCommand executes without error', async () => {
-        const command = new PipUninstallCommand({ pythonExecutable: 'python', log: mockLog });
-
-        await assert.doesNotReject(() => command.execute({ packages: [{ packageName: 'package' }] }));
-    });
-
-    test('UvUninstallCommand executes without error', async () => {
-        const command = new UvUninstallCommand({ pythonExecutable: 'python', log: mockLog });
-
-        await assert.doesNotReject(() => command.execute({ packages: [{ packageName: 'package' }] }));
-    });
-
-    test('PipListCommand executes without error', async () => {
-        runPythonStub.resolves(JSON.stringify([{ name: 'package', version: '1.0.0' }]));
+    test('PipListCommand parses packages and drops entries missing a version', async () => {
+        runPythonStub.resolves(JSON.stringify([{ name: 'package', version: '1.0.0' }, { name: 'broken' }]));
         const command = new PipListCommand({ pythonExecutable: 'python', log: mockLog });
 
-        await assert.doesNotReject(() => command.execute());
+        const result = await command.execute();
+
+        assert.deepStrictEqual(
+            result.map((p) => ({ name: p.name, version: p.version })),
+            [{ name: 'package', version: '1.0.0' }],
+        );
     });
 
-    test('UvListCommand executes without error', async () => {
+    test('UvListCommand parses packages from JSON', async () => {
         runUvStub.resolves(JSON.stringify([{ name: 'package', version: '1.0.0' }]));
         const command = new UvListCommand({ pythonExecutable: 'python', log: mockLog });
 
-        await assert.doesNotReject(() => command.execute());
+        const result = await command.execute();
+
+        assert.deepStrictEqual(
+            result.map((p) => ({ name: p.name, version: p.version })),
+            [{ name: 'package', version: '1.0.0' }],
+        );
     });
 
-    test('PipListDirectNamesCommand executes without error', async () => {
-        runPythonStub.resolves(JSON.stringify([{ name: 'package', version: '1.0.0' }]));
+    test('PipListDirectNamesCommand returns normalized names', async () => {
+        runPythonStub.resolves(JSON.stringify([{ name: 'Flask_Thing', version: '1.0.0' }]));
         const command = new PipListDirectNamesCommand({ pythonExecutable: 'python', log: mockLog });
 
-        await assert.doesNotReject(() => command.execute());
+        const result = await command.execute();
+
+        assert.deepStrictEqual([...result], ['flask-thing']);
     });
 
-    test('UvListDirectNamesCommand executes without error', async () => {
-        runUvStub.resolves('package 1.0.0');
+    test('UvListDirectNamesCommand keeps top-level packages and skips indented dependencies', async () => {
+        runUvStub.resolves(['Flask_Thing 1.0.0', '├── dependency 2.0.0', '└── another-dep 3.0.0'].join('\n'));
         const command = new UvListDirectNamesCommand({ pythonExecutable: 'python', log: mockLog });
 
-        await assert.doesNotReject(() => command.execute());
+        const result = await command.execute();
+
+        assert.deepStrictEqual([...result], ['flask-thing']);
     });
 
-    test('PipVersionCommand executes without error', async () => {
-        runPythonStub.resolves('pip 24.0 from site-packages');
+    test('PipVersionCommand parses the version from pip --version output', async () => {
+        runPythonStub.resolves('pip 24.0 from /site-packages/pip (python 3.13)');
         const command = new PipVersionCommand({ pythonExecutable: 'python', log: mockLog });
 
-        await assert.doesNotReject(() => command.execute());
+        const result = await command.execute();
+
+        assert.strictEqual(result?.public, '24.0');
     });
 
-    test('UvVersionCommand executes without error', async () => {
-        runUvStub.resolves('uv 0.4.20');
+    test('UvVersionCommand parses the version from uv --version output', async () => {
+        runUvStub.resolves('uv 0.4.20 (abcdef 2024-01-01)');
         const command = new UvVersionCommand({ pythonExecutable: 'python', log: mockLog });
 
-        await assert.doesNotReject(() => command.execute());
+        const result = await command.execute();
+
+        assert.strictEqual(result?.public, '0.4.20');
     });
 });

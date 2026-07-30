@@ -25,7 +25,8 @@ export class PipUninstallCommand extends UninstallCommand {
 
 /**
  * UV uninstall command.
- * Parsed command: `uv pip uninstall -y --python <path> <package>`
+ * Parsed command: `uv pip uninstall --python <path> <package>`
+ * Note: `uv pip uninstall` is non-interactive by default and has no `-y`/`--yes` option.
  * Official documentation: https://docs.astral.sh/uv/pip/
  */
 export class UvUninstallCommand extends UninstallCommand {
