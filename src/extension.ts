@@ -657,7 +657,16 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
                     'poetry',
                     registerPoetryFeatures(nativeFinder, context.subscriptions, outputChannel, projectManager),
                 ),
-                safeRegister('inlineScript', registerInlineScriptFeatures(context.subscriptions, outputChannel)),
+                safeRegister(
+                    'inlineScript',
+                    registerInlineScriptFeatures(
+                        nativeFinder,
+                        context.subscriptions,
+                        outputChannel,
+                        sysMgr,
+                        context.globalStorageUri,
+                    ),
+                ),
                 safeRegister('shellStartupVars', shellStartupVarsMgr.initialize()),
             ]);
 
