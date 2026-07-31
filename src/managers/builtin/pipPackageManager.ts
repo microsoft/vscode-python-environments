@@ -129,8 +129,10 @@ export class PipPackageManager implements PackageManager, Disposable {
             });
         } catch (e) {
             if (e instanceof CancellationError) {
-                // Cancellation is a normal control-flow exit; do not surface an error.
-                return;
+                // Cancellation is a normal control-flow exit; skip the user-facing error
+                // UI/logging, but rethrow so callers can distinguish cancel from failure
+                // (e.g. venv creation sets pkgInstallationCancelled by catching CancellationError).
+                throw e;
             }
             this.log.error('Error managing packages', e);
             setImmediate(async () => {
@@ -255,10 +257,13 @@ export class PipPackageManager implements PackageManager, Disposable {
     }
 
     /**
-     * Returns direct (non-transitive) package names using `pip list --not-required` or `uv pip list --not-required`.
+     * Returns direct (non-transitive) package names.
      *
-     * Note: These commands return packages with no installed dependents (leaf packages), not packages
-     * the user explicitly installed. pip/uv do not track install intent.
+     * pip uses `pip list --format=json --not-required`; uv uses `uv pip tree --depth=0`.
+     *
+     * Note: These return top-level packages (no installed dependents / roots of the
+     * dependency tree), not necessarily packages the user explicitly installed. pip/uv
+     * do not track install intent.
      */
     async getDirectPackageNames(environment: PythonEnvironment): Promise<Set<string> | undefined> {
         const pythonExecutable = environment.execInfo?.run?.executable;

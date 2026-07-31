@@ -20,12 +20,12 @@ let pixiRecommendationShown = false;
 
 /**
  * Parse package specifications (strings) into package objects.
- * Each string becomes a package object with packageName and empty version.
+ * Each string becomes a package object with its packageName; the version is left
+ * unset (the spec string may itself embed a version, e.g. "requests==2.31.0").
  */
 export function parsePackageSpecs(packageStrings: string[]): { packageName: string; version?: string }[] {
     return packageStrings.map((pkg) => ({
         packageName: pkg,
-        version: undefined,
     }));
 }
 
