@@ -15,14 +15,16 @@
  *   2. install test package    -> managePackages({ install })
  *   3. list again              -> getPackages (test package now present)
  *   4. list direct packages    -> getPackages filtered by !isTransitive
+ *   4b. available versions      -> getPackageAvailableVersions (when supported)
  *   5. uninstall test package  -> managePackages({ uninstall })
  *   6. list again              -> getPackages (test package absent again)
  *
  * NOTES:
- *   - "Available versions" is intentionally NOT exercised here: the exported
- *     PythonEnvironmentApi does not surface getPackageAvailableVersions (it lives
- *     only on the internal PackageManager interface), so it is unreachable from a
- *     public-API-only test.
+ *   - "Available versions" is exercised via getPackageAvailableVersions when the
+ *     running PythonEnvironmentApi surfaces it. That getter was added to the public
+ *     API; the call is capability-guarded so this test compiles and runs regardless
+ *     of whether the active API build includes it, and gracefully skips the check
+ *     for managers that resolve to `undefined` (no version listing support).
  *   - Direct (non-transitive) packages are derived from Package.isTransitive,
  *     which IS part of the public API.
  *   - The test package (cowsay) is small and dependency-free so a successful
@@ -44,6 +46,18 @@ function hasPackage(packages: Package[] | undefined, name: string): boolean {
     const target = normalizePackageName(name);
     return (packages ?? []).some((p) => normalizePackageName(p.name) === target);
 }
+
+/**
+ * Optional API capability: some API builds surface available-version listing.
+ * Cast through this shape so the test compiles whether or not the running API
+ * exposes getPackageAvailableVersions.
+ */
+type AvailableVersionsCapable = {
+    getPackageAvailableVersions?: (
+        environment: PythonEnvironment,
+        packageName: string,
+    ) => Promise<unknown[] | undefined>;
+};
 
 /**
  * Runs the full lifecycle roundtrip for a single environment/manager.
@@ -79,6 +93,19 @@ async function runRoundtrip(api: PythonEnvironmentApi, env: PythonEnvironment, m
             hasPackage(direct, TEST_PACKAGE),
             `[${managerId}] ${TEST_PACKAGE} should be reported as a direct (non-transitive) package`,
         );
+
+        // 4b. Available versions (optional API capability). Only asserted when the
+        // running API surfaces the getter and the manager supports version listing.
+        const versionsApi = api as unknown as AvailableVersionsCapable;
+        if (typeof versionsApi.getPackageAvailableVersions === 'function') {
+            const versions = await versionsApi.getPackageAvailableVersions(env, TEST_PACKAGE);
+            if (versions !== undefined) {
+                assert.ok(
+                    Array.isArray(versions) && versions.length > 0,
+                    `[${managerId}] ${TEST_PACKAGE} should report at least one available version`,
+                );
+            }
+        }
 
         // 5. Uninstall.
         await api.managePackages(env, { uninstall: [TEST_PACKAGE] });
