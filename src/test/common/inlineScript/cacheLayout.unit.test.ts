@@ -8,7 +8,7 @@ import * as os from 'os';
 import * as path from 'path';
 import * as sinon from 'sinon';
 import { Uri } from 'vscode';
-import { PythonEnvironment } from '../../api';
+import { PythonEnvironment } from '../../../api';
 import {
     CacheEntrySummary,
     INLINE_SCRIPT_CACHE_DIR_NAME,
@@ -26,10 +26,10 @@ import {
     selectStaleEntries,
     verifyBaseInterpreterExists,
     writeMetaJson,
-} from '../../common/inlineScriptCacheLayout';
-import * as logging from '../../common/logging';
-import * as platformUtils from '../../common/utils/platformUtils';
-import { getVenvPythonPath } from '../../common/utils/virtualEnvironment';
+} from '../../../common/inlineScript/cacheLayout';
+import * as logging from '../../../common/logging';
+import * as platformUtils from '../../../common/utils/platformUtils';
+import { getVenvPythonPath } from '../../../common/utils/virtualEnvironment';
 
 function makeMeta(overrides: Partial<InlineScriptEnvMeta> = {}): InlineScriptEnvMeta {
     return {

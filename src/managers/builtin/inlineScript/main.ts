@@ -2,12 +2,12 @@
 // Licensed under the MIT License.
 
 import { Disposable, LogOutputChannel, Uri } from 'vscode';
-import { EnvironmentManager, PythonEnvironmentApi } from '../../api';
-import { traceInfo, traceVerbose } from '../../common/logging';
-import { getPythonApi } from '../../features/pythonApi';
-import { isInlineScriptsFeatureEnabled } from '../../helpers';
-import { NativePythonFinder } from '../common/nativePythonFinder';
-import { InlineScriptEnvManager } from './inlineScriptEnvManager';
+import { EnvironmentManager, PythonEnvironmentApi } from '../../../api';
+import { traceInfo, traceVerbose } from '../../../common/logging';
+import { getPythonApi } from '../../../features/pythonApi';
+import { isInlineScriptsFeatureEnabled } from '../../../helpers';
+import { NativePythonFinder } from '../../common/nativePythonFinder';
+import { InlineScriptEnvManager } from './envManager';
 
 /**
  * Register the inline-script env manager when the internal

@@ -5,11 +5,11 @@ import assert from 'assert';
 import * as path from 'path';
 import * as sinon from 'sinon';
 import { Disposable, TextDocument, TextDocumentChangeEvent, TextDocumentContentChangeEvent, Uri } from 'vscode';
-import * as ism from '../../common/inlineScriptMetadata';
-import { EventNames } from '../../common/telemetry/constants';
-import * as telemetrySender from '../../common/telemetry/sender';
-import * as wapi from '../../common/workspace.apis';
-import { InlineScriptLazyDetector, shouldHandleUri } from '../../features/inlineScriptLazyDetector';
+import * as ism from '../../../common/inlineScript/metadata';
+import { EventNames } from '../../../common/telemetry/constants';
+import * as telemetrySender from '../../../common/telemetry/sender';
+import * as wapi from '../../../common/workspace.apis';
+import { InlineScriptLazyDetector, shouldHandleUri } from '../../../features/inlineScript/lazyDetector';
 
 // Build a minimal TextDocument stub. Only the `uri` field is read by
 // the detector; the rest exists to satisfy the type.

@@ -18,9 +18,9 @@ import {
     RefreshEnvironmentsScope,
     ResolveEnvironmentContext,
     SetEnvironmentScope,
-} from '../../api';
-import { getErrorMessage } from '../../common/errors/utils';
-import { computeCacheKey } from '../../common/inlineScriptCacheKey';
+} from '../../../api';
+import { getErrorMessage } from '../../../common/errors/utils';
+import { computeCacheKey } from '../../../common/inlineScript/cacheKey';
 import {
     META_SCHEMA_VERSION,
     getBaseInterpreterStatus,
@@ -30,21 +30,21 @@ import {
     inspectMetaJson,
     resolveCacheEntryPath,
     writeMetaJson,
-} from '../../common/inlineScriptCacheLayout';
-import { pickCompatibleInterpreter } from '../../common/inlineScriptInterpreter';
+} from '../../../common/inlineScript/cacheLayout';
+import { pickCompatibleInterpreter } from '../../../common/inlineScript/interpreter';
 import {
     InlineScriptMetadata,
     matchesPythonVersion,
     readInlineScriptMetadataFromFile,
-} from '../../common/inlineScriptMetadata';
-import { CONDA_MANAGER_ID, PYENV_MANAGER_ID, SYSTEM_MANAGER_ID } from '../../common/constants';
-import { acquireFileLock, AcquiredFileLock } from '../../common/lockfile.apis';
-import { isFileNotFoundError } from '../../common/utils/filesystem';
-import { normalizePath } from '../../common/utils/pathUtils';
-import { compareReleaseSegments, parseReleaseSegments } from '../../common/utils/pep440Release';
-import { getVenvPythonPath } from '../../common/utils/virtualEnvironment';
-import { NativePythonFinder } from '../common/nativePythonFinder';
-import { createWithProgress, resolveVenvPythonEnvironmentPath } from './venvUtils';
+} from '../../../common/inlineScript/metadata';
+import { CONDA_MANAGER_ID, PYENV_MANAGER_ID, SYSTEM_MANAGER_ID } from '../../../common/constants';
+import { acquireFileLock, AcquiredFileLock } from '../../../common/lockfile.apis';
+import { isFileNotFoundError } from '../../../common/utils/filesystem';
+import { normalizePath } from '../../../common/utils/pathUtils';
+import { compareReleaseSegments, parseReleaseSegments } from '../../../common/utils/pep440Release';
+import { getVenvPythonPath } from '../../../common/utils/virtualEnvironment';
+import { NativePythonFinder } from '../../common/nativePythonFinder';
+import { createWithProgress, resolveVenvPythonEnvironmentPath } from '../venvUtils';
 
 const BASE_INTERPRETER_MANAGER_IDS = new Set([
     SYSTEM_MANAGER_ID,
