@@ -1109,6 +1109,22 @@ export interface PythonPackageGetterApi {
     getPackages(environment: PythonEnvironment, options?: GetPackagesOptions): Promise<Package[] | undefined>;
 
     /**
+     * Get the list of available versions for a package, newest first.
+     *
+     * Support depends on the package manager backing the environment. Managers that do
+     * not implement version lookup resolve to `undefined`.
+     *
+     * @param environment The Python Environment context for the lookup.
+     * @param packageName The name of the package to look up.
+     * @returns A promise that resolves to an array of {@link Pep440Version} objects (newest first),
+     *          or `undefined` if the package manager does not support version listing.
+     */
+    getPackageAvailableVersions(
+        environment: PythonEnvironment,
+        packageName: string,
+    ): Promise<Pep440Version[] | undefined>;
+
+    /**
      * Event raised when the list of packages in a Python Environment changes.
      * @see {@link DidChangePackagesEventArgs}
      */
