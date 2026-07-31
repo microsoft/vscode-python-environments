@@ -19,6 +19,7 @@ import {
     ResolveEnvironmentContext,
     SetEnvironmentScope,
 } from '../../api';
+import { getErrorMessage } from '../../common/errors/utils';
 import { computeCacheKey } from '../../common/inlineScriptCacheKey';
 import {
     META_SCHEMA_VERSION,
@@ -160,7 +161,7 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
                 }
             }
         } catch (error) {
-            this.log.error(`Failed to set up inline-script environment: ${this.errorMessage(error)}`);
+            this.log.error(`Failed to set up inline-script environment: ${getErrorMessage(error)}`);
             return undefined;
         }
     }
@@ -230,7 +231,7 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
                 return { environment, canonicalPath: await fs.realpath(executable) };
             } catch (error) {
                 this.log.warn(
-                    `Skipping base interpreter that cannot be resolved at ${executable}: ${this.errorMessage(error)}`,
+                    `Skipping base interpreter that cannot be resolved at ${executable}: ${getErrorMessage(error)}`,
                 );
             }
         }
@@ -277,20 +278,20 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
                     await lock.retain();
                 } catch (error) {
                     this.log.error(
-                        `Failed to mark the inline-script cache lock as retained: ${this.errorMessage(error)}`,
+                        `Failed to mark the inline-script cache lock as retained: ${getErrorMessage(error)}`,
                     );
                 }
             }
             return build.environment;
         } catch (error) {
-            this.log.error(`Failed to create or reuse inline-script cache entry: ${this.errorMessage(error)}`);
+            this.log.error(`Failed to create or reuse inline-script cache entry: ${getErrorMessage(error)}`);
             return undefined;
         } finally {
             if (lock) {
                 try {
                     await lock.release();
                 } catch (error) {
-                    this.log.warn(`Failed to release inline-script cache lock: ${this.errorMessage(error)}`);
+                    this.log.warn(`Failed to release inline-script cache lock: ${getErrorMessage(error)}`);
                 }
             }
         }
@@ -315,7 +316,7 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
         try {
             resolvedEntry = await resolveCacheEntryPath(cacheRoot, envDir);
         } catch (error) {
-            this.log.warn(`Failed to resolve inline-script cache entry: ${this.errorMessage(error)}`);
+            this.log.warn(`Failed to resolve inline-script cache entry: ${getErrorMessage(error)}`);
             return { kind: 'uncertain' };
         }
         if (!resolvedEntry) {
@@ -369,7 +370,7 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
         try {
             await writeMetaJson(envDir, { ...sidecar, lastUsedAt: new Date().toISOString() });
         } catch (error) {
-            this.log.warn(`Failed to update inline-script cache metadata: ${this.errorMessage(error)}`);
+            this.log.warn(`Failed to update inline-script cache metadata: ${getErrorMessage(error)}`);
         }
         return { kind: 'reusable', environment };
     }
@@ -394,7 +395,7 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
                 false, // trackUvEnvironment
             );
         } catch (error) {
-            this.log.error(`Failed to build inline-script environment: ${this.errorMessage(error)}`);
+            this.log.error(`Failed to build inline-script environment: ${getErrorMessage(error)}`);
             await this.removeCacheEntry(envDir);
             return {};
         }
@@ -429,7 +430,7 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
                 lastUsedAt: new Date().toISOString(),
             });
         } catch (error) {
-            this.log.error(`Failed to record inline-script cache metadata: ${this.errorMessage(error)}`);
+            this.log.error(`Failed to record inline-script cache metadata: ${getErrorMessage(error)}`);
             await this.removeCacheEntry(envDir);
             return {};
         }
@@ -442,7 +443,7 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
             await fs.remove(envDir.fsPath);
             return true;
         } catch (error) {
-            this.log.error(`Failed to remove incomplete inline-script environment: ${this.errorMessage(error)}`);
+            this.log.error(`Failed to remove incomplete inline-script environment: ${getErrorMessage(error)}`);
             return false;
         }
     }
@@ -454,10 +455,6 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
             return false;
         }
         return compareReleaseSegments(actualRelease, expectedRelease) === 0;
-    }
-
-    private errorMessage(error: unknown): string {
-        return error instanceof Error ? error.message : String(error);
     }
 
     dispose(): void {
