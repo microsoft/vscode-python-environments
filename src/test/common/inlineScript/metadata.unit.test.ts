@@ -13,8 +13,8 @@ import {
     matchesPythonVersion,
     readInlineScriptMetadata,
     readInlineScriptMetadataFromFile,
-} from '../../common/inlineScriptMetadata';
-import * as logging from '../../common/logging';
+} from '../../../common/inlineScript/metadata';
+import * as logging from '../../../common/logging';
 
 // Helper to assemble a script body. Lines are joined with '\n' so each
 // test controls line endings explicitly via `joiner` when needed.

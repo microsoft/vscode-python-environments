@@ -65,7 +65,7 @@ import {
 } from './features/envCommands';
 import { PythonEnvironmentManagers } from './features/envManagers';
 import { EnvVarManager, PythonEnvVariableManager } from './features/execution/envVariableManager';
-import { InlineScriptLazyDetector } from './features/inlineScriptLazyDetector';
+import { InlineScriptLazyDetector } from './features/inlineScript/lazyDetector';
 import {
     applyInitialEnvironmentSelection,
     registerInterpreterSettingsChangeListener,
@@ -98,7 +98,7 @@ import { ProjectItem, PythonEnvTreeItem } from './features/views/treeViewItems';
 import { collectEnvironmentInfo, getEnvManagerAndPackageManagerConfigLevels, runPetInTerminalImpl } from './helpers';
 import { EnvironmentManagers, ProjectCreators, PythonProjectManager } from './internal.api';
 import { registerSystemPythonFeatures } from './managers/builtin/main';
-import { registerInlineScriptFeatures } from './managers/builtin/inlineScriptMain';
+import { registerInlineScriptFeatures } from './managers/builtin/inlineScript/main';
 import { SysPythonManager } from './managers/builtin/sysPythonManager';
 import {
     createNativePythonFinder,

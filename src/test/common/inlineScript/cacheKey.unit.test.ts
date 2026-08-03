@@ -8,8 +8,8 @@ import {
     computeCacheKey,
     normalizeDependency,
     normalizeInterpreterPath,
-} from '../../common/inlineScriptCacheKey';
-import * as platformUtils from '../../common/utils/platformUtils';
+} from '../../../common/inlineScript/cacheKey';
+import * as platformUtils from '../../../common/utils/platformUtils';
 
 suite('inlineScriptCacheKey', () => {
     let isWindowsStub: sinon.SinonStub;

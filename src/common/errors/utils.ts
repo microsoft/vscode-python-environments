@@ -3,6 +3,10 @@ import { commands, LogOutputChannel } from 'vscode';
 import { Common } from '../localize';
 import { showErrorMessage, showWarningMessage } from '../window.apis';
 
+export function getErrorMessage(error: unknown): string {
+    return error instanceof Error ? error.message : String(error);
+}
+
 export function parseStack(ex: Error) {
     if (ex.stack && Array.isArray(ex.stack)) {
         const concatenated = { ...ex, stack: ex.stack.join('\n') };

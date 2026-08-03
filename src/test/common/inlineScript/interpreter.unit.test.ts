@@ -4,9 +4,9 @@
 import assert from 'assert';
 import * as sinon from 'sinon';
 import { Uri } from 'vscode';
-import { PythonEnvironment } from '../../api';
-import { extractLowerBoundVersion, pickCompatibleInterpreter } from '../../common/inlineScriptInterpreter';
-import * as logging from '../../common/logging';
+import { PythonEnvironment } from '../../../api';
+import { extractLowerBoundVersion, pickCompatibleInterpreter } from '../../../common/inlineScript/interpreter';
+import * as logging from '../../../common/logging';
 
 function makeEnv(version: string, name = `Python ${version}`, error?: string): PythonEnvironment {
     return {

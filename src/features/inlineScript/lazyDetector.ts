@@ -3,17 +3,17 @@
 
 import * as path from 'path';
 import { Disposable, TextDocument, TextDocumentChangeEvent, Uri } from 'vscode';
-import { readInlineScriptMetadataFromFile } from '../common/inlineScriptMetadata';
-import { traceVerbose, traceWarn } from '../common/logging';
-import { EventNames } from '../common/telemetry/constants';
-import { sendTelemetryEvent } from '../common/telemetry/sender';
+import { readInlineScriptMetadataFromFile } from '../../common/inlineScript/metadata';
+import { traceVerbose, traceWarn } from '../../common/logging';
+import { EventNames } from '../../common/telemetry/constants';
+import { sendTelemetryEvent } from '../../common/telemetry/sender';
 import {
     getOpenTextDocuments,
     getWorkspaceFolder,
     onDidChangeTextDocument,
     onDidOpenTextDocument,
     onDidSaveTextDocument,
-} from '../common/workspace.apis';
+} from '../../common/workspace.apis';
 
 /**
  * Silent on-open / on-save detector for `.py` files that declare

@@ -5,13 +5,13 @@ import * as crypto from 'crypto';
 import * as fsapi from 'fs-extra';
 import * as path from 'path';
 import { Uri } from 'vscode';
-import type { PythonEnvironment } from '../api';
-import { INLINE_SCRIPT_MANAGER_ID } from './constants';
-import { traceWarn } from './logging';
-import { isFileNotFoundError } from './utils/filesystem';
-import { normalizePath } from './utils/pathUtils';
-import { isWindows } from './utils/platformUtils';
-import { getVenvPythonPath } from './utils/virtualEnvironment';
+import type { PythonEnvironment } from '../../api';
+import { INLINE_SCRIPT_MANAGER_ID } from '../constants';
+import { traceWarn } from '../logging';
+import { isFileNotFoundError } from '../utils/filesystem';
+import { normalizePath } from '../utils/pathUtils';
+import { isWindows } from '../utils/platformUtils';
+import { getVenvPythonPath } from '../utils/virtualEnvironment';
 
 /** Bump this and {@link META_SCHEMA_VERSION} together for incompatible cache formats. */
 export const INLINE_SCRIPT_CACHE_DIR_NAME = 'script-envs-v1';
