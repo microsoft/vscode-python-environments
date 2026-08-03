@@ -13,28 +13,28 @@
  * ROUNDTRIP (per manager, all via the public API):
  *   1. list packages           -> getPackages (baseline; test package absent)
  *   2. install test package    -> managePackages({ install })
- *   3. list again              -> getPackages (test package now present)
- *   4. list direct packages    -> getPackages filtered by !isTransitive
+ *   3. refresh + list           -> refreshPackages (enriched, test package now present)
+ *   4. direct vs transitive     -> installed package is direct; its deps are transitive
  *   4b. available versions      -> getPackageAvailableVersions (when supported)
  *   5. uninstall test package  -> managePackages({ uninstall })
  *   6. list again              -> getPackages (test package absent again)
  *
  * NOTES:
+ *   - The test package (flask) is chosen because it is available from every common
+ *     manager's default sources (PyPI for pip/uv/poetry/pipenv, and conda's default
+ *     `main` channel for conda) and pulls in real transitive dependencies (jinja2,
+ *     werkzeug, click, ...). That lets the roundtrip exercise a genuine install on
+ *     every manager AND verify the direct-vs-transitive classification.
  *   - "Available versions" is exercised via getPackageAvailableVersions when the
  *     running PythonEnvironmentApi surfaces it. That getter was added to the public
  *     API; the call is capability-guarded so this test compiles and runs regardless
  *     of whether the active API build includes it, and gracefully skips the check
  *     for managers that resolve to `undefined` (no version listing support).
- *   - The install step is best-effort: a manager-agnostic test cannot guarantee the
- *     test package is installable from every manager's configured sources (e.g. conda
- *     channels may not carry a PyPI-only package, and some managers surface install
- *     failures as notifications rather than throwing). When the package does not appear
- *     after install, that manager is skipped rather than failed; managers that can
- *     install it still run the full lifecycle with assertions.
- *   - Direct (non-transitive) packages are derived from Package.isTransitive,
- *     which IS part of the public API.
- *   - The test package (cowsay) is small and dependency-free so a successful
- *     install shows up as a direct package with no transitive fan-out.
+ *   - Transitive classification comes from Package.isTransitive, which is populated by
+ *     the enriched refreshPackages result (getPackages({skipCache}) re-lists WITHOUT
+ *     enrichment). Managers that implement direct-name detection (pip/uv/poetry) mark
+ *     dependencies isTransitive=true; managers that don't (conda) leave it undefined,
+ *     so the transitive-dependency assertion is conditional on the manager classifying it.
  */
 
 import * as assert from 'assert';
@@ -44,8 +44,13 @@ import { normalizePackageName } from '../../managers/builtin/utils';
 import { ENVS_EXTENSION_ID } from '../constants';
 import { waitForCondition } from '../testUtils';
 
-/** Small, dependency-free package used for the install/uninstall roundtrip. */
-const TEST_PACKAGE = 'cowsay';
+/**
+ * Package used for the install/uninstall roundtrip. flask is available from every
+ * common manager's default source (PyPI and conda's default `main` channel) and pulls
+ * in transitive dependencies, so the roundtrip can verify both installation and the
+ * direct-vs-transitive classification on every manager.
+ */
+const TEST_PACKAGE = 'flask';
 
 /** True when a package with the given (normalized) name is in the list. */
 function hasPackage(packages: Package[] | undefined, name: string): boolean {
@@ -66,16 +71,14 @@ type AvailableVersionsCapable = {
 };
 
 /**
- * Runs the full lifecycle roundtrip for a single environment/manager.
- * Returns `true` when the full lifecycle was exercised (install succeeded and all
- * assertions ran), or `false` when the manager could not install the test package
- * from its configured sources and the roundtrip was skipped.
+ * Runs the full lifecycle roundtrip for a single environment/manager. Throws (via
+ * assertion) on any failure; returns normally when the full lifecycle succeeded.
  */
-async function runRoundtrip(api: PythonEnvironmentApi, env: PythonEnvironment, managerId: string): Promise<boolean> {
+async function runRoundtrip(api: PythonEnvironmentApi, env: PythonEnvironment, managerId: string): Promise<void> {
     const baseline = await api.getPackages(env, { skipCache: true });
     if (baseline === undefined) {
         // No usable package manager for this environment.
-        return false;
+        return;
     }
 
     // Avoid clobbering a pre-existing install of the test package.
@@ -86,33 +89,37 @@ async function runRoundtrip(api: PythonEnvironmentApi, env: PythonEnvironment, m
 
     let installed = false;
     try {
-        // 2. Install (best-effort). Some managers cannot install the test package from
-        // their configured sources, and some surface that failure as a notification
-        // rather than throwing, so success is verified by the next list rather than assumed.
+        // 2. Install.
         await api.managePackages(env, { install: [TEST_PACKAGE] });
-
-        // 3. List again -> present?
-        await api.refreshPackages(env);
-        const afterInstall = await api.getPackages(env, { skipCache: true });
-
-        // If the package did not appear, this manager cannot install it from its
-        // configured sources (e.g. conda channels lacking a PyPI-only package). Treat
-        // that as a graceful skip rather than a hard failure so the test stays
-        // manager-agnostic; managers that can install it still assert the full lifecycle.
-        if (!hasPackage(afterInstall, TEST_PACKAGE)) {
-            console.log(
-                `[${managerId}] ${TEST_PACKAGE} could not be installed from this manager's configured sources; skipping roundtrip`,
-            );
-            return false;
-        }
         installed = true;
 
-        // 4. Direct (non-transitive) packages should include the directly-installed package.
-        const direct = (afterInstall ?? []).filter((p) => p.isTransitive !== true);
-        assert.ok(
-            hasPackage(direct, TEST_PACKAGE),
+        // 3. Refresh and read the ENRICHED package list from the refresh result:
+        // getPackages({skipCache}) re-lists without transitive enrichment, so the
+        // refreshPackages return value is what carries Package.isTransitive.
+        const afterInstall = (await api.refreshPackages(env)) ?? (await api.getPackages(env, { skipCache: true }));
+        assert.ok(hasPackage(afterInstall, TEST_PACKAGE), `[${managerId}] ${TEST_PACKAGE} should be installed`);
+
+        // 4. The installed package is a direct (non-transitive) dependency.
+        const installedPkg = (afterInstall ?? []).find(
+            (p) => normalizePackageName(p.name) === normalizePackageName(TEST_PACKAGE),
+        );
+        assert.notStrictEqual(
+            installedPkg?.isTransitive,
+            true,
             `[${managerId}] ${TEST_PACKAGE} should be reported as a direct (non-transitive) package`,
         );
+
+        // 4a. Transitive-dependency detection. flask pulls in dependencies (jinja2,
+        // werkzeug, ...). Managers that classify direct vs transitive (pip/uv/poetry)
+        // mark those deps isTransitive=true; managers that don't (conda) leave it
+        // undefined, so this assertion is conditional on the manager classifying at all.
+        const classifiesTransitivity = (afterInstall ?? []).some((p) => p.isTransitive !== undefined);
+        if (classifiesTransitivity) {
+            assert.ok(
+                (afterInstall ?? []).some((p) => p.isTransitive === true),
+                `[${managerId}] expected at least one transitive dependency of ${TEST_PACKAGE} to be detected`,
+            );
+        }
 
         // 4b. Available versions (optional API capability). Only asserted when the
         // running API surfaces the getter and the manager supports version listing.
@@ -135,7 +142,6 @@ async function runRoundtrip(api: PythonEnvironmentApi, env: PythonEnvironment, m
         await api.refreshPackages(env);
         const afterUninstall = await api.getPackages(env, { skipCache: true });
         assert.ok(!hasPackage(afterUninstall, TEST_PACKAGE), `[${managerId}] ${TEST_PACKAGE} should be uninstalled`);
-        return true;
     } finally {
         // Best-effort cleanup so a mid-roundtrip failure never leaves the env dirty.
         if (installed) {
@@ -149,7 +155,7 @@ async function runRoundtrip(api: PythonEnvironmentApi, env: PythonEnvironment, m
 }
 
 suite('Integration: Package Manager Roundtrip', function () {
-    this.timeout(180_000); // Install/uninstall across multiple managers can be slow.
+    this.timeout(300_000); // Install/uninstall across multiple managers can be slow (conda solving flask + deps).
 
     let api: PythonEnvironmentApi;
 
@@ -222,13 +228,9 @@ suite('Integration: Package Manager Roundtrip', function () {
                     continue;
                 }
 
-                const exercisedManager = await runRoundtrip(api, env, managerId);
-                if (exercisedManager) {
-                    exercised++;
-                    console.log(`[${managerId}] roundtrip passed (${env.displayName})`);
-                } else {
-                    console.log(`[${managerId}] roundtrip skipped (${env.displayName})`);
-                }
+                await runRoundtrip(api, env, managerId);
+                exercised++;
+                console.log(`[${managerId}] roundtrip passed (${env.displayName})`);
             } catch (e) {
                 failures.push(`[${managerId}] ${e instanceof Error ? e.message : String(e)}`);
             }
