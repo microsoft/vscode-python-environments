@@ -1,10 +1,10 @@
 // Copyright (c) Microsoft Corporation. All rights reserved.
 // Licensed under the MIT License.
 
-import { PythonEnvironment } from '../api';
-import { matchesPythonVersion } from './inlineScriptMetadata';
-import { traceWarn } from './logging';
-import { compareReleaseSegments, parseReleaseSegments } from './utils/pep440Release';
+import { PythonEnvironment } from '../../api';
+import { traceWarn } from '../logging';
+import { compareReleaseSegments, parseReleaseSegments } from '../utils/pep440Release';
+import { matchesPythonVersion } from './metadata';
 
 /**
  * Pick the newest installed Python that can serve as a base interpreter for
@@ -24,7 +24,8 @@ export function pickCompatibleInterpreter(
     installed: ReadonlyArray<PythonEnvironment>,
     requiresPython: string | undefined,
 ): PythonEnvironment | undefined {
-    const constraint = requiresPython && requiresPython.length > 0 ? requiresPython : undefined;
+    const trimmedConstraint = requiresPython?.trim();
+    const constraint = trimmedConstraint ? trimmedConstraint : undefined;
     const candidates = installed.filter((env) => isUsableBaseInterpreter(env, constraint));
     if (candidates.length === 0) {
         return undefined;

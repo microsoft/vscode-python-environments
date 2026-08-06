@@ -4,9 +4,9 @@
 import assert from 'assert';
 import * as sinon from 'sinon';
 import { Uri } from 'vscode';
-import { PythonEnvironment } from '../../api';
-import { extractLowerBoundVersion, pickCompatibleInterpreter } from '../../common/inlineScriptInterpreter';
-import * as logging from '../../common/logging';
+import { PythonEnvironment } from '../../../api';
+import { extractLowerBoundVersion, pickCompatibleInterpreter } from '../../../common/inlineScript/interpreter';
+import * as logging from '../../../common/logging';
 
 function makeEnv(version: string, name = `Python ${version}`, error?: string): PythonEnvironment {
     return {
@@ -153,6 +153,13 @@ suite('inlineScriptInterpreter', () => {
             const envs = [makeEnv('3.10.0'), makeEnv('3.12.4')];
             const picked = pickCompatibleInterpreter(envs, '');
             assert.ok(picked, 'empty constraint must not silently reject all envs');
+            assert.strictEqual(picked.version, '3.12.4');
+        });
+
+        test('whitespace-only requiresPython is treated as no constraint', () => {
+            const envs = [makeEnv('3.10.0'), makeEnv('3.12.4')];
+            const picked = pickCompatibleInterpreter(envs, '   ');
+            assert.ok(picked, 'whitespace-only constraint must not silently reject all envs');
             assert.strictEqual(picked.version, '3.12.4');
         });
 

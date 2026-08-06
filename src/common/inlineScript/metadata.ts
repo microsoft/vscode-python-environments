@@ -4,8 +4,8 @@
 import * as tomljs from '@iarna/toml';
 import * as fs from 'fs/promises';
 import { Uri } from 'vscode';
-import { traceVerbose, traceWarn } from './logging';
-import { compareReleaseSegments, parseReleaseSegments } from './utils/pep440Release';
+import { traceVerbose, traceWarn } from '../logging';
+import { compareReleaseSegments, parseReleaseSegments } from '../utils/pep440Release';
 
 /**
  * Parsed and validated PEP 723 `script` metadata block.

@@ -65,7 +65,7 @@ import {
 } from './features/envCommands';
 import { PythonEnvironmentManagers } from './features/envManagers';
 import { EnvVarManager, PythonEnvVariableManager } from './features/execution/envVariableManager';
-import { InlineScriptLazyDetector } from './features/inlineScriptLazyDetector';
+import { InlineScriptLazyDetector } from './features/inlineScript/lazyDetector';
 import {
     applyInitialEnvironmentSelection,
     registerInterpreterSettingsChangeListener,
@@ -98,7 +98,7 @@ import { ProjectItem, PythonEnvTreeItem } from './features/views/treeViewItems';
 import { registerWorkspacePythonContext } from './features/views/workspacePythonContext';
 import { collectEnvironmentInfo, getEnvManagerAndPackageManagerConfigLevels, runPetInTerminalImpl } from './helpers';
 import { EnvironmentManagers, ProjectCreators, PythonProjectManager } from './internal.api';
-import { registerInlineScriptFeatures } from './managers/builtin/inlineScriptMain';
+import { registerInlineScriptFeatures } from './managers/builtin/inlineScript/main';
 import { registerSystemPythonFeatures } from './managers/builtin/main';
 import { SysPythonManager } from './managers/builtin/sysPythonManager';
 import {
@@ -659,7 +659,16 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
                     'poetry',
                     registerPoetryFeatures(nativeFinder, context.subscriptions, outputChannel, projectManager),
                 ),
-                safeRegister('inlineScript', registerInlineScriptFeatures(context.subscriptions, outputChannel)),
+                safeRegister(
+                    'inlineScript',
+                    registerInlineScriptFeatures(
+                        nativeFinder,
+                        context.subscriptions,
+                        outputChannel,
+                        sysMgr,
+                        context.globalStorageUri,
+                    ),
+                ),
                 safeRegister('shellStartupVars', shellStartupVarsMgr.initialize()),
             ]);
 

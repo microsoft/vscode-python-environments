@@ -2,8 +2,8 @@
 // Licensed under the MIT License.
 
 import { createHash } from 'crypto';
-import { normalizePackageName } from '../managers/builtin/utils';
-import { normalizePath } from './utils/pathUtils';
+import { normalizePackageName } from '../../managers/builtin/utils';
+import { normalizePath } from '../utils/pathUtils';
 
 /** Length, in hex chars, of the cache key returned by {@link computeCacheKey}. 16 = 64 bits of SHA-256; fixed-length and filesystem-safe. */
 export const CACHE_KEY_HEX_LENGTH = 16;
@@ -29,6 +29,41 @@ function normalizeExtras(inner: string): string {
         .map((e) => normalizePackageName(e));
     const deduped = Array.from(new Set(items)).sort();
     return deduped.length > 0 ? `[${deduped.join(',')}]` : '';
+}
+
+/** ` >=  2 ; python_version  <  "3.13"` becomes `>=2 ; python_version<"3.13"`. */
+function normalizeRequirementTail(value: string): string {
+    let result = '';
+    let unquoted = '';
+    let quote: "'" | '"' | undefined;
+    let escaped = false;
+
+    const flushUnquoted = () => {
+        result += unquoted.replace(/\s+/g, ' ').replace(/\s*([<>=!~]=?)\s*/g, '$1');
+        unquoted = '';
+    };
+
+    // Preserve PEP 508 marker literals verbatim; a backslash escapes the next character.
+    for (const character of value) {
+        if (quote) {
+            result += character;
+            if (character === quote && !escaped) {
+                quote = undefined;
+            }
+            escaped = character === '\\' && !escaped;
+            if (character !== '\\') {
+                escaped = false;
+            }
+        } else if (character === "'" || character === '"') {
+            flushUnquoted();
+            quote = character;
+            result += character;
+        } else {
+            unquoted += character;
+        }
+    }
+    flushUnquoted();
+    return result.trim();
 }
 
 /**
@@ -70,10 +105,12 @@ export function normalizeDependency(dep: string): string {
         rest = rest.slice(extrasMatch[0].length);
     }
 
-    const compactedRest = rest
-        .replace(/\s+/g, ' ')
-        .replace(/\s*([<>=!~]=?)\s*/g, '$1')
-        .trim();
+    const directReference = rest.trim();
+    if (directReference.startsWith('@')) {
+        return `${name}${extras} ${directReference}`;
+    }
+
+    const compactedRest = normalizeRequirementTail(rest);
 
     return `${name}${extras}${compactedRest}`;
 }
