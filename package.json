@@ -1,5 +1,5 @@
 {
-    "name": "vscode-python-envs",
+    "name": "vscode-python-envs", 
     "displayName": "Python Environments",
     "description": "Provides a unified python environment experience",
     "version": "1.37.0",
