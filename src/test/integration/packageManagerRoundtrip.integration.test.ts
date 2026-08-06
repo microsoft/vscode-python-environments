@@ -40,6 +40,7 @@
 import * as assert from 'assert';
 import * as vscode from 'vscode';
 import { Package, PythonEnvironment, PythonEnvironmentApi } from '../../api';
+import { CONDA_MANAGER_ID, PYTHON_EXTENSION_ID, VENV_MANAGER_ID } from '../../common/constants';
 import { normalizePackageName } from '../../managers/builtin/utils';
 import { ENVS_EXTENSION_ID } from '../constants';
 import { waitForCondition } from '../testUtils';
@@ -176,21 +177,23 @@ suite('Integration: Package Manager Roundtrip', function () {
 
     /**
      * Picks one representative environment per package manager, grouped by managerId.
-     * Prefers virtual-environment-like envs, which are safe to install into.
+     * Only returns isolated environments that are safe for an install/uninstall test.
      */
     async function getEnvironmentsByManager(): Promise<Map<string, PythonEnvironment>> {
         const environments = await api.getEnvironments('all');
         const byManager = new Map<string, PythonEnvironment>();
-
-        const looksModifiable = (env: PythonEnvironment): boolean =>
-            env.displayName.includes('venv') ||
-            env.displayName.includes('.venv') ||
-            env.envId.managerId.includes('venv');
+        const isolatedManagerIds = new Set([
+            VENV_MANAGER_ID,
+            `${PYTHON_EXTENSION_ID}:pipenv`,
+            `${PYTHON_EXTENSION_ID}:poetry`,
+        ]);
 
         for (const env of environments) {
             const managerId = env.envId.managerId;
-            const current = byManager.get(managerId);
-            if (!current || (looksModifiable(env) && !looksModifiable(current))) {
+            const isSafeToModify =
+                isolatedManagerIds.has(managerId) ||
+                (managerId === CONDA_MANAGER_ID && env.name.toLowerCase() !== 'base');
+            if (isSafeToModify && !byManager.has(managerId)) {
                 byManager.set(managerId, env);
             }
         }
