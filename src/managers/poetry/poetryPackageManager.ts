@@ -82,7 +82,7 @@ export class PoetryPackageManager implements PackageManager, Disposable {
         }
 
         try {
-            await this.runPoetryManage(environment, { install: toInstall, uninstall: toUninstall });
+            await this.runPoetryManage({ install: toInstall, uninstall: toUninstall });
             await updatePackagesAndNotify(this, environment, this.packages.get(environment.envId.id), (changes) => {
                 this._onDidChangePackages.fire({ environment, manager: this, changes });
             });
@@ -174,10 +174,7 @@ export class PoetryPackageManager implements PackageManager, Disposable {
         this.packages.clear();
     }
 
-    private async runPoetryManage(
-        environment: PythonEnvironment,
-        options: { install?: string[]; uninstall?: string[] },
-    ): Promise<void> {
+    private async runPoetryManage(options: { install?: string[]; uninstall?: string[] }): Promise<void> {
         const poetry = await getPoetry();
         if (!poetry) {
             throw new Error(
@@ -186,13 +183,10 @@ export class PoetryPackageManager implements PackageManager, Disposable {
                 ),
             );
         }
-        const cwd = await this.getPoetryCwd(environment);
-
         // Handle uninstalls first
         if (options.uninstall && options.uninstall.length > 0) {
             const removeCmd = new PoetryRemoveCommand({
                 pythonExecutable: poetry,
-                cwd,
                 log: this.log,
             });
             const packages = parsePackageSpecs(options.uninstall);
@@ -206,7 +200,6 @@ export class PoetryPackageManager implements PackageManager, Disposable {
         if (options.install && options.install.length > 0) {
             const addCmd = new PoetryAddCommand({
                 pythonExecutable: poetry,
-                cwd,
                 log: this.log,
             });
             const packages = parsePackageSpecs(options.install);
@@ -237,16 +230,14 @@ export class PoetryPackageManager implements PackageManager, Disposable {
         return (data ?? []).map((pkg) => this.api.createPackageItem(pkg, environment, this));
     }
 
-    async getDirectPackageNames(environment: PythonEnvironment): Promise<Set<string> | undefined> {
+    async getDirectPackageNames(_environment: PythonEnvironment): Promise<Set<string> | undefined> {
         try {
             const poetry = await getPoetry();
             if (!poetry) {
                 return undefined;
             }
-            const cwd = await this.getPoetryCwd(environment);
             const showTopLevelCmd = new PoetryShowTopLevelCommand({
                 pythonExecutable: poetry,
-                cwd,
                 log: this.log,
             });
             return await showTopLevelCmd.execute();
