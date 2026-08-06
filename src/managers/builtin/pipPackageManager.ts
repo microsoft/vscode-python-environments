@@ -81,6 +81,10 @@ export class PipPackageManager implements PackageManager, Disposable {
             }
         }
 
+        if (environment.version.startsWith('2.')) {
+            throw new Error('Python 2.* is not supported (deprecated)');
+        }
+
         try {
             const pythonExecutable = environment.execInfo?.run?.executable;
             if (!pythonExecutable) {
