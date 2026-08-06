@@ -17,6 +17,7 @@ import { untildify, untildifyArray } from '../../common/utils/pathUtils';
 import { isWindows } from '../../common/utils/platformUtils';
 import { createRunningWorkerPool, WorkerPool } from '../../common/utils/workerPool';
 import { getConfiguration, getWorkspaceFolders } from '../../common/workspace.apis';
+import { getRefreshTelemetryMeasures, type RefreshPerformance } from './petTelemetry';
 import { noop } from './utils';
 
 // Timeout constants for JSON-RPC requests (in milliseconds)
@@ -250,15 +251,6 @@ interface RefreshOptions {
     searchPaths?: string[];
 }
 
-/** Performance breakdown sent by PET via the `telemetry` notification after a refresh. */
-export interface RefreshPerformance {
-    total: number;
-    /** Phase name (Locators | Path | GlobalVirtualEnvs | Workspaces) → wall-clock ms */
-    breakdown: Record<string, number>;
-    /** Locator name (Conda | WindowsRegistry | …) → wall-clock ms; only ran locators are present */
-    locators: Record<string, number>;
-}
-
 /** Params shape of the PET `telemetry` JSON-RPC notification. */
 interface PetTelemetryNotification {
     event: string;
@@ -267,69 +259,12 @@ interface PetTelemetryNotification {
     };
 }
 
-export interface RefreshTelemetryMeasuresInput {
-    duration: number;
-    nativeInfo: NativeInfo[];
-    unresolvedCount: number;
-    attempt: number;
-    workspaceDirCount?: number;
-    searchPathCount?: number;
-    refreshPerformance?: RefreshPerformance;
-}
-
-/** Builds the numeric PET refresh payload sent through telemetry measurements. */
-export function getRefreshTelemetryMeasures(input: RefreshTelemetryMeasuresInput): Record<string, number> {
-    let envCount = 0;
-    let condaEnvCount = 0;
-    let managerCount = 0;
-    for (const info of input.nativeInfo) {
-        if (isNativeEnvInfo(info)) {
-            envCount++;
-            if (info.kind === NativePythonEnvironmentKind.conda) {
-                condaEnvCount++;
-            }
-        } else {
-            managerCount++;
-        }
-    }
-
-    const measures: Record<string, number> = {
-        duration: input.duration,
-        envCount,
-        condaEnvCount,
-        managerCount,
-        unresolvedCount: input.unresolvedCount,
-        attempt: input.attempt,
-    };
-    if (input.workspaceDirCount !== undefined) {
-        measures.workspaceDirCount = input.workspaceDirCount;
-    }
-    if (input.searchPathCount !== undefined) {
-        measures.searchPathCount = input.searchPathCount;
-    }
-
-    const breakdown = input.refreshPerformance?.breakdown;
-    if (breakdown?.['Locators'] !== undefined) {
-        measures.breakdownLocators = breakdown['Locators'];
-    }
-    if (breakdown?.['Path'] !== undefined) {
-        measures.breakdownPathEnv = breakdown['Path'];
-    }
-    if (breakdown?.['GlobalVirtualEnvs'] !== undefined) {
-        measures.breakdownGlobalVirtualEnvs = breakdown['GlobalVirtualEnvs'];
-    }
-    if (breakdown?.['Workspaces'] !== undefined) {
-        measures.breakdownWorkspaces = breakdown['Workspaces'];
-    }
-    return measures;
-}
-
 /**
  * Response shape of the PET `info` JSON-RPC request.
  * `buildId` / `commitSha` are populated only when the PET binary was built by CI
  * with the appropriate env vars set; local dev builds omit them.
  */
-export interface NativePetInfo {
+interface NativePetInfo {
     petVersion: string;
     buildId?: string;
     commitSha?: string;
@@ -349,7 +284,11 @@ export class RpcTimeoutError extends Error {
 }
 
 /** Retries only JSON-RPC timeout failures; all other errors propagate immediately. */
-export async function retryRpcTimeout<T>(request: () => Promise<T>, maxAttempts: number): Promise<T> {
+export async function retryRpcTimeout<T>(
+    request: () => Promise<T>,
+    maxAttempts: number,
+    shouldRetry: () => boolean = () => true,
+): Promise<T> {
     if (!Number.isInteger(maxAttempts) || maxAttempts < 1) {
         throw new RangeError('maxAttempts must be a positive integer');
     }
@@ -360,7 +299,7 @@ export async function retryRpcTimeout<T>(request: () => Promise<T>, maxAttempts:
         try {
             return await request();
         } catch (ex) {
-            if (!(ex instanceof RpcTimeoutError) || attempt >= maxAttempts) {
+            if (!(ex instanceof RpcTimeoutError) || attempt >= maxAttempts || !shouldRetry()) {
                 throw ex;
             }
         }
@@ -852,6 +791,7 @@ class NativePythonFinderImpl implements NativePythonFinder {
         retryRpcTimeout(
             () => sendRequestWithTimeout<NativePetInfo>(connection, 'info', {}, INFO_TIMEOUT_MS),
             INFO_REQUEST_ATTEMPTS,
+            () => connection === this.connection,
         )
             .then((result) => {
                 if (connection !== this.connection) {

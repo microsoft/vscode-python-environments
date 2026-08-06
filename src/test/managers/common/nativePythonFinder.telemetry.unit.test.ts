@@ -3,9 +3,9 @@ import {
     NativeInfo,
     NativePythonEnvironmentKind,
     RpcTimeoutError,
-    getRefreshTelemetryMeasures,
     retryRpcTimeout,
 } from '../../../managers/common/nativePythonFinder';
+import { getRefreshTelemetryMeasures } from '../../../managers/common/petTelemetry';
 
 suite('NativePythonFinder telemetry', () => {
     test('builds numeric refresh measures with available context', () => {
@@ -93,6 +93,25 @@ suite('NativePythonFinder telemetry', () => {
                 throw expected;
             }, 3),
             (error: unknown) => error === expected,
+        );
+        assert.strictEqual(attempts, 1);
+    });
+
+    test('stops retrying after the connection is superseded', async () => {
+        let attempts = 0;
+        let connectionIsCurrent = true;
+
+        await assert.rejects(
+            retryRpcTimeout(
+                async () => {
+                    attempts++;
+                    connectionIsCurrent = false;
+                    throw new RpcTimeoutError('info', 2000);
+                },
+                3,
+                () => connectionIsCurrent,
+            ),
+            RpcTimeoutError,
         );
         assert.strictEqual(attempts, 1);
     });

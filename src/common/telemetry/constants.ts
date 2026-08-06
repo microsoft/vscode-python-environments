@@ -601,6 +601,7 @@ export interface IEventNamePropertyMapping {
             "<duration>": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "isMeasurement": true, "owner": "eleanorjboyd" }
         }
     */
+    // Numeric fields declared in the GDPR block are sent through the measurements payload.
     [EventNames.PET_REFRESH]: {
         result: 'success' | 'timeout' | 'error';
         errorType?: string;
@@ -624,6 +625,7 @@ export interface IEventNamePropertyMapping {
             "<duration>": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "isMeasurement": true, "owner": "eleanorjboyd" }
         }
     */
+    // Numeric fields declared in the GDPR block are sent through the measurements payload.
     [EventNames.PET_CONFIGURE]: {
         result: 'success' | 'timeout' | 'error' | 'skipped';
         errorType?: string;
@@ -641,6 +643,7 @@ export interface IEventNamePropertyMapping {
             "<duration>": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "isMeasurement": true, "owner": "eleanorjboyd" }
         }
     */
+    // `attempt` is declared in the GDPR block and sent through the measurements payload.
     [EventNames.PET_PROCESS_RESTART]: {
         result: 'success' | 'error';
         errorType?: string;
