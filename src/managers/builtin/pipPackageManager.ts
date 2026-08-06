@@ -5,6 +5,7 @@ import {
     Disposable,
     Event,
     EventEmitter,
+    l10n,
     LogOutputChannel,
     MarkdownString,
     ProgressLocation,
@@ -107,7 +108,11 @@ export class PipPackageManager implements PackageManager, Disposable {
                 );
                 const packages = parsePackageSpecs(toUninstall);
                 await withProgress(
-                    { location: ProgressLocation.Notification, title: 'Installing packages', cancellable: true },
+                    {
+                        location: ProgressLocation.Notification,
+                        title: l10n.t('Uninstalling packages'),
+                        cancellable: true,
+                    },
                     (_progress, token) => uninstallCmd.execute({ packages, cancellationToken: token }),
                 );
             }
