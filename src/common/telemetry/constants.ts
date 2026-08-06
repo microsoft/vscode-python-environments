@@ -603,25 +603,7 @@ export interface IEventNamePropertyMapping {
     */
     [EventNames.PET_REFRESH]: {
         result: 'success' | 'timeout' | 'error';
-        envCount?: number;
-        /** Number of discovered environments whose kind is Conda. Lets us slice refresh duration by conda footprint. */
-        condaEnvCount?: number;
-        /** Number of discovered environment managers (conda/pyenv/poetry/etc.). */
-        managerCount?: number;
-        unresolvedCount?: number;
-        workspaceDirCount?: number;
-        searchPathCount?: number;
-        attempt: number;
         errorType?: string;
-        // breakdown* fields go through the measures payload (numeric); listed here for GDPR only.
-        /** ms in the Locators phase. */
-        breakdownLocators?: number;
-        /** ms walking PATH env var entries (not a file path). */
-        breakdownPathEnv?: number;
-        /** ms scanning global virtual-env dirs. */
-        breakdownGlobalVirtualEnvs?: number;
-        /** ms scanning workspace dirs. */
-        breakdownWorkspaces?: number;
         /** JSON-serialized Record<locatorName, ms>. Parse with parse_json() in Kusto. */
         locatorsJson?: string;
         /** PET crate version reported by the `info` RPC. 'unknown' if the call failed or the PET binary doesn't implement it. */
@@ -638,14 +620,13 @@ export interface IEventNamePropertyMapping {
             "workspaceDirCount": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "isMeasurement": true, "owner": "eleanorjboyd" },
             "envDirCount": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "isMeasurement": true, "owner": "eleanorjboyd" },
             "retryCount": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "isMeasurement": true, "owner": "eleanorjboyd" },
+            "errorType": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "owner": "eleanorjboyd" },
             "<duration>": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "isMeasurement": true, "owner": "eleanorjboyd" }
         }
     */
     [EventNames.PET_CONFIGURE]: {
         result: 'success' | 'timeout' | 'error' | 'skipped';
-        workspaceDirCount?: number;
-        envDirCount?: number;
-        retryCount: number;
+        errorType?: string;
     };
 
     /* __GDPR__
@@ -661,7 +642,6 @@ export interface IEventNamePropertyMapping {
         }
     */
     [EventNames.PET_PROCESS_RESTART]: {
-        attempt: number;
         result: 'success' | 'error';
         errorType?: string;
         /**

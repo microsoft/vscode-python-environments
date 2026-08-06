@@ -11,8 +11,11 @@ suite('Error Classifier', () => {
             assert.strictEqual(classifyError(new CancellationError()), 'canceled');
         });
 
-        test('should classify RpcTimeoutError as spawn_timeout', () => {
-            assert.strictEqual(classifyError(new RpcTimeoutError('resolve', 30000)), 'spawn_timeout');
+        test('should classify RPC timeouts by method', () => {
+            assert.strictEqual(classifyError(new RpcTimeoutError('configure', 30000)), 'rpc_configure_timeout');
+            assert.strictEqual(classifyError(new RpcTimeoutError('refresh', 30000)), 'rpc_refresh_timeout');
+            assert.strictEqual(classifyError(new RpcTimeoutError('resolve', 30000)), 'rpc_resolve_timeout');
+            assert.strictEqual(classifyError(new RpcTimeoutError('info', 2000)), 'rpc_timeout');
         });
 
         test('should classify non-Error values as unknown', () => {
