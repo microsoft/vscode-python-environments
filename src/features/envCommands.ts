@@ -417,7 +417,7 @@ export async function setEnvironmentCommand(
     context: unknown,
     em: EnvironmentManagers,
     wm: PythonProjectManager,
-): Promise<void> {
+): Promise<PythonEnvironment | undefined> {
     if (context instanceof PythonEnvTreeItem) {
         try {
             const view = context as PythonEnvTreeItem;
@@ -427,23 +427,25 @@ export async function setEnvironmentCommand(
                 if (selected && selected.length > 0) {
                     // Check if the selected environment is already the current one for each project
                     await setEnvironmentForProjects(selected, context.environment, em);
+                    return view.environment;
                 }
             } else {
                 await em.setEnvironments('global', view.environment);
+                return view.environment;
             }
         } catch (ex) {
             if (ex === QuickInputButtons.Back) {
-                await setEnvironmentCommand(context, em, wm);
+                return await setEnvironmentCommand(context, em, wm);
             }
             throw ex;
         }
     } else if (context instanceof ProjectItem) {
         const view = context as ProjectItem;
-        await setEnvironmentCommand([view.project.uri], em, wm);
+        return await setEnvironmentCommand([view.project.uri], em, wm);
     } else if (context instanceof GlobalProjectItem) {
-        await setEnvironmentCommand(undefined, em, wm);
+        return await setEnvironmentCommand(undefined, em, wm);
     } else if (context instanceof Uri) {
-        await setEnvironmentCommand([context], em, wm);
+        return await setEnvironmentCommand([context], em, wm);
     } else if (context === undefined) {
         try {
             const projects = wm.getProjects();
@@ -451,7 +453,7 @@ export async function setEnvironmentCommand(
                 const selected = await pickProjectMany(projects);
                 if (selected && selected.length > 0) {
                     const uris = selected.map((p) => p.uri);
-                    await setEnvironmentCommand(uris, em, wm);
+                    return await setEnvironmentCommand(uris, em, wm);
                 }
             } else {
                 const globalEnvManager = em.getEnvironmentManager(undefined);
@@ -463,11 +465,12 @@ export async function setEnvironmentCommand(
                 });
                 if (selected) {
                     await em.setEnvironments('global', selected);
+                    return selected;
                 }
             }
         } catch (ex) {
             if (ex === QuickInputButtons.Back) {
-                await setEnvironmentCommand(context, em, wm);
+                return await setEnvironmentCommand(context, em, wm);
             }
             throw ex;
         }
@@ -486,6 +489,7 @@ export async function setEnvironmentCommand(
         if (selected) {
             // Use the same logic for checking already set environments
             await setEnvironmentForProjects(projects, selected, em);
+            return selected;
         }
     } else {
         traceError(`Invalid context for setting environment command: ${context}`);

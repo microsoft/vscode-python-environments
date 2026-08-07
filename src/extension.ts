@@ -33,6 +33,7 @@ import {
     createLogOutputChannel,
     onDidChangeActiveTerminal,
     onDidChangeTerminalShellIntegration,
+    onDidChangeWindowState,
     withProgress,
 } from './common/window.apis';
 import { getConfiguration, getWorkspaceFolders } from './common/workspace.apis';
@@ -65,6 +66,7 @@ import {
 } from './features/envCommands';
 import { PythonEnvironmentManagers } from './features/envManagers';
 import { EnvVarManager, PythonEnvVariableManager } from './features/execution/envVariableManager';
+import { FeedbackPromptService } from './features/feedback/feedbackPromptService';
 import { InlineScriptLazyDetector } from './features/inlineScript/lazyDetector';
 import {
     applyInitialEnvironmentSelection,
@@ -165,6 +167,16 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
 
     // Setup the persistent state for the extension.
     setPersistentState(context);
+    const feedbackPrompt = new FeedbackPromptService(context.globalState, context.globalStorageUri.fsPath);
+    await feedbackPrompt.initialize();
+    context.subscriptions.push(
+        feedbackPrompt,
+        onDidChangeWindowState((state) => {
+            if (state.focused) {
+                feedbackPrompt.notifyWindowFocused();
+            }
+        }),
+    );
 
     // One-time migration: remove `system` defaultEnvManager from User settings if a previous
     // version wrote it there (bug #1468). Awaited so the migration deterministically affects
@@ -274,7 +286,7 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
                 manager: managerId,
                 triggeredLocation: 'createSpecifiedCommand',
             });
-            return await withProgress(
+            const environment = await withProgress(
                 {
                     location: ProgressLocation.Notification,
                     title: l10n.t('Creating environment...'),
@@ -283,6 +295,10 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
                     return await createEnvironmentCommand(item, envManagers, projectManager);
                 },
             );
+            if (environment) {
+                await feedbackPrompt.recordSuccessfulAction();
+            }
+            return environment;
         }),
         commands.registerCommand('python-envs.createAny', async (options) => {
             // Telemetry: record environment creation attempt with no specific manager
@@ -290,7 +306,7 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
                 manager: 'none',
                 triggeredLocation: 'createAnyCommand',
             });
-            return await withProgress(
+            const environment = await withProgress(
                 {
                     location: ProgressLocation.Notification,
                     title: l10n.t('Creating environment...'),
@@ -303,6 +319,10 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
                     );
                 },
             );
+            if (environment) {
+                await feedbackPrompt.recordSuccessfulAction();
+            }
+            return environment;
         }),
         commands.registerCommand('python-envs.remove', async (item) => {
             await removeEnvironmentCommand(item, envManagers);
@@ -326,10 +346,16 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
             await managePackageVersion(context, envManagers);
         }),
         commands.registerCommand('python-envs.set', async (item) => {
-            await setEnvironmentCommand(item, envManagers, projectManager);
+            const environment = await setEnvironmentCommand(item, envManagers, projectManager);
+            if (environment) {
+                await feedbackPrompt.recordSuccessfulAction();
+            }
         }),
         commands.registerCommand('python-envs.setEnv', async (item) => {
-            await setEnvironmentCommand(item, envManagers, projectManager);
+            const environment = await setEnvironmentCommand(item, envManagers, projectManager);
+            if (environment) {
+                await feedbackPrompt.recordSuccessfulAction();
+            }
             if (item instanceof PythonEnvTreeItem) {
                 temporaryStateManager.setState(item.environment.envId.id, 'selected');
             }

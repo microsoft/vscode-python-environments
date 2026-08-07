@@ -23,6 +23,13 @@ export namespace WorkbenchStrings {
     export const installExtension = l10n.t('Install Extension');
 }
 
+export namespace FeedbackStrings {
+    export const prompt = l10n.t(
+        'Would you like to share an honest review of Python Environments on the Visual Studio Marketplace?',
+    );
+    export const reviewMarketplace = l10n.t('Review on Marketplace');
+}
+
 export namespace Interpreter {
     export const statusBarSelect = l10n.t('Select Interpreter');
     export const browsePath = l10n.t('Browse...');
