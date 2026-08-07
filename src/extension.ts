@@ -732,6 +732,17 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
 
     sendTelemetryEvent(EventNames.EXTENSION_ACTIVATION_DURATION, start.elapsedTime);
 
+    // Integration tests need the live implementations for capabilities intentionally absent from the public API.
+    if (process.env.VSC_PYTHON_INTEGRATION_TEST === '1') {
+        Object.assign(api, {
+            getRegisteredPackageManagersForTests: () =>
+                envManagers.packageManagers.map((manager) => ({
+                    id: manager.id,
+                    manager: manager.registeredManager,
+                })),
+        });
+    }
+
     return api;
 }
 
