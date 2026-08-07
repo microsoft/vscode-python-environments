@@ -4,54 +4,189 @@
 /**
  * Integration Test: Package Manager Roundtrip
  *
- * PURPOSE:
- * Verify that every discovered package manager performs a full package lifecycle
- * correctly, using only the public extension API. The test is parametrized over
- * the package managers backing the discovered environments, so new managers are
- * covered automatically without adding manager-specific code.
+ * Verifies package lifecycle operations through the public API using disposable
+ * environments. Each fixture owns both sides of the test:
  *
- * ROUNDTRIP (per manager, all via the public API):
- *   1. list packages           -> getPackages (baseline; test package absent)
- *   2. install test package    -> managePackages({ install })
- *   3. refresh + list           -> refreshPackages (enriched, test package now present)
- *   4. direct vs transitive     -> installed package is direct; its deps are transitive
- *   4b. available versions      -> getPackageAvailableVersions (when supported)
- *   5. uninstall test package  -> managePackages({ uninstall })
- *   6. list again              -> getPackages (test package absent again)
+ *   1. Create an environment with the configured environment manager.
+ *   2. Exercise the environment manager's preferred package manager.
+ *   3. Remove the environment, even when the package roundtrip fails.
  *
- * NOTES:
- *   - The test package (flask) is chosen because it is available from every common
- *     manager's default sources (PyPI for pip/uv/poetry/pipenv, and conda's default
- *     `main` channel for conda) and pulls in real transitive dependencies (jinja2,
- *     werkzeug, click, ...). That lets the roundtrip exercise a genuine install on
- *     every manager AND verify the direct-vs-transitive classification.
- *   - "Available versions" is exercised via getPackageAvailableVersions when the
- *     running PythonEnvironmentApi surfaces it. That getter was added to the public
- *     API; the call is capability-guarded so this test compiles and runs regardless
- *     of whether the active API build includes it, and gracefully skips the check
- *     for managers that resolve to `undefined` (no version listing support).
- *   - Transitive classification comes from Package.isTransitive, which is populated by
- *     the enriched refreshPackages result (getPackages({skipCache}) re-lists WITHOUT
- *     enrichment). Managers that implement direct-name detection (pip/uv/poetry) mark
- *     dependencies isTransitive=true; managers that don't (conda) leave it undefined,
- *     so the transitive-dependency assertion is conditional on the manager classifying it.
+ * Poetry and Pipenv are intentionally excluded until their environment lifecycle
+ * setup can participate in the same disposable fixture contract.
  */
 
 import * as assert from 'assert';
+import * as os from 'os';
+import * as path from 'path';
+import * as fs from 'fs-extra';
 import * as vscode from 'vscode';
-import { Package, PythonEnvironment, PythonEnvironmentApi } from '../../api';
-import { CONDA_MANAGER_ID, PYTHON_EXTENSION_ID, VENV_MANAGER_ID } from '../../common/constants';
+import { Package, PythonEnvironment, PythonEnvironmentApi, PythonProject } from '../../api';
+import {
+    CONDA_MANAGER_ID,
+    DEFAULT_PACKAGE_MANAGER_ID,
+    SYSTEM_MANAGER_ID,
+    VENV_MANAGER_ID,
+} from '../../common/constants';
 import { normalizePackageName } from '../../managers/builtin/utils';
 import { ENVS_EXTENSION_ID } from '../constants';
 import { waitForCondition } from '../testUtils';
 
+interface PackageManagerFixture {
+    name: string;
+    environmentManagerId: string;
+    packageManagerId: string;
+    alwaysUseUv?: boolean;
+    isAvailable(environments: PythonEnvironment[]): boolean;
+}
+
+const TEST_PACKAGE = 'flask';
+
+const PACKAGE_MANAGER_FIXTURES: PackageManagerFixture[] = [
+    {
+        name: 'Venv with Pip',
+        environmentManagerId: VENV_MANAGER_ID,
+        packageManagerId: DEFAULT_PACKAGE_MANAGER_ID,
+        alwaysUseUv: false,
+        isAvailable: (environments) =>
+            environments.some(
+                (environment) =>
+                    environment.envId.managerId === SYSTEM_MANAGER_ID && environment.version.startsWith('3.'),
+            ),
+    },
+    {
+        name: 'Conda with Conda',
+        environmentManagerId: CONDA_MANAGER_ID,
+        packageManagerId: CONDA_MANAGER_ID,
+        isAvailable: (environments) =>
+            environments.some((environment) => environment.envId.managerId === CONDA_MANAGER_ID),
+    },
+];
+
+type AvailableVersionsCapable = {
+    getPackageAvailableVersions?: (
+        environment: PythonEnvironment,
+        packageName: string,
+    ) => Promise<unknown[] | undefined>;
+};
+
+function hasPackage(packages: Package[] | undefined, name: string): boolean {
+    const target = normalizePackageName(name);
+    return (packages ?? []).some((pkg) => normalizePackageName(pkg.name) === target);
+}
+
+async function withManagerSettings<T>(
+    fixture: PackageManagerFixture,
+    scope: vscode.Uri,
+    callback: () => Promise<T>,
+): Promise<T> {
+    const config = vscode.workspace.getConfiguration('python-envs', scope);
+    const originalEnvironmentManager = config.inspect<string>('defaultEnvManager')?.workspaceValue;
+    const originalPackageManager = config.inspect<string>('defaultPackageManager')?.workspaceValue;
+    const originalAlwaysUseUv = config.inspect<boolean>('alwaysUseUv')?.globalValue;
+
+    try {
+        await config.update(
+            'defaultEnvManager',
+            fixture.environmentManagerId,
+            vscode.ConfigurationTarget.Workspace,
+        );
+        await config.update(
+            'defaultPackageManager',
+            fixture.packageManagerId,
+            vscode.ConfigurationTarget.Workspace,
+        );
+        if (fixture.alwaysUseUv !== undefined) {
+            await config.update('alwaysUseUv', fixture.alwaysUseUv, vscode.ConfigurationTarget.Global);
+        }
+        return await callback();
+    } finally {
+        const restorations = [
+            config.update(
+                'defaultEnvManager',
+                originalEnvironmentManager,
+                vscode.ConfigurationTarget.Workspace,
+            ),
+            config.update(
+                'defaultPackageManager',
+                originalPackageManager,
+                vscode.ConfigurationTarget.Workspace,
+            ),
+        ];
+        if (fixture.alwaysUseUv !== undefined) {
+            restorations.push(
+                config.update('alwaysUseUv', originalAlwaysUseUv, vscode.ConfigurationTarget.Global),
+            );
+        }
+        await Promise.all(restorations);
+    }
+}
+
+async function runRoundtrip(
+    api: PythonEnvironmentApi,
+    environment: PythonEnvironment,
+    packageManagerId: string,
+): Promise<void> {
+    const baseline = await api.getPackages(environment, { skipCache: true });
+    assert.notStrictEqual(baseline, undefined, `[${packageManagerId}] Package manager should be available`);
+    assert.ok(
+        !hasPackage(baseline, TEST_PACKAGE),
+        `[${packageManagerId}] ${TEST_PACKAGE} should be absent from the new environment`,
+    );
+
+    await api.managePackages(environment, { install: [TEST_PACKAGE] });
+
+    const afterInstall =
+        (await api.refreshPackages(environment)) ?? (await api.getPackages(environment, { skipCache: true }));
+    const installedPackage = (afterInstall ?? []).find(
+        (pkg) => normalizePackageName(pkg.name) === normalizePackageName(TEST_PACKAGE),
+    );
+    assert.ok(installedPackage, `[${packageManagerId}] ${TEST_PACKAGE} should be installed`);
+    assert.strictEqual(
+        installedPackage.pkgId.managerId,
+        packageManagerId,
+        `[${packageManagerId}] ${TEST_PACKAGE} should use the expected package manager`,
+    );
+    assert.notStrictEqual(
+        installedPackage.isTransitive,
+        true,
+        `[${packageManagerId}] ${TEST_PACKAGE} should be reported as a direct package`,
+    );
+
+    const classifiesTransitivity = (afterInstall ?? []).some((pkg) => pkg.isTransitive !== undefined);
+    if (classifiesTransitivity) {
+        assert.ok(
+            (afterInstall ?? []).some((pkg) => pkg.isTransitive === true),
+            `[${packageManagerId}] A ${TEST_PACKAGE} dependency should be reported as transitive`,
+        );
+    }
+
+    const versionsApi = api as AvailableVersionsCapable;
+    if (typeof versionsApi.getPackageAvailableVersions === 'function') {
+        const versions = await versionsApi.getPackageAvailableVersions(environment, TEST_PACKAGE);
+        if (versions !== undefined) {
+            assert.ok(
+                Array.isArray(versions) && versions.length > 0,
+                `[${packageManagerId}] ${TEST_PACKAGE} should report available versions`,
+            );
+        }
+    }
+
+    await api.managePackages(environment, { uninstall: [TEST_PACKAGE] });
+    await api.refreshPackages(environment);
+    const afterUninstall = await api.getPackages(environment, { skipCache: true });
+    assert.ok(!hasPackage(afterUninstall, TEST_PACKAGE), `[${packageManagerId}] ${TEST_PACKAGE} should be uninstalled`);
+}
+
 suite('Integration: Package Manager Roundtrip', function () {
-    this.timeout(300_000); // Install/uninstall across multiple managers can be slow (conda solving flask + deps).
+    this.timeout(600_000); // Environment creation and Conda package solving can both be slow.
 
     let api: PythonEnvironmentApi;
+    let originalTestExecution: string | undefined;
 
     suiteSetup(async function () {
         this.timeout(30_000);
+        originalTestExecution = process.env.VSC_PYTHON_CI_TEST;
+        process.env.VSC_PYTHON_CI_TEST = '1';
 
         const extension = vscode.extensions.getExtension(ENVS_EXTENSION_ID);
         assert.ok(extension, `Extension ${ENVS_EXTENSION_ID} not found`);
@@ -65,185 +200,53 @@ suite('Integration: Package Manager Roundtrip', function () {
         assert.ok(api, 'API not available');
     });
 
-    /**
-     * Picks one representative environment per package manager, grouped by managerId.
-     * Only returns isolated environments that are safe for an install/uninstall test.
-     */
-    async function getEnvironmentsByManager(): Promise<Map<string, PythonEnvironment>> {
-        const environments = await api.getEnvironments('all');
-        const byManager = new Map<string, PythonEnvironment>();
-        const isolatedManagerIds = new Set([
-            VENV_MANAGER_ID,
-            `${PYTHON_EXTENSION_ID}:pipenv`,
-            `${PYTHON_EXTENSION_ID}:poetry`,
-        ]);
-
-        for (const env of environments) {
-            const managerId = env.envId.managerId;
-            const isSafeToModify =
-                isolatedManagerIds.has(managerId) ||
-                (managerId === CONDA_MANAGER_ID && env.name.toLowerCase() !== 'base');
-            if (isSafeToModify && !byManager.has(managerId)) {
-                byManager.set(managerId, env);
-            }
-        }
-        return byManager;
-    }
-
-    /**
-     * Parametrized roundtrip: one assertion pass per discovered package manager.
-     *
-     * This is a single test that iterates managers (rather than a static list) so
-     * that any future manager is exercised automatically once its environments are
-     * discovered. Failures are aggregated and reported per manager.
-     */
-    test('install/list/direct/uninstall roundtrip for each package manager', async function () {
-        const byManager = await getEnvironmentsByManager();
-
-        if (byManager.size === 0) {
-            console.log('No environments discovered; skipping package manager roundtrip');
-            this.skip();
-            return;
-        }
-
-        const failures: string[] = [];
-        let exercised = 0;
-
-        for (const [managerId, env] of byManager) {
-            try {
-                const before = await api.getPackages(env, { skipCache: true });
-                if (before === undefined) {
-                    console.log(`[${managerId}] no package manager available; skipping`);
-                    continue;
-                }
-                if (hasPackage(before, TEST_PACKAGE)) {
-                    console.log(`[${managerId}] ${TEST_PACKAGE} already present; skipping to avoid clobbering`);
-                    continue;
-                }
-
-                await runRoundtrip(api, env, managerId);
-                exercised++;
-                console.log(`[${managerId}] roundtrip passed (${env.displayName})`);
-            } catch (e) {
-                failures.push(`[${managerId}] ${e instanceof Error ? e.message : String(e)}`);
-            }
-        }
-
-        assert.strictEqual(failures.length, 0, `Package manager roundtrip failures:\n${failures.join('\n')}`);
-
-        if (exercised === 0) {
-            console.log('No modifiable package managers were exercised; skipping');
-            this.skip();
+    suiteTeardown(() => {
+        if (originalTestExecution === undefined) {
+            delete process.env.VSC_PYTHON_CI_TEST;
+        } else {
+            process.env.VSC_PYTHON_CI_TEST = originalTestExecution;
         }
     });
-});
 
-/**
- * Package used for the install/uninstall roundtrip. flask is available from every
- * common manager's default source (PyPI and conda's default `main` channel) and pulls
- * in transitive dependencies, so the roundtrip can verify both installation and the
- * direct-vs-transitive classification on every manager.
- */
-const TEST_PACKAGE = 'flask';
-
-/** True when a package with the given (normalized) name is in the list. */
-function hasPackage(packages: Package[] | undefined, name: string): boolean {
-    const target = normalizePackageName(name);
-    return (packages ?? []).some((p) => normalizePackageName(p.name) === target);
-}
-
-/**
- * Optional API capability: some API builds surface available-version listing.
- * Cast through this shape so the test compiles whether or not the running API
- * exposes getPackageAvailableVersions.
- */
-type AvailableVersionsCapable = {
-    getPackageAvailableVersions?: (
-        environment: PythonEnvironment,
-        packageName: string,
-    ) => Promise<unknown[] | undefined>;
-};
-
-/**
- * Runs the full lifecycle roundtrip for a single environment/manager. Throws (via
- * assertion) on any failure; returns normally when the full lifecycle succeeded.
- */
-async function runRoundtrip(api: PythonEnvironmentApi, env: PythonEnvironment, managerId: string): Promise<void> {
-    const baseline = await api.getPackages(env, { skipCache: true });
-    if (baseline === undefined) {
-        // No usable package manager for this environment.
-        return;
-    }
-
-    // Avoid clobbering a pre-existing install of the test package.
-    assert.ok(
-        !hasPackage(baseline, TEST_PACKAGE),
-        `[${managerId}] ${TEST_PACKAGE} unexpectedly already installed; cannot run a clean roundtrip`,
-    );
-
-    let installed = false;
-    try {
-        // 2. Install.
-        await api.managePackages(env, { install: [TEST_PACKAGE] });
-        installed = true;
-
-        // 3. Refresh and read the ENRICHED package list from the refresh result:
-        // getPackages({skipCache}) re-lists without transitive enrichment, so the
-        // refreshPackages return value is what carries Package.isTransitive.
-        const afterInstall = (await api.refreshPackages(env)) ?? (await api.getPackages(env, { skipCache: true }));
-        assert.ok(hasPackage(afterInstall, TEST_PACKAGE), `[${managerId}] ${TEST_PACKAGE} should be installed`);
-
-        // 4. The installed package is a direct (non-transitive) dependency.
-        const installedPkg = (afterInstall ?? []).find(
-            (p) => normalizePackageName(p.name) === normalizePackageName(TEST_PACKAGE),
-        );
-        assert.notStrictEqual(
-            installedPkg?.isTransitive,
-            true,
-            `[${managerId}] ${TEST_PACKAGE} should be reported as a direct (non-transitive) package`,
-        );
-
-        // 4a. Transitive-dependency detection. flask pulls in dependencies (jinja2,
-        // werkzeug, ...). Managers that classify direct vs transitive (pip/uv/poetry)
-        // mark those deps isTransitive=true; managers that don't (conda) leave it
-        // undefined, so this assertion is conditional on the manager classifying at all.
-        const classifiesTransitivity = (afterInstall ?? []).some((p) => p.isTransitive !== undefined);
-        if (classifiesTransitivity) {
-            assert.ok(
-                (afterInstall ?? []).some((p) => p.isTransitive === true),
-                `[${managerId}] expected at least one transitive dependency of ${TEST_PACKAGE} to be detected`,
-            );
-        }
-
-        // 4b. Available versions (optional API capability). Only asserted when the
-        // running API surfaces the getter and the manager supports version listing.
-        const versionsApi = api as unknown as AvailableVersionsCapable;
-        if (typeof versionsApi.getPackageAvailableVersions === 'function') {
-            const versions = await versionsApi.getPackageAvailableVersions(env, TEST_PACKAGE);
-            if (versions !== undefined) {
-                assert.ok(
-                    Array.isArray(versions) && versions.length > 0,
-                    `[${managerId}] ${TEST_PACKAGE} should report at least one available version`,
-                );
+    for (const fixture of PACKAGE_MANAGER_FIXTURES) {
+        test(`${fixture.name}: disposable environment package roundtrip`, async function () {
+            const globalEnvironments = await api.getEnvironments('global');
+            if (!fixture.isAvailable(globalEnvironments)) {
+                this.skip();
+                return;
             }
-        }
 
-        // 5. Uninstall.
-        await api.managePackages(env, { uninstall: [TEST_PACKAGE] });
-        installed = false;
+            const projectRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'python-envs-package-roundtrip-'));
+            const project: PythonProject = {
+                name: `Package roundtrip: ${fixture.name}`,
+                uri: vscode.Uri.file(projectRoot),
+            };
+            let environment: PythonEnvironment | undefined;
 
-        // 6. List again -> absent.
-        await api.refreshPackages(env);
-        const afterUninstall = await api.getPackages(env, { skipCache: true });
-        assert.ok(!hasPackage(afterUninstall, TEST_PACKAGE), `[${managerId}] ${TEST_PACKAGE} should be uninstalled`);
-    } finally {
-        // Best-effort cleanup so a mid-roundtrip failure never leaves the env dirty.
-        if (installed) {
+            api.addPythonProject(project);
+
             try {
-                await api.managePackages(env, { uninstall: [TEST_PACKAGE] });
-            } catch {
-                console.log(`[${managerId}] cleanup: failed to uninstall ${TEST_PACKAGE}`);
+                await withManagerSettings(fixture, project.uri, async () => {
+                    environment = await api.createEnvironment(project.uri, { quickCreate: true });
+                    assert.ok(environment, `[${fixture.name}] Environment creation should succeed`);
+                    assert.strictEqual(
+                        environment.envId.managerId,
+                        fixture.environmentManagerId,
+                        `[${fixture.name}] Environment should use the expected manager`,
+                    );
+
+                    await runRoundtrip(api, environment, fixture.packageManagerId);
+                });
+            } finally {
+                try {
+                    if (environment) {
+                        await api.removeEnvironment(environment);
+                    }
+                } finally {
+                    api.removePythonProject(project);
+                    await fs.remove(projectRoot);
+                }
             }
-        }
+        });
     }
-}
+});
