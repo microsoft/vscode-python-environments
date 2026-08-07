@@ -24,9 +24,7 @@ export namespace WorkbenchStrings {
 }
 
 export namespace FeedbackStrings {
-    export const prompt = l10n.t(
-        'Would you like to share an honest review of Python Environments on the Visual Studio Marketplace?',
-    );
+    export const prompt = l10n.t('Would you like to leave a review for Python Environments?');
     export const reviewMarketplace = l10n.t('Review on Marketplace');
 }
 
