@@ -229,13 +229,13 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
             }),
         );
         let candidates = derivedChecks
-            .filter((candidate) => !candidate.derived)
-            .map((candidate) => candidate.environment)
             .filter(
                 (candidate) =>
-                    !metadata.requiresPython ||
-                    this.matchesInstallConstraint(metadata.requiresPython, candidate.version),
-            );
+                    !candidate.derived &&
+                    (!metadata.requiresPython ||
+                        this.matchesInstallConstraint(metadata.requiresPython, candidate.environment.version)),
+            )
+            .map((candidate) => candidate.environment);
 
         while (candidates.length > 0) {
             const environment = pickCompatibleInterpreter(candidates, undefined);
@@ -266,6 +266,8 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
         const run = this.baseInterpreterInstallationQueue.then(() =>
             this.installAndSelectBaseInterpreterSerially(metadata),
         );
+        // Keep the stored queue tail fulfilled so one failed request does not block later attempts;
+        // the caller still observes the original result through `run`.
         this.baseInterpreterInstallationQueue = run.then(
             () => undefined,
             () => undefined,
