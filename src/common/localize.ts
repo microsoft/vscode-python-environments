@@ -198,6 +198,22 @@ export namespace PoetryStrings {
     export const poetryManager = l10n.t('Manages Poetry environments');
     export const poetryDiscovering = l10n.t('Discovering Poetry environments');
     export const poetryRefreshing = l10n.t('Refreshing Poetry environments');
+    export namespace create {
+        export const description = l10n.t('Create a Poetry environment for the current project');
+        export const progress = (path: string) => l10n.t('Creating Poetry environment for {0}', path);
+        export const singleProject = l10n.t('Poetry environments can only be created for one project at a time.');
+        export const noPyproject = (path: string) => l10n.t('No pyproject.toml was found in {0}.', path);
+        export const noPython = l10n.t('No usable global Python 3 environment was found.');
+        export const missingPath = l10n.t('Poetry did not report the path of the created environment.');
+        export const resolveFailed = (path: string) => l10n.t('The Poetry environment at {0} could not be resolved.', path);
+    }
+    export namespace remove {
+        export const progress = (path: string) => l10n.t('Removing Poetry environment at {0}', path);
+        export const noProject = (path: string) =>
+            l10n.t('The Poetry project associated with the environment at {0} could not be determined.', path);
+        export const noExecutable = (path: string) =>
+            l10n.t('The Python executable for the Poetry environment at {0} could not be determined.', path);
+    }
 }
 
 export namespace ProjectCreatorString {
