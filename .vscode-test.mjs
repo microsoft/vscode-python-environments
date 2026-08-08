@@ -18,19 +18,6 @@ fs.writeFileSync(
     JSON.stringify({ 'python.useEnvironmentsExtension': true, 'python-envs.alwaysUseUv': false }) + '\n',
 );
 
-// A terminated integration host cannot run fixture cleanup. Reset only the known
-// test-owned project prefix and fixture settings before opening the workspace again.
-const integrationWorkspace = path.resolve('src/test/integration/test-workspace/project-a');
-for (const entry of fs.readdirSync(integrationWorkspace, { withFileTypes: true })) {
-    if (entry.isDirectory() && /^\.pm-[A-Za-z0-9]{6}$/.test(entry.name)) {
-        fs.rmSync(path.join(integrationWorkspace, entry.name), { recursive: true, force: true });
-    }
-}
-fs.writeFileSync(
-    path.join(integrationWorkspace, '.vscode', 'settings.json'),
-    JSON.stringify({ 'python-envs.defaultEnvManager': 'ms-python.python:system' }, undefined, 4) + os.EOL,
-);
-
 export default defineConfig([
     {
         label: 'smokeTests',
