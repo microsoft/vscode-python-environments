@@ -94,6 +94,16 @@ for (const profile of profiles) {
             assert.ok(!packages?.some((pkg) => pkg.name === 'requests'), 'Package not uninstalled');
         });
 
+        test(`${profile.name} Package Manager should list available package versions`, async () => {
+            const packageManager = await api.getPackageManager(environment!);
+            assert.ok(packageManager, 'Package manager not available');
+            assert.ok(packageManager.getPackageAvailableVersions, 'Available versions method not available');
+
+            const versions = await packageManager.getPackageAvailableVersions(environment!, 'requests');
+            assert.ok(versions, 'Package versions not available');
+            assert.ok(versions.length > 0, 'No package versions available');
+        });
+
         suiteTeardown(async () => {
             try {
                 await deleteEnvironmentDirectory(vscode.Uri.joinPath(workspaceUri, profile.environmentDirectory));

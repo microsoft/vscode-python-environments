@@ -8,3 +8,4 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [1.37.0]
 
 - Aligned the API package version with the Python Environments extension version.
+- Added `getPackageManager` to retrieve the registered package manager for an environment.
