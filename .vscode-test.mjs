@@ -15,7 +15,7 @@ const userDir = path.join(userDataDir, 'User');
 fs.mkdirSync(userDir, { recursive: true });
 fs.writeFileSync(
     path.join(userDir, 'settings.json'),
-    JSON.stringify({ 'python.useEnvironmentsExtension': true, 'python-envs.alwaysUseUv': false }) + '\n',
+    JSON.stringify({ 'python.useEnvironmentsExtension': true }) + '\n',
 );
 
 export default defineConfig([

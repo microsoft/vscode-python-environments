@@ -324,11 +324,6 @@ export class InternalPackageManager implements PackageManager {
         private readonly manager: PackageManager,
     ) {}
 
-    /** The live registered implementation. Only exposed to the integration-test bridge. */
-    public get registeredManager(): PackageManager {
-        return this.manager;
-    }
-
     public get name(): string {
         return this.manager.name;
     }
