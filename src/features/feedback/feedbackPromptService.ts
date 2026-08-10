@@ -232,6 +232,10 @@ export class FeedbackPromptService implements Disposable {
     }
 }
 
+/**
+ * Atomically creates the marker only when it does not already exist.
+ * Success acquires the prompt claim; EEXIST means another extension host already claimed or displayed it.
+ */
 async function claimPrompt(globalStoragePath: string): Promise<boolean> {
     await fs.mkdir(globalStoragePath, { recursive: true });
     try {
@@ -246,6 +250,8 @@ async function claimPrompt(globalStoragePath: string): Promise<boolean> {
     }
 }
 
+// Remove the claim only when display conditions change before the prompt is shown.
+// After the prompt is displayed or dismissed, the marker remains to enforce once-only behavior.
 async function releasePromptClaim(globalStoragePath: string): Promise<void> {
     try {
         await fs.unlink(path.join(globalStoragePath, PROMPT_CLAIM_FILE));
