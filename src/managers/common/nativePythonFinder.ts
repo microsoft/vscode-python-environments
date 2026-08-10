@@ -11,7 +11,7 @@ import { getExtension } from '../../common/extension.apis';
 import { traceError, traceVerbose, traceWarn } from '../../common/logging';
 import { StopWatch } from '../../common/stopWatch';
 import { EventNames } from '../../common/telemetry/constants';
-import { classifyError } from '../../common/telemetry/errorClassifier';
+import { classifyError, isTimeoutErrorType } from '../../common/telemetry/errorClassifier';
 import { sendTelemetryEvent } from '../../common/telemetry/sender';
 import { untildify, untildifyArray } from '../../common/utils/pathUtils';
 import { isWindows } from '../../common/utils/platformUtils';
@@ -421,7 +421,7 @@ class NativePythonFinderImpl implements NativePythonFinder {
                 EventNames.PET_RESOLVE,
                 sw.elapsedTime,
                 {
-                    result: ex instanceof RpcTimeoutError ? 'timeout' : 'error',
+                    result: isTimeoutErrorType(errorType) ? 'timeout' : 'error',
                     errorType,
                     ...this.getPetInfoProperties(),
                 },
@@ -990,7 +990,7 @@ class NativePythonFinderImpl implements NativePythonFinder {
                     refreshPerformance: refreshPerf,
                 }),
                 {
-                    result: ex instanceof RpcTimeoutError ? 'timeout' : 'error',
+                    result: isTimeoutErrorType(errorType) ? 'timeout' : 'error',
                     errorType,
                     locatorsJson: refreshPerf ? JSON.stringify(refreshPerf.locators) : undefined,
                     ...this.getPetInfoProperties(),
@@ -1057,12 +1057,13 @@ class NativePythonFinderImpl implements NativePythonFinder {
                 { result: 'success' },
             );
         } catch (ex) {
+            const errorType = classifyError(ex);
             sendTelemetryEvent(
                 EventNames.PET_CONFIGURE,
                 { duration: sw.elapsedTime, workspaceDirCount, envDirCount, retryCount },
                 {
-                    result: ex instanceof RpcTimeoutError ? 'timeout' : 'error',
-                    errorType: classifyError(ex),
+                    result: isTimeoutErrorType(errorType) ? 'timeout' : 'error',
+                    errorType,
                 },
                 ex instanceof Error ? ex : undefined,
             );
