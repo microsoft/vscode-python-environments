@@ -17,7 +17,11 @@ import { untildify, untildifyArray } from '../../common/utils/pathUtils';
 import { isWindows } from '../../common/utils/platformUtils';
 import { createRunningWorkerPool, WorkerPool } from '../../common/utils/workerPool';
 import { getConfiguration, getWorkspaceFolders } from '../../common/workspace.apis';
-import { getRefreshTelemetryMeasures, type RefreshPerformance } from './petTelemetry';
+import {
+    getRefreshTelemetryMeasures,
+    shouldRetainPetInfo,
+    type RefreshPerformance,
+} from './petTelemetry';
 import { noop } from './utils';
 
 // Timeout constants for JSON-RPC requests (in milliseconds)
@@ -361,6 +365,7 @@ class NativePythonFinderImpl implements NativePythonFinder {
      * a transient startup timeout from erasing known build attribution.
      */
     private petInfo: NativePetInfo | undefined;
+    private petBinaryFingerprint: string | undefined;
 
     constructor(
         private readonly outputChannel: LogOutputChannel,
@@ -773,10 +778,26 @@ class NativePythonFinderImpl implements NativePythonFinder {
 
         connection.listen();
 
+        this.updatePetBinaryFingerprint();
         // Stamp PET telemetry with version/buildId/commitSha. Fire-and-forget — must not block refresh.
         this.kickoffInfoFetch(connection);
 
         return connection;
+    }
+
+    private updatePetBinaryFingerprint(): void {
+        let currentFingerprint: string | undefined;
+        try {
+            const stat = fs.statSync(this.toolPath);
+            currentFingerprint = `${stat.size}:${stat.mtimeMs}`;
+        } catch (ex) {
+            this.outputChannel.debug('[pet] Unable to fingerprint PET binary:', ex);
+        }
+
+        if (!shouldRetainPetInfo(this.petInfo !== undefined, this.petBinaryFingerprint, currentFingerprint)) {
+            this.petInfo = undefined;
+        }
+        this.petBinaryFingerprint = currentFingerprint;
     }
 
     /**
@@ -941,6 +962,7 @@ class NativePythonFinderImpl implements NativePythonFinder {
                 getRefreshTelemetryMeasures({
                     duration: sw.elapsedTime,
                     nativeInfo,
+                    condaKind: NativePythonEnvironmentKind.conda,
                     unresolvedCount,
                     workspaceDirCount,
                     searchPathCount,
@@ -960,6 +982,7 @@ class NativePythonFinderImpl implements NativePythonFinder {
                 getRefreshTelemetryMeasures({
                     duration: sw.elapsedTime,
                     nativeInfo,
+                    condaKind: NativePythonEnvironmentKind.conda,
                     unresolvedCount,
                     workspaceDirCount,
                     searchPathCount,
@@ -969,6 +992,7 @@ class NativePythonFinderImpl implements NativePythonFinder {
                 {
                     result: ex instanceof RpcTimeoutError ? 'timeout' : 'error',
                     errorType,
+                    locatorsJson: refreshPerf ? JSON.stringify(refreshPerf.locators) : undefined,
                     ...this.getPetInfoProperties(),
                 },
                 ex instanceof Error ? ex : undefined,

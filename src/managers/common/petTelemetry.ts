@@ -15,6 +15,7 @@ export interface RefreshPerformance {
 export interface RefreshTelemetryMeasuresInput {
     duration: number;
     nativeInfo: readonly RefreshTelemetryInfo[];
+    condaKind: string;
     unresolvedCount: number;
     attempt: number;
     workspaceDirCount?: number;
@@ -39,7 +40,7 @@ export function getRefreshTelemetryMeasures(input: RefreshTelemetryMeasuresInput
             managerCount++;
         } else {
             envCount++;
-            if (info.kind === 'Conda') {
+            if (info.kind === input.condaKind) {
                 condaEnvCount++;
             }
         }
@@ -69,4 +70,16 @@ export function getRefreshTelemetryMeasures(input: RefreshTelemetryMeasuresInput
         }
     }
     return measures;
+}
+
+/** Returns true only when cached PET attribution is absent or the binary is provably unchanged. */
+export function shouldRetainPetInfo(
+    hasPetInfo: boolean,
+    previousFingerprint: string | undefined,
+    currentFingerprint: string | undefined,
+): boolean {
+    return !hasPetInfo ||
+        (previousFingerprint !== undefined &&
+            currentFingerprint !== undefined &&
+            previousFingerprint === currentFingerprint);
 }

@@ -5,7 +5,10 @@ import {
     RpcTimeoutError,
     retryRpcTimeout,
 } from '../../../managers/common/nativePythonFinder';
-import { getRefreshTelemetryMeasures } from '../../../managers/common/petTelemetry';
+import {
+    getRefreshTelemetryMeasures,
+    shouldRetainPetInfo,
+} from '../../../managers/common/petTelemetry';
 
 suite('NativePythonFinder telemetry', () => {
     test('builds numeric refresh measures with available context', () => {
@@ -18,6 +21,7 @@ suite('NativePythonFinder telemetry', () => {
         const measures = getRefreshTelemetryMeasures({
             duration: 1200,
             nativeInfo,
+            condaKind: NativePythonEnvironmentKind.conda,
             unresolvedCount: 1,
             workspaceDirCount: 2,
             searchPathCount: 3,
@@ -54,6 +58,7 @@ suite('NativePythonFinder telemetry', () => {
         const measures = getRefreshTelemetryMeasures({
             duration: 50,
             nativeInfo: [],
+            condaKind: NativePythonEnvironmentKind.conda,
             unresolvedCount: 0,
             attempt: 0,
         });
@@ -66,6 +71,26 @@ suite('NativePythonFinder telemetry', () => {
             unresolvedCount: 0,
             attempt: 0,
         });
+    });
+
+    test('uses the caller-provided Conda kind identity', () => {
+        const measures = getRefreshTelemetryMeasures({
+            duration: 1,
+            nativeInfo: [{ kind: 'custom-conda' }],
+            condaKind: 'custom-conda',
+            unresolvedCount: 0,
+            attempt: 0,
+        });
+
+        assert.strictEqual(measures.condaEnvCount, 1);
+    });
+
+    test('retains PET info only when the binary is provably unchanged', () => {
+        assert.strictEqual(shouldRetainPetInfo(false, undefined, undefined), true);
+        assert.strictEqual(shouldRetainPetInfo(true, '10:20', '10:20'), true);
+        assert.strictEqual(shouldRetainPetInfo(true, '10:20', '11:20'), false);
+        assert.strictEqual(shouldRetainPetInfo(true, '10:20', undefined), false);
+        assert.strictEqual(shouldRetainPetInfo(true, undefined, '10:20'), false);
     });
 
     test('retries an RPC timeout and returns the later result', async () => {
@@ -114,6 +139,11 @@ suite('NativePythonFinder telemetry', () => {
             RpcTimeoutError,
         );
         assert.strictEqual(attempts, 1);
+    });
+
+    test('rejects invalid RPC retry limits', async () => {
+        await assert.rejects(retryRpcTimeout(async () => 'unused', 0), RangeError);
+        await assert.rejects(retryRpcTimeout(async () => 'unused', 1.5), RangeError);
     });
 
     test('stops retrying RPC timeouts at the attempt limit', async () => {
