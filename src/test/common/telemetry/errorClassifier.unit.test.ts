@@ -2,7 +2,7 @@ import assert from 'node:assert';
 import { CancellationError } from 'vscode';
 import * as rpc from 'vscode-jsonrpc/node';
 import { BaseError } from '../../../common/errors/types';
-import { classifyError } from '../../../common/telemetry/errorClassifier';
+import { classifyError, isTimeoutErrorType } from '../../../common/telemetry/errorClassifier';
 import { RpcTimeoutError } from '../../../managers/common/nativePythonFinder';
 
 suite('Error Classifier', () => {
@@ -127,6 +127,22 @@ suite('Error Classifier', () => {
                 classifyError(new Error('Failed to create stdio streams for PET process')),
                 'process_crash',
             );
+        });
+    });
+
+    suite('isTimeoutErrorType', () => {
+        test('recognizes spawn and JSON-RPC timeout categories', () => {
+            assert.strictEqual(isTimeoutErrorType('spawn_timeout'), true);
+            assert.strictEqual(isTimeoutErrorType('rpc_timeout'), true);
+            assert.strictEqual(isTimeoutErrorType('rpc_configure_timeout'), true);
+            assert.strictEqual(isTimeoutErrorType('rpc_refresh_timeout'), true);
+            assert.strictEqual(isTimeoutErrorType('rpc_resolve_timeout'), true);
+        });
+
+        test('rejects non-timeout categories', () => {
+            assert.strictEqual(isTimeoutErrorType('connection_error'), false);
+            assert.strictEqual(isTimeoutErrorType('rpc_error'), false);
+            assert.strictEqual(isTimeoutErrorType('unknown'), false);
         });
     });
 });

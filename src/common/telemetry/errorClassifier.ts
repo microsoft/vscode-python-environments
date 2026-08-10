@@ -21,6 +21,12 @@ export type DiscoveryErrorType =
     | 'already_registered'
     | 'unknown';
 
+/** Returns true for spawn and JSON-RPC timeout telemetry categories. */
+export function isTimeoutErrorType(errorType: DiscoveryErrorType): boolean {
+    return errorType === 'spawn_timeout' || errorType === 'rpc_timeout' ||
+        (errorType.startsWith('rpc_') && errorType.endsWith('_timeout'));
+}
+
 /**
  * Classifies an error into a telemetry-safe category for the `errorType` property.
  * Does NOT include raw error messages — only the category.
