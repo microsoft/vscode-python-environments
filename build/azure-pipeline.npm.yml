@@ -83,9 +83,9 @@ extends:
                 workingDirectory: $(Build.SourcesDirectory)/api
                 displayName: Compile TypeScript
 
-              - script: npm pack --ignore-scripts
+              - script: npm run test:package
                 workingDirectory: $(Build.SourcesDirectory)/api
-                displayName: Pack npm package
+                displayName: Pack and validate npm package
 
               - task: CopyFiles@2
                 displayName: Copy package tarball to staging

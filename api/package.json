@@ -11,6 +11,8 @@
         "API",
         "Environments"
     ],
+    "main": "./out/cjs/main.cjs",
+    "types": "./out/cjs/main.d.ts",
     "exports": {
         "import": {
             "types": "./out/esm/main.d.ts",
@@ -41,7 +43,8 @@
         "compile": "npm run compile:esm && npm run compile:cjs",
         "compile:esm": "tsc -b ./tsconfig.esm.json && mve out/esm/main.js out/esm/main.mjs",
         "compile:cjs": "tsc -b ./tsconfig.cjs.json && mve out/cjs/main.js out/cjs/main.cjs",
-        "clean": "node -e \"const fs = require('fs'); fs.rmSync('./out', { recursive: true, force: true });\""
+        "clean": "node -e \"const fs = require('fs'); fs.rmSync('./out', { recursive: true, force: true });\"",
+        "test:package": "node ./scripts/test-package.cjs"
     },
     "devDependencies": {
         "@types/node": "^22.0.0",
