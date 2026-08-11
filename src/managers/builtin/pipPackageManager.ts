@@ -55,6 +55,10 @@ export class PipPackageManager implements PackageManager, Disposable {
         let toUninstall: string[] = [...(options.uninstall ?? [])];
 
         if (toInstall.length === 0 && toUninstall.length === 0) {
+            if (options.runHeadless) {
+                // Headless mode: skip the interactive package picker.
+                return;
+            }
             const projects = this.venv.getProjectsByEnvironment(environment);
             const result = await getWorkspacePackagesToInstall(this.api, options, projects, environment, this.log);
             if (result) {
@@ -92,12 +96,14 @@ export class PipPackageManager implements PackageManager, Disposable {
                         throw e;
                     }
                     this.log.error('Error managing packages', e);
-                    setImmediate(async () => {
-                        const result = await window.showErrorMessage('Error managing packages', 'View Output');
-                        if (result === 'View Output') {
-                            this.log.show();
-                        }
-                    });
+                    if (!manageOptions.runHeadless) {
+                        setImmediate(async () => {
+                            const result = await window.showErrorMessage('Error managing packages', 'View Output');
+                            if (result === 'View Output') {
+                                this.log.show();
+                            }
+                        });
+                    }
                     throw e;
                 }
             },

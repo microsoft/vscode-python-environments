@@ -1,5 +1,5 @@
-import assert from 'assert';
 import { explain } from '@renovatebot/pep440';
+import assert from 'assert';
 import { parsePipIndexVersionsJson, parsePipIndexVersionsText } from '../../../managers/builtin/pipPackageManager';
 
 suite('Pip Version Parsing', () => {
@@ -7,7 +7,10 @@ suite('Pip Version Parsing', () => {
         test('parses valid JSON with versions array', () => {
             const output = JSON.stringify({ name: 'requests', versions: ['2.31.0', '2.30.0', '2.29.0'] });
             const versions = parsePipIndexVersionsJson(output);
-            assert.deepStrictEqual(versions, ['2.31.0', '2.30.0', '2.29.0'].map((v) => explain(v)));
+            assert.deepStrictEqual(
+                versions,
+                ['2.31.0', '2.30.0', '2.29.0'].map((v) => explain(v)),
+            );
         });
 
         test('parses output with a single version', () => {
@@ -43,7 +46,10 @@ suite('Pip Version Parsing', () => {
                 '  LATEST:    2.32.5',
             ].join('\n');
             const versions = parsePipIndexVersionsText(output);
-            assert.deepStrictEqual(versions, ['2.32.5', '2.31.0', '2.30.0'].map((version) => explain(version)));
+            assert.deepStrictEqual(
+                versions,
+                ['2.32.5', '2.31.0', '2.30.0'].map((version) => explain(version)),
+            );
         });
 
         test('returns undefined when the available versions line is missing', () => {
@@ -56,4 +62,3 @@ suite('Pip Version Parsing', () => {
         });
     });
 });
-

@@ -872,7 +872,22 @@ export interface GetPackagesOptions {
     skipCache?: boolean;
 }
 
-export type PackageManagementOptions =
+/**
+ * Options controlling user interaction during package management operations.
+ */
+export interface PackageManagementInteractionOptions {
+    /**
+     * When `true`, the package management operation runs without any user prompts or
+     * interaction and relies solely on the packages provided in the options. Any step
+     * that would normally require user input — such as selecting packages to install
+     * when none are specified — is skipped instead of prompting the user. Intended for
+     * automated or headless scenarios such as integration tests. Defaults to `false`.
+     */
+    runHeadless?: boolean;
+}
+
+export type PackageManagementOptions = PackageManagementInteractionOptions &
+    (
     | {
           /**
            * Upgrade the packages if they are already installed.
@@ -912,7 +927,7 @@ export type PackageManagementOptions =
            * The list of packages to uninstall.
            */
           uninstall: string[];
-      };
+      });
 
 /**
  * Options for creating a Python environment.

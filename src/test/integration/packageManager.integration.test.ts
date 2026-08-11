@@ -63,14 +63,14 @@ for (const profile of profiles) {
         });
 
         test(`${profile.name} Package Manager should install, list, and uninstall a package`, async () => {
-            await api.managePackages(environment!, { install: ['requests'] });
+            await api.managePackages(environment!, { install: ['requests'], runHeadless: true });
             let packages = await api.getPackages(environment!, { skipCache: true });
             assert.ok(
                 packages?.some((pkg) => pkg.name === 'requests'),
                 'Package not installed',
             );
 
-            await api.managePackages(environment!, { uninstall: ['requests'] });
+            await api.managePackages(environment!, { uninstall: ['requests'], runHeadless: true });
             packages = await api.getPackages(environment!, { skipCache: true });
             assert.ok(!packages?.some((pkg) => pkg.name === 'requests'), 'Package not uninstalled');
         });

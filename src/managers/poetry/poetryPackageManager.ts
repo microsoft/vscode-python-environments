@@ -59,6 +59,10 @@ export class PoetryPackageManager implements PackageManager, Disposable {
         let toUninstall: string[] = [...(options.uninstall ?? [])];
 
         if (toInstall.length === 0 && toUninstall.length === 0) {
+            if (options.runHeadless) {
+                // Headless mode: skip the interactive package input prompt.
+                return;
+            }
             // Show package input UI if no packages are specified
             const installInput = await showInputBox({
                 prompt: 'Enter packages to install (comma separated)',
@@ -99,12 +103,14 @@ export class PoetryPackageManager implements PackageManager, Disposable {
                         throw e;
                     }
                     this.log.error('Error managing packages with Poetry', e);
-                    setImmediate(async () => {
-                        const result = await showErrorMessage('Error managing packages with Poetry', 'View Output');
-                        if (result === 'View Output') {
-                            this.log.show();
-                        }
-                    });
+                    if (!options.runHeadless) {
+                        setImmediate(async () => {
+                            const result = await showErrorMessage('Error managing packages with Poetry', 'View Output');
+                            if (result === 'View Output') {
+                                this.log.show();
+                            }
+                        });
+                    }
                     throw e;
                 }
             },

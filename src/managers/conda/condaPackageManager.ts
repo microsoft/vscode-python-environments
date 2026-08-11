@@ -54,6 +54,10 @@ export class CondaPackageManager implements PackageManager, Disposable {
         let toUninstall: string[] = [...(options.uninstall ?? [])];
 
         if (toInstall.length === 0 && toUninstall.length === 0) {
+            if (options.runHeadless) {
+                // Headless mode: skip the interactive package picker.
+                return;
+            }
             const result = await getCommonCondaPackagesToInstall(environment, options, this.api);
             if (result) {
                 toInstall = result.install;
@@ -91,9 +95,11 @@ export class CondaPackageManager implements PackageManager, Disposable {
                     }
 
                     this.log.error('Error installing packages', e);
-                    setImmediate(async () => {
-                        await showErrorMessageWithLogs(CondaStrings.condaInstallError, this.log);
-                    });
+                    if (!manageOptions.runHeadless) {
+                        setImmediate(async () => {
+                            await showErrorMessageWithLogs(CondaStrings.condaInstallError, this.log);
+                        });
+                    }
                 }
             },
         );
