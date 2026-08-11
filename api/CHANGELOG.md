@@ -22,7 +22,3 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - Added the optional `options?: GetPackagesOptions` parameter to `PackageManager.getPackages(environment, options?)` and `PythonPackageGetterApi.getPackages(environment, options?)`. Consumers can set `options.skipCache` to request fresh package data.
-
-## [1.37.0]
-
-- Aligned the API package version with the Python Environments extension version.
