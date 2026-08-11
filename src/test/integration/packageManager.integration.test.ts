@@ -9,25 +9,13 @@ import { waitForCondition } from '../testUtils';
 const profiles = [
     {
         environmentManagerId: VENV_MANAGER_ID,
-        environmentDirectory: '.venv',
         name: 'Pip',
     },
     {
         environmentManagerId: CONDA_MANAGER_ID,
-        environmentDirectory: '.conda',
         name: 'Conda',
     },
 ];
-
-async function deleteEnvironmentDirectory(uri: vscode.Uri): Promise<void> {
-    try {
-        await vscode.workspace.fs.delete(uri, { recursive: true, useTrash: false });
-    } catch (error) {
-        if (!(error instanceof vscode.FileSystemError) || error.code !== 'FileNotFound') {
-            throw error;
-        }
-    }
-}
 
 for (const profile of profiles) {
     suite(`${profile.name} Package Manager`, function () {
@@ -38,8 +26,6 @@ for (const profile of profiles) {
         let workspaceUri: vscode.Uri;
         let previousDefaultEnvManager: string | undefined;
         let defaultEnvManagerUpdated = false;
-        let previousAlwaysUseUv: boolean | undefined;
-        let alwaysUseUvUpdated = false;
         suiteSetup(async function () {
             const extension = vscode.extensions.getExtension(ENVS_EXTENSION_ID);
             assert.ok(extension, 'Extension not found');
@@ -62,14 +48,6 @@ for (const profile of profiles) {
             );
             defaultEnvManagerUpdated = true;
 
-            if (profile.environmentManagerId === VENV_MANAGER_ID) {
-                previousAlwaysUseUv = config.inspect<boolean>('alwaysUseUv')?.globalValue;
-                await config.update('alwaysUseUv', false, vscode.ConfigurationTarget.Global);
-                alwaysUseUvUpdated = true;
-            }
-
-            const environmentDirectory = vscode.Uri.joinPath(workspaceUri, profile.environmentDirectory);
-            await deleteEnvironmentDirectory(environmentDirectory);
             await api.refreshEnvironments(workspaceUri);
 
             environment = await api.createEnvironment(workspaceUri, { quickCreate: true });
@@ -87,7 +65,10 @@ for (const profile of profiles) {
         test(`${profile.name} Package Manager should install, list, and uninstall a package`, async () => {
             await api.managePackages(environment!, { install: ['requests'] });
             let packages = await api.getPackages(environment!, { skipCache: true });
-            assert.ok(packages?.some((pkg) => pkg.name === 'requests'), 'Package not installed');
+            assert.ok(
+                packages?.some((pkg) => pkg.name === 'requests'),
+                'Package not installed',
+            );
 
             await api.managePackages(environment!, { uninstall: ['requests'] });
             packages = await api.getPackages(environment!, { skipCache: true });
@@ -106,13 +87,10 @@ for (const profile of profiles) {
 
         suiteTeardown(async () => {
             try {
-                await deleteEnvironmentDirectory(vscode.Uri.joinPath(workspaceUri, profile.environmentDirectory));
-            } finally {
-                if (alwaysUseUvUpdated) {
-                    await vscode.workspace
-                        .getConfiguration('python-envs')
-                        .update('alwaysUseUv', previousAlwaysUseUv, vscode.ConfigurationTarget.Global);
+                if (environment) {
+                    await api.removeEnvironment(environment);
                 }
+            } finally {
                 if (defaultEnvManagerUpdated) {
                     await vscode.workspace
                         .getConfiguration('python-envs', workspaceUri)
