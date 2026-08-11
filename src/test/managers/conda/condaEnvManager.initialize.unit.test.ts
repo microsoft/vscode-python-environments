@@ -1,6 +1,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import assert from 'assert';
 import * as sinon from 'sinon';
+import { Uri } from 'vscode';
 import { PythonEnvironmentApi } from '../../../api';
 import * as logging from '../../../common/logging';
 import { EventNames } from '../../../common/telemetry/constants';
@@ -27,6 +28,7 @@ import { makeMockCondaEnvironment as makeEnv } from '../../mocks/pythonEnvironme
 suite('CondaEnvManager.initialize - lazy registration flow', () => {
     let getCondaStub: sinon.SinonStub;
     let getCondaPathSettingStub: sinon.SinonStub;
+    let getCondaForGlobalStub: sinon.SinonStub;
     let refreshCondaEnvsStub: sinon.SinonStub;
     let constructSourcingStub: sinon.SinonStub;
     let notifyMissingStub: sinon.SinonStub;
@@ -37,7 +39,7 @@ suite('CondaEnvManager.initialize - lazy registration flow', () => {
         getCondaStub = sinon.stub(condaUtils, 'getConda');
         getCondaPathSettingStub = sinon.stub(condaUtils, 'getCondaPathSetting').returns(undefined);
         refreshCondaEnvsStub = sinon.stub(condaUtils, 'refreshCondaEnvs').resolves([]);
-        sinon.stub(condaUtils, 'getCondaForGlobal').resolves(undefined);
+        getCondaForGlobalStub = sinon.stub(condaUtils, 'getCondaForGlobal').resolves(undefined);
         constructSourcingStub = sinon.stub(condaSourcingUtils, 'constructCondaSourcingStatus');
         notifyMissingStub = sinon.stub(commonUtils, 'notifyMissingManagerIfDefault').resolves();
         sendTelemetryStub = sinon.stub(telemetrySender, 'sendTelemetryEvent');
@@ -99,6 +101,44 @@ suite('CondaEnvManager.initialize - lazy registration flow', () => {
             { managerName: props.managerName, result: props.result, envCount: props.envCount, toolSource: props.toolSource },
             { managerName: 'conda', result: 'success', envCount: 1, toolSource: 'local' },
         );
+    });
+
+    test('does not use a no-Python base as the implicit global fallback', async () => {
+        getCondaStub.resolves('/usr/bin/conda');
+        constructSourcingStub.resolves({ toString: () => '' } as any);
+        const base = makeEnv('base', Uri.file('/opt/miniconda3').fsPath, 'no-python');
+        refreshCondaEnvsStub.resolves([base]);
+
+        const mgr = createManager();
+        await mgr.initialize();
+
+        assert.strictEqual(await mgr.get(undefined), undefined);
+    });
+
+    test('uses a base with Python as the implicit global fallback', async () => {
+        getCondaStub.resolves('/usr/bin/conda');
+        constructSourcingStub.resolves({ toString: () => '' } as any);
+        const base = makeEnv('base', Uri.file('/opt/miniconda3').fsPath, '3.12.0');
+        refreshCondaEnvsStub.resolves([base]);
+
+        const mgr = createManager();
+        await mgr.initialize();
+
+        assert.strictEqual(await mgr.get(undefined), base);
+    });
+
+    test('retains a persisted no-Python base selection', async () => {
+        getCondaStub.resolves('/usr/bin/conda');
+        constructSourcingStub.resolves({ toString: () => '' } as any);
+        const basePath = Uri.file('/opt/miniconda3').fsPath;
+        const base = makeEnv('base', basePath, 'no-python');
+        refreshCondaEnvsStub.resolves([base]);
+        getCondaForGlobalStub.resolves(basePath);
+
+        const mgr = createManager();
+        await mgr.initialize();
+
+        assert.strictEqual(await mgr.get(undefined), base);
     });
 
     test('success path: conda from explicit setting → toolSource=settings', async () => {
