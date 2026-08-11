@@ -104,14 +104,14 @@ export class PipPackageManager implements PackageManager, Disposable {
         );
     }
 
-    async refresh(environment: PythonEnvironment): Promise<Package[] | undefined> {
-        return window.withProgress(
+    async refresh(environment: PythonEnvironment): Promise<void> {
+        await window.withProgress(
             {
                 location: ProgressLocation.Window,
                 title: 'Refreshing packages',
             },
             async () => {
-                return updatePackagesAndNotify(
+                const packages = await updatePackagesAndNotify(
                     this,
                     environment,
                     this.packages.get(environment.envId.id),
@@ -119,6 +119,7 @@ export class PipPackageManager implements PackageManager, Disposable {
                         this._onDidChangePackages.fire({ environment, manager: this, changes });
                     },
                 );
+                this.packages.set(environment.envId.id, packages ?? []);
             },
         );
     }

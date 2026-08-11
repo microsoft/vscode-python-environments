@@ -99,14 +99,14 @@ export class CondaPackageManager implements PackageManager, Disposable {
         );
     }
 
-    async refresh(environment: PythonEnvironment): Promise<Package[] | undefined> {
-        return withProgress(
+    async refresh(environment: PythonEnvironment): Promise<void> {
+        await withProgress(
             {
                 location: ProgressLocation.Window,
                 title: CondaStrings.condaRefreshingPackages,
             },
             async () => {
-                return updatePackagesAndNotify(
+                const packages = await updatePackagesAndNotify(
                     this,
                     environment,
                     this.packages.get(environment.envId.id),
@@ -114,6 +114,7 @@ export class CondaPackageManager implements PackageManager, Disposable {
                         this._onDidChangePackages.fire({ environment, manager: this, changes });
                     },
                 );
+                this.packages.set(environment.envId.id, packages ?? []);
             },
         );
     }

@@ -22,8 +22,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - Added the optional `options?: GetPackagesOptions` parameter to `PackageManager.getPackages(environment, options?)` and `PythonPackageGetterApi.getPackages(environment, options?)`. Consumers can set `options.skipCache` to request fresh package data.
-- Changed `PackageManager.refresh(environment)` from `Promise<void>` to `Promise<Package[] | undefined>`, allowing implementations to return the refreshed package list.
-- Changed `PythonPackageGetterApi.refreshPackages(environment)` from `Promise<void>` to `Promise<Package[] | undefined>`, exposing the refreshed package list to API consumers.
 
 ## [1.37.0]
 

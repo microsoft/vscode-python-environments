@@ -304,7 +304,7 @@ export class PythonEnvironmentApiImpl implements PythonEnvironmentApi {
         }
         return manager.manage(context, options);
     }
-    async refreshPackages(context: PythonEnvironment): Promise<Package[] | undefined> {
+    async refreshPackages(context: PythonEnvironment): Promise<void> {
         await waitForEnvManagerId([context.envId.managerId]);
         const manager = this.envManagers.getPackageManager(context);
         if (!manager) {
