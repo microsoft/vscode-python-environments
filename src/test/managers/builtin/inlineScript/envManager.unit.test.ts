@@ -658,6 +658,70 @@ suite('InlineScriptEnvManager', () => {
             assert.strictEqual(lockStub.callCount, 0);
         });
 
+        test('coalesces the full concurrent setup for the same script', async () => {
+            const uri = scriptUri();
+            const uvExecutable = path.join(tempRoot, 'uv-python', isWindows() ? 'python.exe' : 'python');
+            await fs.outputFile(uvExecutable, '');
+            const uvBase = makeEnvironment('ms-python.python:system', '3.13.1', uvExecutable);
+            readMetadataStub.resolves({ ...VALID_METADATA, requiresPython: '>=3.13' });
+            let installed = false;
+            apiGetEnvironmentsStub.callsFake(async () => (installed ? [uvBase] : [baseEnvironment]));
+            let releaseInstall: (() => void) | undefined;
+            let signalPrompt: (() => void) | undefined;
+            const promptShown = new Promise<void>((resolve) => {
+                signalPrompt = resolve;
+            });
+            const installGate = new Promise<void>((resolve) => {
+                releaseInstall = resolve;
+            });
+            promptInstallPythonViaUvStub.callsFake(async () => {
+                signalPrompt!();
+                await installGate;
+                installed = true;
+                return uvExecutable;
+            });
+
+            const first = manager.create(uri);
+            await promptShown;
+            const second = manager.create(uri);
+            releaseInstall!();
+            const [firstResult, secondResult] = await Promise.all([first, second]);
+
+            assert.ok(firstResult);
+            assert.strictEqual(firstResult, secondResult);
+            assert.strictEqual(promptInstallPythonViaUvStub.callCount, 1);
+            assert.strictEqual(apiRefreshEnvironmentsStub.callCount, 1);
+            assert.strictEqual(createWithProgressStub.callCount, 1);
+        });
+
+        test('coalesces concurrent setup requests for the same script when installation is declined', async () => {
+            const uri = scriptUri();
+            readMetadataStub.resolves({ ...VALID_METADATA, requiresPython: '>=3.13' });
+            apiGetEnvironmentsStub.resolves([baseEnvironment]);
+            let finishPrompt: ((value: undefined) => void) | undefined;
+            let signalPrompt: (() => void) | undefined;
+            const promptShown = new Promise<void>((resolve) => {
+                signalPrompt = resolve;
+            });
+            promptInstallPythonViaUvStub.callsFake(
+                () =>
+                    new Promise<undefined>((resolve) => {
+                        signalPrompt!();
+                        finishPrompt = resolve;
+                    }),
+            );
+
+            const first = manager.create(uri);
+            await promptShown;
+            const second = manager.create(uri);
+            finishPrompt!(undefined);
+            assert.deepStrictEqual(await Promise.all([first, second]), [undefined, undefined]);
+            assert.deepStrictEqual(await Promise.all([first, second]), [undefined, undefined]);
+            assert.strictEqual(promptInstallPythonViaUvStub.callCount, 1);
+            assert.strictEqual(apiRefreshEnvironmentsStub.callCount, 0);
+            assert.strictEqual(createWithProgressStub.callCount, 0);
+        });
+
         test('coalesces simultaneous fallback requests for the same Python version', async () => {
             const uvExecutable = path.join(tempRoot, 'uv-python', isWindows() ? 'python.exe' : 'python');
             await fs.outputFile(uvExecutable, '');

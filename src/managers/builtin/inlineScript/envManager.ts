@@ -21,7 +21,7 @@ import {
     SetEnvironmentScope,
 } from '../../../api';
 import { getErrorMessage } from '../../../common/errors/utils';
-import { computeCacheKey } from '../../../common/inlineScript/cacheKey';
+import { computeCacheKey, normalizeDependency } from '../../../common/inlineScript/cacheKey';
 import {
     META_SCHEMA_VERSION,
     getBaseInterpreterStatus,
@@ -77,6 +77,7 @@ type CacheEntryInspection =
 
 /** Manages extension-owned PEP 723 script environments. */
 export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
+    private readonly pendingSetups = new Map<string, Promise<PythonEnvironment | undefined>>();
     private readonly pendingCreations = new Map<string, Promise<PythonEnvironment | undefined>>();
     private readonly directlyResolvedBaseInterpreters = new Map<string, PythonEnvironment>();
     private baseInterpreterInstallationQueue: Promise<void> = Promise.resolve();
@@ -132,42 +133,80 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
                 return undefined;
             }
 
-            let selectedBase = await this.selectBaseInterpreter(metadata);
-            if (!selectedBase && options?.quickCreate !== true) {
-                selectedBase = await this.installAndSelectBaseInterpreter(metadata);
-            }
-            if (!selectedBase) {
-                this.log.warn(`No compatible Python is available for inline-script environment creation: ${scriptUri.fsPath}.`);
-                return undefined;
-            }
-
-            const cacheKey = computeCacheKey({
-                dependencies: packages,
-                interpreterPath: selectedBase.canonicalPath,
-            });
-            const pending = this.pendingCreations.get(cacheKey);
+            const setupKey = this.getPendingSetupKey(scriptUri, metadata, packages, options);
+            const pending = this.pendingSetups.get(setupKey);
             if (pending) {
                 return await pending;
             }
 
-            const creation = this.createOrReuseEnvironment({
-                cacheKey,
-                packages,
-                metadata,
-                selectedBase,
-            });
-            this.pendingCreations.set(cacheKey, creation);
+            const setup = this.createForScript(scriptUri, metadata, packages, options);
+            this.pendingSetups.set(setupKey, setup);
             try {
-                return await creation;
+                return await setup;
             } finally {
-                if (this.pendingCreations.get(cacheKey) === creation) {
-                    this.pendingCreations.delete(cacheKey);
+                if (this.pendingSetups.get(setupKey) === setup) {
+                    this.pendingSetups.delete(setupKey);
                 }
             }
         } catch (error) {
             this.log.error(`Failed to set up inline-script environment: ${getErrorMessage(error)}`);
             return undefined;
         }
+    }
+
+    private async createForScript(
+        scriptUri: Uri,
+        metadata: InlineScriptMetadata,
+        packages: readonly string[],
+        options?: CreateEnvironmentOptions,
+    ): Promise<PythonEnvironment | undefined> {
+        let selectedBase = await this.selectBaseInterpreter(metadata);
+        if (!selectedBase && options?.quickCreate !== true) {
+            selectedBase = await this.installAndSelectBaseInterpreter(metadata);
+        }
+        if (!selectedBase) {
+            this.log.warn(`No compatible Python is available for inline-script environment creation: ${scriptUri.fsPath}.`);
+            return undefined;
+        }
+
+        const cacheKey = computeCacheKey({
+            dependencies: packages,
+            interpreterPath: selectedBase.canonicalPath,
+        });
+        const pending = this.pendingCreations.get(cacheKey);
+        if (pending) {
+            return await pending;
+        }
+
+        const creation = this.createOrReuseEnvironment({
+            cacheKey,
+            packages,
+            metadata,
+            selectedBase,
+        });
+        this.pendingCreations.set(cacheKey, creation);
+        try {
+            return await creation;
+        } finally {
+            if (this.pendingCreations.get(cacheKey) === creation) {
+                this.pendingCreations.delete(cacheKey);
+            }
+        }
+    }
+
+    private getPendingSetupKey(
+        scriptUri: Uri,
+        metadata: InlineScriptMetadata,
+        packages: readonly string[],
+        options: CreateEnvironmentOptions | undefined,
+    ): string {
+        const normalizedPackages = Array.from(new Set(packages.map(normalizeDependency))).sort();
+        return JSON.stringify([
+            normalizePath(scriptUri.fsPath),
+            metadata.requiresPython?.trim() ?? '',
+            options?.quickCreate === true ? 'quick' : 'interactive',
+            normalizedPackages,
+        ]);
     }
 
     async refresh(_scope: RefreshEnvironmentsScope): Promise<void> {
