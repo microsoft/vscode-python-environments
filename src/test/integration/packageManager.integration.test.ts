@@ -88,7 +88,7 @@ for (const profile of profiles) {
         suiteTeardown(async () => {
             try {
                 if (environment) {
-                    await api.removeEnvironment(environment);
+                    await api.removeEnvironment(environment, { runHeadless: true });
                 }
             } finally {
                 if (defaultEnvManagerUpdated) {

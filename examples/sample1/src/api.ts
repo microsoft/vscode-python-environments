@@ -330,6 +330,17 @@ export interface QuickCreateConfig {
 }
 
 /**
+ * Options controlling environment removal.
+ */
+export interface RemoveEnvironmentOptions {
+    /**
+     * When `true`, removes the environment without prompting for confirmation.
+     * Intended for automated or headless scenarios. Defaults to `false`.
+     */
+    runHeadless?: boolean;
+}
+
+/**
  * Interface representing an environment manager.
  */
 export interface EnvironmentManager {
@@ -392,7 +403,7 @@ export interface EnvironmentManager {
      * @param environment - The Python environment to remove.
      * @returns A promise that resolves when the environment is removed.
      */
-    remove?(environment: PythonEnvironment): Promise<void>;
+    remove?(environment: PythonEnvironment, options?: RemoveEnvironmentOptions): Promise<void>;
 
     /**
      * Refreshes the list of Python environments within the specified scope.
@@ -881,9 +892,10 @@ export interface PythonEnvironmentManagementApi {
      * Remove a Python environment.
      *
      * @param environment The Python environment to remove.
+     * @param options Optional parameters controlling environment removal.
      * @returns A promise that resolves when the environment has been removed.
      */
-    removeEnvironment(environment: PythonEnvironment): Promise<void>;
+    removeEnvironment(environment: PythonEnvironment, options?: RemoveEnvironmentOptions): Promise<void>;
 }
 
 export interface PythonEnvironmentsApi {

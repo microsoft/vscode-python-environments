@@ -1,6 +1,13 @@
 import * as assert from 'assert';
+import * as fs from 'fs-extra';
 import * as os from 'os';
 import * as path from 'path';
+import * as sinon from 'sinon';
+import * as windowApis from '../../../common/window.apis';
+import * as uvEnvironments from '../../../managers/builtin/uvEnvironments';
+import { removeVenv } from '../../../managers/builtin/venvUtils';
+import { createMockLogOutputChannel } from '../../mocks/helper';
+import { createMockPythonEnvironment } from '../../mocks/pythonEnvironment';
 
 suite('venvUtils Path Validation', () => {
     suite('isDriveRoot behavior', () => {
@@ -145,5 +152,29 @@ suite('venvUtils removeVenv validation integration', () => {
             os.platform() === 'win32' ? 'C:\\Users\\test\\.venv\\pyvenv.cfg' : '/home/user/.venv/pyvenv.cfg',
             'Should check for pyvenv.cfg in the environment root',
         );
+    });
+
+    test('headless removal skips confirmation and removes the environment', async () => {
+        const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'remove-venv-'));
+        const envPath = path.join(tempRoot, '.venv');
+        await fs.outputFile(path.join(envPath, 'pyvenv.cfg'), 'home = base');
+        const showWarningMessageStub = sinon.stub(windowApis, 'showWarningMessage');
+        sinon.stub(windowApis, 'withProgress').callsFake(async (_options, task) => task({} as never, {} as never));
+        sinon.stub(uvEnvironments, 'removeUvEnvironment').resolves();
+
+        try {
+            const removed = await removeVenv(
+                createMockPythonEnvironment({ name: '.venv', envPath }),
+                createMockLogOutputChannel(),
+                { runHeadless: true },
+            );
+
+            assert.strictEqual(removed, true);
+            assert.strictEqual(showWarningMessageStub.callCount, 0);
+            assert.strictEqual(await fs.pathExists(envPath), false);
+        } finally {
+            sinon.restore();
+            await fs.remove(tempRoot);
+        }
     });
 });

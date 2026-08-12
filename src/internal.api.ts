@@ -26,6 +26,7 @@ import {
     PythonProjectCreator,
     QuickCreateConfig,
     RefreshEnvironmentsScope,
+    RemoveEnvironmentOptions,
     ResolveEnvironmentContext,
     SetEnvironmentScope,
 } from './api';
@@ -208,9 +209,9 @@ export class InternalEnvironmentManager implements EnvironmentManager {
         return this.manager.remove !== undefined;
     }
 
-    remove(scope: PythonEnvironment): Promise<void> {
+    remove(scope: PythonEnvironment, options?: RemoveEnvironmentOptions): Promise<void> {
         return this.manager.remove
-            ? this.manager.remove(scope)
+            ? this.manager.remove(scope, options)
             : Promise.reject(new RemoveEnvironmentNotSupported(`Remove Environment not supported by: ${this.id}`));
     }
 

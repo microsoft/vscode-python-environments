@@ -28,6 +28,7 @@ import {
     PythonTerminalCreateOptions,
     PythonTerminalExecutionOptions,
     RefreshEnvironmentsScope,
+    RemoveEnvironmentOptions,
     ResolveEnvironmentContext,
     SetEnvironmentScope,
 } from '../api';
@@ -106,9 +107,7 @@ export class PythonEnvironmentApiImpl implements PythonEnvironmentApi {
 
                 this.previousProjects = current;
                 if (added.length > 0 || removed.length > 0) {
-                    traceInfo(
-                        `Python API: Projects changed. Added: ${added.length}, Removed: ${removed.length}`,
-                    );
+                    traceInfo(`Python API: Projects changed. Added: ${added.length}, Removed: ${removed.length}`);
                     this._onDidChangePythonProjects.fire({ added, removed });
                 }
             }),
@@ -196,13 +195,13 @@ export class PythonEnvironmentApiImpl implements PythonEnvironmentApi {
             return result;
         }
     }
-    async removeEnvironment(environment: PythonEnvironment): Promise<void> {
+    async removeEnvironment(environment: PythonEnvironment, options?: RemoveEnvironmentOptions): Promise<void> {
         await waitForEnvManagerId([environment.envId.managerId]);
         const manager = this.envManagers.getEnvironmentManager(environment);
         if (!manager) {
             return Promise.reject(new Error('No environment manager found'));
         }
-        return manager.remove(environment);
+        return manager.remove(environment, options);
     }
     async refreshEnvironments(scope: RefreshEnvironmentsScope): Promise<void> {
         const currentScope = checkUri(scope) as RefreshEnvironmentsScope;

@@ -346,6 +346,17 @@ export interface QuickCreateConfig {
 }
 
 /**
+ * Options controlling environment removal.
+ */
+export interface RemoveEnvironmentOptions {
+    /**
+     * When `true`, removes the environment without prompting for confirmation.
+     * Intended for automated or headless scenarios. Defaults to `false`.
+     */
+    runHeadless?: boolean;
+}
+
+/**
  * Interface representing an environment manager.
  *
  * @remarks
@@ -425,7 +436,7 @@ export interface EnvironmentManager {
      * Invoked to delete the given environment. Typical triggers include an explicit user
      * action (such as a "Delete Environment" command) and programmatic removal via the API.
      */
-    remove?(environment: PythonEnvironment): Promise<void>;
+    remove?(environment: PythonEnvironment, options?: RemoveEnvironmentOptions): Promise<void>;
 
     /**
      * Refreshes the list of Python environments within the specified scope.
@@ -888,46 +899,47 @@ export interface PackageManagementInteractionOptions {
 
 export type PackageManagementOptions = PackageManagementInteractionOptions &
     (
-    | {
-          /**
-           * Upgrade the packages if they are already installed.
-           */
-          upgrade?: boolean;
+        | {
+              /**
+               * Upgrade the packages if they are already installed.
+               */
+              upgrade?: boolean;
 
-          /**
-           * Show option to skip package installation or uninstallation.
-           */
-          showSkipOption?: boolean;
-          /**
-           * The list of packages to install.
-           */
-          install: string[];
+              /**
+               * Show option to skip package installation or uninstallation.
+               */
+              showSkipOption?: boolean;
+              /**
+               * The list of packages to install.
+               */
+              install: string[];
 
-          /**
-           * The list of packages to uninstall.
-           */
-          uninstall?: string[];
-      }
-    | {
-          /**
-           * Upgrade the packages if they are already installed.
-           */
-          upgrade?: boolean;
+              /**
+               * The list of packages to uninstall.
+               */
+              uninstall?: string[];
+          }
+        | {
+              /**
+               * Upgrade the packages if they are already installed.
+               */
+              upgrade?: boolean;
 
-          /**
-           * Show option to skip package installation or uninstallation.
-           */
-          showSkipOption?: boolean;
-          /**
-           * The list of packages to install.
-           */
-          install?: string[];
+              /**
+               * Show option to skip package installation or uninstallation.
+               */
+              showSkipOption?: boolean;
+              /**
+               * The list of packages to install.
+               */
+              install?: string[];
 
-          /**
-           * The list of packages to uninstall.
-           */
-          uninstall: string[];
-      });
+              /**
+               * The list of packages to uninstall.
+               */
+              uninstall: string[];
+          }
+    );
 
 /**
  * Options for creating a Python environment.
@@ -1026,9 +1038,10 @@ export interface PythonEnvironmentManagementApi {
      * Remove a Python environment.
      *
      * @param environment The Python environment to remove.
+     * @param options Optional parameters controlling environment removal.
      * @returns A promise that resolves when the environment has been removed.
      */
-    removeEnvironment(environment: PythonEnvironment): Promise<void>;
+    removeEnvironment(environment: PythonEnvironment, options?: RemoveEnvironmentOptions): Promise<void>;
 }
 
 export interface PythonEnvironmentsApi {

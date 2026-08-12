@@ -11,3 +11,4 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Added `getPackageManager` to retrieve the registered package manager for an environment.
 - Added `PackageManagementInteractionOptions` with an optional `runHeadless?: boolean` property, mixed into `PackageManagementOptions`. When `true`, package management operations run without any user prompts or interaction — steps that would normally require input, such as selecting packages to install when none are specified, are skipped instead of prompting — for automated or headless scenarios such as integration tests.
+- Added `RemoveEnvironmentOptions` with an optional `runHeadless?: boolean` property to remove environments without a confirmation prompt in automated or headless scenarios.
