@@ -509,7 +509,10 @@ export class CondaEnvManager implements EnvironmentManager, Disposable {
 
         // If a global environment is still not set, try using the 'base'
         if (!this.globalEnv) {
-            this.globalEnv = this.findEnvironmentByName('base');
+            const base = this.findEnvironmentByName('base');
+            if (base?.version !== 'no-python') {
+                this.globalEnv = base;
+            }
         }
 
         // Find any conda environments that might be associated with the current projects
