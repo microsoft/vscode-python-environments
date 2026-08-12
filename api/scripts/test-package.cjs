@@ -31,6 +31,10 @@ assert.strictEqual(packResult.length, 1, 'Expected npm pack to produce exactly o
 const tarballPath = path.join(packageRoot, packResult[0].filename);
 const testRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'python-environments-api-'));
 
+function canonicalPath(value) {
+    return fs.realpathSync.native(path.resolve(value));
+}
+
 try {
     fs.writeFileSync(
         path.join(testRoot, 'package.json'),
@@ -73,28 +77,50 @@ try {
         runNodeScript(typescriptCli, ['--project', path.join(consumerRoot, 'tsconfig.json')], packageRoot);
     }
 
+    const installedPackageRoot = path.join(testRoot, 'node_modules', '@vscode', 'python-environments');
+    const installedPackageJson = JSON.parse(fs.readFileSync(path.join(installedPackageRoot, 'package.json'), 'utf8'));
+    assert.strictEqual(installedPackageJson.main, './out/cjs/main.cjs');
+    assert.strictEqual(installedPackageJson.types, './out/cjs/main.d.ts');
+    assert.deepStrictEqual(installedPackageJson.exports, {
+        import: {
+            types: './out/esm/main.d.ts',
+            default: './out/esm/main.mjs',
+        },
+        require: {
+            types: './out/cjs/main.d.ts',
+            default: './out/cjs/main.cjs',
+        },
+    });
+
+    for (const target of [
+        installedPackageJson.main,
+        installedPackageJson.types,
+        installedPackageJson.exports.import.types,
+        installedPackageJson.exports.import.default,
+        installedPackageJson.exports.require.types,
+        installedPackageJson.exports.require.default,
+    ]) {
+        assert.ok(fs.statSync(path.resolve(installedPackageRoot, target)).isFile(), `${target} must be a file`);
+    }
+
     const requireFromConsumer = createRequire(path.join(testRoot, 'legacy', 'consumer.cjs'));
     assert.strictEqual(
-        requireFromConsumer.resolve('@vscode/python-environments'),
-        path.join(testRoot, 'node_modules', '@vscode', 'python-environments', 'out', 'cjs', 'main.cjs'),
+        canonicalPath(requireFromConsumer.resolve('@vscode/python-environments')),
+        canonicalPath(path.join(installedPackageRoot, installedPackageJson.exports.require.default)),
         'CommonJS consumers should resolve the packaged CommonJS entry point',
     );
 
     const esmEntryPoint = execFileSync(
         process.execPath,
-        [
-            '--input-type=module',
-            '--eval',
-            "console.log(import.meta.resolve('@vscode/python-environments'))",
-        ],
+        ['--input-type=module', '--eval', "console.log(import.meta.resolve('@vscode/python-environments'))"],
         {
             cwd: path.join(testRoot, 'modern'),
             encoding: 'utf8',
         },
     ).trim();
     assert.strictEqual(
-        fileURLToPath(esmEntryPoint),
-        path.join(testRoot, 'node_modules', '@vscode', 'python-environments', 'out', 'esm', 'main.mjs'),
+        canonicalPath(fileURLToPath(esmEntryPoint)),
+        canonicalPath(path.join(installedPackageRoot, installedPackageJson.exports.import.default)),
         'ES module consumers should resolve the packaged ES module entry point',
     );
 } finally {

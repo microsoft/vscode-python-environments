@@ -5,12 +5,19 @@ import type {
     PythonPackageGetterApi,
 } from '@vscode/python-environments';
 
-const getAvailableVersions: PythonPackageGetterApi['getPackageAvailableVersions'] = async (
-    _environment: PythonEnvironment,
-    _packageName: string,
-): Promise<Pep440Version[] | undefined> => [];
+type Equal<Left, Right> =
+    (<Value>() => Value extends Left ? 1 : 2) extends <Value>() => Value extends Right ? 1 : 2 ? true : false;
 
-const refreshPackages: PackageManager['refresh'] = async (_environment: PythonEnvironment): Promise<void> => {};
+type AvailableVersionsReturn = ReturnType<PythonPackageGetterApi['getPackageAvailableVersions']>;
+type RefreshReturn = ReturnType<PackageManager['refresh']>;
 
-void getAvailableVersions;
-void refreshPackages;
+const availableVersionsReturnIsExact: Equal<AvailableVersionsReturn, Promise<Pep440Version[] | undefined>> = true;
+const refreshReturnIsExact: Equal<RefreshReturn, Promise<void>> = true;
+
+declare const api: PythonPackageGetterApi;
+declare const environment: PythonEnvironment;
+const availableVersions: Promise<Pep440Version[] | undefined> = api.getPackageAvailableVersions(environment, 'example');
+
+void availableVersionsReturnIsExact;
+void refreshReturnIsExact;
+void availableVersions;
