@@ -20,16 +20,18 @@ import {
     GetEnvironmentScope,
     PythonEnvironment,
     PythonEnvironmentId,
+    PythonProject,
 } from '../../api';
 import * as extensionApis from '../../common/extension.apis';
 import { PythonEnvironmentManagers } from '../../features/envManagers';
 import * as settingHelpers from '../../features/settings/settingHelpers';
-import { PythonProjectManager } from '../../internal.api';
+import { InternalPackageManager, PythonProjectManager } from '../../internal.api';
 import { setupNonThenable } from '../mocks/helper';
 
 suite('PythonEnvironmentManagers getLastKnownEnvironment', () => {
     let envManagers: PythonEnvironmentManagers;
     let projectManager: typeMoq.IMock<PythonProjectManager>;
+    let projectsByUri: Map<string, PythonProject>;
 
     function makeEnv(id: string): PythonEnvironment {
         const envId: PythonEnvironmentId = { id, managerId: 'test-manager' };
@@ -58,8 +60,10 @@ suite('PythonEnvironmentManagers getLastKnownEnvironment', () => {
 
         projectManager = typeMoq.Mock.ofType<PythonProjectManager>();
         setupNonThenable(projectManager);
-        // No project for a scope -> refreshEnvironment/getLastKnownEnvironment use the 'global' key.
-        projectManager.setup((pm) => pm.get(typeMoq.It.isAny())).returns(() => undefined);
+        projectsByUri = new Map();
+        projectManager
+            .setup((pm) => pm.get(typeMoq.It.isAny()))
+            .returns((uri) => projectsByUri.get(uri.toString()));
 
         envManagers = new PythonEnvironmentManagers(projectManager.object);
     });
@@ -96,6 +100,13 @@ suite('PythonEnvironmentManagers getLastKnownEnvironment', () => {
         return id;
     }
 
+    function stubPackageManager(id = 'ms-python.python:pip'): void {
+        const packageManager = typeMoq.Mock.ofType<InternalPackageManager>();
+        setupNonThenable(packageManager);
+        packageManager.setup((manager) => manager.id).returns(() => id);
+        sinon.stub(envManagers, 'getPackageManager').returns(packageManager.object);
+    }
+
     test('returns undefined before any environment has been resolved', () => {
         registerManager(async () => makeEnv('env1'));
         assert.strictEqual(envManagers.getLastKnownEnvironment(undefined), undefined);
@@ -127,7 +138,7 @@ suite('PythonEnvironmentManagers getLastKnownEnvironment', () => {
     test('does not update selection, settings, or events when a registered manager rejects a selection', async () => {
         const scope = Uri.file('/workspace/script.py');
         const project = { name: 'script.py', uri: scope };
-        projectManager.setup((pm) => pm.get(scope)).returns(() => project);
+        projectsByUri.set(scope.toString(), project);
         const managerSet = sinon.stub().rejects(new Error('Inline-script environment is not an owned cache entry.'));
         const managerId = registerManager(async () => undefined, managerSet);
         const rejected = {
@@ -237,6 +248,65 @@ suite('PythonEnvironmentManagers getLastKnownEnvironment', () => {
 
         assert.strictEqual(envManagers.getLastKnownEnvironment(firstUri), first);
         assert.strictEqual(envManagers.getLastKnownEnvironment(secondUri), second);
+    });
+
+    test('does not persist an inline-script manager for the containing project', async () => {
+        const script = Uri.file('/workspace/project/script.py');
+        const containingProject = { name: 'project', uri: Uri.file('/workspace/project') };
+        projectsByUri.set(script.toString(), containingProject);
+        const managerId = registerManager(async () => undefined, async () => undefined, 'inline-script');
+        const environment = { ...makeEnv('inline'), envId: { id: 'inline', managerId } };
+        stubPackageManager();
+        const settings = sinon.stub(settingHelpers, 'setAllManagerSettings').resolves();
+
+        await envManagers.setEnvironment(script, environment);
+
+        assert.strictEqual(settings.callCount, 0);
+    });
+
+    test('persists an inline-script manager when the script is its own project', async () => {
+        const script = Uri.file('/workspace/script.py');
+        const scriptProject = { name: 'script.py', uri: script };
+        projectsByUri.set(script.toString(), scriptProject);
+        const managerId = registerManager(async () => undefined, async () => undefined, 'inline-script');
+        const environment = { ...makeEnv('inline'), envId: { id: 'inline', managerId } };
+        stubPackageManager();
+        const settings = sinon.stub(settingHelpers, 'setAllManagerSettings').resolves();
+
+        await envManagers.setEnvironment(script, environment);
+
+        sinon.assert.calledOnce(settings);
+        assert.deepStrictEqual(settings.firstCall.args[0], [
+            {
+                project: scriptProject,
+                envManager: managerId,
+                packageManager: 'ms-python.python:pip',
+            },
+        ]);
+    });
+
+    test('persists batch inline settings only for scripts registered as exact projects', async () => {
+        const exactScript = Uri.file('/workspace/exact.py');
+        const nestedScript = Uri.file('/workspace/project/nested.py');
+        const looseScript = Uri.file('/outside/loose.py');
+        const exactProject = { name: 'exact.py', uri: exactScript };
+        const containingProject = { name: 'project', uri: Uri.file('/workspace/project') };
+        projectsByUri.set(exactScript.toString(), exactProject);
+        projectsByUri.set(nestedScript.toString(), containingProject);
+        const managerId = registerManager(async () => undefined, async () => undefined, 'inline-script');
+        const environment = { ...makeEnv('inline'), envId: { id: 'inline', managerId } };
+        const settings = sinon.stub(settingHelpers, 'setAllManagerSettings').resolves();
+
+        await envManagers.setEnvironments([exactScript, nestedScript, looseScript], environment);
+
+        sinon.assert.calledOnce(settings);
+        assert.deepStrictEqual(settings.firstCall.args[0], [
+            {
+                project: exactProject,
+                envManager: managerId,
+                packageManager: 'ms-python.python:pip',
+            },
+        ]);
     });
 
     test('retains an earlier successful refresh when a later refresh fails', async () => {

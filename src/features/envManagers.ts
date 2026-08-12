@@ -348,7 +348,11 @@ export class PythonEnvironmentManagers implements EnvironmentManagers {
         // Only persist to settings when explicitly requested
         if (shouldPersistSettings && scope) {
             const packageManager = this.getPackageManager(environment);
-            if (project && packageManager) {
+            const canPersistSettings =
+                project &&
+                packageManager &&
+                this.canPersistManagerSettingForScope(scope, manager, project);
+            if (canPersistSettings) {
                 await setAllManagerSettings([
                     {
                         project,
@@ -361,8 +365,8 @@ export class PythonEnvironmentManagers implements EnvironmentManagers {
                 `[setEnvironment] scope=${scope instanceof Uri ? scope.fsPath : scope}, ` +
                     `env=${environment?.envId?.id ?? 'undefined'}, manager=${manager.id}, ` +
                     `project=${project?.uri?.toString() ?? 'none'}, ` +
-                    `packageManager=${this.getPackageManager(environment)?.id ?? 'UNDEFINED'}, ` +
-                    `settingsPersisted=${!!(project && this.getPackageManager(environment))}`,
+                    `packageManager=${packageManager?.id ?? 'UNDEFINED'}, ` +
+                    `settingsPersisted=${!!canPersistSettings}`,
             );
         }
 
@@ -423,16 +427,19 @@ export class PythonEnvironmentManagers implements EnvironmentManagers {
                 });
                 scope.forEach((uri) => {
                     const m = this.getEnvironmentManager(uri);
+                    const project = this.pm.get(uri);
                     // Always add settings when persisting, OR when manager differs
-                    if (shouldPersistSettings || manager.id !== m?.id) {
+                    if (
+                        (shouldPersistSettings || manager.id !== m?.id) &&
+                        this.canPersistManagerSettingForScope(uri, manager, project)
+                    ) {
                         settings.push({
-                            project: this.pm.get(uri),
+                            project,
                             envManager: manager.id,
                             packageManager: manager.preferredPackageManagerId,
                         });
                     }
 
-                    const project = this.pm.get(uri);
                     const key = this.getActiveSelectionKey(uri, manager, project);
                     const oldEnv = this._activeSelection.get(key);
                     if (oldEnv?.envId.id !== environment?.envId.id) {
@@ -661,6 +668,18 @@ export class PythonEnvironmentManagers implements EnvironmentManagers {
 
     private getInlineScriptSelectionKey(scope: Uri): string {
         return `inline-script:${normalizePath(scope.fsPath)}`;
+    }
+
+    private canPersistManagerSettingForScope(
+        scope: Uri,
+        manager: InternalEnvironmentManager,
+        project: PythonProject | undefined,
+    ): boolean {
+        // Inline associations are per file; never promote one to its containing project's manager setting.
+        return (
+            manager.id !== INLINE_SCRIPT_MANAGER_ID ||
+            (!!project && normalizePath(project.uri.fsPath) === normalizePath(scope.fsPath))
+        );
     }
 
     private bumpSelectionRevision(key: string): number {

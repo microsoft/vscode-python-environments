@@ -1754,6 +1754,48 @@ suite('InlineScriptEnvManager', () => {
             sinon.assert.calledOnceWithExactly(listener, { uri, old: environment, new: rebuilt });
         });
 
+        test('lets an explicit selection win while warm validation awaits filesystem inspection', async () => {
+            const uri = scriptUri();
+            const oldEnvironment = await createOwnedEnvironment();
+            const selectedEnvironment = await createOwnedEnvironment('fedcba9876543210');
+            await manager.set(uri, oldEnvironment);
+            const rebuiltOldEnvironment = {
+                ...oldEnvironment,
+                envId: { ...oldEnvironment.envId, id: 'rebuilt-old' },
+                version: '3.13.1',
+            };
+            resolveVenvStub.resolves(rebuiltOldEnvironment);
+            let releaseBusyCheck: (() => void) | undefined;
+            const busyCheckGate = new Promise<boolean>((resolve) => {
+                releaseBusyCheck = () => resolve(false);
+            });
+            const validationManager = manager as unknown as {
+                isCacheEntryBusy(envDirPath: string): Promise<boolean>;
+            };
+            const busyCheckStub = sinon.stub(validationManager, 'isCacheEntryBusy').callThrough();
+            busyCheckStub.onFirstCall().returns(busyCheckGate);
+            const listener = sinon.spy();
+            manager.onDidChangeEnvironment(listener);
+            clock.tick(5_000);
+
+            const pendingGet = manager.get(uri);
+            await waitForStubCall(busyCheckStub);
+            await manager.set(uri, selectedEnvironment);
+            releaseBusyCheck!();
+
+            assert.strictEqual(await pendingGet, selectedEnvironment);
+            assert.strictEqual(await manager.get(uri), selectedEnvironment);
+            assert.deepStrictEqual(persistedAssociations, {
+                [normalizePath(uri.fsPath)]: selectedEnvironment.environmentPath.fsPath,
+            });
+            assert.strictEqual(resolveVenvStub.callCount, 0);
+            sinon.assert.calledOnceWithExactly(listener, {
+                uri,
+                old: oldEnvironment,
+                new: selectedEnvironment,
+            });
+        });
+
         test('unsets a persisted association after transient rehydration failure', async () => {
             const uri = scriptUri();
             const environment = await createOwnedEnvironment();

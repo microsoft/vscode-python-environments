@@ -400,6 +400,7 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
         }
 
         const cached = this.fsPathToEnv.get(scriptPath);
+        const revision = this.associationRevisions.get(scriptPath) ?? 0;
         if (cached) {
             const validatedAt = this.cachedAssociationValidatedAt.get(scriptPath);
             if (
@@ -408,7 +409,7 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
             ) {
                 return cached;
             }
-            const validation = this.validateCachedAssociation(scriptPath, scriptUri, cached);
+            const validation = this.validateCachedAssociation(scriptPath, scriptUri, cached, revision);
             this.pendingRehydrations.set(scriptPath, validation);
             try {
                 return await validation;
@@ -419,7 +420,6 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
             }
         }
 
-        const revision = this.associationRevisions.get(scriptPath) ?? 0;
         const rehydration = this.rehydrateAssociation(scriptPath, scriptUri, revision);
         this.pendingRehydrations.set(scriptPath, rehydration);
         try {
@@ -444,16 +444,23 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
         scriptPath: string,
         scriptUri: Uri,
         cached: PythonEnvironment,
+        revision: number,
     ): Promise<PythonEnvironment | undefined> {
         const environmentPath = cached.environmentPath.fsPath;
         const envDirPath = path.dirname(path.dirname(environmentPath));
-        if (await this.isCacheEntryBusy(envDirPath)) {
+        const busy = await this.isCacheEntryBusy(envDirPath);
+        if (!this.isCurrentAssociationRevision(scriptPath, revision)) {
+            return this.fsPathToEnv.get(scriptPath);
+        }
+        if (busy) {
             return undefined;
         }
         try {
             const stat = await fs.stat(environmentPath);
+            if (!this.isCurrentAssociationRevision(scriptPath, revision)) {
+                return this.fsPathToEnv.get(scriptPath);
+            }
             if (stat.isFile()) {
-                const revision = this.associationRevisions.get(scriptPath) ?? 0;
                 const resolved = await resolveVenvPythonEnvironmentPath(
                     environmentPath,
                     this.nativeFinder,
@@ -491,21 +498,32 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
                 this._onDidChangeEnvironment.fire({ uri: scriptUri, old: cached, new: resolved });
                 return resolved;
             }
-            if (!(await this.isCacheEntryBusy(envDirPath))) {
+            const becameBusy = await this.isCacheEntryBusy(envDirPath);
+            if (!this.isCurrentAssociationRevision(scriptPath, revision)) {
+                return this.fsPathToEnv.get(scriptPath);
+            }
+            if (!becameBusy) {
                 await this.removeStalePersistedAssociation(
                     scriptPath,
                     environmentPath,
-                    this.associationRevisions.get(scriptPath) ?? 0,
+                    revision,
                     scriptUri,
                 );
             }
         } catch (error) {
+            if (!this.isCurrentAssociationRevision(scriptPath, revision)) {
+                return this.fsPathToEnv.get(scriptPath);
+            }
             if (this.isDefinitivelyStalePathError(error)) {
-                if (!(await this.isCacheEntryBusy(envDirPath))) {
+                const becameBusy = await this.isCacheEntryBusy(envDirPath);
+                if (!this.isCurrentAssociationRevision(scriptPath, revision)) {
+                    return this.fsPathToEnv.get(scriptPath);
+                }
+                if (!becameBusy) {
                     await this.removeStalePersistedAssociation(
                         scriptPath,
                         environmentPath,
-                        this.associationRevisions.get(scriptPath) ?? 0,
+                        revision,
                         scriptUri,
                     );
                 }
