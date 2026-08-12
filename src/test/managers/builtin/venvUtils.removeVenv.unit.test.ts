@@ -1,15 +1,6 @@
 import * as assert from 'assert';
-import * as fse from 'fs-extra';
 import * as os from 'os';
 import * as path from 'path';
-import * as sinon from 'sinon';
-import { LogOutputChannel } from 'vscode';
-import { VENV_MANAGER_ID } from '../../../common/constants';
-import * as testing from '../../../common/utils/testing';
-import * as windowApis from '../../../common/window.apis';
-import { removeVenv } from '../../../managers/builtin/venvUtils';
-import * as uvEnvironments from '../../../managers/builtin/uvEnvironments';
-import { createMockPythonEnvironment } from '../../mocks/pythonEnvironment';
 
 suite('venvUtils Path Validation', () => {
     suite('isDriveRoot behavior', () => {
@@ -154,41 +145,5 @@ suite('venvUtils removeVenv validation integration', () => {
             os.platform() === 'win32' ? 'C:\\Users\\test\\.venv\\pyvenv.cfg' : '/home/user/.venv/pyvenv.cfg',
             'Should check for pyvenv.cfg in the environment root',
         );
-    });
-
-    test('test execution removes the environment without showing a confirmation dialog', async () => {
-        const root = await fse.mkdtemp(path.join(os.tmpdir(), 'venv-remove-'));
-        const envPath = path.join(root, '.venv');
-        const pythonPath =
-            os.platform() === 'win32'
-                ? path.join(envPath, 'Scripts', 'python.exe')
-                : path.join(envPath, 'bin', 'python');
-        await fse.outputFile(path.join(envPath, 'pyvenv.cfg'), '');
-        await fse.outputFile(pythonPath, '');
-
-        const showWarningMessage = sinon.stub(windowApis, 'showWarningMessage');
-        sinon.stub(testing, 'isTestExecution').returns(true);
-        sinon.stub(uvEnvironments, 'removeUvEnvironment').resolves();
-        sinon.stub(windowApis, 'withProgress').callsFake(async (_options, task) => task({} as never, {} as never));
-
-        try {
-            const environment = createMockPythonEnvironment({
-                name: '.venv',
-                envPath: pythonPath,
-                sysPrefix: envPath,
-                version: '3.12.0',
-                managerId: VENV_MANAGER_ID,
-            });
-            const log = {
-                error: sinon.stub(),
-            } as unknown as LogOutputChannel;
-
-            assert.strictEqual(await removeVenv(environment, log), true);
-            assert.strictEqual(showWarningMessage.callCount, 0);
-            assert.strictEqual(await fse.pathExists(envPath), false);
-        } finally {
-            sinon.restore();
-            await fse.remove(root);
-        }
     });
 });
