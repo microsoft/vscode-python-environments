@@ -372,7 +372,7 @@ export class InternalPackageManager implements PackageManager {
         }
     }
 
-    refresh(environment: PythonEnvironment): Promise<Package[] | undefined> {
+    refresh(environment: PythonEnvironment): Promise<void> {
         return this.manager.refresh(environment);
     }
 
