@@ -75,7 +75,7 @@ extends:
                 workingDirectory: $(Build.SourcesDirectory)/api
                 displayName: Install package dependencies
 
-              - script: cp ../src/api.ts src/main.ts
+              - script: mkdir -p src && cp ../src/api.ts src/main.ts
                 workingDirectory: $(Build.SourcesDirectory)/api
                 displayName: Copy src/api.ts to API package entry point
 
@@ -83,9 +83,9 @@ extends:
                 workingDirectory: $(Build.SourcesDirectory)/api
                 displayName: Compile TypeScript
 
-              - script: npm pack --ignore-scripts
+              - script: npm run test:package
                 workingDirectory: $(Build.SourcesDirectory)/api
-                displayName: Pack npm package
+                displayName: Pack and validate npm package
 
               - task: CopyFiles@2
                 displayName: Copy package tarball to staging

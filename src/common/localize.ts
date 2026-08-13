@@ -238,6 +238,7 @@ export namespace UvInstallStrings {
         'No Python found. Would you like to install uv and use it to install Python? This will download and run an installer from https://astral.sh.',
     );
     export const installPython = l10n.t('Install Python');
+    export const installUv = l10n.t('Install uv');
     export const installUvAndPython = l10n.t('Install uv and Python');
     export function installPythonVersion(version: string): string {
         return l10n.t('Install Python {0}', version);
@@ -279,6 +280,12 @@ export namespace UvInstallStrings {
         }
         return l10n.t(
             'No Python installation is available for this script. Would you like to install uv and use it to install Python? This will download and run an installer from https://astral.sh.',
+        );
+    }
+    export function inlineScriptInstallUvForVersionLookupPrompt(requiresPython: string): string {
+        return l10n.t(
+            'No installed Python satisfies this script\'s requirement ({0}). Install uv to find a compatible Python version? This will download and run an installer from https://astral.sh.',
+            requiresPython,
         );
     }
     export const installingUv = l10n.t('Installing uv...');
