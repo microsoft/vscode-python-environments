@@ -523,13 +523,15 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
             }
         }),
         terminalActivation.onDidChangeTerminalActivationState(async (e) => {
-            await setActivateMenuButtonContext(e.terminal, e.environment, e.activated);
+            if (activeTerminal() === e.terminal) {
+                await setActivateMenuButtonContext(e.terminal, e.environment, e.activated);
+            }
         }),
         onDidChangeActiveTerminal(async (t) => {
             if (t) {
                 const env = terminalActivation.getEnvironment(t) ?? (await getEnvironmentForTerminal(api, t));
-                if (env) {
-                    await setActivateMenuButtonContext(t, env, terminalActivation.isActivated(t));
+                if (activeTerminal() === t) {
+                    await setActivateMenuButtonContext(t, env, env ? terminalActivation.isActivated(t) : false);
                 }
             }
         }),
