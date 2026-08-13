@@ -26,7 +26,7 @@ const MAX_PROMPT_DETAIL_LENGTH = 120;
 const TASK_TIMEOUT_MS = 5 * 60 * 1000;
 
 // Accept only numeric release segments before forwarding script-controlled input to uv.
-const INSTALLABLE_PYTHON_VERSION = /^\d+(?:\.\d+)*$/;
+const INSTALLABLE_PYTHON_VERSION = /^\d+(?:\.\d+)*(?:(?:a|b|rc)\d+)?(?:\.dev\d+)?$/i;
 
 // Remove C0/C1 controls and Unicode zero-width/bidirectional formatting characters
 // before displaying script-controlled text in a modal prompt.
@@ -183,6 +183,32 @@ export async function installUv(_log?: LogOutputChannel): Promise<boolean> {
     }
 
     return success;
+}
+
+export async function ensureUvForInlineScriptVersionLookup(
+    requiresPython: string,
+    log?: LogOutputChannel,
+): Promise<boolean> {
+    if (await isUvInstalled(log)) {
+        return true;
+    }
+    const displayedRequirement = sanitizePromptDetail(requiresPython);
+    if (!displayedRequirement) {
+        return false;
+    }
+    const selection = await showInformationMessage(
+        UvInstallStrings.inlineScriptInstallUvForVersionLookupPrompt(displayedRequirement),
+        { modal: true },
+        UvInstallStrings.installUv,
+    );
+    if (selection !== UvInstallStrings.installUv || !(await installUv(log))) {
+        return false;
+    }
+    if (await isUvInstalled(log)) {
+        return true;
+    }
+    showErrorMessage(UvInstallStrings.uvInstallRestartRequired);
+    return false;
 }
 
 /**
