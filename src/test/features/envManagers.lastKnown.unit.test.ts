@@ -32,6 +32,8 @@ suite('PythonEnvironmentManagers getLastKnownEnvironment', () => {
     let envManagers: PythonEnvironmentManagers;
     let projectManager: typeMoq.IMock<PythonProjectManager>;
     let projectsByUri: Map<string, PythonProject>;
+    let defaultManagerId: string;
+    let exactManagerSettings: Map<string, string>;
 
     function makeEnv(id: string): PythonEnvironment {
         const envId: PythonEnvironmentId = { id, managerId: 'test-manager' };
@@ -61,11 +63,16 @@ suite('PythonEnvironmentManagers getLastKnownEnvironment', () => {
         projectManager = typeMoq.Mock.ofType<PythonProjectManager>();
         setupNonThenable(projectManager);
         projectsByUri = new Map();
+        exactManagerSettings = new Map();
         projectManager
             .setup((pm) => pm.get(typeMoq.It.isAny()))
             .returns((uri) => projectsByUri.get(uri.toString()));
 
         envManagers = new PythonEnvironmentManagers(projectManager.object);
+        sinon.stub(settingHelpers, 'getDefaultEnvManagerSetting').callsFake(() => defaultManagerId);
+        sinon
+            .stub(settingHelpers, 'getProjectEnvironmentManagerSetting')
+            .callsFake((_manager, uri) => exactManagerSettings.get(uri.toString()));
     });
 
     teardown(() => {
@@ -93,10 +100,10 @@ suite('PythonEnvironmentManagers getLastKnownEnvironment', () => {
             refresh: async () => undefined,
         } as unknown as EnvironmentManager;
 
+        const managerIndex = envManagers.managers.length;
         envManagers.registerEnvironmentManager(manager);
-        const id = envManagers.managers[0].id;
-        // Force the default environment manager (used for undefined/global scope) to resolve to ours.
-        sinon.stub(settingHelpers, 'getDefaultEnvManagerSetting').returns(id);
+        const id = envManagers.managers[managerIndex].id;
+        defaultManagerId = id;
         return id;
     }
 
@@ -248,6 +255,53 @@ suite('PythonEnvironmentManagers getLastKnownEnvironment', () => {
 
         assert.strictEqual(envManagers.getLastKnownEnvironment(firstUri), first);
         assert.strictEqual(envManagers.getLastKnownEnvironment(secondUri), second);
+    });
+
+    test('routes an active inline-script selection before the containing project default', async () => {
+        const script = Uri.file('/workspace/project/script.py');
+        projectsByUri.set(script.toString(), { name: 'project', uri: Uri.file('/workspace/project') });
+        const defaultId = registerManager(async () => makeEnv('default'), async () => undefined, 'venv');
+        let inlineEnvironment: PythonEnvironment;
+        const inlineId = registerManager(async () => inlineEnvironment, async () => undefined, 'inline-script');
+        inlineEnvironment = { ...makeEnv('inline'), envId: { id: 'inline', managerId: inlineId } };
+        defaultManagerId = defaultId;
+
+        await envManagers.setEnvironment(script, inlineEnvironment, false);
+
+        assert.strictEqual(envManagers.getEnvironmentManager(script)?.id, inlineId);
+        assert.strictEqual(await envManagers.getEnvironment(script), inlineEnvironment);
+    });
+
+    test('lets an exact script project setting override an active inline selection', async () => {
+        const script = Uri.file('/workspace/script.py');
+        projectsByUri.set(script.toString(), { name: 'script.py', uri: script });
+        const selectedId = registerManager(async () => makeEnv('selected'), async () => undefined, 'venv');
+        let inlineEnvironment: PythonEnvironment;
+        const inlineId = registerManager(async () => inlineEnvironment, async () => undefined, 'inline-script');
+        inlineEnvironment = { ...makeEnv('inline'), envId: { id: 'inline', managerId: inlineId } };
+        defaultManagerId = selectedId;
+
+        await envManagers.setEnvironment(script, inlineEnvironment, false);
+        exactManagerSettings.set(script.toString(), selectedId);
+
+        assert.strictEqual(envManagers.getEnvironmentManager(script)?.id, selectedId);
+    });
+
+    test('clears active inline routing after selecting a different manager', async () => {
+        const script = Uri.file('/workspace/project/script.py');
+        projectsByUri.set(script.toString(), { name: 'project', uri: Uri.file('/workspace/project') });
+        let selectedEnvironment: PythonEnvironment;
+        const selectedId = registerManager(async () => selectedEnvironment, async () => undefined, 'venv');
+        let inlineEnvironment: PythonEnvironment;
+        const inlineId = registerManager(async () => inlineEnvironment, async () => undefined, 'inline-script');
+        selectedEnvironment = { ...makeEnv('selected'), envId: { id: 'selected', managerId: selectedId } };
+        inlineEnvironment = { ...makeEnv('inline'), envId: { id: 'inline', managerId: inlineId } };
+        defaultManagerId = selectedId;
+
+        await envManagers.setEnvironment(script, inlineEnvironment, false);
+        await envManagers.setEnvironment(script, selectedEnvironment, false);
+
+        assert.strictEqual(envManagers.getEnvironmentManager(script)?.id, selectedId);
     });
 
     test('does not persist an inline-script manager for the containing project', async () => {

@@ -38,6 +38,7 @@ import {
     EditAllManagerSettings,
     getDefaultEnvManagerSetting,
     getDefaultPkgManagerSetting,
+    getProjectEnvironmentManagerSetting,
     setAllManagerSettings,
 } from './settings/settingHelpers';
 
@@ -195,10 +196,11 @@ export class PythonEnvironmentManagers implements EnvironmentManagers {
      * Returns the environment manager for the given context.
      *
      * Priority:
-     * 1. Use the default from settings (user-configured takes precedence)
-     * 2. If no user-configured setting, fall back to cached environment's manager
-     * 3. If context is a string (manager ID), return that manager directly
-     * 4. If context is a PythonEnvironment, return its manager
+     * 1. Use an exact per-script project setting.
+     * 2. Use a cached per-script inline selection.
+     * 3. Use the containing project or default setting.
+     * 4. Fall back to the cached project/global environment's manager.
+     * 5. If context is a string or PythonEnvironment, return its manager directly.
      */
     public getEnvironmentManager(context: EnvironmentManagerScope): InternalEnvironmentManager | undefined {
         if (this._environmentManagers.size === 0) {
@@ -207,7 +209,31 @@ export class PythonEnvironmentManagers implements EnvironmentManagers {
         }
 
         if (context === undefined || context instanceof Uri) {
-            // First check settings - user-configured settings always take priority
+            const project = context ? this.pm.get(context) : undefined;
+            if (
+                context instanceof Uri &&
+                project &&
+                normalizePath(project.uri.fsPath) === normalizePath(context.fsPath)
+            ) {
+                const exactManagerId = getProjectEnvironmentManagerSetting(this.pm, context);
+                const exactManager = exactManagerId
+                    ? this._environmentManagers.get(exactManagerId)
+                    : undefined;
+                if (exactManager) {
+                    return exactManager;
+                }
+            }
+
+            if (context instanceof Uri) {
+                const inlineEnv = this._activeSelection.get(this.getInlineScriptSelectionKey(context));
+                if (inlineEnv?.envId.managerId === INLINE_SCRIPT_MANAGER_ID) {
+                    const inlineManager = this._environmentManagers.get(INLINE_SCRIPT_MANAGER_ID);
+                    if (inlineManager) {
+                        return inlineManager;
+                    }
+                }
+            }
+
             const defaultEnvManagerId = getDefaultEnvManagerSetting(this.pm, context);
             if (defaultEnvManagerId !== undefined) {
                 const settingsManager = this._environmentManagers.get(defaultEnvManagerId);
@@ -216,13 +242,7 @@ export class PythonEnvironmentManagers implements EnvironmentManagers {
                 }
             }
 
-            // Fall back to cached environment's manager if no user-configured settings
-            const project = context ? this.pm.get(context) : undefined;
-            const cachedEnv =
-                (context instanceof Uri
-                    ? this._activeSelection.get(this.getInlineScriptSelectionKey(context))
-                    : undefined) ??
-                this._activeSelection.get(project ? project.uri.toString() : 'global');
+            const cachedEnv = this._activeSelection.get(project ? project.uri.toString() : 'global');
             if (cachedEnv) {
                 const cachedManager = this._environmentManagers.get(cachedEnv.envId.managerId);
                 if (cachedManager) {
@@ -343,6 +363,9 @@ export class PythonEnvironmentManagers implements EnvironmentManagers {
         const project = scope ? this.pm.get(scope) : undefined;
         const key = this.getActiveSelectionKey(scope, manager, project);
         await manager.set(scope, environment);
+        if (scope instanceof Uri) {
+            this.clearInlineActiveSelection(scope, manager);
+        }
         this.bumpSelectionRevision(key);
 
         // Only persist to settings when explicitly requested
@@ -422,6 +445,7 @@ export class PythonEnvironmentManagers implements EnvironmentManagers {
             if (Array.isArray(scope) && scope.every((s) => s instanceof Uri)) {
                 await manager.set(scope, environment);
                 scope.forEach((uri) => {
+                    this.clearInlineActiveSelection(uri, manager);
                     const project = this.pm.get(uri);
                     this.bumpSelectionRevision(this.getActiveSelectionKey(uri, manager, project));
                 });
@@ -668,6 +692,16 @@ export class PythonEnvironmentManagers implements EnvironmentManagers {
 
     private getInlineScriptSelectionKey(scope: Uri): string {
         return `inline-script:${normalizePath(scope.fsPath)}`;
+    }
+
+    private clearInlineActiveSelection(scope: Uri, manager: InternalEnvironmentManager): void {
+        if (manager.id === INLINE_SCRIPT_MANAGER_ID) {
+            return;
+        }
+        const key = this.getInlineScriptSelectionKey(scope);
+        if (this._activeSelection.delete(key)) {
+            this.bumpSelectionRevision(key);
+        }
     }
 
     private canPersistManagerSettingForScope(

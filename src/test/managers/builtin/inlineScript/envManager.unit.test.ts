@@ -1631,6 +1631,18 @@ suite('InlineScriptEnvManager', () => {
             assert.strictEqual(await manager.get(uri), environment);
         });
 
+        test('uses full PEP 440 semantics when validating a retained association', async () => {
+            const uri = scriptUri();
+            const environment = {
+                ...(await createOwnedEnvironment()),
+                version: '3.15.0',
+            };
+            await manager.set(uri, environment);
+            readMetadataStub.resolves({ ...VALID_METADATA, requiresPython: '!=3.15.0rc2' });
+
+            assert.strictEqual(await manager.get(uri), environment);
+        });
+
         test('does not resolve or discard an association when metadata is absent or unreadable', async () => {
             const uri = scriptUri();
             const environment = await createOwnedEnvironment();
