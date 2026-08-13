@@ -1,7 +1,14 @@
 import * as path from 'path';
 import { Disposable, env, ExtensionTerminalOptions, tasks, Terminal, TerminalOptions, Uri } from 'vscode';
-import { PythonEnvironment, PythonProject, PythonProjectEnvironmentApi, PythonProjectGetterApi } from '../../api';
-import { traceVerbose } from '../../common/logging';
+import {
+    PythonEnvironment,
+    PythonEnvironmentApi,
+    PythonProject,
+    PythonProjectEnvironmentApi,
+    PythonProjectGetterApi,
+} from '../../api';
+import { VENV_MANAGER_ID } from '../../common/constants';
+import { traceError, traceVerbose } from '../../common/logging';
 import { timeout } from '../../common/utils/asyncUtils';
 import { createSimpleDebounce } from '../../common/utils/debounce';
 import { onDidChangeTerminalShellIntegration, onDidWriteTerminalData } from '../../common/window.apis';
@@ -10,6 +17,7 @@ import { identifyTerminalShell } from '../common/shellDetector';
 import { shellIntegrationSupportedShells } from './shells/common/shellUtils';
 
 export const SHELL_INTEGRATION_TIMEOUT = 500; // 0.5 seconds
+const LOCAL_VENV_LOOKUP_TIMEOUT_MS = 1000;
 
 /**
  * Use `terminal.integrated.shellIntegration.timeout` setting if available.
@@ -191,13 +199,152 @@ async function getDistinctProjectEnvs(
     return envs;
 }
 
+function isSameOrParentPath(parentPath: string, candidatePath: string): boolean {
+    const relative = path.relative(path.resolve(parentPath), path.resolve(candidatePath));
+    return relative === '' || (relative !== '..' && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative));
+}
+
+function getProjectForCwd(projects: readonly PythonProject[], cwd: string): PythonProject | undefined {
+    return [...projects]
+        .filter((project) => isSameOrParentPath(project.uri.fsPath, cwd))
+        .sort((a, b) => b.uri.fsPath.length - a.uri.fsPath.length)[0];
+}
+
+function getLocalVenvOwner(environment: PythonEnvironment): string | undefined {
+    if (
+        environment.envId.managerId !== VENV_MANAGER_ID ||
+        environment.error ||
+        !path.isAbsolute(environment.sysPrefix)
+    ) {
+        return undefined;
+    }
+    return path.dirname(path.resolve(environment.sysPrefix));
+}
+
+function isSiblingVenv(environment: PythonEnvironment, project: PythonProject, cwd: string): boolean {
+    const owner = getLocalVenvOwner(environment);
+    return (
+        !!owner &&
+        isSameOrParentPath(project.uri.fsPath, owner) &&
+        !isSameOrParentPath(owner, cwd) &&
+        !isSameOrParentPath(cwd, owner)
+    );
+}
+
+async function getLocalVenvForCwd(
+    api: PythonEnvironmentApi,
+    project: PythonProject,
+    cwd: string,
+): Promise<PythonEnvironment | undefined> {
+    const environmentLookup = api
+        .getEnvironments('all')
+        .then((environments) => ({ environments }))
+        .catch((error) => {
+            traceError('Failed to get environments for terminal cwd resolution', error);
+            return { environments: undefined };
+        });
+    let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
+    const lookupTimeout = new Promise<{ environments: undefined }>((resolve) => {
+        timeoutHandle = setTimeout(() => {
+            traceVerbose(`Timed out looking for a local virtual environment for terminal cwd: ${cwd}`);
+            resolve({ environments: undefined });
+        }, LOCAL_VENV_LOOKUP_TIMEOUT_MS);
+    });
+    const lookupResult = await Promise.race([environmentLookup, lookupTimeout]).finally(() => {
+        if (timeoutHandle) {
+            clearTimeout(timeoutHandle);
+        }
+    });
+    if (!lookupResult.environments) {
+        return undefined;
+    }
+
+    const candidates = lookupResult.environments
+        .map((environment) => ({ environment, owner: getLocalVenvOwner(environment) }))
+        .filter(
+            (candidate): candidate is { environment: PythonEnvironment; owner: string } =>
+                candidate.owner !== undefined &&
+                isSameOrParentPath(project.uri.fsPath, candidate.owner) &&
+                isSameOrParentPath(candidate.owner, cwd),
+        )
+        .map((candidate) => ({
+            ...candidate,
+            distance: path
+                .relative(path.resolve(candidate.owner), path.resolve(cwd))
+                .split(path.sep)
+                .filter(Boolean).length,
+        }));
+
+    if (candidates.length === 0) {
+        return undefined;
+    }
+
+    const nearestDistance = Math.min(...candidates.map((candidate) => candidate.distance));
+    const nearest = candidates.filter((candidate) => candidate.distance === nearestDistance);
+    const unique = Array.from(
+        new Map(nearest.map((candidate) => [candidate.environment.envId.id, candidate.environment])).values(),
+    );
+
+    if (unique.length !== 1) {
+        traceVerbose(`Multiple local virtual environments match terminal cwd: ${cwd}`);
+        return undefined;
+    }
+
+    return unique[0];
+}
+
+interface CwdEnvironmentResolution {
+    environment?: PythonEnvironment;
+    stopFallback: boolean;
+}
+
+async function getEnvironmentForCwd(
+    api: PythonEnvironmentApi,
+    projects: readonly PythonProject[],
+    cwd: string,
+): Promise<CwdEnvironmentResolution> {
+    const project = getProjectForCwd(projects, cwd);
+    if (!project) {
+        return { stopFallback: false };
+    }
+
+    const projectEnvironment = await api.getEnvironment(project.uri);
+    if (projectEnvironment && !isSiblingVenv(projectEnvironment, project, cwd)) {
+        return { environment: projectEnvironment, stopFallback: true };
+    }
+
+    if (!projectEnvironment) {
+        return { stopFallback: true };
+    }
+
+    traceVerbose(`Ignoring virtual environment outside terminal cwd: ${projectEnvironment.environmentPath.fsPath}`);
+
+    const localEnvironment = await getLocalVenvForCwd(api, project, cwd);
+    if (localEnvironment) {
+        traceVerbose(`Using local virtual environment for terminal cwd: ${localEnvironment.environmentPath.fsPath}`);
+        return { environment: localEnvironment, stopFallback: true };
+    }
+
+    return {
+        stopFallback: true,
+    };
+}
+
 export async function getEnvironmentForTerminal(
-    api: PythonProjectGetterApi & PythonProjectEnvironmentApi,
+    api: PythonEnvironmentApi,
     terminal?: Terminal,
 ): Promise<PythonEnvironment | undefined> {
     let env: PythonEnvironment | undefined;
 
     const projects = api.getPythonProjects();
+    const terminalCwd = terminal ? getTerminalCwd(terminal) : undefined;
+    if (terminalCwd) {
+        const cwdResolution = await getEnvironmentForCwd(api, projects, terminalCwd);
+        if (cwdResolution.environment || cwdResolution.stopFallback) {
+            return cwdResolution.environment;
+        }
+    }
+
     if (projects.length === 0) {
         env = await api.getEnvironment(undefined);
     } else if (projects.length === 1) {
@@ -217,10 +364,9 @@ export async function getEnvironmentForTerminal(
     if (env) {
         return env;
     }
-
     // This is a heuristic approach to attempt to find the environment for this terminal.
     // This is not guaranteed to work, but is better than nothing.
-    const terminalCwd = terminal ? getTerminalCwd(terminal) : undefined;
+    // This is not guaranteed to work, but is better than nothing.
     if (terminalCwd) {
         env = await api.getEnvironment(Uri.file(path.resolve(terminalCwd)));
     } else {
