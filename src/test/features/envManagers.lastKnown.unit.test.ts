@@ -243,6 +243,64 @@ suite('PythonEnvironmentManagers getLastKnownEnvironment', () => {
         assert.strictEqual(envManagers.getLastKnownEnvironment(undefined), refreshed);
     });
 
+    test('does not publish an older selection after a newer settings write finishes first', async () => {
+        const scope = Uri.file('/workspace/script.py');
+        const project = { name: 'script.py', uri: scope };
+        projectsByUri.set(scope.toString(), project);
+        const managerId = registerManager(async () => undefined, async () => undefined, 'inline-script');
+        const first = { ...makeEnv('first'), envId: { id: 'first', managerId } };
+        const second = { ...makeEnv('second'), envId: { id: 'second', managerId } };
+        stubPackageManager();
+        let releaseFirstWrite: (() => void) | undefined;
+        let signalFirstWrite: (() => void) | undefined;
+        const firstWriteStarted = new Promise<void>((resolve) => {
+            signalFirstWrite = resolve;
+        });
+        const firstWrite = new Promise<void>((resolve) => {
+            releaseFirstWrite = resolve;
+        });
+        const settings = sinon.stub(settingHelpers, 'setAllManagerSettings');
+        settings.onFirstCall().callsFake(async () => {
+            signalFirstWrite!();
+            await firstWrite;
+        });
+        settings.onSecondCall().resolves();
+        const events: DidChangeEnvironmentEventArgs[] = [];
+        envManagers.onDidChangeActiveEnvironment((event) => events.push(event));
+
+        const olderSelection = envManagers.setEnvironment(scope, first);
+        await firstWriteStarted;
+        await envManagers.setEnvironment(scope, second);
+        releaseFirstWrite!();
+        await olderSelection;
+
+        assert.strictEqual(envManagers.getLastKnownEnvironment(scope), second);
+        assert.deepStrictEqual(events.map((event) => event.new), [second]);
+    });
+
+    test('publishes inline environments with the same ID at different paths', async () => {
+        const scope = Uri.file('/workspace/script.py');
+        const managerId = registerManager(async () => undefined, async () => undefined, 'inline-script');
+        const first = {
+            ...makeEnv('duplicate'),
+            envId: { id: 'duplicate', managerId },
+            environmentPath: Uri.file('/env/first/python'),
+        };
+        const second = {
+            ...makeEnv('duplicate'),
+            envId: { id: 'duplicate', managerId },
+            environmentPath: Uri.file('/env/second/python'),
+        };
+        const events: DidChangeEnvironmentEventArgs[] = [];
+        envManagers.onDidChangeActiveEnvironment((event) => events.push(event));
+
+        await envManagers.setEnvironment(scope, first, false);
+        await envManagers.setEnvironment(scope, second, false);
+
+        assert.strictEqual(envManagers.getLastKnownEnvironment(scope), second);
+        assert.deepStrictEqual(events.map((event) => event.new), [first, second]);
+    });
+
     test('tracks inline-script selections independently for scripts in the same project', async () => {
         const firstUri = Uri.file('/workspace/first.py');
         const secondUri = Uri.file('/workspace/second.py');
@@ -302,6 +360,41 @@ suite('PythonEnvironmentManagers getLastKnownEnvironment', () => {
         await envManagers.setEnvironment(script, selectedEnvironment, false);
 
         assert.strictEqual(envManagers.getEnvironmentManager(script)?.id, selectedId);
+    });
+
+    test('clears inline routing after a no-op inline refresh during settings persistence', async () => {
+        const script = Uri.file('/workspace/project/script.py');
+        projectsByUri.set(script.toString(), { name: 'project', uri: Uri.file('/workspace/project') });
+        let selectedEnvironment: PythonEnvironment;
+        const selectedId = registerManager(async () => selectedEnvironment, async () => undefined, 'venv');
+        let inlineEnvironment: PythonEnvironment;
+        const inlineId = registerManager(async () => inlineEnvironment, async () => undefined, 'inline-script');
+        selectedEnvironment = { ...makeEnv('selected'), envId: { id: 'selected', managerId: selectedId } };
+        inlineEnvironment = { ...makeEnv('inline'), envId: { id: 'inline', managerId: inlineId } };
+        defaultManagerId = selectedId;
+        await envManagers.setEnvironment(script, inlineEnvironment, false);
+        stubPackageManager();
+        let releaseSettings: (() => void) | undefined;
+        let signalSettings: (() => void) | undefined;
+        const settingsStarted = new Promise<void>((resolve) => {
+            signalSettings = resolve;
+        });
+        const settingsGate = new Promise<void>((resolve) => {
+            releaseSettings = resolve;
+        });
+        sinon.stub(settingHelpers, 'setAllManagerSettings').callsFake(async () => {
+            signalSettings!();
+            await settingsGate;
+        });
+
+        const selection = envManagers.setEnvironment(script, selectedEnvironment);
+        await settingsStarted;
+        await envManagers.refreshEnvironment(script);
+        releaseSettings!();
+        await selection;
+
+        assert.strictEqual(envManagers.getEnvironmentManager(script)?.id, selectedId);
+        assert.strictEqual(envManagers.getLastKnownEnvironment(script), selectedEnvironment);
     });
 
     test('does not persist an inline-script manager for the containing project', async () => {

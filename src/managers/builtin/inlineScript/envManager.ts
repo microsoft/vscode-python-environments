@@ -65,14 +65,6 @@ const CACHED_ASSOCIATION_VALIDATION_INTERVAL_MS = 5_000;
 /** Workspace-state key for PEP 723 script path to environment executable associations. */
 export const INLINE_SCRIPT_ENVS_KEY = `${ENVS_EXTENSION_ID}:inline-script:SCRIPT_ENVIRONMENTS`;
 
-type PersistedInlineScriptEnvironments = Record<string, string>;
-
-interface PersistedAssociationChange {
-    readonly scriptPath: string;
-    readonly environmentPath?: string;
-    readonly expectedEnvironmentPath?: string;
-}
-
 interface SelectedBaseInterpreter {
     readonly environment: PythonEnvironment;
     readonly canonicalPath: string;
@@ -277,13 +269,7 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
             environmentPath = environment.environmentPath.fsPath;
         }
 
-        const updates: {
-            readonly uri: Uri;
-            readonly scriptPath: string;
-            readonly before: PythonEnvironment | undefined;
-            readonly needsPersistence: boolean;
-            readonly shouldNotify: boolean;
-        }[] = [];
+        const updates: PendingScriptUpdate[] = [];
         for (const script of scripts) {
             const before = await this.getAssociationForMutation(script.scriptPath);
             const hadPersistedAssociation = this.fsPathToPersistedEnvPath.has(script.scriptPath);
@@ -371,7 +357,7 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
             : environment;
     }
 
-    private getScriptUris(scope: SetEnvironmentScope): { readonly uri: Uri; readonly scriptPath: string }[] {
+    private getScriptUris(scope: SetEnvironmentScope): ScriptReference[] {
         const candidates = scope instanceof Uri ? [scope] : Array.isArray(scope) ? scope : undefined;
         if (
             !candidates ||
@@ -381,7 +367,7 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
             throw new Error('Inline-script environment selection requires one or more local file URIs.');
         }
 
-        const scripts: { readonly uri: Uri; readonly scriptPath: string }[] = [];
+        const scripts: ScriptReference[] = [];
         const seen = new Set<string>();
         for (const candidate of candidates) {
             const scriptPath = normalizePath(candidate.fsPath);
@@ -679,7 +665,8 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
             try {
                 await this.updatePersistedAssociations([{ scriptPath, expectedEnvironmentPath }]);
                 if (
-                    this.fsPathToPersistedEnvPath.get(scriptPath) === expectedEnvironmentPath &&
+                    normalizePath(this.fsPathToPersistedEnvPath.get(scriptPath) ?? '') ===
+                        normalizePath(expectedEnvironmentPath) &&
                     this.isCurrentAssociationRevision(scriptPath, revision)
                 ) {
                     const old = this.fsPathToEnv.get(scriptPath);
@@ -1283,4 +1270,23 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
         this._onDidChangeEnvironments.dispose();
         this._onDidChangeEnvironment.dispose();
     }
+}
+
+type PersistedInlineScriptEnvironments = Record<string, string>;
+
+interface PersistedAssociationChange {
+    readonly scriptPath: string;
+    readonly environmentPath?: string;
+    readonly expectedEnvironmentPath?: string;
+}
+
+interface ScriptReference {
+    readonly uri: Uri;
+    readonly scriptPath: string;
+}
+
+interface PendingScriptUpdate extends ScriptReference {
+    readonly before: PythonEnvironment | undefined;
+    readonly needsPersistence: boolean;
+    readonly shouldNotify: boolean;
 }

@@ -1685,6 +1685,30 @@ suite('InlineScriptEnvManager', () => {
             sinon.assert.calledOnceWithExactly(listener, { uri, old: environment, new: undefined });
         });
 
+        test('clears a case-variant persisted path when its warm executable is deleted', async function () {
+            if (!isWindows()) {
+                this.skip();
+            }
+            const uri = scriptUri();
+            const environment = await createOwnedEnvironment();
+            persistedAssociations = {
+                [normalizePath(uri.fsPath)]: environment.environmentPath.fsPath.toUpperCase(),
+            };
+            resolveVenvStub.resolves(environment);
+            assert.strictEqual(await manager.get(uri), environment);
+            const listener = sinon.spy();
+            manager.onDidChangeEnvironment(listener);
+            await fs.remove(environment.environmentPath.fsPath);
+            clock.tick(5_000);
+
+            assert.strictEqual(await manager.get(uri), undefined);
+            assert.deepStrictEqual(persistedAssociations, {});
+            resolveVenvStub.resetHistory();
+            assert.strictEqual(await manager.get(uri), undefined);
+            assert.strictEqual(resolveVenvStub.callCount, 0);
+            sinon.assert.calledOnceWithExactly(listener, { uri, old: environment, new: undefined });
+        });
+
         test('preserves a warm association while its cache entry is locked', async () => {
             const uri = scriptUri();
             const environment = await createOwnedEnvironment();
