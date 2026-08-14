@@ -93,7 +93,7 @@ import { ProjectView } from './features/views/projectView';
 import { PythonStatusBarImpl } from './features/views/pythonStatusBar';
 import { updateViewsAndStatus } from './features/views/revealHandler';
 import { TemporaryStateManager } from './features/views/temporaryStateManager';
-import { ProjectItem, PythonEnvTreeItem } from './features/views/treeViewItems';
+import { PythonEnvTreeItem } from './features/views/treeViewItems';
 import { collectEnvironmentInfo, getEnvManagerAndPackageManagerConfigLevels, runPetInTerminalImpl } from './helpers';
 import { EnvironmentManagers, ProjectCreators, PythonProjectManager } from './internal.api';
 import { registerInlineScriptFeatures } from './managers/builtin/inlineScript/main';
@@ -364,17 +364,7 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
             });
         }),
         commands.registerCommand('python-envs.removePythonProject', async (item) => {
-            // Clear environment association before removing project
-            if (item instanceof ProjectItem) {
-                const uri = item.project.uri;
-                const manager = envManagers.getEnvironmentManager(uri);
-                if (manager) {
-                    manager.set(uri, undefined);
-                } else {
-                    traceError(`No environment manager found for ${uri.fsPath}`);
-                }
-            }
-            await removePythonProject(item, projectManager);
+            await removePythonProject(item, projectManager, envManagers);
         }),
         commands.registerCommand('python-envs.clearCache', async () => {
             await clearPersistentState();

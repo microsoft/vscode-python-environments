@@ -523,6 +523,45 @@ suite('Package Watcher', () => {
             terminalClose.dispose();
         });
 
+        test('should ignore delayed activation after the terminal closes', () => {
+            const terminalClose = new EventEmitter<Terminal>();
+            (windowApis.onDidCloseTerminal as sinon.SinonStub).callsFake((listener) => terminalClose.event(listener));
+            const environmentChanges = new EventEmitter<DidChangeEnvironmentEventArgs>();
+            const packageManager = new InternalPackageManager('pip', createMockPackageManager() as PackageManager);
+            const env = createMockEnvironment();
+            const terminal = { name: 'terminal' } as Terminal;
+            const envManagers = {
+                onDidChangeActiveEnvironment: environmentChanges.event,
+                getPackageManager: sandbox.stub().returns(packageManager),
+            } as unknown as EnvironmentManagers;
+
+            registerPackageWatchers(envManagers, mockTerminalActivation, mockLogOutputChannel as LogOutputChannel);
+            terminalClose.fire(terminal);
+            terminalActivationChanges.fire({ terminal, environment: env, activated: true });
+
+            assert.strictEqual(createFileSystemWatcherStub.callCount, 0);
+            terminalClose.dispose();
+        });
+
+        test('should dispose the final scoped watcher when its active environment is cleared', () => {
+            const mockWatcher = createMockWatcher();
+            createFileSystemWatcherStub.returns(mockWatcher);
+            const environmentChanges = new EventEmitter<DidChangeEnvironmentEventArgs>();
+            const packageManager = new InternalPackageManager('pip', createMockPackageManager() as PackageManager);
+            const envManagers = {
+                onDidChangeActiveEnvironment: environmentChanges.event,
+                getPackageManager: sandbox.stub().returns(packageManager),
+            } as unknown as EnvironmentManagers;
+            const scope = Uri.file('project');
+            const env = createMockEnvironment();
+
+            registerPackageWatchers(envManagers, mockTerminalActivation, mockLogOutputChannel as LogOutputChannel);
+            environmentChanges.fire({ uri: scope, new: env, old: undefined });
+            environmentChanges.fire({ uri: scope, new: undefined, old: env });
+
+            assert.ok((mockWatcher.dispose as sinon.SinonStub).calledOnce);
+        });
+
         test('should rebind a scoped watcher when the effective package manager changes', () => {
             const firstWatcher = createMockWatcher();
             const secondWatcher = createMockWatcher();

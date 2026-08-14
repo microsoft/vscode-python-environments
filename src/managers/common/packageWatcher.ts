@@ -119,6 +119,7 @@ export function registerPackageWatchers(
         { scope: Uri | undefined; environment: PythonEnvironment }
     >();
     const sharedWatchers = new Map<string, { disposable: Disposable; references: number }>();
+    const closedTerminals = new WeakSet<Terminal>();
 
     const releaseConsumer = (consumer: WatcherConsumer): void => {
         const watcherKey = activeWatcherByConsumer.get(consumer);
@@ -184,13 +185,16 @@ export function registerPackageWatchers(
 
     const terminalActivationDisposable = terminalActivation.onDidChangeTerminalActivationState((changes) => {
         if (changes.activated) {
-            watchEnvironment(changes.terminal, changes.environment, changes.environment);
+            if (!closedTerminals.has(changes.terminal)) {
+                watchEnvironment(changes.terminal, changes.environment, changes.environment);
+            }
         } else {
             releaseConsumer(changes.terminal);
         }
     });
 
     const terminalCloseDisposable = onDidCloseTerminal((terminal) => {
+        closedTerminals.add(terminal);
         releaseConsumer(terminal);
     });
 

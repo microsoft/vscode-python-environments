@@ -652,7 +652,12 @@ export async function addPythonProjectCommand(
     }
 }
 
-export async function removePythonProject(item: ProjectItem, wm: PythonProjectManager): Promise<void> {
+export async function removePythonProject(
+    item: ProjectItem,
+    wm: PythonProjectManager,
+    em: EnvironmentManagers,
+): Promise<void> {
+    await em.setEnvironment(item.project.uri, undefined);
     await removePythonProjectSetting([{ project: item.project }]);
     wm.remove(item.project);
 }
