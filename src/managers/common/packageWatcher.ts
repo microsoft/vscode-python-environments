@@ -1,9 +1,18 @@
 import * as path from 'path';
-import { Disposable, LogOutputChannel, RelativePattern, Uri } from 'vscode';
+import { Disposable, Event, LogOutputChannel, RelativePattern, Terminal, Uri } from 'vscode';
 import { PackageManager, PythonEnvironment } from '../../api';
 import { createSimpleDebounce } from '../../common/utils/debounce';
-import { createFileSystemWatcher, getConfiguration } from '../../common/workspace.apis';
+import { onDidCloseTerminal } from '../../common/window.apis';
+import { createFileSystemWatcher, getConfiguration, onDidChangeConfiguration } from '../../common/workspace.apis';
 import { EnvironmentManagers } from '../../internal.api';
+
+export interface PackageWatcherTerminalActivation {
+    onDidChangeTerminalActivationState: Event<{
+        terminal: Terminal;
+        environment: PythonEnvironment;
+        activated: boolean;
+    }>;
+}
 
 /**
  * Derives the file system watch targets for a given Python environment.
@@ -64,7 +73,12 @@ export function watchPackageChangesForEnvironment(
     const trigger = debouncedRefresh.trigger.bind(debouncedRefresh);
 
     for (const target of watchTargets) {
-        const watcher = createFileSystemWatcher(target, false, false, false);
+        const watcher = createFileSystemWatcher(
+            target,
+            false, // ignoreCreateEvents
+            false, // ignoreChangeEvents
+            false, // ignoreDeleteEvents
+        );
         log.debug(`Watching for package changes in environment ${env.envId.id} at ${target.pattern}`);
         disposables.push(
             watcher,
@@ -84,25 +98,35 @@ export function watchPackageChangesForEnvironment(
  * disposed only after the final scope stops using that environment.
  *
  * @param envManagers - The central environment and package manager registry.
+ * @param terminalActivation - Tracks environments activated in terminals.
  * @param log - Logger for diagnostic and error messages.
  * @returns A disposable that removes all watchers and subscriptions when disposed.
  */
-export function registerPackageWatchers(envManagers: EnvironmentManagers, log: LogOutputChannel): Disposable {
+export function registerPackageWatchers(
+    envManagers: EnvironmentManagers,
+    terminalActivation: PackageWatcherTerminalActivation,
+    log: LogOutputChannel,
+): Disposable {
     const packageWatchersEnabled = getConfiguration('python-envs').get<boolean>('packageWatchers', true);
     if (!packageWatchersEnabled) {
         return new Disposable(() => undefined);
     }
 
-    const activeWatcherByScope = new Map<string, string>();
+    type WatcherConsumer = string | Terminal;
+    const activeWatcherByConsumer = new Map<WatcherConsumer, string>();
+    const activeEnvironmentByScope = new Map<
+        string,
+        { scope: Uri | undefined; environment: PythonEnvironment }
+    >();
     const sharedWatchers = new Map<string, { disposable: Disposable; references: number }>();
 
-    const releaseScope = (scopeKey: string): void => {
-        const watcherKey = activeWatcherByScope.get(scopeKey);
+    const releaseConsumer = (consumer: WatcherConsumer): void => {
+        const watcherKey = activeWatcherByConsumer.get(consumer);
         if (!watcherKey) {
             return;
         }
 
-        activeWatcherByScope.delete(scopeKey);
+        activeWatcherByConsumer.delete(consumer);
         const watcher = sharedWatchers.get(watcherKey);
         if (!watcher) {
             return;
@@ -115,21 +139,25 @@ export function registerPackageWatchers(envManagers: EnvironmentManagers, log: L
         }
     };
 
-    const watchEnvironment = (scopeKey: string, scope: Uri | undefined, environment: PythonEnvironment): void => {
+    const watchEnvironment = (
+        consumer: WatcherConsumer,
+        packageManagerContext: Uri | PythonEnvironment | undefined,
+        environment: PythonEnvironment,
+    ): void => {
         const selectedPackageManager =
-            envManagers.getPackageManager(scope) ?? envManagers.getPackageManager(environment);
+            envManagers.getPackageManager(packageManagerContext) ?? envManagers.getPackageManager(environment);
         if (!selectedPackageManager) {
-            releaseScope(scopeKey);
+            releaseConsumer(consumer);
             log.debug(`No package manager found for environment ${environment.envId.id}`);
             return;
         }
 
         const watcherKey = `${environment.envId.managerId}:${environment.envId.id}:${selectedPackageManager.id}`;
-        if (activeWatcherByScope.get(scopeKey) === watcherKey) {
+        if (activeWatcherByConsumer.get(consumer) === watcherKey) {
             return;
         }
 
-        releaseScope(scopeKey);
+        releaseConsumer(consumer);
 
         const sharedWatcher = sharedWatchers.get(watcherKey);
         if (sharedWatcher) {
@@ -140,22 +168,53 @@ export function registerPackageWatchers(envManagers: EnvironmentManagers, log: L
                 references: 1,
             });
         }
-        activeWatcherByScope.set(scopeKey, watcherKey);
+        activeWatcherByConsumer.set(consumer, watcherKey);
     };
 
     const environmentChangeDisposable = envManagers.onDidChangeActiveEnvironment((changes) => {
         const scopeKey = changes.uri?.toString() ?? 'global';
         if (changes.new) {
+            activeEnvironmentByScope.set(scopeKey, { scope: changes.uri, environment: changes.new });
             watchEnvironment(scopeKey, changes.uri, changes.new);
         } else {
-            releaseScope(scopeKey);
+            activeEnvironmentByScope.delete(scopeKey);
+            releaseConsumer(scopeKey);
         }
+    });
+
+    const terminalActivationDisposable = terminalActivation.onDidChangeTerminalActivationState((changes) => {
+        if (changes.activated) {
+            watchEnvironment(changes.terminal, changes.environment, changes.environment);
+        } else {
+            releaseConsumer(changes.terminal);
+        }
+    });
+
+    const terminalCloseDisposable = onDidCloseTerminal((terminal) => {
+        releaseConsumer(terminal);
+    });
+
+    const configurationChangeDisposable = onDidChangeConfiguration((changes) => {
+        if (
+            !changes.affectsConfiguration('python-envs.defaultPackageManager') &&
+            !changes.affectsConfiguration('python-envs.pythonProjects')
+        ) {
+            return;
+        }
+
+        activeEnvironmentByScope.forEach(({ scope, environment }, scopeKey) => {
+            watchEnvironment(scopeKey, scope, environment);
+        });
     });
 
     return new Disposable(() => {
         environmentChangeDisposable.dispose();
+        terminalActivationDisposable.dispose();
+        terminalCloseDisposable.dispose();
+        configurationChangeDisposable.dispose();
         sharedWatchers.forEach(({ disposable }) => disposable.dispose());
         sharedWatchers.clear();
-        activeWatcherByScope.clear();
+        activeWatcherByConsumer.clear();
+        activeEnvironmentByScope.clear();
     });
 }

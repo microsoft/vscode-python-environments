@@ -672,7 +672,7 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
                 safeRegister('shellStartupVars', shellStartupVarsMgr.initialize()),
             ]);
 
-            context.subscriptions.push(registerPackageWatchers(envManagers, outputChannel));
+            context.subscriptions.push(registerPackageWatchers(envManagers, terminalActivation, outputChannel));
 
             failureStage = 'envSelection';
             stageWatch.reset();
