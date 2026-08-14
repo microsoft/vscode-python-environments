@@ -1573,6 +1573,40 @@ suite('InlineScriptEnvManager', () => {
             restarted.dispose();
         });
 
+        test('preserves and retries a cold association when resolution rejects', async () => {
+            const uri = scriptUri();
+            const environment = await createOwnedEnvironment();
+            persistedAssociations = { [normalizePath(uri.fsPath)]: environment.environmentPath.fsPath };
+            resolveVenvStub.onFirstCall().rejects(new Error('resolver unavailable'));
+            resolveVenvStub.onSecondCall().resolves(environment);
+
+            assert.strictEqual(await manager.get(uri), undefined);
+            assert.deepStrictEqual(persistedAssociations, {
+                [normalizePath(uri.fsPath)]: environment.environmentPath.fsPath,
+            });
+            assert.strictEqual(await manager.get(uri), environment);
+        });
+
+        test('preserves and retries a cold association when ownership inspection rejects', async () => {
+            const uri = scriptUri();
+            const environment = await createOwnedEnvironment();
+            persistedAssociations = { [normalizePath(uri.fsPath)]: environment.environmentPath.fsPath };
+            resolveVenvStub.resolves(environment);
+            const inspectionManager = manager as unknown as {
+                inspectAssociationOwnership(
+                    candidate: PythonEnvironment,
+                ): Promise<'expected' | 'stale' | 'uncertain'>;
+            };
+            const ownershipStub = sinon.stub(inspectionManager, 'inspectAssociationOwnership').callThrough();
+            ownershipStub.onFirstCall().rejects(new Error('filesystem unavailable'));
+
+            assert.strictEqual(await manager.get(uri), undefined);
+            assert.deepStrictEqual(persistedAssociations, {
+                [normalizePath(uri.fsPath)]: environment.environmentPath.fsPath,
+            });
+            assert.strictEqual(await manager.get(uri), environment);
+        });
+
         test('notifies when a slow persisted association finishes rehydrating', async () => {
             const uri = scriptUri();
             const environment = await createOwnedEnvironment();

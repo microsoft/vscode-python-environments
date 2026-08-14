@@ -570,13 +570,21 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
             return undefined;
         }
 
-        const resolved = await resolveVenvPythonEnvironmentPath(
-            environmentPath,
-            this.nativeFinder,
-            this.api,
-            this,
-            this.baseManager,
-        );
+        let resolved: PythonEnvironment | undefined;
+        try {
+            resolved = await resolveVenvPythonEnvironmentPath(
+                environmentPath,
+                this.nativeFinder,
+                this.api,
+                this,
+                this.baseManager,
+            );
+        } catch (error) {
+            this.log.warn(
+                `Unable to resolve persisted inline-script environment ${environmentPath}: ${getErrorMessage(error)}`,
+            );
+            return undefined;
+        }
         if (!resolved) {
             // PET/API resolution can fail transiently. Keep the association for a later retry.
             return undefined;
@@ -585,7 +593,15 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
         if (!this.isCurrentAssociationRevision(scriptPath, revision)) {
             return this.fsPathToEnv.get(scriptPath);
         }
-        const ownership = await this.inspectAssociationOwnership(resolved);
+        let ownership: CacheEnvironmentInspection;
+        try {
+            ownership = await this.inspectAssociationOwnership(resolved);
+        } catch (error) {
+            this.log.warn(
+                `Unable to inspect persisted inline-script environment ${environmentPath}: ${getErrorMessage(error)}`,
+            );
+            return undefined;
+        }
         if (ownership === 'stale') {
             await this.removeStalePersistedAssociation(scriptPath, environmentPath, revision, scriptUri);
             return undefined;

@@ -522,7 +522,6 @@ export class PythonEnvironmentManagers implements EnvironmentManagers {
                 });
             }
         } else {
-            const events: DidChangeEnvironmentEventArgs[] = [];
             if (Array.isArray(scope) && scope.every((s) => s instanceof Uri)) {
                 const groupedScopes = new Map<InternalEnvironmentManager, Uri[]>();
                 scope.forEach((uri) => {
@@ -532,6 +531,7 @@ export class PythonEnvironmentManagers implements EnvironmentManagers {
                     }
                 });
                 for (const [manager, uris] of groupedScopes) {
+                    const events: DidChangeEnvironmentEventArgs[] = [];
                     const selections = uris.map((uri) => this.beginPendingSelection(uri, manager));
                     await manager.set(uris);
                     await Promise.all(
@@ -551,8 +551,10 @@ export class PythonEnvironmentManagers implements EnvironmentManagers {
                             }
                         }),
                     );
+                    await this.fireActiveEnvironmentEvents(events);
                 }
             } else if (typeof scope === 'string' && scope === 'global') {
+                const events: DidChangeEnvironmentEventArgs[] = [];
                 const manager = this.getEnvironmentManager(undefined);
                 if (manager) {
                     const operation = this.beginSelectionOperation('global');
@@ -566,18 +568,7 @@ export class PythonEnvironmentManagers implements EnvironmentManagers {
                         }
                     }
                 }
-            }
-            if (events.length > 0) {
-                await new Promise<void>((resolve, reject) => {
-                    setImmediate(() => {
-                        try {
-                            events.forEach((e) => this._onDidChangeActiveEnvironment.fire(e));
-                            resolve();
-                        } catch (err) {
-                            reject(err);
-                        }
-                    });
-                });
+                await this.fireActiveEnvironmentEvents(events);
             }
         }
     }
@@ -768,8 +759,25 @@ export class PythonEnvironmentManagers implements EnvironmentManagers {
             return false;
         }
         return first.envId.managerId === INLINE_SCRIPT_MANAGER_ID
-            ? normalizePath(first.environmentPath.fsPath) === normalizePath(second.environmentPath.fsPath)
+            ? normalizePath(first.environmentPath.fsPath) === normalizePath(second.environmentPath.fsPath) &&
+                  first.version === second.version
             : first.envId.id === second.envId.id;
+    }
+
+    private async fireActiveEnvironmentEvents(events: readonly DidChangeEnvironmentEventArgs[]): Promise<void> {
+        if (events.length === 0) {
+            return;
+        }
+        await new Promise<void>((resolve, reject) => {
+            setImmediate(() => {
+                try {
+                    events.forEach((event) => this._onDidChangeActiveEnvironment.fire(event));
+                    resolve();
+                } catch (error) {
+                    reject(error);
+                }
+            });
+        });
     }
 
     getProjectEnvManagers(uris: Uri[]): InternalEnvironmentManager[] {

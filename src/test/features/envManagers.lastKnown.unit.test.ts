@@ -301,6 +301,68 @@ suite('PythonEnvironmentManagers getLastKnownEnvironment', () => {
         assert.deepStrictEqual(events.map((event) => event.new), [first, second]);
     });
 
+    test('publishes same-path inline rebuilds but ignores generated-ID-only changes', async () => {
+        const scope = Uri.file('/workspace/script.py');
+        const managerId = registerManager(async () => undefined, async () => undefined, 'inline-script');
+        const environmentPath = Uri.file('/env/inline/python');
+        const first = {
+            ...makeEnv('first'),
+            envId: { id: 'first', managerId },
+            environmentPath,
+            version: '3.12.0',
+        };
+        const regenerated = {
+            ...first,
+            envId: { id: 'regenerated', managerId },
+        };
+        const rebuilt = {
+            ...regenerated,
+            envId: { id: 'rebuilt', managerId },
+            version: '3.13.0',
+        };
+        const events: DidChangeEnvironmentEventArgs[] = [];
+        envManagers.onDidChangeActiveEnvironment((event) => events.push(event));
+
+        await envManagers.setEnvironment(scope, first, false);
+        await envManagers.setEnvironment(scope, regenerated, false);
+        await envManagers.setEnvironment(scope, rebuilt, false);
+
+        assert.strictEqual(envManagers.getLastKnownEnvironment(scope), rebuilt);
+        assert.deepStrictEqual(events.map((event) => event.new), [first, rebuilt]);
+    });
+
+    test('publishes completed manager groups before a later group rejects', async () => {
+        const firstScope = Uri.file('/workspace/first.py');
+        const secondScope = Uri.file('/workspace/second.py');
+        const firstProject = { name: 'first.py', uri: firstScope };
+        const secondProject = { name: 'second.py', uri: secondScope };
+        projectsByUri.set(firstScope.toString(), firstProject);
+        projectsByUri.set(secondScope.toString(), secondProject);
+        const firstSet = sinon.stub().resolves();
+        const firstId = registerManager(async () => undefined, firstSet, 'first-manager');
+        const secondSet = sinon.stub();
+        secondSet.onFirstCall().resolves();
+        secondSet.onSecondCall().rejects(new Error('second group rejected'));
+        const secondId = registerManager(async () => undefined, secondSet, 'second-manager');
+        const firstEnvironment = { ...makeEnv('first'), envId: { id: 'first', managerId: firstId } };
+        const secondEnvironment = { ...makeEnv('second'), envId: { id: 'second', managerId: secondId } };
+        await envManagers.setEnvironment(firstScope, firstEnvironment, false);
+        await envManagers.setEnvironment(secondScope, secondEnvironment, false);
+        exactManagerSettings.set(firstScope.toString(), firstId);
+        exactManagerSettings.set(secondScope.toString(), secondId);
+        const events: DidChangeEnvironmentEventArgs[] = [];
+        envManagers.onDidChangeActiveEnvironment((event) => events.push(event));
+
+        await assert.rejects(
+            envManagers.setEnvironments([firstScope, secondScope], undefined, false),
+            /second group rejected/,
+        );
+
+        assert.strictEqual(envManagers.getLastKnownEnvironment(firstScope), undefined);
+        assert.strictEqual(envManagers.getLastKnownEnvironment(secondScope), secondEnvironment);
+        assert.deepStrictEqual(events, [{ uri: firstScope, old: firstEnvironment, new: undefined }]);
+    });
+
     test('tracks inline-script selections independently for scripts in the same project', async () => {
         const firstUri = Uri.file('/workspace/first.py');
         const secondUri = Uri.file('/workspace/second.py');
