@@ -1,5 +1,5 @@
 import type { Pep440Version } from '@renovatebot/pep440';
-import { CancellationError, Disposable, Event, LogOutputChannel, MarkdownString, Uri } from 'vscode';
+import { CancellationError, Disposable, Event, LogOutputChannel, MarkdownString, RelativePattern, Uri } from 'vscode';
 import {
     CreateEnvironmentOptions,
     CreateEnvironmentScope,
@@ -379,6 +379,10 @@ export class InternalPackageManager implements PackageManager {
 
     getPackages(environment: PythonEnvironment, options?: GetPackagesOptions): Promise<Package[] | undefined> {
         return this.manager.getPackages(environment, options);
+    }
+
+    getPackageWatchTargets(environment: PythonEnvironment): RelativePattern[] {
+        return this.manager.getPackageWatchTargets?.(environment) ?? [];
     }
 
     onDidChangePackages(handler: (e: DidChangePackagesEventArgs) => void): Disposable {

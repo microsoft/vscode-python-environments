@@ -86,7 +86,6 @@ import { cleanupStartupScripts } from './features/terminal/shellStartupSetupHand
 import { TerminalActivationImpl } from './features/terminal/terminalActivationState';
 import { TerminalEnvVarInjector } from './features/terminal/terminalEnvVarInjector';
 import { TerminalManager, TerminalManagerImpl } from './features/terminal/terminalManager';
-import { registerTerminalPackageWatcher } from './features/terminal/terminalPackageWatcher';
 import { getEnvironmentForTerminal } from './features/terminal/utils';
 import { openSearchSettings } from './features/views/envManagerSearch';
 import { EnvManagerView } from './features/views/envManagersView';
@@ -94,11 +93,11 @@ import { ProjectView } from './features/views/projectView';
 import { PythonStatusBarImpl } from './features/views/pythonStatusBar';
 import { updateViewsAndStatus } from './features/views/revealHandler';
 import { TemporaryStateManager } from './features/views/temporaryStateManager';
-import { ProjectItem, PythonEnvTreeItem } from './features/views/treeViewItems';
+import { PythonEnvTreeItem } from './features/views/treeViewItems';
 import { collectEnvironmentInfo, getEnvManagerAndPackageManagerConfigLevels, runPetInTerminalImpl } from './helpers';
 import { EnvironmentManagers, ProjectCreators, PythonProjectManager } from './internal.api';
-import { registerSystemPythonFeatures } from './managers/builtin/main';
 import { registerInlineScriptFeatures } from './managers/builtin/inlineScript/main';
+import { registerSystemPythonFeatures } from './managers/builtin/main';
 import { SysPythonManager } from './managers/builtin/sysPythonManager';
 import {
     createNativePythonFinder,
@@ -106,6 +105,7 @@ import {
     getNativePythonToolsVersion,
     NativePythonFinder,
 } from './managers/common/nativePythonFinder';
+import { registerPackageWatchers } from './managers/common/packageWatcher';
 import { IDisposable } from './managers/common/types';
 import { registerCondaFeatures } from './managers/conda/main';
 import { registerPipenvFeatures } from './managers/pipenv/main';
@@ -364,17 +364,7 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
             });
         }),
         commands.registerCommand('python-envs.removePythonProject', async (item) => {
-            // Clear environment association before removing project
-            if (item instanceof ProjectItem) {
-                const uri = item.project.uri;
-                const manager = envManagers.getEnvironmentManager(uri);
-                if (manager) {
-                    manager.set(uri, undefined);
-                } else {
-                    traceError(`No environment manager found for ${uri.fsPath}`);
-                }
-            }
-            await removePythonProject(item, projectManager);
+            await removePythonProject(item, projectManager, envManagers);
         }),
         commands.registerCommand('python-envs.clearCache', async () => {
             await clearPersistentState();
@@ -672,6 +662,8 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
                 safeRegister('shellStartupVars', shellStartupVarsMgr.initialize()),
             ]);
 
+            context.subscriptions.push(registerPackageWatchers(envManagers, terminalActivation, outputChannel));
+
             failureStage = 'envSelection';
             stageWatch.reset();
             await applyInitialEnvironmentSelection(
@@ -682,11 +674,6 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
                 start.elapsedTime,
                 globalScopeDeferredRef,
             );
-
-            // Register manager-agnostic terminal watcher for package-modifying commands
-            failureStage = 'terminalWatcher';
-            stageWatch.reset();
-            registerTerminalPackageWatcher(api, terminalActivation, outputChannel, context.subscriptions);
 
             // Register listener for interpreter settings changes for interpreter re-selection
             failureStage = 'settingsListener';
