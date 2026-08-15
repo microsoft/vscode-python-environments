@@ -16,7 +16,7 @@ export async function registerPoetryFeatures(
     const api: PythonEnvironmentApi = await getPythonApi();
 
     traceInfo('Registering poetry manager (environments will be discovered lazily)');
-    const envManager = new PoetryManager(nativeFinder, api, projectManager);
+    const envManager = new PoetryManager(nativeFinder, api, outputChannel, projectManager);
     const pkgManager = new PoetryPackageManager(api, outputChannel, envManager);
 
     disposables.push(
