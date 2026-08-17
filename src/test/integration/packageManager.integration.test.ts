@@ -1,8 +1,10 @@
 import * as vscode from 'vscode';
 
 import assert from 'assert';
-import { PythonEnvironment, PythonEnvironmentApi } from '../../api';
-import { CONDA_MANAGER_ID, VENV_MANAGER_ID } from '../../common/constants';
+import * as path from 'path';
+import { PythonEnvironment, PythonEnvironmentApi, PythonProject } from '../../api';
+import { CONDA_MANAGER_ID, DEFAULT_PACKAGE_MANAGER_ID, VENV_MANAGER_ID } from '../../common/constants';
+import { PythonProjectSettings } from '../../internal.api';
 import { isUvInstalled } from '../../managers/builtin/helpers';
 import { ENVS_EXTENSION_ID } from '../constants';
 import { waitForCondition } from '../testUtils';
@@ -10,6 +12,8 @@ import { waitForCondition } from '../testUtils';
 interface PackageManagerProfile {
     environmentManagerId: string;
     name: string;
+    packageManagerId: string;
+    projectDirectory: string;
     alwaysUseUv?: boolean;
 }
 
@@ -17,16 +21,22 @@ const profiles: PackageManagerProfile[] = [
     {
         environmentManagerId: VENV_MANAGER_ID,
         name: 'Pip',
+        packageManagerId: DEFAULT_PACKAGE_MANAGER_ID,
+        projectDirectory: 'pip',
         alwaysUseUv: false,
     },
     {
         environmentManagerId: VENV_MANAGER_ID,
         name: 'Pip with uv',
+        packageManagerId: DEFAULT_PACKAGE_MANAGER_ID,
+        projectDirectory: 'pip-uv',
         alwaysUseUv: true,
     },
     {
         environmentManagerId: CONDA_MANAGER_ID,
         name: 'Conda',
+        packageManagerId: CONDA_MANAGER_ID,
+        projectDirectory: 'conda',
     },
 ];
 
@@ -36,11 +46,12 @@ for (const profile of profiles) {
 
         let api: PythonEnvironmentApi;
         let environment: PythonEnvironment | undefined;
+        let project: PythonProject | undefined;
         let workspaceUri: vscode.Uri;
-        let previousDefaultEnvManager: string | undefined;
-        let defaultEnvManagerUpdated = false;
         let previousAlwaysUseUv: boolean | undefined;
         let alwaysUseUvUpdated = false;
+        let previousPythonProjects: PythonProjectSettings[] | undefined;
+        let pythonProjectsUpdated = false;
         suiteSetup(async function () {
             const extension = vscode.extensions.getExtension(ENVS_EXTENSION_ID);
             assert.ok(extension, 'Extension not found');
@@ -61,23 +72,47 @@ for (const profile of profiles) {
                 return;
             }
 
-            previousDefaultEnvManager = config.inspect<string>('defaultEnvManager')?.workspaceValue;
-            await config.update(
-                'defaultEnvManager',
-                profile.environmentManagerId,
-                vscode.ConfigurationTarget.Workspace,
-            );
-            defaultEnvManagerUpdated = true;
-
             if (profile.alwaysUseUv !== undefined) {
                 previousAlwaysUseUv = config.inspect<boolean>('alwaysUseUv')?.globalValue;
                 await config.update('alwaysUseUv', profile.alwaysUseUv, vscode.ConfigurationTarget.Global);
                 alwaysUseUvUpdated = true;
             }
 
-            await api.refreshEnvironments(workspaceUri);
+            const projectUri = vscode.Uri.joinPath(
+                workspaceUri,
+                `.package-manager-test-${profile.projectDirectory}-${process.pid}`,
+            );
+            await vscode.workspace.fs.createDirectory(projectUri);
+            project = {
+                name: `${profile.name} Package Manager Test`,
+                uri: projectUri,
+            };
+            previousPythonProjects = config.inspect<PythonProjectSettings[]>('pythonProjects')?.workspaceFolderValue;
+            const pythonProjects = config.get<PythonProjectSettings[]>('pythonProjects', []);
+            const projectSetting: PythonProjectSettings = {
+                path: path.relative(workspaceUri.fsPath, projectUri.fsPath).replace(/\\/g, '/'),
+                envManager: profile.environmentManagerId,
+                packageManager: profile.packageManagerId,
+                workspace: workspaceFolder.name,
+            };
+            await config.update(
+                'pythonProjects',
+                [...pythonProjects, projectSetting],
+                vscode.ConfigurationTarget.WorkspaceFolder,
+            );
+            pythonProjectsUpdated = true;
+            await waitForCondition(
+                () =>
+                    api
+                        .getPythonProjects()
+                        .some((registeredProject) => registeredProject.uri.toString() === projectUri.toString()),
+                10_000,
+                `Python project was not registered: ${projectUri.fsPath}`,
+            );
 
-            environment = await api.createEnvironment(workspaceUri, { quickCreate: true });
+            await api.refreshEnvironments(projectUri);
+
+            environment = await api.createEnvironment(projectUri, { quickCreate: true });
             if (!environment) {
                 this.skip();
                 return;
@@ -126,16 +161,40 @@ for (const profile of profiles) {
             } finally {
                 const config = vscode.workspace.getConfiguration('python-envs', workspaceUri);
                 try {
-                    if (alwaysUseUvUpdated) {
-                        await config.update('alwaysUseUv', previousAlwaysUseUv, vscode.ConfigurationTarget.Global);
+                    if (project) {
+                        try {
+                            await api.setEnvironment(project.uri, undefined);
+                        } finally {
+                            try {
+                                if (pythonProjectsUpdated) {
+                                    await config.update(
+                                        'pythonProjects',
+                                        previousPythonProjects,
+                                        vscode.ConfigurationTarget.WorkspaceFolder,
+                                    );
+                                    await waitForCondition(
+                                        () =>
+                                            !api
+                                                .getPythonProjects()
+                                                .some(
+                                                    (registeredProject) =>
+                                                        registeredProject.uri.toString() === project!.uri.toString(),
+                                                ),
+                                        10_000,
+                                        `Python project was not unregistered: ${project.uri.fsPath}`,
+                                    );
+                                }
+                            } finally {
+                                await vscode.workspace.fs.delete(project.uri, {
+                                    recursive: true,
+                                    useTrash: false,
+                                });
+                            }
+                        }
                     }
                 } finally {
-                    if (defaultEnvManagerUpdated) {
-                        await config.update(
-                            'defaultEnvManager',
-                            previousDefaultEnvManager,
-                            vscode.ConfigurationTarget.Workspace,
-                        );
+                    if (alwaysUseUvUpdated) {
+                        await config.update('alwaysUseUv', previousAlwaysUseUv, vscode.ConfigurationTarget.Global);
                     }
                 }
             }
