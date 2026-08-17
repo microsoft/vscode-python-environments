@@ -100,6 +100,7 @@ export class CondaPackageManager implements PackageManager, Disposable {
                             await showErrorMessageWithLogs(CondaStrings.condaInstallError, this.log);
                         });
                     }
+                    throw e;
                 }
             },
         );
