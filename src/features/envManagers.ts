@@ -10,7 +10,7 @@ import {
     PythonProject,
     SetEnvironmentScope,
 } from '../api';
-import { SYSTEM_MANAGER_ID } from '../common/constants';
+import { INLINE_SCRIPT_MANAGER_ID, SYSTEM_MANAGER_ID } from '../common/constants';
 import {
     EnvironmentManagerAlreadyRegisteredError,
     PackageManagerAlreadyRegisteredError,
@@ -20,6 +20,7 @@ import { StopWatch } from '../common/stopWatch';
 import { EventNames } from '../common/telemetry/constants';
 import { sendTelemetryEvent } from '../common/telemetry/sender';
 import { getCallingExtension } from '../common/utils/frameUtils';
+import { normalizePath } from '../common/utils/pathUtils';
 import {
     DidChangeEnvironmentManagerEventArgs,
     DidChangePackageManagerEventArgs,
@@ -37,6 +38,7 @@ import {
     EditAllManagerSettings,
     getDefaultEnvManagerSetting,
     getDefaultPkgManagerSetting,
+    getProjectEnvironmentManagerSetting,
     setAllManagerSettings,
 } from './settings/settingHelpers';
 
@@ -62,6 +64,8 @@ export class PythonEnvironmentManagers implements EnvironmentManagers {
      * Only mutated by setEnvironment() / setEnvironments() / refreshEnvironment().
      */
     private readonly _activeSelection = new Map<string, PythonEnvironment | undefined>();
+    private readonly _selectionRevisions = new Map<string, number>();
+    private readonly _selectionOperationCounters = new Map<string, number>();
 
     private _onDidChangeEnvironmentManager = new EventEmitter<DidChangeEnvironmentManagerEventArgs>();
     private _onDidChangePackageManager = new EventEmitter<DidChangePackageManagerEventArgs>();
@@ -114,7 +118,7 @@ export class PythonEnvironmentManagers implements EnvironmentManagers {
                 );
             }),
             mgr.onDidChangeEnvironment((e: DidChangeEnvironmentEventArgs) => {
-                if (e.old?.envId.id === e.new?.envId.id) {
+                if (this.isSameEnvironment(e.old, e.new)) {
                     return;
                 }
 
@@ -193,10 +197,11 @@ export class PythonEnvironmentManagers implements EnvironmentManagers {
      * Returns the environment manager for the given context.
      *
      * Priority:
-     * 1. Use the default from settings (user-configured takes precedence)
-     * 2. If no user-configured setting, fall back to cached environment's manager
-     * 3. If context is a string (manager ID), return that manager directly
-     * 4. If context is a PythonEnvironment, return its manager
+     * 1. Use an exact per-script project setting.
+     * 2. Use a cached per-script inline selection.
+     * 3. Use the containing project or default setting.
+     * 4. Fall back to the cached project/global environment's manager.
+     * 5. If context is a string or PythonEnvironment, return its manager directly.
      */
     public getEnvironmentManager(context: EnvironmentManagerScope): InternalEnvironmentManager | undefined {
         if (this._environmentManagers.size === 0) {
@@ -205,7 +210,31 @@ export class PythonEnvironmentManagers implements EnvironmentManagers {
         }
 
         if (context === undefined || context instanceof Uri) {
-            // First check settings - user-configured settings always take priority
+            const project = context ? this.pm.get(context) : undefined;
+            if (
+                context instanceof Uri &&
+                project &&
+                normalizePath(project.uri.fsPath) === normalizePath(context.fsPath)
+            ) {
+                const exactManagerId = getProjectEnvironmentManagerSetting(this.pm, context);
+                const exactManager = exactManagerId
+                    ? this._environmentManagers.get(exactManagerId)
+                    : undefined;
+                if (exactManager) {
+                    return exactManager;
+                }
+            }
+
+            if (context instanceof Uri) {
+                const inlineEnv = this._activeSelection.get(this.getInlineScriptSelectionKey(context));
+                if (inlineEnv?.envId.managerId === INLINE_SCRIPT_MANAGER_ID) {
+                    const inlineManager = this._environmentManagers.get(INLINE_SCRIPT_MANAGER_ID);
+                    if (inlineManager) {
+                        return inlineManager;
+                    }
+                }
+            }
+
             const defaultEnvManagerId = getDefaultEnvManagerSetting(this.pm, context);
             if (defaultEnvManagerId !== undefined) {
                 const settingsManager = this._environmentManagers.get(defaultEnvManagerId);
@@ -214,10 +243,7 @@ export class PythonEnvironmentManagers implements EnvironmentManagers {
                 }
             }
 
-            // Fall back to cached environment's manager if no user-configured settings
-            const project = context ? this.pm.get(context) : undefined;
-            const key = project ? project.uri.toString() : 'global';
-            const cachedEnv = this._activeSelection.get(key);
+            const cachedEnv = this._activeSelection.get(project ? project.uri.toString() : 'global');
             if (cachedEnv) {
                 const cachedManager = this._environmentManagers.get(cachedEnv.envId.managerId);
                 if (cachedManager) {
@@ -335,13 +361,23 @@ export class PythonEnvironmentManagers implements EnvironmentManagers {
             traceError(this.managers.map((m) => m.id).join(', '));
             return;
         }
+        const project = scope ? this.pm.get(scope) : undefined;
+        const key = this.getActiveSelectionKey(scope, manager, project);
+        const operation = this.beginSelectionOperation(key);
+        const inlineClearOperation =
+            scope instanceof Uri && manager.id !== INLINE_SCRIPT_MANAGER_ID
+                ? this.beginSelectionOperation(this.getInlineScriptSelectionKey(scope))
+                : undefined;
         await manager.set(scope, environment);
 
-        const project = scope ? this.pm.get(scope) : undefined;
         // Only persist to settings when explicitly requested
         if (shouldPersistSettings && scope) {
             const packageManager = this.getPackageManager(environment);
-            if (project && packageManager) {
+            const canPersistSettings =
+                project &&
+                packageManager &&
+                this.canPersistManagerSettingForScope(scope, manager, project);
+            if (canPersistSettings) {
                 await setAllManagerSettings([
                     {
                         project,
@@ -354,20 +390,25 @@ export class PythonEnvironmentManagers implements EnvironmentManagers {
                 `[setEnvironment] scope=${scope instanceof Uri ? scope.fsPath : scope}, ` +
                     `env=${environment?.envId?.id ?? 'undefined'}, manager=${manager.id}, ` +
                     `project=${project?.uri?.toString() ?? 'none'}, ` +
-                    `packageManager=${this.getPackageManager(environment)?.id ?? 'UNDEFINED'}, ` +
-                    `settingsPersisted=${!!(project && this.getPackageManager(environment))}`,
+                    `packageManager=${packageManager?.id ?? 'UNDEFINED'}, ` +
+                    `settingsPersisted=${!!canPersistSettings}`,
             );
         }
 
-        const key = project ? project.uri.toString() : 'global';
+        if (scope instanceof Uri) {
+            this.clearInlineActiveSelection(scope, manager, inlineClearOperation);
+        }
+        if (!this.commitSelectionOperation(key, operation)) {
+            return;
+        }
         const oldEnv = this._activeSelection.get(key);
-        if (oldEnv?.envId.id !== environment?.envId.id) {
+        if (!this.isSameEnvironment(oldEnv, environment)) {
             this._activeSelection.set(key, environment);
             await new Promise<void>((resolve, reject) => {
                 setImmediate(() => {
                     try {
                         this._onDidChangeActiveEnvironment.fire({
-                            uri: project?.uri,
+                            uri: this.getActiveSelectionUri(scope, manager, project),
                             new: environment,
                             old: oldEnv,
                         });
@@ -407,33 +448,47 @@ export class PythonEnvironmentManagers implements EnvironmentManagers {
                 return;
             }
 
-            const promises: Promise<void>[] = [];
             const settings: EditAllManagerSettings[] = [];
             const events: DidChangeEnvironmentEventArgs[] = [];
             if (Array.isArray(scope) && scope.every((s) => s instanceof Uri)) {
-                promises.push(manager.set(scope, environment));
-                scope.forEach((uri) => {
-                    const m = this.getEnvironmentManager(uri);
+                const selections = scope.map((uri) => this.beginPendingSelection(uri, manager));
+                await manager.set(scope, environment);
+                selections.forEach((selection) => {
+                    const m = this.getEnvironmentManager(selection.scope);
                     // Always add settings when persisting, OR when manager differs
-                    if (shouldPersistSettings || manager.id !== m?.id) {
+                    if (
+                        (shouldPersistSettings || manager.id !== m?.id) &&
+                        this.canPersistManagerSettingForScope(selection.scope, manager, selection.project)
+                    ) {
                         settings.push({
-                            project: this.pm.get(uri),
+                            project: selection.project,
                             envManager: manager.id,
                             packageManager: manager.preferredPackageManagerId,
                         });
                     }
-
-                    const project = this.pm.get(uri);
-                    const key = project ? project.uri.toString() : 'global';
-                    const oldEnv = this._activeSelection.get(key);
-                    if (oldEnv?.envId.id !== environment?.envId.id) {
-                        this._activeSelection.set(key, environment);
-                        events.push({ uri: project?.uri, new: environment, old: oldEnv });
+                });
+                if (shouldPersistSettings) {
+                    await setAllManagerSettings(settings);
+                }
+                selections.forEach((selection) => {
+                    this.clearInlineActiveSelection(selection.scope, manager, selection.inlineClearOperation);
+                    if (!this.commitSelectionOperation(selection.key, selection.operation)) {
+                        return;
+                    }
+                    const oldEnv = this._activeSelection.get(selection.key);
+                    if (!this.isSameEnvironment(oldEnv, environment)) {
+                        this._activeSelection.set(selection.key, environment);
+                        events.push({
+                            uri: this.getActiveSelectionUri(selection.scope, manager, selection.project),
+                            new: environment,
+                            old: oldEnv,
+                        });
                     }
                 });
             } else if (typeof scope === 'string' && scope === 'global') {
                 const m = this.getEnvironmentManager(undefined);
-                promises.push(manager.set(undefined, environment));
+                const operation = this.beginSelectionOperation('global');
+                await manager.set(undefined, environment);
                 // Always add settings when persisting, OR when manager differs
                 if (shouldPersistSettings || manager.id !== m?.id) {
                     settings.push({
@@ -443,16 +498,16 @@ export class PythonEnvironmentManagers implements EnvironmentManagers {
                     });
                 }
 
-                const oldEnv = this._activeSelection.get('global');
-                if (oldEnv?.envId.id !== environment?.envId.id) {
-                    this._activeSelection.set('global', environment);
-                    events.push({ uri: undefined, new: environment, old: oldEnv });
+                if (shouldPersistSettings) {
+                    await setAllManagerSettings(settings);
                 }
-            }
-            await Promise.all(promises);
-            // Only persist to settings when explicitly requested
-            if (shouldPersistSettings) {
-                await setAllManagerSettings(settings);
+                if (this.commitSelectionOperation('global', operation)) {
+                    const oldEnv = this._activeSelection.get('global');
+                    if (!this.isSameEnvironment(oldEnv, environment)) {
+                        this._activeSelection.set('global', environment);
+                        events.push({ uri: undefined, new: environment, old: oldEnv });
+                    }
+                }
             }
             if (events.length > 0) {
                 await new Promise<void>((resolve, reject) => {
@@ -467,60 +522,53 @@ export class PythonEnvironmentManagers implements EnvironmentManagers {
                 });
             }
         } else {
-            const promises: Promise<void>[] = [];
-            const events: DidChangeEnvironmentEventArgs[] = [];
             if (Array.isArray(scope) && scope.every((s) => s instanceof Uri)) {
+                const groupedScopes = new Map<InternalEnvironmentManager, Uri[]>();
                 scope.forEach((uri) => {
                     const manager = this.getEnvironmentManager(uri);
                     if (manager) {
-                        const setAndAddEvent = async () => {
-                            await manager.set(uri);
-
-                            const project = this.pm.get(uri);
-
-                            // Always get the new first, then compare with the old. This has minor impact on the ordering of
-                            // events. But it ensures that we always get the latest environment at the time of this call.
-                            const newEnv = await manager.get(uri);
-                            const key = project ? project.uri.toString() : 'global';
-                            const oldEnv = this._activeSelection.get(key);
-                            if (oldEnv?.envId.id !== newEnv?.envId.id) {
-                                this._activeSelection.set(key, newEnv);
-                                events.push({ uri: project?.uri, new: newEnv, old: oldEnv });
-                            }
-                        };
-                        promises.push(setAndAddEvent());
+                        groupedScopes.set(manager, [...(groupedScopes.get(manager) ?? []), uri]);
                     }
                 });
+                for (const [manager, uris] of groupedScopes) {
+                    const events: DidChangeEnvironmentEventArgs[] = [];
+                    const selections = uris.map((uri) => this.beginPendingSelection(uri, manager));
+                    await manager.set(uris);
+                    await Promise.all(
+                        selections.map(async (selection) => {
+                            const newEnv = await manager.get(selection.scope);
+                            if (!this.commitSelectionOperation(selection.key, selection.operation)) {
+                                return;
+                            }
+                            const oldEnv = this._activeSelection.get(selection.key);
+                            if (!this.isSameEnvironment(oldEnv, newEnv)) {
+                                this._activeSelection.set(selection.key, newEnv);
+                                events.push({
+                                    uri: this.getActiveSelectionUri(selection.scope, manager, selection.project),
+                                    new: newEnv,
+                                    old: oldEnv,
+                                });
+                            }
+                        }),
+                    );
+                    await this.fireActiveEnvironmentEvents(events);
+                }
             } else if (typeof scope === 'string' && scope === 'global') {
+                const events: DidChangeEnvironmentEventArgs[] = [];
                 const manager = this.getEnvironmentManager(undefined);
                 if (manager) {
-                    const setAndAddEvent = async () => {
-                        await manager.set(undefined);
-
-                        // Always get the new first, then compare with the old. This has minor impact on the ordering of
-                        // events. But it ensures that we always get the latest environment at the time of this call.
-                        const newEnv = await manager.get(undefined);
+                    const operation = this.beginSelectionOperation('global');
+                    await manager.set(undefined);
+                    const newEnv = await manager.get(undefined);
+                    if (this.commitSelectionOperation('global', operation)) {
                         const oldEnv = this._activeSelection.get('global');
-                        if (oldEnv?.envId.id !== newEnv?.envId.id) {
+                        if (!this.isSameEnvironment(oldEnv, newEnv)) {
                             this._activeSelection.set('global', newEnv);
                             events.push({ uri: undefined, new: newEnv, old: oldEnv });
                         }
-                    };
-                    promises.push(setAndAddEvent());
+                    }
                 }
-            }
-            await Promise.all(promises);
-            if (events.length > 0) {
-                await new Promise<void>((resolve, reject) => {
-                    setImmediate(() => {
-                        try {
-                            events.forEach((e) => this._onDidChangeActiveEnvironment.fire(e));
-                            resolve();
-                        } catch (err) {
-                            reject(err);
-                        }
-                    });
-                });
+                await this.fireActiveEnvironmentEvents(events);
             }
         }
     }
@@ -593,22 +641,143 @@ export class PythonEnvironmentManagers implements EnvironmentManagers {
         }
 
         const project = scope ? this.pm.get(scope) : undefined;
+        const key = this.getActiveSelectionKey(scope, manager, project);
+        const operation = this.beginSelectionOperation(key);
         const newEnv = await manager.get(scope);
-
-        const key = project ? project.uri.toString() : 'global';
-        const oldEnv = this._activeSelection.get(key);
-        if (oldEnv?.envId.id !== newEnv?.envId.id) {
-            this._activeSelection.set(key, newEnv);
-            setImmediate(() =>
-                this._onDidChangeActiveEnvironment.fire({ uri: project?.uri, new: newEnv, old: oldEnv }),
-            );
+        if (this.getEnvironmentManager(scope) !== manager) {
+            return;
         }
+
+        const oldEnv = this._activeSelection.get(key);
+        if (this.isSameEnvironment(oldEnv, newEnv) || !this.commitSelectionOperation(key, operation)) {
+            return;
+        }
+        this._activeSelection.set(key, newEnv);
+        setImmediate(() =>
+            this._onDidChangeActiveEnvironment.fire({
+                uri: this.getActiveSelectionUri(scope, manager, project),
+                new: newEnv,
+                old: oldEnv,
+            }),
+        );
     }
 
     getLastKnownEnvironment(scope: GetEnvironmentScope): PythonEnvironment | undefined {
         const project = scope ? this.pm.get(scope) : undefined;
-        const key = project ? project.uri.toString() : 'global';
+        const manager = this.getEnvironmentManager(scope);
+        const key = this.getActiveSelectionKey(scope, manager, project);
         return this._activeSelection.get(key);
+    }
+
+    private getActiveSelectionKey(
+        scope: GetEnvironmentScope,
+        manager: InternalEnvironmentManager | undefined,
+        project: PythonProject | undefined,
+    ): string {
+        return scope instanceof Uri && manager?.id === INLINE_SCRIPT_MANAGER_ID
+            ? this.getInlineScriptSelectionKey(scope)
+            : project
+              ? project.uri.toString()
+              : 'global';
+    }
+
+    private getActiveSelectionUri(
+        scope: GetEnvironmentScope,
+        manager: InternalEnvironmentManager,
+        project: PythonProject | undefined,
+    ): Uri | undefined {
+        return scope instanceof Uri && manager.id === INLINE_SCRIPT_MANAGER_ID ? scope : project?.uri;
+    }
+
+    private getInlineScriptSelectionKey(scope: Uri): string {
+        return `inline-script:${normalizePath(scope.fsPath)}`;
+    }
+
+    private beginPendingSelection(scope: Uri, manager: InternalEnvironmentManager): PendingEnvironmentSelection {
+        const project = this.pm.get(scope);
+        const key = this.getActiveSelectionKey(scope, manager, project);
+        return {
+            scope,
+            project,
+            key,
+            operation: this.beginSelectionOperation(key),
+            inlineClearOperation:
+                manager.id === INLINE_SCRIPT_MANAGER_ID
+                    ? undefined
+                    : this.beginSelectionOperation(this.getInlineScriptSelectionKey(scope)),
+        };
+    }
+
+    private clearInlineActiveSelection(
+        scope: Uri,
+        manager: InternalEnvironmentManager,
+        operation: number | undefined,
+    ): void {
+        if (manager.id === INLINE_SCRIPT_MANAGER_ID || operation === undefined) {
+            return;
+        }
+        const key = this.getInlineScriptSelectionKey(scope);
+        if (this.commitSelectionOperation(key, operation)) {
+            this._activeSelection.delete(key);
+        }
+    }
+
+    private canPersistManagerSettingForScope(
+        scope: Uri,
+        manager: InternalEnvironmentManager,
+        project: PythonProject | undefined,
+    ): boolean {
+        // Inline associations are per file; never promote one to its containing project's manager setting.
+        return (
+            manager.id !== INLINE_SCRIPT_MANAGER_ID ||
+            (!!project && normalizePath(project.uri.fsPath) === normalizePath(scope.fsPath))
+        );
+    }
+
+    private beginSelectionOperation(key: string): number {
+        const operation = (this._selectionOperationCounters.get(key) ?? 0) + 1;
+        this._selectionOperationCounters.set(key, operation);
+        return operation;
+    }
+
+    private commitSelectionOperation(key: string, operation: number): boolean {
+        if ((this._selectionRevisions.get(key) ?? 0) > operation) {
+            return false;
+        }
+        this._selectionRevisions.set(key, operation);
+        return true;
+    }
+
+    private isSameEnvironment(
+        first: PythonEnvironment | undefined,
+        second: PythonEnvironment | undefined,
+    ): boolean {
+        if (first === second) {
+            return true;
+        }
+        if (!first || !second || first.envId.managerId !== second.envId.managerId) {
+            return false;
+        }
+        return first.envId.managerId === INLINE_SCRIPT_MANAGER_ID
+            ? normalizePath(first.environmentPath.fsPath) === normalizePath(second.environmentPath.fsPath) &&
+                  first.version === second.version
+            : first.envId.id === second.envId.id;
+    }
+
+    private async fireActiveEnvironmentEvents(events: readonly DidChangeEnvironmentEventArgs[]): Promise<void> {
+        if (events.length === 0) {
+            return;
+        }
+        await new Promise<void>((resolve, reject) => {
+            setImmediate(() => {
+                try {
+                    events.forEach((event) => this._onDidChangeActiveEnvironment.fire(event));
+                    resolve();
+                } catch (error) {
+                    reject(error);
+                }
+            });
+        });
     }
 
     getProjectEnvManagers(uris: Uri[]): InternalEnvironmentManager[] {
@@ -621,4 +790,12 @@ export class PythonEnvironmentManagers implements EnvironmentManagers {
         });
         return projectEnvManagers;
     }
+}
+
+interface PendingEnvironmentSelection {
+    readonly scope: Uri;
+    readonly project: PythonProject | undefined;
+    readonly key: string;
+    readonly operation: number;
+    readonly inlineClearOperation: number | undefined;
 }

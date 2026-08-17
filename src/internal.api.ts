@@ -1,5 +1,5 @@
 import type { Pep440Version } from '@renovatebot/pep440';
-import { CancellationError, Disposable, Event, LogOutputChannel, MarkdownString, Uri } from 'vscode';
+import { CancellationError, Disposable, Event, LogOutputChannel, MarkdownString, RelativePattern, Uri } from 'vscode';
 import {
     CreateEnvironmentOptions,
     CreateEnvironmentScope,
@@ -34,7 +34,7 @@ import { CreateEnvironmentNotSupported, RemoveEnvironmentNotSupported } from './
 import { traceWarn } from './common/logging';
 import { StopWatch } from './common/stopWatch';
 import { EventNames } from './common/telemetry/constants';
-import { classifyError } from './common/telemetry/errorClassifier';
+import { classifyError, isTimeoutErrorType } from './common/telemetry/errorClassifier';
 import { sendTelemetryEvent } from './common/telemetry/sender';
 
 export type EnvironmentManagerScope = undefined | string | Uri | PythonEnvironment;
@@ -242,7 +242,7 @@ export class InternalEnvironmentManager implements EnvironmentManager {
                 duration,
                 {
                     managerId: this.id,
-                    result: errorType === 'canceled' || errorType === 'spawn_timeout' ? 'timeout' : 'error',
+                    result: errorType === 'canceled' || isTimeoutErrorType(errorType) ? 'timeout' : 'error',
                     errorType,
                 },
                 ex instanceof Error ? ex : undefined,
@@ -372,12 +372,16 @@ export class InternalPackageManager implements PackageManager {
         }
     }
 
-    refresh(environment: PythonEnvironment): Promise<Package[] | undefined> {
+    refresh(environment: PythonEnvironment): Promise<void> {
         return this.manager.refresh(environment);
     }
 
     getPackages(environment: PythonEnvironment, options?: GetPackagesOptions): Promise<Package[] | undefined> {
         return this.manager.getPackages(environment, options);
+    }
+
+    getPackageWatchTargets(environment: PythonEnvironment): RelativePattern[] {
+        return this.manager.getPackageWatchTargets?.(environment) ?? [];
     }
 
     onDidChangePackages(handler: (e: DidChangePackagesEventArgs) => void): Disposable {

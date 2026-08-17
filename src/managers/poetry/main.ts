@@ -4,7 +4,6 @@ import { traceInfo } from '../../common/logging';
 import { getPythonApi } from '../../features/pythonApi';
 import { PythonProjectManager } from '../../internal.api';
 import { NativePythonFinder } from '../common/nativePythonFinder';
-import { registerPackageWatcherForManager } from '../common/packageWatcher';
 import { PoetryManager } from './poetryManager';
 import { PoetryPackageManager } from './poetryPackageManager';
 
@@ -25,6 +24,5 @@ export async function registerPoetryFeatures(
         pkgManager,
         api.registerEnvironmentManager(envManager),
         api.registerPackageManager(pkgManager),
-        registerPackageWatcherForManager(envManager, pkgManager, outputChannel),
     );
 }
