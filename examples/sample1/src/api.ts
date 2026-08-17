@@ -750,49 +750,62 @@ export interface GetPackagesOptions {
 }
 
 /**
- * Options for package management.
+ * Options controlling user interaction during package management operations.
  */
-export type PackageManagementOptions =
-    | {
-          /**
-           * Upgrade the packages if it is already installed.
-           */
-          upgrade?: boolean;
+export interface PackageManagementInteractionOptions {
+    /**
+     * When `true`, the package management operation runs without any user prompts or
+     * interaction and relies solely on the packages provided in the options. Any step
+     * that would normally require user input — such as selecting packages to install
+     * when none are specified — is skipped instead of prompting the user. Intended for
+     * automated or headless scenarios such as integration tests. Defaults to `false`.
+     */
+    runHeadless?: boolean;
+}
 
-          /**
-           * Show option to skip package installation
-           */
-          showSkipOption?: boolean;
-          /**
-           * The list of packages to install.
-           */
-          install: string[];
+export type PackageManagementOptions = PackageManagementInteractionOptions &
+    (
+        | {
+              /**
+               * Upgrade the packages if it is already installed.
+               */
+              upgrade?: boolean;
 
-          /**
-           * The list of packages to uninstall.
-           */
-          uninstall?: string[];
-      }
-    | {
-          /**
-           * Upgrade the packages if it is already installed.
-           */
-          upgrade?: boolean;
+              /**
+               * Show option to skip package installation or uninstallation.
+               */
+              showSkipOption?: boolean;
+              /**
+               * The list of packages to install.
+               */
+              install: string[];
 
-          /**
-           * Show option to skip package installation
-           */
-          showSkipOption?: boolean;
-          /**
-           * The list of packages to install.
-           */
-          install?: string[];
+              /**
+               * The list of packages to uninstall.
+               */
+              uninstall?: string[];
+          }
+        | {
+              /**
+               * Upgrade the packages if it is already installed.
+               */
+              upgrade?: boolean;
 
-          /**
-           * The list of packages to uninstall.
-           */
-          uninstall: string[];
-      };
+              /**
+               * Show option to skip package installation or uninstallation.
+               */
+              showSkipOption?: boolean;
+              /**
+               * The list of packages to install.
+               */
+              install?: string[];
+
+              /**
+               * The list of packages to uninstall.
+               */
+              uninstall: string[];
+          }
+    );
 
 /**
  * Options for creating a Python environment.
