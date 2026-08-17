@@ -755,7 +755,7 @@ function getCondaWithoutPython(name: string, prefix: string, conda: string): Pyt
         displayPath: prefix,
         description: prefix,
         tooltip: l10n.t('Conda environment without Python'),
-        version: 'no-python',
+        version: '',
         sysPrefix: prefix,
         iconPath: new ThemeIcon('stop'),
         execInfo: {
@@ -763,6 +763,10 @@ function getCondaWithoutPython(name: string, prefix: string, conda: string): Pyt
         },
         group: name.length > 0 ? 'Named' : 'Prefix',
     };
+}
+
+export function isCondaEnvWithoutPython(environment: PythonEnvironment): boolean {
+    return environment.version === '';
 }
 
 async function nativeToPythonEnv(
@@ -1388,7 +1392,7 @@ export async function checkForNoPythonCondaEnvironment(
     api: PythonEnvironmentApi,
     log: LogOutputChannel,
 ): Promise<PythonEnvironment | undefined> {
-    if (environment.version === 'no-python') {
+    if (isCondaEnvWithoutPython(environment)) {
         if (environment.sysPrefix === '') {
             await showErrorMessage(CondaStrings.condaMissingPythonNoFix, { modal: true });
             return undefined;

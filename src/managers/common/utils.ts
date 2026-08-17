@@ -46,10 +46,15 @@ export function sortEnvironments(collection: PythonEnvironment[]): PythonEnviron
             return -1;
         }
         if (a.version !== b.version) {
-            if (pep440Valid(a.version) && pep440Valid(b.version)) {
+            const aValid = pep440Valid(a.version);
+            const bValid = pep440Valid(b.version);
+            if (aValid && bValid) {
                 return pep440Compare(b.version, a.version); // descending
             }
-            return a.version ? 1 : -1;
+            if (aValid !== bValid) {
+                return aValid ? -1 : 1; // known versions before unknown ones
+            }
+            return a.version.localeCompare(b.version);
         }
         const value = a.name.localeCompare(b.name);
         if (value !== 0) {
@@ -69,7 +74,10 @@ export function getLatest(collection: PythonEnvironment[]): PythonEnvironment | 
 
     let latest = candidates[0];
     for (const env of candidates) {
-        if (pep440Valid(env.version) && pep440Valid(latest.version) && pep440Compare(env.version, latest.version) > 0) {
+        if (!pep440Valid(env.version)) {
+            continue;
+        }
+        if (!pep440Valid(latest.version) || pep440Compare(env.version, latest.version) > 0) {
             latest = env;
         }
     }
