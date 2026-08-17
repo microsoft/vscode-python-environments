@@ -1,10 +1,12 @@
 import * as vscode from 'vscode';
 
+import { compare } from '@renovatebot/pep440';
 import assert from 'assert';
 import * as path from 'path';
-import { PythonEnvironment, PythonEnvironmentApi, PythonProject } from '../../api';
+import { Package, PythonEnvironment, PythonEnvironmentApi, PythonProject } from '../../api';
 import { CONDA_MANAGER_ID, DEFAULT_PACKAGE_MANAGER_ID, VENV_MANAGER_ID } from '../../common/constants';
 import { PythonProjectSettings } from '../../internal.api';
+import { getConda } from '../../managers/conda/condaUtils';
 import { ENVS_EXTENSION_ID } from '../constants';
 import { waitForCondition } from '../testUtils';
 
@@ -15,6 +17,8 @@ interface PackageManagerProfile {
     name: string;
     packageManagerId: PackageManagerId;
     projectDirectory: string;
+    prerequisite(api: PythonEnvironmentApi): Promise<boolean>;
+    supportsVersionLookup(packages: Package[]): boolean;
 }
 
 const profiles: PackageManagerProfile[] = [
@@ -23,12 +27,27 @@ const profiles: PackageManagerProfile[] = [
         name: 'Pip',
         packageManagerId: DEFAULT_PACKAGE_MANAGER_ID,
         projectDirectory: 'pip',
+        prerequisite: async (api) =>
+            (await api.getEnvironments('global')).some((environment) => environment.version.startsWith('3.')),
+        supportsVersionLookup: (packages) => {
+            const pipVersion = packages.find((pkg) => pkg.name.toLowerCase() === 'pip')?.version;
+            return pipVersion !== undefined && compare(pipVersion, '21.2') >= 0;
+        },
     },
     {
         environmentManagerId: CONDA_MANAGER_ID,
         name: 'Conda',
         packageManagerId: CONDA_MANAGER_ID,
         projectDirectory: 'conda',
+        prerequisite: async () => {
+            try {
+                await getConda();
+                return true;
+            } catch {
+                return false;
+            }
+        },
+        supportsVersionLookup: () => true,
     },
 ];
 
@@ -86,6 +105,11 @@ for (const profile of profiles) {
         let previousPythonProjects: PythonProjectSettings[] | undefined;
         let pythonProjectsUpdated = false;
         suiteSetup(async function () {
+            if (process.env.VSC_PYTHON_PACKAGE_NETWORK_TEST !== '1') {
+                this.skip();
+                return;
+            }
+
             const extension = vscode.extensions.getExtension(ENVS_EXTENSION_ID);
             assert.ok(extension, 'Extension not found');
             if (!extension.isActive) {
@@ -99,6 +123,11 @@ for (const profile of profiles) {
             assert.ok(workspaceFolder, 'Integration test workspace not found');
             workspaceUri = workspaceFolder.uri;
             const config = vscode.workspace.getConfiguration('python-envs', workspaceUri);
+
+            if (!(await profile.prerequisite(api))) {
+                this.skip();
+                return;
+            }
 
             const projectUri = vscode.Uri.joinPath(
                 workspaceUri,
@@ -135,10 +164,7 @@ for (const profile of profiles) {
             await api.refreshEnvironments(projectUri);
 
             environment = await api.createEnvironment(projectUri, { quickCreate: true });
-            if (!environment) {
-                this.skip();
-                return;
-            }
+            assert.ok(environment, `${profile.name} failed to create an environment after prerequisites passed`);
             assert.strictEqual(
                 environment.envId.managerId,
                 profile.environmentManagerId,
@@ -147,24 +173,50 @@ for (const profile of profiles) {
         });
 
         test(`${profile.name} Package Manager should install, list, and uninstall a package`, async () => {
-            await api.managePackages(environment!, { install: ['requests'], runHeadless: true });
+            const packageName = 'requests';
+            const baseline = await api.getPackages(environment!, { skipCache: true });
+            assert.ok(baseline, 'Unable to list packages before installation');
+            const wasInstalled = baseline.some((pkg) => pkg.name.toLowerCase() === packageName);
+
+            if (!wasInstalled) {
+                await api.managePackages(environment!, { install: [packageName], runHeadless: true });
+            }
             let packages = await api.getPackages(environment!, { skipCache: true });
+            assert.ok(packages, 'Unable to list packages after installation');
             assert.ok(
-                packages?.some((pkg) => pkg.name === 'requests'),
+                packages.some((pkg) => pkg.name.toLowerCase() === packageName),
                 'Package not installed',
             );
 
-            await api.managePackages(environment!, { uninstall: ['requests'], runHeadless: true });
-            packages = await api.getPackages(environment!, { skipCache: true });
-            assert.ok(!packages?.some((pkg) => pkg.name === 'requests'), 'Package not uninstalled');
+            const directPackageNames = await vscode.commands.executeCommand<string[] | undefined>(
+                'python-envs.test.getDirectPackageNames',
+                environment!,
+            );
+            if (directPackageNames !== undefined) {
+                assert.ok(directPackageNames.includes(packageName), 'Installed package was not reported as direct');
+            }
+
+            if (!wasInstalled) {
+                await api.managePackages(environment!, { uninstall: [packageName], runHeadless: true });
+                packages = await api.getPackages(environment!, { skipCache: true });
+                assert.ok(packages, 'Unable to list packages after uninstallation');
+                assert.ok(
+                    !packages.some((pkg) => pkg.name.toLowerCase() === packageName),
+                    'Package not uninstalled',
+                );
+            }
         });
 
         test(`${profile.name} Package Manager should list available package versions`, async function () {
-            const versions = await api.getPackageAvailableVersions(environment!, 'requests');
-            if (versions === undefined) {
+            const packages = await api.getPackages(environment!, { skipCache: true });
+            assert.ok(packages, 'Unable to list packages before version lookup');
+            if (!profile.supportsVersionLookup(packages)) {
                 this.skip();
                 return;
             }
+
+            const versions = await api.getPackageAvailableVersions(environment!, 'requests');
+            assert.ok(versions, `${profile.name} unexpectedly failed to retrieve package versions`);
             assert.ok(versions.length > 0, 'No package versions available');
         });
 

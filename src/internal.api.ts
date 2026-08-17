@@ -406,6 +406,12 @@ export class InternalPackageManager implements PackageManager {
             : Promise.resolve(undefined);
     }
 
+    getDirectPackageNames(environment: PythonEnvironment): Promise<Set<string> | undefined> {
+        return this.manager.getDirectPackageNames
+            ? this.manager.getDirectPackageNames(environment)
+            : Promise.resolve(undefined);
+    }
+
     formatInstallSpec(packageName: string, version: string): string {
         return this.manager.formatInstallSpec
             ? this.manager.formatInstallSpec(packageName, version)

@@ -263,6 +263,14 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
                   commands.registerCommand('python-envs.test.getPackageManagerIds', () =>
                       envManagers.packageManagers.map((manager) => manager.id),
                   ),
+                  commands.registerCommand(
+                      'python-envs.test.getDirectPackageNames',
+                      async (environment: PythonEnvironment) => {
+                          const manager = envManagers.getPackageManager(environment);
+                          const names = await manager?.getDirectPackageNames?.(environment);
+                          return names ? Array.from(names) : undefined;
+                      },
+                  ),
               ]
             : []),
         commands.registerCommand('python-envs.searchSettings', async () => {
