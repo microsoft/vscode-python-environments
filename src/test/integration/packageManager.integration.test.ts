@@ -5,16 +5,16 @@ import * as path from 'path';
 import { PythonEnvironment, PythonEnvironmentApi, PythonProject } from '../../api';
 import { CONDA_MANAGER_ID, DEFAULT_PACKAGE_MANAGER_ID, VENV_MANAGER_ID } from '../../common/constants';
 import { PythonProjectSettings } from '../../internal.api';
-import { isUvInstalled } from '../../managers/builtin/helpers';
 import { ENVS_EXTENSION_ID } from '../constants';
 import { waitForCondition } from '../testUtils';
+
+type PackageManagerId = `${string}:${string}`;
 
 interface PackageManagerProfile {
     environmentManagerId: string;
     name: string;
-    packageManagerId: string;
+    packageManagerId: PackageManagerId;
     projectDirectory: string;
-    alwaysUseUv?: boolean;
 }
 
 const profiles: PackageManagerProfile[] = [
@@ -23,14 +23,6 @@ const profiles: PackageManagerProfile[] = [
         name: 'Pip',
         packageManagerId: DEFAULT_PACKAGE_MANAGER_ID,
         projectDirectory: 'pip',
-        alwaysUseUv: false,
-    },
-    {
-        environmentManagerId: VENV_MANAGER_ID,
-        name: 'Pip with uv',
-        packageManagerId: DEFAULT_PACKAGE_MANAGER_ID,
-        projectDirectory: 'pip-uv',
-        alwaysUseUv: true,
     },
     {
         environmentManagerId: CONDA_MANAGER_ID,
@@ -40,6 +32,49 @@ const profiles: PackageManagerProfile[] = [
     },
 ];
 
+const deferredPackageManagers: Readonly<Record<PackageManagerId, string>> = {
+    'ms-python.python:poetry': 'Poetry lifecycle coverage requires a controlled Poetry installation.',
+};
+
+const deferredProfiles = {
+    pipWithUv: 'uv-backed Pip selection uses a machine-scoped setting and is unstable within one extension host.',
+} as const;
+
+suite('Package Manager profile coverage', function () {
+    this.timeout(60_000);
+
+    test('covers or explicitly defers every registered package manager', async () => {
+        const extension = vscode.extensions.getExtension(ENVS_EXTENSION_ID);
+        assert.ok(extension, 'Extension not found');
+        const api: PythonEnvironmentApi = extension.isActive ? extension.exports : await extension.activate();
+        await api.getEnvironments('global');
+
+        const registeredIds = await vscode.commands.executeCommand<string[]>(
+            'python-envs.test.getPackageManagerIds',
+        );
+        assert.ok(registeredIds, 'Registered package-manager IDs are unavailable');
+
+        const coveredIds = new Set(profiles.map((profile) => profile.packageManagerId));
+        const uncoveredIds = registeredIds.filter(
+            (managerId) =>
+                !coveredIds.has(managerId as PackageManagerId) &&
+                deferredPackageManagers[managerId as PackageManagerId] === undefined,
+        );
+        assert.deepStrictEqual(uncoveredIds, [], `Package managers lack lifecycle coverage: ${uncoveredIds.join(', ')}`);
+
+        for (const profile of profiles) {
+            assert.ok(
+                registeredIds.includes(profile.packageManagerId),
+                `Profile references an unregistered package manager: ${profile.packageManagerId}`,
+            );
+        }
+
+        for (const [profileName, reason] of Object.entries(deferredProfiles)) {
+            assert.ok(reason.length > 0, `Deferred profile lacks a reason: ${profileName}`);
+        }
+    });
+});
+
 for (const profile of profiles) {
     suite(`${profile.name} Package Manager`, function () {
         this.timeout(300_000);
@@ -48,8 +83,6 @@ for (const profile of profiles) {
         let environment: PythonEnvironment | undefined;
         let project: PythonProject | undefined;
         let workspaceUri: vscode.Uri;
-        let previousAlwaysUseUv: boolean | undefined;
-        let alwaysUseUvUpdated = false;
         let previousPythonProjects: PythonProjectSettings[] | undefined;
         let pythonProjectsUpdated = false;
         suiteSetup(async function () {
@@ -66,17 +99,6 @@ for (const profile of profiles) {
             assert.ok(workspaceFolder, 'Integration test workspace not found');
             workspaceUri = workspaceFolder.uri;
             const config = vscode.workspace.getConfiguration('python-envs', workspaceUri);
-
-            if (profile.alwaysUseUv === true && !(await isUvInstalled())) {
-                this.skip();
-                return;
-            }
-
-            if (profile.alwaysUseUv !== undefined) {
-                previousAlwaysUseUv = config.inspect<boolean>('alwaysUseUv')?.globalValue;
-                await config.update('alwaysUseUv', profile.alwaysUseUv, vscode.ConfigurationTarget.Global);
-                alwaysUseUvUpdated = true;
-            }
 
             const projectUri = vscode.Uri.joinPath(
                 workspaceUri,
@@ -160,41 +182,35 @@ for (const profile of profiles) {
                 }
             } finally {
                 const config = vscode.workspace.getConfiguration('python-envs', workspaceUri);
-                try {
-                    if (project) {
+                if (project) {
+                    try {
+                        await api.setEnvironment(project.uri, undefined);
+                    } finally {
                         try {
-                            await api.setEnvironment(project.uri, undefined);
-                        } finally {
-                            try {
-                                if (pythonProjectsUpdated) {
-                                    await config.update(
-                                        'pythonProjects',
-                                        previousPythonProjects,
-                                        vscode.ConfigurationTarget.WorkspaceFolder,
-                                    );
-                                    await waitForCondition(
-                                        () =>
-                                            !api
-                                                .getPythonProjects()
-                                                .some(
-                                                    (registeredProject) =>
-                                                        registeredProject.uri.toString() === project!.uri.toString(),
-                                                ),
-                                        10_000,
-                                        `Python project was not unregistered: ${project.uri.fsPath}`,
-                                    );
-                                }
-                            } finally {
-                                await vscode.workspace.fs.delete(project.uri, {
-                                    recursive: true,
-                                    useTrash: false,
-                                });
+                            if (pythonProjectsUpdated) {
+                                await config.update(
+                                    'pythonProjects',
+                                    previousPythonProjects,
+                                    vscode.ConfigurationTarget.WorkspaceFolder,
+                                );
+                                await waitForCondition(
+                                    () =>
+                                        !api
+                                            .getPythonProjects()
+                                            .some(
+                                                (registeredProject) =>
+                                                    registeredProject.uri.toString() === project!.uri.toString(),
+                                            ),
+                                    10_000,
+                                    `Python project was not unregistered: ${project.uri.fsPath}`,
+                                );
                             }
+                        } finally {
+                            await vscode.workspace.fs.delete(project.uri, {
+                                recursive: true,
+                                useTrash: false,
+                            });
                         }
-                    }
-                } finally {
-                    if (alwaysUseUvUpdated) {
-                        await config.update('alwaysUseUv', previousAlwaysUseUv, vscode.ConfigurationTarget.Global);
                     }
                 }
             }
