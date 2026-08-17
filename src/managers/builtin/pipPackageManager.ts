@@ -9,7 +9,6 @@ import {
     MarkdownString,
     ProgressLocation,
     ThemeIcon,
-    window,
 } from 'vscode';
 import {
     DidChangePackagesEventArgs,
@@ -21,6 +20,7 @@ import {
     PythonEnvironment,
     PythonEnvironmentApi,
 } from '../../api';
+import { showErrorMessage, withProgress } from '../../common/window.apis';
 import { updatePackagesAndNotify } from '../common/packageChanges';
 import { runPython, runUV, shouldUseUv } from './helpers';
 import { getWorkspacePackagesToInstall } from './pipUtils';
@@ -74,7 +74,7 @@ export class PipPackageManager implements PackageManager, Disposable {
             install: toInstall,
             uninstall: toUninstall,
         };
-        await window.withProgress(
+        await withProgress(
             {
                 location: ProgressLocation.Notification,
                 title: 'Installing packages',
@@ -99,7 +99,7 @@ export class PipPackageManager implements PackageManager, Disposable {
                     this.log.error('Error managing packages', e);
                     if (!manageOptions.runHeadless) {
                         setImmediate(async () => {
-                            const result = await window.showErrorMessage('Error managing packages', 'View Output');
+                            const result = await showErrorMessage('Error managing packages', 'View Output');
                             if (result === 'View Output') {
                                 this.log.show();
                             }
@@ -112,7 +112,7 @@ export class PipPackageManager implements PackageManager, Disposable {
     }
 
     async refresh(environment: PythonEnvironment): Promise<void> {
-        await window.withProgress(
+        await withProgress(
             {
                 location: ProgressLocation.Window,
                 title: 'Refreshing packages',
