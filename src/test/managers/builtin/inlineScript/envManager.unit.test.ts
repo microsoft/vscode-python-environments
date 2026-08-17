@@ -102,7 +102,6 @@ suite('InlineScriptEnvManager', () => {
     let ensureUvForVersionLookupStub: sinon.SinonStub;
     let globalStorageUri: Uri;
     let lockStub: sinon.SinonStub;
-    let log: LogOutputChannel;
     let manager: InlineScriptEnvManager;
     let nativeFinder: NativePythonFinder;
     let promptInstallPythonViaUvStub: sinon.SinonStub;
@@ -191,8 +190,7 @@ suite('InlineScriptEnvManager', () => {
         });
 
         clock = sinon.useFakeTimers({ now: NOW, toFake: ['Date'] });
-        log = makeFakeLog();
-        manager = new InlineScriptEnvManager(nativeFinder, api, baseManager, globalStorageUri, log);
+        manager = new InlineScriptEnvManager(nativeFinder, api, baseManager, globalStorageUri, makeFakeLog());
     });
 
     teardown(async () => {
@@ -207,10 +205,6 @@ suite('InlineScriptEnvManager', () => {
 
     function envDir(): Uri {
         return cacheLayout.getScriptEnvDir(globalStorageUri, CACHE_KEY);
-    }
-
-    function cacheRoot(): Uri {
-        return cacheLayout.getScriptEnvCacheRoot(globalStorageUri);
     }
 
     function setSidecar(metadata: cacheLayout.InlineScriptEnvMeta): void {
@@ -248,7 +242,6 @@ suite('InlineScriptEnvManager', () => {
         test('exposes creation but leaves later-phase methods empty', async () => {
             const asInterface: EnvironmentManager = manager;
             assert.strictEqual(typeof asInterface.create, 'function');
-            assert.strictEqual(asInterface.clearCache, undefined);
             assert.strictEqual(asInterface.remove, undefined);
             assert.strictEqual(asInterface.quickCreateConfig, undefined);
             assert.deepStrictEqual(await manager.getEnvironments('all'), []);
@@ -985,55 +978,16 @@ suite('InlineScriptEnvManager', () => {
                 false,
                 'inline-script cache entries must not be tracked as workspace uv environments',
             );
-            assert.strictEqual(lockStub.callCount, 2);
-            assert.strictEqual(lockStub.firstCall.args[0], cacheRoot().fsPath);
-            assert.strictEqual(lockStub.secondCall.args[0], envDir().fsPath);
-            assert.strictEqual(releaseLockStub.callCount, 2);
+            assert.ok(releaseLockStub.calledOnce);
         });
 
-        test('acquires the cache root lock before the final cache-entry lock and releases root before build', async () => {
-            const rootRelease = sinon.stub().resolves();
-            const entryRelease = sinon.stub().resolves();
-            lockStub.callsFake(async (lockPath: string) => {
-                if (lockPath === cacheRoot().fsPath) {
-                    return {
-                        retain: sinon.stub().resolves(),
-                        release: rootRelease,
-                    };
-                }
-                return {
-                    retain: sinon.stub().resolves(),
-                    release: entryRelease,
-                };
-            });
-            createWithProgressStub.callsFake(async (...args: unknown[]) => {
-                assert.ok(rootRelease.calledOnce, 'root lock should be released before build starts');
-                assert.strictEqual(entryRelease.called, false, 'entry lock should remain held during build');
-                const envDir = args[6] as string;
-                const selectedBase = args[4] as PythonEnvironment;
-                await fs.outputFile(getVenvPythonPath(envDir), '');
-                return {
-                    environment: makeEnvironment(
-                        'ms-python.python:inline-script',
-                        selectedBase.version,
-                        getVenvPythonPath(envDir),
-                        envDir,
-                    ),
-                };
-            });
-
+        test('uses a bounded cross-process lock at the final cache path', async () => {
             await manager.create(scriptUri());
 
-            assert.strictEqual(lockStub.firstCall.args[0], cacheRoot().fsPath);
-            assert.strictEqual(lockStub.secondCall.args[0], envDir().fsPath);
-            const rootOptions = lockStub.firstCall.args[1];
-            const entryOptions = lockStub.secondCall.args[1];
-            assert.strictEqual(rootOptions.timeoutMs, 1_000);
-            assert.strictEqual(rootOptions.retryIntervalMs, 50);
-            assert.strictEqual(entryOptions.timeoutMs, 1_000);
-            assert.strictEqual(entryOptions.retryIntervalMs, 50);
-            assert.ok(rootRelease.calledOnce);
-            assert.ok(entryRelease.calledOnce);
+            assert.strictEqual(lockStub.firstCall.args[0], envDir().fsPath);
+            const options = lockStub.firstCall.args[1];
+            assert.ok(options.timeoutMs > 0);
+            assert.ok(options.retryIntervalMs > 0);
         });
 
         test('coalesces simultaneous same-key creation within one extension host', async () => {
@@ -1078,110 +1032,14 @@ suite('InlineScriptEnvManager', () => {
             const [firstResult, secondResult] = await Promise.all([first, second]);
 
             assert.strictEqual(firstResult, secondResult);
-            assert.strictEqual(lockStub.callCount, 2);
+            assert.strictEqual(lockStub.callCount, 1);
             assert.strictEqual(createWithProgressStub.callCount, 1);
         });
 
-        test('returns undefined without building when the cache root lock cannot be acquired', async () => {
-            const rootLockPath = `${path.resolve(cacheRoot().fsPath)}.lock`;
+        test('returns undefined without building when the cache lock cannot be acquired', async () => {
             lockStub.rejects(Object.assign(new Error('already locked'), { code: 'ELOCKED' }));
             assert.strictEqual(await manager.create(scriptUri()), undefined);
             assert.strictEqual(createWithProgressStub.callCount, 0);
-            sinon.assert.calledWithMatch(
-                log.warn as sinon.SinonStub,
-                sinon.match(new RegExp(`${rootLockPath.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}.*manually`, 'i')),
-            );
-        });
-
-        test('aborts before inspect/build when releasing the cache root lock for handoff fails', async () => {
-            const rootLockPath = `${path.resolve(cacheRoot().fsPath)}.lock`;
-            const rootRelease = sinon.stub().callsFake(async () => {
-                await fs.ensureDir(rootLockPath);
-                throw new Error('root release failed');
-            });
-            const entryRelease = sinon.stub().resolves();
-            lockStub.callsFake(async (lockPath: string) => {
-                if (lockPath === cacheRoot().fsPath) {
-                    return {
-                        retain: sinon.stub().resolves(),
-                        release: rootRelease,
-                    };
-                }
-                return {
-                    retain: sinon.stub().resolves(),
-                    release: entryRelease,
-                };
-            });
-
-            assert.strictEqual(await manager.create(scriptUri()), undefined);
-            assert.strictEqual(createWithProgressStub.callCount, 0);
-            assert.ok(rootRelease.calledOnce);
-            assert.ok(entryRelease.calledOnce);
-            assert.strictEqual(await fs.pathExists(rootLockPath), true);
-            sinon.assert.calledWithMatch(
-                log.warn as sinon.SinonStub,
-                sinon.match(new RegExp(`${rootLockPath.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}.*manually`, 'i')),
-            );
-        });
-
-        test('allows different cache entries to build concurrently after the root-to-entry handoff', async () => {
-            const secondCacheKey = 'fedcba9876543210';
-            const secondEnvDir = cacheLayout.getScriptEnvDir(globalStorageUri, secondCacheKey);
-            computeCacheKeyStub.onFirstCall().returns(CACHE_KEY);
-            computeCacheKeyStub.onSecondCall().returns(secondCacheKey);
-
-            let releaseFirstBuild: (() => void) | undefined;
-            const firstBuildGate = new Promise<void>((resolve) => {
-                releaseFirstBuild = resolve;
-            });
-            const secondBuildStarted = sinon.stub();
-            createWithProgressStub.callsFake(async (...args: unknown[]) => {
-                const target = args[6] as string;
-                await fs.outputFile(venvPythonPath(target), '');
-                if (target === envDir().fsPath) {
-                    await firstBuildGate;
-                } else if (target === secondEnvDir.fsPath) {
-                    secondBuildStarted();
-                }
-                return {
-                    environment: makeEnvironment(
-                        'ms-python.python:inline-script',
-                        '3.12.4',
-                        venvPythonPath(target),
-                        target,
-                    ),
-                };
-            });
-
-            const first = manager.create(scriptUri('first.py'));
-            let second: Promise<PythonEnvironment | undefined> | undefined;
-            try {
-                await waitForStubCall(createWithProgressStub);
-                second = manager.create(scriptUri('second.py'));
-                await waitForStubCall(secondBuildStarted);
-                assert.ok(secondBuildStarted.calledOnce);
-                assert.strictEqual(createWithProgressStub.callCount, 2);
-            } finally {
-                releaseFirstBuild?.();
-                await Promise.allSettled([first, second ?? Promise.resolve(undefined)]);
-            }
-        });
-
-        test('releases the cache root lock when the per-entry lock cannot be acquired', async () => {
-            const rootRelease = sinon.stub().resolves();
-            lockStub.callsFake(async (lockPath: string) => {
-                if (lockPath === cacheRoot().fsPath) {
-                    return {
-                        retain: sinon.stub().resolves(),
-                        release: rootRelease,
-                    };
-                }
-                throw Object.assign(new Error('entry locked'), { code: 'ELOCKED' });
-            });
-
-            assert.strictEqual(await manager.create(scriptUri()), undefined);
-            assert.strictEqual(createWithProgressStub.callCount, 0);
-            assert.ok(rootRelease.calledOnce);
         });
     });
 
@@ -1514,7 +1372,7 @@ suite('InlineScriptEnvManager', () => {
             assert.strictEqual(await fs.pathExists(envDir().fsPath), true);
             assert.strictEqual(writeMetaStub.callCount, 0);
             assert.ok(retainLockStub.calledOnce);
-            assert.strictEqual(releaseLockStub.callCount, 2);
+            assert.ok(releaseLockStub.calledOnce);
         });
 
         test('keeps a failed lock-retain transition fail-closed', async () => {
@@ -1532,7 +1390,7 @@ suite('InlineScriptEnvManager', () => {
 
             assert.strictEqual(await manager.create(scriptUri()), undefined);
             assert.ok(retainLockStub.calledOnce);
-            assert.strictEqual(releaseLockStub.callCount, 2);
+            assert.ok(releaseLockStub.calledOnce);
         });
 
         test('removes the partial environment when package installation fails', async () => {
@@ -1553,7 +1411,7 @@ suite('InlineScriptEnvManager', () => {
             assert.strictEqual(await manager.create(scriptUri()), undefined);
             assert.strictEqual(await fs.pathExists(envDir().fsPath), false);
             assert.strictEqual(writeMetaStub.callCount, 0);
-            assert.strictEqual(releaseLockStub.callCount, 2);
+            assert.ok(releaseLockStub.calledOnce);
         });
 
         test('removes the new environment when sidecar writing fails', async () => {
@@ -1561,7 +1419,7 @@ suite('InlineScriptEnvManager', () => {
 
             assert.strictEqual(await manager.create(scriptUri()), undefined);
             assert.strictEqual(await fs.pathExists(envDir().fsPath), false);
-            assert.strictEqual(releaseLockStub.callCount, 2);
+            assert.ok(releaseLockStub.calledOnce);
         });
 
         test('removes a partial environment when createWithProgress throws', async () => {
@@ -1572,7 +1430,7 @@ suite('InlineScriptEnvManager', () => {
 
             assert.strictEqual(await manager.create(scriptUri()), undefined);
             assert.strictEqual(await fs.pathExists(envDir().fsPath), false);
-            assert.strictEqual(releaseLockStub.callCount, 2);
+            assert.ok(releaseLockStub.calledOnce);
         });
 
         test('rejects and removes a created environment with a different Python release', async () => {
@@ -1614,335 +1472,6 @@ suite('InlineScriptEnvManager', () => {
             assert.strictEqual(await manager.create(scriptUri()), undefined);
             assert.strictEqual(await fs.pathExists(envDir().fsPath), false);
             assert.strictEqual(writeMetaStub.callCount, 0);
-        });
-    });
-
-    suite('clear cache', () => {
-        test('treats a missing cache root as idempotent and clears persisted associations', async () => {
-            const uri = scriptUri();
-            const environment = await createOwnedEnvironment();
-            const listener = sinon.spy();
-            manager.onDidChangeEnvironment(listener);
-
-            await manager.set(uri, environment);
-            listener.resetHistory();
-            await fs.remove(cacheLayout.getScriptEnvCacheRoot(globalStorageUri).fsPath);
-
-            await manager.clearScriptCache();
-            await manager.clearScriptCache();
-
-            assert.strictEqual(workspaceState.clear.callCount, 2);
-            assert.deepStrictEqual(workspaceState.clear.firstCall.args[0], [INLINE_SCRIPT_ENVS_KEY]);
-            assert.strictEqual(persistedAssociations, undefined);
-            assert.strictEqual(await manager.get(uri), undefined);
-            sinon.assert.calledOnceWithMatch(listener, { old: environment, new: undefined });
-        });
-
-        test('removes the cache root, clears state, and notifies known associations', async () => {
-            const firstUri = scriptUri('first.py');
-            const secondUri = scriptUri('second.py');
-            const firstEnvironment = await createOwnedEnvironment();
-            const secondEnvironment = await createOwnedEnvironment('fedcba9876543210');
-            const listener = sinon.spy();
-            manager.onDidChangeEnvironment(listener);
-
-            await manager.set([firstUri, secondUri], firstEnvironment);
-            await manager.set(secondUri, secondEnvironment);
-            listener.resetHistory();
-
-            await manager.clearScriptCache();
-
-            assert.strictEqual(await fs.pathExists(cacheLayout.getScriptEnvCacheRoot(globalStorageUri).fsPath), false);
-            assert.strictEqual(persistedAssociations, undefined);
-            assert.strictEqual(await manager.get(firstUri), undefined);
-            assert.strictEqual(await manager.get(secondUri), undefined);
-            assert.strictEqual(listener.callCount, 2);
-            assert.strictEqual(listener.firstCall.args[0].old, firstEnvironment);
-            assert.strictEqual(listener.firstCall.args[0].new, undefined);
-            assert.strictEqual(listener.secondCall.args[0].old, secondEnvironment);
-            assert.strictEqual(listener.secondCall.args[0].new, undefined);
-        });
-
-        test('refuses to clear while a create is active', async () => {
-            let releaseMetadata: ((value: metadataReader.InlineScriptMetadata | undefined) => void) | undefined;
-            readMetadataStub.callsFake(
-                () =>
-                    new Promise<metadataReader.InlineScriptMetadata | undefined>((resolve) => {
-                        releaseMetadata = resolve;
-                    }),
-            );
-
-            const createPromise = manager.create(scriptUri());
-
-            await assert.rejects(
-                manager.clearScriptCache(),
-                /Close other VS Code windows or restart VS Code, then retry/i,
-            );
-
-            releaseMetadata!(VALID_METADATA);
-            assert.ok(await createPromise);
-        });
-
-        test('refuses create requests while a clear is in progress', async () => {
-            let clearStarted: (() => void) | undefined;
-            let releaseClear: (() => void) | undefined;
-            const started = new Promise<void>((resolve) => {
-                clearStarted = resolve;
-            });
-            const gate = new Promise<void>((resolve) => {
-                releaseClear = resolve;
-            });
-            const clearManager = manager as unknown as {
-                getClearableCacheRootPath(cacheRoot: Uri): Promise<string | undefined>;
-            };
-            sinon.stub(clearManager, 'getClearableCacheRootPath').callsFake(async () => {
-                clearStarted!();
-                await gate;
-                return undefined;
-            });
-
-            const clearPromise = manager.clearScriptCache();
-            await started;
-
-            await assert.rejects(manager.create(scriptUri()), /cache is being cleared/i);
-
-            releaseClear!();
-            await clearPromise;
-        });
-
-        test('refuses to clear when the cache root lock is already held', async () => {
-            const rootLockPath = `${path.resolve(cacheRoot().fsPath)}.lock`;
-            lockStub.callsFake(async (lockPath: string) => {
-                if (lockPath === cacheRoot().fsPath) {
-                    throw Object.assign(new Error('already locked'), { code: 'ELOCKED' });
-                }
-                return { release: releaseLockStub, retain: retainLockStub };
-            });
-
-            await assert.rejects(
-                manager.clearScriptCache(),
-                new RegExp(`${rootLockPath.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}.*remove only this lock path manually`, 'i'),
-            );
-            assert.strictEqual(workspaceState.clear.callCount, 0);
-        });
-
-        test('rejects when cache deletion and state clear succeed but root lock release fails', async () => {
-            const uri = scriptUri();
-            const environment = await createOwnedEnvironment();
-            const rootLockPath = `${path.resolve(cacheRoot().fsPath)}.lock`;
-            const rootRelease = sinon.stub().callsFake(async () => {
-                await fs.ensureDir(rootLockPath);
-                throw new Error('root release failed');
-            });
-            await manager.set(uri, environment);
-            lockStub.callsFake(async () => ({
-                retain: sinon.stub().resolves(),
-                release: rootRelease,
-            }));
-
-            await assert.rejects(
-                manager.clearScriptCache(),
-                new RegExp(`${rootLockPath.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}.*manually`, 'i'),
-            );
-
-            assert.strictEqual(await fs.pathExists(cacheRoot().fsPath), false);
-            assert.strictEqual(persistedAssociations, undefined);
-            assert.ok(rootRelease.calledOnce);
-        });
-
-        test('refuses clear after the root-to-entry handoff because the entry lock is visible on disk', async () => {
-            const otherManager = new InlineScriptEnvManager(nativeFinder, api, baseManager, globalStorageUri, log);
-            const entryLockPath = `${path.resolve(envDir().fsPath)}.lock`;
-            let releaseBuild: (() => void) | undefined;
-            const buildGate = new Promise<void>((resolve) => {
-                releaseBuild = resolve;
-            });
-            createWithProgressStub.callsFake(async (...args: unknown[]) => {
-                const target = args[6] as string;
-                const selectedBase = args[4] as PythonEnvironment;
-                await fs.outputFile(getVenvPythonPath(target), '');
-                await buildGate;
-                return {
-                    environment: makeEnvironment(
-                        'ms-python.python:inline-script',
-                        selectedBase.version,
-                        getVenvPythonPath(target),
-                        target,
-                    ),
-                };
-            });
-            lockStub.callsFake(async (lockPath: string) => {
-                if (lockPath === envDir().fsPath) {
-                    await fs.ensureDir(entryLockPath);
-                    await fs.outputFile(path.join(entryLockPath, 'owner-1234'), '');
-                    return {
-                        retain: sinon.stub().resolves(),
-                        release: sinon.stub().callsFake(async () => {
-                            await fs.remove(entryLockPath);
-                        }),
-                    };
-                }
-                return {
-                    retain: sinon.stub().resolves(),
-                    release: sinon.stub().resolves(),
-                };
-            });
-
-            const createPromise = manager.create(scriptUri());
-            try {
-                await waitForStubCall(createWithProgressStub);
-                await assert.rejects(otherManager.clearScriptCache(), /owner-only lock/i);
-            } finally {
-                releaseBuild!();
-                await createPromise;
-                otherManager.dispose();
-            }
-        });
-
-        test('allows retained lock directories to be removed with the cache root', async () => {
-            const uri = scriptUri();
-            const environment = await createOwnedEnvironment();
-            await manager.set(uri, environment);
-            const lockPath = path.join(cacheLayout.getScriptEnvCacheRoot(globalStorageUri).fsPath, `${CACHE_KEY}.lock`);
-            await fs.ensureDir(lockPath);
-            await fs.outputFile(path.join(lockPath, 'owner-1234'), '');
-            await fs.outputFile(path.join(lockPath, 'retained'), '');
-
-            await manager.clearScriptCache();
-
-            assert.strictEqual(await fs.pathExists(cacheLayout.getScriptEnvCacheRoot(globalStorageUri).fsPath), false);
-            assert.strictEqual(persistedAssociations, undefined);
-        });
-
-        test('rejects active owner lock directories', async () => {
-            const uri = scriptUri();
-            const environment = await createOwnedEnvironment();
-            await manager.set(uri, environment);
-            const lockPath = path.join(cacheLayout.getScriptEnvCacheRoot(globalStorageUri).fsPath, `${CACHE_KEY}.lock`);
-            await fs.ensureDir(lockPath);
-            await fs.outputFile(path.join(lockPath, 'owner-1234'), '');
-
-            await assert.rejects(
-                manager.clearScriptCache(),
-                new RegExp(`${lockPath.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}.*manually remove`, 'i'),
-            );
-
-            assert.strictEqual(await fs.pathExists(cacheLayout.getScriptEnvCacheRoot(globalStorageUri).fsPath), true);
-            assert.deepStrictEqual(persistedAssociations, {
-                [normalizePath(uri.fsPath)]: environment.environmentPath.fsPath,
-            });
-        });
-
-        test('rejects orphaned or malformed lock entries', async () => {
-            const uri = scriptUri();
-            const environment = await createOwnedEnvironment();
-            const cacheRootPath = cacheLayout.getScriptEnvCacheRoot(globalStorageUri).fsPath;
-            const lockPath = path.join(cacheRootPath, `${CACHE_KEY}.lock`);
-            await manager.set(uri, environment);
-
-            await fs.ensureDir(lockPath);
-            await assert.rejects(manager.clearScriptCache(), /could not be verified as retained/i);
-            await fs.remove(lockPath);
-
-            await fs.outputFile(lockPath, 'not a directory');
-            await assert.rejects(manager.clearScriptCache(), /could not be verified as retained/i);
-
-            assert.strictEqual(await fs.pathExists(cacheRootPath), true);
-            assert.deepStrictEqual(persistedAssociations, {
-                [normalizePath(uri.fsPath)]: environment.environmentPath.fsPath,
-            });
-        });
-
-        test('fails closed when the cache root is redirected through a symlink or junction', async function () {
-            const cacheRoot = cacheLayout.getScriptEnvCacheRoot(globalStorageUri);
-            const externalRoot = path.join(tempRoot, 'external-cache-root');
-            const markerPath = path.join(externalRoot, 'keep.txt');
-            await fs.ensureDir(globalStorageUri.fsPath);
-            await fs.remove(cacheRoot.fsPath);
-            await fs.outputFile(markerPath, 'keep');
-            try {
-                await fs.symlink(externalRoot, cacheRoot.fsPath, isWindows() ? 'junction' : 'dir');
-            } catch (error) {
-                const code = (error as NodeJS.ErrnoException).code;
-                if (code === 'EPERM' || code === 'EACCES') {
-                    this.skip();
-                    return;
-                }
-                throw error;
-            }
-
-            await assert.rejects(manager.clearScriptCache(), /could not be proven safe/i);
-
-            assert.strictEqual(await fs.readFile(markerPath, 'utf8'), 'keep');
-            assert.strictEqual((await fs.lstat(cacheRoot.fsPath)).isSymbolicLink(), true);
-        });
-
-        test('surfaces state clear failures after removing the cache root and clearing in-memory state', async () => {
-            const uri = scriptUri();
-            const environment = await createOwnedEnvironment();
-            const listener = sinon.spy();
-            manager.onDidChangeEnvironment(listener);
-
-            await manager.set(uri, environment);
-            listener.resetHistory();
-            workspaceState.clear.rejects(new Error('Memento unavailable'));
-
-            await assert.rejects(manager.clearScriptCache(), /Memento unavailable/);
-
-            const clearState = manager as unknown as {
-                fsPathToEnv: Map<string, PythonEnvironment>;
-                fsPathToPersistedEnvPath: Map<string, string>;
-            };
-            assert.strictEqual(await fs.pathExists(cacheLayout.getScriptEnvCacheRoot(globalStorageUri).fsPath), false);
-            assert.deepStrictEqual(persistedAssociations, {
-                [normalizePath(uri.fsPath)]: environment.environmentPath.fsPath,
-            });
-            assert.strictEqual(clearState.fsPathToEnv.size, 0);
-            assert.strictEqual(clearState.fsPathToPersistedEnvPath.size, 0);
-            sinon.assert.calledOnceWithMatch(listener, { old: environment, new: undefined });
-        });
-
-        test('surfaces disk deletion failures without clearing state', async () => {
-            const uri = scriptUri();
-            const environment = await createOwnedEnvironment();
-            await manager.set(uri, environment);
-            const cacheRootPath = cacheLayout.getScriptEnvCacheRoot(globalStorageUri).fsPath;
-            const clearManager = manager as unknown as {
-                removeClearableCacheRoot(cacheRootPath: string): Promise<void>;
-            };
-            sinon.stub(clearManager, 'removeClearableCacheRoot').rejects(new Error('disk busy'));
-
-            await assert.rejects(manager.clearScriptCache(), /disk busy/);
-
-            assert.strictEqual(await fs.pathExists(cacheRootPath), true);
-            assert.deepStrictEqual(persistedAssociations, {
-                [normalizePath(uri.fsPath)]: environment.environmentPath.fsPath,
-            });
-            assert.strictEqual(await manager.get(uri), environment);
-        });
-
-        test('does not let a pending rehydration repopulate after clear', async () => {
-            const uri = scriptUri();
-            const environment = await createOwnedEnvironment();
-            persistedAssociations = { [normalizePath(uri.fsPath)]: environment.environmentPath.fsPath };
-
-            let resolvePending: ((value: PythonEnvironment | undefined) => void) | undefined;
-            resolveVenvStub.callsFake(
-                () =>
-                    new Promise<PythonEnvironment | undefined>((resolve) => {
-                        resolvePending = resolve;
-                    }),
-            );
-
-            const pendingGet = manager.get(uri);
-            await waitForStubCall(resolveVenvStub);
-
-            await manager.clearScriptCache();
-            resolvePending!(environment);
-
-            assert.strictEqual(await pendingGet, undefined);
-            assert.strictEqual(await manager.get(uri), undefined);
-            assert.strictEqual(persistedAssociations, undefined);
         });
     });
 
@@ -2992,6 +2521,315 @@ suite('InlineScriptEnvManager', () => {
             assert.strictEqual(await manager.get(valid), undefined);
             assert.strictEqual(await manager.get(undefined), undefined);
             assert.strictEqual(await manager.get(Uri.parse('untitled:script.py')), undefined);
+        });
+    });
+
+    suite('clear cache', () => {
+        test('clears cached environments, persisted associations, and in-memory selections', async () => {
+            const first = scriptUri('first.py');
+            const second = scriptUri('second.py');
+            const environment = await createOwnedEnvironment();
+            await manager.set([first, second], environment);
+            const listener = sinon.spy();
+            manager.onDidChangeEnvironment(listener);
+
+            await manager.clearCache();
+
+            assert.strictEqual(await fs.pathExists(envDir().fsPath), false);
+            assert.strictEqual(persistedAssociations, undefined);
+            assert.strictEqual(await manager.get(first), undefined);
+            assert.strictEqual(await manager.get(second), undefined);
+            assert.deepStrictEqual(
+                listener.getCalls().map((call) => normalizePath(call.args[0].uri.fsPath)).sort(),
+                [first.fsPath, second.fsPath].map((value) => normalizePath(value)).sort(),
+            );
+            assert.deepStrictEqual(
+                listener.getCalls().map((call) => call.args[0].old),
+                [environment, environment],
+            );
+            assert.ok(listener.getCalls().every((call) => call.args[0].new === undefined));
+        });
+
+        test('clears associations even when the cache directory is already missing', async () => {
+            const uri = scriptUri();
+            const environment = await createOwnedEnvironment();
+            await manager.set(uri, environment);
+            const listener = sinon.spy();
+            manager.onDidChangeEnvironment(listener);
+            await fs.remove(cacheLayout.getScriptEnvCacheRoot(globalStorageUri).fsPath);
+
+            await manager.clearCache();
+
+            assert.strictEqual(persistedAssociations, undefined);
+            assert.strictEqual(await manager.get(uri), undefined);
+            assert.strictEqual(listener.callCount, 1);
+            assert.strictEqual(normalizePath(listener.firstCall.args[0].uri.fsPath), normalizePath(uri.fsPath));
+            assert.strictEqual(listener.firstCall.args[0].old, environment);
+            assert.strictEqual(listener.firstCall.args[0].new, undefined);
+        });
+
+        test('is idempotent when the cache and associations are already absent', async () => {
+            const listener = sinon.spy();
+            manager.onDidChangeEnvironment(listener);
+
+            await manager.clearCache();
+            await manager.clearCache();
+
+            assert.strictEqual(persistedAssociations, undefined);
+            assert.strictEqual(listener.callCount, 0);
+        });
+
+        test('refuses to clear from an unsafe cache root', async function () {
+            if (isWindows() && !process.env.SystemDrive) {
+                this.skip();
+            }
+            const unsafeManager = new InlineScriptEnvManager(
+                nativeFinder,
+                api,
+                baseManager,
+                Uri.file(process.platform === 'win32' ? `${process.env.SystemDrive ?? 'C:'}\\` : '/'),
+                makeFakeLog(),
+            );
+
+            await assert.rejects(
+                unsafeManager.clearCache(),
+                /unsafe cache root/,
+            );
+
+            unsafeManager.dispose();
+        });
+
+        test('refuses to clear a symlinked cache root', async function () {
+            const symlinkStorageUri = Uri.file(path.join(tempRoot, 'symlink-storage'));
+            const symlinkManager = new InlineScriptEnvManager(
+                nativeFinder,
+                api,
+                baseManager,
+                symlinkStorageUri,
+                makeFakeLog(),
+            );
+            const realCacheRoot = cacheLayout.getScriptEnvCacheRoot(symlinkStorageUri).fsPath;
+            const externalCacheRoot = path.join(tempRoot, 'external-cache-root');
+            await fs.ensureDir(symlinkStorageUri.fsPath);
+            await fs.ensureDir(externalCacheRoot);
+            try {
+                await fs.symlink(externalCacheRoot, realCacheRoot, process.platform === 'win32' ? 'junction' : 'dir');
+            } catch (error) {
+                const code = (error as NodeJS.ErrnoException).code;
+                if (code === 'EPERM' || code === 'EACCES') {
+                    this.skip();
+                }
+                throw error;
+            }
+
+            await assert.rejects(
+                symlinkManager.clearCache(),
+                /not a normal directory/,
+            );
+
+            symlinkManager.dispose();
+        });
+
+        test('refuses to clear when globalStorage is redirected through a symlink or junction', async function () {
+            const physicalStoragePath = path.join(tempRoot, 'physical-storage');
+            const redirectedStoragePath = path.join(tempRoot, 'redirected-storage');
+            await fs.ensureDir(physicalStoragePath);
+            await fs.ensureDir(redirectedStoragePath);
+            const redirectedManager = new InlineScriptEnvManager(
+                nativeFinder,
+                api,
+                baseManager,
+                Uri.file(redirectedStoragePath),
+                makeFakeLog(),
+            );
+            try {
+                await fs.remove(redirectedStoragePath);
+                await fs.symlink(
+                    physicalStoragePath,
+                    redirectedStoragePath,
+                    process.platform === 'win32' ? 'junction' : 'dir',
+                );
+            } catch (error) {
+                const code = (error as NodeJS.ErrnoException).code;
+                if (code === 'EPERM' || code === 'EACCES') {
+                    this.skip();
+                }
+                throw error;
+            }
+
+            await assert.rejects(redirectedManager.clearCache(), /global storage root is not a normal directory/);
+
+            redirectedManager.dispose();
+        });
+
+        test('fails closed when physical cache verification reports a redirected root', async () => {
+            const internalManager = manager as unknown as {
+                getPhysicalOwnedCacheRootPath(cacheRoot: Uri): Promise<string | undefined>;
+            };
+            const original = internalManager.getPhysicalOwnedCacheRootPath.bind(manager);
+            internalManager.getPhysicalOwnedCacheRootPath = async () => {
+                throw new Error('Refusing to clear the script environment cache because the cache root is redirected.');
+            };
+            try {
+                await assert.rejects(manager.clearCache(), /cache root is redirected/);
+            } finally {
+                internalManager.getPhysicalOwnedCacheRootPath = original;
+            }
+        });
+
+        test('refuses to clear while a cached environment is locked', async () => {
+            const uri = scriptUri();
+            const environment = await createOwnedEnvironment();
+            await manager.set(uri, environment);
+            const lockPath = lockfileApis.getFileLockPath(environment.sysPrefix);
+            await fs.ensureDir(lockPath);
+            await fs.writeFile(path.join(lockPath, `owner-${process.pid}-test`), '');
+
+            await assert.rejects(manager.clearCache(), /being created/);
+
+            assert.deepStrictEqual(persistedAssociations, {
+                [normalizePath(uri.fsPath)]: environment.environmentPath.fsPath,
+            });
+            assert.strictEqual(await manager.get(uri), environment);
+        });
+
+        test('clears a retained lock and its corresponding cache entry', async () => {
+            const retainedCacheDir = envDir().fsPath;
+            const retainedLockPath = lockfileApis.getFileLockPath(retainedCacheDir);
+            await fs.outputFile(venvPythonPath(retainedCacheDir), '');
+            await fs.ensureDir(retainedLockPath);
+            await fs.writeFile(path.join(retainedLockPath, 'retained'), '');
+
+            await manager.clearCache();
+
+            assert.strictEqual(await fs.pathExists(retainedCacheDir), false);
+            assert.strictEqual(await fs.pathExists(retainedLockPath), false);
+        });
+
+        test('clears a stale owner lock and its corresponding cache entry', async () => {
+            const uri = scriptUri();
+            const environment = await createOwnedEnvironment();
+            await manager.set(uri, environment);
+            const staleLockPath = lockfileApis.getFileLockPath(environment.sysPrefix);
+            await fs.ensureDir(staleLockPath);
+            await fs.writeFile(path.join(staleLockPath, 'owner-424242-dead'), '');
+            const originalInspectFileLock = lockfileApis.inspectFileLock;
+            sinon.stub(lockfileApis, 'inspectFileLock').callsFake(async (filePath, options) => {
+                if (normalizePath(filePath) === normalizePath(environment.sysPrefix)) {
+                    return 'stale';
+                }
+                return originalInspectFileLock(filePath, options);
+            });
+
+            await manager.clearCache();
+
+            assert.strictEqual(await fs.pathExists(environment.sysPrefix), false);
+            assert.strictEqual(await fs.pathExists(staleLockPath), false);
+            assert.strictEqual(await manager.get(uri), undefined);
+        });
+
+        test('rejects an orphaned lock directory conservatively', async () => {
+            const uri = scriptUri();
+            const environment = await createOwnedEnvironment();
+            await manager.set(uri, environment);
+            await fs.ensureDir(lockfileApis.getFileLockPath(environment.sysPrefix));
+
+            await assert.rejects(manager.clearCache(), /incomplete or malformed/);
+
+            assert.strictEqual(await fs.pathExists(environment.sysPrefix), true);
+            assert.strictEqual(await manager.get(uri), environment);
+        });
+
+        test('surfaces a persistence failure after clearing disk and memory state', async () => {
+            const uri = scriptUri();
+            const environment = await createOwnedEnvironment();
+            await manager.set(uri, environment);
+            const listener = sinon.spy();
+            manager.onDidChangeEnvironment(listener);
+            workspaceState.clear.onFirstCall().rejects(new Error('Memento unavailable'));
+
+            await assert.rejects(manager.clearCache(), /Memento unavailable/);
+
+            assert.strictEqual(await fs.pathExists(envDir().fsPath), false);
+            assert.strictEqual(await manager.get(uri), undefined);
+            assert.strictEqual(listener.callCount, 1);
+            assert.strictEqual(normalizePath(listener.firstCall.args[0].uri.fsPath), normalizePath(uri.fsPath));
+            assert.strictEqual(listener.firstCall.args[0].old, environment);
+            assert.strictEqual(listener.firstCall.args[0].new, undefined);
+        });
+
+        test('does not let a pending rehydration restore an association after clear cache', async () => {
+            const uri = scriptUri();
+            const environment = await createOwnedEnvironment();
+            persistedAssociations = { [normalizePath(uri.fsPath)]: environment.environmentPath.fsPath };
+            let resolveRehydration: ((value: PythonEnvironment | undefined) => void) | undefined;
+            resolveVenvStub.callsFake(
+                () =>
+                    new Promise<PythonEnvironment | undefined>((resolve) => {
+                        resolveRehydration = resolve;
+                    }),
+            );
+            const listener = sinon.spy();
+            manager.onDidChangeEnvironment(listener);
+
+            const pendingGet = manager.get(uri);
+            await waitForStubCall(resolveVenvStub);
+            await manager.clearCache();
+            resolveRehydration!(environment);
+
+            assert.strictEqual(await pendingGet, undefined);
+            assert.strictEqual(await manager.get(uri), undefined);
+            assert.strictEqual(listener.callCount, 0);
+        });
+
+        test('rejects clear when creation started before the clear request', async () => {
+            const uri = scriptUri();
+            let resolveMetadata: ((value: metadataReader.InlineScriptMetadata | undefined) => void) | undefined;
+            readMetadataStub.callsFake(
+                () =>
+                    new Promise<metadataReader.InlineScriptMetadata | undefined>((resolve) => {
+                        resolveMetadata = resolve;
+                    }),
+            );
+
+            const createPromise = manager.create(uri);
+
+            await assert.rejects(manager.clearCache(), /being created/);
+            resolveMetadata!(VALID_METADATA);
+            assert.ok(await createPromise);
+            assert.strictEqual(await fs.pathExists(envDir().fsPath), true);
+        });
+
+        test('queues create behind a clear request that started first', async () => {
+            const uri = scriptUri();
+            let releaseClear: (() => void) | undefined;
+            let signalClearStarted: (() => void) | undefined;
+            const clearStarted = new Promise<void>((resolve) => {
+                signalClearStarted = resolve;
+            });
+            workspaceState.clear.callsFake(
+                async (keys?: string[]) =>
+                    new Promise<void>((resolve) => {
+                        signalClearStarted!();
+                        releaseClear = () => {
+                            if (!keys || keys.includes(INLINE_SCRIPT_ENVS_KEY)) {
+                                persistedAssociations = undefined;
+                            }
+                            resolve();
+                        };
+                    }),
+            );
+
+            const clearPromise = manager.clearCache();
+            const createPromise = manager.create(uri);
+
+            await clearStarted;
+            assert.strictEqual(readMetadataStub.callCount, 0);
+            releaseClear!();
+            await clearPromise;
+
+            assert.ok(await createPromise);
+            assert.ok(readMetadataStub.calledOnce);
         });
     });
 });

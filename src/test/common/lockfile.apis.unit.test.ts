@@ -8,7 +8,13 @@ import * as fs from 'fs-extra';
 import * as os from 'os';
 import * as path from 'path';
 import * as sinon from 'sinon';
-import { acquireFileLock, AcquireFileLockOptions } from '../../common/lockfile.apis';
+import {
+    acquireFileLock,
+    AcquireFileLockOptions,
+    FILE_LOCK_OWNER_MARKER_PREFIX,
+    getFileLockPath,
+    inspectFileLock,
+} from '../../common/lockfile.apis';
 
 const OPTIONS: AcquireFileLockOptions = {
     timeoutMs: 40,
@@ -208,5 +214,64 @@ suite('lockfile APIs', () => {
         await assert.rejects(acquireFileLock(targetPath, OPTIONS), (error: NodeJS.ErrnoException) => {
             return error.code === 'ELOCKORPHANED' && error.path === `${path.resolve(targetPath)}.lock`;
         });
+    });
+
+    test('classifies a live owner marker as held using the liveness probe', async () => {
+        const lockPath = getFileLockPath(targetPath);
+        await fs.ensureDir(lockPath);
+        await fs.writeFile(path.join(lockPath, `${FILE_LOCK_OWNER_MARKER_PREFIX}${process.pid}-live`), '');
+        const checkProcessLiveness = sinon.stub().resolves('live');
+
+        assert.strictEqual(await inspectFileLock(targetPath, { checkProcessLiveness }), 'held');
+        sinon.assert.calledOnceWithExactly(checkProcessLiveness, process.pid);
+    });
+
+    test('classifies a retained lock after retain()', async () => {
+        const lock = await acquireFileLock(targetPath, OPTIONS);
+        await lock.retain();
+
+        assert.strictEqual(await inspectFileLock(targetPath), 'retained');
+    });
+
+    test('classifies a dead owner marker as stale using the liveness probe', async () => {
+        const lockPath = getFileLockPath(targetPath);
+        await fs.ensureDir(lockPath);
+        await fs.writeFile(path.join(lockPath, `${FILE_LOCK_OWNER_MARKER_PREFIX}424242-dead`), '');
+        const checkProcessLiveness = sinon.stub().resolves('dead');
+
+        assert.strictEqual(await inspectFileLock(targetPath, { checkProcessLiveness }), 'stale');
+        sinon.assert.calledOnceWithExactly(checkProcessLiveness, 424242);
+    });
+
+    test('classifies an unavailable owner probe conservatively', async () => {
+        const lockPath = getFileLockPath(targetPath);
+        await fs.ensureDir(lockPath);
+        await fs.writeFile(path.join(lockPath, `${FILE_LOCK_OWNER_MARKER_PREFIX}${process.pid}-busy`), '');
+        const checkProcessLiveness = sinon.stub().resolves('unavailable');
+
+        assert.strictEqual(await inspectFileLock(targetPath, { checkProcessLiveness }), 'unavailable');
+        sinon.assert.calledOnceWithExactly(checkProcessLiveness, process.pid);
+    });
+
+    test('classifies an owner-less lock directory as orphaned', async () => {
+        await fs.ensureDir(getFileLockPath(targetPath));
+
+        assert.strictEqual(await inspectFileLock(targetPath), 'orphaned');
+    });
+
+    test('classifies a malformed owner marker as malformed', async () => {
+        const lockPath = getFileLockPath(targetPath);
+        await fs.ensureDir(lockPath);
+        await fs.writeFile(path.join(lockPath, `${FILE_LOCK_OWNER_MARKER_PREFIX}not-a-pid-live`), '');
+
+        assert.strictEqual(await inspectFileLock(targetPath), 'malformed');
+    });
+
+    test('classifies a lock directory with unexpected entries as malformed', async () => {
+        const lockPath = getFileLockPath(targetPath);
+        await fs.ensureDir(lockPath);
+        await fs.writeFile(path.join(lockPath, 'unexpected.txt'), '');
+
+        assert.strictEqual(await inspectFileLock(targetPath), 'malformed');
     });
 });

@@ -18,10 +18,7 @@ import {
     PythonProjectCreator,
     PythonProjectCreatorOptions,
 } from '../api';
-import { INLINE_SCRIPT_MANAGER_ID } from '../common/constants';
 import { traceError, traceInfo, traceVerbose } from '../common/logging';
-import { clearPersistentState } from '../common/persistentState';
-import type { InlineScriptEnvManager } from '../managers/builtin/inlineScript/envManager';
 import {
     EnvironmentManagers,
     InternalEnvironmentManager,
@@ -29,9 +26,12 @@ import {
     ProjectCreators,
     PythonProjectManager,
 } from '../internal.api';
-import { isInlineScriptsFeatureEnabled } from '../helpers';
-import { waitForEnvManagerId } from './common/managerReady';
-import { removePythonProjectSetting, setEnvironmentManager, setPackageManager } from './settings/settingHelpers';
+import {
+    getResolvedPythonProjectSettings,
+    removePythonProjectSetting,
+    setEnvironmentManager,
+    setPackageManager,
+} from './settings/settingHelpers';
 
 import { valid as pep440Valid } from '@renovatebot/pep440';
 import { executeCommand } from '../common/command.api';
@@ -58,6 +58,8 @@ import {
     showWarningMessage,
     withProgress,
 } from '../common/window.apis';
+import { getWorkspaceFolders } from '../common/workspace.apis';
+import { INLINE_SCRIPT_MANAGER_ID } from '../common/constants';
 import { runAsTask } from './execution/runAsTask';
 import { runInTerminal } from './terminal/runInTerminal';
 import { TerminalManager } from './terminal/terminalManager';
@@ -310,50 +312,6 @@ export async function removeEnvironmentCommand(context: unknown, managers: Envir
     } else {
         traceError(`Invalid context for remove command: ${context}`);
     }
-}
-
-export async function clearCacheCommand(
-    envManagers: EnvironmentManagers,
-    clearShellProfileCache: () => Promise<void>,
-): Promise<void> {
-    await clearPersistentState();
-    await envManagers.clearCache(undefined);
-    await clearShellProfileCache();
-}
-
-export async function clearInlineScriptCacheCommand(
-    getManager: () => InlineScriptEnvManager | undefined | Promise<InlineScriptEnvManager | undefined>,
-): Promise<void> {
-    if (!isInlineScriptsFeatureEnabled()) {
-        const message = l10n.t(
-            'Script environment cache is unavailable because inline script environments are disabled in this window.',
-        );
-        showErrorMessage(message);
-        throw new Error(message);
-    }
-
-    await waitForEnvManagerId([INLINE_SCRIPT_MANAGER_ID]);
-    const manager = await getManager();
-    if (!manager) {
-        const message = l10n.t(
-            'Script environment cache is unavailable because the inline script environment manager is not available in this window.',
-        );
-        showErrorMessage(message);
-        throw new Error(message);
-    }
-
-    const clearLabel = l10n.t('Clear Cache');
-    const confirm = await showWarningMessage(
-        l10n.t('Delete cached environments created for inline Python scripts?'),
-        { modal: true },
-        clearLabel,
-        l10n.t('Cancel'),
-    );
-    if (confirm !== clearLabel) {
-        return;
-    }
-
-    await manager.clearScriptCache();
 }
 
 export async function handlePackageUninstall(context: unknown, em: EnvironmentManagers) {
@@ -710,6 +668,71 @@ export async function removePythonProject(
     await em.setEnvironment(item.project.uri, undefined);
     await removePythonProjectSetting([{ project: item.project }]);
     wm.remove(item.project);
+}
+
+function getInlineScriptProjectEdits(wm: PythonProjectManager) {
+    const currentProjects = new Map(wm.getProjects().map((project) => [project.uri.toString(), project] as const));
+    const edits = new Map<string, { project: PythonProject; envManager: string }>();
+    for (const workspaceFolder of getWorkspaceFolders() ?? []) {
+        for (const resolvedSetting of getResolvedPythonProjectSettings(workspaceFolder)) {
+            if (
+                !resolvedSetting.sources.some(
+                    (source) => source.setting.envManager === INLINE_SCRIPT_MANAGER_ID,
+                )
+            ) {
+                continue;
+            }
+            const projectUri = resolvedSetting.uri;
+            const key = projectUri.toString();
+            edits.set(key, {
+                project:
+                    currentProjects.get(key) ??
+                    wm.create(path.basename(projectUri.fsPath) || resolvedSetting.effective.setting.path, projectUri),
+                envManager: INLINE_SCRIPT_MANAGER_ID,
+            });
+        }
+    }
+    return {
+        edits: Array.from(edits.values()),
+        loadedProjects: currentProjects,
+    };
+}
+
+export async function clearScriptEnvironmentCacheCommand(
+    em: EnvironmentManagers,
+    wm: PythonProjectManager,
+): Promise<void> {
+    const manager = em.getEnvironmentManager(INLINE_SCRIPT_MANAGER_ID);
+    if (!manager || !manager.supportsClearCache()) {
+        throw new Error(
+            l10n.t('Inline-script environment cache is unavailable because the inline-script manager is not registered.'),
+        );
+    }
+
+    const clearLabel = l10n.t('Clear Cache');
+    const confirmation = await showWarningMessage(
+        l10n.t(
+            'This will delete all cached inline-script environments, forget their script associations, and remove inline-script project entries from settings.',
+        ),
+        { modal: true },
+        clearLabel,
+    );
+    if (confirmation !== clearLabel) {
+        return;
+    }
+
+    const { edits, loadedProjects } = getInlineScriptProjectEdits(wm);
+    await manager.clearCache();
+    if (edits.length === 0) {
+        return;
+    }
+    const removedProjects = await removePythonProjectSetting(edits);
+    const loadedProjectsToRemove = removedProjects
+        .map((project) => loadedProjects.get(project.uri.toString()))
+        .filter((project): project is PythonProject => project !== undefined);
+    if (loadedProjectsToRemove.length > 0) {
+        wm.remove(loadedProjectsToRemove);
+    }
 }
 
 export async function getPackageCommandOptions(

@@ -13,7 +13,7 @@ import { PythonEnvironment, PythonEnvironmentApi, PythonProjectCreator } from '.
 import { ENVS_EXTENSION_ID } from './common/constants';
 import { ensureCorrectVersion } from './common/extVersion';
 import { registerLogger, traceError, traceInfo, traceWarn } from './common/logging';
-import { setPersistentState } from './common/persistentState';
+import { clearPersistentState, setPersistentState } from './common/persistentState';
 import { newProjectSelection } from './common/pickers/managers';
 import { StopWatch } from './common/stopWatch';
 import { EventNames } from './common/telemetry/constants';
@@ -44,9 +44,8 @@ import { NewScriptProject } from './features/creators/newScriptProject';
 import { ProjectCreatorsImpl } from './features/creators/projectCreators';
 import {
     addPythonProjectCommand,
-    clearCacheCommand,
-    clearInlineScriptCacheCommand,
     copyPathToClipboard,
+    clearScriptEnvironmentCacheCommand,
     createAnyEnvironmentCommand,
     createEnvironmentCommand,
     createTerminalCommand,
@@ -98,7 +97,6 @@ import { TemporaryStateManager } from './features/views/temporaryStateManager';
 import { PythonEnvTreeItem } from './features/views/treeViewItems';
 import { collectEnvironmentInfo, getEnvManagerAndPackageManagerConfigLevels, runPetInTerminalImpl } from './helpers';
 import { EnvironmentManagers, ProjectCreators, PythonProjectManager } from './internal.api';
-import type { InlineScriptEnvManager } from './managers/builtin/inlineScript/envManager';
 import { registerInlineScriptFeatures } from './managers/builtin/inlineScript/main';
 import { registerSystemPythonFeatures } from './managers/builtin/main';
 import { SysPythonManager } from './managers/builtin/sysPythonManager';
@@ -194,7 +192,6 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
     const terminalActivation = new TerminalActivationImpl();
     const shellEnvsProviders = createShellEnvProviders();
     const shellStartupProviders = createShellStartupProviders();
-    let inlineScriptEnvManager: InlineScriptEnvManager | undefined;
 
     const terminalManager: TerminalManager = new TerminalManagerImpl(
         terminalActivation,
@@ -386,10 +383,12 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
             await removePythonProject(item, projectManager, envManagers);
         }),
         commands.registerCommand('python-envs.clearCache', async () => {
-            await clearCacheCommand(envManagers, () => clearShellProfileCache(shellStartupProviders));
+            await clearPersistentState();
+            await envManagers.clearCache(undefined);
+            await clearShellProfileCache(shellStartupProviders);
         }),
-        commands.registerCommand('python-envs.clearInlineScriptCache', async () => {
-            await clearInlineScriptCacheCommand(() => inlineScriptEnvManager);
+        commands.registerCommand('python-envs.clearScriptEnvCache', async () => {
+            await clearScriptEnvironmentCacheCommand(envManagers, projectManager);
         }),
         commands.registerCommand('python-envs.runInTerminal', (item) => {
             return runInTerminalCommand(item, api, terminalManager);
@@ -671,15 +670,13 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
                 ),
                 safeRegister(
                     'inlineScript',
-                    (async () => {
-                        inlineScriptEnvManager = await registerInlineScriptFeatures(
-                            nativeFinder,
-                            context.subscriptions,
-                            outputChannel,
-                            sysMgr,
-                            context.globalStorageUri,
-                        );
-                    })(),
+                    registerInlineScriptFeatures(
+                        nativeFinder,
+                        context.subscriptions,
+                        outputChannel,
+                        sysMgr,
+                        context.globalStorageUri,
+                    ),
                 ),
                 safeRegister('shellStartupVars', shellStartupVarsMgr.initialize()),
             ]);
