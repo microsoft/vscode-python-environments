@@ -114,7 +114,14 @@ for (const profile of profiles) {
         suiteTeardown(async () => {
             try {
                 if (environment) {
+                    const environmentPath = environment.environmentPath;
                     await api.removeEnvironment(environment, { runHeadless: true });
+                    await assert.rejects(
+                        async () => vscode.workspace.fs.stat(environmentPath),
+                        (error: unknown) =>
+                            error instanceof vscode.FileSystemError && error.code === 'FileNotFound',
+                        `Environment was not removed: ${environmentPath.fsPath}`,
+                    );
                 }
             } finally {
                 const config = vscode.workspace.getConfiguration('python-envs', workspaceUri);
