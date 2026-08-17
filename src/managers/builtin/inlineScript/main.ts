@@ -20,14 +20,15 @@ export async function registerInlineScriptFeatures(
     log: LogOutputChannel,
     baseManager: EnvironmentManager,
     globalStorageUri: Uri,
-): Promise<void> {
+): Promise<InlineScriptEnvManager | undefined> {
     if (!isInlineScriptsFeatureEnabled()) {
         traceVerbose('Inline-script env manager: skipping registration (internal flag is off)');
-        return;
+        return undefined;
     }
 
     const api: PythonEnvironmentApi = await getPythonApi();
     const mgr = new InlineScriptEnvManager(nativeFinder, api, baseManager, globalStorageUri, log);
     disposables.push(mgr, api.registerEnvironmentManager(mgr));
     traceInfo('Inline-script env manager: registered (internal flag is on)');
+    return mgr;
 }

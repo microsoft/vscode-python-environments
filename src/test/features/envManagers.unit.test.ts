@@ -7,6 +7,7 @@ import * as assert from 'assert';
 import * as sinon from 'sinon';
 import { Uri } from 'vscode';
 import { PythonEnvironment } from '../../api';
+import { INLINE_SCRIPT_MANAGER_ID } from '../../common/constants';
 import * as frameUtils from '../../common/utils/frameUtils';
 import * as workspaceApis from '../../common/workspace.apis';
 import { PythonEnvironmentManagers } from '../../features/envManagers';
@@ -334,5 +335,72 @@ suite('PythonEnvironmentManagers - refreshEnvironment', () => {
     test('should do nothing when no manager found for scope', async () => {
         // No manager registered — should not throw
         await envManagers.refreshEnvironment(Uri.file('/unknown/path'));
+    });
+});
+
+suite('PythonEnvironmentManagers - clearCache', () => {
+    let sandbox: sinon.SinonSandbox;
+    let envManagers: PythonEnvironmentManagers;
+    let mockProjectManager: sinon.SinonStubbedInstance<PythonProjectManager>;
+
+    setup(() => {
+        sandbox = sinon.createSandbox();
+        sandbox.stub(frameUtils, 'getCallingExtension').returns('ms-python.python');
+        sandbox.stub(workspaceApis, 'getConfiguration').returns({
+            get: (key: string, defaultValue?: unknown) => {
+                if (key === 'defaultEnvManager') {
+                    return 'ms-python.python:system';
+                }
+                if (key === 'pythonProjects') {
+                    return [];
+                }
+                return defaultValue;
+            },
+            has: () => false,
+            inspect: () => undefined,
+            update: () => Promise.resolve(),
+        } as any);
+
+        mockProjectManager = {
+            getProjects: sandbox.stub().returns([]),
+            get: sandbox.stub().returns(undefined),
+        } as unknown as sinon.SinonStubbedInstance<PythonProjectManager>;
+
+        envManagers = new PythonEnvironmentManagers(mockProjectManager as unknown as PythonProjectManager);
+    });
+
+    teardown(() => {
+        sandbox.restore();
+    });
+
+    function registerFakeManager(managerId: string, clearCache: sinon.SinonStub): void {
+        envManagers.registerEnvironmentManager(
+            {
+                name: managerId.split(':')[1],
+                displayName: managerId,
+                preferredPackageManagerId: 'ms-python.python:pip',
+                clearCache,
+                get: sandbox.stub().resolves(undefined),
+                set: sandbox.stub().resolves(),
+                resolve: sandbox.stub().resolves(undefined),
+                refresh: sandbox.stub().resolves(),
+                getEnvironments: sandbox.stub().resolves([]),
+                onDidChangeEnvironments: sandbox.stub().returns({ dispose: () => {} }),
+                onDidChangeEnvironment: sandbox.stub().returns({ dispose: () => {} }),
+            } as any,
+            { extensionId: 'ms-python.python' },
+        );
+    }
+
+    test('does not special-case managers during broad cache clears', async () => {
+        const systemClearCache = sandbox.stub().resolves();
+        const inlineClearCache = sandbox.stub().resolves();
+        registerFakeManager('ms-python.python:system', systemClearCache);
+        registerFakeManager(INLINE_SCRIPT_MANAGER_ID, inlineClearCache);
+
+        await envManagers.clearCache(undefined);
+
+        assert.ok(systemClearCache.calledOnce);
+        assert.ok(inlineClearCache.calledOnce);
     });
 });

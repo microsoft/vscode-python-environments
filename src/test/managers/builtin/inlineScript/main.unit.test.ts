@@ -51,23 +51,37 @@ suite('registerInlineScriptFeatures (feature-flag gate)', () => {
         isEnabledStub.returns(false);
         const disposables: Disposable[] = [];
 
-        await registerInlineScriptFeatures(nativeFinder, disposables, makeFakeLog(), baseManager, globalStorageUri);
+        const result = await registerInlineScriptFeatures(
+            nativeFinder,
+            disposables,
+            makeFakeLog(),
+            baseManager,
+            globalStorageUri,
+        );
 
         assert.strictEqual(disposables.length, 0, 'no disposables should be added when flag is off');
         assert.strictEqual(getPythonApiStub.called, false, 'should not even call getPythonApi when gated off');
         assert.strictEqual(registerEnvironmentManagerStub.called, false);
+        assert.strictEqual(result, undefined);
     });
 
     test('when the feature flag is TRUE: registers the manager and pushes the disposable', async () => {
         isEnabledStub.returns(true);
         const disposables: Disposable[] = [];
 
-        await registerInlineScriptFeatures(nativeFinder, disposables, makeFakeLog(), baseManager, globalStorageUri);
+        const result = await registerInlineScriptFeatures(
+            nativeFinder,
+            disposables,
+            makeFakeLog(),
+            baseManager,
+            globalStorageUri,
+        );
 
         assert.strictEqual(getPythonApiStub.callCount, 1);
         assert.strictEqual(registerEnvironmentManagerStub.callCount, 1);
         assert.strictEqual(disposables.length, 2, 'expected manager + registration disposable');
         const manager = registerEnvironmentManagerStub.firstCall.args[0];
+        assert.strictEqual(result, manager);
         assert.ok(disposables.includes(manager), 'manager itself should be disposed');
         assert.ok(
             disposables.includes(registerEnvironmentManagerStub.firstCall.returnValue),

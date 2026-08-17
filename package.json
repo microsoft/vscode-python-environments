@@ -246,6 +246,13 @@
                 "icon": "$(trash)"
             },
             {
+                "command": "python-envs.clearInlineScriptCache",
+                "title": "%python-envs.clearInlineScriptCache.title%",
+                "category": "Python",
+                "icon": "$(trash)",
+                "enablement": "config.python.useEnvironmentsExtension != false && config.python-envs.inlineScripts.enabled == true"
+            },
+            {
                 "command": "python-envs.runInTerminal",
                 "title": "%python-envs.runInTerminal.title%",
                 "category": "Python Envs",
@@ -413,6 +420,10 @@
                 {
                     "command": "python-envs.runAsTask",
                     "when": "config.python.useEnvironmentsExtension != false"
+                },
+                {
+                    "command": "python-envs.clearInlineScriptCache",
+                    "when": "config.python.useEnvironmentsExtension != false && config.python-envs.inlineScripts.enabled == true"
                 },
                 {
                     "command": "python-envs.terminal.activate",

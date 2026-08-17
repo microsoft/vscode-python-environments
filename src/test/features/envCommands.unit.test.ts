@@ -6,8 +6,19 @@ import { PythonEnvironment, PythonProject } from '../../api';
 import * as commandApi from '../../common/command.api';
 import * as managerApi from '../../common/pickers/managers';
 import * as projectApi from '../../common/pickers/projects';
-import { createAnyEnvironmentCommand, removePythonProject, revealEnvInManagerView } from '../../features/envCommands';
+import * as persistentState from '../../common/persistentState';
+import * as windowApis from '../../common/window.apis';
+import {
+    clearCacheCommand,
+    clearInlineScriptCacheCommand,
+    createAnyEnvironmentCommand,
+    removePythonProject,
+    revealEnvInManagerView,
+} from '../../features/envCommands';
+import * as managerReady from '../../features/common/managerReady';
 import * as settingHelpers from '../../features/settings/settingHelpers';
+import * as helpers from '../../helpers';
+import type { InlineScriptEnvManager } from '../../managers/builtin/inlineScript/envManager';
 import { EnvManagerView } from '../../features/views/envManagersView';
 import { ProjectEnvironment, ProjectItem } from '../../features/views/treeViewItems';
 import { EnvironmentManagers, InternalEnvironmentManager, PythonProjectManager } from '../../internal.api';
@@ -213,6 +224,112 @@ suite('Remove Python Project Command Tests', () => {
             (envManagers.setEnvironment as sinon.SinonStub).calledOnceWithExactly(project.uri, undefined),
             'Should clear the project environment through the central manager',
         );
+    });
+});
+
+suite('Clear Cache Command Tests', () => {
+    teardown(() => {
+        sinon.restore();
+    });
+
+    test('keeps the broad clear handler on the base path', async () => {
+        const calls: string[] = [];
+        const envManagers = {
+            clearCache: sinon.stub().callsFake(async (scope: unknown) => {
+                calls.push(`managers:${String(scope)}`);
+            }),
+        } as unknown as EnvironmentManagers;
+        const clearShellProfileCache = sinon.stub().callsFake(async () => {
+            calls.push('shell');
+        });
+        sinon.stub(persistentState, 'clearPersistentState').callsFake(async () => {
+            calls.push('state');
+        });
+
+        await clearCacheCommand(envManagers, clearShellProfileCache);
+
+        assert.deepStrictEqual(calls, ['state', 'managers:undefined', 'shell']);
+        assert.ok((envManagers.clearCache as sinon.SinonStub).calledOnceWithExactly(undefined));
+        assert.ok(clearShellProfileCache.calledOnce);
+    });
+});
+
+suite('Clear Inline Script Environment Cache Command Tests', () => {
+    let clearScriptCacheStub: sinon.SinonStub;
+    let getManager: sinon.SinonStub;
+    let showErrorMessageStub: sinon.SinonStub;
+    let showWarningMessageStub: sinon.SinonStub;
+    let isInlineScriptsFeatureEnabledStub: sinon.SinonStub;
+    let waitForEnvManagerIdStub: sinon.SinonStub;
+
+    setup(() => {
+        clearScriptCacheStub = sinon.stub().resolves();
+        getManager = sinon
+            .stub<[], InlineScriptEnvManager | undefined>()
+            .returns({ clearScriptCache: clearScriptCacheStub } as unknown as InlineScriptEnvManager);
+        showErrorMessageStub = sinon.stub(windowApis, 'showErrorMessage');
+        showWarningMessageStub = sinon.stub(windowApis, 'showWarningMessage');
+        isInlineScriptsFeatureEnabledStub = sinon.stub(helpers, 'isInlineScriptsFeatureEnabled').returns(true);
+        waitForEnvManagerIdStub = sinon.stub(managerReady, 'waitForEnvManagerId').resolves();
+    });
+
+    teardown(() => {
+        sinon.restore();
+    });
+
+    test('clears the cache after confirmation', async () => {
+        showWarningMessageStub.callsFake(async (_message, _options, clearLabel: string) => clearLabel);
+
+        await clearInlineScriptCacheCommand(getManager);
+
+        assert.ok(showWarningMessageStub.calledOnce);
+        assert.deepStrictEqual(showWarningMessageStub.firstCall.args[1], { modal: true });
+        assert.ok(waitForEnvManagerIdStub.calledOnce);
+        assert.ok(getManager.calledOnce);
+        assert.ok(clearScriptCacheStub.calledOnce);
+        assert.strictEqual(showErrorMessageStub.called, false);
+    });
+
+    test('does nothing when the confirmation is cancelled', async () => {
+        showWarningMessageStub.resolves(undefined);
+
+        await clearInlineScriptCacheCommand(getManager);
+
+        assert.ok(showWarningMessageStub.calledOnce);
+        assert.ok(waitForEnvManagerIdStub.calledOnce);
+        assert.ok(getManager.calledOnce);
+        assert.strictEqual(clearScriptCacheStub.called, false);
+        assert.strictEqual(showErrorMessageStub.called, false);
+    });
+
+    test('fails fast when the feature setting is off', async () => {
+        isInlineScriptsFeatureEnabledStub.returns(false);
+        showErrorMessageStub.resolves(undefined);
+
+        await assert.rejects(
+            clearInlineScriptCacheCommand(getManager),
+            /inline script environments are disabled in this window/i,
+        );
+
+        assert.ok(showErrorMessageStub.calledOnce);
+        assert.strictEqual(waitForEnvManagerIdStub.called, false);
+        assert.strictEqual(getManager.called, false);
+        assert.strictEqual(showWarningMessageStub.called, false);
+    });
+
+    test('throws a clear error when the manager is unavailable after the readiness wait', async () => {
+        getManager.returns(undefined);
+        showErrorMessageStub.resolves(undefined);
+
+        await assert.rejects(
+            clearInlineScriptCacheCommand(getManager),
+            /inline script environment manager is not available in this window/i,
+        );
+
+        assert.ok(waitForEnvManagerIdStub.calledOnce);
+        assert.ok(getManager.calledOnce);
+        assert.ok(showErrorMessageStub.calledOnce);
+        assert.strictEqual(showWarningMessageStub.called, false);
     });
 });
 

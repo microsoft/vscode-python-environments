@@ -26,9 +26,10 @@ suite('Smoke: Registration Checks', function () {
     this.timeout(MAX_EXTENSION_ACTIVATION_TIME);
 
     let api: PythonEnvironmentApi;
+    let extension: vscode.Extension<PythonEnvironmentApi>;
 
     suiteSetup(async function () {
-        const extension = vscode.extensions.getExtension<PythonEnvironmentApi>(ENVS_EXTENSION_ID);
+        extension = vscode.extensions.getExtension<PythonEnvironmentApi>(ENVS_EXTENSION_ID)!;
         assert.ok(extension, `Extension ${ENVS_EXTENSION_ID} not found`);
 
         if (!extension.isActive) {
@@ -65,6 +66,7 @@ suite('Smoke: Registration Checks', function () {
             'python-envs.setPkgManager',
             'python-envs.refreshAllManagers',
             'python-envs.clearCache',
+            'python-envs.clearInlineScriptCache',
             'python-envs.searchSettings',
 
             // Package management
@@ -110,6 +112,41 @@ suite('Smoke: Registration Checks', function () {
             0,
             `Missing commands:\n${missingCommands.map((c) => `  - ${c}`).join('\n')}\n\n` +
                 'Check that each command is defined in package.json and registered in the extension.',
+        );
+    });
+
+    test('Clear cache commands are contributed from package.json', function () {
+        const clearCacheCommand = extension.packageJSON?.contributes?.commands?.find(
+            (item: { command: string }) => item.command === 'python-envs.clearCache',
+        );
+        const clearInlineScriptCacheCommand = extension.packageJSON?.contributes?.commands?.find(
+            (item: { command: string }) => item.command === 'python-envs.clearInlineScriptCache',
+        );
+        const clearInlineScriptCachePaletteEntry = extension.packageJSON?.contributes?.menus?.commandPalette?.find(
+            (item: { command: string }) => item.command === 'python-envs.clearInlineScriptCache',
+        );
+
+        assert.ok(clearCacheCommand, 'python-envs.clearCache should be contributed in package.json');
+        assert.strictEqual(clearCacheCommand.category, 'Python');
+        assert.strictEqual(clearCacheCommand.title, 'Clear Cache');
+
+        assert.ok(
+            clearInlineScriptCacheCommand,
+            'python-envs.clearInlineScriptCache should be contributed in package.json',
+        );
+        assert.strictEqual(clearInlineScriptCacheCommand.category, 'Python');
+        assert.strictEqual(clearInlineScriptCacheCommand.title, 'Clear Script Environment Cache');
+        assert.strictEqual(
+            clearInlineScriptCacheCommand.enablement,
+            'config.python.useEnvironmentsExtension != false && config.python-envs.inlineScripts.enabled == true',
+        );
+        assert.ok(
+            clearInlineScriptCachePaletteEntry,
+            'python-envs.clearInlineScriptCache should have a command palette contribution',
+        );
+        assert.strictEqual(
+            clearInlineScriptCachePaletteEntry.when,
+            'config.python.useEnvironmentsExtension != false && config.python-envs.inlineScripts.enabled == true',
         );
     });
 
