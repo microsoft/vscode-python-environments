@@ -7,7 +7,7 @@ import * as os from 'os';
 import * as path from 'path';
 import * as sinon from 'sinon';
 import { LogOutputChannel, Uri } from 'vscode';
-import { EnvironmentManager, PythonEnvironment, PythonEnvironmentApi } from '../../../../api';
+import { EnvironmentChangeKind, EnvironmentManager, PythonEnvironment, PythonEnvironmentApi } from '../../../../api';
 import * as cacheKey from '../../../../common/inlineScript/cacheKey';
 import * as cacheLayout from '../../../../common/inlineScript/cacheLayout';
 import * as metadataReader from '../../../../common/inlineScript/metadata';
@@ -211,6 +211,27 @@ suite('InlineScriptEnvManager', () => {
         inspectMetaStub.resolves({ kind: 'valid', metadata });
     }
 
+    async function makeSidecar(
+        overrides: Partial<cacheLayout.InlineScriptEnvMeta> = {},
+    ): Promise<cacheLayout.InlineScriptEnvMeta> {
+        return {
+            schemaVersion: cacheLayout.META_SCHEMA_VERSION,
+            baseInterpreterPath: await fs.realpath(baseExecutable),
+            baseInterpreterVersion: baseEnvironment.version,
+            lastUsedAt: NOW.toISOString(),
+            ...overrides,
+        };
+    }
+
+    function setSidecarResults(results: Record<string, cacheLayout.InlineScriptMetaReadResult>): void {
+        inspectMetaStub.callsFake(async (candidate: Uri) => results[path.basename(candidate.fsPath)] ?? { kind: 'missing' });
+    }
+
+    function setResolvedVenvs(environments: readonly PythonEnvironment[]): void {
+        const byPath = new Map(environments.map((environment) => [normalizePath(environment.environmentPath.fsPath), environment]));
+        resolveVenvStub.callsFake(async (candidatePath: string) => byPath.get(normalizePath(candidatePath)));
+    }
+
     async function createOwnedEnvironment(
         cacheKey: string = CACHE_KEY,
         envId: string = `inline-${cacheKey}`,
@@ -232,6 +253,29 @@ suite('InlineScriptEnvManager', () => {
             await new Promise((resolve) => setTimeout(resolve, 5));
         }
         assert.fail('Expected the stub to be called');
+    }
+
+    async function waitForStubCallCount(stub: sinon.SinonStub, expectedCallCount: number): Promise<void> {
+        for (let attempt = 0; attempt < 20; attempt += 1) {
+            if (stub.callCount >= expectedCallCount) {
+                return;
+            }
+            await new Promise((resolve) => setTimeout(resolve, 5));
+        }
+        assert.fail(`Expected the stub to be called ${expectedCallCount} times`);
+    }
+
+    async function waitForCondition(
+        predicate: () => boolean | Promise<boolean>,
+        message: string,
+    ): Promise<void> {
+        for (let attempt = 0; attempt < 20; attempt += 1) {
+            if (await predicate()) {
+                return;
+            }
+            await new Promise((resolve) => setTimeout(resolve, 5));
+        }
+        assert.fail(message);
     }
 
     function nextTurn(): Promise<void> {
@@ -1472,6 +1516,278 @@ suite('InlineScriptEnvManager', () => {
             assert.strictEqual(await manager.create(scriptUri()), undefined);
             assert.strictEqual(await fs.pathExists(envDir().fsPath), false);
             assert.strictEqual(writeMetaStub.callCount, 0);
+        });
+    });
+
+    suite('activation-time discovery', () => {
+        test('cold-start transient resolution retries and later discovers the environment', async () => {
+            const environment = await createOwnedEnvironment();
+            const sidecar = await makeSidecar();
+            setSidecarResults({ [CACHE_KEY]: { kind: 'valid', metadata: sidecar } });
+            resolveVenvStub.onFirstCall().resolves(undefined);
+            resolveVenvStub.onSecondCall().resolves(environment);
+            const retryManager = manager as unknown as {
+                getDiscoveryRetryDelayMs(attempt: number): number | undefined;
+            };
+            sinon.stub(retryManager, 'getDiscoveryRetryDelayMs').callsFake((attempt) => (attempt === 0 ? 0 : undefined));
+            const listener = sinon.spy();
+            manager.onDidChangeEnvironments(listener);
+
+            manager.startActivationDiscovery();
+
+            await waitForStubCallCount(resolveVenvStub, 2);
+            await waitForCondition(
+                async () => (await manager.getEnvironments('all')).length === 1,
+                'Expected the follow-up discovery retry to publish the environment',
+            );
+            assert.deepStrictEqual(await manager.getEnvironments('all'), [environment]);
+            assert.deepStrictEqual(listener.firstCall.args[0], [
+                { kind: EnvironmentChangeKind.add, environment },
+            ]);
+        });
+
+        test('refresh discovers valid cached environments and exposes them only through all-scope', async () => {
+            const first = await createOwnedEnvironment();
+            const secondKey = 'fedcba9876543210';
+            const second = await createOwnedEnvironment(secondKey);
+            const sidecar = await makeSidecar();
+            setSidecarResults({
+                [CACHE_KEY]: { kind: 'valid', metadata: sidecar },
+                [secondKey]: { kind: 'valid', metadata: sidecar },
+            });
+            setResolvedVenvs([first, second]);
+            const listener = sinon.spy();
+            manager.onDidChangeEnvironments(listener);
+
+            await manager.refresh(undefined);
+
+            const discovered = await manager.getEnvironments('all');
+            assert.deepStrictEqual(
+                discovered.map((environment) => normalizePath(environment.sysPrefix)).sort(),
+                [first, second].map((environment) => normalizePath(environment.sysPrefix)).sort(),
+            );
+            assert.deepStrictEqual(await manager.getEnvironments('global'), []);
+            assert.strictEqual(listener.callCount, 1);
+            assert.deepStrictEqual(
+                listener.firstCall.args[0].map((change: { kind: EnvironmentChangeKind }) => change.kind),
+                [EnvironmentChangeKind.add, EnvironmentChangeKind.add],
+            );
+        });
+
+        test('refresh skips missing, invalid, unavailable, and non-directory cache entries', async () => {
+            const valid = await createOwnedEnvironment();
+            const cacheRoot = cacheLayout.getScriptEnvCacheRoot(globalStorageUri).fsPath;
+            const invalidKey = 'invalid-sidecar';
+            const unavailableKey = 'unavailable-sidecar';
+            await fs.ensureDir(path.join(cacheRoot, 'missing-sidecar'));
+            await fs.ensureDir(path.join(cacheRoot, invalidKey));
+            await fs.ensureDir(path.join(cacheRoot, unavailableKey));
+            await fs.outputFile(path.join(cacheRoot, 'not-a-directory'), '');
+            const sidecar = await makeSidecar();
+            setSidecarResults({
+                [CACHE_KEY]: { kind: 'valid', metadata: sidecar },
+                [invalidKey]: { kind: 'invalid' },
+                [unavailableKey]: { kind: 'unavailable' },
+            });
+            setResolvedVenvs([valid]);
+
+            await manager.refresh(undefined);
+
+            const discovered = await manager.getEnvironments('all');
+            assert.deepStrictEqual(discovered, [valid]);
+            assert.strictEqual(resolveVenvStub.callCount, 1);
+        });
+
+        test('refresh preserves a previously discovered environment while its cache entry is locked', async () => {
+            const environment = await createOwnedEnvironment();
+            const sidecar = await makeSidecar();
+            setSidecarResults({ [CACHE_KEY]: { kind: 'valid', metadata: sidecar } });
+            setResolvedVenvs([environment]);
+            await manager.refresh(undefined);
+            resolveVenvStub.resetHistory();
+            const listener = sinon.spy();
+            manager.onDidChangeEnvironments(listener);
+            await fs.remove(environment.sysPrefix);
+            await fs.ensureDir(`${path.resolve(environment.sysPrefix)}.lock`);
+
+            await manager.refresh(undefined);
+
+            assert.deepStrictEqual(await manager.getEnvironments('all'), [environment]);
+            assert.strictEqual(resolveVenvStub.callCount, 0);
+            assert.strictEqual(listener.callCount, 0);
+        });
+
+        test('refresh removes a previously discovered environment when launcher inspection marks it missing', async () => {
+            const environment = await createOwnedEnvironment();
+            const sidecar = await makeSidecar();
+            setSidecarResults({ [CACHE_KEY]: { kind: 'valid', metadata: sidecar } });
+            setResolvedVenvs([environment]);
+            await manager.refresh(undefined);
+            resolveVenvStub.resetHistory();
+            baseInterpreterStatusStub.resolves('missing');
+            const listener = sinon.spy();
+            manager.onDidChangeEnvironments(listener);
+
+            await manager.refresh(undefined);
+
+            assert.deepStrictEqual(await manager.getEnvironments('all'), []);
+            assert.strictEqual(resolveVenvStub.callCount, 0);
+            assert.deepStrictEqual(listener.firstCall.args[0], [
+                { kind: EnvironmentChangeKind.remove, environment },
+            ]);
+        });
+
+        test('coalesces concurrent refresh requests for the same scan', async () => {
+            const environment = await createOwnedEnvironment();
+            const sidecar = await makeSidecar();
+            setSidecarResults({ [CACHE_KEY]: { kind: 'valid', metadata: sidecar } });
+            let resolveDiscovery: ((value: PythonEnvironment | undefined) => void) | undefined;
+            resolveVenvStub.callsFake(
+                () =>
+                    new Promise<PythonEnvironment | undefined>((resolve) => {
+                        resolveDiscovery = resolve;
+                    }),
+            );
+            const listener = sinon.spy();
+            manager.onDidChangeEnvironments(listener);
+
+            const firstRefresh = manager.refresh(undefined);
+            const secondRefresh = manager.refresh(undefined);
+            await waitForStubCall(resolveVenvStub);
+            assert.strictEqual(resolveVenvStub.callCount, 1);
+            resolveDiscovery!(environment);
+            await Promise.all([firstRefresh, secondRefresh]);
+
+            assert.deepStrictEqual(await manager.getEnvironments('all'), [environment]);
+            assert.strictEqual(listener.callCount, 1);
+        });
+
+        test('explicit refresh does not schedule a delayed follow-up after an uncertain pass', async () => {
+            const sidecar = await makeSidecar();
+            await createOwnedEnvironment();
+            setSidecarResults({ [CACHE_KEY]: { kind: 'valid', metadata: sidecar } });
+            resolveVenvStub.resolves(undefined);
+            const retryManager = manager as unknown as {
+                getDiscoveryRetryDelayMs(attempt: number): number | undefined;
+            };
+            sinon.stub(retryManager, 'getDiscoveryRetryDelayMs').returns(0);
+
+            await manager.refresh(undefined);
+            await new Promise((resolve) => setTimeout(resolve, 25));
+
+            assert.strictEqual(resolveVenvStub.callCount, 1);
+            assert.deepStrictEqual(await manager.getEnvironments('all'), []);
+        });
+
+        test('explicit refresh overlapping bootstrap cancels the later activation retry', async () => {
+            const sidecar = await makeSidecar();
+            await createOwnedEnvironment();
+            setSidecarResults({ [CACHE_KEY]: { kind: 'valid', metadata: sidecar } });
+            let resolveDiscovery: ((value: PythonEnvironment | undefined) => void) | undefined;
+            resolveVenvStub.onFirstCall().callsFake(
+                () =>
+                    new Promise<PythonEnvironment | undefined>((resolve) => {
+                        resolveDiscovery = resolve;
+                    }),
+            );
+            resolveVenvStub.onSecondCall().resolves(undefined);
+            const retryManager = manager as unknown as {
+                getDiscoveryRetryDelayMs(attempt: number): number | undefined;
+            };
+            sinon.stub(retryManager, 'getDiscoveryRetryDelayMs').returns(0);
+
+            manager.startActivationDiscovery();
+            await waitForStubCall(resolveVenvStub);
+
+            const refresh = manager.refresh(undefined);
+            resolveDiscovery!(undefined);
+            await refresh;
+            await new Promise((resolve) => setTimeout(resolve, 25));
+
+            assert.strictEqual(resolveVenvStub.callCount, 1);
+            assert.deepStrictEqual(await manager.getEnvironments('all'), []);
+        });
+
+        test('stops retrying after the bounded follow-up attempts', async () => {
+            const sidecar = await makeSidecar();
+            await createOwnedEnvironment();
+            setSidecarResults({ [CACHE_KEY]: { kind: 'valid', metadata: sidecar } });
+            resolveVenvStub.resolves(undefined);
+            const retryManager = manager as unknown as {
+                getDiscoveryRetryDelayMs(attempt: number): number | undefined;
+            };
+            sinon.stub(retryManager, 'getDiscoveryRetryDelayMs').callsFake((attempt) => (attempt < 2 ? 0 : undefined));
+
+            manager.startActivationDiscovery();
+            await waitForStubCallCount(resolveVenvStub, 3);
+            await new Promise((resolve) => setTimeout(resolve, 25));
+
+            assert.strictEqual(resolveVenvStub.callCount, 3);
+            assert.deepStrictEqual(await manager.getEnvironments('all'), []);
+        });
+
+        test('refresh fires remove events when a discovered cache entry becomes invalid', async () => {
+            const environment = await createOwnedEnvironment();
+            let sidecarResult: cacheLayout.InlineScriptMetaReadResult = {
+                kind: 'valid',
+                metadata: await makeSidecar(),
+            };
+            inspectMetaStub.callsFake(async () => sidecarResult);
+            setResolvedVenvs([environment]);
+            await manager.refresh(undefined);
+            const listener = sinon.spy();
+            manager.onDidChangeEnvironments(listener);
+            sidecarResult = { kind: 'invalid' };
+
+            await manager.refresh(undefined);
+
+            assert.deepStrictEqual(await manager.getEnvironments('all'), []);
+            assert.strictEqual(listener.callCount, 1);
+            assert.deepStrictEqual(listener.firstCall.args[0], [
+                { kind: EnvironmentChangeKind.remove, environment },
+            ]);
+        });
+
+        test('does not publish discovery results after disposal while refresh is in flight', async () => {
+            const environment = await createOwnedEnvironment();
+            const sidecar = await makeSidecar();
+            setSidecarResults({ [CACHE_KEY]: { kind: 'valid', metadata: sidecar } });
+            let resolveDiscovery: ((value: PythonEnvironment | undefined) => void) | undefined;
+            resolveVenvStub.callsFake(
+                () =>
+                    new Promise<PythonEnvironment | undefined>((resolve) => {
+                        resolveDiscovery = resolve;
+                    }),
+            );
+            const listener = sinon.spy();
+            manager.onDidChangeEnvironments(listener);
+
+            const refresh = manager.refresh(undefined);
+            await waitForStubCall(resolveVenvStub);
+            manager.dispose();
+            resolveDiscovery!(environment);
+            await refresh;
+
+            assert.deepStrictEqual(await manager.getEnvironments('all'), []);
+            assert.strictEqual(listener.callCount, 0);
+        });
+
+        test('dispose cancels a pending discovery retry', async () => {
+            const sidecar = await makeSidecar();
+            await createOwnedEnvironment();
+            setSidecarResults({ [CACHE_KEY]: { kind: 'valid', metadata: sidecar } });
+            resolveVenvStub.resolves(undefined);
+            const retryManager = manager as unknown as {
+                getDiscoveryRetryDelayMs(attempt: number): number | undefined;
+            };
+            sinon.stub(retryManager, 'getDiscoveryRetryDelayMs').returns(25);
+
+            manager.startActivationDiscovery();
+            await waitForStubCall(resolveVenvStub);
+            manager.dispose();
+            await new Promise((resolve) => setTimeout(resolve, 40));
+
+            assert.strictEqual(resolveVenvStub.callCount, 1);
         });
     });
 
