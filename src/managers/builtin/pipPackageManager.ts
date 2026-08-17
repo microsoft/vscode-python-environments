@@ -90,6 +90,7 @@ export class PipPackageManager implements PackageManager, Disposable {
                         (changes) => {
                             this._onDidChangePackages.fire({ environment, manager: this, changes });
                         },
+                        () => this.fetchPackages(environment, !manageOptions.runHeadless),
                     );
                 } catch (e) {
                     if (e instanceof CancellationError) {
@@ -132,16 +133,20 @@ export class PipPackageManager implements PackageManager, Disposable {
 
     async getPackages(environment: PythonEnvironment, options?: GetPackagesOptions): Promise<Package[] | undefined> {
         if (options?.skipCache || !this.packages.has(environment.envId.id)) {
-            const data = await refreshPipPackages(environment, this.log);
-            if (data === undefined) {
-                return this.packages.get(environment.envId.id);
-            }
-
-            const packages = data.map((pkg) => this.api.createPackageItem(pkg, environment, this));
-            this.packages.set(environment.envId.id, packages);
-            return packages;
+            return this.fetchPackages(environment);
         }
         return this.packages.get(environment.envId.id);
+    }
+
+    private async fetchPackages(environment: PythonEnvironment, showErrors = true): Promise<Package[]> {
+        const data = await refreshPipPackages(environment, this.log, { showErrors });
+        if (data === undefined) {
+            return this.packages.get(environment.envId.id) ?? [];
+        }
+
+        const packages = data.map((pkg) => this.api.createPackageItem(pkg, environment, this));
+        this.packages.set(environment.envId.id, packages);
+        return packages;
     }
 
     async getVersion(environment: PythonEnvironment): Promise<Pep440Version | undefined> {
