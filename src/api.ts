@@ -679,9 +679,9 @@ export interface PackageManager {
     /**
      * Refreshes the package list for the specified Python environment.
      * @param environment - The Python environment for which to refresh the package list.
-     * @returns A promise that resolves with the refreshed list of packages, or undefined.
+     * @returns A promise that resolves when the refresh is complete.
      */
-    refresh(environment: PythonEnvironment): Promise<Package[] | undefined>;
+    refresh(environment: PythonEnvironment): Promise<void>;
 
     /**
      * Retrieves the list of packages for the specified Python environment.
@@ -1095,9 +1095,9 @@ export interface PythonPackageGetterApi {
      * Refresh the list of packages in a Python Environment.
      *
      * @param environment The Python Environment for which the list of packages is to be refreshed.
-     * @returns A promise that resolves with the refreshed list of packages, or undefined.
+     * @returns A promise that resolves when the list of packages has been refreshed.
      */
-    refreshPackages(environment: PythonEnvironment): Promise<Package[] | undefined>;
+    refreshPackages(environment: PythonEnvironment): Promise<void>;
 
     /**
      * Get the list of packages in a Python Environment.
@@ -1107,6 +1107,22 @@ export interface PythonPackageGetterApi {
      * @returns The list of packages in the Python Environment.
      */
     getPackages(environment: PythonEnvironment, options?: GetPackagesOptions): Promise<Package[] | undefined>;
+
+    /**
+     * Get the list of available versions for a package, newest first.
+     *
+     * Support depends on the package manager backing the environment. Managers that do
+     * not implement version lookup resolve to `undefined`.
+     *
+     * @param environment The Python Environment context for the lookup.
+     * @param packageName The name of the package to look up.
+     * @returns A promise that resolves to an array of {@link Pep440Version} objects (newest first),
+     *          or `undefined` if the package manager does not support version listing.
+     */
+    getPackageAvailableVersions(
+        environment: PythonEnvironment,
+        packageName: string,
+    ): Promise<Pep440Version[] | undefined>;
 
     /**
      * Event raised when the list of packages in a Python Environment changes.

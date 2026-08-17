@@ -4,11 +4,11 @@
 import assert from 'assert';
 import * as sinon from 'sinon';
 import { Disposable, LogOutputChannel, Uri } from 'vscode';
-import { EnvironmentManager, PythonEnvironmentApi } from '../../../api';
-import * as pythonApi from '../../../features/pythonApi';
-import * as helpers from '../../../helpers';
-import { registerInlineScriptFeatures } from '../../../managers/builtin/inlineScriptMain';
-import { NativePythonFinder } from '../../../managers/common/nativePythonFinder';
+import { EnvironmentManager, PythonEnvironmentApi } from '../../../../api';
+import * as pythonApi from '../../../../features/pythonApi';
+import * as helpers from '../../../../helpers';
+import { registerInlineScriptFeatures } from '../../../../managers/builtin/inlineScript/main';
+import { NativePythonFinder } from '../../../../managers/common/nativePythonFinder';
 
 function makeFakeLog(): LogOutputChannel {
     return {

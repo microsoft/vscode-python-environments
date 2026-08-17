@@ -1,10 +1,10 @@
 // Copyright (c) Microsoft Corporation. All rights reserved.
 // Licensed under the MIT License.
 
-import { PythonEnvironment } from '../api';
-import { matchesPythonVersion } from './inlineScriptMetadata';
-import { traceWarn } from './logging';
-import { compareReleaseSegments, parseReleaseSegments } from './utils/pep440Release';
+import { PythonEnvironment } from '../../api';
+import { traceWarn } from '../logging';
+import { compareReleaseSegments, parseReleaseSegments } from '../utils/pep440Release';
+import { matchesPythonVersion } from './metadata';
 
 /**
  * Pick the newest installed Python that can serve as a base interpreter for

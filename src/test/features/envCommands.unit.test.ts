@@ -6,7 +6,8 @@ import { PythonEnvironment, PythonProject } from '../../api';
 import * as commandApi from '../../common/command.api';
 import * as managerApi from '../../common/pickers/managers';
 import * as projectApi from '../../common/pickers/projects';
-import { createAnyEnvironmentCommand, revealEnvInManagerView } from '../../features/envCommands';
+import { createAnyEnvironmentCommand, removePythonProject, revealEnvInManagerView } from '../../features/envCommands';
+import * as settingHelpers from '../../features/settings/settingHelpers';
 import { EnvManagerView } from '../../features/views/envManagersView';
 import { ProjectEnvironment, ProjectItem } from '../../features/views/treeViewItems';
 import { EnvironmentManagers, InternalEnvironmentManager, PythonProjectManager } from '../../internal.api';
@@ -176,6 +177,42 @@ suite('Create Any Environment Command Tests', () => {
         assert.strictEqual(result, env.object, 'Expected the created environment to match the mocked environment.');
         manager.verifyAll();
         em.verifyAll();
+    });
+});
+
+suite('Remove Python Project Command Tests', () => {
+    teardown(() => {
+        sinon.restore();
+    });
+
+    test('clears the active environment before removing the project', async () => {
+        const calls: string[] = [];
+        const project: PythonProject = {
+            uri: Uri.file('/some/test/workspace/project'),
+            name: 'project',
+        };
+        const item = new ProjectItem(project);
+        const envManagers = {
+            setEnvironment: sinon.stub().callsFake(async () => {
+                calls.push('clearEnvironment');
+            }),
+        } as unknown as EnvironmentManagers;
+        const projectManager = {
+            remove: sinon.stub().callsFake(() => {
+                calls.push('removeProject');
+            }),
+        } as unknown as PythonProjectManager;
+        sinon.stub(settingHelpers, 'removePythonProjectSetting').callsFake(async () => {
+            calls.push('removeSetting');
+        });
+
+        await removePythonProject(item, projectManager, envManagers);
+
+        assert.deepStrictEqual(calls, ['clearEnvironment', 'removeSetting', 'removeProject']);
+        assert.ok(
+            (envManagers.setEnvironment as sinon.SinonStub).calledOnceWithExactly(project.uri, undefined),
+            'Should clear the project environment through the central manager',
+        );
     });
 });
 
