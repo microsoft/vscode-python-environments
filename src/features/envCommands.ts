@@ -27,7 +27,7 @@ import {
     PythonProjectManager,
 } from '../internal.api';
 import {
-    getResolvedPythonProjectSettings,
+    removeInlineScriptPythonProjectSettings,
     removePythonProjectSetting,
     setEnvironmentManager,
     setPackageManager,
@@ -58,7 +58,6 @@ import {
     showWarningMessage,
     withProgress,
 } from '../common/window.apis';
-import { getWorkspaceFolders } from '../common/workspace.apis';
 import { INLINE_SCRIPT_MANAGER_ID } from '../common/constants';
 import { runAsTask } from './execution/runAsTask';
 import { runInTerminal } from './terminal/runInTerminal';
@@ -670,34 +669,6 @@ export async function removePythonProject(
     wm.remove(item.project);
 }
 
-function getInlineScriptProjectEdits(wm: PythonProjectManager) {
-    const currentProjects = new Map(wm.getProjects().map((project) => [project.uri.toString(), project] as const));
-    const edits = new Map<string, { project: PythonProject; envManager: string }>();
-    for (const workspaceFolder of getWorkspaceFolders() ?? []) {
-        for (const resolvedSetting of getResolvedPythonProjectSettings(workspaceFolder)) {
-            if (
-                !resolvedSetting.sources.some(
-                    (source) => source.setting.envManager === INLINE_SCRIPT_MANAGER_ID,
-                )
-            ) {
-                continue;
-            }
-            const projectUri = resolvedSetting.uri;
-            const key = projectUri.toString();
-            edits.set(key, {
-                project:
-                    currentProjects.get(key) ??
-                    wm.create(path.basename(projectUri.fsPath) || resolvedSetting.effective.setting.path, projectUri),
-                envManager: INLINE_SCRIPT_MANAGER_ID,
-            });
-        }
-    }
-    return {
-        edits: Array.from(edits.values()),
-        loadedProjects: currentProjects,
-    };
-}
-
 export async function clearScriptEnvironmentCacheCommand(
     em: EnvironmentManagers,
     wm: PythonProjectManager,
@@ -721,15 +692,8 @@ export async function clearScriptEnvironmentCacheCommand(
         return;
     }
 
-    const { edits, loadedProjects } = getInlineScriptProjectEdits(wm);
     await manager.clearCache();
-    if (edits.length === 0) {
-        return;
-    }
-    const removedProjects = await removePythonProjectSetting(edits);
-    const loadedProjectsToRemove = removedProjects
-        .map((project) => loadedProjects.get(project.uri.toString()))
-        .filter((project): project is PythonProject => project !== undefined);
+    const loadedProjectsToRemove = await removeInlineScriptPythonProjectSettings(wm.getProjects());
     if (loadedProjectsToRemove.length > 0) {
         wm.remove(loadedProjectsToRemove);
     }

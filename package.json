@@ -246,12 +246,6 @@
                 "icon": "$(trash)"
             },
             {
-                "command": "python-envs.clearScriptEnvCache",
-                "title": "%python-envs.clearScriptEnvCache.title%",
-                "category": "Python",
-                "icon": "$(trash)"
-            },
-            {
                 "command": "python-envs.runInTerminal",
                 "title": "%python-envs.runInTerminal.title%",
                 "category": "Python Envs",
@@ -471,10 +465,6 @@
                 {
                     "command": "python-envs.reportIssue",
                     "when": "config.python.useEnvironmentsExtension != false"
-                },
-                {
-                    "command": "python-envs.clearScriptEnvCache",
-                    "when": "config.python.useEnvironmentsExtension != false && config.python-envs.inlineScripts.enabled == true"
                 }
             ],
             "view/item/context": [

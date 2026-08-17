@@ -1,7 +1,12 @@
 import * as path from 'path';
 import { ConfigurationScope, ConfigurationTarget, Uri, WorkspaceConfiguration, WorkspaceFolder } from 'vscode';
 import { PythonProject } from '../../api';
-import { DEFAULT_ENV_MANAGER_ID, DEFAULT_PACKAGE_MANAGER_ID, SYSTEM_MANAGER_ID } from '../../common/constants';
+import {
+    DEFAULT_ENV_MANAGER_ID,
+    DEFAULT_PACKAGE_MANAGER_ID,
+    INLINE_SCRIPT_MANAGER_ID,
+    SYSTEM_MANAGER_ID,
+} from '../../common/constants';
 import { traceError, traceInfo, traceVerbose, traceWarn } from '../../common/logging';
 import { getGlobalPersistentState } from '../../common/persistentState';
 import { normalizePath } from '../../common/utils/pathUtils';
@@ -10,7 +15,7 @@ import { sendTelemetryEvent } from '../../common/telemetry/sender';
 import * as workspaceApis from '../../common/workspace.apis';
 import { PythonProjectManager, PythonProjectSettings } from '../../internal.api';
 
-export interface ResolvedPythonProjectSettingSource {
+interface ResolvedPythonProjectSettingSource {
     readonly setting: PythonProjectSettings;
     readonly uri: Uri;
     readonly workspaceFolder: WorkspaceFolder;
@@ -18,7 +23,7 @@ export interface ResolvedPythonProjectSettingSource {
     readonly target: ConfigurationTarget.Workspace | ConfigurationTarget.WorkspaceFolder;
 }
 
-export interface ResolvedPythonProjectSetting {
+interface ResolvedPythonProjectSetting {
     readonly uri: Uri;
     readonly workspaceFolder: WorkspaceFolder;
     readonly effective: ResolvedPythonProjectSettingSource;
@@ -60,7 +65,7 @@ function resolveProjectSettingUri(
         : undefined;
 }
 
-export function getResolvedPythonProjectSettings(
+function getResolvedPythonProjectSettings(
     workspaceFolder: WorkspaceFolder,
     config: WorkspaceConfiguration = workspaceApis.getConfiguration('python-envs', workspaceFolder.uri),
 ): ResolvedPythonProjectSetting[] {
@@ -495,6 +500,115 @@ function cloneProjectSettings(
     return settings?.map((setting) => ({ ...setting }));
 }
 
+export async function removeInlineScriptPythonProjectSettings(
+    currentProjects: readonly PythonProject[],
+): Promise<PythonProject[]> {
+    const currentProjectsByUri = new Map(currentProjects.map((project) => [project.uri.toString(), project] as const));
+    const workspaceEntries: Array<readonly [WorkspaceFolder, EditProjectSettings[]]> = [];
+    for (const workspaceFolder of workspaceApis.getWorkspaceFolders() ?? []) {
+        const edits: EditProjectSettings[] = getResolvedPythonProjectSettings(workspaceFolder)
+            .filter((resolvedSetting) =>
+                resolvedSetting.sources.some((source) => source.setting.envManager === INLINE_SCRIPT_MANAGER_ID),
+            )
+            .map((resolvedSetting) => ({
+                project:
+                    currentProjectsByUri.get(resolvedSetting.uri.toString()) ?? {
+                        name: path.basename(resolvedSetting.uri.fsPath) || resolvedSetting.effective.setting.path,
+                        uri: resolvedSetting.uri,
+                    },
+                envManager: INLINE_SCRIPT_MANAGER_ID,
+            }));
+
+        if (edits.length > 0) {
+            workspaceEntries.push([workspaceFolder, edits]);
+        }
+    }
+
+    if (workspaceEntries.length === 0) {
+        return [];
+    }
+
+    const removedProjects = new Map<string, PythonProject>();
+    const folderRemainingSettings = new Map<string, PythonProjectSettings[]>();
+    const folderExistingSettings = new Map<string, PythonProjectSettings[]>();
+    const promises: Thenable<void>[] = [];
+    let workspaceConfig: WorkspaceConfiguration | undefined;
+    let workspaceValueOriginal: PythonProjectSettings[] | undefined;
+
+    workspaceEntries.forEach(([workspaceFolder, edits]) => {
+        const config = workspaceApis.getConfiguration('python-envs', workspaceFolder.uri);
+        const projectsInspect = config.inspect<PythonProjectSettings[]>('pythonProjects');
+        workspaceConfig ??= config;
+        workspaceValueOriginal ??= cloneProjectSettings(projectsInspect?.workspaceValue);
+
+        const workspaceFolderOriginal = cloneProjectSettings(projectsInspect?.workspaceFolderValue) ?? [];
+        folderExistingSettings.set(workspaceFolder.uri.toString(), workspaceFolderOriginal);
+        const workspaceFolderRemaining = workspaceFolderOriginal.filter(
+            (projectSetting) => !edits.some((edit) => matchesProjectSettingEdit(projectSetting, edit, workspaceFolder)),
+        );
+        folderRemainingSettings.set(workspaceFolder.uri.toString(), workspaceFolderRemaining);
+
+        if (workspaceFolderRemaining.length !== workspaceFolderOriginal.length) {
+            promises.push(
+                config.update(
+                    'pythonProjects',
+                    workspaceFolderRemaining.length > 0 ? workspaceFolderRemaining : undefined,
+                    ConfigurationTarget.WorkspaceFolder,
+                ),
+            );
+        }
+    });
+
+    const aggregatedEdits = workspaceEntries.flatMap(([workspaceFolder, edits]) =>
+        edits.map((edit) => ({ workspaceFolder, edit })),
+    );
+    const workspaceValueRemaining =
+        workspaceValueOriginal?.filter(
+            (projectSetting) =>
+                !aggregatedEdits.some(({ workspaceFolder, edit }) =>
+                    matchesProjectSettingEdit(projectSetting, edit, workspaceFolder),
+                ),
+        ) ?? [];
+
+    if (
+        workspaceConfig &&
+        workspaceValueOriginal !== undefined &&
+        workspaceValueRemaining.length !== workspaceValueOriginal.length
+    ) {
+        promises.push(
+            workspaceConfig.update(
+                'pythonProjects',
+                workspaceValueRemaining.length > 0 ? workspaceValueRemaining : undefined,
+                ConfigurationTarget.Workspace,
+            ),
+        );
+    }
+
+    workspaceEntries.forEach(([workspaceFolder, edits]) => {
+        const existingSettings = [
+            ...(workspaceValueOriginal ?? []),
+            ...((folderExistingSettings.get(workspaceFolder.uri.toString()) ?? [])),
+        ];
+        const remainingSettings = [
+            ...workspaceValueRemaining,
+            ...((folderRemainingSettings.get(workspaceFolder.uri.toString()) ?? [])),
+        ];
+        edits.filter(
+            (edit) =>
+                existingSettings.some((projectSetting) => matchesProjectSettingEdit(projectSetting, edit, workspaceFolder)) &&
+                !hasProjectSetting(remainingSettings, edit.project, workspaceFolder),
+        ).forEach((edit) => {
+            removedProjects.set(edit.project.uri.toString(), edit.project);
+        });
+    });
+
+    await Promise.all(promises);
+
+    return Array.from(removedProjects.values())
+        .map((project) => currentProjectsByUri.get(project.uri.toString()))
+        .filter((project): project is PythonProject => project !== undefined);
+}
+
 export async function addPythonProjectSetting(edits: EditProjectSettings[]): Promise<void> {
     const noWorkspace: EditProjectSettings[] = [];
     const workspaces = new Map<WorkspaceFolder, EditProjectSettings[]>();
@@ -591,7 +705,7 @@ export async function addPythonProjectSetting(edits: EditProjectSettings[]): Pro
     await Promise.all(promises);
 }
 
-export async function removePythonProjectSetting(edits: EditProjectSettings[]): Promise<PythonProject[]> {
+export async function removePythonProjectSetting(edits: EditProjectSettings[]): Promise<void> {
     const noWorkspace: EditProjectSettings[] = [];
     const workspaces = new Map<WorkspaceFolder, EditProjectSettings[]>();
     edits.forEach((e) => {
@@ -607,87 +721,24 @@ export async function removePythonProjectSetting(edits: EditProjectSettings[]): 
         traceError(`Unable to find workspace for ${e.project.uri.fsPath}`);
     });
 
-    const workspaceEntries = Array.from(workspaces.entries());
-    if (workspaceEntries.length === 0) {
-        return [];
-    }
-
-    const removedProjects = new Map<string, PythonProject>();
-    const folderRemainingSettings = new Map<string, PythonProjectSettings[]>();
-    const folderExistingSettings = new Map<string, PythonProjectSettings[]>();
     const promises: Thenable<void>[] = [];
-    let workspaceConfig: WorkspaceConfiguration | undefined;
-    let workspaceValueOriginal: PythonProjectSettings[] | undefined;
-
-    workspaceEntries.forEach(([w, es]) => {
+    workspaces.forEach((es, w) => {
         const config = workspaceApis.getConfiguration('python-envs', w.uri);
-        const projectsInspect = config.inspect<PythonProjectSettings[]>('pythonProjects');
-        workspaceConfig ??= config;
-        workspaceValueOriginal ??= cloneProjectSettings(projectsInspect?.workspaceValue);
-
-        const workspaceFolderOriginal = cloneProjectSettings(projectsInspect?.workspaceFolderValue) ?? [];
-        folderExistingSettings.set(w.uri.toString(), workspaceFolderOriginal);
-        const workspaceFolderRemaining = workspaceFolderOriginal.filter(
-            (projectSetting) => !es.some((edit) => matchesProjectSettingEdit(projectSetting, edit, w)),
-        );
-        folderRemainingSettings.set(w.uri.toString(), workspaceFolderRemaining);
-
-        if (workspaceFolderRemaining.length !== workspaceFolderOriginal.length) {
-            promises.push(
-                config.update(
-                    'pythonProjects',
-                    workspaceFolderRemaining.length > 0 ? workspaceFolderRemaining : undefined,
-                    ConfigurationTarget.WorkspaceFolder,
-                ),
-            );
+        const overrides = config.get<PythonProjectSettings[]>('pythonProjects', []);
+        es.forEach((e) => {
+            const pwPath = normalizePath(e.project.uri.fsPath);
+            const index = overrides.findIndex((s) => normalizePath(path.resolve(w.uri.fsPath, s.path)) === pwPath);
+            if (index >= 0) {
+                overrides.splice(index, 1);
+            }
+        });
+        if (overrides.length === 0) {
+            promises.push(config.update('pythonProjects', undefined, ConfigurationTarget.Workspace));
+        } else {
+            promises.push(config.update('pythonProjects', overrides, ConfigurationTarget.Workspace));
         }
     });
-
-    const aggregatedEdits = workspaceEntries.flatMap(([workspaceFolder, workspaceEdits]) =>
-        workspaceEdits.map((edit) => ({ workspaceFolder, edit })),
-    );
-    const workspaceValueRemaining =
-        workspaceValueOriginal?.filter(
-            (projectSetting) =>
-                !aggregatedEdits.some(({ workspaceFolder, edit }) =>
-                    matchesProjectSettingEdit(projectSetting, edit, workspaceFolder),
-                ),
-        ) ?? [];
-
-    if (
-        workspaceConfig &&
-        workspaceValueOriginal !== undefined &&
-        workspaceValueRemaining.length !== workspaceValueOriginal.length
-    ) {
-        promises.push(
-            workspaceConfig.update(
-                'pythonProjects',
-                workspaceValueRemaining.length > 0 ? workspaceValueRemaining : undefined,
-                ConfigurationTarget.Workspace,
-            ),
-        );
-    }
-
-    workspaceEntries.forEach(([w, es]) => {
-        const existingSettings = [
-            ...(workspaceValueOriginal ?? []),
-            ...((folderExistingSettings.get(w.uri.toString()) ?? [])),
-        ];
-        const remainingSettings = [
-            ...workspaceValueRemaining,
-            ...((folderRemainingSettings.get(w.uri.toString()) ?? [])),
-        ];
-        es.filter(
-            (edit) =>
-                existingSettings.some((projectSetting) => matchesProjectSettingEdit(projectSetting, edit, w)) &&
-                !hasProjectSetting(remainingSettings, edit.project, w),
-        ).forEach((edit) => {
-            removedProjects.set(edit.project.uri.toString(), edit.project);
-        });
-    });
-
     await Promise.all(promises);
-    return Array.from(removedProjects.values());
 }
 
 /**
