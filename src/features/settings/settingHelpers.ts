@@ -28,6 +28,15 @@ function getSettings(
     return undefined;
 }
 
+export function getProjectEnvironmentManagerSetting(
+    wm: PythonProjectManager,
+    scope: Uri,
+): string | undefined {
+    const config = workspaceApis.getConfiguration('python-envs', scope);
+    const setting = getSettings(wm, config, scope)?.envManager;
+    return setting ? setting : undefined;
+}
+
 let DEFAULT_ENV_MANAGER_BROKEN = false;
 let hasShownDefaultEnvManagerBrokenWarn = false;
 
