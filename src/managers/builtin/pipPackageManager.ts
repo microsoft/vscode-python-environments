@@ -126,7 +126,9 @@ export class PipPackageManager implements PackageManager, Disposable {
                         this._onDidChangePackages.fire({ environment, manager: this, changes });
                     },
                 );
-                this.packages.set(environment.envId.id, packages ?? []);
+                if (packages !== undefined) {
+                    this.packages.set(environment.envId.id, packages);
+                }
             },
         );
     }
@@ -138,10 +140,10 @@ export class PipPackageManager implements PackageManager, Disposable {
         return this.packages.get(environment.envId.id);
     }
 
-    private async fetchPackages(environment: PythonEnvironment, showErrors = true): Promise<Package[]> {
+    private async fetchPackages(environment: PythonEnvironment, showErrors = true): Promise<Package[] | undefined> {
         const data = await refreshPipPackages(environment, this.log, { showErrors });
         if (data === undefined) {
-            return this.packages.get(environment.envId.id) ?? [];
+            return this.packages.get(environment.envId.id);
         }
 
         const packages = data.map((pkg) => this.api.createPackageItem(pkg, environment, this));

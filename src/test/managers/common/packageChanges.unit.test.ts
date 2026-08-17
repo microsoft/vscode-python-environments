@@ -145,6 +145,17 @@ suite('packageChanges', () => {
             assert.ok(getPackagesStub.notCalled);
         });
 
+        test('preserves undefined and does not report removals when fetching fails', async () => {
+            const before = [{ name: 'requests', version: '2.31.0' } as Package];
+            getPackagesStub.resolves(undefined);
+            const onChanges = sinon.stub();
+
+            const result = await updatePackagesAndNotify(packageManager, environment, before, onChanges);
+
+            assert.strictEqual(result, undefined);
+            assert.ok(onChanges.notCalled);
+        });
+
         test('does not fire callback when nothing changed', async () => {
             const pkgs = [{ name: 'requests', version: '2.31.0' } as Package];
             getPackagesStub.resolves(pkgs);

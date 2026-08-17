@@ -40,4 +40,24 @@ suite('PipPackageManager', () => {
         assert.deepStrictEqual(initial, [cachedPackage]);
         assert.deepStrictEqual(afterFailedRefresh, [cachedPackage]);
     });
+
+    test('preserves undefined when an uncached refresh fails', async () => {
+        const environment = {
+            envId: { id: 'test-environment', managerId: 'test-manager' },
+            environmentPath: Uri.file('/path/to/environment'),
+        } as PythonEnvironment;
+        const manager = new PipPackageManager(
+            { createPackageItem: sinon.stub() } as unknown as PythonEnvironmentApi,
+            { error: sinon.stub(), info: sinon.stub() } as unknown as LogOutputChannel,
+            {} as VenvManager,
+        );
+        const refreshPackages = sinon.stub(builtinUtils, 'refreshPipPackages').resolves(undefined);
+
+        const firstResult = await manager.getPackages(environment);
+        const secondResult = await manager.getPackages(environment);
+
+        assert.strictEqual(firstResult, undefined);
+        assert.strictEqual(secondResult, undefined);
+        assert.strictEqual(refreshPackages.callCount, 2, 'A failed refresh should not populate the package cache');
+    });
 });
