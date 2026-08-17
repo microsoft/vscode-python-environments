@@ -13,6 +13,8 @@ import * as cacheLayout from '../../../../common/inlineScript/cacheLayout';
 import * as metadataReader from '../../../../common/inlineScript/metadata';
 import * as lockfileApis from '../../../../common/lockfile.apis';
 import * as persistentState from '../../../../common/persistentState';
+import { EventNames } from '../../../../common/telemetry/constants';
+import * as telemetrySender from '../../../../common/telemetry/sender';
 import { isWindows } from '../../../../common/utils/platformUtils';
 import { normalizePath } from '../../../../common/utils/pathUtils';
 import { getVenvPythonPath } from '../../../../common/utils/virtualEnvironment';
@@ -104,6 +106,7 @@ suite('InlineScriptEnvManager', () => {
     let nativeFinder: NativePythonFinder;
     let promptInstallPythonViaUvStub: sinon.SinonStub;
     let readMetadataStub: sinon.SinonStub;
+    let sendTelemetryStub: sinon.SinonStub;
     let inspectMetaStub: sinon.SinonStub;
     let retainLockStub: sinon.SinonStub;
     let releaseLockStub: sinon.SinonStub;
@@ -152,9 +155,12 @@ suite('InlineScriptEnvManager', () => {
         computeCacheKeyStub = sinon.stub(cacheKey, 'computeCacheKey').returns(CACHE_KEY);
         getAvailablePythonVersionsStub = sinon.stub(uvPythonInstaller, 'getAvailablePythonVersions').resolves([]);
         ensureUvForVersionLookupStub = sinon
-            .stub(uvPythonInstaller, 'ensureUvForInlineScriptVersionLookup')
-            .resolves(true);
-        promptInstallPythonViaUvStub = sinon.stub(uvPythonInstaller, 'promptInstallPythonViaUv');
+            .stub(uvPythonInstaller, 'ensureUvForInlineScriptVersionLookupDetailed')
+            .resolves('available');
+        promptInstallPythonViaUvStub = sinon
+            .stub(uvPythonInstaller, 'promptInstallPythonViaUvDetailed')
+            .resolves({ kind: 'declined' });
+        sendTelemetryStub = sinon.stub(telemetrySender, 'sendTelemetryEvent');
         inspectMetaStub = sinon.stub(cacheLayout, 'inspectMetaJson').resolves({ kind: 'missing' });
         baseInterpreterStatusStub = sinon.stub(cacheLayout, 'getBaseInterpreterStatus').resolves('available');
         writeMetaStub = sinon.stub(cacheLayout, 'writeMetaJson').resolves();
@@ -226,6 +232,16 @@ suite('InlineScriptEnvManager', () => {
 
     function nextTurn(): Promise<void> {
         return new Promise((resolve) => setImmediate(resolve));
+    }
+
+    function telemetryCalls(eventName: EventNames): sinon.SinonSpyCall[] {
+        return sendTelemetryStub.getCalls().filter((call) => call.args[0] === eventName);
+    }
+
+    function assertNoInlineScriptLifecycleTelemetry(): void {
+        assert.strictEqual(telemetryCalls(EventNames.INLINE_SCRIPT_ENV_CREATED).length, 0);
+        assert.strictEqual(telemetryCalls(EventNames.INLINE_SCRIPT_ENV_REUSE_HIT).length, 0);
+        assert.strictEqual(telemetryCalls(EventNames.INLINE_SCRIPT_ENV_ERROR).length, 0);
     }
 
     suite('static metadata and deferred methods', () => {
@@ -386,7 +402,7 @@ suite('InlineScriptEnvManager', () => {
             apiGetEnvironmentsStub.onFirstCall().resolves([baseEnvironment]);
             apiGetEnvironmentsStub.onSecondCall().resolves([baseEnvironment]);
             apiGetEnvironmentsStub.onThirdCall().resolves([uvBase]);
-            promptInstallPythonViaUvStub.resolves(uvExecutable);
+            promptInstallPythonViaUvStub.resolves({ kind: 'installed', pythonPath: uvExecutable });
 
             assert.ok(await manager.create(scriptUri()));
 
@@ -407,7 +423,7 @@ suite('InlineScriptEnvManager', () => {
             apiGetEnvironmentsStub.onFirstCall().resolves([]);
             apiGetEnvironmentsStub.onSecondCall().resolves([]);
             apiGetEnvironmentsStub.onThirdCall().resolves([uvBase]);
-            promptInstallPythonViaUvStub.resolves(uvExecutable);
+            promptInstallPythonViaUvStub.resolves({ kind: 'installed', pythonPath: uvExecutable });
 
             assert.ok(await manager.create(scriptUri()));
 
@@ -422,7 +438,7 @@ suite('InlineScriptEnvManager', () => {
 
         test('does not mutate the cache when the user declines installation', async () => {
             readMetadataStub.resolves({ ...VALID_METADATA, requiresPython: '>=3.13' });
-            promptInstallPythonViaUvStub.resolves(undefined);
+            promptInstallPythonViaUvStub.resolves({ kind: 'declined' });
 
             assert.strictEqual(await manager.create(scriptUri()), undefined);
 
@@ -449,7 +465,7 @@ suite('InlineScriptEnvManager', () => {
             const uvBase = makeEnvironment('ms-python.python:system', '3.13.2', uvExecutable);
             readMetadataStub.resolves({ ...VALID_METADATA, requiresPython: '>=3.13' });
             apiGetEnvironmentsStub.resolves([baseEnvironment]);
-            promptInstallPythonViaUvStub.resolves(uvExecutable);
+            promptInstallPythonViaUvStub.resolves({ kind: 'installed', pythonPath: uvExecutable });
             apiRefreshEnvironmentsStub.rejects(new Error('discovery failed'));
             resolveSystemPythonStub.resolves(uvBase);
 
@@ -474,7 +490,7 @@ suite('InlineScriptEnvManager', () => {
             apiGetEnvironmentsStub.onFirstCall().resolves([baseEnvironment]);
             apiGetEnvironmentsStub.onSecondCall().resolves([baseEnvironment]);
             apiGetEnvironmentsStub.onThirdCall().rejects(new Error('discovery failed'));
-            promptInstallPythonViaUvStub.resolves(uvExecutable);
+            promptInstallPythonViaUvStub.resolves({ kind: 'installed', pythonPath: uvExecutable });
             resolveSystemPythonStub.resolves(uvBase);
 
             assert.ok(await manager.create(scriptUri()));
@@ -524,7 +540,7 @@ suite('InlineScriptEnvManager', () => {
                     arch: 'x86_64',
                 },
             ]);
-            promptInstallPythonViaUvStub.resolves(uvExecutable);
+            promptInstallPythonViaUvStub.resolves({ kind: 'installed', pythonPath: uvExecutable });
 
             assert.ok(await manager.create(scriptUri()));
 
@@ -552,7 +568,7 @@ suite('InlineScriptEnvManager', () => {
                 makeUvPythonVersion('3.13.3'),
                 makeUvPythonVersion('3.13.0'),
             ]);
-            promptInstallPythonViaUvStub.resolves(uvExecutable);
+            promptInstallPythonViaUvStub.resolves({ kind: 'installed', pythonPath: uvExecutable });
 
             assert.ok(await manager.create(scriptUri()));
 
@@ -571,7 +587,7 @@ suite('InlineScriptEnvManager', () => {
             apiGetEnvironmentsStub.onSecondCall().resolves([baseEnvironment]);
             apiGetEnvironmentsStub.onThirdCall().resolves([uvBase]);
             getAvailablePythonVersionsStub.resolves([makeUvPythonVersion('3.11.14')]);
-            promptInstallPythonViaUvStub.resolves(uvExecutable);
+            promptInstallPythonViaUvStub.resolves({ kind: 'installed', pythonPath: uvExecutable });
 
             assert.ok(await manager.create(scriptUri()));
 
@@ -590,7 +606,7 @@ suite('InlineScriptEnvManager', () => {
             apiGetEnvironmentsStub.onSecondCall().resolves([baseEnvironment]);
             apiGetEnvironmentsStub.onThirdCall().resolves([uvBase]);
             getAvailablePythonVersionsStub.resolves([]);
-            promptInstallPythonViaUvStub.resolves(uvExecutable);
+            promptInstallPythonViaUvStub.resolves({ kind: 'installed', pythonPath: uvExecutable });
 
             assert.ok(await manager.create(scriptUri()));
 
@@ -613,7 +629,7 @@ suite('InlineScriptEnvManager', () => {
                 makeUvPythonVersion('3.15.0a6'),
                 makeUvPythonVersion('3.14.2'),
             ]);
-            promptInstallPythonViaUvStub.resolves(uvExecutable);
+            promptInstallPythonViaUvStub.resolves({ kind: 'installed', pythonPath: uvExecutable });
 
             assert.ok(await manager.create(scriptUri()));
 
@@ -631,7 +647,7 @@ suite('InlineScriptEnvManager', () => {
             apiGetEnvironmentsStub.onFirstCall().resolves([baseEnvironment]);
             apiGetEnvironmentsStub.onSecondCall().resolves([baseEnvironment]);
             apiGetEnvironmentsStub.onThirdCall().resolves([uvBase]);
-            promptInstallPythonViaUvStub.resolves(uvExecutable);
+            promptInstallPythonViaUvStub.resolves({ kind: 'installed', pythonPath: uvExecutable });
 
             assert.ok(await manager.create(scriptUri()));
 
@@ -649,7 +665,7 @@ suite('InlineScriptEnvManager', () => {
             apiGetEnvironmentsStub.onFirstCall().resolves([baseEnvironment]);
             apiGetEnvironmentsStub.onSecondCall().resolves([baseEnvironment]);
             apiGetEnvironmentsStub.onThirdCall().resolves([uvBase]);
-            promptInstallPythonViaUvStub.resolves(uvExecutable);
+            promptInstallPythonViaUvStub.resolves({ kind: 'installed', pythonPath: uvExecutable });
 
             assert.ok(await manager.create(scriptUri()));
 
@@ -682,7 +698,7 @@ suite('InlineScriptEnvManager', () => {
                 apiGetEnvironmentsStub.onFirstCall().resolves([baseEnvironment]);
                 apiGetEnvironmentsStub.onSecondCall().resolves([baseEnvironment]);
                 apiGetEnvironmentsStub.onThirdCall().resolves(refreshedEnvironments);
-                promptInstallPythonViaUvStub.resolves(baseExecutable);
+                promptInstallPythonViaUvStub.resolves({ kind: 'installed', pythonPath: baseExecutable });
 
                 assert.strictEqual(await manager.create(scriptUri()), undefined);
 
@@ -730,7 +746,7 @@ suite('InlineScriptEnvManager', () => {
                 signalPrompt!();
                 await installGate;
                 installed = true;
-                return uvExecutable;
+                return { kind: 'installed', pythonPath: uvExecutable };
             });
 
             const first = manager.create(uri);
@@ -750,23 +766,23 @@ suite('InlineScriptEnvManager', () => {
             const uri = scriptUri();
             readMetadataStub.resolves({ ...VALID_METADATA, requiresPython: '>=3.13' });
             apiGetEnvironmentsStub.resolves([baseEnvironment]);
-            let finishPrompt: ((value: undefined) => void) | undefined;
+            let finishPrompt: (() => void) | undefined;
             let signalPrompt: (() => void) | undefined;
             const promptShown = new Promise<void>((resolve) => {
                 signalPrompt = resolve;
             });
             promptInstallPythonViaUvStub.callsFake(
                 () =>
-                    new Promise<undefined>((resolve) => {
+                    new Promise<{ kind: 'declined' }>((resolve) => {
                         signalPrompt!();
-                        finishPrompt = resolve;
+                        finishPrompt = () => resolve({ kind: 'declined' });
                     }),
             );
 
             const first = manager.create(uri);
             await promptShown;
             const second = manager.create(uri);
-            finishPrompt!(undefined);
+            finishPrompt!();
             assert.deepStrictEqual(await Promise.all([first, second]), [undefined, undefined]);
             assert.deepStrictEqual(await Promise.all([first, second]), [undefined, undefined]);
             assert.strictEqual(promptInstallPythonViaUvStub.callCount, 1);
@@ -809,7 +825,7 @@ suite('InlineScriptEnvManager', () => {
                 signalPrompt!();
                 await installGate;
                 isInstalled = true;
-                return uvExecutable;
+                return { kind: 'installed', pythonPath: uvExecutable };
             });
 
             const first = manager.create(scriptUri('a.py'));
@@ -862,7 +878,7 @@ suite('InlineScriptEnvManager', () => {
                 signalPrompt!();
                 await installGate;
                 installed = true;
-                return uvExecutable;
+                return { kind: 'installed', pythonPath: uvExecutable };
             });
 
             const first = manager.create(scriptUri('lower-bound.py'));
@@ -898,7 +914,7 @@ suite('InlineScriptEnvManager', () => {
             promptInstallPythonViaUvStub.callsFake(async () => {
                 signalPrompt!();
                 await installGate;
-                return uvExecutable;
+                return { kind: 'installed', pythonPath: uvExecutable };
             });
 
             const first = manager.create(scriptUri('first.py'));
@@ -925,7 +941,7 @@ suite('InlineScriptEnvManager', () => {
             apiGetEnvironmentsStub.onThirdCall().resolves([baseEnvironment]);
             apiGetEnvironmentsStub.onCall(3).rejects(new Error('discovery unavailable'));
             resolveSystemPythonStub.resolves(uvBase);
-            promptInstallPythonViaUvStub.resolves(uvExecutable);
+            promptInstallPythonViaUvStub.resolves({ kind: 'installed', pythonPath: uvExecutable });
 
             assert.ok(await manager.create(scriptUri('first.py')));
             assert.ok(await manager.create(scriptUri('second.py')));
@@ -1482,6 +1498,305 @@ suite('InlineScriptEnvManager', () => {
         test('dispose is idempotent', () => {
             manager.dispose();
             assert.doesNotThrow(() => manager.dispose());
+        });
+    });
+
+    suite('telemetry', () => {
+        test('does not emit lifecycle telemetry for non-applicable create calls', async () => {
+            readMetadataStub.resolves(undefined);
+
+            assert.strictEqual(await manager.create('global'), undefined);
+            assert.strictEqual(await manager.create(scriptUri()), undefined);
+            assertNoInlineScriptLifecycleTelemetry();
+        });
+
+        test('emits envCreated with only duration and dependencyCount after verified creation', async () => {
+            assert.ok(await manager.create(scriptUri()));
+
+            const createdCalls = telemetryCalls(EventNames.INLINE_SCRIPT_ENV_CREATED);
+            assert.strictEqual(createdCalls.length, 1);
+            assert.deepStrictEqual(createdCalls[0].args, [
+                EventNames.INLINE_SCRIPT_ENV_CREATED,
+                { duration: 0, dependencyCount: 1 },
+            ]);
+            assert.strictEqual(telemetryCalls(EventNames.INLINE_SCRIPT_ENV_REUSE_HIT).length, 0);
+            assert.strictEqual(telemetryCalls(EventNames.INLINE_SCRIPT_ENV_ERROR).length, 0);
+        });
+
+        test('emits envReuseHit only for validated cache hits', async () => {
+            await fs.ensureDir(envDir().fsPath);
+            setSidecar({
+                schemaVersion: cacheLayout.META_SCHEMA_VERSION,
+                baseInterpreterPath: baseExecutable,
+                baseInterpreterVersion: baseEnvironment.version,
+                lastUsedAt: NOW.toISOString(),
+            });
+            const cached = makeEnvironment(
+                'ms-python.python:inline-script',
+                '3.12.4',
+                venvPythonPath(envDir().fsPath),
+                envDir().fsPath,
+            );
+            await fs.outputFile(venvPythonPath(envDir().fsPath), '');
+            resolveVenvStub.resolves(cached);
+
+            assert.strictEqual(await manager.create(scriptUri()), cached);
+
+            const reuseCalls = telemetryCalls(EventNames.INLINE_SCRIPT_ENV_REUSE_HIT);
+            assert.strictEqual(reuseCalls.length, 1);
+            assert.deepStrictEqual(reuseCalls[0].args, [EventNames.INLINE_SCRIPT_ENV_REUSE_HIT]);
+            assert.strictEqual(telemetryCalls(EventNames.INLINE_SCRIPT_ENV_CREATED).length, 0);
+            assert.strictEqual(telemetryCalls(EventNames.INLINE_SCRIPT_ENV_ERROR).length, 0);
+        });
+
+        test('emits a single compatible-python-declined error for coalesced same-script requests', async () => {
+            const uri = scriptUri();
+            readMetadataStub.resolves({ ...VALID_METADATA, requiresPython: '>=3.13' });
+            apiGetEnvironmentsStub.resolves([baseEnvironment]);
+            let finishPrompt: (() => void) | undefined;
+            let signalPrompt: (() => void) | undefined;
+            const promptShown = new Promise<void>((resolve) => {
+                signalPrompt = resolve;
+            });
+            promptInstallPythonViaUvStub.callsFake(
+                () =>
+                    new Promise<{ kind: 'declined' }>((resolve) => {
+                        signalPrompt!();
+                        finishPrompt = () => resolve({ kind: 'declined' });
+                    }),
+            );
+
+            const first = manager.create(uri);
+            await promptShown;
+            const second = manager.create(uri);
+            finishPrompt!();
+
+            assert.deepStrictEqual(await Promise.all([first, second]), [undefined, undefined]);
+            assert.strictEqual(promptInstallPythonViaUvStub.callCount, 1);
+            assert.deepStrictEqual(
+                telemetryCalls(EventNames.INLINE_SCRIPT_ENV_ERROR).map((call) => call.args),
+                [[EventNames.INLINE_SCRIPT_ENV_ERROR, undefined, { category: 'compatible-python-declined' }]],
+            );
+            assert.strictEqual(telemetryCalls(EventNames.INLINE_SCRIPT_ENV_CREATED).length, 0);
+            assert.strictEqual(telemetryCalls(EventNames.INLINE_SCRIPT_ENV_REUSE_HIT).length, 0);
+        });
+
+        test('emits no-compatible-python when quick create cannot prompt for a compatible interpreter', async () => {
+            readMetadataStub.resolves({ ...VALID_METADATA, requiresPython: '>=3.13' });
+            apiGetEnvironmentsStub.resolves([baseEnvironment]);
+
+            assert.strictEqual(await manager.create(scriptUri(), { quickCreate: true }), undefined);
+
+            assert.strictEqual(promptInstallPythonViaUvStub.callCount, 0);
+            assert.deepStrictEqual(
+                telemetryCalls(EventNames.INLINE_SCRIPT_ENV_ERROR).map((call) => call.args),
+                [[EventNames.INLINE_SCRIPT_ENV_ERROR, undefined, { category: 'no-compatible-python' }]],
+            );
+            assert.strictEqual(telemetryCalls(EventNames.INLINE_SCRIPT_ENV_CREATED).length, 0);
+        });
+
+        test('emits discovery-failure when quick create cannot inspect discovered interpreters', async () => {
+            readMetadataStub.resolves({ ...VALID_METADATA, requiresPython: '>=3.13' });
+            apiGetEnvironmentsStub.rejects(new Error('discovery unavailable'));
+
+            assert.strictEqual(await manager.create(scriptUri(), { quickCreate: true }), undefined);
+
+            assert.strictEqual(promptInstallPythonViaUvStub.callCount, 0);
+            assert.deepStrictEqual(
+                telemetryCalls(EventNames.INLINE_SCRIPT_ENV_ERROR).map((call) => call.args),
+                [[EventNames.INLINE_SCRIPT_ENV_ERROR, undefined, { category: 'discovery-failure' }]],
+            );
+        });
+
+        test('emits discovery-failure instead of compatible-python-declined when discovery is unavailable', async () => {
+            const uri = scriptUri();
+            readMetadataStub.resolves({ ...VALID_METADATA, requiresPython: '>=3.13' });
+            apiGetEnvironmentsStub.rejects(new Error('discovery unavailable'));
+
+            assert.strictEqual(await manager.create(uri), undefined);
+
+            assert.strictEqual(promptInstallPythonViaUvStub.callCount, 1);
+            assert.deepStrictEqual(
+                telemetryCalls(EventNames.INLINE_SCRIPT_ENV_ERROR).map((call) => call.args),
+                [[EventNames.INLINE_SCRIPT_ENV_ERROR, undefined, { category: 'discovery-failure' }]],
+            );
+        });
+
+        test('emits discovery-failure instead of install-failure when discovery never recovers', async () => {
+            const uvExecutable = path.join(tempRoot, 'uv-python', isWindows() ? 'python.exe' : 'python');
+            await fs.outputFile(uvExecutable, '');
+            readMetadataStub.resolves({ ...VALID_METADATA, requiresPython: '>=3.13' });
+            apiGetEnvironmentsStub.rejects(new Error('discovery unavailable'));
+            promptInstallPythonViaUvStub.resolves({ kind: 'installed', pythonPath: uvExecutable });
+            resolveSystemPythonStub.resolves(undefined);
+
+            assert.strictEqual(await manager.create(scriptUri()), undefined);
+
+            assert.strictEqual(promptInstallPythonViaUvStub.callCount, 1);
+            assert.strictEqual(resolveSystemPythonStub.callCount, 1);
+            assert.deepStrictEqual(
+                telemetryCalls(EventNames.INLINE_SCRIPT_ENV_ERROR).map((call) => call.args),
+                [[EventNames.INLINE_SCRIPT_ENV_ERROR, undefined, { category: 'discovery-failure' }]],
+            );
+        });
+
+        test('emits a single envCreated event for coalesced same-key creation', async () => {
+            let continueCreation: (() => void) | undefined;
+            let creationStarted: (() => void) | undefined;
+            const started = new Promise<void>((resolve) => {
+                creationStarted = resolve;
+            });
+            const gate = new Promise<void>((resolve) => {
+                continueCreation = resolve;
+            });
+            createWithProgressStub.callsFake(async (...args: unknown[]) => {
+                const target = args[6] as string;
+                await fs.outputFile(venvPythonPath(target), '');
+                creationStarted!();
+                await gate;
+                return {
+                    environment: makeEnvironment(
+                        'ms-python.python:inline-script',
+                        '3.12.4',
+                        venvPythonPath(target),
+                        target,
+                    ),
+                };
+            });
+
+            const first = manager.create(scriptUri('a.py'));
+            await started;
+            const second = manager.create(scriptUri('b.py'));
+            continueCreation!();
+
+            const [firstResult, secondResult] = await Promise.all([first, second]);
+            assert.ok(firstResult);
+            assert.strictEqual(firstResult, secondResult);
+            assert.strictEqual(telemetryCalls(EventNames.INLINE_SCRIPT_ENV_CREATED).length, 1);
+            assert.strictEqual(telemetryCalls(EventNames.INLINE_SCRIPT_ENV_REUSE_HIT).length, 0);
+            assert.strictEqual(telemetryCalls(EventNames.INLINE_SCRIPT_ENV_ERROR).length, 0);
+        });
+
+        test('excludes lock and cache inspection time from envCreated duration', async () => {
+            await fs.ensureDir(envDir().fsPath);
+            lockStub.callsFake(async () => {
+                clock.tick(3_000);
+                return { release: releaseLockStub, retain: retainLockStub };
+            });
+            inspectMetaStub.callsFake(async () => {
+                clock.tick(2_000);
+                return { kind: 'missing' };
+            });
+            createWithProgressStub.callsFake(async (...args: unknown[]) => {
+                const target = args[6] as string;
+                clock.tick(25);
+                await fs.outputFile(venvPythonPath(target), '');
+                return {
+                    environment: makeEnvironment(
+                        'ms-python.python:inline-script',
+                        '3.12.4',
+                        venvPythonPath(target),
+                        target,
+                    ),
+                };
+            });
+
+            assert.ok(await manager.create(scriptUri()));
+
+            const createdCalls = telemetryCalls(EventNames.INLINE_SCRIPT_ENV_CREATED);
+            assert.strictEqual(createdCalls.length, 1);
+            assert.deepStrictEqual(createdCalls[0].args, [
+                EventNames.INLINE_SCRIPT_ENV_CREATED,
+                { duration: 25, dependencyCount: 1 },
+            ]);
+        });
+
+        test('emits lock-timeout when the cache lock cannot be acquired', async () => {
+            lockStub.rejects(Object.assign(new Error('already locked'), { code: 'ELOCKED' }));
+
+            assert.strictEqual(await manager.create(scriptUri()), undefined);
+
+            assert.deepStrictEqual(
+                telemetryCalls(EventNames.INLINE_SCRIPT_ENV_ERROR).map((call) => call.args),
+                [[EventNames.INLINE_SCRIPT_ENV_ERROR, undefined, { category: 'lock-timeout' }]],
+            );
+            assert.strictEqual(telemetryCalls(EventNames.INLINE_SCRIPT_ENV_CREATED).length, 0);
+        });
+
+        for (const code of ['ELOCKRETAINED', 'ELOCKORPHANED'] as const) {
+            test(`emits lock-unavailable when cache lock acquisition fails with ${code}`, async () => {
+                lockStub.rejects(Object.assign(new Error('lock unavailable'), { code }));
+
+                assert.strictEqual(await manager.create(scriptUri()), undefined);
+
+                assert.deepStrictEqual(
+                    telemetryCalls(EventNames.INLINE_SCRIPT_ENV_ERROR).map((call) => call.args),
+                    [[EventNames.INLINE_SCRIPT_ENV_ERROR, undefined, { category: 'lock-unavailable' }]],
+                );
+                assert.strictEqual(telemetryCalls(EventNames.INLINE_SCRIPT_ENV_CREATED).length, 0);
+            });
+        }
+
+        test('emits package-install-cancelled and no success event on rollback', async () => {
+            createWithProgressStub.callsFake(async (...args: unknown[]) => {
+                const target = args[6] as string;
+                await fs.outputFile(venvPythonPath(target), '');
+                return {
+                    environment: makeEnvironment(
+                        'ms-python.python:inline-script',
+                        '3.12.4',
+                        venvPythonPath(target),
+                        target,
+                    ),
+                    pkgInstallationErr: 'Canceled',
+                    pkgInstallationCancelled: true,
+                };
+            });
+
+            assert.strictEqual(await manager.create(scriptUri()), undefined);
+
+            assert.deepStrictEqual(
+                telemetryCalls(EventNames.INLINE_SCRIPT_ENV_ERROR).map((call) => call.args),
+                [[EventNames.INLINE_SCRIPT_ENV_ERROR, undefined, { category: 'package-install-cancelled' }]],
+            );
+            assert.strictEqual(telemetryCalls(EventNames.INLINE_SCRIPT_ENV_CREATED).length, 0);
+        });
+
+        test('emits install-failure when sidecar persistence rollback removes the new environment', async () => {
+            writeMetaStub.rejects(new Error('disk full'));
+
+            assert.strictEqual(await manager.create(scriptUri()), undefined);
+
+            assert.deepStrictEqual(
+                telemetryCalls(EventNames.INLINE_SCRIPT_ENV_ERROR).map((call) => call.args),
+                [[EventNames.INLINE_SCRIPT_ENV_ERROR, undefined, { category: 'install-failure' }]],
+            );
+            assert.strictEqual(telemetryCalls(EventNames.INLINE_SCRIPT_ENV_CREATED).length, 0);
+        });
+
+        test('rebuilds a failed reuse validation as creation without counting a reuse hit', async () => {
+            await fs.ensureDir(envDir().fsPath);
+            setSidecar({
+                schemaVersion: cacheLayout.META_SCHEMA_VERSION,
+                baseInterpreterPath: baseExecutable,
+                baseInterpreterVersion: baseEnvironment.version,
+                lastUsedAt: NOW.toISOString(),
+            });
+            await fs.outputFile(venvPythonPath(envDir().fsPath), '');
+            resolveVenvStub.resolves(
+                makeEnvironment(
+                    'ms-python.python:inline-script',
+                    '3.10.0',
+                    venvPythonPath(envDir().fsPath),
+                    envDir().fsPath,
+                ),
+            );
+
+            assert.ok(await manager.create(scriptUri()));
+
+            assert.strictEqual(telemetryCalls(EventNames.INLINE_SCRIPT_ENV_CREATED).length, 1);
+            assert.strictEqual(telemetryCalls(EventNames.INLINE_SCRIPT_ENV_REUSE_HIT).length, 0);
+            assert.strictEqual(telemetryCalls(EventNames.INLINE_SCRIPT_ENV_ERROR).length, 0);
         });
     });
 
