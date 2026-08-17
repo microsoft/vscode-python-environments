@@ -76,11 +76,7 @@ for (const profile of profiles) {
         });
 
         test(`${profile.name} Package Manager should list available package versions`, async function () {
-            const packageManager = await api.getPackageManager(environment!);
-            assert.ok(packageManager, 'Package manager not available');
-            assert.ok(packageManager.getPackageAvailableVersions, 'Available versions method not available');
-
-            const versions = await packageManager.getPackageAvailableVersions(environment!, 'requests');
+            const versions = await api.getPackageAvailableVersions(environment!, 'requests');
             if (versions === undefined) {
                 this.skip();
                 return;

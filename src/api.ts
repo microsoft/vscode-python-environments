@@ -1120,14 +1120,6 @@ export interface PythonPackageManagerRegistrationApi {
 
 export interface PythonPackageGetterApi {
     /**
-     * Get the registered package manager associated with a Python Environment.
-     *
-     * @param environment The Python Environment whose package manager is required.
-     * @returns The registered package manager, or undefined if no package manager is available.
-     */
-    getPackageManager(environment: PythonEnvironment): Promise<PackageManager | undefined>;
-
-    /**
      * Refresh the list of packages in a Python Environment.
      *
      * @param environment The Python Environment for which the list of packages is to be refreshed.
