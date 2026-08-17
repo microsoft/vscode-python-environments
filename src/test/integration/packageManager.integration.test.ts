@@ -3,13 +3,26 @@ import * as vscode from 'vscode';
 import assert from 'assert';
 import { PythonEnvironment, PythonEnvironmentApi } from '../../api';
 import { CONDA_MANAGER_ID, VENV_MANAGER_ID } from '../../common/constants';
+import { isUvInstalled } from '../../managers/builtin/helpers';
 import { ENVS_EXTENSION_ID } from '../constants';
 import { waitForCondition } from '../testUtils';
 
-const profiles = [
+interface PackageManagerProfile {
+    environmentManagerId: string;
+    name: string;
+    alwaysUseUv?: boolean;
+}
+
+const profiles: PackageManagerProfile[] = [
     {
         environmentManagerId: VENV_MANAGER_ID,
         name: 'Pip',
+        alwaysUseUv: false,
+    },
+    {
+        environmentManagerId: VENV_MANAGER_ID,
+        name: 'Pip with uv',
+        alwaysUseUv: true,
     },
     {
         environmentManagerId: CONDA_MANAGER_ID,
@@ -26,6 +39,8 @@ for (const profile of profiles) {
         let workspaceUri: vscode.Uri;
         let previousDefaultEnvManager: string | undefined;
         let defaultEnvManagerUpdated = false;
+        let previousAlwaysUseUv: boolean | undefined;
+        let alwaysUseUvUpdated = false;
         suiteSetup(async function () {
             const extension = vscode.extensions.getExtension(ENVS_EXTENSION_ID);
             assert.ok(extension, 'Extension not found');
@@ -40,6 +55,12 @@ for (const profile of profiles) {
             assert.ok(workspaceFolder, 'Integration test workspace not found');
             workspaceUri = workspaceFolder.uri;
             const config = vscode.workspace.getConfiguration('python-envs', workspaceUri);
+
+            if (profile.alwaysUseUv === true && !(await isUvInstalled())) {
+                this.skip();
+                return;
+            }
+
             previousDefaultEnvManager = config.inspect<string>('defaultEnvManager')?.workspaceValue;
             await config.update(
                 'defaultEnvManager',
@@ -47,6 +68,12 @@ for (const profile of profiles) {
                 vscode.ConfigurationTarget.Workspace,
             );
             defaultEnvManagerUpdated = true;
+
+            if (profile.alwaysUseUv !== undefined) {
+                previousAlwaysUseUv = config.inspect<boolean>('alwaysUseUv')?.globalValue;
+                await config.update('alwaysUseUv', profile.alwaysUseUv, vscode.ConfigurationTarget.Global);
+                alwaysUseUvUpdated = true;
+            }
 
             await api.refreshEnvironments(workspaceUri);
 
@@ -90,10 +117,19 @@ for (const profile of profiles) {
                     await api.removeEnvironment(environment, { runHeadless: true });
                 }
             } finally {
-                if (defaultEnvManagerUpdated) {
-                    await vscode.workspace
-                        .getConfiguration('python-envs', workspaceUri)
-                        .update('defaultEnvManager', previousDefaultEnvManager, vscode.ConfigurationTarget.Workspace);
+                const config = vscode.workspace.getConfiguration('python-envs', workspaceUri);
+                try {
+                    if (alwaysUseUvUpdated) {
+                        await config.update('alwaysUseUv', previousAlwaysUseUv, vscode.ConfigurationTarget.Global);
+                    }
+                } finally {
+                    if (defaultEnvManagerUpdated) {
+                        await config.update(
+                            'defaultEnvManager',
+                            previousDefaultEnvManager,
+                            vscode.ConfigurationTarget.Workspace,
+                        );
+                    }
                 }
             }
         });
