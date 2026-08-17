@@ -55,6 +55,10 @@ export class PipPackageManager implements PackageManager, Disposable {
         let toUninstall: string[] = [...(options.uninstall ?? [])];
 
         if (toInstall.length === 0 && toUninstall.length === 0) {
+            if (options.runHeadless) {
+                // Headless mode: skip the interactive package picker.
+                return;
+            }
             const projects = this.venv.getProjectsByEnvironment(environment);
             const result = await getWorkspacePackagesToInstall(this.api, options, projects, environment, this.log);
             if (result) {
@@ -86,18 +90,21 @@ export class PipPackageManager implements PackageManager, Disposable {
                         (changes) => {
                             this._onDidChangePackages.fire({ environment, manager: this, changes });
                         },
+                        () => this.fetchPackages(environment, !manageOptions.runHeadless),
                     );
                 } catch (e) {
                     if (e instanceof CancellationError) {
                         throw e;
                     }
                     this.log.error('Error managing packages', e);
-                    setImmediate(async () => {
-                        const result = await window.showErrorMessage('Error managing packages', 'View Output');
-                        if (result === 'View Output') {
-                            this.log.show();
-                        }
-                    });
+                    if (!manageOptions.runHeadless) {
+                        setImmediate(async () => {
+                            const result = await window.showErrorMessage('Error managing packages', 'View Output');
+                            if (result === 'View Output') {
+                                this.log.show();
+                            }
+                        });
+                    }
                     throw e;
                 }
             },
@@ -119,23 +126,29 @@ export class PipPackageManager implements PackageManager, Disposable {
                         this._onDidChangePackages.fire({ environment, manager: this, changes });
                     },
                 );
-                this.packages.set(environment.envId.id, packages ?? []);
+                if (packages !== undefined) {
+                    this.packages.set(environment.envId.id, packages);
+                }
             },
         );
     }
 
     async getPackages(environment: PythonEnvironment, options?: GetPackagesOptions): Promise<Package[] | undefined> {
         if (options?.skipCache || !this.packages.has(environment.envId.id)) {
-            const data = await refreshPipPackages(environment, this.log);
-            if (data === undefined) {
-                return this.packages.get(environment.envId.id);
-            }
-
-            const packages = data.map((pkg) => this.api.createPackageItem(pkg, environment, this));
-            this.packages.set(environment.envId.id, packages);
-            return packages;
+            return this.fetchPackages(environment);
         }
         return this.packages.get(environment.envId.id);
+    }
+
+    private async fetchPackages(environment: PythonEnvironment, showErrors = true): Promise<Package[] | undefined> {
+        const data = await refreshPipPackages(environment, this.log, { showErrors });
+        if (data === undefined) {
+            return this.packages.get(environment.envId.id);
+        }
+
+        const packages = data.map((pkg) => this.api.createPackageItem(pkg, environment, this));
+        this.packages.set(environment.envId.id, packages);
+        return packages;
     }
 
     async getVersion(environment: PythonEnvironment): Promise<Pep440Version | undefined> {
@@ -186,9 +199,9 @@ export class PipPackageManager implements PackageManager, Disposable {
                 return parsePipIndexVersionsJson(output);
             }
 
-            // pip >= 21.2.0 - use `pip index versions <package> --json` to get available versions in a machine readable format.
+            // pip >= 25.1 - use `pip index versions <package> --json` to get available versions in a machine readable format.
             const pipVersion = await this.getVersion(environment);
-            if (pipVersion && compare(pipVersion.public, '21.2.0') >= 0) {
+            if (pipVersion && compare(pipVersion.public, '25.1') >= 0) {
                 const output = await runPython(
                     python,
                     ['-m', 'pip', 'index', 'versions', packageName, '--json', '--python-version', baseVersion],
@@ -198,7 +211,17 @@ export class PipPackageManager implements PackageManager, Disposable {
                 return parsePipIndexVersionsJson(output);
             }
 
-            // pip <= 20.3.4 - version picking is undefined; no reliable machine-readable API exists.
+            if (pipVersion && compare(pipVersion.public, '21.2') >= 0) {
+                const output = await runPython(
+                    python,
+                    ['-m', 'pip', 'index', 'versions', packageName, '--python-version', baseVersion],
+                    undefined,
+                    this.log,
+                );
+                return parsePipIndexVersionsText(output);
+            }
+
+            // pip < 21.2 - version picking is undefined; `pip index versions` is unavailable.
         } catch {
             return undefined;
         }
@@ -244,4 +267,18 @@ export function parsePipIndexVersionsJson(output: string): Pep440Version[] | und
     } catch {
         return undefined;
     }
+}
+
+/** Parses the legacy text output from `pip index versions <package>`. */
+export function parsePipIndexVersionsText(output: string): Pep440Version[] | undefined {
+    const match = output.match(/^Available versions:\s*(.+)$/im);
+    if (!match) {
+        return undefined;
+    }
+    const versions = match[1]
+        .split(',')
+        .map((version) => parse(version.trim()))
+        .filter((version): version is Pep440Version => version !== null)
+        .sort((a, b) => rcompare(a.public, b.public));
+    return versions.length > 0 ? versions : undefined;
 }

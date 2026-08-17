@@ -218,7 +218,7 @@ async function execPipList(environment: PythonEnvironment, log?: LogOutputChanne
 export async function refreshPipPackages(
     environment: PythonEnvironment,
     log?: LogOutputChannel,
-    options?: { showProgress: boolean },
+    options?: { showProgress?: boolean; showErrors?: boolean },
 ): Promise<PipPackage[] | undefined> {
     let data: string;
     try {
@@ -238,7 +238,9 @@ export async function refreshPipPackages(
         return parsePipListJson(data, log);
     } catch (e) {
         log?.error('Error refreshing packages', e);
-        showErrorMessageWithLogs(SysManagerStrings.packageRefreshError, log);
+        if (options?.showErrors !== false) {
+            showErrorMessageWithLogs(SysManagerStrings.packageRefreshError, log);
+        }
         return undefined;
     }
 }
