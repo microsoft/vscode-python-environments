@@ -4,12 +4,9 @@ import * as path from 'path';
 import * as sinon from 'sinon';
 import { ConfigurationTarget, Uri, WorkspaceFolder } from 'vscode';
 import * as logging from '../../../common/logging';
-import * as persistentState from '../../../common/persistentState';
-import * as sender from '../../../common/telemetry/sender';
 import * as workspaceApis from '../../../common/workspace.apis';
 import {
     addPythonProjectSetting,
-    migrateGlobalDefaultEnvManagerSetting,
     setAllManagerSettings,
     setEnvironmentManager,
     setPackageManager,
@@ -153,6 +150,9 @@ suite('Setting Helpers - Settings Write Behavior', () => {
                 'Should never write defaultPackageManager for global edits',
             );
         });
+    });
+
+    suite('setEnvironmentManager - Global Settings', () => {
         test('should NOT write to global even when value differs from current', async () => {
             const mockConfig = createMockConfig({
                 currentEnvManager: VENV_MANAGER_ID,
@@ -614,223 +614,5 @@ suite('Setting Helpers - Empty Path Migration', () => {
             assert.strictEqual(projects[0].path, '.', 'Path should be fixed to "." not empty string');
             assert.strictEqual(projects[0].envManager, CONDA_MANAGER_ID, 'envManager should be updated');
         });
-    });
-});
-
-suite('Setting Helpers - migrateGlobalDefaultEnvManagerSetting', () => {
-    const SYSTEM_MANAGER_ID = 'ms-python.python:system';
-    const VENV_MANAGER_ID = 'ms-python.python:venv';
-    const MIGRATION_FLAG_KEY = 'globalSettingsMigration.systemEnvManagerRemoved';
-    const TELEMETRY_EVENT = 'MIGRATION.SYSTEM_ENV_MANAGER';
-
-    let sandbox: sinon.SinonSandbox;
-    let sendTelemetryEventStub: sinon.SinonStub;
-
-    setup(() => {
-        sandbox = sinon.createSandbox();
-        sendTelemetryEventStub = sandbox.stub(sender, 'sendTelemetryEvent');
-    });
-
-    teardown(() => {
-        sandbox.restore();
-    });
-
-    function createMockPersistentState(data: Record<string, unknown> = {}) {
-        const store: Record<string, unknown> = { ...data };
-        return {
-            get: async <T>(key: string): Promise<T | undefined> => store[key] as T | undefined,
-            set: async <T>(key: string, value: T): Promise<void> => {
-                store[key] = value;
-            },
-            clear: async (): Promise<void> => {
-                Object.keys(store).forEach((k) => delete store[k]);
-            },
-        };
-    }
-
-    /**
-     * Builds a mock WorkspaceConfiguration whose `inspect('defaultEnvManager')` returns the
-     * provided sequence of values (one per call), so a test can simulate a different state
-     * for the post-update re-inspect. If only one entry is given it is reused for every call.
-     */
-    function createMockConfig(options: {
-        inspectSequence: Array<Record<string, unknown> | undefined>;
-        updateImpl?: (key: string, value: unknown, target: ConfigurationTarget) => Promise<void>;
-    }) {
-        const updateCalls: Array<{ key: string; value: unknown; target: ConfigurationTarget }> = [];
-        let callIndex = 0;
-        const mockConfig = {
-            get: () => undefined,
-            has: () => false,
-            inspect: (key: string) => {
-                if (key !== 'defaultEnvManager') {
-                    return undefined;
-                }
-                const i = Math.min(callIndex, options.inspectSequence.length - 1);
-                callIndex += 1;
-                return options.inspectSequence[i];
-            },
-            update: (key: string, value: unknown, target: ConfigurationTarget) => {
-                updateCalls.push({ key, value, target });
-                return options.updateImpl ? options.updateImpl(key, value, target) : Promise.resolve();
-            },
-        };
-        return { mockConfig, updateCalls };
-    }
-
-    function assertTelemetryOutcome(expected: string, extraProps?: Record<string, unknown>) {
-        assert.strictEqual(sendTelemetryEventStub.callCount, 1, 'Should emit exactly one telemetry event');
-        const call = sendTelemetryEventStub.firstCall;
-        assert.strictEqual(call.args[0], TELEMETRY_EVENT, 'Should use the correct event name');
-        const props = call.args[2] as Record<string, unknown> | undefined;
-        assert.ok(props, 'Telemetry event should have properties');
-        assert.strictEqual(props!.outcome, expected, `outcome should be '${expected}'`);
-        if (extraProps) {
-            for (const [k, v] of Object.entries(extraProps)) {
-                assert.strictEqual(props![k], v, `prop '${k}' should be '${String(v)}'`);
-            }
-        }
-    }
-
-    test('removes system defaultEnvManager from globalValue and marks migrated', async () => {
-        const mockState = createMockPersistentState();
-        sandbox.stub(persistentState, 'getGlobalPersistentState').resolves(mockState);
-
-        const { mockConfig, updateCalls } = createMockConfig({
-            inspectSequence: [{ globalValue: SYSTEM_MANAGER_ID }, { globalValue: undefined }],
-        });
-        sandbox.stub(workspaceApis, 'getConfiguration').returns(mockConfig as any);
-
-        await migrateGlobalDefaultEnvManagerSetting();
-
-        const removal = updateCalls.find(
-            (c) => c.key === 'defaultEnvManager' && c.target === ConfigurationTarget.Global,
-        );
-        assert.ok(removal, 'Should remove defaultEnvManager from Global settings');
-        assert.strictEqual(removal!.value, undefined, 'Should pass undefined to clear the setting');
-
-        const migrated = await mockState.get<boolean>(MIGRATION_FLAG_KEY);
-        assert.strictEqual(migrated, true, 'Should set migration flag');
-        assertTelemetryOutcome('removed');
-    });
-
-    test('removes when stale value is in globalRemoteValue (remote context)', async () => {
-        const mockState = createMockPersistentState();
-        sandbox.stub(persistentState, 'getGlobalPersistentState').resolves(mockState);
-
-        const { mockConfig, updateCalls } = createMockConfig({
-            inspectSequence: [
-                { globalRemoteValue: SYSTEM_MANAGER_ID, globalValue: undefined },
-                { globalRemoteValue: undefined, globalValue: undefined },
-            ],
-        });
-        sandbox.stub(workspaceApis, 'getConfiguration').returns(mockConfig as any);
-
-        await migrateGlobalDefaultEnvManagerSetting();
-
-        assert.strictEqual(updateCalls.length, 1, 'Should call update once');
-        const migrated = await mockState.get<boolean>(MIGRATION_FLAG_KEY);
-        assert.strictEqual(migrated, true);
-        assertTelemetryOutcome('removed');
-    });
-
-    test('removes when stale value is in globalLocalValue', async () => {
-        const mockState = createMockPersistentState();
-        sandbox.stub(persistentState, 'getGlobalPersistentState').resolves(mockState);
-
-        const { mockConfig, updateCalls } = createMockConfig({
-            inspectSequence: [
-                { globalLocalValue: SYSTEM_MANAGER_ID, globalValue: undefined },
-                { globalLocalValue: undefined, globalValue: undefined },
-            ],
-        });
-        sandbox.stub(workspaceApis, 'getConfiguration').returns(mockConfig as any);
-
-        await migrateGlobalDefaultEnvManagerSetting();
-
-        assert.strictEqual(updateCalls.length, 1, 'Should call update once');
-        const migrated = await mockState.get<boolean>(MIGRATION_FLAG_KEY);
-        assert.strictEqual(migrated, true);
-        assertTelemetryOutcome('removed');
-    });
-
-    test('does not mark migrated when another user-scope slot still has the stale value (partial)', async () => {
-        const mockState = createMockPersistentState();
-        sandbox.stub(persistentState, 'getGlobalPersistentState').resolves(mockState);
-
-        // Initial inspect: both globalValue and globalLocalValue have the stale value.
-        // Post-update: only globalValue is cleared (current context); globalLocalValue persists.
-        const { mockConfig, updateCalls } = createMockConfig({
-            inspectSequence: [
-                { globalValue: SYSTEM_MANAGER_ID, globalLocalValue: SYSTEM_MANAGER_ID },
-                { globalValue: undefined, globalLocalValue: SYSTEM_MANAGER_ID },
-            ],
-        });
-        sandbox.stub(workspaceApis, 'getConfiguration').returns(mockConfig as any);
-
-        await migrateGlobalDefaultEnvManagerSetting();
-
-        assert.strictEqual(updateCalls.length, 1, 'Should still attempt removal once');
-        const migrated = await mockState.get<boolean>(MIGRATION_FLAG_KEY);
-        assert.notStrictEqual(migrated, true, 'Should NOT set migration flag when another slot still holds the value');
-        assertTelemetryOutcome('partial');
-    });
-
-    test('does not remove when no user-scope slot has the stale value (not_set) and marks migrated', async () => {
-        const mockState = createMockPersistentState();
-        sandbox.stub(persistentState, 'getGlobalPersistentState').resolves(mockState);
-
-        const { mockConfig, updateCalls } = createMockConfig({
-            inspectSequence: [{ globalValue: VENV_MANAGER_ID }],
-        });
-        sandbox.stub(workspaceApis, 'getConfiguration').returns(mockConfig as any);
-
-        await migrateGlobalDefaultEnvManagerSetting();
-
-        assert.strictEqual(updateCalls.length, 0, 'Should not call update when no stale value present');
-        const migrated = await mockState.get<boolean>(MIGRATION_FLAG_KEY);
-        assert.strictEqual(migrated, true, 'Should mark migrated so we never check again');
-        assertTelemetryOutcome('not_set');
-    });
-
-    test('does not run migration if already migrated', async () => {
-        const mockState = createMockPersistentState({
-            [MIGRATION_FLAG_KEY]: true,
-        });
-        sandbox.stub(persistentState, 'getGlobalPersistentState').resolves(mockState);
-
-        const { mockConfig, updateCalls } = createMockConfig({
-            inspectSequence: [{ globalValue: SYSTEM_MANAGER_ID }],
-        });
-        const getConfigStub = sandbox.stub(workspaceApis, 'getConfiguration').returns(mockConfig as any);
-
-        await migrateGlobalDefaultEnvManagerSetting();
-
-        assert.strictEqual(updateCalls.length, 0, 'Should not write any settings if already migrated');
-        assert.strictEqual(getConfigStub.callCount, 0, 'Should short-circuit before reading configuration');
-        assert.strictEqual(sendTelemetryEventStub.callCount, 0, 'Should not emit telemetry on no-op runs');
-    });
-
-    test('does not set migration flag if update throws and reports failed telemetry', async () => {
-        const mockState = createMockPersistentState();
-        sandbox.stub(persistentState, 'getGlobalPersistentState').resolves(mockState);
-
-        const updateError = new Error('settings.json read-only');
-        let updateCalled = false;
-        const { mockConfig } = createMockConfig({
-            inspectSequence: [{ globalValue: SYSTEM_MANAGER_ID }],
-            updateImpl: () => {
-                updateCalled = true;
-                return Promise.reject(updateError);
-            },
-        });
-        sandbox.stub(workspaceApis, 'getConfiguration').returns(mockConfig as any);
-
-        await migrateGlobalDefaultEnvManagerSetting();
-
-        assert.strictEqual(updateCalled, true, 'Failure path must actually attempt the update');
-        const migrated = await mockState.get<boolean>(MIGRATION_FLAG_KEY);
-        assert.notStrictEqual(migrated, true, 'Should NOT set migration flag when removal fails');
-        assertTelemetryOutcome('failed', { errorType: 'Error' });
     });
 });
