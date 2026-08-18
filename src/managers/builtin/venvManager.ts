@@ -1,14 +1,6 @@
 import * as fs from 'fs/promises';
 import * as path from 'path';
-import {
-    EventEmitter,
-    l10n,
-    LogOutputChannel,
-    MarkdownString,
-    ProgressLocation,
-    ThemeIcon,
-    Uri,
-} from 'vscode';
+import { EventEmitter, l10n, LogOutputChannel, MarkdownString, ProgressLocation, ThemeIcon, Uri } from 'vscode';
 import {
     CreateEnvironmentOptions,
     CreateEnvironmentScope,
@@ -24,6 +16,7 @@ import {
     PythonProject,
     QuickCreateConfig,
     RefreshEnvironmentsScope,
+    RemoveEnvironmentOptions,
     ResolveEnvironmentContext,
     SetEnvironmentScope,
 } from '../../api';
@@ -265,11 +258,11 @@ export class VenvManager implements EnvironmentManager {
     /**
      * Removes the specified Python environment, updates internal collections, and fires change events as needed.
      */
-    async remove(environment: PythonEnvironment): Promise<void> {
+    async remove(environment: PythonEnvironment, options?: RemoveEnvironmentOptions): Promise<void> {
         try {
             this.skipWatcherRefresh = true;
 
-            const isRemoved = await removeVenv(environment, this.log);
+            const isRemoved = await removeVenv(environment, this.log, options);
             if (!isRemoved) {
                 return;
             }

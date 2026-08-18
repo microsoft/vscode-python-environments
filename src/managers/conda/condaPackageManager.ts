@@ -62,6 +62,10 @@ export class CondaPackageManager implements PackageManager, Disposable {
         let toUninstall: string[] = [...(options.uninstall ?? [])];
 
         if (toInstall.length === 0 && toUninstall.length === 0) {
+            if (options.runHeadless) {
+                // Headless mode: skip the interactive package picker.
+                return;
+            }
             const result = await getCommonCondaPackagesToInstall(environment, options, this.api);
             if (result) {
                 toInstall = result.install;
@@ -71,59 +75,59 @@ export class CondaPackageManager implements PackageManager, Disposable {
             }
         }
 
-        try {
-            // Centralize command options for install/uninstall operations
-            const environmentPath = environment.environmentPath.fsPath;
+        await withProgress(
+            {
+                location: ProgressLocation.Notification,
+                title: CondaStrings.condaInstallingPackages,
+                cancellable: true,
+            },
+            async (_progress, token) => {
+                try {
+                    const commandOptions = {
+                        pythonExecutable: 'conda',
+                        condaEnvironmentPath: environment.environmentPath.fsPath,
+                        log: this.log,
+                    };
 
-            // Execute uninstall if needed
-            if (toUninstall.length > 0) {
-                const uninstallCmd = new CondaUninstallCommand({
-                    pythonExecutable: 'conda',
-                    condaEnvironmentPath: environmentPath,
-                    log: this.log,
-                });
-                const packages = parsePackageSpecs(toUninstall);
-                await withProgress(
-                    {
-                        location: ProgressLocation.Notification,
-                        title: CondaStrings.condaInstallingPackages,
-                        cancellable: true,
-                    },
-                    (_progress, token) => uninstallCmd.execute({ packages, cancellationToken: token }),
-                );
-            }
+                    if (toUninstall.length > 0) {
+                        const command = new CondaUninstallCommand(commandOptions);
+                        await command.execute({
+                            packages: parsePackageSpecs(toUninstall),
+                            cancellationToken: token,
+                        });
+                    }
 
-            // Execute install if needed
-            if (toInstall.length > 0) {
-                const installCmd = new CondaInstallCommand({
-                    pythonExecutable: 'conda',
-                    condaEnvironmentPath: environmentPath,
-                    log: this.log,
-                });
-                const packages = parsePackageSpecs(toInstall);
-                await withProgress(
-                    {
-                        location: ProgressLocation.Notification,
-                        title: CondaStrings.condaInstallingPackages,
-                        cancellable: true,
-                    },
-                    (_progress, token) =>
-                        installCmd.execute({ packages, upgrade: options.upgrade, cancellationToken: token }),
-                );
-            }
+                    if (toInstall.length > 0) {
+                        const command = new CondaInstallCommand(commandOptions);
+                        await command.execute({
+                            packages: parsePackageSpecs(toInstall),
+                            upgrade: options.upgrade,
+                            cancellationToken: token,
+                        });
+                    }
 
-            await updatePackagesAndNotify(this, environment, this.packages.get(environment.envId.id), (changes) => {
-                this._onDidChangePackages.fire({ environment, manager: this, changes });
-            });
-        } catch (e) {
-            if (e instanceof CancellationError) {
-                throw e;
-            }
-            this.log.error('Error installing packages', e);
-            setImmediate(async () => {
-                await showErrorMessageWithLogs(CondaStrings.condaInstallError, this.log);
-            });
-        }
+                    await updatePackagesAndNotify(
+                        this,
+                        environment,
+                        this.packages.get(environment.envId.id),
+                        (changes) => {
+                            this._onDidChangePackages.fire({ environment, manager: this, changes });
+                        },
+                    );
+                } catch (e) {
+                    if (e instanceof CancellationError) {
+                        throw e;
+                    }
+                    this.log.error('Error installing packages', e);
+                    if (!options.runHeadless) {
+                        setImmediate(async () => {
+                            await showErrorMessageWithLogs(CondaStrings.condaInstallError, this.log);
+                        });
+                    }
+                    throw e;
+                }
+            },
+        );
     }
 
     async refresh(environment: PythonEnvironment): Promise<void> {

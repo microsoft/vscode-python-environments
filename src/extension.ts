@@ -258,6 +258,21 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
                 },
             );
         }),
+        ...(process.env.VSC_PYTHON_INTEGRATION_TEST === '1'
+            ? [
+                  commands.registerCommand('python-envs.test.getPackageManagerIds', () =>
+                      envManagers.packageManagers.map((manager) => manager.id),
+                  ),
+                  commands.registerCommand(
+                      'python-envs.test.getDirectPackageNames',
+                      async (environment: PythonEnvironment) => {
+                          const manager = envManagers.getPackageManager(environment);
+                          const names = await manager?.getDirectPackageNames?.(environment);
+                          return names ? Array.from(names) : undefined;
+                      },
+                  ),
+              ]
+            : []),
         commands.registerCommand('python-envs.searchSettings', async () => {
             await openSearchSettings();
         }),

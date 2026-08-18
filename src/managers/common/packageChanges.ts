@@ -9,6 +9,8 @@ import { normalizePackageName } from '../builtin/utils';
  */
 export type PackageChangesCallback = (changes: { kind: PackageChangeKind; pkg: Package }[]) => void;
 
+type PackageFetcher = () => Promise<Package[] | undefined>;
+
 /**
  * Computes the list of package changes between a before and after snapshot.
  * @param before - The previous list of packages.
@@ -41,18 +43,29 @@ export function getPackageChanges(before: Package[], after: Package[]): { kind: 
  * This function calls {@link PackageManager.getPackages} with `skipCache` to fetch
  * the latest snapshot. The caller should pass the previously cached packages
  * so changes can be computed against the pre-refresh state.
+ *
+ * @param packageManager The package manager whose packages changed.
+ * @param environment The environment whose packages should be refreshed.
+ * @param before The package snapshot from before the operation.
+ * @param onChanges Callback invoked when package changes are detected.
+ * @param fetchPackages Optional internal fetcher for operation-specific refresh behavior.
  */
 export async function updatePackagesAndNotify(
     packageManager: PackageManager,
     environment: PythonEnvironment,
     before: Package[] | undefined,
     onChanges: PackageChangesCallback,
+    fetchPackages?: PackageFetcher,
 ): Promise<Package[] | undefined> {
     const [after, afterDirectDependenciesNames] = await Promise.all([
-        packageManager.getPackages(environment, { skipCache: true }).then((pkgs) => pkgs ?? []),
+        fetchPackages?.() ?? packageManager.getPackages(environment, { skipCache: true }),
         // Handle transitive dependencies (best-effort, don't break package refresh on failure)
         packageManager.getDirectPackageNames?.(environment).catch(() => undefined),
     ]);
+
+    if (after === undefined) {
+        return undefined;
+    }
 
     // Enrich packages with transitive dependency info (best-effort, creates new objects to respect readonly)
     const enriched = afterDirectDependenciesNames && afterDirectDependenciesNames.size > 0

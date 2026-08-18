@@ -11,7 +11,13 @@ import {
     ThemeIcon,
     Uri,
 } from 'vscode';
-import { EnvironmentManager, PythonEnvironment, PythonEnvironmentApi, PythonEnvironmentInfo } from '../../api';
+import {
+    EnvironmentManager,
+    PythonEnvironment,
+    PythonEnvironmentApi,
+    PythonEnvironmentInfo,
+    RemoveEnvironmentOptions,
+} from '../../api';
 import { ENVS_EXTENSION_ID } from '../../common/constants';
 import { Common, VenvManagerStrings } from '../../common/localize';
 import { traceInfo, traceVerbose } from '../../common/logging';
@@ -553,7 +559,11 @@ async function validateVenvRemovalPath(envPath: string, log: LogOutputChannel): 
     return undefined;
 }
 
-export async function removeVenv(environment: PythonEnvironment, log: LogOutputChannel): Promise<boolean> {
+export async function removeVenv(
+    environment: PythonEnvironment,
+    log: LogOutputChannel,
+    options?: RemoveEnvironmentOptions,
+): Promise<boolean> {
     const pythonPath = os.platform() === 'win32' ? 'python.exe' : 'python';
 
     const envFsPath = path.normalize(environment.environmentPath.fsPath);
@@ -568,15 +578,19 @@ export async function removeVenv(environment: PythonEnvironment, log: LogOutputC
     // Normalize path for UI display - ensure forward slashes on Windows
     const displayPath = normalizePath(envPath);
 
-    const confirm = await showWarningMessage(
-        l10n.t('Are you sure you want to remove {0}?', displayPath),
-        {
-            modal: true,
-        },
-        { title: Common.yes },
-        { title: Common.no, isCloseAffordance: true },
-    );
-    if (confirm?.title === Common.yes) {
+    const confirmed =
+        options?.runHeadless === true ||
+        (
+            await showWarningMessage(
+                l10n.t('Are you sure you want to remove {0}?', displayPath),
+                {
+                    modal: true,
+                },
+                { title: Common.yes },
+                { title: Common.no, isCloseAffordance: true },
+            )
+        )?.title === Common.yes;
+    if (confirmed) {
         const result = await withProgress(
             {
                 location: ProgressLocation.Notification,

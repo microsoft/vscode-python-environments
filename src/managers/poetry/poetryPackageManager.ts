@@ -3,6 +3,7 @@ import * as fsapi from 'fs-extra';
 import * as path from 'path';
 import {
     CancellationError,
+    CancellationToken,
     Event,
     EventEmitter,
     l10n,
@@ -63,6 +64,10 @@ export class PoetryPackageManager implements PackageManager, Disposable {
         let toUninstall: string[] = [...(options.uninstall ?? [])];
 
         if (toInstall.length === 0 && toUninstall.length === 0) {
+            if (options.runHeadless) {
+                // Headless mode: skip the interactive package input prompt.
+                return;
+            }
             // Show package input UI if no packages are specified
             const installInput = await showInputBox({
                 prompt: 'Enter packages to install (comma separated)',
@@ -81,25 +86,40 @@ export class PoetryPackageManager implements PackageManager, Disposable {
             }
         }
 
-        try {
-            await this.runPoetryManage({ install: toInstall, uninstall: toUninstall });
-            await updatePackagesAndNotify(this, environment, this.packages.get(environment.envId.id), (changes) => {
-                this._onDidChangePackages.fire({ environment, manager: this, changes });
-            });
-        } catch (e) {
-            if (e instanceof CancellationError) {
-                // Cancellation is not an error; rethrow without surfacing an error message.
-                throw e;
-            }
-            this.log.error('Error managing packages with Poetry', e);
-            setImmediate(async () => {
-                const result = await showErrorMessage('Error managing packages with Poetry', 'View Output');
-                if (result === 'View Output') {
-                    this.log.show();
+        await withProgress(
+            {
+                location: ProgressLocation.Notification,
+                title: 'Managing packages with Poetry',
+                cancellable: true,
+            },
+            async (_progress, token) => {
+                try {
+                    await this.runPoetryManage(environment, { install: toInstall, uninstall: toUninstall }, token);
+                    await updatePackagesAndNotify(
+                        this,
+                        environment,
+                        this.packages.get(environment.envId.id),
+                        (changes) => {
+                            this._onDidChangePackages.fire({ environment, manager: this, changes });
+                        },
+                    );
+                } catch (e) {
+                    if (e instanceof CancellationError) {
+                        throw e;
+                    }
+                    this.log.error('Error managing packages with Poetry', e);
+                    if (!options.runHeadless) {
+                        setImmediate(async () => {
+                            const result = await showErrorMessage('Error managing packages with Poetry', 'View Output');
+                            if (result === 'View Output') {
+                                this.log.show();
+                            }
+                        });
+                    }
+                    throw e;
                 }
-            });
-            throw e;
-        }
+            },
+        );
     }
 
     async refresh(environment: PythonEnvironment): Promise<void> {
@@ -174,7 +194,11 @@ export class PoetryPackageManager implements PackageManager, Disposable {
         this.packages.clear();
     }
 
-    private async runPoetryManage(options: { install?: string[]; uninstall?: string[] }): Promise<void> {
+    private async runPoetryManage(
+        environment: PythonEnvironment,
+        options: { install?: string[]; uninstall?: string[] },
+        token?: CancellationToken,
+    ): Promise<void> {
         const poetry = await getPoetry();
         if (!poetry) {
             throw new Error(
@@ -183,30 +207,28 @@ export class PoetryPackageManager implements PackageManager, Disposable {
                 ),
             );
         }
+        const cwd = await this.getPoetryCwd(environment);
+
         // Handle uninstalls first
         if (options.uninstall && options.uninstall.length > 0) {
             const removeCmd = new PoetryRemoveCommand({
                 pythonExecutable: poetry,
+                cwd,
                 log: this.log,
             });
             const packages = parsePackageSpecs(options.uninstall);
-            await withProgress(
-                { location: ProgressLocation.Notification, title: 'Managing packages with Poetry', cancellable: true },
-                (_progress, token) => removeCmd.execute({ packages, cancellationToken: token }),
-            );
+            await removeCmd.execute({ packages, cancellationToken: token });
         }
 
         // Handle installs
         if (options.install && options.install.length > 0) {
             const addCmd = new PoetryAddCommand({
                 pythonExecutable: poetry,
+                cwd,
                 log: this.log,
             });
             const packages = parsePackageSpecs(options.install);
-            await withProgress(
-                { location: ProgressLocation.Notification, title: 'Managing packages with Poetry', cancellable: true },
-                (_progress, token) => addCmd.execute({ packages, cancellationToken: token }),
-            );
+            await addCmd.execute({ packages, cancellationToken: token });
         }
     }
 
@@ -230,14 +252,16 @@ export class PoetryPackageManager implements PackageManager, Disposable {
         return (data ?? []).map((pkg) => this.api.createPackageItem(pkg, environment, this));
     }
 
-    async getDirectPackageNames(_environment: PythonEnvironment): Promise<Set<string> | undefined> {
+    async getDirectPackageNames(environment: PythonEnvironment): Promise<Set<string> | undefined> {
         try {
             const poetry = await getPoetry();
             if (!poetry) {
                 return undefined;
             }
+            const cwd = await this.getPoetryCwd(environment);
             const showTopLevelCmd = new PoetryShowTopLevelCommand({
                 pythonExecutable: poetry,
+                cwd,
                 log: this.log,
             });
             return await showTopLevelCmd.execute();

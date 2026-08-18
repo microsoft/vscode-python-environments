@@ -10,7 +10,6 @@ import {
     MarkdownString,
     ProgressLocation,
     ThemeIcon,
-    window,
 } from 'vscode';
 import {
     DidChangePackagesEventArgs,
@@ -22,7 +21,7 @@ import {
     PythonEnvironment,
     PythonEnvironmentApi,
 } from '../../api';
-import { withProgress } from '../../common/window.apis';
+import { showErrorMessage, withProgress } from '../../common/window.apis';
 import { CommandConstructorOptions } from '../base/commands/index';
 import { updatePackagesAndNotify } from '../common/packageChanges';
 import { createPipOrUvCommand } from './commands/factory';
@@ -72,6 +71,10 @@ export class PipPackageManager implements PackageManager, Disposable {
         let toUninstall: string[] = [...(options.uninstall ?? [])];
 
         if (toInstall.length === 0 && toUninstall.length === 0) {
+            if (options.runHeadless) {
+                // Headless mode: skip the interactive package picker.
+                return;
+            }
             const projects = this.venv.getProjectsByEnvironment(environment);
             const result = await getWorkspacePackagesToInstall(this.api, options, projects, environment, this.log);
             if (result) {
@@ -86,76 +89,80 @@ export class PipPackageManager implements PackageManager, Disposable {
             throw new Error('Python 2.* is not supported (deprecated)');
         }
 
-        try {
-            const pythonExecutable = environment.execInfo?.run?.executable;
-            if (!pythonExecutable) {
-                throw new Error('Unable to determine Python executable path');
-            }
+        await withProgress(
+            {
+                location: ProgressLocation.Notification,
+                title: l10n.t('Managing packages'),
+                cancellable: true,
+            },
+            async (_progress, token) => {
+                try {
+                    const pythonExecutable = environment.execInfo?.run?.executable;
+                    if (!pythonExecutable) {
+                        throw new Error('Unable to determine Python executable path');
+                    }
+                    const commandOptions: CommandConstructorOptions = {
+                        pythonExecutable,
+                        log: this.log,
+                    };
 
-            // Centralize command options for install/uninstall operations
-            const manageCommandOptions: CommandConstructorOptions = {
-                pythonExecutable,
-                log: this.log,
-            };
+                    if (toUninstall.length > 0) {
+                        const command: PipUninstallCommand | UvUninstallCommand = await createPipOrUvCommand(
+                            commandOptions,
+                            environment.environmentPath.fsPath,
+                            PipUninstallCommand,
+                            UvUninstallCommand,
+                        );
+                        await command.execute({
+                            packages: parsePackageSpecs(toUninstall),
+                            cancellationToken: token,
+                        });
+                    }
 
-            // Execute uninstall if needed
-            if (toUninstall.length > 0) {
-                const uninstallCmd: PipUninstallCommand | UvUninstallCommand = await createPipOrUvCommand(
-                    manageCommandOptions,
-                    environment.environmentPath.fsPath,
-                    PipUninstallCommand,
-                    UvUninstallCommand,
-                );
-                const packages = parsePackageSpecs(toUninstall);
-                await withProgress(
-                    {
-                        location: ProgressLocation.Notification,
-                        title: l10n.t('Uninstalling packages'),
-                        cancellable: true,
-                    },
-                    (_progress, token) => uninstallCmd.execute({ packages, cancellationToken: token }),
-                );
-            }
+                    if (toInstall.length > 0) {
+                        const command: PipInstallCommand | UvInstallCommand = await createPipOrUvCommand(
+                            commandOptions,
+                            environment.environmentPath.fsPath,
+                            PipInstallCommand,
+                            UvInstallCommand,
+                        );
+                        await command.execute({
+                            packages: parsePackageSpecs(toInstall),
+                            upgrade: options.upgrade,
+                            cancellationToken: token,
+                        });
+                    }
 
-            // Execute install if needed
-            if (toInstall.length > 0) {
-                const installCmd: PipInstallCommand | UvInstallCommand = await createPipOrUvCommand(
-                    manageCommandOptions,
-                    environment.environmentPath.fsPath,
-                    PipInstallCommand,
-                    UvInstallCommand,
-                );
-                const packages = parsePackageSpecs(toInstall);
-                await withProgress(
-                    { location: ProgressLocation.Notification, title: 'Installing packages', cancellable: true },
-                    (_progress, token) =>
-                        installCmd.execute({ packages, upgrade: options.upgrade, cancellationToken: token }),
-                );
-            }
-
-            await updatePackagesAndNotify(this, environment, this.packages.get(environment.envId.id), (changes) => {
-                this._onDidChangePackages.fire({ environment, manager: this, changes });
-            });
-        } catch (e) {
-            if (e instanceof CancellationError) {
-                // Cancellation is a normal control-flow exit; skip the user-facing error
-                // UI/logging, but rethrow so callers can distinguish cancel from failure
-                // (e.g. venv creation sets pkgInstallationCancelled by catching CancellationError).
-                throw e;
-            }
-            this.log.error('Error managing packages', e);
-            setImmediate(async () => {
-                const result = await window.showErrorMessage('Error managing packages', 'View Output');
-                if (result === 'View Output') {
-                    this.log.show();
+                    await updatePackagesAndNotify(
+                        this,
+                        environment,
+                        this.packages.get(environment.envId.id),
+                        (changes) => {
+                            this._onDidChangePackages.fire({ environment, manager: this, changes });
+                        },
+                        () => this.fetchPackages(environment, !options.runHeadless),
+                    );
+                } catch (e) {
+                    if (e instanceof CancellationError) {
+                        throw e;
+                    }
+                    this.log.error('Error managing packages', e);
+                    if (!options.runHeadless) {
+                        setImmediate(async () => {
+                            const result = await showErrorMessage('Error managing packages', 'View Output');
+                            if (result === 'View Output') {
+                                this.log.show();
+                            }
+                        });
+                    }
+                    throw e;
                 }
-            });
-            throw e;
-        }
+            },
+        );
     }
 
     async refresh(environment: PythonEnvironment): Promise<void> {
-        await window.withProgress(
+        await withProgress(
             {
                 location: ProgressLocation.Window,
                 title: 'Refreshing packages',
@@ -169,32 +176,48 @@ export class PipPackageManager implements PackageManager, Disposable {
                         this._onDidChangePackages.fire({ environment, manager: this, changes });
                     },
                 );
-                this.packages.set(environment.envId.id, packages ?? []);
+                if (packages !== undefined) {
+                    this.packages.set(environment.envId.id, packages);
+                }
             },
         );
     }
 
     async getPackages(environment: PythonEnvironment, options?: GetPackagesOptions): Promise<Package[] | undefined> {
         if (options?.skipCache || !this.packages.has(environment.envId.id)) {
+            return this.fetchPackages(environment);
+        }
+        return this.packages.get(environment.envId.id);
+    }
+
+    private async fetchPackages(environment: PythonEnvironment, showErrors = true): Promise<Package[] | undefined> {
+        try {
             const pythonExecutable = environment.execInfo?.run?.executable;
             if (!pythonExecutable) {
-                return undefined;
+                throw new Error('Unable to determine Python executable path');
             }
-            const listCmd: PipListCommand | UvListCommand = await createPipOrUvCommand(
-                {
-                    pythonExecutable,
-                    log: this.log,
-                },
+            const command: PipListCommand | UvListCommand = await createPipOrUvCommand(
+                { pythonExecutable, log: this.log },
                 environment.environmentPath.fsPath,
                 PipListCommand,
                 UvListCommand,
             );
-            const data = await listCmd.execute();
-            const packages = (data ?? []).map((pkg) => this.api.createPackageItem(pkg, environment, this));
+            const data = await command.execute();
+            const packages = data.map((pkg) => this.api.createPackageItem(pkg, environment, this));
             this.packages.set(environment.envId.id, packages);
             return packages;
+        } catch (error) {
+            this.log.error('Error refreshing packages', error);
+            if (showErrors) {
+                setImmediate(async () => {
+                    const result = await showErrorMessage('Error refreshing packages', 'View Output');
+                    if (result === 'View Output') {
+                        this.log.show();
+                    }
+                });
+            }
+            return this.packages.get(environment.envId.id);
         }
-        return this.packages.get(environment.envId.id);
     }
 
     async getVersion(environment: PythonEnvironment): Promise<Pep440Version | undefined> {
