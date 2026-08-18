@@ -12,8 +12,11 @@ import {
     acquireFileLock,
     AcquireFileLockOptions,
     FILE_LOCK_OWNER_MARKER_PREFIX,
+    FILE_LOCK_RETAINED_MARKER,
+    FILE_LOCK_RETAINED_MARKER_PREFIX,
     getFileLockPath,
     inspectFileLock,
+    reclaimFileLock,
 } from '../../common/lockfile.apis';
 
 const OPTIONS: AcquireFileLockOptions = {
@@ -171,29 +174,29 @@ suite('lockfile APIs', () => {
         assert.ok(Date.now() - startedAt < 1_000);
         const lockPath = `${path.resolve(targetPath)}.lock`;
         const retainedEntries = await fs.readdir(lockPath);
-        assert.ok(retainedEntries.includes('retained'));
-        assert.strictEqual(retainedEntries.filter((entry) => entry.startsWith('owner-')).length, 1);
+        assert.strictEqual(retainedEntries.length, 1);
+        assert.ok(retainedEntries[0].startsWith(`${FILE_LOCK_RETAINED_MARKER_PREFIX}${process.pid}-`));
 
         await lock.release();
         assert.deepStrictEqual(await fs.readdir(lockPath), retainedEntries);
     });
 
-    test('falls back to renaming the owner marker when the retained sentinel cannot be written', async () => {
+    test('atomically converts the owner marker into a generation-specific retained marker', async () => {
         const lock = await acquireFileLock(targetPath, OPTIONS);
-        sinon.stub(fsExtra, 'writeFile').rejects(Object.assign(new Error('write failed'), { code: 'EACCES' }));
 
         await lock.retain();
 
         const lockPath = `${path.resolve(targetPath)}.lock`;
-        assert.deepStrictEqual(await fs.readdir(lockPath), ['retained']);
+        const entries = await fs.readdir(lockPath);
+        assert.strictEqual(entries.length, 1);
+        assert.ok(entries[0].startsWith(`${FILE_LOCK_RETAINED_MARKER_PREFIX}${process.pid}-`));
         await assert.rejects(acquireFileLock(targetPath, OPTIONS), (error: NodeJS.ErrnoException) => {
             return error.code === 'ELOCKRETAINED';
         });
     });
 
-    test('remains fail-closed when neither retained-marker strategy succeeds', async () => {
+    test('remains fail-closed when retaining the generation marker fails', async () => {
         const lock = await acquireFileLock(targetPath, OPTIONS);
-        sinon.stub(fsExtra, 'writeFile').rejects(Object.assign(new Error('write failed'), { code: 'EACCES' }));
         sinon.stub(fsExtra, 'rename').rejects(Object.assign(new Error('rename failed'), { code: 'EBUSY' }));
 
         await assert.rejects(lock.retain(), (error: NodeJS.ErrnoException) => error.code === 'ERETAINFAILED');
@@ -231,6 +234,70 @@ suite('lockfile APIs', () => {
         await lock.retain();
 
         assert.strictEqual(await inspectFileLock(targetPath), 'retained');
+    });
+
+    test('reclaims a generation-specific retained lock', async () => {
+        const lock = await acquireFileLock(targetPath, OPTIONS);
+        await lock.retain();
+
+        assert.strictEqual(await reclaimFileLock(targetPath), true);
+        assert.strictEqual(await inspectFileLock(targetPath), 'missing');
+        const replacement = await acquireFileLock(targetPath, OPTIONS);
+        await replacement.release();
+    });
+
+    test('refuses to reclaim the ambiguous legacy retained marker', async () => {
+        const lockPath = getFileLockPath(targetPath);
+        await fs.ensureDir(lockPath);
+        await fs.writeFile(path.join(lockPath, `${FILE_LOCK_OWNER_MARKER_PREFIX}${process.pid}-legacy`), '');
+        await fs.writeFile(path.join(lockPath, FILE_LOCK_RETAINED_MARKER), '');
+
+        assert.strictEqual(await inspectFileLock(targetPath), 'retained');
+        assert.strictEqual(await reclaimFileLock(targetPath), false);
+        assert.strictEqual(await fs.pathExists(path.join(lockPath, FILE_LOCK_RETAINED_MARKER)), true);
+        await assert.rejects(acquireFileLock(targetPath, OPTIONS), (error: NodeJS.ErrnoException) => {
+            return error.code === 'ELOCKRETAINED';
+        });
+    });
+
+    test('does not touch a new generation when a delayed reclaimer loses its marker claim', async () => {
+        const lockPath = getFileLockPath(targetPath);
+        const staleMarker = `${FILE_LOCK_OWNER_MARKER_PREFIX}424242-dead`;
+        await fs.ensureDir(targetPath);
+        await fs.ensureDir(lockPath);
+        await fs.writeFile(path.join(lockPath, staleMarker), '');
+        const rename = fsExtra.rename;
+        let releaseFirstClaim: (() => void) | undefined;
+        let firstClaimStarted: (() => void) | undefined;
+        const firstClaim = new Promise<void>((resolve) => {
+            firstClaimStarted = resolve;
+        });
+        const releaseClaim = new Promise<void>((resolve) => {
+            releaseFirstClaim = resolve;
+        });
+        let renameCount = 0;
+        sinon.stub(fsExtra, 'rename').callsFake(async (source, destination) => {
+            renameCount += 1;
+            if (renameCount === 1) {
+                firstClaimStarted!();
+                await releaseClaim;
+            }
+            await rename(source, destination);
+        });
+
+        const staleInspection = { checkProcessLiveness: sinon.stub().resolves('dead') };
+        const delayedReclaimer = reclaimFileLock(targetPath, staleInspection);
+        await firstClaim;
+        assert.strictEqual(await reclaimFileLock(targetPath, staleInspection), true);
+        const replacement = await acquireFileLock(targetPath, OPTIONS);
+        const replacementEntries = await fs.readdir(lockPath);
+
+        releaseFirstClaim!();
+        assert.strictEqual(await delayedReclaimer, false);
+        assert.deepStrictEqual(await fs.readdir(lockPath), replacementEntries);
+        assert.strictEqual(await fs.pathExists(targetPath), true);
+
+        await replacement.release();
     });
 
     test('classifies a dead owner marker as stale using the liveness probe', async () => {

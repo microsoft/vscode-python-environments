@@ -18,6 +18,8 @@ export interface AcquiredFileLock {
 
 export const FILE_LOCK_DIR_SUFFIX = '.lock';
 export const FILE_LOCK_OWNER_MARKER_PREFIX = 'owner-';
+export const FILE_LOCK_RETAINED_MARKER_PREFIX = 'retained-';
+/** Legacy retained marker. It remains recognizable but cannot be safely reclaimed. */
 export const FILE_LOCK_RETAINED_MARKER = 'retained';
 
 export type ProcessLiveness = 'live' | 'dead' | 'unavailable';
@@ -40,7 +42,7 @@ export async function acquireFileLock(filePath: string, options: AcquireFileLock
         lockPath,
         `${FILE_LOCK_OWNER_MARKER_PREFIX}${process.pid}-${crypto.randomBytes(16).toString('hex')}`,
     );
-    const retainedMarker = path.join(lockPath, FILE_LOCK_RETAINED_MARKER);
+    const retainedMarker = path.join(lockPath, getRetainedMarkerName(path.basename(ownerMarker)));
     const deadline = Date.now() + options.timeoutMs;
 
     while (true) {
@@ -69,22 +71,9 @@ export async function acquireFileLock(filePath: string, options: AcquireFileLock
                     }
                     state = 'retained';
                     try {
-                        await fsapi.writeFile(retainedMarker, '', { flag: 'wx' });
-                    } catch (error) {
-                        if (hasErrorCode(error, 'EEXIST')) {
-                            return;
-                        }
-                        try {
-                            await fsapi.rename(ownerMarker, retainedMarker);
-                        } catch (renameError) {
-                            if (!hasErrorCode(renameError, 'EEXIST')) {
-                                throw createLockError(
-                                    'Failed to mark the lock as retained',
-                                    'ERETAINFAILED',
-                                    lockPath,
-                                );
-                            }
-                        }
+                        await fsapi.rename(ownerMarker, retainedMarker);
+                    } catch (_error) {
+                        throw createLockError('Failed to mark the lock as retained', 'ERETAINFAILED', lockPath);
                     }
                 },
                 release: async () => {
@@ -119,6 +108,19 @@ export async function acquireFileLock(filePath: string, options: AcquireFileLock
 }
 
 export async function inspectFileLock(filePath: string, options?: InspectFileLockOptions): Promise<FileLockState> {
+    return (await inspectFileLockSnapshot(filePath, options)).state;
+}
+
+interface FileLockSnapshot {
+    readonly state: FileLockState;
+    readonly marker?: string;
+    readonly markerKind?: 'owner' | 'retained';
+}
+
+async function inspectFileLockSnapshot(
+    filePath: string,
+    options?: InspectFileLockOptions,
+): Promise<FileLockSnapshot> {
     const lockPath = getFileLockPath(filePath);
 
     let stat;
@@ -126,65 +128,97 @@ export async function inspectFileLock(filePath: string, options?: InspectFileLoc
         stat = await fsapi.lstat(lockPath);
     } catch (error) {
         if (hasErrorCode(error, 'ENOENT')) {
-            return 'missing';
+            return { state: 'missing' };
         }
         throw error;
     }
 
     if (!stat.isDirectory() || stat.isSymbolicLink()) {
-        return 'malformed';
+        return { state: 'malformed' };
     }
 
     const entries = await fsapi.readdir(lockPath);
     const ownerEntries = entries.filter((entry) => entry.startsWith(FILE_LOCK_OWNER_MARKER_PREFIX));
+    const generationRetainedEntries = entries.filter((entry) => entry.startsWith(FILE_LOCK_RETAINED_MARKER_PREFIX));
     const retainedEntries = entries.filter((entry) => entry === FILE_LOCK_RETAINED_MARKER);
     const unknownEntries = entries.filter(
-        (entry) => !entry.startsWith(FILE_LOCK_OWNER_MARKER_PREFIX) && entry !== FILE_LOCK_RETAINED_MARKER,
+        (entry) =>
+            !entry.startsWith(FILE_LOCK_OWNER_MARKER_PREFIX) &&
+            !entry.startsWith(FILE_LOCK_RETAINED_MARKER_PREFIX) &&
+            entry !== FILE_LOCK_RETAINED_MARKER,
     );
 
-    if (unknownEntries.length > 0 || ownerEntries.length > 1 || retainedEntries.length > 1) {
-        return 'malformed';
+    if (
+        unknownEntries.length > 0 ||
+        ownerEntries.length > 1 ||
+        generationRetainedEntries.length > 1 ||
+        retainedEntries.length > 1 ||
+        generationRetainedEntries.length + retainedEntries.length > 1 ||
+        generationRetainedEntries.length + ownerEntries.length > 1
+    ) {
+        return { state: 'malformed' };
     }
     if (retainedEntries.length === 1) {
-        return 'retained';
+        return { state: 'retained' };
+    }
+    if (generationRetainedEntries.length === 1) {
+        const retainedPid = parseMarkerPid(generationRetainedEntries[0], FILE_LOCK_RETAINED_MARKER_PREFIX);
+        if (retainedPid === undefined) {
+            return { state: 'malformed' };
+        }
+        return { state: 'retained', marker: generationRetainedEntries[0], markerKind: 'retained' };
     }
     if (ownerEntries.length === 1) {
-        const ownerPid = parseOwnerPid(ownerEntries[0]);
+        const ownerPid = parseMarkerPid(ownerEntries[0], FILE_LOCK_OWNER_MARKER_PREFIX);
         if (ownerPid === undefined) {
-            return 'malformed';
+            return { state: 'malformed' };
         }
         const liveness = await (options?.checkProcessLiveness ?? getProcessLiveness)(ownerPid);
         if (liveness === 'dead') {
-            return 'stale';
+            return { state: 'stale', marker: ownerEntries[0], markerKind: 'owner' };
         }
-        return liveness === 'live' ? 'held' : 'unavailable';
+        return { state: liveness === 'live' ? 'held' : 'unavailable', marker: ownerEntries[0], markerKind: 'owner' };
     }
-    return 'orphaned';
+    return { state: 'orphaned' };
 }
 
 /**
- * Move a stale or retained lock out of the lock name before a replacement owner is acquired.
- * The rename prevents a newly-created lock from being removed based on an earlier inspection.
+ * Claim and remove the exact observed stale or retained generation without releasing the lock directory.
  */
-export async function reclaimFileLock(filePath: string): Promise<boolean> {
+export async function reclaimFileLock(filePath: string, options?: InspectFileLockOptions): Promise<boolean> {
     const lockPath = getFileLockPath(filePath);
-    const state = await inspectFileLock(filePath);
-    if (state !== 'stale' && state !== 'retained') {
+    const snapshot = await inspectFileLockSnapshot(filePath, options);
+    if (
+        (snapshot.state !== 'stale' && snapshot.state !== 'retained') ||
+        !snapshot.marker ||
+        !snapshot.markerKind
+    ) {
         return false;
     }
 
-    const quarantinedLockPath = `${lockPath}.reclaimed-${process.pid}-${crypto.randomBytes(16).toString('hex')}`;
+    const claimedMarker = path.join(
+        lockPath,
+        `.reclaim-${process.pid}-${crypto.randomBytes(16).toString('hex')}-${snapshot.marker}`,
+    );
     try {
-        await fsapi.rename(lockPath, quarantinedLockPath);
+        await fsapi.rename(path.join(lockPath, snapshot.marker), claimedMarker);
     } catch (error) {
-        if (hasErrorCode(error, 'ENOENT')) {
+        if (hasErrorCode(error, 'ENOENT') || hasErrorCode(error, 'EEXIST')) {
             return false;
         }
         throw error;
     }
 
-    await fsapi.remove(quarantinedLockPath);
-    return true;
+    try {
+        await fsapi.unlink(claimedMarker);
+        await fsapi.rmdir(lockPath);
+        return true;
+    } catch (error) {
+        if (hasErrorCode(error, 'ENOENT') || hasErrorCode(error, 'ENOTEMPTY')) {
+            return false;
+        }
+        throw error;
+    }
 }
 
 export async function getProcessLiveness(pid: number): Promise<ProcessLiveness> {
@@ -204,8 +238,10 @@ export async function getProcessLiveness(pid: number): Promise<ProcessLiveness> 
 
 async function isRetainedLock(lockPath: string): Promise<boolean> {
     try {
-        await fsapi.lstat(path.join(lockPath, FILE_LOCK_RETAINED_MARKER));
-        return true;
+        const entries = await fsapi.readdir(lockPath);
+        return entries.some(
+            (entry) => entry === FILE_LOCK_RETAINED_MARKER || entry.startsWith(FILE_LOCK_RETAINED_MARKER_PREFIX),
+        );
     } catch (error) {
         if (hasErrorCode(error, 'ENOENT')) {
             return false;
@@ -220,8 +256,12 @@ function hasErrorCode(error: unknown, code: string): boolean {
     );
 }
 
-function parseOwnerPid(entry: string): number | undefined {
-    const match = entry.match(new RegExp(`^${escapeRegExp(FILE_LOCK_OWNER_MARKER_PREFIX)}(\\d+)-`));
+function getRetainedMarkerName(ownerMarker: string): string {
+    return `${FILE_LOCK_RETAINED_MARKER_PREFIX}${ownerMarker.slice(FILE_LOCK_OWNER_MARKER_PREFIX.length)}`;
+}
+
+function parseMarkerPid(entry: string, prefix: string): number | undefined {
+    const match = entry.match(new RegExp(`^${escapeRegExp(prefix)}(\\d+)-.+$`));
     if (!match) {
         return undefined;
     }

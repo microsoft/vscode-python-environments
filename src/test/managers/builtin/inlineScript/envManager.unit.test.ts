@@ -2694,7 +2694,23 @@ suite('InlineScriptEnvManager', () => {
             assert.strictEqual(await manager.get(uri), environment);
         });
 
-        test('clears a retained lock and its corresponding cache entry', async () => {
+        test('clears a generation-specific retained lock and its corresponding cache entry', async () => {
+            lockStub.restore();
+            const retainedCacheDir = envDir().fsPath;
+            await fs.outputFile(venvPythonPath(retainedCacheDir), '');
+            const lock = await lockfileApis.acquireFileLock(retainedCacheDir, {
+                timeoutMs: 0,
+                retryIntervalMs: 1,
+            });
+            await lock.retain();
+
+            await manager.clearCache();
+
+            assert.strictEqual(await fs.pathExists(retainedCacheDir), false);
+            assert.strictEqual(await fs.pathExists(lockfileApis.getFileLockPath(retainedCacheDir)), false);
+        });
+
+        test('refuses to clear a legacy retained lock conservatively', async () => {
             lockStub.restore();
             const retainedCacheDir = envDir().fsPath;
             const retainedLockPath = lockfileApis.getFileLockPath(retainedCacheDir);
@@ -2702,10 +2718,10 @@ suite('InlineScriptEnvManager', () => {
             await fs.ensureDir(retainedLockPath);
             await fs.writeFile(path.join(retainedLockPath, 'retained'), '');
 
-            await manager.clearCache();
+            await assert.rejects(manager.clearCache(), /incomplete or malformed/);
 
-            assert.strictEqual(await fs.pathExists(retainedCacheDir), false);
-            assert.strictEqual(await fs.pathExists(retainedLockPath), false);
+            assert.strictEqual(await fs.pathExists(retainedCacheDir), true);
+            assert.strictEqual(await fs.pathExists(retainedLockPath), true);
         });
 
         test('clears a stale owner lock and its corresponding cache entry', async () => {
