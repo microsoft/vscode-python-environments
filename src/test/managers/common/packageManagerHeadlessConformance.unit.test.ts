@@ -20,7 +20,7 @@ import * as poetryUtils from '../../../managers/poetry/poetryUtils';
 suite('Package manager headless conformance', () => {
     const environment = {
         envId: { id: 'test-environment', managerId: 'test-manager' },
-        environmentPath: Uri.file('/path/to/environment'),
+        environmentPath: Uri.joinPath(Uri.file(__dirname), 'path', 'to', 'environment'),
     } as PythonEnvironment;
 
     teardown(() => {
