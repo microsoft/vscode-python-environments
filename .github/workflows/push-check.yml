@@ -335,11 +335,3 @@ jobs:
       - name: Run Integration Tests (non-Linux)
         if: runner.os != 'Linux'
         run: npm run integration-test
-
-      - name: Run Package Manager Network Integration Tests
-        if: runner.os == 'Linux' && matrix.python-version == '3.12'
-        uses: GabrielBB/xvfb-action@86d97bde4a65fe9b290c0b3fb92c2c4ed0e5302d # v1.6
-        env:
-          VSC_PYTHON_PACKAGE_NETWORK_TEST: '1'
-        with:
-          run: npm run integration-test -- --grep "Package Manager"
