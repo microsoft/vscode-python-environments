@@ -2,6 +2,7 @@
 // Licensed under the MIT License.
 
 import assert from 'assert';
+import fsExtra from 'fs-extra';
 import * as fs from 'fs-extra';
 import * as os from 'os';
 import * as path from 'path';
@@ -1574,6 +1575,19 @@ suite('InlineScriptEnvManager', () => {
             );
         });
 
+        test('explicit refresh takes a single cache-root snapshot', async () => {
+            const environment = await createOwnedEnvironment();
+            const sidecar = await makeSidecar();
+            setSidecarResults({ [CACHE_KEY]: { kind: 'valid', metadata: sidecar } });
+            setResolvedVenvs([environment]);
+            const readdirStub = sinon.stub(fsExtra, 'readdir').resolves([CACHE_KEY]);
+
+            await manager.refresh(undefined);
+
+            assert.strictEqual(readdirStub.callCount, 1);
+            assert.deepStrictEqual(await manager.getEnvironments('all'), [environment]);
+        });
+
         test('refresh skips missing, invalid, unavailable, and non-directory cache entries', async () => {
             const valid = await createOwnedEnvironment();
             const cacheRoot = cacheLayout.getScriptEnvCacheRoot(globalStorageUri).fsPath;
@@ -1609,6 +1623,73 @@ suite('InlineScriptEnvManager', () => {
             manager.onDidChangeEnvironments(listener);
             await fs.remove(environment.sysPrefix);
             await fs.ensureDir(`${path.resolve(environment.sysPrefix)}.lock`);
+
+            await manager.refresh(undefined);
+
+            assert.deepStrictEqual(await manager.getEnvironments('all'), [environment]);
+            assert.strictEqual(resolveVenvStub.callCount, 0);
+            assert.strictEqual(listener.callCount, 0);
+        });
+
+        test('refresh preserves a discovered environment when its lock probe reports EIO', async () => {
+            const environment = await createOwnedEnvironment();
+            const sidecar = await makeSidecar();
+            setSidecarResults({ [CACHE_KEY]: { kind: 'valid', metadata: sidecar } });
+            setResolvedVenvs([environment]);
+            await manager.refresh(undefined);
+            resolveVenvStub.resetHistory();
+            baseInterpreterStatusStub.resetHistory();
+            baseInterpreterStatusStub.resolves('missing');
+            const listener = sinon.spy();
+            manager.onDidChangeEnvironments(listener);
+            const lockPath = `${path.resolve(environment.sysPrefix)}.lock`;
+            sinon
+                .stub(fsExtra, 'lstat')
+                .callThrough()
+                .withArgs(lockPath)
+                .rejects(Object.assign(new Error('I/O error'), { code: 'EIO' }));
+
+            await manager.refresh(undefined);
+
+            assert.deepStrictEqual(await manager.getEnvironments('all'), [environment]);
+            assert.strictEqual(resolveVenvStub.callCount, 0);
+            assert.strictEqual(baseInterpreterStatusStub.callCount, 0);
+            assert.strictEqual(listener.callCount, 0);
+        });
+
+        test('uses the cache entry name to preserve a canonical sysPrefix through a cache-root link', async function () {
+            const cacheRoot = cacheLayout.getScriptEnvCacheRoot(globalStorageUri).fsPath;
+            const physicalCacheRoot = path.join(tempRoot, 'physical-cache-root');
+            const physicalEnvDir = path.join(physicalCacheRoot, CACHE_KEY);
+            const physicalExecutable = getVenvPythonPath(physicalEnvDir);
+            await fs.ensureDir(path.dirname(cacheRoot));
+            await fs.ensureDir(physicalCacheRoot);
+            try {
+                await fs.symlink(physicalCacheRoot, cacheRoot, isWindows() ? 'junction' : 'dir');
+            } catch (error) {
+                const code = (error as NodeJS.ErrnoException).code;
+                if (code === 'EPERM' || code === 'EACCES') {
+                    this.skip();
+                    return;
+                }
+                throw error;
+            }
+            await fs.outputFile(physicalExecutable, '');
+            const environment = makeEnvironment(
+                'ms-python.python:inline-script',
+                '3.12.4',
+                physicalExecutable,
+                physicalEnvDir,
+            );
+            const sidecar = await makeSidecar();
+            setSidecarResults({ [CACHE_KEY]: { kind: 'valid', metadata: sidecar } });
+            resolveVenvStub.resolves(environment);
+            await manager.refresh(undefined);
+            resolveVenvStub.resetHistory();
+            const listener = sinon.spy();
+            manager.onDidChangeEnvironments(listener);
+            await fs.remove(physicalEnvDir);
+            await fs.ensureDir(`${physicalEnvDir}.lock`);
 
             await manager.refresh(undefined);
 
@@ -1660,6 +1741,127 @@ suite('InlineScriptEnvManager', () => {
 
             assert.deepStrictEqual(await manager.getEnvironments('all'), [environment]);
             assert.strictEqual(listener.callCount, 1);
+        });
+
+        test('runs a snapshot-aware follow-up when activation joins an explicit refresh', async () => {
+            const first = await createOwnedEnvironment();
+            const secondKey = 'fedcba9876543210';
+            const sidecar = await makeSidecar();
+            setSidecarResults({ [CACHE_KEY]: { kind: 'valid', metadata: sidecar } });
+            let second: PythonEnvironment | undefined;
+            let releaseFirstResolution: (() => void) | undefined;
+            let signalFirstResolution: (() => void) | undefined;
+            const firstResolution = new Promise<void>((resolve) => {
+                signalFirstResolution = resolve;
+            });
+            const resolutionGate = new Promise<void>((resolve) => {
+                releaseFirstResolution = resolve;
+            });
+            let firstResolutionPending = true;
+            resolveVenvStub.callsFake(async (candidatePath: string) => {
+                if (
+                    firstResolutionPending &&
+                    normalizePath(candidatePath) === normalizePath(first.environmentPath.fsPath)
+                ) {
+                    firstResolutionPending = false;
+                    signalFirstResolution!();
+                    await resolutionGate;
+                }
+                return normalizePath(candidatePath) === normalizePath(first.environmentPath.fsPath) ? first : second;
+            });
+
+            const refresh = manager.refresh(undefined);
+            await firstResolution;
+            manager.startActivationDiscovery();
+            second = await createOwnedEnvironment(secondKey);
+            setSidecarResults({
+                [CACHE_KEY]: { kind: 'valid', metadata: sidecar },
+                [secondKey]: { kind: 'valid', metadata: sidecar },
+            });
+            releaseFirstResolution!();
+            await refresh;
+
+            await waitForStubCallCount(resolveVenvStub, 3);
+            await waitForCondition(
+                async () => (await manager.getEnvironments('all')).length === 2,
+                'Expected activation discovery to scan the entry added after the explicit refresh snapshot',
+            );
+            assert.deepStrictEqual(await manager.getEnvironments('all'), [first, second]);
+        });
+
+        test('retries when a cache entry appears during a discovery scan', async () => {
+            const first = await createOwnedEnvironment();
+            const secondKey = 'fedcba9876543210';
+            const sidecar = await makeSidecar();
+            setSidecarResults({ [CACHE_KEY]: { kind: 'valid', metadata: sidecar } });
+            let second: PythonEnvironment | undefined;
+            let releaseFirstResolution: (() => void) | undefined;
+            let signalFirstResolution: (() => void) | undefined;
+            const firstResolution = new Promise<void>((resolve) => {
+                signalFirstResolution = resolve;
+            });
+            const resolutionGate = new Promise<void>((resolve) => {
+                releaseFirstResolution = resolve;
+            });
+            let firstResolutionPending = true;
+            resolveVenvStub.callsFake(async (candidatePath: string) => {
+                if (
+                    firstResolutionPending &&
+                    normalizePath(candidatePath) === normalizePath(first.environmentPath.fsPath)
+                ) {
+                    firstResolutionPending = false;
+                    signalFirstResolution!();
+                    await resolutionGate;
+                }
+                return normalizePath(candidatePath) === normalizePath(first.environmentPath.fsPath) ? first : second;
+            });
+            const retryManager = manager as unknown as {
+                getDiscoveryRetryDelayMs(attempt: number): number | undefined;
+            };
+            sinon.stub(retryManager, 'getDiscoveryRetryDelayMs').callsFake((attempt) => (attempt === 0 ? 0 : undefined));
+
+            manager.startActivationDiscovery();
+            await firstResolution;
+            second = await createOwnedEnvironment(secondKey);
+            setSidecarResults({
+                [CACHE_KEY]: { kind: 'valid', metadata: sidecar },
+                [secondKey]: { kind: 'valid', metadata: sidecar },
+            });
+            releaseFirstResolution!();
+
+            await waitForStubCallCount(resolveVenvStub, 3);
+            await waitForCondition(
+                async () => (await manager.getEnvironments('all')).length === 2,
+                'Expected the scan after the changed snapshot to publish both environments',
+            );
+            assert.deepStrictEqual(await manager.getEnvironments('all'), [first, second]);
+        });
+
+        test('discovers a build that completes after the short retry window', async () => {
+            const sidecar = await makeSidecar();
+            setSidecarResults({ [CACHE_KEY]: { kind: 'valid', metadata: sidecar } });
+            const retryManager = manager as unknown as {
+                getDiscoveryRetryDelayMs(attempt: number): number | undefined;
+            };
+            assert.strictEqual(retryManager.getDiscoveryRetryDelayMs(2), 30_000);
+            const retryDelayStub = sinon
+                .stub(retryManager, 'getDiscoveryRetryDelayMs')
+                .callsFake((attempt) => (attempt < 2 ? 0 : attempt === 2 ? 25 : undefined));
+            const lockPath = `${path.resolve(envDir().fsPath)}.lock`;
+            await fs.ensureDir(lockPath);
+
+            manager.startActivationDiscovery();
+            await waitForStubCallCount(retryDelayStub, 3);
+            const environment = await createOwnedEnvironment();
+            resolveVenvStub.resolves(environment);
+            await fs.remove(lockPath);
+
+            await waitForStubCall(resolveVenvStub);
+            await waitForCondition(
+                async () => (await manager.getEnvironments('all')).length === 1,
+                'Expected the extended retry to publish the completed build',
+            );
+            assert.deepStrictEqual(await manager.getEnvironments('all'), [environment]);
         });
 
         test('explicit refresh does not schedule a delayed follow-up after an uncertain pass', async () => {
@@ -2431,6 +2633,28 @@ suite('InlineScriptEnvManager', () => {
             manager.onDidChangeEnvironment(listener);
             await fs.remove(environment.environmentPath.fsPath);
             await fs.ensureDir(`${path.resolve(environment.sysPrefix)}.lock`);
+            clock.tick(5_000);
+
+            assert.strictEqual(await manager.get(uri), undefined);
+            assert.deepStrictEqual(persistedAssociations, {
+                [normalizePath(uri.fsPath)]: environment.environmentPath.fsPath,
+            });
+            assert.strictEqual(listener.callCount, 0);
+        });
+
+        test('preserves a warm association when its lock probe reports EIO', async () => {
+            const uri = scriptUri();
+            const environment = await createOwnedEnvironment();
+            await manager.set(uri, environment);
+            const listener = sinon.spy();
+            manager.onDidChangeEnvironment(listener);
+            await fs.remove(environment.environmentPath.fsPath);
+            const lockPath = `${path.resolve(environment.sysPrefix)}.lock`;
+            sinon
+                .stub(fsExtra, 'lstat')
+                .callThrough()
+                .withArgs(lockPath)
+                .rejects(Object.assign(new Error('I/O error'), { code: 'EIO' }));
             clock.tick(5_000);
 
             assert.strictEqual(await manager.get(uri), undefined);
