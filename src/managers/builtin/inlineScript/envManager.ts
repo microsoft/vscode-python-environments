@@ -185,7 +185,7 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
                 }
             }
         } catch (error) {
-            this.sendInlineScriptEnvErrorTelemetry('install-failure');
+            this.sendInlineScriptEnvErrorTelemetry('setup-failure');
             this.log.error(`Failed to set up inline-script environment: ${getErrorMessage(error)}`);
             return undefined;
         }
@@ -257,7 +257,7 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
         }
         if (quickCreate) {
             return {
-                errorCategory: this.getBaseInterpreterErrorCategory(selection.discoveryFailed, 'no-compatible-python'),
+                errorCategory: selection.discoveryFailed ? 'discovery-failure' : 'no-compatible-python',
             };
         }
         return this.installAndSelectBaseInterpreter(metadata, selection.discoveryFailed);
@@ -940,20 +940,15 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
                 'Cannot install a Python for this inline script because no compatible install version could be selected.',
             );
             return {
-                errorCategory: this.getBaseInterpreterErrorCategory(
-                    discoveryFailed,
-                    versionSelection.errorCategory ?? 'no-compatible-python',
-                ),
+                errorCategory: versionSelection.errorCategory ?? 'no-compatible-python',
             };
         }
 
         const installResult = await this.installPythonAndRefresh(requiresPython, versionSelection.version);
         if (installResult.kind !== 'installed') {
             return {
-                errorCategory: this.getBaseInterpreterErrorCategory(
-                    discoveryFailed,
+                errorCategory:
                     installResult.kind === 'declined' ? 'compatible-python-declined' : 'install-failure',
-                ),
             };
         }
         const installedPath = installResult.installedPath;
@@ -991,7 +986,7 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
                 'Python was installed for an inline script, but no compatible base interpreter was discovered after refreshing environments.',
             );
             return {
-                errorCategory: this.getBaseInterpreterErrorCategory(discoveryFailedAfterInstall, 'install-failure'),
+                errorCategory: discoveryFailedAfterInstall ? 'discovery-failure' : 'setup-failure',
             };
         }
         return { selectedBase: selected };
@@ -1140,19 +1135,19 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
 
             const cached = await this.inspectCacheEntry(cacheRoot, envDir, metadata, selectedBase);
             if (cached.kind === 'reusable') {
-                this.sendInlineScriptEnvReuseHitTelemetry();
+                this.sendInlineScriptEnvReuseHitTelemetry(dependencyCount);
                 return cached.environment;
             }
             if (cached.kind === 'uncertain') {
                 this.log.warn(
                     `Preserving an inline-script cache entry that could not be safely inspected: ${envDir.fsPath}`,
                 );
-                this.sendInlineScriptEnvErrorTelemetry('install-failure');
+                this.sendInlineScriptEnvErrorTelemetry('setup-failure');
                 return undefined;
             }
             if (cached.kind === 'stale') {
                 if (!(await this.removeCacheEntry(envDir))) {
-                    this.sendInlineScriptEnvErrorTelemetry('install-failure');
+                    this.sendInlineScriptEnvErrorTelemetry('setup-failure');
                     return undefined;
                 }
             }
@@ -1313,7 +1308,7 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
         ) {
             this.log.error('Created inline-script environment does not match the requested cache entry.');
             await this.removeCacheEntry(envDir);
-            return { errorCategory: 'install-failure' };
+            return { errorCategory: 'setup-failure' };
         }
 
         try {
@@ -1326,7 +1321,7 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
         } catch (error) {
             this.log.error(`Failed to record inline-script cache metadata: ${getErrorMessage(error)}`);
             await this.removeCacheEntry(envDir);
-            return { errorCategory: 'install-failure' };
+            return { errorCategory: 'setup-failure' };
         }
 
         return { environment: result.environment };
@@ -1374,19 +1369,12 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
         });
     }
 
-    private sendInlineScriptEnvReuseHitTelemetry(): void {
-        sendTelemetryEvent(EventNames.INLINE_SCRIPT_ENV_REUSE_HIT);
+    private sendInlineScriptEnvReuseHitTelemetry(dependencyCount: number): void {
+        sendTelemetryEvent(EventNames.INLINE_SCRIPT_ENV_REUSE_HIT, { dependencyCount });
     }
 
     private sendInlineScriptEnvErrorTelemetry(category: InlineScriptEnvErrorCategory): void {
         sendTelemetryEvent(EventNames.INLINE_SCRIPT_ENV_ERROR, undefined, { category });
-    }
-
-    private getBaseInterpreterErrorCategory(
-        discoveryFailed: boolean,
-        fallbackCategory: InlineScriptEnvErrorCategory,
-    ): InlineScriptEnvErrorCategory {
-        return discoveryFailed ? 'discovery-failure' : fallbackCategory;
     }
 
     private getCreateOrReuseErrorCategory(error: unknown): InlineScriptEnvErrorCategory {
@@ -1398,7 +1386,7 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
         ) {
             return (error as NodeJS.ErrnoException).code === 'ELOCKED' ? 'lock-timeout' : 'lock-unavailable';
         }
-        return 'install-failure';
+        return 'setup-failure';
     }
 
     dispose(): void {

@@ -1537,6 +1537,7 @@ suite('InlineScriptEnvManager', () => {
         });
 
         test('emits envReuseHit only for validated cache hits', async () => {
+            readMetadataStub.resolves({ ...VALID_METADATA, dependencies: ['Requests', 'requests'] });
             await fs.ensureDir(envDir().fsPath);
             setSidecar({
                 schemaVersion: cacheLayout.META_SCHEMA_VERSION,
@@ -1557,9 +1558,26 @@ suite('InlineScriptEnvManager', () => {
 
             const reuseCalls = telemetryCalls(EventNames.INLINE_SCRIPT_ENV_REUSE_HIT);
             assert.strictEqual(reuseCalls.length, 1);
-            assert.deepStrictEqual(reuseCalls[0].args, [EventNames.INLINE_SCRIPT_ENV_REUSE_HIT]);
+            assert.deepStrictEqual(reuseCalls[0].args, [
+                EventNames.INLINE_SCRIPT_ENV_REUSE_HIT,
+                { dependencyCount: 1 },
+            ]);
             assert.strictEqual(telemetryCalls(EventNames.INLINE_SCRIPT_ENV_CREATED).length, 0);
             assert.strictEqual(telemetryCalls(EventNames.INLINE_SCRIPT_ENV_ERROR).length, 0);
+        });
+
+        test('emits setup-failure when cache inspection is unavailable', async () => {
+            await fs.ensureDir(envDir().fsPath);
+            inspectMetaStub.resolves({ kind: 'unavailable' });
+
+            assert.strictEqual(await manager.create(scriptUri()), undefined);
+
+            assert.deepStrictEqual(
+                telemetryCalls(EventNames.INLINE_SCRIPT_ENV_ERROR).map((call) => call.args),
+                [[EventNames.INLINE_SCRIPT_ENV_ERROR, undefined, { category: 'setup-failure' }]],
+            );
+            assert.strictEqual(telemetryCalls(EventNames.INLINE_SCRIPT_ENV_CREATED).length, 0);
+            assert.strictEqual(telemetryCalls(EventNames.INLINE_SCRIPT_ENV_REUSE_HIT).length, 0);
         });
 
         test('emits a single compatible-python-declined error for coalesced same-script requests', async () => {
@@ -1621,7 +1639,7 @@ suite('InlineScriptEnvManager', () => {
             );
         });
 
-        test('emits discovery-failure instead of compatible-python-declined when discovery is unavailable', async () => {
+        test('emits the final compatible-python-declined outcome when discovery was unavailable', async () => {
             const uri = scriptUri();
             readMetadataStub.resolves({ ...VALID_METADATA, requiresPython: '>=3.13' });
             apiGetEnvironmentsStub.rejects(new Error('discovery unavailable'));
@@ -1631,11 +1649,25 @@ suite('InlineScriptEnvManager', () => {
             assert.strictEqual(promptInstallPythonViaUvStub.callCount, 1);
             assert.deepStrictEqual(
                 telemetryCalls(EventNames.INLINE_SCRIPT_ENV_ERROR).map((call) => call.args),
-                [[EventNames.INLINE_SCRIPT_ENV_ERROR, undefined, { category: 'discovery-failure' }]],
+                [[EventNames.INLINE_SCRIPT_ENV_ERROR, undefined, { category: 'compatible-python-declined' }]],
             );
         });
 
-        test('emits discovery-failure instead of install-failure when discovery never recovers', async () => {
+        test('emits the final install-failure outcome when discovery was unavailable', async () => {
+            readMetadataStub.resolves({ ...VALID_METADATA, requiresPython: '>=3.13' });
+            apiGetEnvironmentsStub.rejects(new Error('discovery unavailable'));
+            promptInstallPythonViaUvStub.resolves({ kind: 'failed' });
+
+            assert.strictEqual(await manager.create(scriptUri()), undefined);
+
+            assert.strictEqual(promptInstallPythonViaUvStub.callCount, 1);
+            assert.deepStrictEqual(
+                telemetryCalls(EventNames.INLINE_SCRIPT_ENV_ERROR).map((call) => call.args),
+                [[EventNames.INLINE_SCRIPT_ENV_ERROR, undefined, { category: 'install-failure' }]],
+            );
+        });
+
+        test('emits discovery-failure when installed Python cannot be discovered or resolved', async () => {
             const uvExecutable = path.join(tempRoot, 'uv-python', isWindows() ? 'python.exe' : 'python');
             await fs.outputFile(uvExecutable, '');
             readMetadataStub.resolves({ ...VALID_METADATA, requiresPython: '>=3.13' });
@@ -1775,14 +1807,14 @@ suite('InlineScriptEnvManager', () => {
             assert.strictEqual(telemetryCalls(EventNames.INLINE_SCRIPT_ENV_CREATED).length, 0);
         });
 
-        test('emits install-failure when sidecar persistence rollback removes the new environment', async () => {
+        test('emits setup-failure when sidecar persistence rollback removes the new environment', async () => {
             writeMetaStub.rejects(new Error('disk full'));
 
             assert.strictEqual(await manager.create(scriptUri()), undefined);
 
             assert.deepStrictEqual(
                 telemetryCalls(EventNames.INLINE_SCRIPT_ENV_ERROR).map((call) => call.args),
-                [[EventNames.INLINE_SCRIPT_ENV_ERROR, undefined, { category: 'install-failure' }]],
+                [[EventNames.INLINE_SCRIPT_ENV_ERROR, undefined, { category: 'setup-failure' }]],
             );
             assert.strictEqual(telemetryCalls(EventNames.INLINE_SCRIPT_ENV_CREATED).length, 0);
         });

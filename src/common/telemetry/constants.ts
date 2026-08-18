@@ -233,6 +233,8 @@ export enum EventNames {
     /**
      * Telemetry event fired when inline-script environment creation validates
      * and reuses an existing cache entry without rebuilding it.
+     * Measures:
+     * - dependencyCount: number (normalized dependency count in the cache key)
      */
     INLINE_SCRIPT_ENV_REUSE_HIT = 'inlineScript.envReuseHit',
     /**
@@ -259,6 +261,7 @@ export type InlineScriptEnvErrorCategory =
     | 'no-compatible-python'
     | 'package-install-cancelled'
     | 'install-failure'
+    | 'setup-failure'
     | 'lock-timeout'
     | 'lock-unavailable';
 
@@ -737,9 +740,14 @@ export interface IEventNamePropertyMapping {
     };
 
     /* __GDPR__
-        "inlineScript.envReuseHit": {"owner": "StellaHuang95" }
+        "inlineScript.envReuseHit": {
+            "dependencyCount": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "isMeasurement": true, "owner": "StellaHuang95" }
+        }
     */
-    [EventNames.INLINE_SCRIPT_ENV_REUSE_HIT]: never | undefined;
+    [EventNames.INLINE_SCRIPT_ENV_REUSE_HIT]: {
+        // Goes through the measures payload (numeric); listed here for GDPR only.
+        dependencyCount?: number;
+    };
 
     /* __GDPR__
         "inlineScript.envError": {
