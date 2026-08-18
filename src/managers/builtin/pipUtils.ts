@@ -11,11 +11,11 @@ import { normalizePath } from '../../common/utils/pathUtils';
 import { showQuickPickWithButtons, withProgress } from '../../common/window.apis';
 import { findFiles } from '../../common/workspace.apis';
 import { selectFromCommonPackagesToInstall, selectFromInstallableToInstall } from '../common/pickers';
+import { normalizePackageName } from '../common/packageUtils';
 import { Installable } from '../common/types';
 import { mergePackages } from '../common/utils';
 import { createPipOrUvCommand } from './commands/factory';
 import { PipListCommand, UvListCommand } from './commands/index';
-import { normalizePackageName } from './utils';
 
 export interface PyprojectToml {
     project?: {
@@ -279,14 +279,19 @@ export async function getWorkspacePackagesToInstall(
     if (environment) {
         const pythonExecutable = environment.execInfo?.run?.executable;
         if (pythonExecutable) {
-            const listCmd: PipListCommand | UvListCommand = await createPipOrUvCommand(
-                { pythonExecutable, log },
-                environment.environmentPath.fsPath,
-                PipListCommand,
-                UvListCommand,
-            );
-            const data = await listCmd.execute();
-            installed = data?.map((pkg) => pkg.name);
+            try {
+                const listCmd: PipListCommand | UvListCommand = await createPipOrUvCommand(
+                    { pythonExecutable, log },
+                    environment.environmentPath.fsPath,
+                    PipListCommand,
+                    UvListCommand,
+                );
+                const data = await listCmd.execute();
+                installed = data.map((pkg) => pkg.name);
+            } catch (error) {
+                log?.error('Error listing installed packages', error);
+                installed = [];
+            }
         }
         common = mergePackages(common, installed ?? []);
     }

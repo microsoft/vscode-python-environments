@@ -18,17 +18,6 @@ const PIXI_EXTENSION_ID = 'renan-r-santos.pixi-code';
 const PIXI_RECOMMEND_DONT_ASK_KEY = 'pixi-extension-recommend-dont-ask';
 let pixiRecommendationShown = false;
 
-/**
- * Parse package specifications (strings) into package objects.
- * Each string becomes a package object with its packageName; the version is left
- * unset (the spec string may itself embed a version, e.g. "requests==2.31.0").
- */
-export function parsePackageSpecs(packageStrings: string[]): { packageName: string; version?: string }[] {
-    return packageStrings.map((pkg) => ({
-        packageName: pkg,
-    }));
-}
-
 function asPackageQuickPickItem(name: string, version?: string): QuickPickItem {
     return {
         label: name,
@@ -240,8 +229,4 @@ export async function resolveSystemPythonEnvironmentPath(
         traceVerbose(`Failed to resolve env "${fsPath}": ${ex}`);
     }
     return undefined;
-}
-
-export function normalizePackageName(name: string): string {
-    return name.replace(/[-_.]+/g, '-').toLowerCase();
 }

@@ -2,7 +2,7 @@
 // Licensed under the MIT License.
 
 import { Package, PackageChangeKind, PackageManager, PythonEnvironment } from '../../api';
-import { normalizePackageName } from '../builtin/utils';
+import { normalizePackageName } from './packageUtils';
 
 /**
  * Callback invoked with the computed changes when at least one change is detected.
