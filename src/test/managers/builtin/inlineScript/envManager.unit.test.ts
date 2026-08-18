@@ -1523,6 +1523,19 @@ suite('InlineScriptEnvManager', () => {
             assert.strictEqual(telemetryCalls(EventNames.INLINE_SCRIPT_ENV_ERROR).length, 0);
         });
 
+        test('deduplicates normalized dependencies for envCreated dependencyCount', async () => {
+            readMetadataStub.resolves({ ...VALID_METADATA, dependencies: ['Requests', 'requests'] });
+
+            assert.ok(await manager.create(scriptUri()));
+
+            const createdCalls = telemetryCalls(EventNames.INLINE_SCRIPT_ENV_CREATED);
+            assert.strictEqual(createdCalls.length, 1);
+            assert.deepStrictEqual(createdCalls[0].args, [
+                EventNames.INLINE_SCRIPT_ENV_CREATED,
+                { duration: 0, dependencyCount: 1 },
+            ]);
+        });
+
         test('emits envReuseHit only for validated cache hits', async () => {
             await fs.ensureDir(envDir().fsPath);
             setSidecar({
