@@ -8,10 +8,10 @@ import { LogOutputChannel, Uri } from 'vscode';
 import { PythonEnvironmentApi } from '../../../api';
 import * as windowApis from '../../../common/window.apis';
 import * as packageChanges from '../../../managers/common/packageChanges';
+import * as runPoetryModule from '../../../managers/poetry/commands/runPoetry';
 import { PoetryPackageManager } from '../../../managers/poetry/poetryPackageManager';
 import { PoetryManager } from '../../../managers/poetry/poetryManager';
 import * as poetryUtils from '../../../managers/poetry/poetryUtils';
-import * as runPoetryModule from '../../../managers/poetry/commands/runPoetry';
 import { createMockPythonEnvironment } from '../../mocks/pythonEnvironment';
 
 suite('PoetryPackageManager', () => {
@@ -19,8 +19,9 @@ suite('PoetryPackageManager', () => {
         envPath: path.join(process.cwd(), '.venv'),
         managerId: 'ms-python.python:poetry',
     });
-    let runPoetryStub: sinon.SinonStub;
+    let logError: sinon.SinonStub;
     let manager: PoetryPackageManager;
+    let runPoetryStub: sinon.SinonStub;
 
     setup(() => {
         const api = {
@@ -31,9 +32,10 @@ suite('PoetryPackageManager', () => {
                 },
             ],
         } as unknown as PythonEnvironmentApi;
+        logError = sinon.stub();
         const log = {
             append: sinon.stub(),
-            error: sinon.stub(),
+            error: logError,
             info: sinon.stub(),
             show: sinon.stub(),
         } as unknown as LogOutputChannel;
@@ -63,5 +65,15 @@ suite('PoetryPackageManager', () => {
 
         assert.strictEqual(runPoetryStub.callCount, 1);
         assert.strictEqual(runPoetryStub.firstCall.args[1], undefined);
+    });
+
+    test('package loading returns an empty list when poetry show fails', async () => {
+        const showError = new Error('poetry show failed');
+        runPoetryStub.rejects(showError);
+
+        const packages = await manager.getPackages(environment, { skipCache: true });
+
+        assert.deepStrictEqual(packages, []);
+        assert.ok(logError.calledOnceWithExactly(`Error refreshing packages with Poetry: ${showError}`));
     });
 });
