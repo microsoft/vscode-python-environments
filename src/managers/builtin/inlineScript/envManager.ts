@@ -498,8 +498,17 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
         }
 
         if (checkForSnapshotChanges) {
+            let finalEntryNames: string[] | undefined;
             try {
-                const finalEntryNames = await fs.readdir(cacheRoot.fsPath);
+                finalEntryNames = await fs.readdir(cacheRoot.fsPath);
+            } catch (error) {
+                if (this.isDefinitivelyStalePathError(error)) {
+                    finalEntryNames = [];
+                } else {
+                    shouldRetry = true;
+                }
+            }
+            if (finalEntryNames !== undefined) {
                 const initialEntries = new Set(entryNames);
                 if (
                     finalEntryNames.length !== entryNames.length ||
@@ -507,8 +516,6 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
                 ) {
                     shouldRetry = true;
                 }
-            } catch {
-                shouldRetry = true;
             }
         }
 

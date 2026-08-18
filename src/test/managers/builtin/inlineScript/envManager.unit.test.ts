@@ -1588,6 +1588,23 @@ suite('InlineScriptEnvManager', () => {
             assert.deepStrictEqual(await manager.getEnvironments('all'), [environment]);
         });
 
+        test('does not retry when the final cache-root snapshot is definitively absent and empty', async () => {
+            const readdirStub = sinon.stub(fsExtra, 'readdir');
+            readdirStub.onFirstCall().resolves([]);
+            readdirStub.onSecondCall().rejects(Object.assign(new Error('cache root removed'), { code: 'ENOENT' }));
+            const retryManager = manager as unknown as {
+                getDiscoveryRetryDelayMs(attempt: number): number | undefined;
+            };
+            sinon.stub(retryManager, 'getDiscoveryRetryDelayMs').returns(0);
+
+            manager.startActivationDiscovery();
+            await waitForStubCallCount(readdirStub, 2);
+            await new Promise((resolve) => setTimeout(resolve, 25));
+
+            assert.strictEqual(readdirStub.callCount, 2);
+            assert.deepStrictEqual(await manager.getEnvironments('all'), []);
+        });
+
         test('refresh skips missing, invalid, unavailable, and non-directory cache entries', async () => {
             const valid = await createOwnedEnvironment();
             const cacheRoot = cacheLayout.getScriptEnvCacheRoot(globalStorageUri).fsPath;
