@@ -1,5 +1,5 @@
 import { ListDirectNamesCommand, type BaseExecuteArgs } from '../../base/commands/index';
-import { normalizePackageName } from '../../builtin/utils';
+import { normalizePackageName } from '../../common/packageUtils';
 import { runPoetry } from './runPoetry';
 
 /**

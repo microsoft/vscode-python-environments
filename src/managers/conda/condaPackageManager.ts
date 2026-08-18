@@ -25,8 +25,8 @@ import { showErrorMessageWithLogs } from '../../common/errors/utils';
 import { CondaStrings } from '../../common/localize';
 import { withProgress } from '../../common/window.apis';
 
-import { parsePackageSpecs } from '../builtin/utils';
 import { updatePackagesAndNotify } from '../common/packageChanges';
+import { parsePackageSpecs } from '../common/packageUtils';
 import {
     CondaAvailableVersionsCommand,
     CondaInstallCommand,

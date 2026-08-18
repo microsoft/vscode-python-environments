@@ -23,8 +23,8 @@ import {
     PythonEnvironmentApi,
 } from '../../api';
 import { showErrorMessage, showInputBox, withProgress } from '../../common/window.apis';
-import { parsePackageSpecs } from '../builtin/utils';
 import { updatePackagesAndNotify } from '../common/packageChanges';
+import { parsePackageSpecs } from '../common/packageUtils';
 import {
     PoetryAddCommand,
     PoetryRemoveCommand,

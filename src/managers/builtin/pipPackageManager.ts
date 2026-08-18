@@ -25,6 +25,7 @@ import {
 import { withProgress } from '../../common/window.apis';
 import { CommandConstructorOptions } from '../base/commands/index';
 import { updatePackagesAndNotify } from '../common/packageChanges';
+import { parsePackageSpecs } from '../common/packageUtils';
 import { createPipOrUvCommand } from './commands/factory';
 import {
     PipAvailableVersionsCommand,
@@ -41,7 +42,6 @@ import {
     UvVersionCommand,
 } from './commands/index';
 import { getWorkspacePackagesToInstall } from './pipUtils';
-import { parsePackageSpecs } from './utils';
 import { VenvManager } from './venvManager';
 
 export class PipPackageManager implements PackageManager, Disposable {
@@ -248,6 +248,12 @@ export class PipPackageManager implements PackageManager, Disposable {
                     // pip <= 20.3.4 - version picking is undefined; no reliable machine-readable API exists.
                     return undefined;
                 }
+                const versions = await availableVersionsCmd.execute({
+                    packageName,
+                    pythonVersion: baseVersion,
+                    useJson: compare(pipVersion.public, '25.1') >= 0,
+                });
+                return versions.sort((a, b) => compare(b.public, a.public));
             }
 
             const versions = await availableVersionsCmd.execute({
