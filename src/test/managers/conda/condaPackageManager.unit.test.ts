@@ -8,6 +8,7 @@ import { PythonEnvironment, PythonEnvironmentApi } from '../../../api';
 import * as errorUtils from '../../../common/errors/utils';
 import * as windowApis from '../../../common/window.apis';
 import { CondaInstallCommand } from '../../../managers/conda/commands/install';
+import { CondaListCommand } from '../../../managers/conda/commands/list';
 import { CondaPackageManager } from '../../../managers/conda/condaPackageManager';
 
 suite('CondaPackageManager', () => {
@@ -37,5 +38,35 @@ suite('CondaPackageManager', () => {
 
         assert.ok(logError.calledOnce);
         assert.ok(showErrorMessageWithLogs.notCalled);
+    });
+
+    test('retries package listing after a parse failure and caches only success', async () => {
+        const environment = {
+            envId: { id: 'test-environment', managerId: 'test-manager' },
+            environmentPath: Uri.file('.'),
+        } as PythonEnvironment;
+        const api = {
+            createPackageItem: sinon.stub().callsFake((pkg) => pkg),
+        } as unknown as PythonEnvironmentApi;
+        const manager = new CondaPackageManager(api, { error: sinon.stub() } as unknown as LogOutputChannel);
+        const parseError = new SyntaxError('Unexpected token');
+        const execute = sinon.stub(CondaListCommand.prototype, 'execute');
+        execute.onFirstCall().rejects(parseError);
+        execute.onSecondCall().resolves([
+            {
+                name: 'requests',
+                displayName: 'requests',
+                version: '2.32.0',
+                description: '2.32.0',
+            },
+        ]);
+
+        await assert.rejects(manager.getPackages(environment), (error: unknown) => error === parseError);
+        const packages = await manager.getPackages(environment);
+        const cachedPackages = await manager.getPackages(environment);
+
+        assert.deepStrictEqual(packages?.map((pkg) => pkg.name), ['requests']);
+        assert.deepStrictEqual(cachedPackages?.map((pkg) => pkg.name), ['requests']);
+        assert.strictEqual(execute.callCount, 2, 'Only the successful list result should populate the cache');
     });
 });
