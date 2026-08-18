@@ -401,19 +401,18 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
         return followUp;
     }
 
-    private startSnapshotRefreshAfter(sharedPass: DiscoveryRefreshPass): Promise<boolean> {
-        return sharedPass.promise.then(() => {
-            if (this.disposed || !this.activationDiscoveryActive) {
-                return false;
-            }
-            const pending = this.pendingRefresh;
-            if (pending && pending !== sharedPass) {
-                return pending.checksForSnapshotChanges
-                    ? pending.promise
-                    : this.startSnapshotRefreshAfter(pending);
-            }
-            return this.startRefreshPass(true);
-        });
+    private async startSnapshotRefreshAfter(sharedPass: DiscoveryRefreshPass): Promise<boolean> {
+        await sharedPass.promise;
+        if (this.disposed || !this.activationDiscoveryActive) {
+            return false;
+        }
+        const pending = this.pendingRefresh;
+        if (pending && pending !== sharedPass) {
+            return pending.checksForSnapshotChanges
+                ? pending.promise
+                : this.startSnapshotRefreshAfter(pending);
+        }
+        return this.startRefreshPass(true);
     }
 
     private runActivationDiscoveryPass(): void {
