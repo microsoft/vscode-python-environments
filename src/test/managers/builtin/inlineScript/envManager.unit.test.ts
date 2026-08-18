@@ -234,16 +234,6 @@ suite('InlineScriptEnvManager', () => {
         return new Promise((resolve) => setImmediate(resolve));
     }
 
-    function telemetryCalls(eventName: EventNames): sinon.SinonSpyCall[] {
-        return sendTelemetryStub.getCalls().filter((call) => call.args[0] === eventName);
-    }
-
-    function assertNoInlineScriptLifecycleTelemetry(): void {
-        assert.strictEqual(telemetryCalls(EventNames.INLINE_SCRIPT_ENV_CREATED).length, 0);
-        assert.strictEqual(telemetryCalls(EventNames.INLINE_SCRIPT_ENV_REUSE_HIT).length, 0);
-        assert.strictEqual(telemetryCalls(EventNames.INLINE_SCRIPT_ENV_ERROR).length, 0);
-    }
-
     suite('static metadata and deferred methods', () => {
         test('exposes creation but leaves later-phase methods empty', async () => {
             const asInterface: EnvironmentManager = manager;
@@ -1502,6 +1492,16 @@ suite('InlineScriptEnvManager', () => {
     });
 
     suite('telemetry', () => {
+        function telemetryCalls(eventName: EventNames): sinon.SinonSpyCall[] {
+            return sendTelemetryStub.getCalls().filter((call) => call.args[0] === eventName);
+        }
+
+        function assertNoInlineScriptLifecycleTelemetry(): void {
+            assert.strictEqual(telemetryCalls(EventNames.INLINE_SCRIPT_ENV_CREATED).length, 0);
+            assert.strictEqual(telemetryCalls(EventNames.INLINE_SCRIPT_ENV_REUSE_HIT).length, 0);
+            assert.strictEqual(telemetryCalls(EventNames.INLINE_SCRIPT_ENV_ERROR).length, 0);
+        }
+
         test('does not emit lifecycle telemetry for non-applicable create calls', async () => {
             readMetadataStub.resolves(undefined);
 
