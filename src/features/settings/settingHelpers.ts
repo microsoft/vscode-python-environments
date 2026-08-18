@@ -19,8 +19,8 @@ interface ResolvedPythonProjectSettingSource {
     readonly setting: PythonProjectSettings;
     readonly uri: Uri;
     readonly workspaceFolder: WorkspaceFolder;
-    readonly source: 'workspace' | 'workspaceFolder';
-    readonly target: ConfigurationTarget.Workspace | ConfigurationTarget.WorkspaceFolder;
+    readonly source: 'global' | 'workspace' | 'workspaceFolder';
+    readonly target: ConfigurationTarget.Global | ConfigurationTarget.Workspace | ConfigurationTarget.WorkspaceFolder;
 }
 
 interface ResolvedPythonProjectSetting {
@@ -34,8 +34,8 @@ function resolvePythonProjectSettingSource(
     setting: PythonProjectSettings,
     workspaceFolder: WorkspaceFolder,
     allWorkspaceFolders: readonly WorkspaceFolder[],
-    source: 'workspace' | 'workspaceFolder',
-    target: ConfigurationTarget.Workspace | ConfigurationTarget.WorkspaceFolder,
+    source: 'global' | 'workspace' | 'workspaceFolder',
+    target: ConfigurationTarget.Global | ConfigurationTarget.Workspace | ConfigurationTarget.WorkspaceFolder,
 ): ResolvedPythonProjectSettingSource | undefined {
     const resolvedWorkspaceFolder = setting.workspace
         ? allWorkspaceFolders.find((candidate) => candidate.name === setting.workspace)
@@ -75,6 +75,17 @@ function getResolvedPythonProjectSettings(
     const fallbackSettings =
         projectsInspect === undefined ? config.get<PythonProjectSettings[]>('pythonProjects', []) : undefined;
     const orderedSources: ResolvedPythonProjectSettingSource[] = [
+        ...(projectsInspect?.globalValue ?? [])
+            .map((setting) =>
+                resolvePythonProjectSettingSource(
+                    setting,
+                    workspaceFolder,
+                    allWorkspaceFolders,
+                    'global',
+                    ConfigurationTarget.Global,
+                ),
+            )
+            .filter((setting): setting is ResolvedPythonProjectSettingSource => setting !== undefined),
         ...(projectsInspect?.workspaceValue ?? fallbackSettings ?? [])
             .map((setting) =>
                 resolvePythonProjectSettingSource(
@@ -532,12 +543,16 @@ export async function removeInlineScriptPythonProjectSettings(
     const folderRemainingSettings = new Map<string, PythonProjectSettings[]>();
     const folderExistingSettings = new Map<string, PythonProjectSettings[]>();
     const promises: Thenable<void>[] = [];
+    let globalConfig: WorkspaceConfiguration | undefined;
+    let globalValueOriginal: PythonProjectSettings[] | undefined;
     let workspaceConfig: WorkspaceConfiguration | undefined;
     let workspaceValueOriginal: PythonProjectSettings[] | undefined;
 
     workspaceEntries.forEach(([workspaceFolder, edits]) => {
         const config = workspaceApis.getConfiguration('python-envs', workspaceFolder.uri);
         const projectsInspect = config.inspect<PythonProjectSettings[]>('pythonProjects');
+        globalConfig ??= config;
+        globalValueOriginal ??= cloneProjectSettings(projectsInspect?.globalValue);
         workspaceConfig ??= config;
         workspaceValueOriginal ??= cloneProjectSettings(projectsInspect?.workspaceValue);
 
@@ -562,6 +577,13 @@ export async function removeInlineScriptPythonProjectSettings(
     const aggregatedEdits = workspaceEntries.flatMap(([workspaceFolder, edits]) =>
         edits.map((edit) => ({ workspaceFolder, edit })),
     );
+    const globalValueRemaining =
+        globalValueOriginal?.filter(
+            (projectSetting) =>
+                !aggregatedEdits.some(({ workspaceFolder, edit }) =>
+                    matchesProjectSettingEdit(projectSetting, edit, workspaceFolder),
+                ),
+        ) ?? [];
     const workspaceValueRemaining =
         workspaceValueOriginal?.filter(
             (projectSetting) =>
@@ -569,6 +591,16 @@ export async function removeInlineScriptPythonProjectSettings(
                     matchesProjectSettingEdit(projectSetting, edit, workspaceFolder),
                 ),
         ) ?? [];
+
+    if (globalConfig && globalValueOriginal !== undefined && globalValueRemaining.length !== globalValueOriginal.length) {
+        promises.push(
+            globalConfig.update(
+                'pythonProjects',
+                globalValueRemaining.length > 0 ? globalValueRemaining : undefined,
+                ConfigurationTarget.Global,
+            ),
+        );
+    }
 
     if (
         workspaceConfig &&
@@ -586,10 +618,12 @@ export async function removeInlineScriptPythonProjectSettings(
 
     workspaceEntries.forEach(([workspaceFolder, edits]) => {
         const existingSettings = [
+            ...(globalValueOriginal ?? []),
             ...(workspaceValueOriginal ?? []),
             ...((folderExistingSettings.get(workspaceFolder.uri.toString()) ?? [])),
         ];
         const remainingSettings = [
+            ...globalValueRemaining,
             ...workspaceValueRemaining,
             ...((folderRemainingSettings.get(workspaceFolder.uri.toString()) ?? [])),
         ];

@@ -162,6 +162,31 @@ export async function inspectFileLock(filePath: string, options?: InspectFileLoc
     return 'orphaned';
 }
 
+/**
+ * Move a stale or retained lock out of the lock name before a replacement owner is acquired.
+ * The rename prevents a newly-created lock from being removed based on an earlier inspection.
+ */
+export async function reclaimFileLock(filePath: string): Promise<boolean> {
+    const lockPath = getFileLockPath(filePath);
+    const state = await inspectFileLock(filePath);
+    if (state !== 'stale' && state !== 'retained') {
+        return false;
+    }
+
+    const quarantinedLockPath = `${lockPath}.reclaimed-${process.pid}-${crypto.randomBytes(16).toString('hex')}`;
+    try {
+        await fsapi.rename(lockPath, quarantinedLockPath);
+    } catch (error) {
+        if (hasErrorCode(error, 'ENOENT')) {
+            return false;
+        }
+        throw error;
+    }
+
+    await fsapi.remove(quarantinedLockPath);
+    return true;
+}
+
 export async function getProcessLiveness(pid: number): Promise<ProcessLiveness> {
     try {
         process.kill(pid, 0);
@@ -196,12 +221,16 @@ function hasErrorCode(error: unknown, code: string): boolean {
 }
 
 function parseOwnerPid(entry: string): number | undefined {
-    const match = entry.match(/^owner-(\d+)-/);
+    const match = entry.match(new RegExp(`^${escapeRegExp(FILE_LOCK_OWNER_MARKER_PREFIX)}(\\d+)-`));
     if (!match) {
         return undefined;
     }
     const pid = Number(match[1]);
     return Number.isSafeInteger(pid) && pid > 0 ? pid : undefined;
+}
+
+function escapeRegExp(value: string): string {
+    return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
 function createLockError(message: string, code: string, lockPath: string): NodeJS.ErrnoException {

@@ -316,6 +316,28 @@ suite('Clear Script Environment Cache Command Tests', () => {
         sinon.assert.calledOnceWithExactly(removeInlineSettings, [inlineProject]);
         sinon.assert.notCalled(projectManager.remove as sinon.SinonStub);
     });
+
+    test('preserves project settings when cache cleanup reports a partial failure', async () => {
+        const clearCache = sinon.stub().rejects(new Error('one cache entry could not be deleted'));
+        const envManagers = {
+            getEnvironmentManager: sinon.stub().withArgs(INLINE_SCRIPT_MANAGER_ID).returns({
+                supportsClearCache: () => true,
+                clearCache,
+            }),
+        } as unknown as EnvironmentManagers;
+        const projectManager = {
+            getProjects: sinon.stub().returns([]),
+            remove: sinon.stub(),
+        } as unknown as PythonProjectManager;
+        sinon.stub(windowApis, 'showWarningMessage').resolves('Clear Cache' as never);
+        const removeInlineSettings = sinon.stub(settingHelpers, 'removeInlineScriptPythonProjectSettings').resolves([]);
+
+        await assert.rejects(clearScriptEnvironmentCacheCommand(envManagers, projectManager), /could not be deleted/);
+
+        sinon.assert.calledOnce(clearCache);
+        sinon.assert.notCalled(removeInlineSettings);
+        sinon.assert.notCalled(projectManager.remove as sinon.SinonStub);
+    });
 });
 
 suite('Reveal Env In Manager View Command Tests', () => {

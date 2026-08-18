@@ -654,16 +654,22 @@ suite('Setting Helpers - Project Removal', () => {
 
     function createProjectConfig(options: {
         workspaceName: string;
+        globalValue?: PythonProjectSettings[];
         workspaceValue?: PythonProjectSettings[];
         workspaceFolderValue?: PythonProjectSettings[];
     }): MockWorkspaceConfiguration {
         const mockConfig = new MockWorkspaceConfiguration();
-        const mergedProjects = [...(options.workspaceValue ?? []), ...(options.workspaceFolderValue ?? [])];
+        const mergedProjects = [
+            ...(options.globalValue ?? []),
+            ...(options.workspaceValue ?? []),
+            ...(options.workspaceFolderValue ?? []),
+        ];
         (mockConfig as any).get = <T>(key: string, defaultValue?: T): T | undefined =>
             key === 'pythonProjects' ? (mergedProjects as unknown as T) : defaultValue;
         (mockConfig as any).inspect = (key: string) =>
             key === 'pythonProjects'
                 ? {
+                      globalValue: options.globalValue,
                       workspaceValue: options.workspaceValue,
                       workspaceFolderValue: options.workspaceFolderValue,
                   }
@@ -1067,6 +1073,87 @@ suite('Setting Helpers - Project Removal', () => {
                             call.target === ConfigurationTarget.WorkspaceFolder,
                     ),
                 'Should update the same configuration scope that originally contained each project entry',
+            );
+        });
+
+        test('removes global inline entries once while preserving higher-precedence non-inline entries', async () => {
+            const globalProject = new PythonProjectsImpl(
+                'global.py',
+                Uri.file(path.join(firstWorkspacePath, 'global.py')),
+            );
+            const workspaceProject = new PythonProjectsImpl(
+                'workspace.py',
+                Uri.file(path.join(firstWorkspacePath, 'workspace.py')),
+            );
+            const folderProject = new PythonProjectsImpl(
+                'folder.py',
+                Uri.file(path.join(secondWorkspaceUri.fsPath, 'folder.py')),
+            );
+            const firstConfig = createProjectConfig({
+                workspaceName: firstWorkspace.name,
+                globalValue: [
+                    { path: 'global.py', envManager: INLINE_MANAGER_ID, packageManager: PIP_MANAGER_ID },
+                    { path: 'keep.py', envManager: VENV_MANAGER_ID, packageManager: PIP_MANAGER_ID },
+                ],
+                workspaceValue: [
+                    { path: 'workspace.py', envManager: INLINE_MANAGER_ID, packageManager: PIP_MANAGER_ID },
+                ],
+                workspaceFolderValue: [
+                    { path: 'global.py', envManager: VENV_MANAGER_ID, packageManager: PIP_MANAGER_ID },
+                ],
+            });
+            const secondConfig = createProjectConfig({
+                workspaceName: secondWorkspace.name,
+                globalValue: [
+                    { path: 'global.py', envManager: INLINE_MANAGER_ID, packageManager: PIP_MANAGER_ID },
+                    { path: 'keep.py', envManager: VENV_MANAGER_ID, packageManager: PIP_MANAGER_ID },
+                ],
+                workspaceFolderValue: [
+                    { path: 'folder.py', envManager: INLINE_MANAGER_ID, packageManager: PIP_MANAGER_ID },
+                ],
+            });
+            sinon.stub(workspaceApis, 'getWorkspaceFolders').returns([firstWorkspace, secondWorkspace]);
+            sinon.stub(workspaceApis, 'getWorkspaceFolder').callsFake((uri) =>
+                uri.fsPath.startsWith(secondWorkspaceUri.fsPath) ? secondWorkspace : firstWorkspace,
+            );
+            sinon.stub(workspaceApis, 'getConfiguration').callsFake((_section?: string, scope?: unknown) => {
+                const uri = scope as Uri;
+                return uri.fsPath === secondWorkspaceUri.fsPath ? secondConfig : firstConfig;
+            });
+
+            const removedProjects = await removeInlineScriptPythonProjectSettings([
+                globalProject,
+                workspaceProject,
+                folderProject,
+            ]);
+
+            assert.deepStrictEqual(
+                removedProjects.map((project) => project.uri.fsPath).sort(),
+                [workspaceProject.uri.fsPath, folderProject.uri.fsPath].sort(),
+                'The folder-level non-inline entry keeps the global project loaded',
+            );
+            const globalUpdates = updateCalls.filter((call) => call.target === ConfigurationTarget.Global);
+            assert.strictEqual(globalUpdates.length, 1, 'Global settings should be updated exactly once');
+            assert.deepStrictEqual(globalUpdates[0].value, [
+                { path: 'keep.py', envManager: VENV_MANAGER_ID, packageManager: PIP_MANAGER_ID },
+            ]);
+            assert.ok(
+                updateCalls.some(
+                    (call) =>
+                        call.workspace === firstWorkspace.name &&
+                        call.target === ConfigurationTarget.Workspace &&
+                        call.value === undefined,
+                ),
+                'Workspace-scoped inline entry should be removed at its source',
+            );
+            assert.ok(
+                updateCalls.some(
+                    (call) =>
+                        call.workspace === secondWorkspace.name &&
+                        call.target === ConfigurationTarget.WorkspaceFolder &&
+                        call.value === undefined,
+                ),
+                'Folder-scoped inline entry should be removed at its source',
             );
         });
     });
