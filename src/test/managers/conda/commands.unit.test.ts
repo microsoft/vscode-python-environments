@@ -86,6 +86,43 @@ suite('Conda commands', () => {
         );
     });
 
+    test('CondaListCommand accepts a successfully parsed empty environment', async () => {
+        runCondaStub.resolves('[]');
+        const command = new CondaListCommand({
+            pythonExecutable: 'conda',
+            condaEnvironmentPath: environmentPath,
+            log: mockLog,
+        });
+
+        const result = await command.execute();
+
+        assert.deepStrictEqual(result, []);
+    });
+
+    test('CondaListCommand rejects malformed JSON', async () => {
+        runCondaStub.resolves('not json');
+        const command = new CondaListCommand({
+            pythonExecutable: 'conda',
+            condaEnvironmentPath: environmentPath,
+            log: mockLog,
+        });
+
+        await assert.rejects(() => command.execute(), SyntaxError);
+        assert.ok((mockLog.error as sinon.SinonStub).calledOnce);
+    });
+
+    test('CondaListCommand rejects non-array JSON', async () => {
+        runCondaStub.resolves('{}');
+        const command = new CondaListCommand({
+            pythonExecutable: 'conda',
+            condaEnvironmentPath: environmentPath,
+            log: mockLog,
+        });
+
+        await assert.rejects(() => command.execute(), /expected a JSON array/);
+        assert.ok((mockLog.error as sinon.SinonStub).calledOnce);
+    });
+
     test('CondaVersionCommand parses the version', async () => {
         runCondaStub.resolves('conda 24.1.2');
         const command = new CondaVersionCommand({ pythonExecutable: 'conda', log: mockLog });
