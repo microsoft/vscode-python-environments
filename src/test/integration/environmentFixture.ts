@@ -17,6 +17,7 @@ import { waitForCondition } from '../testUtils';
 const OWNERSHIP_FILE_NAME = '.python-envs-test-owner.json';
 const COMMAND_TIMEOUT_MS = 180_000;
 const DISCOVERY_TIMEOUT_MS = 60_000;
+const API_REMOVAL_SETTLE_TIMEOUT_MS = 10_000;
 
 export interface EnvironmentFixtureProvider {
     readonly environmentDirectory: string;
@@ -74,16 +75,13 @@ export async function createEnvironmentFixture(
     let projectSettingAdded = false;
     let environmentCreated = false;
     let environment: PythonEnvironment | undefined;
-    let disposed = false;
+    let disposePromise: Promise<void> | undefined;
     let markerWritten = false;
     let projectRootCreated = false;
 
-    const dispose = async (): Promise<void> => {
-        if (disposed) {
-            return;
-        }
-        disposed = true;
+    const cleanup = async (): Promise<void> => {
         const cleanupErrors: Error[] = [];
+        let environmentRemovalPending = false;
 
         if (markerWritten && (environmentCreated || (await pathExists(prefix)))) {
             let ownershipVerified = false;
@@ -94,26 +92,58 @@ export async function createEnvironmentFixture(
                 cleanupErrors.push(toError(error));
             }
             if (ownershipVerified && environment) {
+                let apiRemovalSettled = false;
+                const apiRemoval = api
+                    .removeEnvironment(environment, { runHeadless: true })
+                    .finally(() => {
+                        apiRemovalSettled = true;
+                    });
                 try {
                     await withTimeout(
-                        api.removeEnvironment(environment, { runHeadless: true }),
+                        apiRemoval,
                         COMMAND_TIMEOUT_MS,
                         `${request.name} API environment removal timed out`,
                     );
                 } catch (error) {
                     cleanupErrors.push(toError(error));
+                    if (!apiRemovalSettled) {
+                        try {
+                            await withTimeout(
+                                apiRemoval,
+                                API_REMOVAL_SETTLE_TIMEOUT_MS,
+                                `${request.name} API environment removal did not settle after timing out`,
+                            );
+                        } catch (settleError) {
+                            if (apiRemovalSettled) {
+                                cleanupErrors.push(toError(settleError));
+                            } else {
+                                environmentRemovalPending = true;
+                                cleanupErrors.push(
+                                    new Error(
+                                        `${request.name} direct cleanup was skipped because API removal is still running`,
+                                    ),
+                                );
+                            }
+                        }
+                    }
                 }
             }
             if (ownershipVerified && (await pathExists(prefix))) {
                 cleanupErrors.push(
                     new Error(`${request.name} API removal left the environment on disk: ${prefix.fsPath}`),
                 );
-                try {
-                    await request.provider.remove(prefix);
-                    await assertPathMissing(prefix, `${request.name} environment was not removed`);
-                } catch (error) {
-                    cleanupErrors.push(toError(error));
+                if (!environmentRemovalPending) {
+                    try {
+                        await request.provider.remove(prefix);
+                        await assertPathMissing(prefix, `${request.name} environment was not removed`);
+                    } catch (error) {
+                        cleanupErrors.push(toError(error));
+                    }
                 }
+            }
+            if (ownershipVerified && !(await pathExists(prefix))) {
+                environmentCreated = false;
+                environment = undefined;
             }
         }
 
@@ -143,7 +173,7 @@ export async function createEnvironmentFixture(
             }
         }
 
-        if (projectRootCreated && (await pathExists(projectUri))) {
+        if (!environmentRemovalPending && projectRootCreated && (await pathExists(projectUri))) {
             try {
                 if (markerWritten) {
                     await verifyOwnership(projectUri, markerUri, token, prefix);
@@ -159,6 +189,16 @@ export async function createEnvironmentFixture(
         if (cleanupErrors.length > 0) {
             throw new Error(cleanupErrors.map((error) => error.message).join('\n'));
         }
+    };
+
+    const dispose = (): Promise<void> => {
+        if (!disposePromise) {
+            disposePromise = cleanup().catch((error) => {
+                disposePromise = undefined;
+                throw error;
+            });
+        }
+        return disposePromise;
     };
 
     try {
