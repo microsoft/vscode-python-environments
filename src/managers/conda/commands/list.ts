@@ -22,16 +22,27 @@ export class CondaListCommand extends ListCommand {
 
     async execute(executeArgs?: BaseExecuteArgs): Promise<PackageInfo[]> {
         const output = await runCondaExecutable(this.buildCommand(), this.log, executeArgs?.cancellationToken);
-        let condaPackages: { name: string; version: string }[];
+        let parsed: unknown;
         try {
-            condaPackages = JSON.parse(output) as { name: string; version: string }[];
-        } catch {
-            return [];
+            parsed = JSON.parse(output);
+        } catch (error) {
+            this.log?.error('Failed to parse conda list output', error);
+            throw error;
+        }
+        if (!Array.isArray(parsed)) {
+            const error = new Error('Invalid conda list output: expected a JSON array');
+            this.log?.error(error.message);
+            throw error;
         }
 
         const packages: PackageInfo[] = [];
-        for (const condaPkg of condaPackages) {
-            if (condaPkg.name && condaPkg.version) {
+        for (const condaPkg of parsed) {
+            if (
+                typeof condaPkg === 'object' &&
+                condaPkg !== null &&
+                typeof condaPkg.name === 'string' &&
+                typeof condaPkg.version === 'string'
+            ) {
                 packages.push({
                     name: condaPkg.name,
                     displayName: condaPkg.name,

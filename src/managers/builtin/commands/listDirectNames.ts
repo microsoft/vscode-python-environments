@@ -1,6 +1,6 @@
 import { ListDirectNamesCommand, type BaseExecuteArgs } from '../../base/commands/index';
+import { normalizePackageName } from '../../common/packageUtils';
 import { runPython, runUV } from '../helpers';
-import { normalizePackageName } from '../utils';
 
 /**
  * Pip list direct names command.
