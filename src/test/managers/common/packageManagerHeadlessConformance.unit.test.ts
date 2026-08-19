@@ -38,7 +38,7 @@ suite('Package manager headless conformance', () => {
         const condaPicker = sinon.stub(condaUtils, 'getCommonCondaPackagesToInstall');
         const poetryInput = sinon.stub(windowApis, 'showInputBox');
 
-        for (const manager of createManagers()) {
+        for (const manager of createManagers().all) {
             await manager.manage(environment, { install: [], runHeadless: true });
         }
 
@@ -61,7 +61,7 @@ suite('Package manager headless conformance', () => {
         const showErrorMessage = sinon.stub(windowApis, 'showErrorMessage').resolves(undefined);
         const showErrorMessageWithLogs = sinon.stub(errorUtils, 'showErrorMessageWithLogs').resolves();
 
-        for (const manager of createManagers()) {
+        for (const manager of createManagers().all) {
             await assert.rejects(
                 manager.manage(environment, { install: ['requests'], runHeadless: true }),
                 (error: unknown) => error === operationError,
@@ -92,7 +92,7 @@ suite('Package manager headless conformance', () => {
         sinon.stub(PipPackageManager.prototype, 'getDirectPackageNames').resolves(undefined);
         const showErrorMessage = sinon.stub(windowApis, 'showErrorMessage').resolves(undefined);
         const showErrorMessageWithLogs = sinon.stub(errorUtils, 'showErrorMessageWithLogs').resolves();
-        const manager = createManagers()[0];
+        const manager = createManagers().pip;
 
         await manager.manage(environment, { install: ['requests'], runHeadless: true });
         await flushImmediate();
@@ -110,7 +110,7 @@ suite('Package manager headless conformance', () => {
         sinon.stub(condaUtils, 'runCondaExecutable').rejects(refreshError);
         const showErrorMessage = sinon.stub(windowApis, 'showErrorMessage').resolves(undefined);
         const showErrorMessageWithLogs = sinon.stub(errorUtils, 'showErrorMessageWithLogs').resolves();
-        const manager = createManagers()[1];
+        const manager = createManagers().conda;
 
         await assert.rejects(
             manager.manage(environment, { install: ['requests'], runHeadless: true }),
@@ -141,7 +141,7 @@ suite('Package manager headless conformance', () => {
         });
         const showErrorMessage = sinon.stub(windowApis, 'showErrorMessage').resolves(undefined);
         const showErrorMessageWithLogs = sinon.stub(errorUtils, 'showErrorMessageWithLogs').resolves();
-        const manager = createManagers()[2];
+        const manager = createManagers().poetry;
 
         await manager.manage(environment, { install: ['requests'], runHeadless: true });
         await flushImmediate();
@@ -152,7 +152,12 @@ suite('Package manager headless conformance', () => {
         assert.ok(showErrorMessageWithLogs.notCalled);
     });
 
-    function createManagers(): PackageManager[] {
+    function createManagers(): {
+        pip: PackageManager;
+        conda: PackageManager;
+        poetry: PackageManager;
+        all: PackageManager[];
+    } {
         const api = {
             createPackageItem: sinon.stub(),
             getPythonProjects: sinon.stub().returns([]),
@@ -163,11 +168,12 @@ suite('Package manager headless conformance', () => {
             info: sinon.stub(),
             show: sinon.stub(),
         } as unknown as LogOutputChannel;
-        return [
-            new PipPackageManager(api, log, { getProjectsByEnvironment: sinon.stub().returns([]) } as unknown as VenvManager),
-            new CondaPackageManager(api, log),
-            new PoetryPackageManager(api, log, {} as PoetryManager),
-        ];
+        const pip = new PipPackageManager(api, log, {
+            getProjectsByEnvironment: sinon.stub().returns([]),
+        } as unknown as VenvManager);
+        const conda = new CondaPackageManager(api, log);
+        const poetry = new PoetryPackageManager(api, log, {} as PoetryManager);
+        return { pip, conda, poetry, all: [pip, conda, poetry] };
     }
 
     async function flushImmediate(): Promise<void> {

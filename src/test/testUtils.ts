@@ -28,6 +28,7 @@ export function sleep(ms: number): Promise<void> {
  * @param timeoutMs - Maximum time to wait (default: 10 seconds)
  * @param errorMessage - Error message if condition is not met
  * @param pollIntervalMs - How often to check condition (default: 100ms)
+ * @param retryOnError - Whether rejected conditions should be retried (default: true)
  *
  * @example
  * // Wait for extension to activate
@@ -50,6 +51,7 @@ export async function waitForCondition(
     timeoutMs: number = 10_000,
     errorMessage: string | (() => string) = 'Condition not met within timeout',
     pollIntervalMs: number = 100,
+    retryOnError: boolean = true,
 ): Promise<void> {
     return new Promise<void>((resolve, reject) => {
         const startTime = Date.now();
@@ -61,8 +63,11 @@ export async function waitForCondition(
                     resolve();
                     return;
                 }
-            } catch {
-                // Condition threw - keep waiting
+            } catch (error) {
+                if (!retryOnError) {
+                    reject(error);
+                    return;
+                }
             }
 
             if (Date.now() - startTime >= timeoutMs) {

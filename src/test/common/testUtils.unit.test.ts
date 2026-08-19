@@ -71,6 +71,15 @@ suite('Test Utilities', () => {
             );
             assert.ok(counter >= 3);
         });
+
+        test('should preserve condition errors when retries are disabled', async () => {
+            const conditionError = new Error('Package refresh failed');
+
+            await assert.rejects(
+                () => waitForCondition(() => Promise.reject(conditionError), 1000, 'Should not time out', 10, false),
+                (error: unknown) => error === conditionError,
+            );
+        });
     });
 
     suite('retryUntilSuccess', () => {
