@@ -2,48 +2,44 @@ import * as vscode from 'vscode';
 
 import { compare } from '@renovatebot/pep440';
 import assert from 'assert';
-import * as path from 'path';
-import { Package, PythonEnvironment, PythonEnvironmentApi, PythonProject } from '../../api';
-import { CONDA_MANAGER_ID, DEFAULT_PACKAGE_MANAGER_ID, VENV_MANAGER_ID } from '../../common/constants';
-import { normalizePath } from '../../common/utils/pathUtils';
-import { PythonProjectSettings } from '../../internal.api';
+import { Package, PythonEnvironment, PythonEnvironmentApi } from '../../api';
+import { CONDA_MANAGER_ID, DEFAULT_PACKAGE_MANAGER_ID } from '../../common/constants';
 import { ENVS_EXTENSION_ID } from '../constants';
 import { waitForCondition } from '../testUtils';
+import {
+    createCondaFixtureProvider,
+    createEnvironmentFixture,
+    createVenvFixtureProvider,
+    EnvironmentFixture,
+    EnvironmentFixtureProvider,
+} from './environmentFixture';
 
 type PackageManagerId = `${string}:${string}`;
 
 interface PackageManagerProfile {
-    environmentManagerId: string;
     name: string;
     packageName: string;
     packageManagerId: PackageManagerId;
-    projectDirectory: string;
-    prerequisite?(api: PythonEnvironmentApi): Promise<boolean>;
-    existingEnvironmentPathVariable?: string;
+    provider: EnvironmentFixtureProvider;
     supportsVersionLookup(packages: Package[]): boolean;
 }
 
 const profiles: PackageManagerProfile[] = [
     {
-        environmentManagerId: VENV_MANAGER_ID,
         name: 'Pip',
         packageName: 'requests',
         packageManagerId: DEFAULT_PACKAGE_MANAGER_ID,
-        projectDirectory: 'pip',
-        prerequisite: async (api) =>
-            (await api.getEnvironments('global')).some((environment) => environment.version.startsWith('3.')),
+        provider: createVenvFixtureProvider(),
         supportsVersionLookup: (packages) => {
             const pipVersion = packages.find((pkg) => pkg.name.toLowerCase() === 'pip')?.version;
             return pipVersion !== undefined && compare(pipVersion, '21.2') >= 0;
         },
     },
     {
-        environmentManagerId: CONDA_MANAGER_ID,
         name: 'Conda',
         packageName: 'flask',
         packageManagerId: CONDA_MANAGER_ID,
-        projectDirectory: 'conda',
-        existingEnvironmentPathVariable: 'VSC_PYTHON_PACKAGE_CONDA_ENV',
+        provider: createCondaFixtureProvider(),
         supportsVersionLookup: () => true,
     },
 ];
@@ -55,12 +51,6 @@ const deferredPackageManagers: Readonly<Record<PackageManagerId, string>> = {
 const deferredProfiles = {
     pipWithUv: 'uv-backed Pip selection uses a machine-scoped setting and is unstable within one extension host.',
 } as const;
-
-function pathsEqual(first: string, second: string): boolean {
-    const firstPath = path.resolve(vscode.Uri.file(first).fsPath);
-    const secondPath = path.resolve(vscode.Uri.file(second).fsPath);
-    return normalizePath(firstPath) === normalizePath(secondPath);
-}
 
 suite('Package Manager profile coverage', function () {
     this.timeout(60_000);
@@ -99,17 +89,13 @@ suite('Package Manager profile coverage', function () {
 
 for (const profile of profiles) {
     suite(`${profile.name} Package Manager`, function () {
-        this.timeout(300_000);
+        this.timeout(600_000);
 
         let api: PythonEnvironmentApi;
         let environment: PythonEnvironment | undefined;
-        let project: PythonProject | undefined;
-        let workspaceUri: vscode.Uri;
+        let fixture: EnvironmentFixture | undefined;
         let previousAlwaysUseUv: boolean | undefined;
-        let previousPythonProjects: PythonProjectSettings[] | undefined;
         let alwaysUseUvUpdated = false;
-        let createdEnvironment = false;
-        let pythonProjectsUpdated = false;
         suiteSetup(async function () {
             if (process.env.VSC_PYTHON_PACKAGE_NETWORK_TEST !== '1') {
                 this.skip();
@@ -127,8 +113,7 @@ for (const profile of profiles) {
 
             const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
             assert.ok(workspaceFolder, 'Integration test workspace not found');
-            workspaceUri = workspaceFolder.uri;
-            const config = vscode.workspace.getConfiguration('python-envs', workspaceUri);
+            const config = vscode.workspace.getConfiguration('python-envs', workspaceFolder.uri);
 
             if (profile.packageManagerId === DEFAULT_PACKAGE_MANAGER_ID) {
                 previousAlwaysUseUv = config.inspect<boolean>('alwaysUseUv')?.globalValue;
@@ -136,76 +121,16 @@ for (const profile of profiles) {
                 alwaysUseUvUpdated = true;
             }
 
-            if (profile.prerequisite && !(await profile.prerequisite(api))) {
-                this.skip();
-                return;
-            }
-
-            if (profile.existingEnvironmentPathVariable) {
-                const environmentPath = process.env[profile.existingEnvironmentPathVariable];
-                assert.ok(
-                    environmentPath,
-                    `Missing environment variable: ${profile.existingEnvironmentPathVariable}`,
-                );
-
-                await api.refreshEnvironments(undefined);
-                await waitForCondition(
-                    async () => {
-                        environment = (await api.getEnvironments('all')).find(
-                            (candidate) =>
-                                candidate.envId.managerId === profile.environmentManagerId &&
-                                pathsEqual(candidate.environmentPath.fsPath, environmentPath),
-                        );
-                        return environment !== undefined;
-                    },
-                    30_000,
-                    `${profile.name} test environment was not discovered: ${environmentPath}`,
-                    1_000,
-                );
-                return;
-            }
-
-            const projectUri = vscode.Uri.joinPath(
-                workspaceUri,
-                `.package-manager-test-${profile.projectDirectory}-${process.pid}`,
-            );
-            await vscode.workspace.fs.createDirectory(projectUri);
-            project = {
+            fixture = await createEnvironmentFixture(api, workspaceFolder, {
                 name: `${profile.name} Package Manager Test`,
-                uri: projectUri,
-            };
-            previousPythonProjects = config.inspect<PythonProjectSettings[]>('pythonProjects')?.workspaceFolderValue;
-            const pythonProjects = config.get<PythonProjectSettings[]>('pythonProjects', []);
-            const projectSetting: PythonProjectSettings = {
-                path: path.relative(workspaceUri.fsPath, projectUri.fsPath).replace(/\\/g, '/'),
-                envManager: profile.environmentManagerId,
-                packageManager: profile.packageManagerId,
-                workspace: workspaceFolder.name,
-            };
-            await config.update(
-                'pythonProjects',
-                [...pythonProjects, projectSetting],
-                vscode.ConfigurationTarget.WorkspaceFolder,
-            );
-            pythonProjectsUpdated = true;
-            await waitForCondition(
-                () =>
-                    api
-                        .getPythonProjects()
-                        .some((registeredProject) => registeredProject.uri.toString() === projectUri.toString()),
-                10_000,
-                `Python project was not registered: ${projectUri.fsPath}`,
-            );
-
-            await api.refreshEnvironments(projectUri);
-
-            environment = await api.createEnvironment(projectUri, { quickCreate: true });
-            createdEnvironment = environment !== undefined;
-            assert.ok(environment, `${profile.name} failed to create an environment after prerequisites passed`);
+                packageManagerId: profile.packageManagerId,
+                provider: profile.provider,
+            });
+            environment = fixture.environment;
             assert.strictEqual(
                 environment.envId.managerId,
-                profile.environmentManagerId,
-                `Expected an environment created by ${profile.environmentManagerId}`,
+                profile.provider.managerId,
+                `Expected an environment created by ${profile.provider.managerId}`,
             );
         });
 
@@ -272,57 +197,15 @@ for (const profile of profiles) {
 
         suiteTeardown(async () => {
             try {
-                if (environment && createdEnvironment) {
-                    const environmentPath = environment.environmentPath;
-                    await api.removeEnvironment(environment, { runHeadless: true });
-                    await assert.rejects(
-                        async () => vscode.workspace.fs.stat(environmentPath),
-                        (error: unknown) =>
-                            error instanceof vscode.FileSystemError && error.code === 'FileNotFound',
-                        `Environment was not removed: ${environmentPath.fsPath}`,
-                    );
+                if (fixture) {
+                    await fixture.dispose();
                 }
             } finally {
-                const config = vscode.workspace.getConfiguration('python-envs', workspaceUri);
-                try {
-                    if (project) {
-                        await api.setEnvironment(project.uri, undefined);
-                    }
-                    if (pythonProjectsUpdated) {
-                        await config.update(
-                            'pythonProjects',
-                            previousPythonProjects,
-                            vscode.ConfigurationTarget.WorkspaceFolder,
-                        );
-                        await waitForCondition(
-                            () =>
-                                !api
-                                    .getPythonProjects()
-                                    .some(
-                                        (registeredProject) =>
-                                            registeredProject.uri.toString() === project!.uri.toString(),
-                                    ),
-                            10_000,
-                            `Python project was not unregistered: ${project!.uri.fsPath}`,
-                        );
-                    }
-                } finally {
-                    try {
-                        if (alwaysUseUvUpdated) {
-                            await config.update(
-                                'alwaysUseUv',
-                                previousAlwaysUseUv,
-                                vscode.ConfigurationTarget.Global,
-                            );
-                        }
-                    } finally {
-                        if (project) {
-                            await vscode.workspace.fs.delete(project.uri, {
-                                recursive: true,
-                                useTrash: false,
-                            });
-                        }
-                    }
+                if (alwaysUseUvUpdated) {
+                    const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
+                    assert.ok(workspaceFolder, 'Integration test workspace not found during teardown');
+                    const config = vscode.workspace.getConfiguration('python-envs', workspaceFolder.uri);
+                    await config.update('alwaysUseUv', previousAlwaysUseUv, vscode.ConfigurationTarget.Global);
                 }
             }
         });
