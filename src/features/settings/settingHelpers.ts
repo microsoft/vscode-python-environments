@@ -50,7 +50,7 @@ export function isDefaultEnvManagerBroken(): boolean {
 export function getDefaultEnvManagerSetting(wm: PythonProjectManager, scope?: Uri): string {
     const config = workspaceApis.getConfiguration('python-envs', scope);
     const settings = getSettings(wm, config, scope);
-    if (settings && settings.envManager.length > 0) {
+    if (settings?.envManager) {
         return settings.envManager;
     }
     // Only show the warning once per session
@@ -78,7 +78,7 @@ export function getDefaultPkgManagerSetting(
     const config = workspaceApis.getConfiguration('python-envs', scope);
 
     const settings = getSettings(wm, config, scope);
-    if (settings && settings.packageManager.length > 0) {
+    if (settings?.packageManager) {
         return settings.packageManager;
     }
 
