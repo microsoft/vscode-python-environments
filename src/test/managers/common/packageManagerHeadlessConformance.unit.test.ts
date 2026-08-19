@@ -57,7 +57,7 @@ suite('Package manager headless conformance', () => {
 
     test('rejects failures without showing error notifications', async () => {
         const operationError = new Error('package operation failed');
-        sinon.stub(windowApis, 'withProgress').callsFake(async (_options, task) => task({} as never, {} as never));
+        const withProgress = sinon.stub(windowApis, 'withProgress');
         sinon.stub(builtinUtils, 'managePackages').rejects(operationError);
         sinon.stub(condaUtils, 'managePackages').rejects(operationError);
         sinon.stub(poetryUtils, 'getPoetry').resolves(undefined);
@@ -70,6 +70,40 @@ suite('Package manager headless conformance', () => {
             );
         }
 
+        assert.ok(withProgress.notCalled);
+        assert.ok(showErrorMessage.notCalled);
+        assert.ok(showErrorMessageWithLogs.notCalled);
+    });
+
+    test('rejects refresh failures without showing progress or error notifications', async () => {
+        const refreshError = new Error('package refresh failed');
+        const withProgress = sinon.stub(windowApis, 'withProgress');
+        sinon.stub(builtinUtils, 'managePackages').resolves();
+        sinon.stub(condaUtils, 'managePackages').resolves();
+        sinon
+            .stub(
+                PoetryPackageManager.prototype as unknown as {
+                    runPoetryManage: () => Promise<void>;
+                },
+                'runPoetryManage',
+            )
+            .resolves();
+        sinon.stub(builtinUtils, 'refreshPipPackages').rejects(refreshError);
+        sinon.stub(CondaPackageManager.prototype, 'getPackages').rejects(refreshError);
+        sinon.stub(PoetryPackageManager.prototype, 'getPackages').rejects(refreshError);
+        sinon.stub(PipPackageManager.prototype, 'getDirectPackageNames').resolves(undefined);
+        sinon.stub(PoetryPackageManager.prototype, 'getDirectPackageNames').resolves(undefined);
+        const showErrorMessage = sinon.stub(windowApis, 'showErrorMessage').resolves(undefined);
+        const showErrorMessageWithLogs = sinon.stub(errorUtils, 'showErrorMessageWithLogs').resolves();
+
+        for (const manager of createManagers()) {
+            await assert.rejects(
+                manager.manage(environment, { install: ['requests'], runHeadless: true }),
+                (error: unknown) => error === refreshError,
+            );
+        }
+
+        assert.ok(withProgress.notCalled);
         assert.ok(showErrorMessage.notCalled);
         assert.ok(showErrorMessageWithLogs.notCalled);
     });

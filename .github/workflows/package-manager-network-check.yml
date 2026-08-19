@@ -1,0 +1,82 @@
+name: Package Manager Network Check
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  NODE_VERSION: '22.21.1'
+
+jobs:
+  package-manager-network-tests:
+    name: Package Manager Network Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+
+      - name: Checkout Python Environment Tools
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          repository: 'microsoft/python-environment-tools'
+          path: 'python-env-tools-src'
+          sparse-checkout: |
+            crates
+            Cargo.toml
+            Cargo.lock
+          sparse-checkout-cone-mode: false
+
+      - name: Install Rust Toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust build
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            python-env-tools-src/target
+          key: ${{ runner.os }}-cargo-pet-${{ hashFiles('python-env-tools-src/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-pet-
+
+      - name: Build Python Environment Tools
+        run: cargo build --release --package pet
+        working-directory: python-env-tools-src
+
+      - name: Copy pet binary
+        run: |
+          mkdir -p python-env-tools/bin
+          cp python-env-tools-src/target/release/pet python-env-tools/bin/
+          chmod +x python-env-tools/bin/pet
+
+      - name: Install Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: Install Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: '3.12'
+
+      - name: Install Dependencies
+        run: npm ci
+
+      - name: Compile Extension
+        run: npm run compile
+
+      - name: Compile Tests
+        run: npm run compile-tests
+
+      - name: Run Package Manager Network Integration Tests
+        uses: GabrielBB/xvfb-action@86d97bde4a65fe9b290c0b3fb92c2c4ed0e5302d # v1.6
+        env:
+          VSC_PYTHON_PACKAGE_NETWORK_TEST: '1'
+        with:
+          run: npm run integration-test -- --grep "Package Manager"
