@@ -102,7 +102,9 @@ for (const profile of profiles) {
         let environment: PythonEnvironment | undefined;
         let project: PythonProject | undefined;
         let workspaceUri: vscode.Uri;
+        let previousAlwaysUseUv: boolean | undefined;
         let previousPythonProjects: PythonProjectSettings[] | undefined;
+        let alwaysUseUvUpdated = false;
         let pythonProjectsUpdated = false;
         suiteSetup(async function () {
             if (process.env.VSC_PYTHON_PACKAGE_NETWORK_TEST !== '1') {
@@ -123,6 +125,12 @@ for (const profile of profiles) {
             assert.ok(workspaceFolder, 'Integration test workspace not found');
             workspaceUri = workspaceFolder.uri;
             const config = vscode.workspace.getConfiguration('python-envs', workspaceUri);
+
+            if (profile.packageManagerId === DEFAULT_PACKAGE_MANAGER_ID) {
+                previousAlwaysUseUv = config.inspect<boolean>('alwaysUseUv')?.workspaceFolderValue;
+                await config.update('alwaysUseUv', false, vscode.ConfigurationTarget.WorkspaceFolder);
+                alwaysUseUvUpdated = true;
+            }
 
             if (!(await profile.prerequisite(api))) {
                 this.skip();
@@ -234,30 +242,39 @@ for (const profile of profiles) {
                 }
             } finally {
                 const config = vscode.workspace.getConfiguration('python-envs', workspaceUri);
-                if (project) {
-                    try {
+                try {
+                    if (project) {
                         await api.setEnvironment(project.uri, undefined);
+                    }
+                    if (pythonProjectsUpdated) {
+                        await config.update(
+                            'pythonProjects',
+                            previousPythonProjects,
+                            vscode.ConfigurationTarget.WorkspaceFolder,
+                        );
+                        await waitForCondition(
+                            () =>
+                                !api
+                                    .getPythonProjects()
+                                    .some(
+                                        (registeredProject) =>
+                                            registeredProject.uri.toString() === project!.uri.toString(),
+                                    ),
+                            10_000,
+                            `Python project was not unregistered: ${project!.uri.fsPath}`,
+                        );
+                    }
+                } finally {
+                    try {
+                        if (alwaysUseUvUpdated) {
+                            await config.update(
+                                'alwaysUseUv',
+                                previousAlwaysUseUv,
+                                vscode.ConfigurationTarget.WorkspaceFolder,
+                            );
+                        }
                     } finally {
-                        try {
-                            if (pythonProjectsUpdated) {
-                                await config.update(
-                                    'pythonProjects',
-                                    previousPythonProjects,
-                                    vscode.ConfigurationTarget.WorkspaceFolder,
-                                );
-                                await waitForCondition(
-                                    () =>
-                                        !api
-                                            .getPythonProjects()
-                                            .some(
-                                                (registeredProject) =>
-                                                    registeredProject.uri.toString() === project!.uri.toString(),
-                                            ),
-                                    10_000,
-                                    `Python project was not unregistered: ${project.uri.fsPath}`,
-                                );
-                            }
-                        } finally {
+                        if (project) {
                             await vscode.workspace.fs.delete(project.uri, {
                                 recursive: true,
                                 useTrash: false,
