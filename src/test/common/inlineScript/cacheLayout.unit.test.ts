@@ -640,18 +640,60 @@ suite('inlineScriptCacheLayout', () => {
                 await fs.writeFile(path.join(envDir.fsPath, 'pyvenv.cfg'), content, 'utf8');
             }
 
+            async function writeLauncher(): Promise<string> {
+                const launcherPath = getVenvPythonPath(envDir.fsPath);
+                await fs.ensureDir(path.dirname(launcherPath));
+                await fs.writeFile(launcherPath, '');
+                return launcherPath;
+            }
+
             test('returns true when pyvenv.cfg.home points to an existing python.exe', async () => {
                 const homeDir = path.join(tmpDir, 'Python313');
                 await fs.ensureDir(homeDir);
                 await fs.writeFile(path.join(homeDir, 'python.exe'), '');
+                await writeLauncher();
                 await writePyvenvCfg(`home = ${homeDir}\ninclude-system-site-packages = false\nversion = 3.13.0\n`);
                 assert.strictEqual(await verifyBaseInterpreterExists(envDir), true);
                 assert.strictEqual(traceWarnStub.called, false, 'no warn on success');
             });
 
+            test('returns false when the cached launcher is missing even if the base python still exists', async () => {
+                const homeDir = path.join(tmpDir, 'Python313');
+                await fs.ensureDir(homeDir);
+                await fs.writeFile(path.join(homeDir, 'python.exe'), '');
+                await writePyvenvCfg(`home = ${homeDir}\n`);
+                assert.strictEqual(await getBaseInterpreterStatus(envDir), 'missing');
+                assert.strictEqual(await verifyBaseInterpreterExists(envDir), false);
+                assert.ok(
+                    traceWarnStub.getCalls().some((c) => String(c.args[0]).includes('cached interpreter launcher')),
+                    'expected a missing-launcher warn',
+                );
+            });
+
+            test('returns false when the cached launcher path is not a regular file', async () => {
+                const homeDir = path.join(tmpDir, 'Python313');
+                await fs.ensureDir(homeDir);
+                await fs.writeFile(path.join(homeDir, 'python.exe'), '');
+                const launcherPath = getVenvPythonPath(envDir.fsPath);
+                await fs.ensureDir(launcherPath);
+                await writePyvenvCfg(`home = ${homeDir}\n`);
+                assert.strictEqual(await getBaseInterpreterStatus(envDir), 'missing');
+                assert.strictEqual(await verifyBaseInterpreterExists(envDir), false);
+                assert.ok(
+                    traceWarnStub.getCalls().some((c) => String(c.args[0]).includes('not a regular file')),
+                    'expected a non-file launcher warn',
+                );
+            });
+
+            test('classifies a transient cached-launcher stat failure as unavailable', async () => {
+                sinon.stub(fsExtra, 'stat').rejects(Object.assign(new Error('I/O error'), { code: 'EIO' }));
+                assert.strictEqual(await getBaseInterpreterStatus(envDir), 'unavailable');
+            });
+
             test('returns false when pyvenv.cfg.home points to a removed python.exe', async () => {
                 const homeDir = path.join(tmpDir, 'Python313');
                 await fs.ensureDir(homeDir);
+                await writeLauncher();
                 await writePyvenvCfg(`home = ${homeDir}\n`);
                 assert.strictEqual(await verifyBaseInterpreterExists(envDir), false);
                 assert.ok(
@@ -661,6 +703,7 @@ suite('inlineScriptCacheLayout', () => {
             });
 
             test('returns false when pyvenv.cfg is missing entirely', async () => {
+                await writeLauncher();
                 assert.strictEqual(await verifyBaseInterpreterExists(envDir), false);
                 assert.ok(
                     traceWarnStub
@@ -671,6 +714,7 @@ suite('inlineScriptCacheLayout', () => {
             });
 
             test('returns false when pyvenv.cfg has no `home =` line', async () => {
+                await writeLauncher();
                 await writePyvenvCfg('include-system-site-packages = false\nversion = 3.13.0\n');
                 assert.strictEqual(await verifyBaseInterpreterExists(envDir), false);
                 assert.ok(
@@ -679,6 +723,7 @@ suite('inlineScriptCacheLayout', () => {
             });
 
             test('returns false when pyvenv.cfg has an empty home value', async () => {
+                await writeLauncher();
                 await writePyvenvCfg('home =\n');
                 assert.strictEqual(await verifyBaseInterpreterExists(envDir), false);
                 assert.ok(
@@ -690,6 +735,7 @@ suite('inlineScriptCacheLayout', () => {
                 const homeDir = path.join(tmpDir, 'Python313');
                 await fs.ensureDir(homeDir);
                 await fs.writeFile(path.join(homeDir, 'python.exe'), '');
+                await writeLauncher();
                 await writePyvenvCfg(`  home   =   ${homeDir}   \n`);
                 assert.strictEqual(await verifyBaseInterpreterExists(envDir), true);
             });
@@ -698,6 +744,7 @@ suite('inlineScriptCacheLayout', () => {
                 const homeDir = path.join(tmpDir, 'Python313');
                 await fs.ensureDir(homeDir);
                 await fs.writeFile(path.join(homeDir, 'python.exe'), '');
+                await writeLauncher();
                 await writePyvenvCfg(`home = ${homeDir}\r\nversion = 3.13.0\r\n`);
                 assert.strictEqual(await verifyBaseInterpreterExists(envDir), true);
             });
