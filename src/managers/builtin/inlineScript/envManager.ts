@@ -3,6 +3,7 @@
 
 import * as fs from 'fs-extra';
 import * as path from 'path';
+import type { Stats } from 'fs';
 import { clean as cleanPep440, satisfies as satisfiesPep440 } from '@renovatebot/pep440';
 import { Disposable, Event, EventEmitter, l10n, LogOutputChannel, MarkdownString, ThemeIcon, Uri } from 'vscode';
 import {
@@ -462,6 +463,7 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
 
         const lockedKeys = new Set<string>();
         const nextByKey = new Map<string, PythonEnvironment>();
+        const initialFingerprints = new Map<string, string | undefined>();
         let shouldRetry = false;
         for (const entryName of entryNames.sort()) {
             if (entryName.endsWith('.lock')) {
@@ -477,6 +479,7 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
             const envDir = Uri.joinPath(cacheRoot, entryName);
             const key = this.getDiscoveryEntryKey(entryName);
             const discovered = await this.inspectDiscoveredCacheEntry(cacheRoot, envDir);
+            initialFingerprints.set(key, discovered.fingerprint);
             if (discovered.kind === 'resolved') {
                 nextByKey.set(key, discovered.environment);
             } else if (discovered.kind === 'preserve') {
@@ -499,22 +502,55 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
 
         if (checkForSnapshotChanges) {
             let finalEntryNames: string[] | undefined;
+            let finalCacheRootMissing = false;
             try {
                 finalEntryNames = await fs.readdir(cacheRoot.fsPath);
             } catch (error) {
                 if (this.isDefinitivelyStalePathError(error)) {
                     finalEntryNames = [];
+                    finalCacheRootMissing = true;
                 } else {
-                    shouldRetry = true;
+                    this.log.warn(
+                        `Unable to verify the final inline-script cache snapshot ${cacheRoot.fsPath}: ${getErrorMessage(error)}`,
+                    );
+                    return true;
                 }
             }
-            if (finalEntryNames !== undefined) {
+
+            if (finalCacheRootMissing) {
+                shouldRetry ||= entryNames.length > 0;
+                nextByKey.clear();
+            } else if (finalEntryNames !== undefined) {
                 const initialEntries = new Set(entryNames);
-                if (
+                const snapshotChanged =
                     finalEntryNames.length !== entryNames.length ||
-                    finalEntryNames.some((entryName) => !initialEntries.has(entryName))
-                ) {
-                    shouldRetry = true;
+                    finalEntryNames.some((entryName) => !initialEntries.has(entryName));
+                if (snapshotChanged) {
+                    return true;
+                }
+
+                for (const entryName of finalEntryNames) {
+                    if (entryName.endsWith(FILE_LOCK_DIR_SUFFIX)) {
+                        continue;
+                    }
+                    const key = this.getDiscoveryEntryKey(entryName);
+                    let finalFingerprint: string;
+                    try {
+                        finalFingerprint = this.getCacheEntryFingerprint(
+                            await fs.lstat(Uri.joinPath(cacheRoot, entryName).fsPath),
+                        );
+                    } catch (error) {
+                        if (this.isDefinitivelyStalePathError(error)) {
+                            return true;
+                        }
+                        this.log.warn(
+                            `Unable to verify inline-script cache entry ${entryName}: ${getErrorMessage(error)}`,
+                        );
+                        return true;
+                    }
+                    if (initialFingerprints.get(key) !== finalFingerprint) {
+                        return true;
+                    }
                 }
             }
         }
@@ -533,35 +569,47 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
         cacheRoot: Uri,
         envDir: Uri,
     ): Promise<DiscoveredCacheEntryResult> {
+        let fingerprint: string | undefined;
         try {
             const stat = await fs.lstat(envDir.fsPath);
+            fingerprint = this.getCacheEntryFingerprint(stat);
             if (!stat.isDirectory() || stat.isSymbolicLink()) {
-                return { kind: 'skip' };
+                return { kind: 'skip', fingerprint };
             }
         } catch (error) {
-            return this.isDefinitivelyStalePathError(error) ? { kind: 'skip' } : { kind: 'preserve' };
+            return this.isDefinitivelyStalePathError(error)
+                ? { kind: 'skip' }
+                : { kind: 'preserve' };
         }
 
         if (await this.isCacheEntryBusy(envDir.fsPath)) {
-            return { kind: 'preserve' };
+            return { kind: 'preserve', fingerprint };
         }
 
         try {
             if (!(await resolveCacheEntryPath(cacheRoot, envDir))) {
-                return { kind: 'skip' };
+                return { kind: 'skip', fingerprint };
             }
         } catch (error) {
-            return this.isDefinitivelyStalePathError(error) ? { kind: 'skip' } : { kind: 'preserve' };
+            return this.isDefinitivelyStalePathError(error)
+                ? { kind: 'skip', fingerprint }
+                : { kind: 'preserve', fingerprint };
         }
 
         const sidecarResult = await inspectMetaJson(envDir);
         if (sidecarResult.kind !== 'valid') {
-            return { kind: sidecarResult.kind === 'unavailable' ? 'preserve' : 'skip' };
+            return {
+                kind: sidecarResult.kind === 'unavailable' ? 'preserve' : 'skip',
+                fingerprint,
+            };
         }
 
         const baseInterpreterStatus = await getBaseInterpreterStatus(envDir);
         if (baseInterpreterStatus !== 'available') {
-            return { kind: baseInterpreterStatus === 'unavailable' ? 'preserve' : 'skip' };
+            return {
+                kind: baseInterpreterStatus === 'unavailable' ? 'preserve' : 'skip',
+                fingerprint,
+            };
         }
 
         let environment: PythonEnvironment | undefined;
@@ -577,21 +625,24 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
             this.log.warn(
                 `Unable to resolve inline-script cache entry ${envDir.fsPath}: ${getErrorMessage(error)}`,
             );
-            return { kind: 'preserve' };
+            return { kind: 'preserve', fingerprint };
         }
         if (!environment) {
-            return { kind: 'preserve' };
+            return { kind: 'preserve', fingerprint };
         }
 
         const ownership = await inspectOwnedCacheEntry(environment, cacheRoot, envDir);
         if (ownership !== 'expected') {
-            return { kind: ownership === 'uncertain' ? 'preserve' : 'skip' };
+            return {
+                kind: ownership === 'uncertain' ? 'preserve' : 'skip',
+                fingerprint,
+            };
         }
         if (!this.areEqualPythonReleases(environment.version, sidecarResult.metadata.baseInterpreterVersion)) {
-            return { kind: 'skip' };
+            return { kind: 'skip', fingerprint };
         }
 
-        return { kind: 'resolved', environment };
+        return { kind: 'resolved', environment, fingerprint };
     }
 
     private replaceDiscoveredEnvironments(next: PythonEnvironment[]): void {
@@ -622,6 +673,10 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
 
     private getDiscoveryEntryKey(entryName: string): string {
         return normalizePath(entryName);
+    }
+
+    private getCacheEntryFingerprint(stat: Stats): string {
+        return [stat.dev, stat.ino, stat.birthtimeMs, stat.ctimeMs, stat.mtimeMs].join(':');
     }
 
     private getDiscoveredEnvironmentKey(environment: PythonEnvironment): string {
@@ -2244,5 +2299,9 @@ interface PendingScriptUpdate extends ScriptReference {
 }
 
 type DiscoveredCacheEntryResult =
-    | { readonly kind: 'preserve' | 'skip' }
-    | { readonly kind: 'resolved'; readonly environment: PythonEnvironment };
+    | { readonly kind: 'preserve' | 'skip'; readonly fingerprint?: string }
+    | {
+          readonly kind: 'resolved';
+          readonly environment: PythonEnvironment;
+          readonly fingerprint: string;
+      };

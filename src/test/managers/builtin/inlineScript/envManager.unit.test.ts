@@ -1605,6 +1605,105 @@ suite('InlineScriptEnvManager', () => {
             assert.deepStrictEqual(await manager.getEnvironments('all'), []);
         });
 
+        test('publishes an empty collection when a populated cache root is absent at the final snapshot', async () => {
+            const environment = await createOwnedEnvironment();
+            const sidecar = await makeSidecar();
+            setSidecarResults({ [CACHE_KEY]: { kind: 'valid', metadata: sidecar } });
+            setResolvedVenvs([environment]);
+            await manager.refresh(undefined);
+            const listener = sinon.spy();
+            manager.onDidChangeEnvironments(listener);
+            const readdirStub = sinon.stub(fsExtra, 'readdir');
+            readdirStub.onFirstCall().resolves([CACHE_KEY]);
+            readdirStub.onSecondCall().rejects(Object.assign(new Error('cache root removed'), { code: 'ENOENT' }));
+            const retryManager = manager as unknown as {
+                getDiscoveryRetryDelayMs(attempt: number): number | undefined;
+            };
+            sinon.stub(retryManager, 'getDiscoveryRetryDelayMs').returns(undefined);
+
+            manager.startActivationDiscovery();
+            await waitForStubCallCount(readdirStub, 2);
+            await waitForCondition(
+                async () => (await manager.getEnvironments('all')).length === 0,
+                'Expected final cache-root absence to remove the staged environment immediately',
+            );
+
+            assert.deepStrictEqual(listener.getCalls().map((call) => call.args[0]), [
+                [{ kind: EnvironmentChangeKind.remove, environment }],
+            ]);
+        });
+
+        test('preserves the prior collection when the final cache-root snapshot is unavailable', async () => {
+            const environment = await createOwnedEnvironment();
+            const sidecar = await makeSidecar();
+            setSidecarResults({ [CACHE_KEY]: { kind: 'valid', metadata: sidecar } });
+            setResolvedVenvs([environment]);
+            await manager.refresh(undefined);
+            inspectMetaStub.resolves({ kind: 'invalid' });
+            const listener = sinon.spy();
+            manager.onDidChangeEnvironments(listener);
+            const readdirStub = sinon.stub(fsExtra, 'readdir');
+            readdirStub.onFirstCall().resolves([CACHE_KEY]);
+            readdirStub.onSecondCall().rejects(Object.assign(new Error('I/O error'), { code: 'EIO' }));
+            const retryManager = manager as unknown as {
+                getDiscoveryRetryDelayMs(attempt: number): number | undefined;
+            };
+            sinon.stub(retryManager, 'getDiscoveryRetryDelayMs').returns(undefined);
+
+            manager.startActivationDiscovery();
+            await waitForStubCallCount(readdirStub, 2);
+            await new Promise((resolve) => setTimeout(resolve, 25));
+
+            assert.deepStrictEqual(await manager.getEnvironments('all'), [environment]);
+            assert.strictEqual(listener.callCount, 0);
+        });
+
+        test('retries when a cache entry is rebuilt under the same key during inspection', async () => {
+            await createOwnedEnvironment(CACHE_KEY, 'old-generation');
+            const sidecar = await makeSidecar();
+            let releaseInspection: (() => void) | undefined;
+            let signalInspection: (() => void) | undefined;
+            const inspectionStarted = new Promise<void>((resolve) => {
+                signalInspection = resolve;
+            });
+            const inspectionGate = new Promise<void>((resolve) => {
+                releaseInspection = resolve;
+            });
+            inspectMetaStub.resolves({ kind: 'valid', metadata: sidecar });
+            inspectMetaStub.onFirstCall().callsFake(async () => {
+                signalInspection!();
+                await inspectionGate;
+                return { kind: 'invalid' };
+            });
+            let replacement: PythonEnvironment | undefined;
+            resolveVenvStub.callsFake(async () => replacement);
+            const retryManager = manager as unknown as {
+                getDiscoveryRetryDelayMs(attempt: number): number | undefined;
+            };
+            sinon.stub(retryManager, 'getDiscoveryRetryDelayMs').callsFake((attempt) =>
+                attempt === 0 ? 0 : undefined,
+            );
+            const listener = sinon.spy();
+            manager.onDidChangeEnvironments(listener);
+
+            manager.startActivationDiscovery();
+            await inspectionStarted;
+            await fs.move(envDir().fsPath, path.join(tempRoot, 'old-generation'));
+            replacement = await createOwnedEnvironment(CACHE_KEY, 'new-generation');
+            releaseInspection!();
+
+            await waitForStubCall(resolveVenvStub);
+            await waitForCondition(
+                async () => (await manager.getEnvironments('all')).length === 1,
+                'Expected a follow-up scan to publish the rebuilt cache generation',
+            );
+
+            assert.deepStrictEqual(await manager.getEnvironments('all'), [replacement]);
+            assert.deepStrictEqual(listener.getCalls().map((call) => call.args[0]), [
+                [{ kind: EnvironmentChangeKind.add, environment: replacement }],
+            ]);
+        });
+
         test('refresh skips missing, invalid, unavailable, and non-directory cache entries', async () => {
             const valid = await createOwnedEnvironment();
             const cacheRoot = cacheLayout.getScriptEnvCacheRoot(globalStorageUri).fsPath;
