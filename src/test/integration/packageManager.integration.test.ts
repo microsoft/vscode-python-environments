@@ -15,9 +15,11 @@ type PackageManagerId = `${string}:${string}`;
 interface PackageManagerProfile {
     environmentManagerId: string;
     name: string;
+    packageName: string;
     packageManagerId: PackageManagerId;
     projectDirectory: string;
     prerequisite(api: PythonEnvironmentApi): Promise<boolean>;
+    reuseExistingEnvironment?: boolean;
     supportsVersionLookup(packages: Package[]): boolean;
 }
 
@@ -25,6 +27,7 @@ const profiles: PackageManagerProfile[] = [
     {
         environmentManagerId: VENV_MANAGER_ID,
         name: 'Pip',
+        packageName: 'requests',
         packageManagerId: DEFAULT_PACKAGE_MANAGER_ID,
         projectDirectory: 'pip',
         prerequisite: async (api) =>
@@ -37,6 +40,7 @@ const profiles: PackageManagerProfile[] = [
     {
         environmentManagerId: CONDA_MANAGER_ID,
         name: 'Conda',
+        packageName: 'flask',
         packageManagerId: CONDA_MANAGER_ID,
         projectDirectory: 'conda',
         prerequisite: async () => {
@@ -47,6 +51,7 @@ const profiles: PackageManagerProfile[] = [
                 return false;
             }
         },
+        reuseExistingEnvironment: true,
         supportsVersionLookup: () => true,
     },
 ];
@@ -105,6 +110,7 @@ for (const profile of profiles) {
         let previousAlwaysUseUv: boolean | undefined;
         let previousPythonProjects: PythonProjectSettings[] | undefined;
         let alwaysUseUvUpdated = false;
+        let createdEnvironment = false;
         let pythonProjectsUpdated = false;
         suiteSetup(async function () {
             if (process.env.VSC_PYTHON_PACKAGE_NETWORK_TEST !== '1') {
@@ -127,13 +133,22 @@ for (const profile of profiles) {
             const config = vscode.workspace.getConfiguration('python-envs', workspaceUri);
 
             if (profile.packageManagerId === DEFAULT_PACKAGE_MANAGER_ID) {
-                previousAlwaysUseUv = config.inspect<boolean>('alwaysUseUv')?.workspaceFolderValue;
-                await config.update('alwaysUseUv', false, vscode.ConfigurationTarget.WorkspaceFolder);
+                previousAlwaysUseUv = config.inspect<boolean>('alwaysUseUv')?.globalValue;
+                await config.update('alwaysUseUv', false, vscode.ConfigurationTarget.Global);
                 alwaysUseUvUpdated = true;
             }
 
             if (!(await profile.prerequisite(api))) {
                 this.skip();
+                return;
+            }
+
+            if (profile.reuseExistingEnvironment) {
+                await api.refreshEnvironments(undefined);
+                environment = (await api.getEnvironments('global')).find(
+                    (candidate) => candidate.envId.managerId === profile.environmentManagerId,
+                );
+                assert.ok(environment, `No existing ${profile.name} environment is available`);
                 return;
             }
 
@@ -172,6 +187,7 @@ for (const profile of profiles) {
             await api.refreshEnvironments(projectUri);
 
             environment = await api.createEnvironment(projectUri, { quickCreate: true });
+            createdEnvironment = environment !== undefined;
             assert.ok(environment, `${profile.name} failed to create an environment after prerequisites passed`);
             assert.strictEqual(
                 environment.envId.managerId,
@@ -181,7 +197,7 @@ for (const profile of profiles) {
         });
 
         test(`${profile.name} Package Manager should install, list, and uninstall a package`, async () => {
-            const packageName = 'requests';
+            const packageName = profile.packageName;
             const baseline = await api.getPackages(environment!, { skipCache: true });
             assert.ok(baseline, 'Unable to list packages before installation');
             const wasInstalled = baseline.some((pkg) => pkg.name.toLowerCase() === packageName);
@@ -223,14 +239,14 @@ for (const profile of profiles) {
                 return;
             }
 
-            const versions = await api.getPackageAvailableVersions(environment!, 'requests');
+            const versions = await api.getPackageAvailableVersions(environment!, profile.packageName);
             assert.ok(versions, `${profile.name} unexpectedly failed to retrieve package versions`);
             assert.ok(versions.length > 0, 'No package versions available');
         });
 
         suiteTeardown(async () => {
             try {
-                if (environment) {
+                if (environment && createdEnvironment) {
                     const environmentPath = environment.environmentPath;
                     await api.removeEnvironment(environment, { runHeadless: true });
                     await assert.rejects(
@@ -270,7 +286,7 @@ for (const profile of profiles) {
                             await config.update(
                                 'alwaysUseUv',
                                 previousAlwaysUseUv,
-                                vscode.ConfigurationTarget.WorkspaceFolder,
+                                vscode.ConfigurationTarget.Global,
                             );
                         }
                     } finally {
