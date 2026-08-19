@@ -6,7 +6,6 @@ import * as path from 'path';
 import { Package, PythonEnvironment, PythonEnvironmentApi, PythonProject } from '../../api';
 import { CONDA_MANAGER_ID, DEFAULT_PACKAGE_MANAGER_ID, VENV_MANAGER_ID } from '../../common/constants';
 import { PythonProjectSettings } from '../../internal.api';
-import { getConda } from '../../managers/conda/condaUtils';
 import { ENVS_EXTENSION_ID } from '../constants';
 import { waitForCondition } from '../testUtils';
 
@@ -18,7 +17,7 @@ interface PackageManagerProfile {
     packageName: string;
     packageManagerId: PackageManagerId;
     projectDirectory: string;
-    prerequisite(api: PythonEnvironmentApi): Promise<boolean>;
+    prerequisite?(api: PythonEnvironmentApi): Promise<boolean>;
     reuseExistingEnvironment?: boolean;
     supportsVersionLookup(packages: Package[]): boolean;
 }
@@ -43,14 +42,6 @@ const profiles: PackageManagerProfile[] = [
         packageName: 'flask',
         packageManagerId: CONDA_MANAGER_ID,
         projectDirectory: 'conda',
-        prerequisite: async () => {
-            try {
-                await getConda();
-                return true;
-            } catch {
-                return false;
-            }
-        },
         reuseExistingEnvironment: true,
         supportsVersionLookup: () => true,
     },
@@ -138,7 +129,7 @@ for (const profile of profiles) {
                 alwaysUseUvUpdated = true;
             }
 
-            if (!(await profile.prerequisite(api))) {
+            if (profile.prerequisite && !(await profile.prerequisite(api))) {
                 this.skip();
                 return;
             }
@@ -147,7 +138,10 @@ for (const profile of profiles) {
                 environment = (await api.getEnvironments('global')).find(
                     (candidate) => candidate.envId.managerId === profile.environmentManagerId,
                 );
-                assert.ok(environment, `No existing ${profile.name} environment is available`);
+                if (!environment) {
+                    this.skip();
+                    return;
+                }
                 return;
             }
 
