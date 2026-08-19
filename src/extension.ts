@@ -93,7 +93,8 @@ import { ProjectView } from './features/views/projectView';
 import { PythonStatusBarImpl } from './features/views/pythonStatusBar';
 import { updateViewsAndStatus } from './features/views/revealHandler';
 import { TemporaryStateManager } from './features/views/temporaryStateManager';
-import { PythonEnvTreeItem } from './features/views/treeViewItems';
+import { ProjectItem, PythonEnvTreeItem } from './features/views/treeViewItems';
+import { registerWorkspacePythonContext } from './features/views/workspacePythonContext';
 import { collectEnvironmentInfo, getEnvManagerAndPackageManagerConfigLevels, runPetInTerminalImpl } from './helpers';
 import { EnvironmentManagers, ProjectCreators, PythonProjectManager } from './internal.api';
 import { registerInlineScriptFeatures } from './managers/builtin/inlineScript/main';
@@ -113,6 +114,7 @@ import { registerPoetryFeatures } from './managers/poetry/main';
 import { registerPyenvFeatures } from './managers/pyenv/main';
 
 export async function activate(context: ExtensionContext): Promise<PythonEnvironmentApi | undefined> {
+    registerWorkspacePythonContext(context.subscriptions);
     // Only skip activation if user explicitly set useEnvironmentsExtension to false.
     // When disabled, the main Python extension handles environments instead (legacy mode).
     const config = getConfiguration('python');

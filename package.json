@@ -668,7 +668,7 @@
                     "id": "python",
                     "title": "Python",
                     "icon": "files/logo.svg",
-                    "when": "config.python.useEnvironmentsExtension != false"
+                    "when": "config.python.useEnvironmentsExtension != false && python-envs.workspaceHasPython"
                 }
             ]
         },
@@ -679,14 +679,14 @@
                     "name": "Python Projects",
                     "icon": "files/logo.svg",
                     "contextualTitle": "Python Projects",
-                    "when": "config.python.useEnvironmentsExtension != false"
+                    "when": "config.python.useEnvironmentsExtension != false && python-envs.workspaceHasPython"
                 },
                 {
                     "id": "env-managers",
                     "name": "Environment Managers",
                     "icon": "files/logo.svg",
                     "contextualTitle": "Environment Managers",
-                    "when": "config.python.useEnvironmentsExtension != false"
+                    "when": "config.python.useEnvironmentsExtension != false && python-envs.workspaceHasPython"
                 }
             ]
         },
