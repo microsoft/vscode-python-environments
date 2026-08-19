@@ -154,7 +154,8 @@ for (const profile of profiles) {
                 30_000,
                 'Package not installed',
                 1_000,
-                false,
+                true,
+                true,
             );
 
             const directPackageNames = await vscode.commands.executeCommand<string[] | undefined>(
@@ -175,7 +176,8 @@ for (const profile of profiles) {
                     30_000,
                     'Package not uninstalled',
                     1_000,
-                    false,
+                    true,
+                    true,
                 );
             }
         });

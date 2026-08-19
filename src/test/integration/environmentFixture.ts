@@ -75,9 +75,19 @@ export async function createEnvironmentFixture(
     let projectSettingAdded = false;
     let environmentCreated = false;
     let environment: PythonEnvironment | undefined;
+    let apiRemovalSettled = false;
     let disposePromise: Promise<void> | undefined;
     let markerWritten = false;
     let projectRootCreated = false;
+    const getApiRemoval = createSingleFlightOperation(() => {
+        if (!environment) {
+            return Promise.resolve();
+        }
+        apiRemovalSettled = false;
+        return api.removeEnvironment(environment, { runHeadless: true }).finally(() => {
+            apiRemovalSettled = true;
+        });
+    });
 
     const cleanup = async (): Promise<void> => {
         const cleanupErrors: Error[] = [];
@@ -92,15 +102,10 @@ export async function createEnvironmentFixture(
                 cleanupErrors.push(toError(error));
             }
             if (ownershipVerified && environment) {
-                let apiRemovalSettled = false;
-                const apiRemoval = api
-                    .removeEnvironment(environment, { runHeadless: true })
-                    .finally(() => {
-                        apiRemovalSettled = true;
-                    });
+                const apiRemovalPromise = getApiRemoval();
                 try {
                     await withTimeout(
-                        apiRemoval,
+                        apiRemovalPromise,
                         COMMAND_TIMEOUT_MS,
                         `${request.name} API environment removal timed out`,
                     );
@@ -109,7 +114,7 @@ export async function createEnvironmentFixture(
                     if (!apiRemovalSettled) {
                         try {
                             await withTimeout(
-                                apiRemoval,
+                                apiRemovalPromise,
                                 API_REMOVAL_SETTLE_TIMEOUT_MS,
                                 `${request.name} API environment removal did not settle after timing out`,
                             );
@@ -535,6 +540,17 @@ async function withTimeout<T>(operation: Promise<T>, timeoutMs: number, message:
             clearTimeout(timer);
         }
     }
+}
+
+/**
+ * Returns a function that starts an asynchronous operation at most once and shares its promise.
+ */
+export function createSingleFlightOperation<T>(operation: () => Promise<T>): () => Promise<T> {
+    let promise: Promise<T> | undefined;
+    return () => {
+        promise ??= operation();
+        return promise;
+    };
 }
 
 function sanitizeName(value: string): string {
