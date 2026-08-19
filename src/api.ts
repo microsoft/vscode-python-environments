@@ -18,10 +18,6 @@ import type {
 import { extensions } from 'vscode';
 
 export type { Pep440Version } from '@renovatebot/pep440';
-export {
-    isPackageVersionLookupNotSupportedError,
-    PackageVersionLookupNotSupportedError,
-} from './common/errors/NotSupportedError';
 
 /*
  * Do not introduce any breaking changes to this API.
@@ -753,11 +749,8 @@ export interface PackageManager {
      * Retrieves the list of available versions for a given package.
      * @param environment - The Python environment context for the lookup.
      * @param packageName - The name of the package to look up.
-     * Managers that do not support version listing should reject with
-     * {@link PackageVersionLookupNotSupportedError}.
-     *
-     * @returns A promise that resolves to an array of {@link Pep440Version} objects (newest first).
-     *          `undefined` remains supported for compatibility with existing manager implementations.
+     * @returns A promise that resolves to an array of {@link Pep440Version} objects (newest first),
+     *          or `undefined` if this manager does not support version listing.
      */
     getPackageAvailableVersions?(
         environment: PythonEnvironment,
@@ -1147,12 +1140,12 @@ export interface PythonPackageGetterApi {
      * Get the list of available versions for a package, newest first.
      *
      * Support depends on the package manager backing the environment. Managers that do
-     * not implement version lookup reject with {@link PackageVersionLookupNotSupportedError}.
+     * not implement version lookup resolve to `undefined`.
      *
      * @param environment The Python Environment context for the lookup.
      * @param packageName The name of the package to look up.
-     * @returns A promise that resolves to an array of {@link Pep440Version} objects (newest first).
-     *          `undefined` remains supported for compatibility with existing manager implementations.
+     * @returns A promise that resolves to an array of {@link Pep440Version} objects (newest first),
+     *          or `undefined` if the package manager does not support version listing.
      */
     getPackageAvailableVersions(
         environment: PythonEnvironment,

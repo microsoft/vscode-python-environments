@@ -2,13 +2,9 @@ import * as vscode from 'vscode';
 
 import { compare } from '@renovatebot/pep440';
 import assert from 'assert';
-import {
-    isPackageVersionLookupNotSupportedError,
-    Package,
-    PythonEnvironment,
-    PythonEnvironmentApi,
-} from '../../api';
+import { Package, PythonEnvironment, PythonEnvironmentApi } from '../../api';
 import { CONDA_MANAGER_ID, DEFAULT_PACKAGE_MANAGER_ID } from '../../common/constants';
+import { isPackageVersionLookupNotSupportedError } from '../../common/errors/NotSupportedError';
 import { ENVS_EXTENSION_ID } from '../constants';
 import { waitForCondition } from '../testUtils';
 import {

@@ -12,7 +12,6 @@ import {
 } from 'vscode';
 import {
     CreateEnvironmentOptions,
-    isPackageVersionLookupNotSupportedError,
     Pep440Version,
     PythonEnvironment,
     PythonEnvironmentApi,
@@ -20,6 +19,7 @@ import {
     PythonProjectCreator,
     PythonProjectCreatorOptions,
 } from '../api';
+import { isPackageVersionLookupNotSupportedError } from '../common/errors/NotSupportedError';
 import { traceError, traceInfo, traceVerbose } from '../common/logging';
 import {
     EnvironmentManagers,

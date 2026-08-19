@@ -4,13 +4,9 @@
 import * as assert from 'assert';
 import * as sinon from 'sinon';
 import { LogOutputChannel, Uri } from 'vscode';
-import {
-    isPackageVersionLookupNotSupportedError,
-    PackageManager,
-    PythonEnvironment,
-    PythonEnvironmentApi,
-} from '../../../api';
+import { PackageManager, PythonEnvironment, PythonEnvironmentApi } from '../../../api';
 import * as childProcessApis from '../../../common/childProcess.apis';
+import { isPackageVersionLookupNotSupportedError } from '../../../common/errors/NotSupportedError';
 import * as errorUtils from '../../../common/errors/utils';
 import * as windowApis from '../../../common/window.apis';
 import * as workspaceApis from '../../../common/workspace.apis';

@@ -4,12 +4,8 @@
 import * as assert from 'assert';
 import * as sinon from 'sinon';
 import { LogOutputChannel, Uri } from 'vscode';
-import {
-    isPackageVersionLookupNotSupportedError,
-    Package,
-    PythonEnvironment,
-    PythonEnvironmentApi,
-} from '../../../api';
+import { Package, PythonEnvironment, PythonEnvironmentApi } from '../../../api';
+import { isPackageVersionLookupNotSupportedError } from '../../../common/errors/NotSupportedError';
 import * as helpers from '../../../managers/builtin/helpers';
 import { PipPackageManager } from '../../../managers/builtin/pipPackageManager';
 import * as builtinUtils from '../../../managers/builtin/utils';
