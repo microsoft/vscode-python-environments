@@ -12,11 +12,13 @@ import {
 } from 'vscode';
 import {
     CreateEnvironmentOptions,
+    Pep440Version,
     PythonEnvironment,
     PythonEnvironmentApi,
     PythonProject,
     PythonProjectCreator,
     PythonProjectCreatorOptions,
+    isPackageVersionLookupNotSupportedError,
 } from '../api';
 import { traceError, traceInfo, traceVerbose } from '../common/logging';
 import {
@@ -369,11 +371,20 @@ export async function managePackageVersion(context: unknown, em: EnvironmentMana
 
         let version: string | undefined;
 
-        // Try to fetch available versions for a QuickPick experience
-        const availableVersions = await withProgress(
-            { location: ProgressLocation.Window, title: l10n.t('Fetching available versions for {0}...', pkg.name) },
-            () => packageManager.getPackageAvailableVersions(environment, pkg.name),
-        );
+        // Try to fetch available versions for a QuickPick experience. Only a typed
+        // unsupported-capability error falls back to manual entry; any other failure
+        // (command, network, or malformed output) propagates for normal handling.
+        let availableVersions: Pep440Version[] | undefined;
+        try {
+            availableVersions = await withProgress(
+                { location: ProgressLocation.Window, title: l10n.t('Fetching available versions for {0}...', pkg.name) },
+                () => packageManager.getPackageAvailableVersions(environment, pkg.name),
+            );
+        } catch (error) {
+            if (!isPackageVersionLookupNotSupportedError(error)) {
+                throw error;
+            }
+        }
 
         if (availableVersions && availableVersions.length > 0) {
             const items = availableVersions.map((v) => ({

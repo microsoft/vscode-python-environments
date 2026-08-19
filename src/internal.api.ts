@@ -18,6 +18,7 @@ import {
     PackageInfo,
     PackageManagementOptions,
     PackageManager,
+    PackageVersionLookupNotSupportedError,
     PythonEnvironment,
     PythonEnvironmentExecutionInfo,
     PythonEnvironmentId,
@@ -397,13 +398,30 @@ export class InternalPackageManager implements PackageManager {
         return this.manager.getVersion ? this.manager.getVersion(environment) : Promise.resolve(undefined);
     }
 
-    getPackageAvailableVersions(
+    /**
+     * Delegates version lookup to the underlying package manager.
+     *
+     * Managers that do not implement version lookup - or that resolve `undefined` - are treated
+     * as lacking the capability, so this rejects with {@link PackageVersionLookupNotSupportedError}.
+     * All other errors from the manager propagate unchanged.
+     */
+    async getPackageAvailableVersions(
         environment: PythonEnvironment,
         packageName: string,
-    ): Promise<Pep440Version[] | undefined> {
-        return this.manager.getPackageAvailableVersions
-            ? this.manager.getPackageAvailableVersions(environment, packageName)
-            : Promise.resolve(undefined);
+    ): Promise<Pep440Version[]> {
+        if (!this.manager.getPackageAvailableVersions) {
+            throw new PackageVersionLookupNotSupportedError(
+                `Package version lookup is not supported by package manager: ${this.id}`,
+            );
+        }
+        const versions = await this.manager.getPackageAvailableVersions(environment, packageName);
+        if (versions === undefined) {
+            // A manager that resolves `undefined` is signalling the capability is unavailable.
+            throw new PackageVersionLookupNotSupportedError(
+                `Package version lookup is not supported by package manager: ${this.id}`,
+            );
+        }
+        return versions;
     }
 
     getDirectPackageNames(environment: PythonEnvironment): Promise<Set<string> | undefined> {

@@ -746,11 +746,22 @@ export interface PackageManager {
     getVersion?(environment: PythonEnvironment): Promise<Pep440Version | undefined>;
 
     /**
-     * Retrieves the list of available versions for a given package.
+     * Retrieves the list of available versions for a given package, newest first.
+     *
+     * Implementations should:
+     * - resolve to a non-empty array of {@link Pep440Version} objects on success;
+     * - throw a {@link PackageVersionLookupNotSupportedError} when this manager cannot look up
+     *   versions at all (an unsupported capability);
+     * - let operational failures (command, network, or malformed/unparseable output) propagate
+     *   instead of swallowing them into `undefined`.
+     *
+     * Resolving to `undefined` is treated by callers as an unsupported capability, equivalent to
+     * throwing {@link PackageVersionLookupNotSupportedError}.
+     *
      * @param environment - The Python environment context for the lookup.
      * @param packageName - The name of the package to look up.
-     * @returns A promise that resolves to an array of {@link Pep440Version} objects (newest first),
-     *          or `undefined` if this manager does not support version listing.
+     * @returns A promise that resolves to an array of {@link Pep440Version} objects (newest first).
+     * @throws {@link PackageVersionLookupNotSupportedError} when version lookup is unsupported.
      */
     getPackageAvailableVersions?(
         environment: PythonEnvironment,
@@ -1118,6 +1129,56 @@ export interface PythonPackageManagerRegistrationApi {
     registerPackageManager(manager: PackageManager, options?: { extensionId?: string }): Disposable;
 }
 
+/**
+ * Error thrown when a package manager cannot list available package versions.
+ *
+ * This distinguishes an *unsupported capability* from an *operational failure* (such as a
+ * failed command, a network error, or malformed/unparseable output). Consumers of
+ * {@link PythonPackageGetterApi.getPackageAvailableVersions} should treat this specific error
+ * as a signal to fall back to manual version entry, while letting any other error propagate.
+ *
+ * The {@link code} property carries a stable, string-literal discriminator so the error can be
+ * recognized reliably across extension bundle boundaries, where `instanceof` may fail because
+ * each bundle can load its own copy of this class. Prefer {@link isPackageVersionLookupNotSupportedError}
+ * over a bare `instanceof` check for that reason.
+ */
+export class PackageVersionLookupNotSupportedError extends Error {
+    /**
+     * Stable discriminator identifying this error type across bundle boundaries.
+     */
+    public readonly code = 'PackageVersionLookupNotSupported';
+
+    constructor(message?: string) {
+        super(message ?? 'The package manager does not support looking up available package versions.');
+        this.name = 'PackageVersionLookupNotSupportedError';
+        // Preserve the prototype chain when this class is transpiled to older targets so that
+        // `instanceof` continues to work within a single bundle.
+        Object.setPrototypeOf(this, PackageVersionLookupNotSupportedError.prototype);
+    }
+}
+
+/**
+ * Type guard reporting whether an error represents unsupported package version lookup.
+ *
+ * Uses the stable {@link PackageVersionLookupNotSupportedError.code} discriminator, so it returns
+ * `true` even when the error crossed an extension bundle boundary and `instanceof` would fail.
+ *
+ * @param error The value to test.
+ * @returns `true` if `error` is a {@link PackageVersionLookupNotSupportedError} (or a structurally
+ *          equivalent error carrying the same `code`).
+ */
+export function isPackageVersionLookupNotSupportedError(
+    error: unknown,
+): error is PackageVersionLookupNotSupportedError {
+    return (
+        error instanceof PackageVersionLookupNotSupportedError ||
+        (typeof error === 'object' &&
+            error !== null &&
+            'code' in error &&
+            (error as { code?: unknown }).code === 'PackageVersionLookupNotSupported')
+    );
+}
+
 export interface PythonPackageGetterApi {
     /**
      * Refresh the list of packages in a Python Environment.
@@ -1139,18 +1200,24 @@ export interface PythonPackageGetterApi {
     /**
      * Get the list of available versions for a package, newest first.
      *
-     * Support depends on the package manager backing the environment. Managers that do
-     * not implement version lookup resolve to `undefined`.
+     * The returned promise distinguishes an unsupported capability from an operational failure:
+     * - It resolves to a non-empty array of {@link Pep440Version} objects when versions are found.
+     * - It rejects with a {@link PackageVersionLookupNotSupportedError} when the environment's
+     *   package manager does not support version lookup (for example, the default/missing manager,
+     *   Poetry, or a Pip older than 21.2). Use {@link isPackageVersionLookupNotSupportedError} to
+     *   detect this reliably across extension bundle boundaries and fall back to manual entry.
+     * - It rejects with the original error for any other failure (command, network, or
+     *   malformed/unparseable output), which callers should handle or surface normally.
      *
      * @param environment The Python Environment context for the lookup.
      * @param packageName The name of the package to look up.
-     * @returns A promise that resolves to an array of {@link Pep440Version} objects (newest first),
-     *          or `undefined` if the package manager does not support version listing.
+     * @returns A promise that resolves to an array of {@link Pep440Version} objects (newest first).
+     * @throws {@link PackageVersionLookupNotSupportedError} when version lookup is unsupported.
      */
     getPackageAvailableVersions(
         environment: PythonEnvironment,
         packageName: string,
-    ): Promise<Pep440Version[] | undefined>;
+    ): Promise<Pep440Version[]>;
 
     /**
      * Event raised when the list of packages in a Python Environment changes.

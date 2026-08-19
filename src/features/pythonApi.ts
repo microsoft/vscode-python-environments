@@ -16,6 +16,7 @@ import {
     PackageInfo,
     PackageManagementOptions,
     PackageManager,
+    PackageVersionLookupNotSupportedError,
     Pep440Version,
     PythonBackgroundRunOptions,
     PythonEnvironment,
@@ -322,11 +323,13 @@ export class PythonEnvironmentApiImpl implements PythonEnvironmentApi {
     async getPackageAvailableVersions(
         context: PythonEnvironment,
         packageName: string,
-    ): Promise<Pep440Version[] | undefined> {
+    ): Promise<Pep440Version[]> {
         await waitForEnvManagerId([context.envId.managerId]);
         const manager = this.envManagers.getPackageManager(context);
         if (!manager) {
-            return Promise.resolve(undefined);
+            throw new PackageVersionLookupNotSupportedError(
+                `No package manager is available to look up versions for: ${context.envId.id}`,
+            );
         }
         return manager.getPackageAvailableVersions(context, packageName);
     }
