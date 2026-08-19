@@ -1,8 +1,10 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import * as assert from 'assert';
+import * as path from 'path';
 import * as sinon from 'sinon';
 import { Disposable, EventEmitter, Uri, WorkspaceFolder } from 'vscode';
 import * as workspaceApis from '../../common/workspace.apis';
+import { normalizePath } from '../../common/utils/pathUtils';
 import { PythonProjectManagerImpl } from '../../features/projectManager';
 import * as settingHelpers from '../../features/settings/settingHelpers';
 import { PythonProjectSettings } from '../../internal.api';
@@ -301,6 +303,163 @@ suite('Project Manager Initialization - Settings Preservation', () => {
 
             // The poetry project setting should NOT be overwritten with conda
             assertNoSettingsWritten('Default manager change');
+
+            pm.dispose();
+        });
+
+        test('config refresh drops only the project removed from workspaceValue and preserves workspaceFolder entries', async () => {
+            let workspaceValueProjects: PythonProjectSettings[] = [
+                {
+                    path: 'script.py',
+                    envManager: 'ms-python.python:inline-script',
+                    packageManager: 'ms-python.python:pip',
+                    workspace: workspaceFolder.name,
+                },
+            ];
+            let workspaceFolderProjects: PythonProjectSettings[] = [
+                {
+                    path: 'keep.py',
+                    envManager: 'ms-python.python:venv',
+                    packageManager: 'ms-python.python:pip',
+                },
+            ];
+            const mockConfig = new MockWorkspaceConfiguration();
+            (mockConfig as any).get = <T>(key: string, defaultValue?: T): T | undefined => {
+                if (key === 'pythonProjects') {
+                    return [...workspaceValueProjects, ...workspaceFolderProjects] as unknown as T;
+                }
+                if (key === 'defaultEnvManager') {
+                    return 'ms-python.python:venv' as T;
+                }
+                if (key === 'defaultPackageManager') {
+                    return 'ms-python.python:pip' as T;
+                }
+                return defaultValue;
+            };
+            mockConfig.update = () => Promise.resolve();
+            sinon.stub(workspaceApis, 'getConfiguration').returns(mockConfig);
+
+            const pm = new PythonProjectManagerImpl();
+            pm.initialize();
+            await clock.tickAsync(150);
+
+            assert.ok(
+                pm.getProjects().some(
+                    (project) =>
+                        normalizePath(project.uri.fsPath) === normalizePath(path.join(workspacePath, 'script.py')),
+                ),
+                'workspaceValue project should be loaded initially',
+            );
+            assert.ok(
+                pm.getProjects().some(
+                    (project) => normalizePath(project.uri.fsPath) === normalizePath(path.join(workspacePath, 'keep.py')),
+                ),
+                'workspaceFolder project should be loaded initially',
+            );
+
+            workspaceValueProjects = [];
+            configChangeEmitter.fire({
+                affectsConfiguration: (section: string) => section === 'python-envs.pythonProjects',
+            });
+            await clock.tickAsync(150);
+
+            assert.strictEqual(
+                pm.getProjects().some(
+                    (project) =>
+                        normalizePath(project.uri.fsPath) === normalizePath(path.join(workspacePath, 'script.py')),
+                ),
+                false,
+                'workspaceValue project should be removed after config refresh',
+            );
+            assert.ok(
+                pm.getProjects().some(
+                    (project) => normalizePath(project.uri.fsPath) === normalizePath(path.join(workspacePath, 'keep.py')),
+                ),
+                'workspaceFolder project should remain after config refresh',
+            );
+            assertNoSettingsWritten('Config refresh after project removal');
+
+            pm.dispose();
+        });
+
+        test('shared workspaceValue removals do not resurrect projects after a multi-root refresh', async () => {
+            const secondWorkspacePath = process.platform === 'win32' ? 'C:\\workspace2' : '/workspace2';
+            const secondWorkspaceFolder: WorkspaceFolder = {
+                uri: Uri.file(secondWorkspacePath),
+                name: 'workspace2',
+                index: 1,
+            };
+            let sharedWorkspaceProjects: PythonProjectSettings[] = [
+                {
+                    path: 'first',
+                    envManager: 'ms-python.python:inline-script',
+                    packageManager: 'ms-python.python:pip',
+                    workspace: workspaceFolder.name,
+                },
+                {
+                    path: 'second',
+                    envManager: 'ms-python.python:inline-script',
+                    packageManager: 'ms-python.python:pip',
+                    workspace: secondWorkspaceFolder.name,
+                },
+            ];
+            (workspaceApis.getWorkspaceFolders as sinon.SinonStub).returns([workspaceFolder, secondWorkspaceFolder]);
+            const mockConfig = new MockWorkspaceConfiguration();
+            (mockConfig as any).get = <T>(key: string, defaultValue?: T): T | undefined => {
+                if (key === 'pythonProjects') {
+                    return sharedWorkspaceProjects as unknown as T;
+                }
+                if (key === 'defaultEnvManager') {
+                    return 'ms-python.python:venv' as T;
+                }
+                if (key === 'defaultPackageManager') {
+                    return 'ms-python.python:pip' as T;
+                }
+                return defaultValue;
+            };
+            mockConfig.update = () => Promise.resolve();
+            sinon.stub(workspaceApis, 'getConfiguration').returns(mockConfig);
+
+            const pm = new PythonProjectManagerImpl();
+            pm.initialize();
+            await clock.tickAsync(150);
+
+            assert.ok(
+                pm.getProjects().some(
+                    (project) => normalizePath(project.uri.fsPath) === normalizePath(path.join(workspacePath, 'first')),
+                ),
+                'first shared workspace project should be loaded initially',
+            );
+            assert.ok(
+                pm.getProjects().some(
+                    (project) =>
+                        normalizePath(project.uri.fsPath) === normalizePath(path.join(secondWorkspacePath, 'second')),
+                ),
+                'second shared workspace project should be loaded initially',
+            );
+
+            sharedWorkspaceProjects = [];
+            configChangeEmitter.fire({
+                affectsConfiguration: (section: string) => section === 'python-envs.pythonProjects',
+            });
+            await clock.tickAsync(150);
+
+            assert.strictEqual(
+                pm.getProjects().some(
+                    (project) => normalizePath(project.uri.fsPath) === normalizePath(path.join(workspacePath, 'first')),
+                ),
+                false,
+                'first shared workspace project should stay removed after refresh',
+            );
+            assert.strictEqual(
+                pm.getProjects().some(
+                    (project) =>
+                        normalizePath(project.uri.fsPath) === normalizePath(path.join(secondWorkspacePath, 'second')),
+                ),
+                false,
+                'second shared workspace project should stay removed after refresh',
+            );
+            assertNoSettingsWritten('Shared workspace refresh');
 
             pm.dispose();
         });

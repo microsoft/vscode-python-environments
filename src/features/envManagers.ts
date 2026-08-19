@@ -320,12 +320,16 @@ export class PythonEnvironmentManagers implements EnvironmentManagers {
 
     public async clearCache(scope: EnvironmentManagerScope): Promise<void> {
         if (scope === undefined) {
-            await Promise.all(this.managers.map((m) => m.clearCache()));
+            await Promise.all(
+                this.managers
+                    .filter((manager) => manager.id !== INLINE_SCRIPT_MANAGER_ID)
+                    .map((manager) => manager.clearCache()),
+            );
             return;
         }
 
         const manager = this.getEnvironmentManager(scope);
-        if (manager) {
+        if (manager && manager.id !== INLINE_SCRIPT_MANAGER_ID) {
             await manager.clearCache();
         }
     }

@@ -113,6 +113,38 @@ suite('Smoke: Registration Checks', function () {
         );
     });
 
+    test('Internal inline clear command is not publicly contributed', function () {
+        const extension = vscode.extensions.getExtension<PythonEnvironmentApi>(ENVS_EXTENSION_ID);
+        assert.ok(extension, `Extension ${ENVS_EXTENSION_ID} not found`);
+
+        const contributedCommands = (extension.packageJSON?.contributes?.commands ?? []) as Array<{ command: string }>;
+        const commandPaletteEntries = (extension.packageJSON?.contributes?.menus?.commandPalette ?? []) as Array<{
+            command: string;
+        }>;
+
+        assert.ok(
+            !contributedCommands.some((entry) => entry.command === 'python-envs.clearScriptEnvCache'),
+            'python-envs.clearScriptEnvCache should not be publicly contributed before rollout',
+        );
+        assert.ok(
+            !commandPaletteEntries.some((entry) => entry.command === 'python-envs.clearScriptEnvCache'),
+            'python-envs.clearScriptEnvCache should not appear in contributed menus before rollout',
+        );
+    });
+
+    test('Internal inline clear command is not registered while the feature flag is off', async function () {
+        const allCommands = await vscode.commands.getCommands(true);
+
+        assert.ok(
+            !allCommands.includes('python-envs.clearScriptEnvCache'),
+            'python-envs.clearScriptEnvCache should not be registered by default',
+        );
+        await assert.rejects(
+            () => Promise.resolve(vscode.commands.executeCommand('python-envs.clearScriptEnvCache')),
+            /not found/i,
+        );
+    });
+
     // =========================================================================
     // API METHODS - All API methods must exist and be functions
     // =========================================================================
