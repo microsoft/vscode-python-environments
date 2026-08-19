@@ -11,23 +11,29 @@ import { Uri } from 'vscode';
 import { PythonEnvironment } from '../../../api';
 import {
     CacheEntrySummary,
+    MAX_SOURCE_METADATA_IDENTITY_HASHES,
+    SOURCE_METADATA_IDENTITY_HASH_HEX_LENGTH,
     INLINE_SCRIPT_CACHE_DIR_NAME,
     InlineScriptEnvMeta,
     META_JSON_FILENAME,
     META_SCHEMA_VERSION,
     getBaseInterpreterStatus,
+    hashSourceMetadataIdentity,
     getMetaJsonPath,
     getScriptEnvCacheRoot,
     getScriptEnvDir,
     inspectOwnedCacheEntry,
     inspectMetaJson,
+    mergeSourceMetadataIdentityHashes,
     readMetaJson,
+    restoreMetaJsonBackupUnderLock,
     resolveCacheEntryPath,
     selectStaleEntries,
     verifyBaseInterpreterExists,
     writeMetaJson,
 } from '../../../common/inlineScript/cacheLayout';
 import * as logging from '../../../common/logging';
+import { createDeferred } from '../../../common/utils/deferred';
 import * as platformUtils from '../../../common/utils/platformUtils';
 import { getVenvPythonPath } from '../../../common/utils/virtualEnvironment';
 
@@ -89,7 +95,9 @@ suite('inlineScriptCacheLayout', () => {
         });
 
         test('writeMetaJson then readMetaJson returns the same object', async () => {
-            const meta = makeMeta();
+            const meta = makeMeta({
+                sourceMetadataIdentityHashes: [hashSourceMetadataIdentity('{"requiresPython":">=3.11","dependencies":["requests"]}')],
+            });
             await writeMetaJson(envDir, meta);
             const read = await readMetaJson(envDir);
             assert.deepStrictEqual(read, meta);
@@ -122,22 +130,129 @@ suite('inlineScriptCacheLayout', () => {
             );
         });
 
-        test('concurrent writeMetaJson calls leave one valid sidecar, never a missing one', async () => {
-            await writeMetaJson(envDir, makeMeta({ lastUsedAt: '2020-01-01T00:00:00.000Z' }));
-            const a = makeMeta({ lastUsedAt: '2025-01-01T00:00:00.000Z' });
-            const b = makeMeta({ lastUsedAt: '2030-01-01T00:00:00.000Z' });
-            await Promise.all([writeMetaJson(envDir, a), writeMetaJson(envDir, b)]);
-            const read = await readMetaJson(envDir);
-            assert.ok(read, 'sidecar must exist after concurrent writes');
-            assert.ok(
-                read.lastUsedAt === a.lastUsedAt || read.lastUsedAt === b.lastUsedAt,
-                `final write must be one of the concurrent payloads, got ${read.lastUsedAt}`,
+        test('restores an existing sidecar when both replacement attempts fail', async () => {
+            const existing = makeMeta({ lastUsedAt: '2020-01-01T00:00:00.000Z' });
+            await writeMetaJson(envDir, existing);
+            const replacementError = Object.assign(new Error('sharing violation'), { code: 'EPERM' });
+            const originalRename = fsExtra.rename;
+            const renameStub = sinon.stub(fsExtra, 'rename') as unknown as sinon.SinonStub;
+            renameStub.callsFake(async (source: string, destination: string) => {
+                switch (renameStub.callCount) {
+                    case 1:
+                    case 3:
+                        throw replacementError;
+                    default:
+                        return originalRename(source, destination);
+                }
+            });
+
+            await assert.rejects(
+                writeMetaJson(envDir, makeMeta({ lastUsedAt: '2030-01-01T00:00:00.000Z' })),
+                (error) => error === replacementError,
             );
+
+            assert.deepStrictEqual(await readMetaJson(envDir), existing);
+            assert.strictEqual(renameStub.callCount, 4, 'retryable replacement failure should restore after retry');
             const entries = await fs.readdir(envDir.fsPath);
             assert.deepStrictEqual(
-                entries.filter((name) => name.includes('.tmp-')),
+                entries.filter((name) => name.includes('.tmp-') || name.includes('.backup-')),
+                [],
+                'failed replacement must clean up temporary and backup files',
+            );
+        });
+
+        test('retains the backup when restoration cannot prove the final sidecar exists', async () => {
+            const existing = makeMeta({ lastUsedAt: '2020-01-01T00:00:00.000Z' });
+            await writeMetaJson(envDir, existing);
+            const replacementError = Object.assign(new Error('sharing violation'), { code: 'EPERM' });
+            const restoreError = Object.assign(new Error('restore failed'), { code: 'EIO' });
+            const originalRename = fsExtra.rename;
+            const renameStub = sinon.stub(fsExtra, 'rename') as unknown as sinon.SinonStub;
+            renameStub.callsFake(async (source: string, destination: string) => {
+                switch (renameStub.callCount) {
+                    case 1:
+                    case 3:
+                        throw replacementError;
+                    case 2:
+                        return originalRename(source, destination);
+                    default:
+                        throw restoreError;
+                }
+            });
+
+            await assert.rejects(
+                writeMetaJson(envDir, makeMeta({ lastUsedAt: '2030-01-01T00:00:00.000Z' })),
+                (error) => error === replacementError,
+            );
+
+            assert.strictEqual(await readMetaJson(envDir), undefined);
+            const entries = await fs.readdir(envDir.fsPath);
+            const backups = entries.filter((name) => name.includes('.backup-'));
+            assert.strictEqual(backups.length, 1, 'failed restoration must retain the only known good copy');
+            assert.deepStrictEqual(
+                JSON.parse(await fs.readFile(path.join(envDir.fsPath, backups[0]), 'utf8')),
+                existing,
+            );
+            assert.deepStrictEqual(entries.filter((name) => name.includes('.tmp-')), []);
+        });
+
+        test('serializes concurrent writes for the same sidecar and retains the latest metadata', async () => {
+            const a = makeMeta({ lastUsedAt: '2025-01-01T00:00:00.000Z' });
+            const b = makeMeta({ lastUsedAt: '2030-01-01T00:00:00.000Z' });
+            const firstRenameStarted = createDeferred<void>();
+            const allowFirstRename = createDeferred<void>();
+            const originalRename = fsExtra.rename;
+            const renameStub = sinon.stub(fsExtra, 'rename') as unknown as sinon.SinonStub;
+            renameStub.callsFake(async (source: string, destination: string) => {
+                if (renameStub.callCount === 1) {
+                    firstRenameStarted.resolve();
+                    await allowFirstRename.promise;
+                }
+                return originalRename(source, destination);
+            });
+
+            const first = writeMetaJson(envDir, a);
+            await firstRenameStarted.promise;
+            const second = writeMetaJson(envDir, b);
+            assert.strictEqual(renameStub.callCount, 1, 'the second same-path write must wait for the first');
+            allowFirstRename.resolve();
+            await Promise.all([first, second]);
+
+            const read = await readMetaJson(envDir);
+            assert.ok(read, 'sidecar must exist after concurrent writes');
+            assert.deepStrictEqual(read, b);
+            const entries = await fs.readdir(envDir.fsPath);
+            assert.deepStrictEqual(
+                entries.filter((name) => name.includes('.tmp-') || name.includes('.backup-')),
                 [],
             );
+        });
+
+        test('does not serialize writes for different sidecars', async () => {
+            const otherEnvDir = Uri.file(path.join(tmpDir, 'other-env'));
+            const firstFinalPath = getMetaJsonPath(envDir).fsPath;
+            const firstRenameStarted = createDeferred<void>();
+            const allowFirstRename = createDeferred<void>();
+            const originalRename = fsExtra.rename;
+            const renameStub = sinon.stub(fsExtra, 'rename') as unknown as sinon.SinonStub;
+            let delayedFirstRename = false;
+            renameStub.callsFake(async (source: string, destination: string) => {
+                if (!delayedFirstRename && destination === firstFinalPath) {
+                    delayedFirstRename = true;
+                    firstRenameStarted.resolve();
+                    await allowFirstRename.promise;
+                }
+                return originalRename(source, destination);
+            });
+
+            const first = writeMetaJson(envDir, makeMeta({ lastUsedAt: '2025-01-01T00:00:00.000Z' }));
+            await firstRenameStarted.promise;
+            const other = makeMeta({ lastUsedAt: '2030-01-01T00:00:00.000Z' });
+            await writeMetaJson(otherEnvDir, other);
+
+            assert.deepStrictEqual(await readMetaJson(otherEnvDir), other);
+            allowFirstRename.resolve();
+            await first;
         });
 
         test('writeMetaJson only serializes environment-level metadata', async () => {
@@ -153,6 +268,116 @@ suite('inlineScriptCacheLayout', () => {
             await writeMetaJson(envDir, makeMeta());
             const raw = await fs.readFile(getMetaJsonPath(envDir).fsPath, 'utf8');
             assert.ok(raw.includes('\n'), 'expected indented JSON');
+        });
+    });
+
+    suite('restoreMetaJsonBackupUnderLock', () => {
+        let tmpDir: string;
+        let envDir: Uri;
+
+        setup(async () => {
+            tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'isclayout-backup-recovery-'));
+            envDir = Uri.file(path.join(tmpDir, 'env'));
+            await fs.ensureDir(envDir.fsPath);
+        });
+
+        teardown(async () => {
+            await fs.remove(tmpDir);
+        });
+
+        function backupPath(suffix: string): string {
+            return `${getMetaJsonPath(envDir).fsPath}.backup-${suffix}`;
+        }
+
+        async function writeBackup(suffix: string, content: string | Buffer): Promise<void> {
+            await fs.writeFile(backupPath(suffix), content);
+        }
+
+        test('leaves valid backups untouched for unlocked readers, then restores one under the entry lock', async () => {
+            const metadata = makeMeta();
+            await writeBackup('abcdef123456', JSON.stringify(metadata));
+
+            assert.deepStrictEqual(await inspectMetaJson(envDir), { kind: 'missing' });
+            assert.strictEqual(await readMetaJson(envDir), undefined);
+            assert.strictEqual(await fs.pathExists(getMetaJsonPath(envDir).fsPath), false);
+
+            assert.deepStrictEqual(await restoreMetaJsonBackupUnderLock(envDir), { kind: 'valid', metadata });
+            assert.deepStrictEqual(await readMetaJson(envDir), metadata);
+            assert.strictEqual(await fs.pathExists(backupPath('abcdef123456')), false);
+        });
+
+        test('selects the newest valid backup and uses its path as a stable tie-breaker', async () => {
+            const older = makeMeta({ lastUsedAt: '2020-01-01T00:00:00.000Z' });
+            const sameTimeLaterPath = makeMeta({ lastUsedAt: '2030-01-01T00:00:00.000Z' });
+            const sameTimeEarlierPath = makeMeta({ lastUsedAt: '2030-01-01T00:00:00.000Z', baseInterpreterVersion: '3.13.0' });
+            await writeBackup('ffffffffffff', JSON.stringify(older));
+            await writeBackup('eeeeeeeeeeee', JSON.stringify(sameTimeLaterPath));
+            await writeBackup('000000000000', JSON.stringify(sameTimeEarlierPath));
+
+            assert.deepStrictEqual(await restoreMetaJsonBackupUnderLock(envDir), {
+                kind: 'valid',
+                metadata: sameTimeEarlierPath,
+            });
+            assert.deepStrictEqual(await readMetaJson(envDir), sameTimeEarlierPath);
+            assert.strictEqual(await fs.pathExists(backupPath('000000000000')), false);
+        });
+
+        test('leaves valid backups in place when none meet the compatibility predicate', async () => {
+            await writeBackup('abcdef123456', JSON.stringify(makeMeta()));
+
+            assert.deepStrictEqual(await restoreMetaJsonBackupUnderLock(envDir, () => false), { kind: 'missing' });
+            assert.strictEqual(await fs.pathExists(backupPath('abcdef123456')), true);
+            assert.strictEqual(await fs.pathExists(getMetaJsonPath(envDir).fsPath), false);
+        });
+
+        test('rejects temp, malformed, unsupported, and oversized artifacts without restoring them', async () => {
+            const finalPath = getMetaJsonPath(envDir).fsPath;
+            await fs.writeFile(`${finalPath}.tmp-abcdef123456`, JSON.stringify(makeMeta()));
+            await fs.writeFile(`${finalPath}.backup-ABCDEF123456`, JSON.stringify(makeMeta()));
+            await writeBackup('111111111111', 'not json');
+            await writeBackup('222222222222', JSON.stringify({ ...makeMeta(), schemaVersion: 99 }));
+            await writeBackup('333333333333', Buffer.alloc(1024 * 1024 + 1, 0x20));
+
+            assert.deepStrictEqual(await restoreMetaJsonBackupUnderLock(envDir), { kind: 'missing' });
+            assert.strictEqual(await fs.pathExists(finalPath), false);
+        });
+
+        test('rejects a symlink backup without restoring it', async function () {
+            const externalPath = path.join(tmpDir, 'external-meta.json');
+            await fs.writeFile(externalPath, JSON.stringify(makeMeta()));
+            try {
+                await fs.symlink(externalPath, backupPath('abcdef123456'), 'file');
+            } catch (error) {
+                const code = (error as NodeJS.ErrnoException).code;
+                if (code === 'EPERM' || code === 'EACCES') {
+                    this.skip();
+                    return;
+                }
+                throw error;
+            }
+
+            assert.deepStrictEqual(await restoreMetaJsonBackupUnderLock(envDir), { kind: 'missing' });
+            assert.strictEqual(await fs.pathExists(getMetaJsonPath(envDir).fsPath), false);
+        });
+
+        test('preserves the entry when backup scanning is uncertain', async () => {
+            const backup = backupPath('abcdef123456');
+            await writeBackup('abcdef123456', JSON.stringify(makeMeta()));
+            sinon.stub(fsExtra, 'readdir').rejects(Object.assign(new Error('I/O error'), { code: 'EIO' }));
+
+            assert.deepStrictEqual(await restoreMetaJsonBackupUnderLock(envDir), { kind: 'unavailable' });
+            assert.strictEqual(await fs.pathExists(backup), true);
+            assert.strictEqual(await fs.pathExists(getMetaJsonPath(envDir).fsPath), false);
+        });
+
+        test('preserves the backup when restoration is uncertain', async () => {
+            const backup = backupPath('abcdef123456');
+            await writeBackup('abcdef123456', JSON.stringify(makeMeta()));
+            sinon.stub(fsExtra, 'rename').rejects(Object.assign(new Error('I/O error'), { code: 'EIO' }));
+
+            assert.deepStrictEqual(await restoreMetaJsonBackupUnderLock(envDir), { kind: 'unavailable' });
+            assert.strictEqual(await fs.pathExists(backup), true);
+            assert.strictEqual(await fs.pathExists(getMetaJsonPath(envDir).fsPath), false);
         });
     });
 
@@ -188,6 +413,11 @@ suite('inlineScriptCacheLayout', () => {
             const metadata = makeMeta();
             await writeRaw(JSON.stringify(metadata));
             assert.deepStrictEqual(await inspectMetaJson(envDir), { kind: 'valid', metadata });
+        });
+
+        test('classifies a newer schema as unsupported without treating it as malformed', async () => {
+            await writeRaw(JSON.stringify({ ...makeMeta(), schemaVersion: 99 }));
+            assert.deepStrictEqual(await inspectMetaJson(envDir), { kind: 'unsupported' });
         });
 
         test('classifies non-ENOENT sidecar stat failures as unavailable', async () => {
@@ -233,11 +463,10 @@ suite('inlineScriptCacheLayout', () => {
             );
         });
 
-        test('returns undefined for an unknown schemaVersion', async () => {
+        test('classifies a newer schemaVersion as unsupported', async () => {
             await writeRaw(JSON.stringify({ ...makeMeta(), schemaVersion: 99 }));
-            const result = await readMetaJson(envDir);
-            assert.strictEqual(result, undefined);
-            assert.ok(traceWarnStub.called);
+            const result = await inspectMetaJson(envDir);
+            assert.deepStrictEqual(result, { kind: 'unsupported' });
         });
 
         test('returns undefined when baseInterpreterPath is missing', async () => {
@@ -270,6 +499,31 @@ suite('inlineScriptCacheLayout', () => {
             await writeRaw(JSON.stringify(partial));
             assert.strictEqual(await readMetaJson(envDir), undefined);
             await writeRaw(JSON.stringify({ ...makeMeta(), baseInterpreterVersion: '   ' }));
+            assert.strictEqual(await readMetaJson(envDir), undefined);
+        });
+
+        test('returns undefined for malformed sourceMetadataIdentityHashes', async () => {
+            await writeRaw(JSON.stringify({ ...makeMeta(), sourceMetadataIdentityHashes: 'not-an-array' }));
+            assert.strictEqual(await readMetaJson(envDir), undefined);
+            await writeRaw(JSON.stringify({ ...makeMeta(), sourceMetadataIdentityHashes: [] }));
+            assert.strictEqual(await readMetaJson(envDir), undefined);
+            await writeRaw(JSON.stringify({ ...makeMeta(), sourceMetadataIdentityHashes: ['bad-hash'] }));
+            assert.strictEqual(await readMetaJson(envDir), undefined);
+        });
+
+        test('returns undefined for duplicate or oversized sourceMetadataIdentityHashes', async () => {
+            const hash = hashSourceMetadataIdentity('same');
+            await writeRaw(JSON.stringify({ ...makeMeta(), sourceMetadataIdentityHashes: [hash, hash] }));
+            assert.strictEqual(await readMetaJson(envDir), undefined);
+            await writeRaw(
+                JSON.stringify({
+                    ...makeMeta(),
+                    sourceMetadataIdentityHashes: Array.from(
+                        { length: MAX_SOURCE_METADATA_IDENTITY_HASHES + 1 },
+                        (_, index) => hashSourceMetadataIdentity(`id-${index}`),
+                    ),
+                }),
+            );
             assert.strictEqual(await readMetaJson(envDir), undefined);
         });
 
@@ -334,11 +588,36 @@ suite('inlineScriptCacheLayout', () => {
             assert.strictEqual('_internal' in result, false);
         });
 
+        test('old sidecars without sourceMetadataIdentityHashes remain valid', async () => {
+            const result = await inspectMetaJson(envDir);
+            assert.deepStrictEqual(result, { kind: 'missing' });
+            await writeRaw(JSON.stringify(makeMeta()));
+            assert.ok(await readMetaJson(envDir));
+        });
+
         test('returns undefined when the sidecar path is a directory rather than a file', async () => {
             await fs.remove(getMetaJsonPath(envDir).fsPath).catch(() => undefined);
             await fs.ensureDir(getMetaJsonPath(envDir).fsPath);
             assert.strictEqual(await readMetaJson(envDir), undefined);
             assert.ok(traceWarnStub.called);
+        });
+
+        suite('source metadata hash helpers', () => {
+            test('hashSourceMetadataIdentity returns fixed-size lowercase hex', () => {
+                const hash = hashSourceMetadataIdentity('metadata-identity');
+                assert.strictEqual(hash.length, SOURCE_METADATA_IDENTITY_HASH_HEX_LENGTH);
+                assert.ok(/^[0-9a-f]+$/.test(hash));
+            });
+
+            test('mergeSourceMetadataIdentityHashes dedupes and caps the newest hashes', () => {
+                const hashes = Array.from({ length: MAX_SOURCE_METADATA_IDENTITY_HASHES }, (_, index) =>
+                    hashSourceMetadataIdentity(`id-${index}`),
+                );
+                const merged = mergeSourceMetadataIdentityHashes(hashes, hashSourceMetadataIdentity('latest'));
+                assert.ok(merged);
+                assert.strictEqual(merged.length, MAX_SOURCE_METADATA_IDENTITY_HASHES);
+                assert.strictEqual(merged[merged.length - 1], hashSourceMetadataIdentity('latest'));
+            });
         });
 
         test('returns undefined when the sidecar exceeds the size cap (1 MiB)', async () => {

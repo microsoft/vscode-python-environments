@@ -27,6 +27,15 @@ export interface InlineScriptMetadata {
      * newline (or end of string if there is no trailing newline).
      */
     readonly range: { readonly start: number; readonly end: number };
+    /**
+     * Character offsets of the same metadata block in source text after the
+     * parser's BOM handling. Unlike {@link range}, these preserve CRLF, so
+     * they can be compared with TextDocument change offsets.
+     *
+     * Optional to keep manually constructed metadata compatible; parser
+     * results always supply it.
+     */
+    readonly sourceRange?: { readonly start: number; readonly end: number };
 }
 
 /**
@@ -79,7 +88,8 @@ export function readInlineScriptMetadata(scriptText: string): InlineScriptMetada
     // "UTF-8 with BOM" on Windows have this; without stripping it the
     // first line becomes "\uFEFF# /// script" and the regex fails to
     // match.
-    let text = scriptText.charCodeAt(0) === 0xfeff ? scriptText.slice(1) : scriptText;
+    const sourceText = scriptText.charCodeAt(0) === 0xfeff ? scriptText.slice(1) : scriptText;
+    let text = sourceText;
 
     // Normalize CRLF and lone CR to LF so the canonical regex (which
     // was authored assuming `.` matches `\r`, true in Python's re but
@@ -215,7 +225,25 @@ export function readInlineScriptMetadata(scriptText: string): InlineScriptMetada
         dependencies,
         tool,
         range: { start: matchStart, end },
+        sourceRange: {
+            start: sourceOffsetForNormalizedOffset(sourceText, matchStart),
+            end: sourceOffsetForNormalizedOffset(sourceText, end),
+        },
     };
+}
+
+function sourceOffsetForNormalizedOffset(sourceText: string, normalizedOffset: number): number {
+    let sourceOffset = 0;
+    let currentNormalizedOffset = 0;
+    while (currentNormalizedOffset < normalizedOffset && sourceOffset < sourceText.length) {
+        if (sourceText.charCodeAt(sourceOffset) === 0x0d) {
+            sourceOffset += sourceText.charCodeAt(sourceOffset + 1) === 0x0a ? 2 : 1;
+        } else {
+            sourceOffset += 1;
+        }
+        currentNormalizedOffset += 1;
+    }
+    return sourceOffset;
 }
 
 /**
