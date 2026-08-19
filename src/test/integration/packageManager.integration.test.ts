@@ -1,5 +1,6 @@
 import * as vscode from 'vscode';
 
+import { compare } from '@renovatebot/pep440';
 import assert from 'assert';
 import {
     isPackageVersionLookupNotSupportedError,
@@ -25,6 +26,7 @@ interface PackageManagerProfile {
     packageName: string;
     packageManagerId: PackageManagerId;
     provider: EnvironmentFixtureProvider;
+    supportsVersionLookup(packages: Package[]): boolean | undefined;
 }
 
 const profiles: PackageManagerProfile[] = [
@@ -33,12 +35,17 @@ const profiles: PackageManagerProfile[] = [
         packageName: 'requests',
         packageManagerId: DEFAULT_PACKAGE_MANAGER_ID,
         provider: createVenvFixtureProvider(),
+        supportsVersionLookup: (packages) => {
+            const pipVersion = packages.find((pkg) => pkg.name.toLowerCase() === 'pip')?.version;
+            return pipVersion === undefined ? undefined : compare(pipVersion, '21.2') >= 0;
+        },
     },
     {
         name: 'Conda',
         packageName: 'flask',
         packageManagerId: CONDA_MANAGER_ID,
         provider: createCondaFixtureProvider(),
+        supportsVersionLookup: () => true,
     },
 ];
 
@@ -183,17 +190,36 @@ for (const profile of profiles) {
         });
 
         test(`${profile.name} Package Manager should list available package versions`, async function () {
+            const packages = await api.getPackages(environment!, { skipCache: true });
+            assert.ok(packages, 'Unable to list packages before version lookup');
+            const supportsVersionLookup = profile.supportsVersionLookup(packages);
+            assert.notStrictEqual(
+                supportsVersionLookup,
+                undefined,
+                `${profile.name} version lookup capability could not be determined`,
+            );
+
             let versions;
             try {
                 versions = await api.getPackageAvailableVersions(environment!, profile.packageName);
             } catch (error) {
                 if (isPackageVersionLookupNotSupportedError(error)) {
+                    assert.strictEqual(
+                        supportsVersionLookup,
+                        false,
+                        `${profile.name} unexpectedly reported version lookup as unsupported`,
+                    );
                     this.skip();
                     return;
                 }
                 throw error;
             }
 
+            assert.strictEqual(
+                supportsVersionLookup,
+                true,
+                `${profile.name} returned versions despite declaring lookup unsupported`,
+            );
             assert.ok(versions, `${profile.name} unexpectedly returned no package versions`);
             assert.ok(versions.length > 0, 'No package versions available');
         });
