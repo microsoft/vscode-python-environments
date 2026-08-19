@@ -29,5 +29,6 @@ export async function registerInlineScriptFeatures(
     const api: PythonEnvironmentApi = await getPythonApi();
     const mgr = new InlineScriptEnvManager(nativeFinder, api, baseManager, globalStorageUri, log);
     disposables.push(mgr, api.registerEnvironmentManager(mgr));
+    setImmediate(() => mgr.startActivationDiscovery());
     traceInfo('Inline-script env manager: registered (internal flag is on)');
 }

@@ -204,7 +204,7 @@ export function selectStaleEntries(entries: ReadonlyArray<CacheEntrySummary>, no
 }
 
 /**
- * Verify that a cached env's base interpreter still exists on disk.
+ * Verify that a cached env's launcher and base interpreter still exist on disk.
  */
 export async function verifyBaseInterpreterExists(envDir: Uri): Promise<boolean> {
     return (await getBaseInterpreterStatus(envDir)) === 'available';
@@ -221,6 +221,11 @@ async function getPosixBaseInterpreterStatus(envDir: Uri): Promise<BaseInterpret
 }
 
 async function getWindowsBaseInterpreterStatus(envDir: Uri): Promise<BaseInterpreterStatus> {
+    const launcherStatus = await getRegularFileStatus(getVenvPythonPath(envDir.fsPath), 'cached interpreter launcher');
+    if (launcherStatus !== 'available') {
+        return launcherStatus;
+    }
+
     const pyvenvPath = Uri.joinPath(envDir, 'pyvenv.cfg').fsPath;
     let raw: string;
     try {
