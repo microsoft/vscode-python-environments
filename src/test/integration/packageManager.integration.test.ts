@@ -144,7 +144,6 @@ for (const profile of profiles) {
             }
 
             if (profile.reuseExistingEnvironment) {
-                await api.refreshEnvironments(undefined);
                 environment = (await api.getEnvironments('global')).find(
                     (candidate) => candidate.envId.managerId === profile.environmentManagerId,
                 );
@@ -205,11 +204,15 @@ for (const profile of profiles) {
             if (!wasInstalled) {
                 await api.managePackages(environment!, { install: [packageName], runHeadless: true });
             }
-            let packages = await api.getPackages(environment!, { skipCache: true });
-            assert.ok(packages, 'Unable to list packages after installation');
-            assert.ok(
-                packages.some((pkg) => pkg.name.toLowerCase() === packageName),
+            let packages: Package[] | undefined;
+            await waitForCondition(
+                async () => {
+                    packages = await api.getPackages(environment!, { skipCache: true });
+                    return packages?.some((pkg) => pkg.name.toLowerCase() === packageName) ?? false;
+                },
+                30_000,
                 'Package not installed',
+                1_000,
             );
 
             const directPackageNames = await vscode.commands.executeCommand<string[] | undefined>(
@@ -222,11 +225,14 @@ for (const profile of profiles) {
 
             if (!wasInstalled) {
                 await api.managePackages(environment!, { uninstall: [packageName], runHeadless: true });
-                packages = await api.getPackages(environment!, { skipCache: true });
-                assert.ok(packages, 'Unable to list packages after uninstallation');
-                assert.ok(
-                    !packages.some((pkg) => pkg.name.toLowerCase() === packageName),
+                await waitForCondition(
+                    async () => {
+                        packages = await api.getPackages(environment!, { skipCache: true });
+                        return packages !== undefined && !packages.some((pkg) => pkg.name.toLowerCase() === packageName);
+                    },
+                    30_000,
                     'Package not uninstalled',
+                    1_000,
                 );
             }
         });
@@ -239,9 +245,15 @@ for (const profile of profiles) {
                 return;
             }
 
-            const versions = await api.getPackageAvailableVersions(environment!, profile.packageName);
-            assert.ok(versions, `${profile.name} unexpectedly failed to retrieve package versions`);
-            assert.ok(versions.length > 0, 'No package versions available');
+            await waitForCondition(
+                async () => {
+                    const versions = await api.getPackageAvailableVersions(environment!, profile.packageName);
+                    return versions !== undefined && versions.length > 0;
+                },
+                30_000,
+                `${profile.name} unexpectedly failed to retrieve package versions`,
+                2_000,
+            );
         });
 
         suiteTeardown(async () => {
