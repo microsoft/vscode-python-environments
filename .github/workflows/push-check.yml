@@ -253,6 +253,8 @@ jobs:
     name: Integration Tests
     runs-on: ${{ matrix.os }}
     needs: [smoke-tests]
+    env:
+      VSC_PYTHON_PACKAGE_NETWORK_TEST: '1'
     strategy:
       fail-fast: false
       matrix:
