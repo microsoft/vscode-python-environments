@@ -5,6 +5,7 @@ import assert from 'assert';
 import * as path from 'path';
 import { Package, PythonEnvironment, PythonEnvironmentApi, PythonProject } from '../../api';
 import { CONDA_MANAGER_ID, DEFAULT_PACKAGE_MANAGER_ID, VENV_MANAGER_ID } from '../../common/constants';
+import { normalizePath } from '../../common/utils/pathUtils';
 import { PythonProjectSettings } from '../../internal.api';
 import { ENVS_EXTENSION_ID } from '../constants';
 import { waitForCondition } from '../testUtils';
@@ -18,7 +19,7 @@ interface PackageManagerProfile {
     packageManagerId: PackageManagerId;
     projectDirectory: string;
     prerequisite?(api: PythonEnvironmentApi): Promise<boolean>;
-    reuseExistingEnvironment?: boolean;
+    existingEnvironmentPathVariable?: string;
     supportsVersionLookup(packages: Package[]): boolean;
 }
 
@@ -42,7 +43,7 @@ const profiles: PackageManagerProfile[] = [
         packageName: 'flask',
         packageManagerId: CONDA_MANAGER_ID,
         projectDirectory: 'conda',
-        reuseExistingEnvironment: true,
+        existingEnvironmentPathVariable: 'VSC_PYTHON_PACKAGE_CONDA_ENV',
         supportsVersionLookup: () => true,
     },
 ];
@@ -54,6 +55,12 @@ const deferredPackageManagers: Readonly<Record<PackageManagerId, string>> = {
 const deferredProfiles = {
     pipWithUv: 'uv-backed Pip selection uses a machine-scoped setting and is unstable within one extension host.',
 } as const;
+
+function pathsEqual(first: string, second: string): boolean {
+    const firstPath = path.resolve(vscode.Uri.file(first).fsPath);
+    const secondPath = path.resolve(vscode.Uri.file(second).fsPath);
+    return normalizePath(firstPath) === normalizePath(secondPath);
+}
 
 suite('Package Manager profile coverage', function () {
     this.timeout(60_000);
@@ -134,14 +141,27 @@ for (const profile of profiles) {
                 return;
             }
 
-            if (profile.reuseExistingEnvironment) {
-                environment = (await api.getEnvironments('global')).find(
-                    (candidate) => candidate.envId.managerId === profile.environmentManagerId,
+            if (profile.existingEnvironmentPathVariable) {
+                const environmentPath = process.env[profile.existingEnvironmentPathVariable];
+                assert.ok(
+                    environmentPath,
+                    `Missing environment variable: ${profile.existingEnvironmentPathVariable}`,
                 );
-                if (!environment) {
-                    this.skip();
-                    return;
-                }
+
+                await api.refreshEnvironments(undefined);
+                await waitForCondition(
+                    async () => {
+                        environment = (await api.getEnvironments('all')).find(
+                            (candidate) =>
+                                candidate.envId.managerId === profile.environmentManagerId &&
+                                pathsEqual(candidate.environmentPath.fsPath, environmentPath),
+                        );
+                        return environment !== undefined;
+                    },
+                    30_000,
+                    `${profile.name} test environment was not discovered: ${environmentPath}`,
+                    1_000,
+                );
                 return;
             }
 
@@ -193,6 +213,10 @@ for (const profile of profiles) {
             const packageName = profile.packageName;
             const baseline = await api.getPackages(environment!, { skipCache: true });
             assert.ok(baseline, 'Unable to list packages before installation');
+            assert.ok(
+                baseline.every((pkg) => pkg.pkgId.managerId === profile.packageManagerId),
+                `${profile.name} lifecycle used an unexpected package manager`,
+            );
             const wasInstalled = baseline.some((pkg) => pkg.name.toLowerCase() === packageName);
 
             if (!wasInstalled) {
@@ -240,12 +264,9 @@ for (const profile of profiles) {
             }
 
             const versions = await api.getPackageAvailableVersions(environment!, profile.packageName);
-            // The API currently returns undefined for both unsupported lookups and command/network failures.
-            // Skip until those outcomes can be distinguished by the API contract.
-            if (versions === undefined) {
-                this.skip();
-                return;
-            }
+            // The API does not yet distinguish an unsupported lookup from a command or network failure.
+            // Supported profiles must remain strict until that result contract can be made explicit.
+            assert.ok(versions, `${profile.name} unexpectedly failed to retrieve package versions`);
             assert.ok(versions.length > 0, 'No package versions available');
         });
 

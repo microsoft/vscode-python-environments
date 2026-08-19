@@ -328,6 +328,22 @@ jobs:
       - name: Compile Tests
         run: npm run compile-tests
 
+      - name: Set up Conda
+        uses: conda-incubator/setup-miniconda@fc2d68f6413eb2d87b895e92f8584b5b94a10167 # v3
+        with:
+          activate-environment: ''
+          auto-activate: false
+
+      - name: Create isolated Conda test environment
+        shell: pwsh
+        run: |
+          $condaEnvironment = Join-Path $env:RUNNER_TEMP 'python-envs-package-manager-conda'
+          "VSC_PYTHON_PACKAGE_CONDA_ENV=$condaEnvironment" >> $env:GITHUB_ENV
+          conda create --yes --clone base --prefix $condaEnvironment
+          if ($LASTEXITCODE -ne 0) {
+            exit $LASTEXITCODE
+          }
+
       - name: Run Integration Tests (Linux)
         if: runner.os == 'Linux'
         uses: GabrielBB/xvfb-action@86d97bde4a65fe9b290c0b3fb92c2c4ed0e5302d # v1.6
@@ -337,6 +353,17 @@ jobs:
       - name: Run Integration Tests (non-Linux)
         if: runner.os != 'Linux'
         run: npm run integration-test
+
+      - name: Remove isolated Conda test environment
+        if: always()
+        shell: pwsh
+        run: |
+          if ($env:VSC_PYTHON_PACKAGE_CONDA_ENV -and (Test-Path -LiteralPath $env:VSC_PYTHON_PACKAGE_CONDA_ENV)) {
+            conda env remove --yes --prefix $env:VSC_PYTHON_PACKAGE_CONDA_ENV
+            if ($LASTEXITCODE -ne 0) {
+              exit $LASTEXITCODE
+            }
+          }
 
   integration-tests-multiroot:
     name: Integration Tests (Multi-Root)

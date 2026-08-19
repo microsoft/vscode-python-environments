@@ -5,41 +5,33 @@ import * as assert from 'assert';
 import * as sinon from 'sinon';
 import { LogOutputChannel, Uri } from 'vscode';
 import { PackageManager, PythonEnvironment, PythonEnvironmentApi } from '../../../api';
+import * as childProcessApis from '../../../common/childProcess.apis';
 import * as errorUtils from '../../../common/errors/utils';
 import * as windowApis from '../../../common/window.apis';
+import * as workspaceApis from '../../../common/workspace.apis';
 import { PipPackageManager } from '../../../managers/builtin/pipPackageManager';
 import * as pipUtils from '../../../managers/builtin/pipUtils';
 import * as builtinUtils from '../../../managers/builtin/utils';
+import * as uvEnvironments from '../../../managers/builtin/uvEnvironments';
 import { VenvManager } from '../../../managers/builtin/venvManager';
 import { CondaPackageManager } from '../../../managers/conda/condaPackageManager';
 import * as condaUtils from '../../../managers/conda/condaUtils';
 import { PoetryManager } from '../../../managers/poetry/poetryManager';
 import { PoetryPackageManager } from '../../../managers/poetry/poetryPackageManager';
 import * as poetryUtils from '../../../managers/poetry/poetryUtils';
+import { MockChildProcess } from '../../mocks/mockChildProcess';
 
 suite('Package manager headless conformance', () => {
     const environment = {
         envId: { id: 'test-environment', managerId: 'test-manager' },
         environmentPath: Uri.joinPath(Uri.file(__dirname), 'path', 'to', 'environment'),
-    } as PythonEnvironment;
+        execInfo: { run: { executable: 'python', args: [] } },
+        version: '3.12.0',
+    } as unknown as PythonEnvironment;
 
     teardown(() => {
         sinon.restore();
     });
-
-    function createManagers(): PackageManager[] {
-        const api = {} as PythonEnvironmentApi;
-        const log = {
-            error: sinon.stub(),
-            info: sinon.stub(),
-            show: sinon.stub(),
-        } as unknown as LogOutputChannel;
-        return [
-            new PipPackageManager(api, log, { getProjectsByEnvironment: sinon.stub().returns([]) } as unknown as VenvManager),
-            new CondaPackageManager(api, log),
-            new PoetryPackageManager(api, log, {} as PoetryManager),
-        ];
-    }
 
     test('does not invoke interactive package input when no packages are provided', async () => {
         const pipPicker = sinon.stub(pipUtils, 'getWorkspacePackagesToInstall');
@@ -60,51 +52,125 @@ suite('Package manager headless conformance', () => {
         const withProgress = sinon.stub(windowApis, 'withProgress');
         sinon.stub(builtinUtils, 'managePackages').rejects(operationError);
         sinon.stub(condaUtils, 'managePackages').rejects(operationError);
-        sinon.stub(poetryUtils, 'getPoetry').resolves(undefined);
+        sinon.stub(poetryUtils, 'getPoetry').resolves('poetry');
+        sinon.stub(childProcessApis, 'spawnProcess').callsFake(() => {
+            const process = new MockChildProcess('poetry', ['add', 'requests']);
+            setImmediate(() => process.emit('error', operationError));
+            return process as unknown as ReturnType<typeof childProcessApis.spawnProcess>;
+        });
         const showErrorMessage = sinon.stub(windowApis, 'showErrorMessage').resolves(undefined);
         const showErrorMessageWithLogs = sinon.stub(errorUtils, 'showErrorMessageWithLogs').resolves();
 
         for (const manager of createManagers()) {
             await assert.rejects(
                 manager.manage(environment, { install: ['requests'], runHeadless: true }),
+                (error: unknown) => error === operationError,
             );
         }
+        await flushImmediate();
 
         assert.ok(withProgress.notCalled);
         assert.ok(showErrorMessage.notCalled);
         assert.ok(showErrorMessageWithLogs.notCalled);
     });
 
-    test('rejects refresh failures without showing progress or error notifications', async () => {
-        const refreshError = new Error('package refresh failed');
+    test('suppresses Pip refresh failures without showing progress or error notifications', async () => {
         const withProgress = sinon.stub(windowApis, 'withProgress');
         sinon.stub(builtinUtils, 'managePackages').resolves();
-        sinon.stub(condaUtils, 'managePackages').resolves();
-        sinon
-            .stub(
-                PoetryPackageManager.prototype as unknown as {
-                    runPoetryManage: () => Promise<void>;
-                },
-                'runPoetryManage',
-            )
-            .resolves();
-        sinon.stub(builtinUtils, 'refreshPipPackages').rejects(refreshError);
-        sinon.stub(CondaPackageManager.prototype, 'getPackages').rejects(refreshError);
-        sinon.stub(PoetryPackageManager.prototype, 'getPackages').rejects(refreshError);
+        sinon.stub(uvEnvironments, 'getUvEnvironments').resolves([]);
+        sinon.stub(workspaceApis, 'getConfiguration').returns({
+            get: sinon.stub().withArgs('alwaysUseUv').returns(false),
+        } as unknown as ReturnType<typeof workspaceApis.getConfiguration>);
+        const spawnProcess = sinon.stub(childProcessApis, 'spawnProcess').callsFake(() => {
+            const process = new MockChildProcess('python', ['-m', 'pip', 'list']);
+            setImmediate(() => {
+                process.emit('exit', 1, null);
+                process.emit('close', 1, null);
+            });
+            return process as unknown as ReturnType<typeof childProcessApis.spawnProcess>;
+        });
         sinon.stub(PipPackageManager.prototype, 'getDirectPackageNames').resolves(undefined);
-        sinon.stub(PoetryPackageManager.prototype, 'getDirectPackageNames').resolves(undefined);
         const showErrorMessage = sinon.stub(windowApis, 'showErrorMessage').resolves(undefined);
         const showErrorMessageWithLogs = sinon.stub(errorUtils, 'showErrorMessageWithLogs').resolves();
+        const manager = createManagers()[0];
 
-        for (const manager of createManagers()) {
-            await assert.rejects(
-                manager.manage(environment, { install: ['requests'], runHeadless: true }),
-                (error: unknown) => error === refreshError,
-            );
-        }
+        await manager.manage(environment, { install: ['requests'], runHeadless: true });
+        await flushImmediate();
+
+        assert.ok(spawnProcess.called);
+        assert.ok(withProgress.notCalled);
+        assert.ok(showErrorMessage.notCalled);
+        assert.ok(showErrorMessageWithLogs.notCalled);
+    });
+
+    test('rejects Conda refresh failures without showing progress or error notifications', async () => {
+        const refreshError = new Error('package refresh failed');
+        const withProgress = sinon.stub(windowApis, 'withProgress');
+        sinon.stub(condaUtils, 'managePackages').resolves();
+        sinon.stub(condaUtils, 'runCondaExecutable').rejects(refreshError);
+        const showErrorMessage = sinon.stub(windowApis, 'showErrorMessage').resolves(undefined);
+        const showErrorMessageWithLogs = sinon.stub(errorUtils, 'showErrorMessageWithLogs').resolves();
+        const manager = createManagers()[1];
+
+        await assert.rejects(
+            manager.manage(environment, { install: ['requests'], runHeadless: true }),
+            (error: unknown) => error === refreshError,
+        );
+        await flushImmediate();
 
         assert.ok(withProgress.notCalled);
         assert.ok(showErrorMessage.notCalled);
         assert.ok(showErrorMessageWithLogs.notCalled);
     });
+
+    test('suppresses Poetry refresh failures without showing progress or error notifications', async () => {
+        const refreshError = new Error('package refresh failed');
+        const withProgress = sinon.stub(windowApis, 'withProgress');
+        sinon.stub(poetryUtils, 'getPoetry').resolves('poetry');
+        sinon.stub(PoetryPackageManager.prototype, 'getDirectPackageNames').resolves(undefined);
+        const spawnProcess = sinon.stub(childProcessApis, 'spawnProcess').callsFake((_command, args) => {
+            const process = new MockChildProcess('poetry', args);
+            setImmediate(() => {
+                if (args[0] === 'add') {
+                    process.emit('close', 0, null);
+                } else {
+                    process.emit('error', refreshError);
+                }
+            });
+            return process as unknown as ReturnType<typeof childProcessApis.spawnProcess>;
+        });
+        const showErrorMessage = sinon.stub(windowApis, 'showErrorMessage').resolves(undefined);
+        const showErrorMessageWithLogs = sinon.stub(errorUtils, 'showErrorMessageWithLogs').resolves();
+        const manager = createManagers()[2];
+
+        await manager.manage(environment, { install: ['requests'], runHeadless: true });
+        await flushImmediate();
+
+        assert.strictEqual(spawnProcess.callCount, 2);
+        assert.ok(withProgress.notCalled);
+        assert.ok(showErrorMessage.notCalled);
+        assert.ok(showErrorMessageWithLogs.notCalled);
+    });
+
+    function createManagers(): PackageManager[] {
+        const api = {
+            createPackageItem: sinon.stub(),
+            getPythonProjects: sinon.stub().returns([]),
+        } as unknown as PythonEnvironmentApi;
+        const log = {
+            append: sinon.stub(),
+            error: sinon.stub(),
+            info: sinon.stub(),
+            show: sinon.stub(),
+        } as unknown as LogOutputChannel;
+        return [
+            new PipPackageManager(api, log, { getProjectsByEnvironment: sinon.stub().returns([]) } as unknown as VenvManager),
+            new CondaPackageManager(api, log),
+            new PoetryPackageManager(api, log, {} as PoetryManager),
+        ];
+    }
+
+    async function flushImmediate(): Promise<void> {
+        await new Promise<void>((resolve) => setImmediate(resolve));
+    }
 });
