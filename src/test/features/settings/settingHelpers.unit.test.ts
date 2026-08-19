@@ -800,6 +800,33 @@ suite('Setting Helpers - Project Removal', () => {
     });
 
     suite('removeInlineScriptPythonProjectSettings', () => {
+        test('removes global inline entries when no workspace folders are open', async () => {
+            const config = createProjectConfig({
+                workspaceName: 'global',
+                globalValue: [
+                    { path: 'script.py', envManager: INLINE_MANAGER_ID, packageManager: PIP_MANAGER_ID },
+                    { path: 'keep.py', envManager: VENV_MANAGER_ID, packageManager: PIP_MANAGER_ID },
+                ],
+            });
+            sinon.stub(workspaceApis, 'getWorkspaceFolders').returns(undefined);
+            sinon.stub(workspaceApis, 'getConfiguration').callsFake((_section?: string, scope?: unknown) => {
+                assert.strictEqual(scope, undefined);
+                return config;
+            });
+
+            const removedProjects = await removeInlineScriptPythonProjectSettings([]);
+
+            assert.deepStrictEqual(removedProjects, []);
+            assert.deepStrictEqual(updateCalls, [
+                {
+                    workspace: 'global',
+                    key: 'pythonProjects',
+                    value: [{ path: 'keep.py', envManager: VENV_MANAGER_ID, packageManager: PIP_MANAGER_ID }],
+                    target: ConfigurationTarget.Global,
+                },
+            ]);
+        });
+
         test('removes all inline-script entries while preserving non-inline duplicates', async () => {
             const project = new PythonProjectsImpl('script.py', Uri.file(path.join(firstWorkspacePath, 'script.py')));
             const otherProject = new PythonProjectsImpl('other.py', Uri.file(path.join(firstWorkspacePath, 'other.py')));

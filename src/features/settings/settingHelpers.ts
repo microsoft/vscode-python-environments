@@ -515,8 +515,26 @@ export async function removeInlineScriptPythonProjectSettings(
     currentProjects: readonly PythonProject[],
 ): Promise<PythonProject[]> {
     const currentProjectsByUri = new Map(currentProjects.map((project) => [project.uri.toString(), project] as const));
+    const workspaceFolders = workspaceApis.getWorkspaceFolders() ?? [];
+    const globalConfig = workspaceApis.getConfiguration('python-envs', workspaceFolders[0]?.uri);
+    const globalValueOriginal = cloneProjectSettings(
+        globalConfig.inspect<PythonProjectSettings[]>('pythonProjects')?.globalValue,
+    );
+    const globalValueRemaining =
+        globalValueOriginal?.filter((projectSetting) => projectSetting.envManager !== INLINE_SCRIPT_MANAGER_ID) ?? [];
+    const promises: Thenable<void>[] = [];
+    if (globalValueOriginal !== undefined && globalValueRemaining.length !== globalValueOriginal.length) {
+        promises.push(
+            globalConfig.update(
+                'pythonProjects',
+                globalValueRemaining.length > 0 ? globalValueRemaining : undefined,
+                ConfigurationTarget.Global,
+            ),
+        );
+    }
+
     const workspaceEntries: Array<readonly [WorkspaceFolder, EditProjectSettings[]]> = [];
-    for (const workspaceFolder of workspaceApis.getWorkspaceFolders() ?? []) {
+    for (const workspaceFolder of workspaceFolders) {
         const edits: EditProjectSettings[] = getResolvedPythonProjectSettings(workspaceFolder)
             .filter((resolvedSetting) =>
                 resolvedSetting.sources.some((source) => source.setting.envManager === INLINE_SCRIPT_MANAGER_ID),
@@ -536,23 +554,19 @@ export async function removeInlineScriptPythonProjectSettings(
     }
 
     if (workspaceEntries.length === 0) {
+        await Promise.all(promises);
         return [];
     }
 
     const removedProjects = new Map<string, PythonProject>();
     const folderRemainingSettings = new Map<string, PythonProjectSettings[]>();
     const folderExistingSettings = new Map<string, PythonProjectSettings[]>();
-    const promises: Thenable<void>[] = [];
-    let globalConfig: WorkspaceConfiguration | undefined;
-    let globalValueOriginal: PythonProjectSettings[] | undefined;
     let workspaceConfig: WorkspaceConfiguration | undefined;
     let workspaceValueOriginal: PythonProjectSettings[] | undefined;
 
     workspaceEntries.forEach(([workspaceFolder, edits]) => {
         const config = workspaceApis.getConfiguration('python-envs', workspaceFolder.uri);
         const projectsInspect = config.inspect<PythonProjectSettings[]>('pythonProjects');
-        globalConfig ??= config;
-        globalValueOriginal ??= cloneProjectSettings(projectsInspect?.globalValue);
         workspaceConfig ??= config;
         workspaceValueOriginal ??= cloneProjectSettings(projectsInspect?.workspaceValue);
 
@@ -577,13 +591,6 @@ export async function removeInlineScriptPythonProjectSettings(
     const aggregatedEdits = workspaceEntries.flatMap(([workspaceFolder, edits]) =>
         edits.map((edit) => ({ workspaceFolder, edit })),
     );
-    const globalValueRemaining =
-        globalValueOriginal?.filter(
-            (projectSetting) =>
-                !aggregatedEdits.some(({ workspaceFolder, edit }) =>
-                    matchesProjectSettingEdit(projectSetting, edit, workspaceFolder),
-                ),
-        ) ?? [];
     const workspaceValueRemaining =
         workspaceValueOriginal?.filter(
             (projectSetting) =>
@@ -591,16 +598,6 @@ export async function removeInlineScriptPythonProjectSettings(
                     matchesProjectSettingEdit(projectSetting, edit, workspaceFolder),
                 ),
         ) ?? [];
-
-    if (globalConfig && globalValueOriginal !== undefined && globalValueRemaining.length !== globalValueOriginal.length) {
-        promises.push(
-            globalConfig.update(
-                'pythonProjects',
-                globalValueRemaining.length > 0 ? globalValueRemaining : undefined,
-                ConfigurationTarget.Global,
-            ),
-        );
-    }
 
     if (
         workspaceConfig &&
