@@ -31,7 +31,11 @@ import {
     SetEnvironmentScope,
 } from './api';
 import { ISSUES_URL } from './common/constants';
-import { CreateEnvironmentNotSupported, RemoveEnvironmentNotSupported } from './common/errors/NotSupportedError';
+import {
+    CreateEnvironmentNotSupported,
+    PackageVersionLookupNotSupportedError,
+    RemoveEnvironmentNotSupported,
+} from './common/errors/NotSupportedError';
 import { traceWarn } from './common/logging';
 import { StopWatch } from './common/stopWatch';
 import { EventNames } from './common/telemetry/constants';
@@ -403,7 +407,9 @@ export class InternalPackageManager implements PackageManager {
     ): Promise<Pep440Version[] | undefined> {
         return this.manager.getPackageAvailableVersions
             ? this.manager.getPackageAvailableVersions(environment, packageName)
-            : Promise.resolve(undefined);
+            : Promise.reject(
+                  new PackageVersionLookupNotSupportedError(`Package version lookup not supported by: ${this.id}`),
+              );
     }
 
     getDirectPackageNames(environment: PythonEnvironment): Promise<Set<string> | undefined> {

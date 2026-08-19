@@ -21,6 +21,7 @@ import {
     PythonEnvironment,
     PythonEnvironmentApi,
 } from '../../api';
+import { PackageVersionLookupNotSupportedError } from '../../common/errors/NotSupportedError';
 import { showErrorMessage, withProgress } from '../../common/window.apis';
 import { updatePackagesAndNotify } from '../common/packageChanges';
 import { runPython, runUV, shouldUseUv } from './helpers';
@@ -162,21 +163,7 @@ export class PipPackageManager implements PackageManager, Disposable {
     async getVersion(environment: PythonEnvironment): Promise<Pep440Version | undefined> {
         try {
             const useUv = await shouldUseUv(this.log, environment.environmentPath.fsPath);
-            if (useUv) {
-                const result = await runUV(['--version'], undefined, this.log);
-                // "uv X.Y.Z"
-                const match = result.match(/^uv\s+(\d+\.\d+(?:\.\d+)*)/);
-                return match ? (parse(match[1]) ?? undefined) : undefined;
-            }
-            const result = await runPython(
-                environment.execInfo?.run?.executable ?? 'python',
-                ['-m', 'pip', '--version'],
-                undefined,
-                this.log,
-            );
-            // "pip X.Y.Z from /path/to/pip (python X.Y)"
-            const match = result.match(/^pip\s+(\d+\.\d+(?:\.\d+)*)/);
-            return match ? (parse(match[1]) ?? undefined) : undefined;
+            return await this.getVersionOrThrow(environment, useUv);
         } catch {
             return undefined;
         }
@@ -185,54 +172,69 @@ export class PipPackageManager implements PackageManager, Disposable {
     async getPackageAvailableVersions(
         environment: PythonEnvironment,
         packageName: string,
-    ): Promise<Pep440Version[] | undefined> {
-        try {
-            const python = environment.execInfo?.run?.executable;
-            if (!python) {
-                return undefined;
-            }
-
-            const baseVersion = parse(environment.version)?.base_version;
-            if (!baseVersion) {
-                return undefined;
-            }
-            // uv - Run pip via `uv tool run pip`
-            const useUv = await shouldUseUv(this.log, environment.environmentPath.fsPath);
-            if (useUv) {
-                const output = await runUV(
-                    ['tool', 'run', 'pip', 'index', 'versions', packageName, '--json', '--python-version', baseVersion],
-                    undefined,
-                    this.log,
-                );
-                return parsePipIndexVersionsJson(output);
-            }
-
-            // pip >= 25.1 - use `pip index versions <package> --json` to get available versions in a machine readable format.
-            const pipVersion = await this.getVersion(environment);
-            if (pipVersion && compare(pipVersion.public, '25.1') >= 0) {
-                const output = await runPython(
-                    python,
-                    ['-m', 'pip', 'index', 'versions', packageName, '--json', '--python-version', baseVersion],
-                    undefined,
-                    this.log,
-                );
-                return parsePipIndexVersionsJson(output);
-            }
-
-            if (pipVersion && compare(pipVersion.public, '21.2') >= 0) {
-                const output = await runPython(
-                    python,
-                    ['-m', 'pip', 'index', 'versions', packageName, '--python-version', baseVersion],
-                    undefined,
-                    this.log,
-                );
-                return parsePipIndexVersionsText(output);
-            }
-
-            // pip < 21.2 - version picking is undefined; `pip index versions` is unavailable.
-        } catch {
-            return undefined;
+    ): Promise<Pep440Version[]> {
+        const python = environment.execInfo?.run?.executable;
+        if (!python) {
+            throw new Error(`Python executable is unavailable for environment: ${environment.envId.id}`);
         }
+
+        const baseVersion = getPythonVersionForPackageLookup(environment.version);
+        if (!baseVersion) {
+            throw new Error(`Python version is unavailable for environment: ${environment.envId.id}`);
+        }
+        // uv - Run pip via `uv tool run pip`
+        const useUv = await shouldUseUv(this.log, environment.environmentPath.fsPath);
+        if (useUv) {
+            const output = await runUV(
+                ['tool', 'run', 'pip', 'index', 'versions', packageName, '--json', '--python-version', baseVersion],
+                undefined,
+                this.log,
+            );
+            return requireAvailableVersions(parsePipIndexVersionsJson(output), 'uv');
+        }
+
+        const pipVersion = await this.getVersionOrThrow(environment, false);
+        // pip >= 25.1 - use `pip index versions <package> --json` to get available versions in a machine readable format.
+        if (compare(pipVersion.public, '25.1') >= 0) {
+            const output = await runPython(
+                python,
+                ['-m', 'pip', 'index', 'versions', packageName, '--json', '--python-version', baseVersion],
+                undefined,
+                this.log,
+            );
+            return requireAvailableVersions(parsePipIndexVersionsJson(output), 'pip');
+        }
+
+        if (compare(pipVersion.public, '21.2') >= 0) {
+            const output = await runPython(
+                python,
+                ['-m', 'pip', 'index', 'versions', packageName, '--python-version', baseVersion],
+                undefined,
+                this.log,
+            );
+            return requireAvailableVersions(parsePipIndexVersionsText(output), 'pip');
+        }
+
+        throw new PackageVersionLookupNotSupportedError(
+            `Package version lookup requires pip 21.2 or newer; found ${pipVersion.public}`,
+        );
+    }
+
+    private async getVersionOrThrow(environment: PythonEnvironment, useUv: boolean): Promise<Pep440Version> {
+        const result = useUv
+            ? await runUV(['--version'], undefined, this.log)
+            : await runPython(
+                  environment.execInfo?.run?.executable ?? 'python',
+                  ['-m', 'pip', '--version'],
+                  undefined,
+                  this.log,
+              );
+        const match = result.match(useUv ? /^uv\s+(\d+\.\d+(?:\.\d+)*)/ : /^pip\s+(\d+\.\d+(?:\.\d+)*)/);
+        const version = match ? parse(match[1]) : null;
+        if (!version) {
+            throw new Error(`Unable to parse ${useUv ? 'uv' : 'pip'} version from: ${result.trim()}`);
+        }
+        return version;
     }
 
     dispose(): void {
@@ -250,6 +252,21 @@ export class PipPackageManager implements PackageManager, Disposable {
         const data = await refreshPipDirectPackageNames(environment, this.log);
         return data ? new Set(data.map(normalizePackageName)) : undefined;
     }
+}
+
+function requireAvailableVersions(
+    versions: Pep440Version[] | undefined,
+    packageManager: 'pip' | 'uv',
+): Pep440Version[] {
+    if (!versions) {
+        throw new Error(`Unable to parse available package versions from ${packageManager} output`);
+    }
+    return versions;
+}
+
+function getPythonVersionForPackageLookup(version: string): string | undefined {
+    const match = version.match(/^\s*(\d+)\.(\d+)(?:\.(\d+))?/);
+    return match ? [match[1], match[2], match[3]].filter((segment) => segment !== undefined).join('.') : undefined;
 }
 
 /**

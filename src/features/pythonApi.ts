@@ -33,6 +33,7 @@ import {
     ResolveEnvironmentContext,
     SetEnvironmentScope,
 } from '../api';
+import { PackageVersionLookupNotSupportedError } from '../common/errors/NotSupportedError';
 import { traceError, traceInfo } from '../common/logging';
 import { pickEnvironmentManager } from '../common/pickers/managers';
 import { timeout } from '../common/utils/asyncUtils';
@@ -326,7 +327,9 @@ export class PythonEnvironmentApiImpl implements PythonEnvironmentApi {
         await waitForEnvManagerId([context.envId.managerId]);
         const manager = this.envManagers.getPackageManager(context);
         if (!manager) {
-            return Promise.resolve(undefined);
+            throw new PackageVersionLookupNotSupportedError(
+                `No package manager supports version lookup for: ${context.envId.id}`,
+            );
         }
         return manager.getPackageAvailableVersions(context, packageName);
     }

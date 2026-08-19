@@ -24,6 +24,7 @@ import {
     PythonEnvironment,
     PythonEnvironmentApi,
 } from '../../api';
+import { PackageVersionLookupNotSupportedError } from '../../common/errors/NotSupportedError';
 import { spawnProcess } from '../../common/childProcess.apis';
 import { showErrorMessage, showInputBox, withProgress } from '../../common/window.apis';
 import { normalizePackageName } from '../builtin/utils';
@@ -176,11 +177,10 @@ export class PoetryPackageManager implements PackageManager, Disposable {
     async getPackageAvailableVersions(
         _environment: PythonEnvironment,
         _packageName: string,
-    ): Promise<Pep440Version[] | undefined> {
+    ): Promise<Pep440Version[]> {
         // Poetry doesn't have a native "list available versions" command.
         // Poetry 2.x supports `poetry search` but it was disabled on PyPI.
-        // Return undefined to indicate this manager doesn't support version listing.
-        return undefined;
+        throw new PackageVersionLookupNotSupportedError('Poetry does not support package version lookup');
     }
 
     formatInstallSpec(packageName: string, version: string): string {

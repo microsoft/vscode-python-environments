@@ -1,8 +1,12 @@
 import * as vscode from 'vscode';
 
-import { compare } from '@renovatebot/pep440';
 import assert from 'assert';
-import { Package, PythonEnvironment, PythonEnvironmentApi } from '../../api';
+import {
+    isPackageVersionLookupNotSupportedError,
+    Package,
+    PythonEnvironment,
+    PythonEnvironmentApi,
+} from '../../api';
 import { CONDA_MANAGER_ID, DEFAULT_PACKAGE_MANAGER_ID } from '../../common/constants';
 import { ENVS_EXTENSION_ID } from '../constants';
 import { waitForCondition } from '../testUtils';
@@ -21,7 +25,6 @@ interface PackageManagerProfile {
     packageName: string;
     packageManagerId: PackageManagerId;
     provider: EnvironmentFixtureProvider;
-    supportsVersionLookup(packages: Package[]): boolean;
 }
 
 const profiles: PackageManagerProfile[] = [
@@ -30,17 +33,12 @@ const profiles: PackageManagerProfile[] = [
         packageName: 'requests',
         packageManagerId: DEFAULT_PACKAGE_MANAGER_ID,
         provider: createVenvFixtureProvider(),
-        supportsVersionLookup: (packages) => {
-            const pipVersion = packages.find((pkg) => pkg.name.toLowerCase() === 'pip')?.version;
-            return pipVersion !== undefined && compare(pipVersion, '21.2') >= 0;
-        },
     },
     {
         name: 'Conda',
         packageName: 'flask',
         packageManagerId: CONDA_MANAGER_ID,
         provider: createCondaFixtureProvider(),
-        supportsVersionLookup: () => true,
     },
 ];
 
@@ -183,19 +181,18 @@ for (const profile of profiles) {
         });
 
         test(`${profile.name} Package Manager should list available package versions`, async function () {
-            const packages = await api.getPackages(environment!, { skipCache: true });
-            assert.ok(packages, 'Unable to list packages before version lookup');
-            if (!profile.supportsVersionLookup(packages)) {
-                this.skip();
-                return;
+            let versions;
+            try {
+                versions = await api.getPackageAvailableVersions(environment!, profile.packageName);
+            } catch (error) {
+                if (isPackageVersionLookupNotSupportedError(error)) {
+                    this.skip();
+                    return;
+                }
+                throw error;
             }
 
-            const versions = await api.getPackageAvailableVersions(environment!, profile.packageName);
-            // Accept undefined until the API can distinguish unsupported lookups from command or network failures.
-            // TODO: Add that result distinction and make supported lookups strict in a follow-up PR.
-            if (versions === undefined) {
-                return;
-            }
+            assert.ok(versions, `${profile.name} unexpectedly returned no package versions`);
             assert.ok(versions.length > 0, 'No package versions available');
         });
 

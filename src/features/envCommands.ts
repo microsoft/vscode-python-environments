@@ -12,6 +12,8 @@ import {
 } from 'vscode';
 import {
     CreateEnvironmentOptions,
+    isPackageVersionLookupNotSupportedError,
+    Pep440Version,
     PythonEnvironment,
     PythonEnvironmentApi,
     PythonProject,
@@ -363,10 +365,17 @@ export async function managePackageVersion(context: unknown, em: EnvironmentMana
         let version: string | undefined;
 
         // Try to fetch available versions for a QuickPick experience
-        const availableVersions = await withProgress(
-            { location: ProgressLocation.Window, title: l10n.t('Fetching available versions for {0}...', pkg.name) },
-            () => packageManager.getPackageAvailableVersions(environment, pkg.name),
-        );
+        let availableVersions: Pep440Version[] | undefined;
+        try {
+            availableVersions = await withProgress(
+                { location: ProgressLocation.Window, title: l10n.t('Fetching available versions for {0}...', pkg.name) },
+                () => packageManager.getPackageAvailableVersions(environment, pkg.name),
+            );
+        } catch (error) {
+            if (!isPackageVersionLookupNotSupportedError(error)) {
+                throw error;
+            }
+        }
 
         if (availableVersions && availableVersions.length > 0) {
             const items = availableVersions.map((v) => ({

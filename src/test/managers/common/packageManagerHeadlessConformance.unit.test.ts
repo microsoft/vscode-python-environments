@@ -4,11 +4,17 @@
 import * as assert from 'assert';
 import * as sinon from 'sinon';
 import { LogOutputChannel, Uri } from 'vscode';
-import { PackageManager, PythonEnvironment, PythonEnvironmentApi } from '../../../api';
+import {
+    isPackageVersionLookupNotSupportedError,
+    PackageManager,
+    PythonEnvironment,
+    PythonEnvironmentApi,
+} from '../../../api';
 import * as childProcessApis from '../../../common/childProcess.apis';
 import * as errorUtils from '../../../common/errors/utils';
 import * as windowApis from '../../../common/window.apis';
 import * as workspaceApis from '../../../common/workspace.apis';
+import { InternalPackageManager } from '../../../internal.api';
 import { PipPackageManager } from '../../../managers/builtin/pipPackageManager';
 import * as pipUtils from '../../../managers/builtin/pipUtils';
 import * as builtinUtils from '../../../managers/builtin/utils';
@@ -150,6 +156,35 @@ suite('Package manager headless conformance', () => {
         assert.ok(withProgress.notCalled);
         assert.ok(showErrorMessage.notCalled);
         assert.ok(showErrorMessageWithLogs.notCalled);
+    });
+
+    test('reports missing version lookup implementations as unsupported', async () => {
+        const manager = new InternalPackageManager('test:unsupported', {
+            name: 'unsupported',
+            manage: sinon.stub().resolves(),
+            refresh: sinon.stub().resolves(),
+            getPackages: sinon.stub().resolves([]),
+        });
+
+        await assert.rejects(
+            manager.getPackageAvailableVersions(environment, 'requests'),
+            isPackageVersionLookupNotSupportedError,
+        );
+    });
+
+    test('recognizes unsupported lookup errors across module boundaries', () => {
+        assert.ok(
+            isPackageVersionLookupNotSupportedError({
+                code: 'PackageVersionLookupNotSupported',
+            }),
+        );
+    });
+
+    test('reports Poetry version lookup as unsupported', async () => {
+        await assert.rejects(
+            createManagers().poetry.getPackageAvailableVersions!(environment, 'requests'),
+            isPackageVersionLookupNotSupportedError,
+        );
     });
 
     function createManagers(): {

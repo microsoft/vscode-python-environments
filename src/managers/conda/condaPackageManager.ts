@@ -189,30 +189,26 @@ export class CondaPackageManager implements PackageManager, Disposable {
     async getPackageAvailableVersions(
         _environment: PythonEnvironment,
         packageName: string,
-    ): Promise<Pep440Version[] | undefined> {
-        try {
-            const output = await runCondaExecutable(['search', packageName, '--json'], this.log);
-            const parsed = JSON.parse(output);
-            if (parsed && typeof parsed === 'object' && Array.isArray(parsed[packageName])) {
-                const uniqueVersions = new Map<string, Pep440Version>();
-                parsed[packageName]
-                    .filter((entry: { version?: string }) => !!entry.version?.trim())
-                    .map((entry: { version?: string }) => parse(entry.version!))
-                    .filter((v: Pep440Version | null): v is Pep440Version => v !== null)
-                    .forEach((version: Pep440Version) => {
-                        if (!uniqueVersions.has(version.public)) {
-                            uniqueVersions.set(version.public, version);
-                        }
-                    });
-
-                return Array.from(uniqueVersions.values()).sort((a: Pep440Version, b: Pep440Version) =>
-                    rcompare(a.public, b.public),
-                );
-            }
-            return undefined;
-        } catch {
-            return undefined;
+    ): Promise<Pep440Version[]> {
+        const output = await runCondaExecutable(['search', packageName, '--json'], this.log);
+        const parsed = JSON.parse(output);
+        if (!parsed || typeof parsed !== 'object' || !Array.isArray(parsed[packageName])) {
+            throw new Error(`Conda returned invalid package version data for: ${packageName}`);
         }
+        const uniqueVersions = new Map<string, Pep440Version>();
+        parsed[packageName]
+            .filter((entry: { version?: string }) => !!entry.version?.trim())
+            .map((entry: { version?: string }) => parse(entry.version!))
+            .filter((v: Pep440Version | null): v is Pep440Version => v !== null)
+            .forEach((version: Pep440Version) => {
+                if (!uniqueVersions.has(version.public)) {
+                    uniqueVersions.set(version.public, version);
+                }
+            });
+
+        return Array.from(uniqueVersions.values()).sort((a: Pep440Version, b: Pep440Version) =>
+            rcompare(a.public, b.public),
+        );
     }
 
     getPackageWatchTargets(environment: PythonEnvironment): RelativePattern[] {
