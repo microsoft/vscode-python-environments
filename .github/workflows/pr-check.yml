@@ -252,6 +252,9 @@ jobs:
     name: Integration Tests
     runs-on: ${{ matrix.os }}
     needs: [smoke-tests]
+    env:
+      CONDA_PLUGINS_AUTO_ACCEPT_TOS: 'true'
+      VSC_PYTHON_PACKAGE_NETWORK_TEST: '1'
     strategy:
       fail-fast: false
       matrix:
@@ -325,6 +328,12 @@ jobs:
       - name: Compile Tests
         run: npm run compile-tests
 
+      - name: Set up Conda
+        uses: conda-incubator/setup-miniconda@fc2d68f6413eb2d87b895e92f8584b5b94a10167 # v3
+        with:
+          activate-environment: ''
+          auto-activate: false
+
       - name: Run Integration Tests (Linux)
         if: runner.os == 'Linux'
         uses: GabrielBB/xvfb-action@86d97bde4a65fe9b290c0b3fb92c2c4ed0e5302d # v1.6
@@ -334,14 +343,6 @@ jobs:
       - name: Run Integration Tests (non-Linux)
         if: runner.os != 'Linux'
         run: npm run integration-test
-
-      - name: Run Package Manager Network Integration Tests
-        if: runner.os == 'Linux' && matrix.python-version == '3.12'
-        uses: GabrielBB/xvfb-action@86d97bde4a65fe9b290c0b3fb92c2c4ed0e5302d # v1.6
-        env:
-          VSC_PYTHON_PACKAGE_NETWORK_TEST: '1'
-        with:
-          run: npm run integration-test -- --grep "Package Manager"
 
   integration-tests-multiroot:
     name: Integration Tests (Multi-Root)

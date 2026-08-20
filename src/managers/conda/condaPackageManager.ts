@@ -3,6 +3,7 @@ import { explain as parse, rcompare } from '@renovatebot/pep440';
 import * as path from 'path';
 import {
     CancellationError,
+    CancellationToken,
     Disposable,
     Event,
     EventEmitter,
@@ -72,37 +73,44 @@ export class CondaPackageManager implements PackageManager, Disposable {
             install: toInstall,
             uninstall: toUninstall,
         };
+        const execute = async (token?: CancellationToken): Promise<void> => {
+            try {
+                await managePackages(environment, manageOptions, token, this.log);
+                await updatePackagesAndNotify(
+                    this,
+                    environment,
+                    this.packages.get(environment.envId.id),
+                    (changes) => {
+                        this._onDidChangePackages.fire({ environment, manager: this, changes });
+                    },
+                );
+            } catch (e) {
+                if (e instanceof CancellationError) {
+                    throw e;
+                }
+
+                this.log.error('Error installing packages', e);
+                if (!manageOptions.runHeadless) {
+                    setImmediate(async () => {
+                        await showErrorMessageWithLogs(CondaStrings.condaInstallError, this.log);
+                    });
+                }
+                throw e;
+            }
+        };
+
+        if (manageOptions.runHeadless) {
+            await execute();
+            return;
+        }
+
         await withProgress(
             {
                 location: ProgressLocation.Notification,
                 title: CondaStrings.condaInstallingPackages,
                 cancellable: true,
             },
-            async (_progress, token) => {
-                try {
-                    await managePackages(environment, manageOptions, token, this.log);
-                    await updatePackagesAndNotify(
-                        this,
-                        environment,
-                        this.packages.get(environment.envId.id),
-                        (changes) => {
-                            this._onDidChangePackages.fire({ environment, manager: this, changes });
-                        },
-                    );
-                } catch (e) {
-                    if (e instanceof CancellationError) {
-                        throw e;
-                    }
-
-                    this.log.error('Error installing packages', e);
-                    if (!manageOptions.runHeadless) {
-                        setImmediate(async () => {
-                            await showErrorMessageWithLogs(CondaStrings.condaInstallError, this.log);
-                        });
-                    }
-                    throw e;
-                }
-            },
+            async (_progress, token) => execute(token),
         );
     }
 
@@ -178,16 +186,6 @@ export class CondaPackageManager implements PackageManager, Disposable {
         }
     }
 
-    /**
-     * Lists available versions for a package via `conda search --json`, newest first.
-     *
-     * Conda always supports version lookup, so operational failures (command, network, or
-     * malformed/unparseable output) propagate instead of being swallowed into `undefined`.
-     *
-     * @param _environment - Unused; conda resolves versions from its configured channels.
-     * @param packageName - The package whose versions should be listed.
-     * @returns A promise that resolves to an array of {@link Pep440Version} objects (newest first).
-     */
     async getPackageAvailableVersions(
         _environment: PythonEnvironment,
         packageName: string,
@@ -197,7 +195,6 @@ export class CondaPackageManager implements PackageManager, Disposable {
         if (!parsed || typeof parsed !== 'object' || !Array.isArray(parsed[packageName])) {
             throw new Error(`Conda returned unexpected package version data for: ${packageName}`);
         }
-
         const uniqueVersions = new Map<string, Pep440Version>();
         parsed[packageName]
             .filter((entry: { version?: string }) => !!entry.version?.trim())
