@@ -3818,6 +3818,36 @@ suite('InlineScriptEnvManager', () => {
             assert.strictEqual(await manager.get(futureUri), undefined);
         });
 
+        for (const schemaVersion of [0, -1, 1.5, Number.NaN, Number.POSITIVE_INFINITY]) {
+            test(`repairs a malformed numeric schema version (${String(schemaVersion)})`, async () => {
+                const invalidUri = scriptUri('invalid.py');
+                const validUri = scriptUri('valid.py');
+                const invalidEnvironment = await createOwnedEnvironment('0011223344556677');
+                const validEnvironment = await createOwnedEnvironment('fedcba9876543210');
+                persistedAssociations = {
+                    [normalizePath(invalidUri.fsPath)]: {
+                        schemaVersion,
+                        environmentPath: invalidEnvironment.environmentPath.fsPath,
+                        metadataBinding: {
+                            kind: 'matched',
+                            sourceIdentity: VALID_METADATA_IDENTITY,
+                        },
+                    },
+                    [normalizePath(validUri.fsPath)]: matchedAssociationRecord(
+                        validEnvironment.environmentPath.fsPath,
+                    ),
+                };
+
+                assert.strictEqual(await manager.get(invalidUri), undefined);
+
+                assert.deepStrictEqual(persistedAssociations, {
+                    [normalizePath(validUri.fsPath)]: matchedAssociationRecord(
+                        validEnvironment.environmentPath.fsPath,
+                    ),
+                });
+            });
+        }
+
         test('removes a requested record with an unknown current binding kind without affecting unrelated entries', async () => {
             const invalidUri = scriptUri('invalid.py');
             const validUri = scriptUri('valid.py');

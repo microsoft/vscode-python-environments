@@ -2050,11 +2050,14 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
         }
         const association = value as Record<string, unknown>;
         const schemaVersion = association.schemaVersion;
-        if (typeof schemaVersion !== 'number') {
+        if (typeof schemaVersion !== 'number' || !Number.isSafeInteger(schemaVersion) || schemaVersion <= 0) {
             return { kind: 'invalid' };
         }
-        if (schemaVersion !== PERSISTED_ASSOCIATION_SCHEMA_VERSION) {
+        if (schemaVersion > PERSISTED_ASSOCIATION_SCHEMA_VERSION) {
             return { kind: 'future' };
+        }
+        if (schemaVersion !== PERSISTED_ASSOCIATION_SCHEMA_VERSION) {
+            return { kind: 'invalid' };
         }
         const environmentPath = association.environmentPath;
         const metadataBinding = association.metadataBinding;

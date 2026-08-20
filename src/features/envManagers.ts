@@ -580,7 +580,6 @@ export class PythonEnvironmentManagers implements EnvironmentManagers {
                     await manager.set(uris);
                     await Promise.all(
                         selections.map(async (selection) => {
-                            this.clearInlineRoutingOverride(selection.scope);
                             const newEnv = await manager.get(selection.scope);
                             if (!this.commitSelectionOperation(selection.key, selection.operation)) {
                                 return;
@@ -795,13 +794,6 @@ export class PythonEnvironmentManagers implements EnvironmentManagers {
             return;
         }
         this._inlineRoutingOverrides.set(key, manager.id);
-    }
-
-    private clearInlineRoutingOverride(scope: Uri): void {
-        if (!this.inlineScriptRouting) {
-            return;
-        }
-        this._inlineRoutingOverrides.delete(this.getInlineScriptSelectionKey(scope));
     }
 
     private async publishEffectiveEnvironmentAfterOverrideClear(

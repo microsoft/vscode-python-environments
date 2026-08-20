@@ -535,6 +535,26 @@ suite('PythonEnvironmentManagers getLastKnownEnvironment', () => {
         assert.strictEqual(envManagers.getLastKnownEnvironment(script), selectedEnvironment);
     });
 
+    test('preserves an explicit non-inline override during a batch manager refresh', async () => {
+        const script = Uri.file('/workspace/project/script.py');
+        projectsByUri.set(script.toString(), { name: 'project', uri: Uri.file('/workspace/project') });
+        let selectedEnvironment: PythonEnvironment;
+        const selectedId = registerManager(async () => selectedEnvironment, async () => undefined, 'venv');
+        let inlineEnvironment: PythonEnvironment;
+        const inlineId = registerManager(async () => inlineEnvironment, async () => undefined, 'inline-script');
+        selectedEnvironment = { ...makeEnv('selected'), envId: { id: 'selected', managerId: selectedId } };
+        inlineEnvironment = { ...makeEnv('inline'), envId: { id: 'inline', managerId: inlineId } };
+        defaultManagerId = selectedId;
+        markInlineScript(script);
+        await envManagers.setEnvironment(script, inlineEnvironment, false);
+        await envManagers.setEnvironment(script, selectedEnvironment, false);
+
+        await envManagers.setEnvironments([script], undefined, false);
+
+        assert.strictEqual(envManagers.getEnvironmentManager(script)?.id, selectedId);
+        assert.strictEqual(envManagers.getLastKnownEnvironment(script), selectedEnvironment);
+    });
+
     test('publishes through the inline manager after an explicit override is cleared', async () => {
         const script = Uri.file('/workspace/project/script.py');
         projectsByUri.set(script.toString(), { name: 'project', uri: Uri.file('/workspace/project') });
