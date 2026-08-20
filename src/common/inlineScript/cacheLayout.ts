@@ -22,8 +22,12 @@ export const META_JSON_FILENAME = '.meta.json';
  * Schema version embedded in every {@link InlineScriptEnvMeta}.
  */
 export const META_SCHEMA_VERSION = 1 as const;
+export const SOURCE_METADATA_IDENTITY_HASH_HEX_LENGTH = 64;
+export const MAX_SOURCE_METADATA_IDENTITY_HASHES = 128;
 
 const MAX_META_JSON_BYTES = 1024 * 1024;
+const META_JSON_BACKUP_FILENAME_RE = /^\.meta\.json\.backup-[0-9a-f]{12}$/;
+const pendingMetaJsonWrites = new Map<string, Promise<void>>();
 
 /**
  * Validated on-disk schema for a cached inline-script environment's
@@ -38,11 +42,13 @@ export interface InlineScriptEnvMeta {
     readonly baseInterpreterVersion: string;
     /** Last successful use as a canonical UTC string produced by `Date.toISOString()`. */
     readonly lastUsedAt: string;
+    /** Bounded SHA-256 hashes of metadata identities proven for this cache entry. */
+    readonly sourceMetadataIdentityHashes?: readonly string[];
 }
 
 export type InlineScriptMetaReadResult =
     | { readonly kind: 'valid'; readonly metadata: InlineScriptEnvMeta }
-    | { readonly kind: 'missing' | 'invalid' | 'unavailable' };
+    | { readonly kind: 'missing' | 'invalid' | 'unsupported' | 'unavailable' };
 
 export type BaseInterpreterStatus = 'available' | 'missing' | 'unavailable';
 export type CacheEnvironmentInspection = 'expected' | 'stale' | 'uncertain';
@@ -119,8 +125,73 @@ export async function readMetaJson(envDir: Uri): Promise<InlineScriptEnvMeta | u
 
 /** Classify sidecar state; only `unavailable` denotes transient I/O. */
 export async function inspectMetaJson(envDir: Uri): Promise<InlineScriptMetaReadResult> {
-    const metaPath = getMetaJsonPath(envDir).fsPath;
+    return inspectMetaJsonFile(getMetaJsonPath(envDir).fsPath);
+}
 
+/**
+ * Restore the most recently-used compatible sidecar backup while the caller
+ * owns the cache-entry lock. General readers must use {@link inspectMetaJson}.
+ */
+export async function restoreMetaJsonBackupUnderLock(
+    envDir: Uri,
+    isCompatible: (metadata: InlineScriptEnvMeta) => boolean = () => true,
+): Promise<InlineScriptMetaReadResult> {
+    const finalPath = getMetaJsonPath(envDir).fsPath;
+    const initial = await inspectMetaJsonFile(finalPath);
+    if (initial.kind !== 'missing') {
+        return initial;
+    }
+
+    let entries: string[];
+    try {
+        entries = await fsapi.readdir(envDir.fsPath);
+    } catch (error) {
+        traceWarn(`inline-script meta: failed to scan backup sidecars in ${envDir.fsPath}:`, error);
+        return { kind: 'unavailable' };
+    }
+
+    const validBackups: Array<{ readonly path: string; readonly metadata: InlineScriptEnvMeta }> = [];
+    for (const entry of entries.filter((name) => META_JSON_BACKUP_FILENAME_RE.test(name))) {
+        const result = await inspectMetaJsonFile(path.join(envDir.fsPath, entry));
+        if (result.kind === 'valid' && isCompatible(result.metadata)) {
+            validBackups.push({ path: path.join(envDir.fsPath, entry), metadata: result.metadata });
+        } else if (result.kind === 'unavailable' || result.kind === 'missing') {
+            // A listed candidate changing or becoming unreadable is an
+            // uncertain scan; preserve the entry rather than rebuilding it.
+            return { kind: 'unavailable' };
+        }
+    }
+
+    if (validBackups.length === 0) {
+        return { kind: 'missing' };
+    }
+
+    // `lastUsedAt` is schema-validated canonical ISO text. Prefer the newest
+    // compatible backup; use the path as a stable tie-breaker.
+    validBackups.sort((a, b) => {
+        if (a.metadata.lastUsedAt !== b.metadata.lastUsedAt) {
+            return a.metadata.lastUsedAt < b.metadata.lastUsedAt ? 1 : -1;
+        }
+        return a.path < b.path ? -1 : a.path > b.path ? 1 : 0;
+    });
+    const selected = validBackups[0];
+
+    // Native rename may replace an existing destination on some platforms,
+    // so recheck under the caller's entry lock before restoring.
+    const current = await inspectMetaJsonFile(finalPath);
+    if (current.kind !== 'missing') {
+        return current;
+    }
+    try {
+        await fsapi.rename(selected.path, finalPath);
+    } catch (error) {
+        traceWarn(`inline-script meta: failed to restore backup ${selected.path}:`, error);
+        return { kind: 'unavailable' };
+    }
+    return { kind: 'valid', metadata: selected.metadata };
+}
+
+async function inspectMetaJsonFile(metaPath: string): Promise<InlineScriptMetaReadResult> {
     try {
         const stat = await fsapi.lstat(metaPath);
         if (!stat.isFile()) {
@@ -160,6 +231,10 @@ export async function inspectMetaJson(envDir: Uri): Promise<InlineScriptMetaRead
     }
 
     const validated = validateMeta(parsed);
+    if (validated === 'unsupported') {
+        traceWarn(`inline-script meta: unsupported schema in ${metaPath}`);
+        return { kind: 'unsupported' };
+    }
     if (!validated) {
         traceWarn(`inline-script meta: invalid shape in ${metaPath}`);
         return { kind: 'invalid' };
@@ -168,21 +243,95 @@ export async function inspectMetaJson(envDir: Uri): Promise<InlineScriptMetaRead
 }
 
 /**
- * Atomically write the `.meta.json` sidecar via temp-file + rename.
+ * Queue writes for a single sidecar in this process. Production callers also
+ * hold the cache-entry file lock, which serializes this operation across
+ * extension-host processes.
  */
-export async function writeMetaJson(envDir: Uri, meta: InlineScriptEnvMeta): Promise<void> {
-    await fsapi.ensureDir(envDir.fsPath);
+export function writeMetaJson(envDir: Uri, meta: InlineScriptEnvMeta): Promise<void> {
     const finalPath = getMetaJsonPath(envDir).fsPath;
+    const key = normalizePath(path.resolve(finalPath));
+    const previous = pendingMetaJsonWrites.get(key) ?? Promise.resolve();
+    const operation = previous.catch(() => undefined).then(() => writeMetaJsonOnce(envDir, meta, finalPath));
+    let queued: Promise<void>;
+    queued = operation.finally(() => {
+        if (pendingMetaJsonWrites.get(key) === queued) {
+            pendingMetaJsonWrites.delete(key);
+        }
+    });
+    pendingMetaJsonWrites.set(key, queued);
+    return queued;
+}
+
+async function writeMetaJsonOnce(envDir: Uri, meta: InlineScriptEnvMeta, finalPath: string): Promise<void> {
+    await fsapi.ensureDir(envDir.fsPath);
     const tmpSuffix = crypto.randomBytes(6).toString('hex');
     const tmpPath = `${finalPath}.tmp-${tmpSuffix}`;
+    const backupPath = `${finalPath}.backup-${tmpSuffix}`;
     const payload = JSON.stringify(meta, undefined, 2);
+    let hasBackup = false;
+    let finalKnownToExist = false;
+
     try {
         await fsapi.writeFile(tmpPath, payload, 'utf8');
-        await fsapi.rename(tmpPath, finalPath);
-    } catch (err) {
+        try {
+            await fsapi.rename(tmpPath, finalPath);
+            finalKnownToExist = true;
+            return;
+        } catch (err) {
+            const code = (err as NodeJS.ErrnoException | undefined)?.code;
+            if (!['EPERM', 'EEXIST', 'EBUSY'].includes(code ?? '')) {
+                throw err;
+            }
+        }
+
+        try {
+            await fsapi.rename(finalPath, backupPath);
+            hasBackup = true;
+        } catch (err) {
+            if (!isFileNotFoundError(err)) {
+                throw err;
+            }
+        }
+
+        try {
+            await fsapi.rename(tmpPath, finalPath);
+            finalKnownToExist = true;
+        } catch (replaceError) {
+            if (hasBackup) {
+                try {
+                    await fsapi.rename(backupPath, finalPath);
+                    finalKnownToExist = true;
+                } catch {
+                    // Keep the backup: it is the only known copy when
+                    // restoration cannot prove the final sidecar exists.
+                }
+            }
+            throw replaceError;
+        }
+    } finally {
         await fsapi.remove(tmpPath).catch(() => undefined);
-        throw err;
+        if (hasBackup && finalKnownToExist) {
+            await fsapi.remove(backupPath).catch(() => undefined);
+        }
     }
+}
+
+export function hashSourceMetadataIdentity(identity: string): string {
+    return crypto.createHash('sha256').update(identity, 'utf8').digest('hex');
+}
+
+export function mergeSourceMetadataIdentityHashes(
+    existing: readonly string[] | undefined,
+    current: string | undefined,
+): readonly string[] | undefined {
+    const ordered = [...(existing ?? [])];
+    if (current && !ordered.includes(current)) {
+        ordered.push(current);
+    }
+    if (ordered.length === 0) {
+        return undefined;
+    }
+    return Object.freeze(ordered.slice(-MAX_SOURCE_METADATA_IDENTITY_HASHES));
 }
 
 /**
@@ -290,11 +439,21 @@ function isNonEmptyTrimmedString(value: unknown): value is string {
     return typeof value === 'string' && value.length > 0 && value.trim() === value;
 }
 
-function validateMeta(value: unknown): InlineScriptEnvMeta | undefined {
+function validateMeta(value: unknown): InlineScriptEnvMeta | 'unsupported' | undefined {
     if (typeof value !== 'object' || value === null || Array.isArray(value)) {
         return undefined;
     }
     const obj = value as Record<string, unknown>;
+    if (
+        typeof obj.schemaVersion !== 'number' ||
+        !Number.isSafeInteger(obj.schemaVersion) ||
+        obj.schemaVersion <= 0
+    ) {
+        return undefined;
+    }
+    if (obj.schemaVersion > META_SCHEMA_VERSION) {
+        return 'unsupported';
+    }
     if (obj.schemaVersion !== META_SCHEMA_VERSION) {
         return undefined;
     }
@@ -307,13 +466,42 @@ function validateMeta(value: unknown): InlineScriptEnvMeta | undefined {
     if (!isCanonicalIsoTimestamp(obj.lastUsedAt)) {
         return undefined;
     }
+    const sourceMetadataIdentityHashes = validateSourceMetadataIdentityHashes(obj.sourceMetadataIdentityHashes);
+    if (obj.sourceMetadataIdentityHashes !== undefined && sourceMetadataIdentityHashes === undefined) {
+        return undefined;
+    }
 
     return {
         schemaVersion: META_SCHEMA_VERSION,
         baseInterpreterPath: obj.baseInterpreterPath,
         baseInterpreterVersion: obj.baseInterpreterVersion,
         lastUsedAt: obj.lastUsedAt,
+        ...(sourceMetadataIdentityHashes ? { sourceMetadataIdentityHashes } : {}),
     };
+}
+
+function validateSourceMetadataIdentityHashes(value: unknown): readonly string[] | undefined {
+    if (value === undefined) {
+        return undefined;
+    }
+    if (!Array.isArray(value) || value.length === 0 || value.length > MAX_SOURCE_METADATA_IDENTITY_HASHES) {
+        return undefined;
+    }
+    const hashes: string[] = [];
+    const seen = new Set<string>();
+    for (const item of value) {
+        if (
+            typeof item !== 'string' ||
+            item.length !== SOURCE_METADATA_IDENTITY_HASH_HEX_LENGTH ||
+            !/^[0-9a-f]+$/.test(item) ||
+            seen.has(item)
+        ) {
+            return undefined;
+        }
+        seen.add(item);
+        hashes.push(item);
+    }
+    return Object.freeze(hashes);
 }
 
 function isCanonicalIsoTimestamp(value: unknown): value is string {
