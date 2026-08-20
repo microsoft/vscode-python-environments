@@ -5,9 +5,12 @@ import assert from 'assert';
 import * as sinon from 'sinon';
 import { Disposable, LogOutputChannel, Uri } from 'vscode';
 import { EnvironmentManager, PythonEnvironmentApi } from '../../../../api';
+import * as cacheLayout from '../../../../common/inlineScript/cacheLayout';
 import { InlineScriptRoutingRegistry } from '../../../../common/inlineScript/routingRegistry';
+import * as persistentState from '../../../../common/persistentState';
 import * as workspaceApis from '../../../../common/workspace.apis';
 import { latchInlineScriptFeatureActivation } from '../../../../features/inlineScript/activation';
+import { InlineScriptLazyDetector } from '../../../../features/inlineScript/lazyDetector';
 import * as pythonApi from '../../../../features/pythonApi';
 import * as helpers from '../../../../helpers';
 import { InlineScriptEnvManager } from '../../../../managers/builtin/inlineScript/envManager';
@@ -40,6 +43,8 @@ suite('registerInlineScriptFeatures (feature-flag gate)', () => {
     let getPythonApiStub: sinon.SinonStub;
     let registerEnvironmentManagerStub: sinon.SinonStub;
     let startActivationDiscoveryStub: sinon.SinonStub;
+    let onDidDeleteFilesStub: sinon.SinonStub;
+    let onDidRenameFilesStub: sinon.SinonStub;
     const nativeFinder = {} as NativePythonFinder;
     const baseManager = {} as EnvironmentManager;
     const globalStorageUri = Uri.file('inline-script-global-storage');
@@ -49,8 +54,12 @@ suite('registerInlineScriptFeatures (feature-flag gate)', () => {
         isEnabledStub = sinon.stub(helpers, 'isInlineScriptsFeatureEnabled');
         registerEnvironmentManagerStub = sinon.stub<[unknown], Disposable>().returns({ dispose: () => undefined });
         startActivationDiscoveryStub = sinon.stub(InlineScriptEnvManager.prototype, 'startActivationDiscovery');
-        sinon.stub(workspaceApis, 'onDidDeleteFiles').returns(new Disposable(() => undefined));
-        sinon.stub(workspaceApis, 'onDidRenameFiles').returns(new Disposable(() => undefined));
+        onDidDeleteFilesStub = sinon
+            .stub(workspaceApis, 'onDidDeleteFiles')
+            .returns(new Disposable(() => undefined));
+        onDidRenameFilesStub = sinon
+            .stub(workspaceApis, 'onDidRenameFiles')
+            .returns(new Disposable(() => undefined));
         getPythonApiStub = sinon.stub(pythonApi, 'getPythonApi').resolves({
             registerEnvironmentManager: registerEnvironmentManagerStub,
         } as unknown as PythonEnvironmentApi);
@@ -170,6 +179,47 @@ suite('registerInlineScriptFeatures (feature-flag gate)', () => {
         assert.strictEqual(disposables.length, 0, 'disabled activation should not add disposables later');
         assert.strictEqual(getPythonApiStub.called, false, 'disabled activation should never touch the API later');
         assert.strictEqual(registerEnvironmentManagerStub.called, false);
+    });
+
+    test('absent flag performs no inline registration, persistence, cache, or routing-listener work', async () => {
+        isEnabledStub.returns(false);
+        const persistentStateStub = sinon.stub(persistentState, 'getWorkspacePersistentState');
+        const inspectMetaJsonStub = sinon.stub(cacheLayout, 'inspectMetaJson');
+        const writeMetaJsonStub = sinon.stub(cacheLayout, 'writeMetaJson');
+        sinon.stub(workspaceApis, 'onDidOpenTextDocument').returns(new Disposable(() => undefined));
+        sinon.stub(workspaceApis, 'onDidSaveTextDocument').returns(new Disposable(() => undefined));
+        sinon.stub(workspaceApis, 'onDidChangeTextDocument').returns(new Disposable(() => undefined));
+        sinon.stub(workspaceApis, 'getOpenTextDocuments').returns([]);
+
+        const activation = latchInlineScriptFeatureActivation();
+        const detector = new InlineScriptLazyDetector(activation.routingRegistry);
+        detector.activate();
+        const disposables: Disposable[] = [];
+        await (activation.enabled
+            ? registerInlineScriptFeatures(
+                  nativeFinder,
+                  disposables,
+                  makeFakeLog(),
+                  baseManager,
+                  globalStorageUri,
+                  activation,
+              )
+            : Promise.resolve());
+        await nextTurn();
+
+        assert.strictEqual(activation.enabled, false);
+        assert.strictEqual(activation.routingRegistry, undefined);
+        assert.strictEqual(isEnabledStub.callCount, 1);
+        assert.strictEqual(getPythonApiStub.callCount, 0);
+        assert.strictEqual(registerEnvironmentManagerStub.callCount, 0);
+        assert.strictEqual(startActivationDiscoveryStub.callCount, 0);
+        assert.strictEqual(persistentStateStub.callCount, 0);
+        assert.strictEqual(inspectMetaJsonStub.callCount, 0);
+        assert.strictEqual(writeMetaJsonStub.callCount, 0);
+        assert.strictEqual(onDidDeleteFilesStub.callCount, 0);
+        assert.strictEqual(onDidRenameFilesStub.callCount, 0);
+        assert.strictEqual(disposables.length, 0);
+        detector.dispose();
     });
 
     test('latches TRUE through deferred registration even if the live setting flips FALSE later', async () => {
