@@ -4359,6 +4359,41 @@ suite('InlineScriptEnvManager', () => {
             assert.strictEqual(refreshManager.lastValidatedMetadataIdentityProofs.has(scriptPath), false);
         });
 
+        test('ignores a stale refresh when the same metadata returns after routeability is cleared', async () => {
+            const uri = scriptUri();
+            const scriptPath = normalizePath(uri.fsPath);
+            const environment = await createOwnedEnvironment();
+            await manager.set(uri, environment);
+            const refreshManager = asMetadataRefreshManager(manager);
+            refreshManager.subscriptions[0].dispose();
+            routingRegistry.setMetadata(uri, VALID_METADATA);
+            const metadataIdentity = routingRegistry.getMetadataIdentity(uri)!;
+            const staleRevision = routingRegistry.getMetadataRevision(uri);
+            let resolveProof: ((value: boolean) => void) | undefined;
+            const proofStub = sinon.stub(refreshManager, 'currentCacheEntryProvesSourceMetadataIdentity').returns(
+                new Promise<boolean>((resolve) => {
+                    resolveProof = resolve;
+                }),
+            );
+
+            const pendingRefresh = refreshManager.refreshValidatedAssociationForMetadataInternal(
+                scriptPath,
+                uri,
+                VALID_METADATA,
+                metadataIdentity,
+                staleRevision,
+                refreshManager.associationRevisions.get(scriptPath) ?? 0,
+            );
+            await waitForStubCall(proofStub);
+            routingRegistry.clearMetadata(uri);
+            routingRegistry.setMetadata(uri, VALID_METADATA);
+            assert.ok(routingRegistry.getMetadataRevision(uri) > staleRevision);
+            resolveProof!(true);
+            await pendingRefresh;
+
+            assert.strictEqual(routingRegistry.hasValidatedAssociation(uri), false);
+        });
+
         test('ignores a stale saved-metadata refresh when an unset wins while sidecar proof awaits', async () => {
             const uri = scriptUri();
             const scriptPath = normalizePath(uri.fsPath);

@@ -158,7 +158,7 @@ suite('inlineScriptMetadata', () => {
             assert.ok(md);
             assert.deepStrictEqual([...(md.dependencies ?? [])], ['a']);
             assert.strictEqual(md.range.start, 0, 'normalized parser offsets continue to exclude the BOM');
-            assert.deepStrictEqual(md.sourceRange, { start: 0, end: text.length - 1 });
+            assert.deepStrictEqual(md.sourceRange, { start: 1, end: text.length });
         });
 
         test('shebang before block does not block detection', () => {

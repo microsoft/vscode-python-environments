@@ -346,6 +346,27 @@ suite('InlineScriptLazyDetector', () => {
         detector.dispose();
     });
 
+    test('a metadata edit invalidates an in-flight open read before metadata is registered', async () => {
+        const uri = Uri.file(path.resolve('/ws/edit-race.py'));
+        const staleRead = createDeferred<ism.InlineScriptMetadata>();
+        readMetadataStub.returns(staleRead.promise);
+        routingRegistry.setValidatedAssociation(uri, true);
+        const detector = createDetector();
+
+        const open = openListener!(makeDoc(uri)) as Promise<void>;
+        fireChange(uri, makeContentChanges(0));
+        staleRead.resolve(VALID_METADATA);
+        await open;
+
+        assert.strictEqual(routingRegistry.getMetadata(uri), undefined);
+        assert.strictEqual(routingRegistry.shouldRoute(uri), false);
+        assert.strictEqual(
+            (detector as unknown as { routingReadGenerations: Map<string, number> }).routingReadGenerations.size,
+            0,
+        );
+        detector.dispose();
+    });
+
     test('telemetry-only concurrent open + save still coalesces to a single read', async () => {
         const uri = Uri.file(path.resolve('/ws/telemetry-race.py'));
         readMetadataStub.resolves(VALID_METADATA);
@@ -413,6 +434,10 @@ suite('InlineScriptLazyDetector', () => {
 
         fireChange(uri, makeContentChanges(0));
         assert.strictEqual(routingRegistry.shouldRoute(uri), false);
+        assert.strictEqual(
+            (detector as unknown as { routingReadGenerations: Map<string, number> }).routingReadGenerations.size,
+            0,
+        );
 
         await fireSave(uri);
         assert.deepStrictEqual(routingRegistry.getMetadata(uri), VALID_METADATA);
@@ -461,6 +486,27 @@ suite('InlineScriptLazyDetector', () => {
         fireChange(uri, makeContentChanges(dependencyOffset));
 
         assert.strictEqual(routingRegistry.getMetadata(uri), undefined);
+        assert.strictEqual(routingRegistry.shouldRoute(uri), false);
+        detector.dispose();
+    });
+
+    test('invalidates routing for an edit at the end of a BOM-prefixed metadata block', async () => {
+        const uri = Uri.file(path.resolve('/elsewhere/bom.py'));
+        const source =
+            '\uFEFF# /// script\r\n# dependencies = ["requests"]\r\n# ///\r\nprint("hello")\r\n';
+        const metadata = ism.readInlineScriptMetadata(source);
+        assert.ok(metadata?.sourceRange);
+        assert.deepStrictEqual(metadata.sourceRange, {
+            start: 1,
+            end: source.indexOf('print'),
+        });
+        readMetadataStub.resolves(metadata);
+        routingRegistry.setValidatedAssociation(uri, true);
+        const detector = createDetector();
+
+        await fireOpen(uri);
+        fireChange(uri, makeContentChanges(metadata.sourceRange.end - 1));
+
         assert.strictEqual(routingRegistry.shouldRoute(uri), false);
         detector.dispose();
     });

@@ -244,13 +244,15 @@ export class InlineScriptLazyDetector implements Disposable {
             return;
         }
         if (this.routingRegistry) {
+            const key = e.document.uri.toString();
             const metadata = this.routingRegistry.getMetadata(e.document.uri);
             if (
-                metadata &&
-                this.contentChangesMayAffectMetadata(
-                    e.contentChanges,
-                    metadata.sourceRange?.end ?? metadata.range.end,
-                )
+                (metadata &&
+                    this.contentChangesMayAffectMetadata(
+                        e.contentChanges,
+                        metadata.sourceRange?.end ?? metadata.range.end,
+                    )) ||
+                (!metadata && this.inFlight.has(key))
             ) {
                 this.clearRouteability(e.document.uri);
             }
@@ -281,6 +283,10 @@ export class InlineScriptLazyDetector implements Disposable {
     private clearRouteability(uri: Uri): void {
         if (!this.routingRegistry || !shouldTrackRoutingUri(uri)) {
             return;
+        }
+        const key = uri.toString();
+        if (this.inFlight.has(key)) {
+            this.advanceRoutingReadGeneration(key);
         }
         this.routingRegistry.clearMetadata(uri);
         this.routingRegistry.setValidatedAssociation(uri, false);
@@ -314,7 +320,7 @@ export class InlineScriptLazyDetector implements Disposable {
             return;
         }
         this.inFlight.delete(key);
-        if (routingGeneration !== undefined && this.routingReadGenerations.get(key) === routingGeneration) {
+        if (routingGeneration !== undefined) {
             this.routingReadGenerations.delete(key);
         }
     }

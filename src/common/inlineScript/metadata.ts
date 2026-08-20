@@ -28,9 +28,9 @@ export interface InlineScriptMetadata {
      */
     readonly range: { readonly start: number; readonly end: number };
     /**
-     * Character offsets of the same metadata block in source text after the
-     * parser's BOM handling. Unlike {@link range}, these preserve CRLF, so
-     * they can be compared with TextDocument change offsets.
+     * Character offsets of the same metadata block in the original source
+     * text. Unlike {@link range}, these include a leading BOM and preserve
+     * CRLF, so they can be compared with TextDocument change offsets.
      *
      * Optional to keep manually constructed metadata compatible; parser
      * results always supply it.
@@ -88,7 +88,8 @@ export function readInlineScriptMetadata(scriptText: string): InlineScriptMetada
     // "UTF-8 with BOM" on Windows have this; without stripping it the
     // first line becomes "\uFEFF# /// script" and the regex fails to
     // match.
-    const sourceText = scriptText.charCodeAt(0) === 0xfeff ? scriptText.slice(1) : scriptText;
+    const bomOffset = scriptText.charCodeAt(0) === 0xfeff ? 1 : 0;
+    const sourceText = scriptText.slice(bomOffset);
     let text = sourceText;
 
     // Normalize CRLF and lone CR to LF so the canonical regex (which
@@ -226,8 +227,8 @@ export function readInlineScriptMetadata(scriptText: string): InlineScriptMetada
         tool,
         range: { start: matchStart, end },
         sourceRange: {
-            start: sourceOffsetForNormalizedOffset(sourceText, matchStart),
-            end: sourceOffsetForNormalizedOffset(sourceText, end),
+            start: bomOffset + sourceOffsetForNormalizedOffset(sourceText, matchStart),
+            end: bomOffset + sourceOffsetForNormalizedOffset(sourceText, end),
         },
     };
 }

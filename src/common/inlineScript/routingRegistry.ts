@@ -30,6 +30,7 @@ interface ScriptRoutingState {
 
 export class InlineScriptRoutingRegistry implements Disposable {
     private readonly states = new Map<string, ScriptRoutingState>();
+    private readonly metadataRevisions = new Map<string, number>();
     private readonly _onDidChangeRouteability = new EventEmitter<InlineScriptRouteabilityChangeEvent>();
     private readonly _onDidChangeMetadata = new EventEmitter<InlineScriptMetadataChangeEvent>();
 
@@ -44,16 +45,16 @@ export class InlineScriptRoutingRegistry implements Disposable {
             return;
         }
         const metadataIdentity = getInlineScriptMetadataRoutingIdentity(metadata);
+        const metadataRevision = this.nextMetadataRevision(scriptPath);
         this.update(
             scriptPath,
             (state) => {
-                const currentRevision = state?.metadataRevision ?? 0;
                 return {
                     ...state,
                     uri,
                     metadata,
                     metadataIdentity,
-                    metadataRevision: currentRevision + 1,
+                    metadataRevision,
                 };
             },
             true,
@@ -65,16 +66,16 @@ export class InlineScriptRoutingRegistry implements Disposable {
         if (!scriptPath) {
             return;
         }
+        const metadataRevision = this.nextMetadataRevision(scriptPath);
         this.update(
             scriptPath,
             (state) => {
-                const currentRevision = state?.metadataRevision ?? 0;
                 return {
                     ...state,
                     uri,
                     metadata: undefined,
                     metadataIdentity: undefined,
-                    metadataRevision: currentRevision + 1,
+                    metadataRevision,
                 };
             },
             true,
@@ -93,7 +94,7 @@ export class InlineScriptRoutingRegistry implements Disposable {
 
     public getMetadataRevision(script: Uri | string): number {
         const scriptPath = getInlineScriptRoutingKey(script);
-        return scriptPath ? (this.states.get(scriptPath)?.metadataRevision ?? 0) : 0;
+        return scriptPath ? (this.metadataRevisions.get(scriptPath) ?? 0) : 0;
     }
 
     public getUri(script: Uri | string): Uri | undefined {
@@ -125,6 +126,7 @@ export class InlineScriptRoutingRegistry implements Disposable {
 
     public dispose(): void {
         this.states.clear();
+        this.metadataRevisions.clear();
         this._onDidChangeMetadata.dispose();
         this._onDidChangeRouteability.dispose();
     }
@@ -134,7 +136,10 @@ export class InlineScriptRoutingRegistry implements Disposable {
         updater: (state: ScriptRoutingState) => ScriptRoutingState,
         fireMetadataChange: boolean = false,
     ): void {
-        const previous = this.states.get(scriptPath) ?? { metadataRevision: 0, validatedAssociation: false };
+        const previous = this.states.get(scriptPath) ?? {
+            metadataRevision: this.metadataRevisions.get(scriptPath) ?? 0,
+            validatedAssociation: false,
+        };
         const previousRouteable = this.isRouteable(previous);
         const next = updater(previous);
 
@@ -165,6 +170,12 @@ export class InlineScriptRoutingRegistry implements Disposable {
 
     private isRouteable(state: ScriptRoutingState | undefined): boolean {
         return !!state?.metadata && state.validatedAssociation;
+    }
+
+    private nextMetadataRevision(scriptPath: string): number {
+        const revision = (this.metadataRevisions.get(scriptPath) ?? 0) + 1;
+        this.metadataRevisions.set(scriptPath, revision);
+        return revision;
     }
 }
 
