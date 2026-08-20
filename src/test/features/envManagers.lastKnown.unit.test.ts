@@ -535,6 +535,107 @@ suite('PythonEnvironmentManagers getLastKnownEnvironment', () => {
         assert.strictEqual(envManagers.getLastKnownEnvironment(script), selectedEnvironment);
     });
 
+    test('publishes through the inline manager after an explicit override is cleared', async () => {
+        const script = Uri.file('/workspace/project/script.py');
+        projectsByUri.set(script.toString(), { name: 'project', uri: Uri.file('/workspace/project') });
+        const selectedSet = sinon.stub().resolves();
+        let selectedEnvironment: PythonEnvironment;
+        const selectedId = registerManager(async () => selectedEnvironment, selectedSet, 'venv');
+        let inlineEnvironment: PythonEnvironment;
+        const inlineGet = sinon.stub().callsFake(async () => inlineEnvironment);
+        const inlineId = registerManager(inlineGet, async () => undefined, 'inline-script');
+        selectedEnvironment = { ...makeEnv('selected'), envId: { id: 'selected', managerId: selectedId } };
+        inlineEnvironment = { ...makeEnv('inline'), envId: { id: 'inline', managerId: inlineId } };
+        defaultManagerId = selectedId;
+        markInlineScript(script);
+        await envManagers.setEnvironment(script, inlineEnvironment, false);
+        await envManagers.setEnvironment(script, selectedEnvironment, false);
+        await new Promise((resolve) => setImmediate(resolve));
+        selectedSet.resetHistory();
+        inlineGet.resetHistory();
+        const events: DidChangeEnvironmentEventArgs[] = [];
+        envManagers.onDidChangeActiveEnvironment((event) => events.push(event));
+
+        await envManagers.setEnvironment(script, undefined, false);
+
+        sinon.assert.calledOnceWithExactly(selectedSet, script, undefined);
+        sinon.assert.calledOnceWithExactly(inlineGet, script);
+        assert.strictEqual(envManagers.getEnvironmentManager(script)?.id, inlineId);
+        assert.strictEqual(envManagers.getLastKnownEnvironment(script), inlineEnvironment);
+        assert.deepStrictEqual(events, [
+            {
+                uri: script,
+                old: selectedEnvironment,
+                new: inlineEnvironment,
+            },
+        ]);
+    });
+
+    test('does not let override clearing overwrite a newer inline selection', async () => {
+        const script = Uri.file('/workspace/project/script.py');
+        projectsByUri.set(script.toString(), { name: 'project', uri: Uri.file('/workspace/project') });
+        let releaseOverrideClear: (() => void) | undefined;
+        let signalOverrideClear: (() => void) | undefined;
+        const overrideClearStarted = new Promise<void>((resolve) => {
+            signalOverrideClear = resolve;
+        });
+        const overrideClearGate = new Promise<void>((resolve) => {
+            releaseOverrideClear = resolve;
+        });
+        const selectedSet = sinon.stub();
+        selectedSet.onFirstCall().resolves();
+        selectedSet.onSecondCall().callsFake(async () => {
+            signalOverrideClear!();
+            await overrideClearGate;
+        });
+        let selectedEnvironment: PythonEnvironment;
+        const selectedId = registerManager(async () => selectedEnvironment, selectedSet, 'venv');
+
+        let releaseNewInline: (() => void) | undefined;
+        let signalNewInline: (() => void) | undefined;
+        const newInlineStarted = new Promise<void>((resolve) => {
+            signalNewInline = resolve;
+        });
+        const newInlineGate = new Promise<void>((resolve) => {
+            releaseNewInline = resolve;
+        });
+        const inlineSet = sinon.stub();
+        inlineSet.onFirstCall().resolves();
+        inlineSet.onSecondCall().callsFake(async () => {
+            signalNewInline!();
+            await newInlineGate;
+        });
+        let inlineEnvironment: PythonEnvironment;
+        const inlineId = registerManager(async () => inlineEnvironment, inlineSet, 'inline-script');
+        const oldInline = {
+            ...makeEnv('old-inline'),
+            envId: { id: 'old-inline', managerId: inlineId },
+        };
+        const newInline = {
+            ...makeEnv('new-inline'),
+            envId: { id: 'new-inline', managerId: inlineId },
+        };
+        inlineEnvironment = oldInline;
+        selectedEnvironment = { ...makeEnv('selected'), envId: { id: 'selected', managerId: selectedId } };
+        defaultManagerId = selectedId;
+        markInlineScript(script);
+        await envManagers.setEnvironment(script, oldInline, false);
+        await envManagers.setEnvironment(script, selectedEnvironment, false);
+
+        const clearOverride = envManagers.setEnvironment(script, undefined, false);
+        await overrideClearStarted;
+        inlineEnvironment = newInline;
+        const newerSelection = envManagers.setEnvironment(script, newInline, false);
+        await newInlineStarted;
+        releaseOverrideClear!();
+        await clearOverride;
+        releaseNewInline!();
+        await newerSelection;
+
+        assert.strictEqual(envManagers.getEnvironmentManager(script)?.id, inlineId);
+        assert.strictEqual(envManagers.getLastKnownEnvironment(script), newInline);
+    });
+
     test('clears inline routing after a no-op inline refresh during settings persistence', async () => {
         const script = Uri.file('/workspace/project/script.py');
         projectsByUri.set(script.toString(), { name: 'project', uri: Uri.file('/workspace/project') });

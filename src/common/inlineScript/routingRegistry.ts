@@ -55,6 +55,8 @@ export class InlineScriptRoutingRegistry implements Disposable {
                     metadata,
                     metadataIdentity,
                     metadataRevision,
+                    validatedAssociation:
+                        state.metadataIdentity === metadataIdentity ? state.validatedAssociation : false,
                 };
             },
             true,

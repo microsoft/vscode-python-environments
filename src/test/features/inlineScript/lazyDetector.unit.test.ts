@@ -342,7 +342,7 @@ suite('InlineScriptLazyDetector', () => {
         await save;
 
         assert.deepStrictEqual(routingRegistry.getMetadata(uri), savedMetadata);
-        assert.strictEqual(routingRegistry.shouldRoute(uri), true);
+        assert.strictEqual(routingRegistry.shouldRoute(uri), false);
         detector.dispose();
     });
 
@@ -402,6 +402,9 @@ suite('InlineScriptLazyDetector', () => {
 
         await fireOpen(uri);
 
+        assert.deepStrictEqual(routingRegistry.getMetadata(uri), VALID_METADATA);
+        assert.strictEqual(routingRegistry.shouldRoute(uri), false);
+        routingRegistry.setValidatedAssociation(uri, true);
         assert.strictEqual(routingRegistry.shouldRoute(uri), true);
         assert.ok(readMetadataStub.calledOnceWithExactly(uri), 'loose files should still refresh saved metadata');
         detector.dispose();
@@ -417,6 +420,9 @@ suite('InlineScriptLazyDetector', () => {
         const detector = createDetector();
         await flushImmediate();
 
+        assert.deepStrictEqual(routingRegistry.getMetadata(uri), VALID_METADATA);
+        assert.strictEqual(routingRegistry.shouldRoute(uri), false);
+        routingRegistry.setValidatedAssociation(uri, true);
         assert.strictEqual(routingRegistry.shouldRoute(uri), true);
         assert.ok(readMetadataStub.calledOnceWithExactly(uri), 'loose replay should refresh saved metadata');
         detector.dispose();
@@ -430,6 +436,7 @@ suite('InlineScriptLazyDetector', () => {
         const detector = createDetector();
 
         await fireOpen(uri);
+        routingRegistry.setValidatedAssociation(uri, true);
         assert.strictEqual(routingRegistry.shouldRoute(uri), true);
 
         fireChange(uri, makeContentChanges(0));
@@ -454,6 +461,7 @@ suite('InlineScriptLazyDetector', () => {
         await fireOpen(uri);
         const metadata = routingRegistry.getMetadata(uri);
         assert.ok(metadata, 'expected routing metadata after open');
+        routingRegistry.setValidatedAssociation(uri, true);
 
         fireChange(uri, makeContentChanges(metadata!.range.end + 5));
 
@@ -483,6 +491,7 @@ suite('InlineScriptLazyDetector', () => {
         const detector = createDetector();
 
         await fireOpen(uri);
+        routingRegistry.setValidatedAssociation(uri, true);
         fireChange(uri, makeContentChanges(dependencyOffset));
 
         assert.strictEqual(routingRegistry.getMetadata(uri), undefined);
@@ -505,13 +514,14 @@ suite('InlineScriptLazyDetector', () => {
         const detector = createDetector();
 
         await fireOpen(uri);
+        routingRegistry.setValidatedAssociation(uri, true);
         fireChange(uri, makeContentChanges(metadata.sourceRange.end - 1));
 
         assert.strictEqual(routingRegistry.shouldRoute(uri), false);
         detector.dispose();
     });
 
-    test('save rehydrates routing from saved file metadata rather than the live buffer', async () => {
+    test('save publishes saved file metadata before association validation', async () => {
         const uri = Uri.file(path.resolve('/elsewhere/savedState.py'));
         readMetadataStub.resolves(VALID_METADATA);
         routingRegistry.setValidatedAssociation(uri, true);
@@ -519,7 +529,8 @@ suite('InlineScriptLazyDetector', () => {
 
         await fireSave(uri);
 
-        assert.strictEqual(routingRegistry.shouldRoute(uri), true);
+        assert.deepStrictEqual(routingRegistry.getMetadata(uri), VALID_METADATA);
+        assert.strictEqual(routingRegistry.shouldRoute(uri), false);
         detector.dispose();
     });
 

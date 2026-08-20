@@ -15,6 +15,41 @@ const METADATA = {
 };
 
 suite('InlineScriptRoutingRegistry', () => {
+    test('invalidates a validated association synchronously when metadata identity changes', () => {
+        const registry = new InlineScriptRoutingRegistry();
+        const uri = Uri.file('/workspace/script.py');
+        const routeabilityEvents: boolean[] = [];
+        registry.onDidChangeRouteability((event) => routeabilityEvents.push(event.routeable));
+        registry.setMetadata(uri, METADATA);
+        registry.setValidatedAssociation(uri, true);
+
+        registry.setMetadata(uri, {
+            ...METADATA,
+            dependencies: ['httpx'],
+        });
+
+        assert.strictEqual(registry.hasValidatedAssociation(uri), false);
+        assert.strictEqual(registry.shouldRoute(uri), false);
+        assert.deepStrictEqual(routeabilityEvents, [true, false]);
+        registry.dispose();
+    });
+
+    test('preserves validation when saved metadata has the same routing identity', () => {
+        const registry = new InlineScriptRoutingRegistry();
+        const uri = Uri.file('/workspace/script.py');
+        registry.setMetadata(uri, METADATA);
+        registry.setValidatedAssociation(uri, true);
+
+        registry.setMetadata(uri, {
+            ...METADATA,
+            dependencies: ['Requests'],
+        });
+
+        assert.strictEqual(registry.hasValidatedAssociation(uri), true);
+        assert.strictEqual(registry.shouldRoute(uri), true);
+        registry.dispose();
+    });
+
     test('keeps metadata revisions monotonic after an empty state is removed', () => {
         const registry = new InlineScriptRoutingRegistry();
         const uri = Uri.file('/workspace/script.py');

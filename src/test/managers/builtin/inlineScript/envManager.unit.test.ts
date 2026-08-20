@@ -3506,11 +3506,7 @@ suite('InlineScriptEnvManager', () => {
             await manager.set(uri, environment);
 
             assert.deepStrictEqual(persistedAssociations, {
-                [normalizePath(uri.fsPath)]: {
-                    schemaVersion: 1,
-                    environmentPath: environment!.environmentPath.fsPath,
-                    metadataBinding: { kind: 'legacy' },
-                },
+                [normalizePath(uri.fsPath)]: pendingAssociationRecord(environment!.environmentPath.fsPath),
             });
             assert.strictEqual(routingRegistry.hasValidatedAssociation(uri), false);
         });
@@ -3532,11 +3528,7 @@ suite('InlineScriptEnvManager', () => {
             await manager.set(targetUri, environment!);
 
             assert.deepStrictEqual(persistedAssociations, {
-                [normalizePath(targetUri.fsPath)]: {
-                    schemaVersion: 1,
-                    environmentPath: environment!.environmentPath.fsPath,
-                    metadataBinding: { kind: 'legacy' },
-                },
+                [normalizePath(targetUri.fsPath)]: pendingAssociationRecord(environment!.environmentPath.fsPath),
             });
             assert.strictEqual(routingRegistry.hasValidatedAssociation(targetUri), false);
         });
@@ -3571,11 +3563,9 @@ suite('InlineScriptEnvManager', () => {
             await restarted.set(uri, differentOwnedEnvironment!);
 
             assert.deepStrictEqual(persistedAssociations, {
-                [normalizePath(uri.fsPath)]: {
-                    schemaVersion: 1,
-                    environmentPath: differentOwnedEnvironment!.environmentPath.fsPath,
-                    metadataBinding: { kind: 'legacy' },
-                },
+                [normalizePath(uri.fsPath)]: pendingAssociationRecord(
+                    differentOwnedEnvironment!.environmentPath.fsPath,
+                ),
             });
             restarted.dispose();
         });
@@ -3607,11 +3597,7 @@ suite('InlineScriptEnvManager', () => {
             await restarted.set(uri, environment);
 
             assert.deepStrictEqual(persistedAssociations, {
-                [normalizePath(uri.fsPath)]: {
-                    schemaVersion: 1,
-                    environmentPath: environment!.environmentPath.fsPath,
-                    metadataBinding: { kind: 'legacy' },
-                },
+                [normalizePath(uri.fsPath)]: pendingAssociationRecord(environment!.environmentPath.fsPath),
             });
             restarted.dispose();
         });
@@ -4032,6 +4018,7 @@ suite('InlineScriptEnvManager', () => {
             await nextTurn();
 
             assert.strictEqual(restartRoutingRegistry.hasValidatedAssociation(uri), false);
+            assert.strictEqual(await restarted.get(uri), environment);
             restarted.dispose();
         });
 
@@ -4133,7 +4120,7 @@ suite('InlineScriptEnvManager', () => {
                 [normalizePath(uri.fsPath)]: matchedAssociationRecord(environment.environmentPath.fsPath),
             });
             assert.strictEqual(restartRoutingRegistry.hasValidatedAssociation(uri), false);
-            assert.strictEqual(await restarted.get(uri), environment);
+            assert.strictEqual(await restarted.get(uri), undefined);
             restarted.dispose();
         });
 
@@ -4277,6 +4264,123 @@ suite('InlineScriptEnvManager', () => {
             await pending;
 
             assert.strictEqual(restartRoutingRegistry.hasValidatedAssociation(uri), true);
+            restarted.dispose();
+        });
+
+        test('validates restart routeability through the public registry event path', async () => {
+            const uri = scriptUri();
+            const environment = await createOwnedEnvironment();
+            persistedAssociations = {
+                [normalizePath(uri.fsPath)]: matchedAssociationRecord(environment.environmentPath.fsPath),
+            };
+            resolveVenvStub.resolves(environment);
+            const restartRoutingRegistry = new InlineScriptRoutingRegistry();
+            const restarted = new InlineScriptEnvManager(
+                nativeFinder,
+                api,
+                baseManager,
+                globalStorageUri,
+                makeFakeLog(),
+                restartRoutingRegistry,
+            );
+            await nextTurn();
+
+            restartRoutingRegistry.setMetadata(uri, VALID_METADATA);
+            await waitForCondition(
+                () => restartRoutingRegistry.hasValidatedAssociation(uri),
+                'Expected the registry metadata event to validate the persisted association',
+            );
+
+            assert.strictEqual(restartRoutingRegistry.shouldRoute(uri), true);
+            restarted.dispose();
+        });
+
+        test('rejects restart routeability when runtime Python differs from the sidecar base version', async () => {
+            const uri = scriptUri();
+            const environment = await createOwnedEnvironment();
+            const rebuilt = { ...environment, version: '3.13.0' };
+            persistedAssociations = {
+                [normalizePath(uri.fsPath)]: matchedAssociationRecord(environment.environmentPath.fsPath),
+            };
+            setSidecar(
+                {
+                    schemaVersion: cacheLayout.META_SCHEMA_VERSION,
+                    baseInterpreterPath: baseExecutable,
+                    baseInterpreterVersion: '3.12.4',
+                    lastUsedAt: NOW.toISOString(),
+                    sourceMetadataIdentityHashes: [
+                        cacheLayout.hashSourceMetadataIdentity(VALID_METADATA_IDENTITY),
+                    ],
+                },
+                Uri.file(environment.sysPrefix),
+            );
+            resolveVenvStub.resolves(rebuilt);
+            const restartRoutingRegistry = new InlineScriptRoutingRegistry();
+            const restarted = new InlineScriptEnvManager(
+                nativeFinder,
+                api,
+                baseManager,
+                globalStorageUri,
+                makeFakeLog(),
+                restartRoutingRegistry,
+            );
+            await nextTurn();
+
+            restartRoutingRegistry.setMetadata(uri, VALID_METADATA);
+            await waitForStubCall(resolveVenvStub);
+            await nextTurn();
+
+            assert.strictEqual(restartRoutingRegistry.hasValidatedAssociation(uri), false);
+            assert.strictEqual(await restarted.get(uri), undefined);
+            restarted.dispose();
+        });
+
+        test('rejects restart routeability when runtime Python does not satisfy requires-python', async () => {
+            const uri = scriptUri();
+            const environment = await createOwnedEnvironment();
+            const metadata = {
+                ...VALID_METADATA,
+                requiresPython: '>=3.13',
+            } satisfies metadataReader.InlineScriptMetadata;
+            const metadataIdentity = JSON.stringify({
+                requiresPython: '>=3.13',
+                dependencies: ['requests'],
+            });
+            persistedAssociations = {
+                [normalizePath(uri.fsPath)]: matchedAssociationRecord(
+                    environment.environmentPath.fsPath,
+                    metadataIdentity,
+                ),
+            };
+            setSidecar(
+                {
+                    schemaVersion: cacheLayout.META_SCHEMA_VERSION,
+                    baseInterpreterPath: baseExecutable,
+                    baseInterpreterVersion: environment.version,
+                    lastUsedAt: NOW.toISOString(),
+                    sourceMetadataIdentityHashes: [
+                        cacheLayout.hashSourceMetadataIdentity(metadataIdentity),
+                    ],
+                },
+                Uri.file(environment.sysPrefix),
+            );
+            resolveVenvStub.resolves(environment);
+            const restartRoutingRegistry = new InlineScriptRoutingRegistry();
+            const restarted = new InlineScriptEnvManager(
+                nativeFinder,
+                api,
+                baseManager,
+                globalStorageUri,
+                makeFakeLog(),
+                restartRoutingRegistry,
+            );
+            await nextTurn();
+
+            restartRoutingRegistry.setMetadata(uri, metadata);
+            await waitForStubCall(resolveVenvStub);
+            await nextTurn();
+
+            assert.strictEqual(restartRoutingRegistry.hasValidatedAssociation(uri), false);
             restarted.dispose();
         });
 
@@ -4904,7 +5008,7 @@ suite('InlineScriptEnvManager', () => {
             assert.strictEqual(listener.callCount, 0);
         });
 
-        test('refreshes a warm association rebuilt at the same cache path', async () => {
+        test('rejects a warm association rebuilt at the same cache path with a different Python release', async () => {
             const uri = scriptUri();
             const environment = await createOwnedEnvironment();
             await manager.set(uri, environment);
@@ -4918,8 +5022,8 @@ suite('InlineScriptEnvManager', () => {
             manager.onDidChangeEnvironment(listener);
             clock.tick(5_000);
 
-            assert.strictEqual(await manager.get(uri), rebuilt);
-            sinon.assert.calledOnceWithExactly(listener, { uri, old: environment, new: rebuilt });
+            assert.strictEqual(await manager.get(uri), undefined);
+            assert.strictEqual(listener.callCount, 0);
         });
 
         test('retains warm environment identity when validation finds the same version', async () => {
@@ -4959,17 +5063,20 @@ suite('InlineScriptEnvManager', () => {
             const environment = await createOwnedEnvironment();
             await manager.set(uri, environment);
             const validationManager = manager as unknown as {
-                currentCacheEntryProvesSourceMetadataIdentity(
+                readCurrentCacheEntrySidecar(
                     candidate: PythonEnvironment,
-                    metadataIdentity: string,
-                    metadata: metadataReader.InlineScriptMetadata,
-                ): Promise<boolean>;
+                ): Promise<cacheLayout.InlineScriptEnvMeta | undefined>;
             };
-            let resolveProof: ((value: boolean) => void) | undefined;
-            const proofStub = sinon.stub(validationManager, 'currentCacheEntryProvesSourceMetadataIdentity').callThrough();
-            proofStub.onFirstCall().returns(
-                new Promise<boolean>((resolve) => {
-                    resolveProof = resolve;
+            const sidecar = await makeSidecar({
+                sourceMetadataIdentityHashes: [
+                    cacheLayout.hashSourceMetadataIdentity(VALID_METADATA_IDENTITY),
+                ],
+            });
+            let resolveSidecar: ((value: cacheLayout.InlineScriptEnvMeta) => void) | undefined;
+            const sidecarStub = sinon.stub(validationManager, 'readCurrentCacheEntrySidecar').callThrough();
+            sidecarStub.onFirstCall().returns(
+                new Promise<cacheLayout.InlineScriptEnvMeta>((resolve) => {
+                    resolveSidecar = resolve;
                 }),
             );
             const listener = sinon.spy();
@@ -4977,9 +5084,9 @@ suite('InlineScriptEnvManager', () => {
             clock.tick(5_000);
 
             const pendingGet = manager.get(uri);
-            await waitForStubCall(proofStub);
+            await waitForStubCall(sidecarStub);
             await manager.set(uri, undefined);
-            resolveProof!(true);
+            resolveSidecar!(sidecar);
 
             assert.strictEqual(await pendingGet, undefined);
             assert.strictEqual(await manager.get(uri), undefined);
@@ -4992,17 +5099,20 @@ suite('InlineScriptEnvManager', () => {
             const replacementEnvironment = await createOwnedEnvironment('fedcba9876543210');
             await manager.set(uri, oldEnvironment);
             const validationManager = manager as unknown as {
-                currentCacheEntryProvesSourceMetadataIdentity(
+                readCurrentCacheEntrySidecar(
                     candidate: PythonEnvironment,
-                    metadataIdentity: string,
-                    metadata: metadataReader.InlineScriptMetadata,
-                ): Promise<boolean>;
+                ): Promise<cacheLayout.InlineScriptEnvMeta | undefined>;
             };
-            let resolveProof: ((value: boolean) => void) | undefined;
-            const proofStub = sinon.stub(validationManager, 'currentCacheEntryProvesSourceMetadataIdentity').callThrough();
-            proofStub.onFirstCall().returns(
-                new Promise<boolean>((resolve) => {
-                    resolveProof = resolve;
+            const sidecar = await makeSidecar({
+                sourceMetadataIdentityHashes: [
+                    cacheLayout.hashSourceMetadataIdentity(VALID_METADATA_IDENTITY),
+                ],
+            });
+            let resolveSidecar: ((value: cacheLayout.InlineScriptEnvMeta) => void) | undefined;
+            const sidecarStub = sinon.stub(validationManager, 'readCurrentCacheEntrySidecar').callThrough();
+            sidecarStub.onFirstCall().returns(
+                new Promise<cacheLayout.InlineScriptEnvMeta>((resolve) => {
+                    resolveSidecar = resolve;
                 }),
             );
             const listener = sinon.spy();
@@ -5010,9 +5120,9 @@ suite('InlineScriptEnvManager', () => {
             clock.tick(5_000);
 
             const pendingGet = manager.get(uri);
-            await waitForStubCall(proofStub);
+            await waitForStubCall(sidecarStub);
             await manager.set(uri, replacementEnvironment);
-            resolveProof!(true);
+            resolveSidecar!(sidecar);
 
             assert.strictEqual(await pendingGet, replacementEnvironment);
             assert.strictEqual(await manager.get(uri), replacementEnvironment);
@@ -5035,6 +5145,15 @@ suite('InlineScriptEnvManager', () => {
                 envId: { ...environment.envId, id: 'rebuilt' },
                 version: '3.13.1',
             };
+            setSidecar({
+                schemaVersion: cacheLayout.META_SCHEMA_VERSION,
+                baseInterpreterPath: baseExecutable,
+                baseInterpreterVersion: rebuilt.version,
+                lastUsedAt: NOW.toISOString(),
+                sourceMetadataIdentityHashes: [
+                    cacheLayout.hashSourceMetadataIdentity(VALID_METADATA_IDENTITY),
+                ],
+            });
             let resolveValidation: ((value: PythonEnvironment) => void) | undefined;
             resolveVenvStub.callsFake(
                 () =>

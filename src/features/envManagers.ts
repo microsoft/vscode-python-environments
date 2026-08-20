@@ -376,10 +376,20 @@ export class PythonEnvironmentManagers implements EnvironmentManagers {
         const project = scope ? this.pm.get(scope) : undefined;
         const key = this.getActiveSelectionKey(scope, manager, project);
         const operation = this.beginSelectionOperation(key);
+        const clearingInlineRoutingOverride =
+            scope instanceof Uri &&
+            environment === undefined &&
+            this.getInlineRoutingOverrideManager(scope)?.id === manager.id;
         const publishInlineSelection =
             !(scope instanceof Uri) || this.shouldPublishInlineSelectionImmediately(scope, manager);
         const inlineClearOperation =
             scope instanceof Uri && manager.id !== INLINE_SCRIPT_MANAGER_ID
+                ? this.beginSelectionOperation(this.getInlineScriptSelectionKey(scope))
+                : undefined;
+        const inlineOverrideHandoffOperation =
+            clearingInlineRoutingOverride &&
+            scope instanceof Uri &&
+            this.inlineScriptRouting?.shouldRoute(scope)
                 ? this.beginSelectionOperation(this.getInlineScriptSelectionKey(scope))
                 : undefined;
         await manager.set(scope, environment);
@@ -412,6 +422,18 @@ export class PythonEnvironmentManagers implements EnvironmentManagers {
         if (scope instanceof Uri) {
             this.updateInlineRoutingOverride(scope, manager, environment);
             this.clearInlineActiveSelection(scope, manager, inlineClearOperation);
+            if (
+                clearingInlineRoutingOverride &&
+                (await this.publishEffectiveEnvironmentAfterOverrideClear(
+                    scope,
+                    manager,
+                    key,
+                    operation,
+                    inlineOverrideHandoffOperation,
+                ))
+            ) {
+                return;
+            }
         }
         if (!publishInlineSelection) {
             return;
@@ -780,6 +802,57 @@ export class PythonEnvironmentManagers implements EnvironmentManagers {
             return;
         }
         this._inlineRoutingOverrides.delete(this.getInlineScriptSelectionKey(scope));
+    }
+
+    private async publishEffectiveEnvironmentAfterOverrideClear(
+        scope: Uri,
+        previousManager: InternalEnvironmentManager,
+        previousKey: string,
+        previousOperation: number,
+        reservedInlineOperation: number | undefined,
+    ): Promise<boolean> {
+        const effectiveManager = this.getEnvironmentManager(scope);
+        if (!effectiveManager || effectiveManager.id === previousManager.id) {
+            return false;
+        }
+        if (!this.commitSelectionOperation(previousKey, previousOperation)) {
+            return true;
+        }
+
+        const oldEnvironment = this._activeSelection.get(previousKey);
+        const project = this.pm.get(scope);
+        const effectiveKey = this.getActiveSelectionKey(scope, effectiveManager, project);
+        const effectiveOperation =
+            effectiveManager.id === INLINE_SCRIPT_MANAGER_ID && reservedInlineOperation !== undefined
+                ? reservedInlineOperation
+                : this.beginSelectionOperation(effectiveKey);
+        if (!this.isLatestSelectionOperation(effectiveKey, effectiveOperation)) {
+            return true;
+        }
+        const newEnvironment = await effectiveManager.get(scope);
+        if (
+            this.getEnvironmentManager(scope) !== effectiveManager ||
+            !this.isLatestSelectionOperation(effectiveKey, effectiveOperation) ||
+            !this.commitSelectionOperation(effectiveKey, effectiveOperation)
+        ) {
+            return true;
+        }
+
+        this._activeSelection.set(effectiveKey, newEnvironment);
+        if (!this.isSameEnvironment(oldEnvironment, newEnvironment)) {
+            await this.fireActiveEnvironmentEvents([
+                {
+                    uri: this.getActiveSelectionUri(scope, effectiveManager, project),
+                    old: oldEnvironment,
+                    new: newEnvironment,
+                },
+            ]);
+        }
+        return true;
+    }
+
+    private isLatestSelectionOperation(key: string, operation: number): boolean {
+        return (this._selectionOperationCounters.get(key) ?? 0) === operation;
     }
 
     private async handleInlineScriptRouteabilityChange(

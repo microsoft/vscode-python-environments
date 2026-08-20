@@ -1155,11 +1155,12 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
                 if (metadataMatch === 'mismatched') {
                     return undefined;
                 }
-                const metadataIdentityProven = await this.currentCacheEntryProvesSourceMetadataIdentity(
-                    resolved,
-                    metadataIdentity,
-                    metadata,
-                );
+                const sidecar = await this.readCurrentCacheEntrySidecar(resolved);
+                if (sidecar && !this.cacheEntryMatchesRuntimeAndMetadata(sidecar, resolved, metadata)) {
+                    return undefined;
+                }
+                const metadataIdentityProven =
+                    !!sidecar && this.cacheEntryProvesSourceMetadataIdentity(sidecar, resolved, metadataIdentity, metadata);
                 if (!this.isCurrentAssociationRevision(scriptPath, revision)) {
                     return this.fsPathToEnv.get(scriptPath);
                 }
@@ -1335,11 +1336,12 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
         if (metadataMatch === 'mismatched') {
             return undefined;
         }
-        const metadataIdentityProven = await this.currentCacheEntryProvesSourceMetadataIdentity(
-            resolved,
-            metadataIdentity,
-            metadata,
-        );
+        const sidecar = await this.readCurrentCacheEntrySidecar(resolved);
+        if (sidecar && !this.cacheEntryMatchesRuntimeAndMetadata(sidecar, resolved, metadata)) {
+            return undefined;
+        }
+        const metadataIdentityProven =
+            !!sidecar && this.cacheEntryProvesSourceMetadataIdentity(sidecar, resolved, metadataIdentity, metadata);
         if (!this.isCurrentAssociationRevision(scriptPath, revision)) {
             return this.fsPathToEnv.get(scriptPath);
         }
@@ -1624,10 +1626,25 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
         metadataIdentity: string,
         metadata: InlineScriptMetadata,
     ): boolean {
+        if (!this.cacheEntryMatchesRuntimeAndMetadata(sidecar, environment, metadata)) {
+            return false;
+        }
         return (
             this.sidecarProvesSourceMetadataIdentity(sidecar, metadataIdentity) ||
             this.isMetadataOnlyCacheEntryForMetadata(sidecar, environment, metadata)
         );
+    }
+
+    private cacheEntryMatchesRuntimeAndMetadata(
+        sidecar: InlineScriptEnvMeta,
+        environment: PythonEnvironment,
+        metadata: InlineScriptMetadata,
+    ): boolean {
+        if (!this.areEqualPythonReleases(environment.version, sidecar.baseInterpreterVersion)) {
+            return false;
+        }
+        const requiresPython = metadata.requiresPython?.trim();
+        return !requiresPython || this.matchesInstallConstraint(requiresPython, environment.version);
     }
 
     private async resolveVerifiedSourceMetadataIdentity(
@@ -1976,7 +1993,9 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
         if (!sourceMetadataIdentity) {
             return {
                 environmentPath,
-                metadataBinding: { kind: 'legacy' },
+                metadataBinding: currentMetadataIdentity
+                    ? { kind: 'pending', sourceIdentity: currentMetadataIdentity }
+                    : { kind: 'legacy' },
             };
         }
         return {
