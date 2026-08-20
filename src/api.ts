@@ -749,7 +749,7 @@ export interface PackageManager {
      * Retrieves the list of available versions for a given package, newest first.
      *
      * Implementations should:
-     * - resolve to a non-empty array of {@link Pep440Version} objects on success;
+     * - resolve to an array of {@link Pep440Version} objects on success;
      * - throw a {@link PackageVersionLookupNotSupportedError} when this manager cannot look up
      *   versions at all (an unsupported capability);
      * - let operational failures (command, network, or malformed/unparseable output) propagate
@@ -1179,6 +1179,22 @@ export function isPackageVersionLookupNotSupportedError(
     );
 }
 
+/**
+ * Controls how package version lookup failures are reported.
+ */
+export interface GetPackageAvailableVersionsOptions {
+    /**
+     * Determines whether lookup failures preserve the legacy `undefined` result or reject.
+     *
+     * - `legacy` resolves to `undefined` for unsupported lookups and operational failures.
+     *   This remains the default for backward compatibility, but may be removed in a future
+     *   major API version.
+     * - `throw` rejects with {@link PackageVersionLookupNotSupportedError} for unsupported
+     *   lookups and propagates operational failures unchanged.
+     */
+    errorMode?: 'legacy' | 'throw';
+}
+
 export interface PythonPackageGetterApi {
     /**
      * Refresh the list of packages in a Python Environment.
@@ -1200,24 +1216,27 @@ export interface PythonPackageGetterApi {
     /**
      * Get the list of available versions for a package, newest first.
      *
-     * The returned promise distinguishes an unsupported capability from an operational failure:
-     * - It resolves to a non-empty array of {@link Pep440Version} objects when versions are found.
-     * - It rejects with a {@link PackageVersionLookupNotSupportedError} when the environment's
-     *   package manager does not support version lookup (for example, the default/missing manager,
-     *   Poetry, or a Pip older than 21.2). Use {@link isPackageVersionLookupNotSupportedError} to
-     *   detect this reliably across extension bundle boundaries and fall back to manual entry.
-     * - It rejects with the original error for any other failure (command, network, or
-     *   malformed/unparseable output), which callers should handle or surface normally.
+     * By default, this preserves the legacy behavior of resolving to `undefined` for unsupported
+     * lookups and operational failures. Pass `{ errorMode: 'throw' }` to distinguish unsupported
+     * capabilities from operational failures: unsupported lookups reject with
+     * {@link PackageVersionLookupNotSupportedError}, while other failures propagate unchanged.
      *
      * @param environment The Python Environment context for the lookup.
      * @param packageName The name of the package to look up.
-     * @returns A promise that resolves to an array of {@link Pep440Version} objects (newest first).
-     * @throws {@link PackageVersionLookupNotSupportedError} when version lookup is unsupported.
+     * @param options Controls how lookup failures are reported.
+     * @returns A promise that resolves to an array of {@link Pep440Version} objects (newest first),
+     *          or `undefined` in legacy mode when lookup is unsupported or fails.
      */
     getPackageAvailableVersions(
         environment: PythonEnvironment,
         packageName: string,
+        options: GetPackageAvailableVersionsOptions & { errorMode: 'throw' },
     ): Promise<Pep440Version[]>;
+    getPackageAvailableVersions(
+        environment: PythonEnvironment,
+        packageName: string,
+        options?: GetPackageAvailableVersionsOptions,
+    ): Promise<Pep440Version[] | undefined>;
 
     /**
      * Event raised when the list of packages in a Python Environment changes.

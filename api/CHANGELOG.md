@@ -11,10 +11,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Added `PackageVersionLookupNotSupportedError`, thrown when a package manager cannot list a package's available versions (an unsupported capability, as distinct from an operational failure). The error exposes a stable `code` (`'PackageVersionLookupNotSupported'`) discriminator.
 - Added the `isPackageVersionLookupNotSupportedError(error): error is PackageVersionLookupNotSupportedError` type guard. It recognizes the error via its stable `code`, so it works even when the error crosses an extension bundle boundary and `instanceof` would fail.
+- Added an optional `errorMode` to `PythonPackageGetterApi.getPackageAvailableVersions`. The default `legacy` mode preserves the existing `undefined` result for unsupported lookups and operational failures. The opt-in `throw` mode rejects with `PackageVersionLookupNotSupportedError` for unsupported capabilities and propagates operational failures unchanged.
 
 ### Changed
 
-- `PythonPackageGetterApi.getPackageAvailableVersions` now distinguishes an unsupported capability from an operational failure. It rejects with `PackageVersionLookupNotSupportedError` when the environment's package manager does not support version lookup (the default/missing manager, Poetry, or a Pip older than 21.2), and it propagates the original error for operational failures (command, network, or malformed/unparseable output) instead of resolving to `undefined`. On success it resolves to a non-empty array of versions, and its return type is now `Promise<Pep440Version[]>`.
 - Documented that `PackageManager.getPackageAvailableVersions` implementations should throw `PackageVersionLookupNotSupportedError` when version lookup is unsupported and let operational failures propagate. Resolving to `undefined` continues to be treated by callers as an unsupported capability.
 
 ## [1.2.0]

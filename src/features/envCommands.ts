@@ -378,7 +378,7 @@ export async function managePackageVersion(context: unknown, em: EnvironmentMana
         try {
             availableVersions = await withProgress(
                 { location: ProgressLocation.Window, title: l10n.t('Fetching available versions for {0}...', pkg.name) },
-                () => packageManager.getPackageAvailableVersions(environment, pkg.name),
+                () => packageManager.getPackageAvailableVersions(environment, pkg.name, { errorMode: 'throw' }),
             );
         } catch (error) {
             if (!isPackageVersionLookupNotSupportedError(error)) {

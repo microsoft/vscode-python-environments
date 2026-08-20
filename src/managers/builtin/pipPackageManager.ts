@@ -186,7 +186,7 @@ export class PipPackageManager implements PackageManager, Disposable {
      *
      * @param environment - The Python environment to query.
      * @param packageName - The package whose versions should be listed.
-     * @returns A promise that resolves to a non-empty array of {@link Pep440Version} objects.
+     * @returns A promise that resolves to an array of {@link Pep440Version} objects.
      * @throws {@link PackageVersionLookupNotSupportedError} when pip is too old to list versions.
      */
     async getPackageAvailableVersions(
