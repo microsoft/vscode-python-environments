@@ -200,7 +200,7 @@ async function execPipList(environment: PythonEnvironment, log?: LogOutputChanne
     try {
         return await runPython(
             environment.execInfo.run.executable,
-            ['-m', 'pip', 'list', '--format=json', ...(args ?? [])],
+            ['-m', 'pip', 'list', '--format=json', '--disable-pip-version-check', ...(args ?? [])],
             undefined,
             log,
             undefined,

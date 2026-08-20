@@ -16,6 +16,10 @@ This guide covers the full testing lifecycle:
 4. **🛠️ Fixing Problems** - Resolve compilation and runtime issues
 5. **✅ Validation** - Ensure coverage and resilience
 
+## Learnings
+
+- Pip commands that return JSON must pass `--disable-pip-version-check`; the process helper combines stderr with stdout, so update notices can otherwise make valid JSON unparseable (1).
+
 ### When to Use This Guide
 
 **User Requests Testing:**
