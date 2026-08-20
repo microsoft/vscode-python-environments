@@ -4946,6 +4946,58 @@ suite('InlineScriptEnvManager', () => {
             assert.strictEqual(routingRegistry.hasValidatedAssociation(uri), false);
         });
 
+        test('waits for persisted association initialization before handling a script deletion', async () => {
+            await nextTurn();
+            manager.dispose();
+            const uri = scriptUri();
+            const scriptPath = normalizePath(uri.fsPath);
+            persistedAssociations = {
+                [scriptPath]: matchedAssociationRecord(path.join(tempRoot, 'cached-python')),
+            };
+            let signalInitialRead!: () => void;
+            let releaseInitialRead!: () => void;
+            const initialReadStarted = new Promise<void>((resolve) => {
+                signalInitialRead = resolve;
+            });
+            const initialReadBarrier = new Promise<void>((resolve) => {
+                releaseInitialRead = resolve;
+            });
+            let associationReads = 0;
+            workspaceState.get.callsFake(async (key: string) => {
+                if (key !== INLINE_SCRIPT_ENVS_KEY) {
+                    return undefined;
+                }
+                associationReads += 1;
+                if (associationReads === 1) {
+                    signalInitialRead();
+                    await initialReadBarrier;
+                }
+                return persistedAssociations;
+            });
+            workspaceState.set.resetHistory();
+            manager = new InlineScriptEnvManager(
+                nativeFinder,
+                api,
+                baseManager,
+                globalStorageUri,
+                makeFakeLog(),
+                routingRegistry,
+            );
+            await initialReadStarted;
+
+            fireDelete(uri);
+            await nextTurn();
+            releaseInitialRead();
+            await waitForCondition(
+                () => workspaceStateSetCalls(INLINE_SCRIPT_ENVS_KEY).length === 1,
+                'deleted association should be persisted after initialization completes',
+            );
+
+            assert.deepStrictEqual(persistedAssociations, {});
+            assert.strictEqual(await manager.get(uri), undefined);
+            assert.strictEqual(routingRegistry.hasValidatedAssociation(uri), false);
+        });
+
         test('clears persisted association state for the old path when a script is renamed', async () => {
             const oldUri = scriptUri('old.py');
             const newUri = scriptUri('new.py');

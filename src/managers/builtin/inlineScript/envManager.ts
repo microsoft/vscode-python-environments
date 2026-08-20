@@ -197,6 +197,7 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
     private discoveryRetryTimer: ReturnType<typeof setTimeout> | undefined;
     private readonly subscriptions: Disposable[] = [];
     private persistenceQueue: Promise<void> = Promise.resolve();
+    private readonly persistedAssociationsLoaded: Promise<void>;
     private selectionQueue: Promise<void> = Promise.resolve();
     private cacheMaintenanceQueue: Promise<void> = Promise.resolve();
     private cacheMaintenanceBarrier: Deferred<void> | undefined;
@@ -246,12 +247,11 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
                 });
             }),
         );
-        queueMicrotask(() => {
-            void this.initializePersistedAssociations().catch((error) => {
-                this.log.warn(
-                    `Failed to prime inline-script environment associations: ${getErrorMessage(error)}`,
-                );
-            });
+        this.persistedAssociationsLoaded = this.loadPersistedAssociations();
+        void this.initializePersistedAssociations().catch((error) => {
+            this.log.warn(
+                `Failed to prime inline-script environment associations: ${getErrorMessage(error)}`,
+            );
         });
     }
 
@@ -1812,12 +1812,16 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
         this.lastValidatedMetadataIdentityProofs.delete(scriptPath);
     }
 
-    private initializePersistedAssociations(): Promise<void> {
+    private loadPersistedAssociations(): Promise<void> {
         return this.enqueuePersistence(async (state) => {
             const rawAssociations = await state.get<unknown>(INLINE_SCRIPT_ENVS_KEY);
             const parsed = this.parsePersistedAssociations(rawAssociations);
             this.applyPersistedAssociations(parsed?.records ?? {});
-        }).then(async () => {
+        });
+    }
+
+    private initializePersistedAssociations(): Promise<void> {
+        return this.persistedAssociationsLoaded.then(async () => {
             await Promise.all(
                 [...this.fsPathToPersistedAssociation.keys()].map(async (scriptPath) => {
                     const uri = this.routingRegistry.getUri(scriptPath);
@@ -2164,6 +2168,7 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
 
     private clearAssociationsForScripts(scripts: readonly Uri[]): Promise<void> {
         return this.enqueueSelection(async () => {
+            await this.persistedAssociationsLoaded;
             const changes = scripts
                 .filter((uri) => uri.scheme === 'file')
                 .map((uri) => ({
