@@ -3,7 +3,13 @@ import * as vscode from 'vscode';
 import { compare } from '@renovatebot/pep440';
 import assert from 'assert';
 import * as path from 'path';
-import { Package, PythonEnvironment, PythonEnvironmentApi, PythonProject } from '../../api';
+import {
+    Package,
+    PythonEnvironment,
+    PythonEnvironmentApi,
+    PythonProject,
+    isPackageVersionLookupNotSupportedError,
+} from '../../api';
 import { CONDA_MANAGER_ID, DEFAULT_PACKAGE_MANAGER_ID, VENV_MANAGER_ID } from '../../common/constants';
 import { PythonProjectSettings } from '../../internal.api';
 import { getConda } from '../../managers/conda/condaUtils';
@@ -210,12 +216,23 @@ for (const profile of profiles) {
         test(`${profile.name} Package Manager should list available package versions`, async function () {
             const packages = await api.getPackages(environment!, { skipCache: true });
             assert.ok(packages, 'Unable to list packages before version lookup');
+
             if (!profile.supportsVersionLookup(packages)) {
+                // The profile declares that the active manager/tool version does not support
+                // version lookup, so the API must surface the typed unsupported-capability error
+                // rather than an operational failure. Assert that contract, then skip.
+                await assert.rejects(
+                    () => api.getPackageAvailableVersions(environment!, 'requests', { errorMode: 'throw' }),
+                    (error: unknown) => isPackageVersionLookupNotSupportedError(error),
+                    `${profile.name} did not report unsupported version lookup with the typed error`,
+                );
                 this.skip();
                 return;
             }
 
-            const versions = await api.getPackageAvailableVersions(environment!, 'requests');
+            // Supported profiles must resolve to a defined, non-empty result; operational failures
+            // propagate and fail the test instead of silently resolving to undefined.
+            const versions = await api.getPackageAvailableVersions(environment!, 'requests', { errorMode: 'throw' });
             assert.ok(versions, `${profile.name} unexpectedly failed to retrieve package versions`);
             assert.ok(versions.length > 0, 'No package versions available');
         });
