@@ -444,7 +444,11 @@ function validateMeta(value: unknown): InlineScriptEnvMeta | 'unsupported' | und
         return undefined;
     }
     const obj = value as Record<string, unknown>;
-    if (typeof obj.schemaVersion !== 'number') {
+    if (
+        typeof obj.schemaVersion !== 'number' ||
+        !Number.isSafeInteger(obj.schemaVersion) ||
+        obj.schemaVersion <= 0
+    ) {
         return undefined;
     }
     if (obj.schemaVersion > META_SCHEMA_VERSION) {

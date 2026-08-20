@@ -420,6 +420,13 @@ suite('inlineScriptCacheLayout', () => {
             assert.deepStrictEqual(await inspectMetaJson(envDir), { kind: 'unsupported' });
         });
 
+        for (const schemaVersion of [0, -1, 1.5]) {
+            test(`classifies malformed numeric schema version ${schemaVersion} as invalid`, async () => {
+                await writeRaw(JSON.stringify({ ...makeMeta(), schemaVersion }));
+                assert.deepStrictEqual(await inspectMetaJson(envDir), { kind: 'invalid' });
+            });
+        }
+
         test('classifies non-ENOENT sidecar stat failures as unavailable', async () => {
             sinon.stub(fsExtra, 'lstat').rejects(Object.assign(new Error('permission denied'), { code: 'EACCES' }));
             assert.deepStrictEqual(await inspectMetaJson(envDir), { kind: 'unavailable' });
