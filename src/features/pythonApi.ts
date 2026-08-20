@@ -10,12 +10,14 @@ import {
     EnvironmentManager,
     GetEnvironmentScope,
     GetEnvironmentsScope,
+    GetPackageAvailableVersionsOptions,
     GetPackagesOptions,
     Package,
     PackageId,
     PackageInfo,
     PackageManagementOptions,
     PackageManager,
+    PackageVersionLookupNotSupportedError,
     Pep440Version,
     PythonBackgroundRunOptions,
     PythonEnvironment,
@@ -33,7 +35,6 @@ import {
     ResolveEnvironmentContext,
     SetEnvironmentScope,
 } from '../api';
-import { PackageVersionLookupNotSupportedError } from '../common/errors/NotSupportedError';
 import { traceError, traceInfo } from '../common/logging';
 import { pickEnvironmentManager } from '../common/pickers/managers';
 import { timeout } from '../common/utils/asyncUtils';
@@ -320,18 +321,32 @@ export class PythonEnvironmentApiImpl implements PythonEnvironmentApi {
         }
         return manager.getPackages(context, options);
     }
+    getPackageAvailableVersions(
+        context: PythonEnvironment,
+        packageName: string,
+        options: GetPackageAvailableVersionsOptions & { errorMode: 'throw' },
+    ): Promise<Pep440Version[]>;
+    getPackageAvailableVersions(
+        context: PythonEnvironment,
+        packageName: string,
+        options?: GetPackageAvailableVersionsOptions,
+    ): Promise<Pep440Version[] | undefined>;
     async getPackageAvailableVersions(
         context: PythonEnvironment,
         packageName: string,
+        options?: GetPackageAvailableVersionsOptions,
     ): Promise<Pep440Version[] | undefined> {
         await waitForEnvManagerId([context.envId.managerId]);
         const manager = this.envManagers.getPackageManager(context);
         if (!manager) {
-            throw new PackageVersionLookupNotSupportedError(
-                `No package manager supports version lookup for: ${context.envId.id}`,
-            );
+            if (options?.errorMode === 'throw') {
+                throw new PackageVersionLookupNotSupportedError(
+                    `No package manager is available to look up versions for: ${context.envId.id}`,
+                );
+            }
+            return undefined;
         }
-        return manager.getPackageAvailableVersions(context, packageName);
+        return manager.getPackageAvailableVersions(context, packageName, options);
     }
     onDidChangePackages: Event<DidChangePackagesEventArgs> = this._onDidChangePackages.event;
 

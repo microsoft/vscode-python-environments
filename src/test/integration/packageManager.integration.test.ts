@@ -2,9 +2,13 @@ import * as vscode from 'vscode';
 
 import { compare } from '@renovatebot/pep440';
 import assert from 'assert';
-import { Package, PythonEnvironment, PythonEnvironmentApi } from '../../api';
+import {
+    Package,
+    PythonEnvironment,
+    PythonEnvironmentApi,
+    isPackageVersionLookupNotSupportedError,
+} from '../../api';
 import { CONDA_MANAGER_ID, DEFAULT_PACKAGE_MANAGER_ID } from '../../common/constants';
-import { isPackageVersionLookupNotSupportedError } from '../../common/errors/NotSupportedError';
 import { ENVS_EXTENSION_ID } from '../constants';
 import { waitForCondition } from '../testUtils';
 import {
@@ -197,7 +201,9 @@ for (const profile of profiles) {
 
             let versions;
             try {
-                versions = await api.getPackageAvailableVersions(environment!, profile.packageName);
+                versions = await api.getPackageAvailableVersions(environment!, profile.packageName, {
+                    errorMode: 'throw',
+                });
             } catch (error) {
                 if (isPackageVersionLookupNotSupportedError(error)) {
                     assert.strictEqual(

@@ -21,10 +21,10 @@ import {
     Package,
     PackageManagementOptions,
     PackageManager,
+    PackageVersionLookupNotSupportedError,
     PythonEnvironment,
     PythonEnvironmentApi,
 } from '../../api';
-import { PackageVersionLookupNotSupportedError } from '../../common/errors/NotSupportedError';
 import { spawnProcess } from '../../common/childProcess.apis';
 import { showErrorMessage, showInputBox, withProgress } from '../../common/window.apis';
 import { normalizePackageName } from '../builtin/utils';
@@ -174,13 +174,22 @@ export class PoetryPackageManager implements PackageManager, Disposable {
         return versionStr ? (parse(versionStr) ?? undefined) : undefined;
     }
 
+    /**
+     * Reports that Poetry cannot list available package versions.
+     *
+     * Poetry has no native "list available versions" command. Poetry 2.x exposes `poetry search`,
+     * but PyPI disabled the backing endpoint, so there is no reliable way to enumerate versions.
+     * This throws the typed unsupported-capability error so callers can fall back to manual entry.
+     *
+     * @param _environment - Unused.
+     * @param _packageName - Unused.
+     * @throws {@link PackageVersionLookupNotSupportedError} always.
+     */
     async getPackageAvailableVersions(
         _environment: PythonEnvironment,
         _packageName: string,
     ): Promise<Pep440Version[]> {
-        // Poetry doesn't have a native "list available versions" command.
-        // Poetry 2.x supports `poetry search` but it was disabled on PyPI.
-        throw new PackageVersionLookupNotSupportedError('Poetry does not support package version lookup');
+        throw new PackageVersionLookupNotSupportedError('Poetry does not support listing available package versions.');
     }
 
     formatInstallSpec(packageName: string, version: string): string {

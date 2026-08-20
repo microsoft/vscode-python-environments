@@ -18,10 +18,10 @@ import {
     Package,
     PackageManagementOptions,
     PackageManager,
+    PackageVersionLookupNotSupportedError,
     PythonEnvironment,
     PythonEnvironmentApi,
 } from '../../api';
-import { PackageVersionLookupNotSupportedError } from '../../common/errors/NotSupportedError';
 import { showErrorMessage, withProgress } from '../../common/window.apis';
 import { updatePackagesAndNotify } from '../common/packageChanges';
 import { runPython, runUV, shouldUseUv } from './helpers';
@@ -163,12 +163,40 @@ export class PipPackageManager implements PackageManager, Disposable {
     async getVersion(environment: PythonEnvironment): Promise<Pep440Version | undefined> {
         try {
             const useUv = await shouldUseUv(this.log, environment.environmentPath.fsPath);
-            return await this.getVersionOrThrow(environment, useUv);
+            if (useUv) {
+                const result = await runUV(['--version'], undefined, this.log);
+                // "uv X.Y.Z"
+                const match = result.match(/^uv\s+(\d+\.\d+(?:\.\d+)*)/);
+                return match ? (parse(match[1]) ?? undefined) : undefined;
+            }
+            const result = await runPython(
+                environment.execInfo?.run?.executable ?? 'python',
+                ['-m', 'pip', '--version'],
+                undefined,
+                this.log,
+            );
+            // "pip X.Y.Z from /path/to/pip (python X.Y)"
+            const match = result.match(/^pip\s+(\d+\.\d+(?:\.\d+)*)/);
+            return match ? (parse(match[1]) ?? undefined) : undefined;
         } catch {
             return undefined;
         }
     }
 
+    /**
+     * Lists available versions for a package, newest first.
+     *
+     * Distinguishes an unsupported capability from an operational failure:
+     * - Throws {@link PackageVersionLookupNotSupportedError} when the environment's pip is older
+     *   than 21.2 (which predates `pip index versions`).
+     * - Lets operational failures (missing interpreter/version, command, network, or
+     *   malformed/unparseable output) propagate instead of returning `undefined`.
+     *
+     * @param environment - The Python environment to query.
+     * @param packageName - The package whose versions should be listed.
+     * @returns A promise that resolves to an array of {@link Pep440Version} objects.
+     * @throws {@link PackageVersionLookupNotSupportedError} when pip is too old to list versions.
+     */
     async getPackageAvailableVersions(
         environment: PythonEnvironment,
         packageName: string,
@@ -182,7 +210,8 @@ export class PipPackageManager implements PackageManager, Disposable {
         if (!baseVersion) {
             throw new Error(`Python version is unavailable for environment: ${environment.envId.id}`);
         }
-        // uv - Run pip via `uv tool run pip`
+
+        // uv - Run pip via `uv tool run pip`; uv always emits the machine-readable JSON output.
         const useUv = await shouldUseUv(this.log, environment.environmentPath.fsPath);
         if (useUv) {
             const output = await runUV(
@@ -190,11 +219,12 @@ export class PipPackageManager implements PackageManager, Disposable {
                 undefined,
                 this.log,
             );
-            return requireAvailableVersions(parsePipIndexVersionsJson(output), 'uv');
+            return requireParsedVersions(parsePipIndexVersionsJson(output), 'uv');
         }
 
-        const pipVersion = await this.getVersionOrThrow(environment, false);
-        // pip >= 25.1 - use `pip index versions <package> --json` to get available versions in a machine readable format.
+        const pipVersion = await this.resolvePipVersionOrThrow(python);
+
+        // pip >= 25.1 - `pip index versions <package> --json` returns a machine-readable format.
         if (compare(pipVersion.public, '25.1') >= 0) {
             const output = await runPython(
                 python,
@@ -202,9 +232,10 @@ export class PipPackageManager implements PackageManager, Disposable {
                 undefined,
                 this.log,
             );
-            return requireAvailableVersions(parsePipIndexVersionsJson(output), 'pip');
+            return requireParsedVersions(parsePipIndexVersionsJson(output), 'pip');
         }
 
+        // pip 21.2 - 25.0 - only the human-readable text output is available.
         if (compare(pipVersion.public, '21.2') >= 0) {
             const output = await runPython(
                 python,
@@ -212,27 +243,29 @@ export class PipPackageManager implements PackageManager, Disposable {
                 undefined,
                 this.log,
             );
-            return requireAvailableVersions(parsePipIndexVersionsText(output), 'pip');
+            return requireParsedVersions(parsePipIndexVersionsText(output), 'pip');
         }
 
+        // pip < 21.2 predates `pip index versions`; version lookup is an unsupported capability.
         throw new PackageVersionLookupNotSupportedError(
-            `Package version lookup requires pip 21.2 or newer; found ${pipVersion.public}`,
+            `Package version lookup requires pip 21.2 or newer; the environment has pip ${pipVersion.public}.`,
         );
     }
 
-    private async getVersionOrThrow(environment: PythonEnvironment, useUv: boolean): Promise<Pep440Version> {
-        const result = useUv
-            ? await runUV(['--version'], undefined, this.log)
-            : await runPython(
-                  environment.execInfo?.run?.executable ?? 'python',
-                  ['-m', 'pip', '--version'],
-                  undefined,
-                  this.log,
-              );
-        const match = result.match(useUv ? /^uv\s+(\d+\.\d+(?:\.\d+)*)/ : /^pip\s+(\d+\.\d+(?:\.\d+)*)/);
+    /**
+     * Resolves the environment's pip version, throwing when it cannot be determined.
+     *
+     * Unlike {@link getVersion}, failures here propagate so an operational problem (for example,
+     * pip is missing or the command fails) is surfaced instead of being misreported as an
+     * unsupported capability.
+     */
+    private async resolvePipVersionOrThrow(python: string): Promise<Pep440Version> {
+        const result = await runPython(python, ['-m', 'pip', '--version'], undefined, this.log);
+        // "pip X.Y.Z from /path/to/pip (python X.Y)"
+        const match = result.match(/^pip\s+(\d+\.\d+(?:\.\d+)*)/);
         const version = match ? parse(match[1]) : null;
         if (!version) {
-            throw new Error(`Unable to parse ${useUv ? 'uv' : 'pip'} version from: ${result.trim()}`);
+            throw new Error(`Unable to determine the pip version from: ${result.trim()}`);
         }
         return version;
     }
@@ -254,17 +287,29 @@ export class PipPackageManager implements PackageManager, Disposable {
     }
 }
 
-function requireAvailableVersions(
-    versions: Pep440Version[] | undefined,
-    packageManager: 'pip' | 'uv',
-): Pep440Version[] {
+/**
+ * Ensures a parse step produced versions, converting a parsing miss into a propagating
+ * operational error instead of silently returning `undefined`.
+ */
+function requireParsedVersions(versions: Pep440Version[] | undefined, tool: 'pip' | 'uv'): Pep440Version[] {
     if (!versions) {
-        throw new Error(`Unable to parse available package versions from ${packageManager} output`);
+        throw new Error(`Unable to parse available package versions from ${tool} output.`);
     }
     return versions;
 }
 
-function getPythonVersionForPackageLookup(version: string): string | undefined {
+/**
+ * Extracts a `major.minor[.micro]` string suitable for pip's `--python-version` flag from a
+ * Python interpreter version string.
+ *
+ * Interpreter versions can include release-level and serial suffixes (for example
+ * `3.13.14.final.0`) that are not valid PEP 440 versions, so this uses a tolerant numeric-prefix
+ * match instead of a PEP 440 parse.
+ *
+ * @param version - The interpreter version string (e.g. `"3.13.14"` or `"3.13.14.final.0"`).
+ * @returns The dotted numeric version (e.g. `"3.13.14"`), or `undefined` when there is no numeric prefix.
+ */
+export function getPythonVersionForPackageLookup(version: string): string | undefined {
     const match = version.match(/^\s*(\d+)\.(\d+)(?:\.(\d+))?/);
     return match ? [match[1], match[2], match[3]].filter((segment) => segment !== undefined).join('.') : undefined;
 }

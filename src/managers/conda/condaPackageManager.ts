@@ -193,7 +193,7 @@ export class CondaPackageManager implements PackageManager, Disposable {
         const output = await runCondaExecutable(['search', packageName, '--json'], this.log);
         const parsed = JSON.parse(output);
         if (!parsed || typeof parsed !== 'object' || !Array.isArray(parsed[packageName])) {
-            throw new Error(`Conda returned invalid package version data for: ${packageName}`);
+            throw new Error(`Conda returned unexpected package version data for: ${packageName}`);
         }
         const uniqueVersions = new Map<string, Pep440Version>();
         parsed[packageName]

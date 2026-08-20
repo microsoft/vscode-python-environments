@@ -746,11 +746,22 @@ export interface PackageManager {
     getVersion?(environment: PythonEnvironment): Promise<Pep440Version | undefined>;
 
     /**
-     * Retrieves the list of available versions for a given package.
+     * Retrieves the list of available versions for a given package, newest first.
+     *
+     * Implementations should:
+     * - resolve to an array of {@link Pep440Version} objects on success;
+     * - throw a {@link PackageVersionLookupNotSupportedError} when this manager cannot look up
+     *   versions at all (an unsupported capability);
+     * - let operational failures (command, network, or malformed/unparseable output) propagate
+     *   instead of swallowing them into `undefined`.
+     *
+     * Resolving to `undefined` is treated by callers as an unsupported capability, equivalent to
+     * throwing {@link PackageVersionLookupNotSupportedError}.
+     *
      * @param environment - The Python environment context for the lookup.
      * @param packageName - The name of the package to look up.
-     * @returns A promise that resolves to an array of {@link Pep440Version} objects (newest first),
-     *          or `undefined` if this manager does not support version listing.
+     * @returns A promise that resolves to an array of {@link Pep440Version} objects (newest first).
+     * @throws {@link PackageVersionLookupNotSupportedError} when version lookup is unsupported.
      */
     getPackageAvailableVersions?(
         environment: PythonEnvironment,
@@ -1118,6 +1129,72 @@ export interface PythonPackageManagerRegistrationApi {
     registerPackageManager(manager: PackageManager, options?: { extensionId?: string }): Disposable;
 }
 
+/**
+ * Error thrown when a package manager cannot list available package versions.
+ *
+ * This distinguishes an *unsupported capability* from an *operational failure* (such as a
+ * failed command, a network error, or malformed/unparseable output). Consumers of
+ * {@link PythonPackageGetterApi.getPackageAvailableVersions} should treat this specific error
+ * as a signal to fall back to manual version entry, while letting any other error propagate.
+ *
+ * The {@link code} property carries a stable, string-literal discriminator so the error can be
+ * recognized reliably across extension bundle boundaries, where `instanceof` may fail because
+ * each bundle can load its own copy of this class. Prefer {@link isPackageVersionLookupNotSupportedError}
+ * over a bare `instanceof` check for that reason.
+ */
+export class PackageVersionLookupNotSupportedError extends Error {
+    /**
+     * Stable discriminator identifying this error type across bundle boundaries.
+     */
+    public readonly code = 'PackageVersionLookupNotSupported';
+
+    constructor(message?: string) {
+        super(message ?? 'The package manager does not support looking up available package versions.');
+        this.name = 'PackageVersionLookupNotSupportedError';
+        // Preserve the prototype chain when this class is transpiled to older targets so that
+        // `instanceof` continues to work within a single bundle.
+        Object.setPrototypeOf(this, PackageVersionLookupNotSupportedError.prototype);
+    }
+}
+
+/**
+ * Type guard reporting whether an error represents unsupported package version lookup.
+ *
+ * Uses the stable {@link PackageVersionLookupNotSupportedError.code} discriminator, so it returns
+ * `true` even when the error crossed an extension bundle boundary and `instanceof` would fail.
+ *
+ * @param error The value to test.
+ * @returns `true` if `error` is a {@link PackageVersionLookupNotSupportedError} (or a structurally
+ *          equivalent error carrying the same `code`).
+ */
+export function isPackageVersionLookupNotSupportedError(
+    error: unknown,
+): error is PackageVersionLookupNotSupportedError {
+    return (
+        error instanceof PackageVersionLookupNotSupportedError ||
+        (typeof error === 'object' &&
+            error !== null &&
+            'code' in error &&
+            (error as { code?: unknown }).code === 'PackageVersionLookupNotSupported')
+    );
+}
+
+/**
+ * Controls how package version lookup failures are reported.
+ */
+export interface GetPackageAvailableVersionsOptions {
+    /**
+     * Determines whether lookup failures preserve the legacy `undefined` result or reject.
+     *
+     * - `legacy` resolves to `undefined` for unsupported lookups and operational failures.
+     *   This remains the default for backward compatibility, but may be removed in a future
+     *   major API version.
+     * - `throw` rejects with {@link PackageVersionLookupNotSupportedError} for unsupported
+     *   lookups and propagates operational failures unchanged.
+     */
+    errorMode?: 'legacy' | 'throw';
+}
+
 export interface PythonPackageGetterApi {
     /**
      * Refresh the list of packages in a Python Environment.
@@ -1139,17 +1216,26 @@ export interface PythonPackageGetterApi {
     /**
      * Get the list of available versions for a package, newest first.
      *
-     * Support depends on the package manager backing the environment. Managers that do
-     * not implement version lookup resolve to `undefined`.
+     * By default, this preserves the legacy behavior of resolving to `undefined` for unsupported
+     * lookups and operational failures. Pass `{ errorMode: 'throw' }` to distinguish unsupported
+     * capabilities from operational failures: unsupported lookups reject with
+     * {@link PackageVersionLookupNotSupportedError}, while other failures propagate unchanged.
      *
      * @param environment The Python Environment context for the lookup.
      * @param packageName The name of the package to look up.
+     * @param options Controls how lookup failures are reported.
      * @returns A promise that resolves to an array of {@link Pep440Version} objects (newest first),
-     *          or `undefined` if the package manager does not support version listing.
+     *          or `undefined` in legacy mode when lookup is unsupported or fails.
      */
     getPackageAvailableVersions(
         environment: PythonEnvironment,
         packageName: string,
+        options: GetPackageAvailableVersionsOptions & { errorMode: 'throw' },
+    ): Promise<Pep440Version[]>;
+    getPackageAvailableVersions(
+        environment: PythonEnvironment,
+        packageName: string,
+        options?: GetPackageAvailableVersionsOptions,
     ): Promise<Pep440Version[] | undefined>;
 
     /**

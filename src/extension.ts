@@ -45,6 +45,7 @@ import { ProjectCreatorsImpl } from './features/creators/projectCreators';
 import {
     addPythonProjectCommand,
     copyPathToClipboard,
+    clearScriptEnvironmentCacheCommand,
     createAnyEnvironmentCommand,
     createEnvironmentCommand,
     createTerminalCommand,
@@ -94,7 +95,12 @@ import { PythonStatusBarImpl } from './features/views/pythonStatusBar';
 import { updateViewsAndStatus } from './features/views/revealHandler';
 import { TemporaryStateManager } from './features/views/temporaryStateManager';
 import { PythonEnvTreeItem } from './features/views/treeViewItems';
-import { collectEnvironmentInfo, getEnvManagerAndPackageManagerConfigLevels, runPetInTerminalImpl } from './helpers';
+import {
+    collectEnvironmentInfo,
+    getEnvManagerAndPackageManagerConfigLevels,
+    isInlineScriptsFeatureEnabled,
+    runPetInTerminalImpl,
+} from './helpers';
 import { EnvironmentManagers, ProjectCreators, PythonProjectManager } from './internal.api';
 import { registerInlineScriptFeatures } from './managers/builtin/inlineScript/main';
 import { registerSystemPythonFeatures } from './managers/builtin/main';
@@ -396,6 +402,13 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
             await envManagers.clearCache(undefined);
             await clearShellProfileCache(shellStartupProviders);
         }),
+        ...(isInlineScriptsFeatureEnabled()
+            ? [
+                  commands.registerCommand('python-envs.clearScriptEnvCache', async () => {
+                      await clearScriptEnvironmentCacheCommand(envManagers, projectManager);
+                  }),
+              ]
+            : []),
         commands.registerCommand('python-envs.runInTerminal', (item) => {
             return runInTerminalCommand(item, api, terminalManager);
         }),

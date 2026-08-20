@@ -5,6 +5,18 @@ All notable changes to the `@vscode/python-environments` API package are documen
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.3.0]
+
+### Added
+
+- Added `PackageVersionLookupNotSupportedError`, thrown when a package manager cannot list a package's available versions (an unsupported capability, as distinct from an operational failure). The error exposes a stable `code` (`'PackageVersionLookupNotSupported'`) discriminator.
+- Added the `isPackageVersionLookupNotSupportedError(error): error is PackageVersionLookupNotSupportedError` type guard. It recognizes the error via its stable `code`, so it works even when the error crosses an extension bundle boundary and `instanceof` would fail.
+- Added an optional `errorMode` to `PythonPackageGetterApi.getPackageAvailableVersions`. The default `legacy` mode preserves the existing `undefined` result for unsupported lookups and operational failures. The opt-in `throw` mode rejects with `PackageVersionLookupNotSupportedError` for unsupported capabilities and propagates operational failures unchanged.
+
+### Changed
+
+- Documented that `PackageManager.getPackageAvailableVersions` implementations should throw `PackageVersionLookupNotSupportedError` when version lookup is unsupported and let operational failures propagate. Resolving to `undefined` continues to be treated by callers as an unsupported capability.
+
 ## [1.2.0]
 
 ### Added

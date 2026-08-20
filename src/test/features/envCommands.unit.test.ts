@@ -4,9 +4,16 @@ import * as typeMoq from 'typemoq';
 import { Uri } from 'vscode';
 import { PythonEnvironment, PythonProject } from '../../api';
 import * as commandApi from '../../common/command.api';
+import { INLINE_SCRIPT_MANAGER_ID } from '../../common/constants';
 import * as managerApi from '../../common/pickers/managers';
 import * as projectApi from '../../common/pickers/projects';
-import { createAnyEnvironmentCommand, removePythonProject, revealEnvInManagerView } from '../../features/envCommands';
+import * as windowApis from '../../common/window.apis';
+import {
+    clearScriptEnvironmentCacheCommand,
+    createAnyEnvironmentCommand,
+    removePythonProject,
+    revealEnvInManagerView,
+} from '../../features/envCommands';
 import * as settingHelpers from '../../features/settings/settingHelpers';
 import { EnvManagerView } from '../../features/views/envManagersView';
 import { ProjectEnvironment, ProjectItem } from '../../features/views/treeViewItems';
@@ -213,6 +220,123 @@ suite('Remove Python Project Command Tests', () => {
             (envManagers.setEnvironment as sinon.SinonStub).calledOnceWithExactly(project.uri, undefined),
             'Should clear the project environment through the central manager',
         );
+    });
+});
+
+suite('Clear Script Environment Cache Command Tests', () => {
+    teardown(() => {
+        sinon.restore();
+    });
+
+    test('cancels without clearing the cache or touching project settings', async () => {
+        const clearCache = sinon.stub().resolves();
+        const envManagers = {
+            getEnvironmentManager: sinon.stub().withArgs(INLINE_SCRIPT_MANAGER_ID).returns({
+                supportsClearCache: () => true,
+                clearCache,
+            }),
+        } as unknown as EnvironmentManagers;
+        const projectManager = {
+            getProjects: sinon.stub().returns([]),
+            remove: sinon.stub(),
+        } as unknown as PythonProjectManager;
+        sinon.stub(windowApis, 'showWarningMessage').resolves(undefined);
+        const removeInlineSettings = sinon.stub(settingHelpers, 'removeInlineScriptPythonProjectSettings').resolves([]);
+
+        await clearScriptEnvironmentCacheCommand(envManagers, projectManager);
+
+        sinon.assert.notCalled(clearCache);
+        sinon.assert.notCalled(removeInlineSettings);
+        sinon.assert.notCalled(projectManager.remove as sinon.SinonStub);
+    });
+
+    test('clears cache before inline settings cleanup and unloads removed projects', async () => {
+        const calls: string[] = [];
+        const inlineProject: PythonProject = {
+            uri: Uri.file('/workspace/script.py'),
+            name: 'script.py',
+        };
+        const clearCache = sinon.stub().callsFake(async () => {
+            calls.push('clearCache');
+        });
+        const envManagers = {
+            getEnvironmentManager: sinon.stub().withArgs(INLINE_SCRIPT_MANAGER_ID).returns({
+                supportsClearCache: () => true,
+                clearCache,
+            }),
+        } as unknown as EnvironmentManagers;
+        const projectManager = {
+            getProjects: sinon.stub().callsFake(() => {
+                calls.push('getProjects');
+                return [inlineProject];
+            }),
+            remove: sinon.stub().callsFake(() => {
+                calls.push('removeProjects');
+            }),
+        } as unknown as PythonProjectManager;
+        sinon.stub(windowApis, 'showWarningMessage').resolves('Clear Cache' as never);
+        const removeInlineSettings = sinon
+            .stub(settingHelpers, 'removeInlineScriptPythonProjectSettings')
+            .callsFake(async (projects) => {
+                calls.push('removeInlineSettings');
+                assert.deepStrictEqual(projects, [inlineProject]);
+                return [inlineProject];
+            });
+
+        await clearScriptEnvironmentCacheCommand(envManagers, projectManager);
+
+        sinon.assert.calledOnce(clearCache);
+        sinon.assert.calledOnce(removeInlineSettings);
+        sinon.assert.calledOnceWithExactly(projectManager.remove as sinon.SinonStub, [inlineProject]);
+        assert.deepStrictEqual(calls, ['clearCache', 'getProjects', 'removeInlineSettings', 'removeProjects']);
+    });
+
+    test('keeps loaded projects when inline settings cleanup leaves them configured', async () => {
+        const inlineProject: PythonProject = {
+            uri: Uri.file('/workspace/runner'),
+            name: 'runner',
+        };
+        const clearCache = sinon.stub().resolves();
+        const envManagers = {
+            getEnvironmentManager: sinon.stub().withArgs(INLINE_SCRIPT_MANAGER_ID).returns({
+                supportsClearCache: () => true,
+                clearCache,
+            }),
+        } as unknown as EnvironmentManagers;
+        const projectManager = {
+            getProjects: sinon.stub().returns([inlineProject]),
+            remove: sinon.stub(),
+        } as unknown as PythonProjectManager;
+        sinon.stub(windowApis, 'showWarningMessage').resolves('Clear Cache' as never);
+        const removeInlineSettings = sinon.stub(settingHelpers, 'removeInlineScriptPythonProjectSettings').resolves([]);
+
+        await clearScriptEnvironmentCacheCommand(envManagers, projectManager);
+
+        sinon.assert.calledOnce(clearCache);
+        sinon.assert.calledOnceWithExactly(removeInlineSettings, [inlineProject]);
+        sinon.assert.notCalled(projectManager.remove as sinon.SinonStub);
+    });
+
+    test('preserves project settings when cache cleanup reports a partial failure', async () => {
+        const clearCache = sinon.stub().rejects(new Error('one cache entry could not be deleted'));
+        const envManagers = {
+            getEnvironmentManager: sinon.stub().withArgs(INLINE_SCRIPT_MANAGER_ID).returns({
+                supportsClearCache: () => true,
+                clearCache,
+            }),
+        } as unknown as EnvironmentManagers;
+        const projectManager = {
+            getProjects: sinon.stub().returns([]),
+            remove: sinon.stub(),
+        } as unknown as PythonProjectManager;
+        sinon.stub(windowApis, 'showWarningMessage').resolves('Clear Cache' as never);
+        const removeInlineSettings = sinon.stub(settingHelpers, 'removeInlineScriptPythonProjectSettings').resolves([]);
+
+        await assert.rejects(clearScriptEnvironmentCacheCommand(envManagers, projectManager), /could not be deleted/);
+
+        sinon.assert.calledOnce(clearCache);
+        sinon.assert.notCalled(removeInlineSettings);
+        sinon.assert.notCalled(projectManager.remove as sinon.SinonStub);
     });
 });
 

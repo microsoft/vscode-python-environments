@@ -1,7 +1,12 @@
 import * as path from 'path';
 import { ConfigurationScope, ConfigurationTarget, Uri, WorkspaceConfiguration, WorkspaceFolder } from 'vscode';
 import { PythonProject } from '../../api';
-import { DEFAULT_ENV_MANAGER_ID, DEFAULT_PACKAGE_MANAGER_ID, SYSTEM_MANAGER_ID } from '../../common/constants';
+import {
+    DEFAULT_ENV_MANAGER_ID,
+    DEFAULT_PACKAGE_MANAGER_ID,
+    INLINE_SCRIPT_MANAGER_ID,
+    SYSTEM_MANAGER_ID,
+} from '../../common/constants';
 import { traceError, traceInfo, traceVerbose, traceWarn } from '../../common/logging';
 import { getGlobalPersistentState } from '../../common/persistentState';
 import { normalizePath } from '../../common/utils/pathUtils';
@@ -9,6 +14,123 @@ import { EventNames } from '../../common/telemetry/constants';
 import { sendTelemetryEvent } from '../../common/telemetry/sender';
 import * as workspaceApis from '../../common/workspace.apis';
 import { PythonProjectManager, PythonProjectSettings } from '../../internal.api';
+
+interface ResolvedPythonProjectSettingSource {
+    readonly setting: PythonProjectSettings;
+    readonly uri: Uri;
+    readonly workspaceFolder: WorkspaceFolder;
+    readonly source: 'global' | 'workspace' | 'workspaceFolder';
+    readonly target: ConfigurationTarget.Global | ConfigurationTarget.Workspace | ConfigurationTarget.WorkspaceFolder;
+}
+
+interface ResolvedPythonProjectSetting {
+    readonly uri: Uri;
+    readonly workspaceFolder: WorkspaceFolder;
+    readonly effective: ResolvedPythonProjectSettingSource;
+    readonly sources: readonly ResolvedPythonProjectSettingSource[];
+}
+
+function resolvePythonProjectSettingSource(
+    setting: PythonProjectSettings,
+    workspaceFolder: WorkspaceFolder,
+    allWorkspaceFolders: readonly WorkspaceFolder[],
+    source: 'global' | 'workspace' | 'workspaceFolder',
+    target: ConfigurationTarget.Global | ConfigurationTarget.Workspace | ConfigurationTarget.WorkspaceFolder,
+): ResolvedPythonProjectSettingSource | undefined {
+    const resolvedWorkspaceFolder = setting.workspace
+        ? allWorkspaceFolders.find((candidate) => candidate.name === setting.workspace)
+        : workspaceFolder;
+    if (!resolvedWorkspaceFolder || resolvedWorkspaceFolder.uri.toString() !== workspaceFolder.uri.toString()) {
+        return undefined;
+    }
+    return {
+        setting,
+        uri: Uri.file(path.resolve(resolvedWorkspaceFolder.uri.fsPath, setting.path)),
+        workspaceFolder,
+        source,
+        target,
+    };
+}
+
+function resolveProjectSettingUri(
+    setting: PythonProjectSettings,
+    workspaceFolder: WorkspaceFolder,
+    allWorkspaceFolders: readonly WorkspaceFolder[] = workspaceApis.getWorkspaceFolders() ?? [workspaceFolder],
+): Uri | undefined {
+    const resolvedWorkspaceFolder = setting.workspace
+        ? allWorkspaceFolders.find((candidate) => candidate.name === setting.workspace)
+        : workspaceFolder;
+    return resolvedWorkspaceFolder
+        ? Uri.file(path.resolve(resolvedWorkspaceFolder.uri.fsPath, setting.path))
+        : undefined;
+}
+
+function getResolvedPythonProjectSettings(
+    workspaceFolder: WorkspaceFolder,
+    config: WorkspaceConfiguration = workspaceApis.getConfiguration('python-envs', workspaceFolder.uri),
+): ResolvedPythonProjectSetting[] {
+    const allWorkspaceFolders = workspaceApis.getWorkspaceFolders() ?? [workspaceFolder];
+    const projectsInspect =
+        typeof config.inspect === 'function' ? config.inspect<PythonProjectSettings[]>('pythonProjects') : undefined;
+    const fallbackSettings =
+        projectsInspect === undefined ? config.get<PythonProjectSettings[]>('pythonProjects', []) : undefined;
+    const orderedSources: ResolvedPythonProjectSettingSource[] = [
+        ...(projectsInspect?.globalValue ?? [])
+            .map((setting) =>
+                resolvePythonProjectSettingSource(
+                    setting,
+                    workspaceFolder,
+                    allWorkspaceFolders,
+                    'global',
+                    ConfigurationTarget.Global,
+                ),
+            )
+            .filter((setting): setting is ResolvedPythonProjectSettingSource => setting !== undefined),
+        ...(projectsInspect?.workspaceValue ?? fallbackSettings ?? [])
+            .map((setting) =>
+                resolvePythonProjectSettingSource(
+                    setting,
+                    workspaceFolder,
+                    allWorkspaceFolders,
+                    'workspace',
+                    ConfigurationTarget.Workspace,
+                ),
+            )
+            .filter((setting): setting is ResolvedPythonProjectSettingSource => setting !== undefined),
+        ...(projectsInspect?.workspaceFolderValue ?? [])
+            .map((setting) =>
+                resolvePythonProjectSettingSource(
+                    setting,
+                    workspaceFolder,
+                    allWorkspaceFolders,
+                    'workspaceFolder',
+                    ConfigurationTarget.WorkspaceFolder,
+                ),
+            )
+            .filter((setting): setting is ResolvedPythonProjectSettingSource => setting !== undefined),
+    ];
+
+    const grouped = new Map<string, ResolvedPythonProjectSetting>();
+    for (const source of orderedSources) {
+        const key = source.uri.toString();
+        const existing = grouped.get(key);
+        if (existing) {
+            grouped.set(key, {
+                ...existing,
+                effective: source,
+                sources: [...existing.sources, source],
+            });
+        } else {
+            grouped.set(key, {
+                uri: source.uri,
+                workspaceFolder,
+                effective: source,
+                sources: [source],
+            });
+        }
+    }
+    return Array.from(grouped.values());
+}
 
 function getSettings(
     wm: PythonProjectManager,
@@ -347,6 +469,175 @@ export interface EditProjectSettings {
     envManager?: string;
     packageManager?: string;
     workspace?: string;
+}
+
+function matchesProjectSettingEdit(
+    setting: PythonProjectSettings,
+    edit: EditProjectSettings,
+    workspaceFolder: WorkspaceFolder,
+): boolean {
+    const projectPath = normalizePath(edit.project.uri.fsPath);
+    const settingUri = resolveProjectSettingUri(setting, workspaceFolder);
+    if (!settingUri || normalizePath(settingUri.fsPath) !== projectPath) {
+        return false;
+    }
+    if (edit.workspace !== undefined && setting.workspace !== edit.workspace) {
+        return false;
+    }
+    if (edit.envManager !== undefined && setting.envManager !== edit.envManager) {
+        return false;
+    }
+    if (edit.packageManager !== undefined && setting.packageManager !== edit.packageManager) {
+        return false;
+    }
+    return true;
+}
+
+function hasProjectSetting(
+    settings: readonly PythonProjectSettings[],
+    project: PythonProject,
+    workspaceFolder: WorkspaceFolder,
+): boolean {
+    const projectPath = normalizePath(project.uri.fsPath);
+    return settings.some((setting) => {
+        const settingUri = resolveProjectSettingUri(setting, workspaceFolder);
+        return settingUri ? normalizePath(settingUri.fsPath) === projectPath : false;
+    });
+}
+
+function cloneProjectSettings(
+    settings: readonly PythonProjectSettings[] | undefined,
+): PythonProjectSettings[] | undefined {
+    return settings?.map((setting) => ({ ...setting }));
+}
+
+export async function removeInlineScriptPythonProjectSettings(
+    currentProjects: readonly PythonProject[],
+): Promise<PythonProject[]> {
+    const currentProjectsByUri = new Map(currentProjects.map((project) => [project.uri.toString(), project] as const));
+    const workspaceFolders = workspaceApis.getWorkspaceFolders() ?? [];
+    const globalConfig = workspaceApis.getConfiguration('python-envs', workspaceFolders[0]?.uri);
+    const globalValueOriginal = cloneProjectSettings(
+        globalConfig.inspect<PythonProjectSettings[]>('pythonProjects')?.globalValue,
+    );
+    const globalValueRemaining =
+        globalValueOriginal?.filter((projectSetting) => projectSetting.envManager !== INLINE_SCRIPT_MANAGER_ID) ?? [];
+    const promises: Thenable<void>[] = [];
+    if (globalValueOriginal !== undefined && globalValueRemaining.length !== globalValueOriginal.length) {
+        promises.push(
+            globalConfig.update(
+                'pythonProjects',
+                globalValueRemaining.length > 0 ? globalValueRemaining : undefined,
+                ConfigurationTarget.Global,
+            ),
+        );
+    }
+
+    const workspaceEntries: Array<readonly [WorkspaceFolder, EditProjectSettings[]]> = [];
+    for (const workspaceFolder of workspaceFolders) {
+        const edits: EditProjectSettings[] = getResolvedPythonProjectSettings(workspaceFolder)
+            .filter((resolvedSetting) =>
+                resolvedSetting.sources.some((source) => source.setting.envManager === INLINE_SCRIPT_MANAGER_ID),
+            )
+            .map((resolvedSetting) => ({
+                project:
+                    currentProjectsByUri.get(resolvedSetting.uri.toString()) ?? {
+                        name: path.basename(resolvedSetting.uri.fsPath) || resolvedSetting.effective.setting.path,
+                        uri: resolvedSetting.uri,
+                    },
+                envManager: INLINE_SCRIPT_MANAGER_ID,
+            }));
+
+        if (edits.length > 0) {
+            workspaceEntries.push([workspaceFolder, edits]);
+        }
+    }
+
+    if (workspaceEntries.length === 0) {
+        await Promise.all(promises);
+        return [];
+    }
+
+    const removedProjects = new Map<string, PythonProject>();
+    const folderRemainingSettings = new Map<string, PythonProjectSettings[]>();
+    const folderExistingSettings = new Map<string, PythonProjectSettings[]>();
+    let workspaceConfig: WorkspaceConfiguration | undefined;
+    let workspaceValueOriginal: PythonProjectSettings[] | undefined;
+
+    workspaceEntries.forEach(([workspaceFolder, edits]) => {
+        const config = workspaceApis.getConfiguration('python-envs', workspaceFolder.uri);
+        const projectsInspect = config.inspect<PythonProjectSettings[]>('pythonProjects');
+        workspaceConfig ??= config;
+        workspaceValueOriginal ??= cloneProjectSettings(projectsInspect?.workspaceValue);
+
+        const workspaceFolderOriginal = cloneProjectSettings(projectsInspect?.workspaceFolderValue) ?? [];
+        folderExistingSettings.set(workspaceFolder.uri.toString(), workspaceFolderOriginal);
+        const workspaceFolderRemaining = workspaceFolderOriginal.filter(
+            (projectSetting) => !edits.some((edit) => matchesProjectSettingEdit(projectSetting, edit, workspaceFolder)),
+        );
+        folderRemainingSettings.set(workspaceFolder.uri.toString(), workspaceFolderRemaining);
+
+        if (workspaceFolderRemaining.length !== workspaceFolderOriginal.length) {
+            promises.push(
+                config.update(
+                    'pythonProjects',
+                    workspaceFolderRemaining.length > 0 ? workspaceFolderRemaining : undefined,
+                    ConfigurationTarget.WorkspaceFolder,
+                ),
+            );
+        }
+    });
+
+    const aggregatedEdits = workspaceEntries.flatMap(([workspaceFolder, edits]) =>
+        edits.map((edit) => ({ workspaceFolder, edit })),
+    );
+    const workspaceValueRemaining =
+        workspaceValueOriginal?.filter(
+            (projectSetting) =>
+                !aggregatedEdits.some(({ workspaceFolder, edit }) =>
+                    matchesProjectSettingEdit(projectSetting, edit, workspaceFolder),
+                ),
+        ) ?? [];
+
+    if (
+        workspaceConfig &&
+        workspaceValueOriginal !== undefined &&
+        workspaceValueRemaining.length !== workspaceValueOriginal.length
+    ) {
+        promises.push(
+            workspaceConfig.update(
+                'pythonProjects',
+                workspaceValueRemaining.length > 0 ? workspaceValueRemaining : undefined,
+                ConfigurationTarget.Workspace,
+            ),
+        );
+    }
+
+    workspaceEntries.forEach(([workspaceFolder, edits]) => {
+        const existingSettings = [
+            ...(globalValueOriginal ?? []),
+            ...(workspaceValueOriginal ?? []),
+            ...((folderExistingSettings.get(workspaceFolder.uri.toString()) ?? [])),
+        ];
+        const remainingSettings = [
+            ...globalValueRemaining,
+            ...workspaceValueRemaining,
+            ...((folderRemainingSettings.get(workspaceFolder.uri.toString()) ?? [])),
+        ];
+        edits.filter(
+            (edit) =>
+                existingSettings.some((projectSetting) => matchesProjectSettingEdit(projectSetting, edit, workspaceFolder)) &&
+                !hasProjectSetting(remainingSettings, edit.project, workspaceFolder),
+        ).forEach((edit) => {
+            removedProjects.set(edit.project.uri.toString(), edit.project);
+        });
+    });
+
+    await Promise.all(promises);
+
+    return Array.from(removedProjects.values())
+        .map((project) => currentProjectsByUri.get(project.uri.toString()))
+        .filter((project): project is PythonProject => project !== undefined);
 }
 
 export async function addPythonProjectSetting(edits: EditProjectSettings[]): Promise<void> {
