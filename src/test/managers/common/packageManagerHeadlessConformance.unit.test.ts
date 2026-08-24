@@ -15,13 +15,18 @@ import * as errorUtils from '../../../common/errors/utils';
 import * as windowApis from '../../../common/window.apis';
 import * as workspaceApis from '../../../common/workspace.apis';
 import { InternalPackageManager } from '../../../internal.api';
+import { PipInstallCommand } from '../../../managers/builtin/commands/install';
+import { PipListCommand } from '../../../managers/builtin/commands/list';
+import * as helpers from '../../../managers/builtin/helpers';
 import { PipPackageManager } from '../../../managers/builtin/pipPackageManager';
 import * as pipUtils from '../../../managers/builtin/pipUtils';
-import * as builtinUtils from '../../../managers/builtin/utils';
 import * as uvEnvironments from '../../../managers/builtin/uvEnvironments';
 import { VenvManager } from '../../../managers/builtin/venvManager';
+import { CondaInstallCommand } from '../../../managers/conda/commands/install';
+import { CondaListCommand } from '../../../managers/conda/commands/list';
 import { CondaPackageManager } from '../../../managers/conda/condaPackageManager';
 import * as condaUtils from '../../../managers/conda/condaUtils';
+import { PoetryAddCommand } from '../../../managers/poetry/commands/add';
 import { PoetryManager } from '../../../managers/poetry/poetryManager';
 import { PoetryPackageManager } from '../../../managers/poetry/poetryPackageManager';
 import * as poetryUtils from '../../../managers/poetry/poetryUtils';
@@ -56,14 +61,11 @@ suite('Package manager headless conformance', () => {
     test('rejects failures without showing error notifications', async () => {
         const operationError = new Error('package operation failed');
         const withProgress = sinon.stub(windowApis, 'withProgress');
-        sinon.stub(builtinUtils, 'managePackages').rejects(operationError);
-        sinon.stub(condaUtils, 'managePackages').rejects(operationError);
+        sinon.stub(helpers, 'shouldUseUv').resolves(false);
+        sinon.stub(PipInstallCommand.prototype, 'execute').rejects(operationError);
+        sinon.stub(CondaInstallCommand.prototype, 'execute').rejects(operationError);
+        sinon.stub(PoetryAddCommand.prototype, 'execute').rejects(operationError);
         sinon.stub(poetryUtils, 'getPoetry').resolves('poetry');
-        sinon.stub(childProcessApis, 'spawnProcess').callsFake(() => {
-            const process = new MockChildProcess('poetry', ['add', 'requests']);
-            setImmediate(() => process.emit('error', operationError));
-            return process as unknown as ReturnType<typeof childProcessApis.spawnProcess>;
-        });
         const showErrorMessage = sinon.stub(windowApis, 'showErrorMessage').resolves(undefined);
         const showErrorMessageWithLogs = sinon.stub(errorUtils, 'showErrorMessageWithLogs').resolves();
 
@@ -82,19 +84,12 @@ suite('Package manager headless conformance', () => {
 
     test('suppresses Pip refresh failures without showing progress or error notifications', async () => {
         const withProgress = sinon.stub(windowApis, 'withProgress');
-        sinon.stub(builtinUtils, 'managePackages').resolves();
+        sinon.stub(PipInstallCommand.prototype, 'execute').resolves();
         sinon.stub(uvEnvironments, 'getUvEnvironments').resolves([]);
         sinon.stub(workspaceApis, 'getConfiguration').returns({
             get: sinon.stub().withArgs('alwaysUseUv').returns(false),
         } as unknown as ReturnType<typeof workspaceApis.getConfiguration>);
-        const spawnProcess = sinon.stub(childProcessApis, 'spawnProcess').callsFake(() => {
-            const process = new MockChildProcess('python', ['-m', 'pip', 'list']);
-            setImmediate(() => {
-                process.emit('exit', 1, null);
-                process.emit('close', 1, null);
-            });
-            return process as unknown as ReturnType<typeof childProcessApis.spawnProcess>;
-        });
+        const listPackages = sinon.stub(PipListCommand.prototype, 'execute').rejects(new Error('pip list failed'));
         sinon.stub(PipPackageManager.prototype, 'getDirectPackageNames').resolves(undefined);
         const showErrorMessage = sinon.stub(windowApis, 'showErrorMessage').resolves(undefined);
         const showErrorMessageWithLogs = sinon.stub(errorUtils, 'showErrorMessageWithLogs').resolves();
@@ -103,7 +98,7 @@ suite('Package manager headless conformance', () => {
         await manager.manage(environment, { install: ['requests'], runHeadless: true });
         await flushImmediate();
 
-        assert.ok(spawnProcess.called);
+        assert.ok(listPackages.called);
         assert.ok(withProgress.notCalled);
         assert.ok(showErrorMessage.notCalled);
         assert.ok(showErrorMessageWithLogs.notCalled);
@@ -112,8 +107,8 @@ suite('Package manager headless conformance', () => {
     test('rejects Conda refresh failures without showing progress or error notifications', async () => {
         const refreshError = new Error('package refresh failed');
         const withProgress = sinon.stub(windowApis, 'withProgress');
-        sinon.stub(condaUtils, 'managePackages').resolves();
-        sinon.stub(condaUtils, 'runCondaExecutable').rejects(refreshError);
+        sinon.stub(CondaInstallCommand.prototype, 'execute').resolves();
+        sinon.stub(CondaListCommand.prototype, 'execute').rejects(refreshError);
         const showErrorMessage = sinon.stub(windowApis, 'showErrorMessage').resolves(undefined);
         const showErrorMessageWithLogs = sinon.stub(errorUtils, 'showErrorMessageWithLogs').resolves();
         const manager = createManagers().conda;

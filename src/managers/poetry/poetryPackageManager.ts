@@ -20,6 +20,7 @@ import {
     Package,
     PackageManagementOptions,
     PackageManager,
+    PackageVersionLookupNotSupportedError,
     PythonEnvironment,
     PythonEnvironmentApi,
 } from '../../api';
@@ -86,39 +87,46 @@ export class PoetryPackageManager implements PackageManager, Disposable {
             }
         }
 
+        const execute = async (token?: CancellationToken): Promise<void> => {
+            try {
+                await this.runPoetryManage({ install: toInstall, uninstall: toUninstall }, token);
+                await updatePackagesAndNotify(
+                    this,
+                    environment,
+                    this.packages.get(environment.envId.id),
+                    (changes) => {
+                        this._onDidChangePackages.fire({ environment, manager: this, changes });
+                    },
+                );
+            } catch (e) {
+                if (e instanceof CancellationError) {
+                    throw e;
+                }
+                this.log.error('Error managing packages with Poetry', e);
+                if (!options.runHeadless) {
+                    setImmediate(async () => {
+                        const result = await showErrorMessage('Error managing packages with Poetry', 'View Output');
+                        if (result === 'View Output') {
+                            this.log.show();
+                        }
+                    });
+                }
+                throw e;
+            }
+        };
+
+        if (options.runHeadless) {
+            await execute();
+            return;
+        }
+
         await withProgress(
             {
                 location: ProgressLocation.Notification,
                 title: 'Managing packages with Poetry',
                 cancellable: true,
             },
-            async (_progress, token) => {
-                try {
-                    await this.runPoetryManage({ install: toInstall, uninstall: toUninstall }, token);
-                    await updatePackagesAndNotify(
-                        this,
-                        environment,
-                        this.packages.get(environment.envId.id),
-                        (changes) => {
-                            this._onDidChangePackages.fire({ environment, manager: this, changes });
-                        },
-                    );
-                } catch (e) {
-                    if (e instanceof CancellationError) {
-                        throw e;
-                    }
-                    this.log.error('Error managing packages with Poetry', e);
-                    if (!options.runHeadless) {
-                        setImmediate(async () => {
-                            const result = await showErrorMessage('Error managing packages with Poetry', 'View Output');
-                            if (result === 'View Output') {
-                                this.log.show();
-                            }
-                        });
-                    }
-                    throw e;
-                }
-            },
+            (_progress, token) => execute(token),
         );
     }
 
@@ -177,11 +185,10 @@ export class PoetryPackageManager implements PackageManager, Disposable {
     async getPackageAvailableVersions(
         _environment: PythonEnvironment,
         _packageName: string,
-    ): Promise<Pep440Version[] | undefined> {
-        // Poetry doesn't have a native "list available versions" command.
-        // Poetry 2.x supports `poetry search` but it was disabled on PyPI.
-        // Return undefined to indicate this manager doesn't support version listing.
-        return undefined;
+    ): Promise<Pep440Version[]> {
+        throw new PackageVersionLookupNotSupportedError(
+            'Poetry does not provide a package version lookup command supported by this extension.',
+        );
     }
 
     formatInstallSpec(packageName: string, version: string): string {

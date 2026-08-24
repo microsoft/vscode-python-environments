@@ -3,6 +3,7 @@ import { compare } from '@renovatebot/pep440';
 import * as path from 'path';
 import {
     CancellationError,
+    CancellationToken,
     Disposable,
     Event,
     EventEmitter,
@@ -62,6 +63,9 @@ export class CondaPackageManager implements PackageManager, Disposable {
         let toUninstall: string[] = [...(options.uninstall ?? [])];
 
         if (toInstall.length === 0 && toUninstall.length === 0) {
+            if (options.runHeadless) {
+                return;
+            }
             const result = await getCommonCondaPackagesToInstall(environment, options, this.api);
             if (result) {
                 toInstall = result.install;
@@ -71,69 +75,71 @@ export class CondaPackageManager implements PackageManager, Disposable {
             }
         }
 
-        try {
-            // Centralize command options for install/uninstall operations
-            const environmentPath = environment.environmentPath.fsPath;
-
-            // Execute uninstall if needed
-            if (toUninstall.length > 0) {
-                const uninstallCmd = new CondaUninstallCommand({
+        const execute = async (token?: CancellationToken): Promise<void> => {
+            try {
+                const commandOptions = {
                     pythonExecutable: 'conda',
-                    condaEnvironmentPath: environmentPath,
+                    condaEnvironmentPath: environment.environmentPath.fsPath,
                     log: this.log,
-                });
-                const packages = parsePackageSpecs(toUninstall);
-                await withProgress(
-                    {
-                        location: ProgressLocation.Notification,
-                        title: CondaStrings.condaInstallingPackages,
-                        cancellable: true,
-                    },
-                    (_progress, token) => uninstallCmd.execute({ packages, cancellationToken: token }),
-                );
-            }
+                };
 
-            // Execute install if needed
-            if (toInstall.length > 0) {
-                const installCmd = new CondaInstallCommand({
-                    pythonExecutable: 'conda',
-                    condaEnvironmentPath: environmentPath,
-                    log: this.log,
-                });
-                const packages = parsePackageSpecs(toInstall);
-                await withProgress(
-                    {
-                        location: ProgressLocation.Notification,
-                        title: CondaStrings.condaInstallingPackages,
-                        cancellable: true,
-                    },
-                    (_progress, token) =>
-                        installCmd.execute({ packages, upgrade: options.upgrade, cancellationToken: token }),
-                );
-            }
+                if (toUninstall.length > 0) {
+                    const command = new CondaUninstallCommand(commandOptions);
+                    await command.execute({
+                        packages: parsePackageSpecs(toUninstall),
+                        cancellationToken: token,
+                    });
+                }
 
-            await updatePackagesAndNotify(this, environment, this.packages.get(environment.envId.id), (changes) => {
-                this._onDidChangePackages.fire({ environment, manager: this, changes });
-            });
-        } catch (e) {
-            if (e instanceof CancellationError) {
+                if (toInstall.length > 0) {
+                    const command = new CondaInstallCommand(commandOptions);
+                    await command.execute({
+                        packages: parsePackageSpecs(toInstall),
+                        upgrade: options.upgrade,
+                        cancellationToken: token,
+                    });
+                }
+
+                await updatePackagesAndNotify(this, environment, this.packages.get(environment.envId.id), (changes) => {
+                    this._onDidChangePackages.fire({ environment, manager: this, changes });
+                });
+            } catch (e) {
+                if (e instanceof CancellationError) {
+                    throw e;
+                }
+                this.log.error('Error installing packages', e);
+                if (!options.runHeadless) {
+                    setImmediate(async () => {
+                        await showErrorMessageWithLogs(CondaStrings.condaInstallError, this.log);
+                    });
+                }
                 throw e;
             }
-            this.log.error('Error installing packages', e);
-            setImmediate(async () => {
-                await showErrorMessageWithLogs(CondaStrings.condaInstallError, this.log);
-            });
+        };
+
+        if (options.runHeadless) {
+            await execute();
+            return;
         }
+
+        await withProgress(
+            {
+                location: ProgressLocation.Notification,
+                title: CondaStrings.condaInstallingPackages,
+                cancellable: true,
+            },
+            (_progress, token) => execute(token),
+        );
     }
 
-    async refresh(environment: PythonEnvironment): Promise<Package[] | undefined> {
-        return withProgress(
+    async refresh(environment: PythonEnvironment): Promise<void> {
+        await withProgress(
             {
                 location: ProgressLocation.Window,
                 title: CondaStrings.condaRefreshingPackages,
             },
             async () => {
-                return updatePackagesAndNotify(
+                const packages = await updatePackagesAndNotify(
                     this,
                     environment,
                     this.packages.get(environment.envId.id),
@@ -141,6 +147,7 @@ export class CondaPackageManager implements PackageManager, Disposable {
                         this._onDidChangePackages.fire({ environment, manager: this, changes });
                     },
                 );
+                this.packages.set(environment.envId.id, packages ?? []);
             },
         );
     }
@@ -180,17 +187,13 @@ export class CondaPackageManager implements PackageManager, Disposable {
     async getPackageAvailableVersions(
         _environment: PythonEnvironment,
         packageName: string,
-    ): Promise<Pep440Version[] | undefined> {
-        try {
-            const availableVersionsCmd = new CondaAvailableVersionsCommand({
-                pythonExecutable: 'conda',
-                log: this.log,
-            });
-            const versions = await availableVersionsCmd.execute({ packageName, pythonVersion: '' });
-            return versions.sort((a, b) => compare(b.public, a.public));
-        } catch {
-            return undefined;
-        }
+    ): Promise<Pep440Version[]> {
+        const availableVersionsCmd = new CondaAvailableVersionsCommand({
+            pythonExecutable: 'conda',
+            log: this.log,
+        });
+        const versions = await availableVersionsCmd.execute({ packageName, pythonVersion: '' });
+        return versions.sort((a, b) => compare(b.public, a.public));
     }
 
     getPackageWatchTargets(environment: PythonEnvironment): RelativePattern[] {

@@ -27,7 +27,7 @@ import {
     SYSTEM_MANAGER_ID,
     VENV_MANAGER_ID,
 } from '../../common/constants';
-import { normalizePackageName } from '../../managers/builtin/utils';
+import { normalizePackageName } from '../../managers/common/packageUtils';
 import { ENVS_EXTENSION_ID } from '../constants';
 import { waitForCondition } from '../testUtils';
 
@@ -135,8 +135,8 @@ async function runRoundtrip(
 
     await api.managePackages(environment, { install: [TEST_PACKAGE] });
 
-    const afterInstall =
-        (await api.refreshPackages(environment)) ?? (await api.getPackages(environment, { skipCache: true }));
+    await api.refreshPackages(environment);
+    const afterInstall = await api.getPackages(environment, { skipCache: true });
     const installedPackage = (afterInstall ?? []).find(
         (pkg) => normalizePackageName(pkg.name) === normalizePackageName(TEST_PACKAGE),
     );
