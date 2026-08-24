@@ -38,4 +38,21 @@ suite('CondaPackageManager', () => {
         assert.ok(logError.calledOnce);
         assert.ok(showErrorMessageWithLogs.notCalled);
     });
+
+    test('propagates package version lookup failures', async () => {
+        const environment = {
+            envId: { id: 'test-environment', managerId: 'test-manager' },
+        } as PythonEnvironment;
+        const manager = new CondaPackageManager(
+            {} as PythonEnvironmentApi,
+            { error: sinon.stub() } as unknown as LogOutputChannel,
+        );
+        const lookupError = new Error('conda search failed');
+        sinon.stub(condaUtils, 'runCondaExecutable').rejects(lookupError);
+
+        await assert.rejects(
+            manager.getPackageAvailableVersions(environment, 'flask'),
+            (error: unknown) => error === lookupError,
+        );
+    });
 });

@@ -4,7 +4,13 @@
 import * as assert from 'assert';
 import * as sinon from 'sinon';
 import { LogOutputChannel, Uri } from 'vscode';
-import { Package, PythonEnvironment, PythonEnvironmentApi } from '../../../api';
+import {
+    Package,
+    PythonEnvironment,
+    PythonEnvironmentApi,
+    isPackageVersionLookupNotSupportedError,
+} from '../../../api';
+import * as helpers from '../../../managers/builtin/helpers';
 import { PipPackageManager } from '../../../managers/builtin/pipPackageManager';
 import * as builtinUtils from '../../../managers/builtin/utils';
 import { VenvManager } from '../../../managers/builtin/venvManager';
@@ -60,4 +66,73 @@ suite('PipPackageManager', () => {
         assert.strictEqual(secondResult, undefined);
         assert.strictEqual(refreshPackages.callCount, 2, 'A failed refresh should not populate the package cache');
     });
+
+    test('reports version lookup as unsupported for pip older than 21.2', async () => {
+        const manager = createManager();
+        const environment = createEnvironment();
+        sinon.stub(helpers, 'shouldUseUv').resolves(false);
+        sinon.stub(helpers, 'runPython').resolves('pip 20.3.4 from /path/to/pip (python 3.12)');
+
+        await assert.rejects(
+            manager.getPackageAvailableVersions(environment, 'requests'),
+            isPackageVersionLookupNotSupportedError,
+        );
+    });
+
+    test('propagates version lookup command failures for supported pip', async () => {
+        const manager = createManager();
+        const environment = createEnvironment();
+        const lookupError = new Error('pip index failed');
+        sinon.stub(helpers, 'shouldUseUv').resolves(false);
+        const runPython = sinon.stub(helpers, 'runPython');
+        runPython.onFirstCall().resolves('pip 25.1 from /path/to/pip (python 3.12)');
+        runPython.onSecondCall().rejects(lookupError);
+
+        await assert.rejects(
+            manager.getPackageAvailableVersions(environment, 'requests'),
+            (error: unknown) => error === lookupError,
+        );
+    });
+
+    test('normalizes discovered Python versions for pip lookup', async () => {
+        const manager = createManager();
+        const environment = {
+            ...createEnvironment(),
+            version: '3.13.14.final.0',
+        };
+        sinon.stub(helpers, 'shouldUseUv').resolves(false);
+        const runPython = sinon.stub(helpers, 'runPython');
+        runPython.onFirstCall().resolves('pip 25.1 from /path/to/pip (python 3.13)');
+        runPython.onSecondCall().resolves(JSON.stringify({ versions: ['2.32.5'] }));
+
+        await manager.getPackageAvailableVersions(environment, 'requests');
+
+        assert.deepStrictEqual(runPython.secondCall.args[1], [
+            '-m',
+            'pip',
+            'index',
+            'versions',
+            'requests',
+            '--json',
+            '--python-version',
+            '3.13.14',
+        ]);
+    });
+
+    function createManager(): PipPackageManager {
+        return new PipPackageManager(
+            { createPackageItem: sinon.stub() } as unknown as PythonEnvironmentApi,
+            { error: sinon.stub(), info: sinon.stub() } as unknown as LogOutputChannel,
+            {} as VenvManager,
+        );
+    }
+
+    function createEnvironment(): PythonEnvironment {
+        return {
+            envId: { id: 'test-environment', managerId: 'test-manager' },
+            environmentPath: Uri.file('/path/to/environment'),
+            execInfo: { run: { executable: 'python', args: [] } },
+            version: '3.12.0',
+        } as unknown as PythonEnvironment;
+    }
 });

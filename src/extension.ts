@@ -277,6 +277,16 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
                       envManagers.packageManagers.map((manager) => manager.id),
                   ),
                   commands.registerCommand(
+                      'python-envs.test.resolveEnvironmentWithManager',
+                      async (managerId: string, environmentUri: Uri) => {
+                          const manager = envManagers.getEnvironmentManager(managerId);
+                          if (!manager) {
+                              throw new Error(`Environment manager not found: ${managerId}`);
+                          }
+                          return manager.resolve(environmentUri);
+                      },
+                  ),
+                  commands.registerCommand(
                       'python-envs.test.getDirectPackageNames',
                       async (environment: PythonEnvironment) => {
                           const manager = envManagers.getPackageManager(environment);

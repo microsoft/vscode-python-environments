@@ -71,6 +71,37 @@ suite('Test Utilities', () => {
             );
             assert.ok(counter >= 3);
         });
+
+        test('should preserve condition errors when retries are disabled', async () => {
+            const conditionError = new Error('Package refresh failed');
+
+            await assert.rejects(
+                () => waitForCondition(() => Promise.reject(conditionError), 1000, 'Should not time out', 10, false),
+                (error: unknown) => error === conditionError,
+            );
+        });
+
+        test('should retry and preserve the last condition error at timeout', async () => {
+            const conditionError = new Error('Package refresh failed');
+            let attempts = 0;
+
+            await assert.rejects(
+                () =>
+                    waitForCondition(
+                        () => {
+                            attempts++;
+                            return Promise.reject(conditionError);
+                        },
+                        50,
+                        'Should preserve the refresh error',
+                        10,
+                        true,
+                        true,
+                    ),
+                (error: unknown) => error === conditionError,
+            );
+            assert.ok(attempts > 1, 'The rejected condition should be retried before timing out');
+        });
     });
 
     suite('retryUntilSuccess', () => {

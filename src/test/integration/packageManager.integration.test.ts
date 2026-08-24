@@ -2,57 +2,49 @@ import * as vscode from 'vscode';
 
 import { compare } from '@renovatebot/pep440';
 import assert from 'assert';
-import * as path from 'path';
 import {
     Package,
     PythonEnvironment,
     PythonEnvironmentApi,
-    PythonProject,
     isPackageVersionLookupNotSupportedError,
 } from '../../api';
-import { CONDA_MANAGER_ID, DEFAULT_PACKAGE_MANAGER_ID, VENV_MANAGER_ID } from '../../common/constants';
-import { PythonProjectSettings } from '../../internal.api';
-import { getConda } from '../../managers/conda/condaUtils';
+import { CONDA_MANAGER_ID, DEFAULT_PACKAGE_MANAGER_ID } from '../../common/constants';
 import { ENVS_EXTENSION_ID } from '../constants';
 import { waitForCondition } from '../testUtils';
+import {
+    createCondaFixtureProvider,
+    createEnvironmentFixture,
+    createVenvFixtureProvider,
+    EnvironmentFixture,
+    EnvironmentFixtureProvider,
+} from './environmentFixture';
 
 type PackageManagerId = `${string}:${string}`;
 
 interface PackageManagerProfile {
-    environmentManagerId: string;
     name: string;
+    packageName: string;
     packageManagerId: PackageManagerId;
-    projectDirectory: string;
-    prerequisite(api: PythonEnvironmentApi): Promise<boolean>;
-    supportsVersionLookup(packages: Package[]): boolean;
+    provider: EnvironmentFixtureProvider;
+    supportsVersionLookup(packages: Package[]): boolean | undefined;
 }
 
 const profiles: PackageManagerProfile[] = [
     {
-        environmentManagerId: VENV_MANAGER_ID,
         name: 'Pip',
+        packageName: 'requests',
         packageManagerId: DEFAULT_PACKAGE_MANAGER_ID,
-        projectDirectory: 'pip',
-        prerequisite: async (api) =>
-            (await api.getEnvironments('global')).some((environment) => environment.version.startsWith('3.')),
+        provider: createVenvFixtureProvider(),
         supportsVersionLookup: (packages) => {
             const pipVersion = packages.find((pkg) => pkg.name.toLowerCase() === 'pip')?.version;
-            return pipVersion !== undefined && compare(pipVersion, '21.2') >= 0;
+            return pipVersion === undefined ? undefined : compare(pipVersion, '21.2') >= 0;
         },
     },
     {
-        environmentManagerId: CONDA_MANAGER_ID,
         name: 'Conda',
+        packageName: 'flask',
         packageManagerId: CONDA_MANAGER_ID,
-        projectDirectory: 'conda',
-        prerequisite: async () => {
-            try {
-                await getConda();
-                return true;
-            } catch {
-                return false;
-            }
-        },
+        provider: createCondaFixtureProvider(),
         supportsVersionLookup: () => true,
     },
 ];
@@ -102,14 +94,13 @@ suite('Package Manager profile coverage', function () {
 
 for (const profile of profiles) {
     suite(`${profile.name} Package Manager`, function () {
-        this.timeout(300_000);
+        this.timeout(600_000);
 
         let api: PythonEnvironmentApi;
         let environment: PythonEnvironment | undefined;
-        let project: PythonProject | undefined;
-        let workspaceUri: vscode.Uri;
-        let previousPythonProjects: PythonProjectSettings[] | undefined;
-        let pythonProjectsUpdated = false;
+        let fixture: EnvironmentFixture | undefined;
+        let previousAlwaysUseUv: boolean | undefined;
+        let alwaysUseUvUpdated = false;
         suiteSetup(async function () {
             if (process.env.VSC_PYTHON_PACKAGE_NETWORK_TEST !== '1') {
                 this.skip();
@@ -127,71 +118,51 @@ for (const profile of profiles) {
 
             const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
             assert.ok(workspaceFolder, 'Integration test workspace not found');
-            workspaceUri = workspaceFolder.uri;
-            const config = vscode.workspace.getConfiguration('python-envs', workspaceUri);
+            const config = vscode.workspace.getConfiguration('python-envs', workspaceFolder.uri);
 
-            if (!(await profile.prerequisite(api))) {
-                this.skip();
-                return;
+            if (profile.packageManagerId === DEFAULT_PACKAGE_MANAGER_ID) {
+                previousAlwaysUseUv = config.inspect<boolean>('alwaysUseUv')?.globalValue;
+                await config.update('alwaysUseUv', false, vscode.ConfigurationTarget.Global);
+                alwaysUseUvUpdated = true;
             }
 
-            const projectUri = vscode.Uri.joinPath(
-                workspaceUri,
-                `.package-manager-test-${profile.projectDirectory}-${process.pid}`,
-            );
-            await vscode.workspace.fs.createDirectory(projectUri);
-            project = {
+            fixture = await createEnvironmentFixture(api, workspaceFolder, {
                 name: `${profile.name} Package Manager Test`,
-                uri: projectUri,
-            };
-            previousPythonProjects = config.inspect<PythonProjectSettings[]>('pythonProjects')?.workspaceFolderValue;
-            const pythonProjects = config.get<PythonProjectSettings[]>('pythonProjects', []);
-            const projectSetting: PythonProjectSettings = {
-                path: path.relative(workspaceUri.fsPath, projectUri.fsPath).replace(/\\/g, '/'),
-                envManager: profile.environmentManagerId,
-                packageManager: profile.packageManagerId,
-                workspace: workspaceFolder.name,
-            };
-            await config.update(
-                'pythonProjects',
-                [...pythonProjects, projectSetting],
-                vscode.ConfigurationTarget.WorkspaceFolder,
-            );
-            pythonProjectsUpdated = true;
-            await waitForCondition(
-                () =>
-                    api
-                        .getPythonProjects()
-                        .some((registeredProject) => registeredProject.uri.toString() === projectUri.toString()),
-                10_000,
-                `Python project was not registered: ${projectUri.fsPath}`,
-            );
-
-            await api.refreshEnvironments(projectUri);
-
-            environment = await api.createEnvironment(projectUri, { quickCreate: true });
-            assert.ok(environment, `${profile.name} failed to create an environment after prerequisites passed`);
+                packageManagerId: profile.packageManagerId,
+                provider: profile.provider,
+            });
+            environment = fixture.environment;
             assert.strictEqual(
                 environment.envId.managerId,
-                profile.environmentManagerId,
-                `Expected an environment created by ${profile.environmentManagerId}`,
+                profile.provider.managerId,
+                `Expected an environment created by ${profile.provider.managerId}`,
             );
         });
 
         test(`${profile.name} Package Manager should install, list, and uninstall a package`, async () => {
-            const packageName = 'requests';
+            const packageName = profile.packageName;
             const baseline = await api.getPackages(environment!, { skipCache: true });
             assert.ok(baseline, 'Unable to list packages before installation');
+            assert.ok(
+                baseline.every((pkg) => pkg.pkgId.managerId === profile.packageManagerId),
+                `${profile.name} lifecycle used an unexpected package manager`,
+            );
             const wasInstalled = baseline.some((pkg) => pkg.name.toLowerCase() === packageName);
 
             if (!wasInstalled) {
                 await api.managePackages(environment!, { install: [packageName], runHeadless: true });
             }
-            let packages = await api.getPackages(environment!, { skipCache: true });
-            assert.ok(packages, 'Unable to list packages after installation');
-            assert.ok(
-                packages.some((pkg) => pkg.name.toLowerCase() === packageName),
+            let packages: Package[] | undefined;
+            await waitForCondition(
+                async () => {
+                    packages = await api.getPackages(environment!, { skipCache: true });
+                    return packages?.some((pkg) => pkg.name.toLowerCase() === packageName) ?? false;
+                },
+                30_000,
                 'Package not installed',
+                1_000,
+                true,
+                true,
             );
 
             const directPackageNames = await vscode.commands.executeCommand<string[] | undefined>(
@@ -204,11 +175,16 @@ for (const profile of profiles) {
 
             if (!wasInstalled) {
                 await api.managePackages(environment!, { uninstall: [packageName], runHeadless: true });
-                packages = await api.getPackages(environment!, { skipCache: true });
-                assert.ok(packages, 'Unable to list packages after uninstallation');
-                assert.ok(
-                    !packages.some((pkg) => pkg.name.toLowerCase() === packageName),
+                await waitForCondition(
+                    async () => {
+                        packages = await api.getPackages(environment!, { skipCache: true });
+                        return packages !== undefined && !packages.some((pkg) => pkg.name.toLowerCase() === packageName);
+                    },
+                    30_000,
                     'Package not uninstalled',
+                    1_000,
+                    true,
+                    true,
                 );
             }
         });
@@ -216,71 +192,51 @@ for (const profile of profiles) {
         test(`${profile.name} Package Manager should list available package versions`, async function () {
             const packages = await api.getPackages(environment!, { skipCache: true });
             assert.ok(packages, 'Unable to list packages before version lookup');
+            const supportsVersionLookup = profile.supportsVersionLookup(packages);
+            assert.notStrictEqual(
+                supportsVersionLookup,
+                undefined,
+                `${profile.name} version lookup capability could not be determined`,
+            );
 
-            if (!profile.supportsVersionLookup(packages)) {
-                // The profile declares that the active manager/tool version does not support
-                // version lookup, so the API must surface the typed unsupported-capability error
-                // rather than an operational failure. Assert that contract, then skip.
-                await assert.rejects(
-                    () => api.getPackageAvailableVersions(environment!, 'requests', { errorMode: 'throw' }),
-                    (error: unknown) => isPackageVersionLookupNotSupportedError(error),
-                    `${profile.name} did not report unsupported version lookup with the typed error`,
-                );
-                this.skip();
-                return;
+            let versions;
+            try {
+                versions = await api.getPackageAvailableVersions(environment!, profile.packageName, {
+                    errorMode: 'throw',
+                });
+            } catch (error) {
+                if (isPackageVersionLookupNotSupportedError(error)) {
+                    assert.strictEqual(
+                        supportsVersionLookup,
+                        false,
+                        `${profile.name} unexpectedly reported version lookup as unsupported`,
+                    );
+                    this.skip();
+                    return;
+                }
+                throw error;
             }
 
-            // Supported profiles must resolve to a defined, non-empty result; operational failures
-            // propagate and fail the test instead of silently resolving to undefined.
-            const versions = await api.getPackageAvailableVersions(environment!, 'requests', { errorMode: 'throw' });
-            assert.ok(versions, `${profile.name} unexpectedly failed to retrieve package versions`);
+            assert.strictEqual(
+                supportsVersionLookup,
+                true,
+                `${profile.name} returned versions despite declaring lookup unsupported`,
+            );
+            assert.ok(versions, `${profile.name} unexpectedly returned no package versions`);
             assert.ok(versions.length > 0, 'No package versions available');
         });
 
         suiteTeardown(async () => {
             try {
-                if (environment) {
-                    const environmentPath = environment.environmentPath;
-                    await api.removeEnvironment(environment, { runHeadless: true });
-                    await assert.rejects(
-                        async () => vscode.workspace.fs.stat(environmentPath),
-                        (error: unknown) =>
-                            error instanceof vscode.FileSystemError && error.code === 'FileNotFound',
-                        `Environment was not removed: ${environmentPath.fsPath}`,
-                    );
+                if (fixture) {
+                    await fixture.dispose();
                 }
             } finally {
-                const config = vscode.workspace.getConfiguration('python-envs', workspaceUri);
-                if (project) {
-                    try {
-                        await api.setEnvironment(project.uri, undefined);
-                    } finally {
-                        try {
-                            if (pythonProjectsUpdated) {
-                                await config.update(
-                                    'pythonProjects',
-                                    previousPythonProjects,
-                                    vscode.ConfigurationTarget.WorkspaceFolder,
-                                );
-                                await waitForCondition(
-                                    () =>
-                                        !api
-                                            .getPythonProjects()
-                                            .some(
-                                                (registeredProject) =>
-                                                    registeredProject.uri.toString() === project!.uri.toString(),
-                                            ),
-                                    10_000,
-                                    `Python project was not unregistered: ${project.uri.fsPath}`,
-                                );
-                            }
-                        } finally {
-                            await vscode.workspace.fs.delete(project.uri, {
-                                recursive: true,
-                                useTrash: false,
-                            });
-                        }
-                    }
+                if (alwaysUseUvUpdated) {
+                    const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
+                    assert.ok(workspaceFolder, 'Integration test workspace not found during teardown');
+                    const config = vscode.workspace.getConfiguration('python-envs', workspaceFolder.uri);
+                    await config.update('alwaysUseUv', previousAlwaysUseUv, vscode.ConfigurationTarget.Global);
                 }
             }
         });

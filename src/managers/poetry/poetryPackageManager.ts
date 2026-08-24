@@ -82,39 +82,46 @@ export class PoetryPackageManager implements PackageManager, Disposable {
             }
         }
 
+        const execute = async (token?: CancellationToken): Promise<void> => {
+            try {
+                await this.runPoetryManage({ install: toInstall, uninstall: toUninstall }, token);
+                await updatePackagesAndNotify(
+                    this,
+                    environment,
+                    this.packages.get(environment.envId.id),
+                    (changes) => {
+                        this._onDidChangePackages.fire({ environment, manager: this, changes });
+                    },
+                );
+            } catch (e) {
+                if (e instanceof CancellationError) {
+                    throw e;
+                }
+                this.log.error('Error managing packages with Poetry', e);
+                if (!options.runHeadless) {
+                    setImmediate(async () => {
+                        const result = await showErrorMessage('Error managing packages with Poetry', 'View Output');
+                        if (result === 'View Output') {
+                            this.log.show();
+                        }
+                    });
+                }
+                throw e;
+            }
+        };
+
+        if (options.runHeadless) {
+            await execute();
+            return;
+        }
+
         await withProgress(
             {
                 location: ProgressLocation.Notification,
                 title: 'Managing packages with Poetry',
                 cancellable: true,
             },
-            async (_progress, token) => {
-                try {
-                    await this.runPoetryManage({ install: toInstall, uninstall: toUninstall }, token);
-                    await updatePackagesAndNotify(
-                        this,
-                        environment,
-                        this.packages.get(environment.envId.id),
-                        (changes) => {
-                            this._onDidChangePackages.fire({ environment, manager: this, changes });
-                        },
-                    );
-                } catch (e) {
-                    if (e instanceof CancellationError) {
-                        throw e;
-                    }
-                    this.log.error('Error managing packages with Poetry', e);
-                    if (!options.runHeadless) {
-                        setImmediate(async () => {
-                            const result = await showErrorMessage('Error managing packages with Poetry', 'View Output');
-                            if (result === 'View Output') {
-                                this.log.show();
-                            }
-                        });
-                    }
-                    throw e;
-                }
-            },
+            async (_progress, token) => execute(token),
         );
     }
 

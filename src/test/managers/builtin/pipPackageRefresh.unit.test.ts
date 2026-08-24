@@ -50,4 +50,19 @@ suite('Pip package refresh', () => {
         assert.strictEqual(result, undefined);
         assert.ok(showErrorMessageWithLogsStub.notCalled);
     });
+
+    test('disables the pip version check when listing packages', async () => {
+        const runPythonStub = helpers.runPython as sinon.SinonStub;
+        runPythonStub.resolves('[]');
+
+        await refreshPipPackages(environment, log);
+
+        assert.deepStrictEqual(runPythonStub.firstCall.args[1], [
+            '-m',
+            'pip',
+            'list',
+            '--format=json',
+            '--disable-pip-version-check',
+        ]);
+    });
 });

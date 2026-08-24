@@ -1253,7 +1253,7 @@ export async function deleteCondaEnvironment(environment: PythonEnvironment, log
 export async function managePackages(
     environment: PythonEnvironment,
     options: PackageManagementOptions,
-    token: CancellationToken,
+    token: CancellationToken | undefined,
     log: LogOutputChannel,
 ): Promise<void> {
     if (options.uninstall && options.uninstall.length > 0) {

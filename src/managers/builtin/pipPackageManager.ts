@@ -2,6 +2,7 @@ import type { Pep440Version } from '@renovatebot/pep440';
 import { compare, explain as parse, rcompare } from '@renovatebot/pep440';
 import {
     CancellationError,
+    CancellationToken,
     Disposable,
     Event,
     EventEmitter,
@@ -9,7 +10,6 @@ import {
     MarkdownString,
     ProgressLocation,
     ThemeIcon,
-    window,
 } from 'vscode';
 import {
     DidChangePackagesEventArgs,
@@ -22,6 +22,7 @@ import {
     PythonEnvironment,
     PythonEnvironmentApi,
 } from '../../api';
+import { showErrorMessage, withProgress } from '../../common/window.apis';
 import { updatePackagesAndNotify } from '../common/packageChanges';
 import { runPython, runUV, shouldUseUv } from './helpers';
 import { getWorkspacePackagesToInstall } from './pipUtils';
@@ -75,45 +76,52 @@ export class PipPackageManager implements PackageManager, Disposable {
             install: toInstall,
             uninstall: toUninstall,
         };
-        await window.withProgress(
+        const execute = async (token?: CancellationToken): Promise<void> => {
+            try {
+                await managePackages(environment, manageOptions, this, token);
+                await updatePackagesAndNotify(
+                    this,
+                    environment,
+                    this.packages.get(environment.envId.id),
+                    (changes) => {
+                        this._onDidChangePackages.fire({ environment, manager: this, changes });
+                    },
+                    () => this.fetchPackages(environment, !manageOptions.runHeadless),
+                );
+            } catch (e) {
+                if (e instanceof CancellationError) {
+                    throw e;
+                }
+                this.log.error('Error managing packages', e);
+                if (!manageOptions.runHeadless) {
+                    setImmediate(async () => {
+                        const result = await showErrorMessage('Error managing packages', 'View Output');
+                        if (result === 'View Output') {
+                            this.log.show();
+                        }
+                    });
+                }
+                throw e;
+            }
+        };
+
+        if (manageOptions.runHeadless) {
+            await execute();
+            return;
+        }
+
+        await withProgress(
             {
                 location: ProgressLocation.Notification,
                 title: 'Installing packages',
                 cancellable: true,
             },
-            async (_progress, token) => {
-                try {
-                    await managePackages(environment, manageOptions, this, token);
-                    await updatePackagesAndNotify(
-                        this,
-                        environment,
-                        this.packages.get(environment.envId.id),
-                        (changes) => {
-                            this._onDidChangePackages.fire({ environment, manager: this, changes });
-                        },
-                        () => this.fetchPackages(environment, !manageOptions.runHeadless),
-                    );
-                } catch (e) {
-                    if (e instanceof CancellationError) {
-                        throw e;
-                    }
-                    this.log.error('Error managing packages', e);
-                    if (!manageOptions.runHeadless) {
-                        setImmediate(async () => {
-                            const result = await window.showErrorMessage('Error managing packages', 'View Output');
-                            if (result === 'View Output') {
-                                this.log.show();
-                            }
-                        });
-                    }
-                    throw e;
-                }
-            },
+            async (_progress, token) => execute(token),
         );
     }
 
     async refresh(environment: PythonEnvironment): Promise<void> {
-        await window.withProgress(
+        await withProgress(
             {
                 location: ProgressLocation.Window,
                 title: 'Refreshing packages',
