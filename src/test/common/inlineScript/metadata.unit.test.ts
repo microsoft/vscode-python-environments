@@ -131,6 +131,8 @@ suite('inlineScriptMetadata', () => {
             const md = readInlineScriptMetadata(text);
             assert.ok(md);
             assert.deepStrictEqual([...(md.dependencies ?? [])], ['a']);
+            assert.deepStrictEqual(md.sourceRange, { start: 0, end: text.length });
+            assert.strictEqual(md.range.end, text.replace(/\r\n/g, '\n').length);
         });
 
         test('lone-CR line endings parse identically to LF', () => {
@@ -155,6 +157,8 @@ suite('inlineScriptMetadata', () => {
             const md = readInlineScriptMetadata(text);
             assert.ok(md);
             assert.deepStrictEqual([...(md.dependencies ?? [])], ['a']);
+            assert.strictEqual(md.range.start, 0, 'normalized parser offsets continue to exclude the BOM');
+            assert.deepStrictEqual(md.sourceRange, { start: 1, end: text.length });
         });
 
         test('shebang before block does not block detection', () => {

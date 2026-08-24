@@ -7,11 +7,17 @@ import * as fs from 'fs-extra';
 import * as os from 'os';
 import * as path from 'path';
 import * as sinon from 'sinon';
-import { LogOutputChannel, Uri } from 'vscode';
-import { EnvironmentChangeKind, EnvironmentManager, PythonEnvironment, PythonEnvironmentApi } from '../../../../api';
+import { Disposable, LogOutputChannel, TextDocument, Uri } from 'vscode';
+import {
+    EnvironmentChangeKind,
+    EnvironmentManager,
+    PythonEnvironment,
+    PythonEnvironmentApi,
+} from '../../../../api';
 import * as cacheKey from '../../../../common/inlineScript/cacheKey';
 import * as cacheLayout from '../../../../common/inlineScript/cacheLayout';
 import * as metadataReader from '../../../../common/inlineScript/metadata';
+import { InlineScriptRoutingRegistry } from '../../../../common/inlineScript/routingRegistry';
 import * as lockfileApis from '../../../../common/lockfile.apis';
 import * as persistentState from '../../../../common/persistentState';
 import { EventNames } from '../../../../common/telemetry/constants';
@@ -19,6 +25,7 @@ import * as telemetrySender from '../../../../common/telemetry/sender';
 import { isWindows } from '../../../../common/utils/platformUtils';
 import { normalizePath } from '../../../../common/utils/pathUtils';
 import { getVenvPythonPath } from '../../../../common/utils/virtualEnvironment';
+import * as workspaceApis from '../../../../common/workspace.apis';
 import {
     InlineScriptEnvManager,
     INLINE_SCRIPT_ENVS_KEY,
@@ -35,6 +42,10 @@ const VALID_METADATA: metadataReader.InlineScriptMetadata = {
     dependencies: ['requests'],
     range: { start: 0, end: 40 },
 };
+const VALID_METADATA_IDENTITY = JSON.stringify({
+    requiresPython: '>=3.11',
+    dependencies: ['requests'],
+});
 
 function makeFakeLog(): LogOutputChannel {
     return {
@@ -113,9 +124,15 @@ suite('InlineScriptEnvManager', () => {
     let releaseLockStub: sinon.SinonStub;
     let resolveSystemPythonStub: sinon.SinonStub;
     let resolveVenvStub: sinon.SinonStub;
+    let routingRegistry: InlineScriptRoutingRegistry;
+    let sidecarsByEnvDir: Map<string, cacheLayout.InlineScriptEnvMeta | 'missing' | 'invalid' | 'unavailable'>;
+    let environmentsByExecutablePath: Map<string, PythonEnvironment>;
+    let cacheKeysByInputs: Map<string, string>;
     let tempRoot: string;
     let baseInterpreterStatusStub: sinon.SinonStub;
     let writeMetaStub: sinon.SinonStub;
+    let deleteFilesListener: ((e: { files: readonly Uri[] }) => unknown) | undefined;
+    let renameFilesListener: ((e: { files: readonly { oldUri: Uri; newUri: Uri }[] }) => unknown) | undefined;
     let workspaceState: {
         get: sinon.SinonStub;
         set: sinon.SinonStub;
@@ -137,6 +154,12 @@ suite('InlineScriptEnvManager', () => {
             refreshEnvironments: apiRefreshEnvironmentsStub,
         } as unknown as PythonEnvironmentApi;
         nativeFinder = {} as NativePythonFinder;
+        routingRegistry = new InlineScriptRoutingRegistry();
+        sidecarsByEnvDir = new Map();
+        environmentsByExecutablePath = new Map();
+        cacheKeysByInputs = new Map();
+        deleteFilesListener = undefined;
+        renameFilesListener = undefined;
         baseManager = {} as EnvironmentManager;
         persistedAssociations = undefined;
         workspaceState = {
@@ -157,7 +180,10 @@ suite('InlineScriptEnvManager', () => {
         sinon.stub(persistentState, 'getWorkspacePersistentState').resolves(workspaceState);
 
         readMetadataStub = sinon.stub(metadataReader, 'readInlineScriptMetadataFromFile').resolves(VALID_METADATA);
-        computeCacheKeyStub = sinon.stub(cacheKey, 'computeCacheKey').returns(CACHE_KEY);
+        computeCacheKeyStub = sinon.stub(cacheKey, 'computeCacheKey').callsFake((inputs) => {
+            return cacheKeysByInputs.get(getCacheKeyInputKey(inputs.dependencies, inputs.interpreterPath)) ?? CACHE_KEY;
+        });
+        registerCacheKey(CACHE_KEY, VALID_METADATA.dependencies ?? [], baseExecutable);
         getAvailablePythonVersionsStub = sinon.stub(uvPythonInstaller, 'getAvailablePythonVersions').resolves([]);
         ensureUvForVersionLookupStub = sinon
             .stub(uvPythonInstaller, 'ensureUvForInlineScriptVersionLookupDetailed')
@@ -166,32 +192,66 @@ suite('InlineScriptEnvManager', () => {
             .stub(uvPythonInstaller, 'promptInstallPythonViaUvDetailed')
             .resolves({ kind: 'declined' });
         sendTelemetryStub = sinon.stub(telemetrySender, 'sendTelemetryEvent');
-        inspectMetaStub = sinon.stub(cacheLayout, 'inspectMetaJson').resolves({ kind: 'missing' });
+        inspectMetaStub = sinon.stub(cacheLayout, 'inspectMetaJson').callsFake(async (envDir: Uri) => {
+            const result = sidecarsByEnvDir.get(normalizePath(envDir.fsPath)) ?? 'missing';
+            if (result === 'missing' || result === 'invalid' || result === 'unavailable') {
+                return { kind: result };
+            }
+            return { kind: 'valid', metadata: result };
+        });
         baseInterpreterStatusStub = sinon.stub(cacheLayout, 'getBaseInterpreterStatus').resolves('available');
-        writeMetaStub = sinon.stub(cacheLayout, 'writeMetaJson').resolves();
+        writeMetaStub = sinon.stub(cacheLayout, 'writeMetaJson').callsFake(async (envDir: Uri, meta: cacheLayout.InlineScriptEnvMeta) => {
+            sidecarsByEnvDir.set(normalizePath(envDir.fsPath), meta);
+        });
         retainLockStub = sinon.stub().resolves();
         releaseLockStub = sinon.stub().resolves();
         lockStub = sinon
             .stub(lockfileApis, 'acquireFileLock')
             .resolves({ release: releaseLockStub, retain: retainLockStub });
         resolveSystemPythonStub = sinon.stub(builtinUtils, 'resolveSystemPythonEnvironmentPath').resolves(undefined);
-        resolveVenvStub = sinon.stub(venvUtils, 'resolveVenvPythonEnvironmentPath').resolves(undefined);
+        resolveVenvStub = sinon.stub(venvUtils, 'resolveVenvPythonEnvironmentPath').callsFake(async (environmentPath: string) => {
+            return environmentsByExecutablePath.get(normalizePath(environmentPath));
+        });
+        sinon.stub(workspaceApis, 'onDidDeleteFiles').callsFake((listener: (e: { files: readonly Uri[] }) => unknown) => {
+            deleteFilesListener = listener;
+            return new Disposable(() => {
+                deleteFilesListener = undefined;
+            });
+        });
+        sinon
+            .stub(workspaceApis, 'onDidRenameFiles')
+            .callsFake((listener: (e: { files: readonly { oldUri: Uri; newUri: Uri }[] }) => unknown) => {
+                renameFilesListener = listener;
+                return new Disposable(() => {
+                    renameFilesListener = undefined;
+                });
+            });
+        sinon.stub(workspaceApis, 'getOpenTextDocuments').returns([]);
         createWithProgressStub = sinon.stub(venvUtils, 'createWithProgress').callsFake(async (...args: unknown[]) => {
             const envDir = args[6] as string;
             const selectedBase = args[4] as PythonEnvironment;
             await fs.outputFile(getVenvPythonPath(envDir), '');
+            const environment = makeEnvironment(
+                'ms-python.python:inline-script',
+                selectedBase.version,
+                getVenvPythonPath(envDir),
+                envDir,
+            );
+            environmentsByExecutablePath.set(normalizePath(environment.environmentPath.fsPath), environment);
             return {
-                environment: makeEnvironment(
-                    'ms-python.python:inline-script',
-                    selectedBase.version,
-                    getVenvPythonPath(envDir),
-                    envDir,
-                ),
+                environment,
             };
         });
 
         clock = sinon.useFakeTimers({ now: NOW, toFake: ['Date'] });
-        manager = new InlineScriptEnvManager(nativeFinder, api, baseManager, globalStorageUri, makeFakeLog());
+        manager = new InlineScriptEnvManager(
+            nativeFinder,
+            api,
+            baseManager,
+            globalStorageUri,
+            makeFakeLog(),
+            routingRegistry,
+        );
     });
 
     teardown(async () => {
@@ -208,8 +268,21 @@ suite('InlineScriptEnvManager', () => {
         return cacheLayout.getScriptEnvDir(globalStorageUri, CACHE_KEY);
     }
 
-    function setSidecar(metadata: cacheLayout.InlineScriptEnvMeta): void {
-        inspectMetaStub.resolves({ kind: 'valid', metadata });
+    function getCacheKeyInputKey(dependencies: readonly string[], interpreterPath: string): string {
+        return JSON.stringify({
+            dependencies: Array.from(
+                new Set(dependencies.map((dependency) => cacheKey.normalizeDependency(dependency)).filter(Boolean)),
+            ).sort(),
+            interpreterPath: normalizePath(interpreterPath),
+        });
+    }
+
+    function registerCacheKey(cacheKeyValue: string, dependencies: readonly string[], interpreterPath: string): void {
+        cacheKeysByInputs.set(getCacheKeyInputKey(dependencies, interpreterPath), cacheKeyValue);
+    }
+
+    function setSidecar(metadata: cacheLayout.InlineScriptEnvMeta, targetEnvDir: Uri = envDir()): void {
+        sidecarsByEnvDir.set(normalizePath(targetEnvDir.fsPath), metadata);
     }
 
     async function makeSidecar(
@@ -239,11 +312,25 @@ suite('InlineScriptEnvManager', () => {
     ): Promise<PythonEnvironment> {
         const location = cacheLayout.getScriptEnvDir(globalStorageUri, cacheKey).fsPath;
         const executable = getVenvPythonPath(location);
+        const baseInterpreterPath =
+            cacheKey === CACHE_KEY
+                ? baseExecutable
+                : path.join(tempRoot, `base-python-${cacheKey}`, isWindows() ? 'python.exe' : 'python');
+        await fs.outputFile(baseInterpreterPath, '');
         await fs.outputFile(executable, '');
-        return {
+        registerCacheKey(cacheKey, VALID_METADATA.dependencies ?? [], baseInterpreterPath);
+        setSidecar({
+            schemaVersion: cacheLayout.META_SCHEMA_VERSION,
+            baseInterpreterPath,
+            baseInterpreterVersion: baseEnvironment.version,
+            lastUsedAt: NOW.toISOString(),
+        }, Uri.file(location));
+        const environment = {
             ...makeEnvironment('ms-python.python:inline-script', '3.12.4', executable, location),
             envId: { managerId: 'ms-python.python:inline-script', id: envId },
         };
+        environmentsByExecutablePath.set(normalizePath(executable), environment);
+        return environment;
     }
 
     async function waitForStubCall(stub: sinon.SinonStub): Promise<void> {
@@ -256,14 +343,14 @@ suite('InlineScriptEnvManager', () => {
         assert.fail('Expected the stub to be called');
     }
 
-    async function waitForStubCallCount(stub: sinon.SinonStub, expectedCallCount: number): Promise<void> {
+    async function waitForStubCallCount(stub: { callCount: number }, expectedCallCount: number): Promise<void> {
         for (let attempt = 0; attempt < 20; attempt += 1) {
             if (stub.callCount >= expectedCallCount) {
                 return;
             }
             await new Promise((resolve) => setTimeout(resolve, 5));
         }
-        assert.fail(`Expected the stub to be called ${expectedCallCount} times`);
+        assert.fail(`Expected the stub to be called at least ${expectedCallCount} times`);
     }
 
     async function waitForCondition(
@@ -281,6 +368,119 @@ suite('InlineScriptEnvManager', () => {
 
     function nextTurn(): Promise<void> {
         return new Promise((resolve) => setImmediate(resolve));
+    }
+
+    function fireDelete(...files: Uri[]): void {
+        assert.ok(deleteFilesListener, 'delete listener should be registered');
+        deleteFilesListener!({ files });
+    }
+
+    function fireRename(oldUri: Uri, newUri: Uri): void {
+        assert.ok(renameFilesListener, 'rename listener should be registered');
+        renameFilesListener!({ files: [{ oldUri, newUri }] });
+    }
+
+    function workspaceStateSetCalls(key: string): readonly sinon.SinonSpyCall[] {
+        return workspaceState.set.getCalls().filter((call) => call.args[0] === key);
+    }
+
+    function matchedAssociationRecord(environmentPath: string, metadataIdentity: string = VALID_METADATA_IDENTITY): unknown {
+        return {
+            schemaVersion: 1,
+            environmentPath,
+            metadataBinding: {
+                kind: 'matched',
+                sourceIdentity: metadataIdentity,
+            },
+        };
+    }
+
+    function pendingAssociationRecord(environmentPath: string, metadataIdentity: string = VALID_METADATA_IDENTITY): unknown {
+        return {
+            schemaVersion: 1,
+            environmentPath,
+            metadataBinding: {
+                kind: 'pending',
+                sourceIdentity: metadataIdentity,
+            },
+        };
+    }
+
+    function futureAssociationRecord(environmentPath: string): unknown {
+        return {
+            schemaVersion: 2,
+            environmentPath,
+            metadataBinding: {
+                kind: 'matched',
+                sourceIdentity: 'future',
+            },
+        };
+    }
+
+    async function triggerSavedMetadataChange(
+        registry: InlineScriptRoutingRegistry,
+        managerInstance: InlineScriptEnvManager,
+        uri: Uri,
+        metadata: metadataReader.InlineScriptMetadata = VALID_METADATA,
+    ): Promise<void> {
+        registry.setMetadata(uri, metadata);
+        await (
+            managerInstance as unknown as {
+                handleSavedMetadataChange(event: {
+                    uri: Uri;
+                    metadata: metadataReader.InlineScriptMetadata;
+                    metadataIdentity: string | undefined;
+                    metadataRevision: number;
+                }): Promise<void>;
+            }
+        ).handleSavedMetadataChange({
+            uri,
+            metadata,
+            metadataIdentity: registry.getMetadataIdentity(uri),
+            metadataRevision: registry.getMetadataRevision(uri),
+        });
+    }
+
+    function asMetadataRefreshManager(managerInstance: InlineScriptEnvManager): {
+        refreshValidatedAssociationForMetadataInternal(
+            scriptPath: string,
+            uri: Uri,
+            metadata: metadataReader.InlineScriptMetadata,
+            metadataIdentity: string,
+            metadataRevision: number,
+            associationRevision: number,
+        ): Promise<void>;
+        currentCacheEntryProvesSourceMetadataIdentity(
+            candidate: PythonEnvironment,
+            metadataIdentity: string,
+            metadata: metadataReader.InlineScriptMetadata,
+        ): Promise<boolean>;
+        cachedAssociationValidatedAt: Map<string, number>;
+        lastValidatedMetadataIdentities: Map<string, string>;
+        lastValidatedMetadataIdentityProofs: Map<string, boolean>;
+        associationRevisions: Map<string, number>;
+        subscriptions: Disposable[];
+    } {
+        return managerInstance as unknown as {
+            refreshValidatedAssociationForMetadataInternal(
+                scriptPath: string,
+                uri: Uri,
+                metadata: metadataReader.InlineScriptMetadata,
+                metadataIdentity: string,
+                metadataRevision: number,
+                associationRevision: number,
+            ): Promise<void>;
+            currentCacheEntryProvesSourceMetadataIdentity(
+                candidate: PythonEnvironment,
+                metadataIdentity: string,
+                metadata: metadataReader.InlineScriptMetadata,
+            ): Promise<boolean>;
+            cachedAssociationValidatedAt: Map<string, number>;
+            lastValidatedMetadataIdentities: Map<string, string>;
+            lastValidatedMetadataIdentityProofs: Map<string, boolean>;
+            associationRevisions: Map<string, number>;
+            subscriptions: Disposable[];
+        };
     }
 
     suite('static metadata and deferred methods', () => {
@@ -1016,6 +1216,9 @@ suite('InlineScriptEnvManager', () => {
                     baseInterpreterPath: baseExecutable,
                     baseInterpreterVersion: baseEnvironment.version,
                     lastUsedAt: NOW.toISOString(),
+                    sourceMetadataIdentityHashes: [
+                        cacheLayout.hashSourceMetadataIdentity(VALID_METADATA_IDENTITY),
+                    ],
                 },
             ]);
             assert.strictEqual(
@@ -1033,6 +1236,61 @@ suite('InlineScriptEnvManager', () => {
             const options = lockStub.firstCall.args[1];
             assert.ok(options.timeoutMs > 0);
             assert.ok(options.retryIntervalMs > 0);
+        });
+
+        test('reuses a restart cache entry from an older backup matching the selected base', async () => {
+            const directory = envDir();
+            const executable = venvPythonPath(directory.fsPath);
+            const sidecar = {
+                schemaVersion: cacheLayout.META_SCHEMA_VERSION,
+                baseInterpreterPath: baseExecutable,
+                baseInterpreterVersion: baseEnvironment.version,
+                lastUsedAt: NOW.toISOString(),
+            } satisfies cacheLayout.InlineScriptEnvMeta;
+            const newerIncompatibleSidecar = {
+                ...sidecar,
+                baseInterpreterPath: path.join(tempRoot, 'other-base-python'),
+                baseInterpreterVersion: '3.13.0',
+                lastUsedAt: '2030-01-01T00:00:00.000Z',
+            } satisfies cacheLayout.InlineScriptEnvMeta;
+            const environment = makeEnvironment(
+                'ms-python.python:inline-script',
+                baseEnvironment.version,
+                executable,
+                directory.fsPath,
+            );
+            await fs.outputFile(executable, '');
+            await fs.writeFile(
+                `${cacheLayout.getMetaJsonPath(directory).fsPath}.backup-abcdef123456`,
+                JSON.stringify(sidecar),
+            );
+            await fs.writeFile(
+                `${cacheLayout.getMetaJsonPath(directory).fsPath}.backup-ffffffffffff`,
+                JSON.stringify(newerIncompatibleSidecar),
+            );
+            environmentsByExecutablePath.set(normalizePath(executable), environment);
+            inspectMetaStub.restore();
+
+            const result = await manager.create(scriptUri());
+
+            assert.strictEqual(result, environment);
+            assert.strictEqual(createWithProgressStub.callCount, 0, 'recovered cache entry must not rebuild');
+            assert.deepStrictEqual(await cacheLayout.readMetaJson(directory), sidecar);
+            assert.strictEqual(
+                await fs.pathExists(`${cacheLayout.getMetaJsonPath(directory).fsPath}.backup-abcdef123456`),
+                false,
+            );
+        });
+
+        test('preserves a restart cache entry when backup recovery is uncertain', async () => {
+            const markerPath = path.join(envDir().fsPath, 'keep.txt');
+            await fs.outputFile(markerPath, 'keep');
+            inspectMetaStub.resolves({ kind: 'missing' });
+            sinon.stub(cacheLayout, 'restoreMetaJsonBackupUnderLock').resolves({ kind: 'unavailable' });
+
+            assert.strictEqual(await manager.create(scriptUri()), undefined);
+            assert.strictEqual(await fs.readFile(markerPath, 'utf8'), 'keep');
+            assert.strictEqual(createWithProgressStub.callCount, 0);
         });
 
         test('coalesces simultaneous same-key creation within one extension host', async () => {
@@ -1081,6 +1339,482 @@ suite('InlineScriptEnvManager', () => {
             assert.strictEqual(createWithProgressStub.callCount, 1);
         });
 
+        test('records every successful same-key coalesced caller provenance for later set and restart routing', async () => {
+            const cacheKeyValue = 'fedcba9876543210';
+            const firstUri = scriptUri('a.py');
+            const secondUri = scriptUri('b.py');
+            const secondMetadata = {
+                ...VALID_METADATA,
+                requiresPython: '>=3.12',
+            } satisfies metadataReader.InlineScriptMetadata;
+            const firstIdentity = VALID_METADATA_IDENTITY;
+            const secondIdentity = JSON.stringify({
+                requiresPython: secondMetadata.requiresPython,
+                dependencies: secondMetadata.dependencies,
+            });
+            const metadataByScript = new Map<string, metadataReader.InlineScriptMetadata>([
+                [normalizePath(firstUri.fsPath), VALID_METADATA],
+                [normalizePath(secondUri.fsPath), secondMetadata],
+            ]);
+            readMetadataStub.callsFake(async (uri: Uri) => metadataByScript.get(normalizePath(uri.fsPath)));
+            routingRegistry.setMetadata(firstUri, VALID_METADATA);
+            routingRegistry.setMetadata(secondUri, secondMetadata);
+            registerCacheKey(cacheKeyValue, ['requests', 'pytest'], baseExecutable);
+
+            let continueCreation: (() => void) | undefined;
+            let creationStarted: (() => void) | undefined;
+            let secondCallHashed: (() => void) | undefined;
+            const started = new Promise<void>((resolve) => {
+                creationStarted = resolve;
+            });
+            const secondHashed = new Promise<void>((resolve) => {
+                secondCallHashed = resolve;
+            });
+            const gate = new Promise<void>((resolve) => {
+                continueCreation = resolve;
+            });
+            computeCacheKeyStub.callsFake((inputs: cacheKey.CacheKeyInputs) => {
+                if (computeCacheKeyStub.callCount === 2) {
+                    secondCallHashed!();
+                }
+                return cacheKeysByInputs.get(getCacheKeyInputKey(inputs.dependencies, inputs.interpreterPath)) ?? CACHE_KEY;
+            });
+            createWithProgressStub.callsFake(async (...args: unknown[]) => {
+                const target = args[6] as string;
+                await fs.outputFile(venvPythonPath(target), '');
+                const environment = makeEnvironment(
+                    'ms-python.python:inline-script',
+                    '3.12.4',
+                    venvPythonPath(target),
+                    target,
+                );
+                environmentsByExecutablePath.set(normalizePath(environment.environmentPath.fsPath), environment);
+                creationStarted!();
+                await gate;
+                return { environment };
+            });
+
+            const first = manager.create(firstUri, { additionalPackages: ['pytest'] });
+            await started;
+            const second = manager.create(secondUri, { additionalPackages: ['pytest'] });
+            await secondHashed;
+            continueCreation!();
+            const [firstEnvironment, secondEnvironment] = await Promise.all([first, second]);
+
+            assert.ok(firstEnvironment);
+            assert.strictEqual(firstEnvironment, secondEnvironment);
+            assert.strictEqual(lockStub.callCount, 1);
+            assert.strictEqual(createWithProgressStub.callCount, 1);
+            assert.deepStrictEqual(
+                (
+                    sidecarsByEnvDir.get(
+                        normalizePath(cacheLayout.getScriptEnvDir(globalStorageUri, cacheKeyValue).fsPath),
+                    ) as cacheLayout.InlineScriptEnvMeta
+                ).sourceMetadataIdentityHashes,
+                [
+                    cacheLayout.hashSourceMetadataIdentity(firstIdentity),
+                    cacheLayout.hashSourceMetadataIdentity(secondIdentity),
+                ],
+            );
+
+            await manager.set(firstUri, firstEnvironment);
+            await manager.set(secondUri, secondEnvironment);
+            assert.deepStrictEqual(persistedAssociations, {
+                [normalizePath(firstUri.fsPath)]: matchedAssociationRecord(firstEnvironment.environmentPath.fsPath, firstIdentity),
+                [normalizePath(secondUri.fsPath)]: matchedAssociationRecord(secondEnvironment!.environmentPath.fsPath, secondIdentity),
+            });
+            assert.strictEqual(routingRegistry.hasValidatedAssociation(firstUri), true);
+            assert.strictEqual(routingRegistry.hasValidatedAssociation(secondUri), true);
+
+            persistedAssociations = {};
+            const restartRoutingRegistry = new InlineScriptRoutingRegistry();
+            restartRoutingRegistry.setMetadata(firstUri, VALID_METADATA);
+            restartRoutingRegistry.setMetadata(secondUri, secondMetadata);
+            const restarted = new InlineScriptEnvManager(
+                nativeFinder,
+                api,
+                baseManager,
+                globalStorageUri,
+                makeFakeLog(),
+                restartRoutingRegistry,
+            );
+
+            await restarted.set(firstUri, firstEnvironment);
+            await restarted.set(secondUri, secondEnvironment);
+
+            assert.deepStrictEqual(persistedAssociations, {
+                [normalizePath(firstUri.fsPath)]: matchedAssociationRecord(firstEnvironment.environmentPath.fsPath, firstIdentity),
+                [normalizePath(secondUri.fsPath)]: matchedAssociationRecord(secondEnvironment!.environmentPath.fsPath, secondIdentity),
+            });
+            assert.strictEqual(restartRoutingRegistry.hasValidatedAssociation(firstUri), true);
+            assert.strictEqual(restartRoutingRegistry.hasValidatedAssociation(secondUri), true);
+            restarted.dispose();
+        });
+
+        test('merges a late same-key caller that arrives while the initial sidecar write is in flight', async () => {
+            const cacheKeyValue = 'fedcba9876543210';
+            const firstUri = scriptUri('a.py');
+            const secondUri = scriptUri('b.py');
+            const secondMetadata = {
+                ...VALID_METADATA,
+                requiresPython: '>=3.12',
+            } satisfies metadataReader.InlineScriptMetadata;
+            const secondIdentity = JSON.stringify({
+                requiresPython: secondMetadata.requiresPython,
+                dependencies: secondMetadata.dependencies,
+            });
+            const firstHash = cacheLayout.hashSourceMetadataIdentity(VALID_METADATA_IDENTITY);
+            const secondHash = cacheLayout.hashSourceMetadataIdentity(secondIdentity);
+            const metadataByScript = new Map<string, metadataReader.InlineScriptMetadata>([
+                [normalizePath(firstUri.fsPath), VALID_METADATA],
+                [normalizePath(secondUri.fsPath), secondMetadata],
+            ]);
+            readMetadataStub.callsFake(async (uri: Uri) => metadataByScript.get(normalizePath(uri.fsPath)));
+            registerCacheKey(cacheKeyValue, ['requests', 'pytest'], baseExecutable);
+            let secondCallHashed: (() => void) | undefined;
+            const secondHashed = new Promise<void>((resolve) => {
+                secondCallHashed = resolve;
+            });
+            computeCacheKeyStub.callsFake((inputs: cacheKey.CacheKeyInputs) => {
+                if (computeCacheKeyStub.callCount === 2) {
+                    secondCallHashed!();
+                }
+                return cacheKeysByInputs.get(getCacheKeyInputKey(inputs.dependencies, inputs.interpreterPath)) ?? CACHE_KEY;
+            });
+
+            let releaseFirstWrite: (() => void) | undefined;
+            let firstWriteStarted: (() => void) | undefined;
+            const firstWriteGate = new Promise<void>((resolve) => {
+                releaseFirstWrite = resolve;
+            });
+            const firstWritePending = new Promise<void>((resolve) => {
+                firstWriteStarted = resolve;
+            });
+            let firstWrittenHashes: readonly string[] | undefined;
+            writeMetaStub.callsFake(async (envDir: Uri, meta: cacheLayout.InlineScriptEnvMeta) => {
+                if (writeMetaStub.callCount === 1) {
+                    firstWrittenHashes = meta.sourceMetadataIdentityHashes;
+                    firstWriteStarted!();
+                    await firstWriteGate;
+                }
+                sidecarsByEnvDir.set(normalizePath(envDir.fsPath), meta);
+            });
+            createWithProgressStub.callsFake(async (...args: unknown[]) => {
+                const target = args[6] as string;
+                await fs.outputFile(venvPythonPath(target), '');
+                const environment = makeEnvironment(
+                    'ms-python.python:inline-script',
+                    '3.12.4',
+                    venvPythonPath(target),
+                    target,
+                );
+                environmentsByExecutablePath.set(normalizePath(environment.environmentPath.fsPath), environment);
+                return { environment };
+            });
+
+            const first = manager.create(firstUri, { additionalPackages: ['pytest'] });
+            await firstWritePending;
+            const second = manager.create(secondUri, { additionalPackages: ['pytest'] });
+            await secondHashed;
+            const pendingCreations = (
+                manager as unknown as {
+                    pendingCreations: Map<string, { sourceMetadataIdentityHashes?: readonly string[] }>;
+                }
+            ).pendingCreations;
+            for (let attempt = 0; attempt < 20; attempt += 1) {
+                if (pendingCreations.get(cacheKeyValue)?.sourceMetadataIdentityHashes?.includes(secondHash)) {
+                    break;
+                }
+                await nextTurn();
+            }
+
+            assert.deepStrictEqual(firstWrittenHashes, [firstHash]);
+            assert.strictEqual(
+                pendingCreations.get(cacheKeyValue)?.sourceMetadataIdentityHashes?.includes(secondHash),
+                true,
+            );
+
+            releaseFirstWrite!();
+            const [firstEnvironment, secondEnvironment] = await Promise.all([first, second]);
+
+            assert.ok(firstEnvironment);
+            assert.strictEqual(firstEnvironment, secondEnvironment);
+            assert.strictEqual(createWithProgressStub.callCount, 1);
+            assert.strictEqual(lockStub.callCount, 2);
+            assert.deepStrictEqual(
+                (
+                    sidecarsByEnvDir.get(
+                        normalizePath(cacheLayout.getScriptEnvDir(globalStorageUri, cacheKeyValue).fsPath),
+                    ) as cacheLayout.InlineScriptEnvMeta
+                ).sourceMetadataIdentityHashes,
+                [firstHash, secondHash],
+            );
+        });
+
+        for (const failureMode of ['lock', 'read', 'write'] as const) {
+            test(`late same-key caller returns undefined when durable provenance merge ${failureMode} fails, but first caller and retry succeed`, async () => {
+                const cacheKeyValue = 'fedcba9876543210';
+                const firstUri = scriptUri('a.py');
+                const secondUri = scriptUri('b.py');
+                const secondMetadata = {
+                    ...VALID_METADATA,
+                    requiresPython: '>=3.12',
+                } satisfies metadataReader.InlineScriptMetadata;
+                const secondIdentity = JSON.stringify({
+                    requiresPython: secondMetadata.requiresPython,
+                    dependencies: secondMetadata.dependencies,
+                });
+                const firstHash = cacheLayout.hashSourceMetadataIdentity(VALID_METADATA_IDENTITY);
+                const secondHash = cacheLayout.hashSourceMetadataIdentity(secondIdentity);
+                const metadataByScript = new Map<string, metadataReader.InlineScriptMetadata>([
+                    [normalizePath(firstUri.fsPath), VALID_METADATA],
+                    [normalizePath(secondUri.fsPath), secondMetadata],
+                ]);
+                readMetadataStub.callsFake(async (uri: Uri) => metadataByScript.get(normalizePath(uri.fsPath)));
+                registerCacheKey(cacheKeyValue, ['requests', 'pytest'], baseExecutable);
+                let secondCallHashed: (() => void) | undefined;
+                const secondHashed = new Promise<void>((resolve) => {
+                    secondCallHashed = resolve;
+                });
+                computeCacheKeyStub.callsFake((inputs: cacheKey.CacheKeyInputs) => {
+                    if (computeCacheKeyStub.callCount === 2) {
+                        secondCallHashed!();
+                    }
+                    return cacheKeysByInputs.get(getCacheKeyInputKey(inputs.dependencies, inputs.interpreterPath)) ?? CACHE_KEY;
+                });
+
+                let releaseFirstWrite: (() => void) | undefined;
+                let firstWriteStarted: (() => void) | undefined;
+                const firstWriteGate = new Promise<void>((resolve) => {
+                    releaseFirstWrite = resolve;
+                });
+                const firstWritePending = new Promise<void>((resolve) => {
+                    firstWriteStarted = resolve;
+                });
+                writeMetaStub.callsFake(async (envDir: Uri, meta: cacheLayout.InlineScriptEnvMeta) => {
+                    if (writeMetaStub.callCount === 1) {
+                        firstWriteStarted!();
+                        await firstWriteGate;
+                    }
+                    sidecarsByEnvDir.set(normalizePath(envDir.fsPath), meta);
+                });
+                if (failureMode === 'lock') {
+                    lockStub.onSecondCall().rejects(new Error('merge lock failed'));
+                } else if (failureMode === 'read') {
+                    inspectMetaStub.onFirstCall().rejects(new Error('merge read failed'));
+                } else {
+                    writeMetaStub.onSecondCall().rejects(new Error('merge write failed'));
+                }
+                createWithProgressStub.callsFake(async (...args: unknown[]) => {
+                    const target = args[6] as string;
+                    await fs.outputFile(venvPythonPath(target), '');
+                    const environment = makeEnvironment(
+                        'ms-python.python:inline-script',
+                        '3.12.4',
+                        venvPythonPath(target),
+                        target,
+                    );
+                    environmentsByExecutablePath.set(normalizePath(environment.environmentPath.fsPath), environment);
+                    return { environment };
+                });
+
+                const first = manager.create(firstUri, { additionalPackages: ['pytest'] });
+                await firstWritePending;
+                const second = manager.create(secondUri, { additionalPackages: ['pytest'] });
+                await secondHashed;
+                releaseFirstWrite!();
+                const [firstEnvironment, secondEnvironment] = await Promise.all([first, second]);
+
+                assert.ok(firstEnvironment);
+                assert.strictEqual(secondEnvironment, undefined);
+                assert.strictEqual(createWithProgressStub.callCount, 1);
+                assert.deepStrictEqual(
+                    (
+                        sidecarsByEnvDir.get(
+                            normalizePath(cacheLayout.getScriptEnvDir(globalStorageUri, cacheKeyValue).fsPath),
+                        ) as cacheLayout.InlineScriptEnvMeta
+                    ).sourceMetadataIdentityHashes,
+                    [firstHash],
+                );
+
+                const retried = await manager.create(secondUri, { additionalPackages: ['pytest'] });
+
+                assert.ok(retried);
+                assert.strictEqual(normalizePath(retried!.environmentPath.fsPath), normalizePath(firstEnvironment.environmentPath.fsPath));
+                assert.deepStrictEqual(
+                    (
+                        sidecarsByEnvDir.get(
+                            normalizePath(cacheLayout.getScriptEnvDir(globalStorageUri, cacheKeyValue).fsPath),
+                        ) as cacheLayout.InlineScriptEnvMeta
+                    ).sourceMetadataIdentityHashes,
+                    [firstHash, secondHash],
+                );
+                assert.strictEqual(createWithProgressStub.callCount, 1);
+            });
+        }
+
+        test('does not record provenance when a shared same-key creation fails', async () => {
+            const firstUri = scriptUri('a.py');
+            const secondUri = scriptUri('b.py');
+            const secondMetadata = {
+                ...VALID_METADATA,
+                requiresPython: '>=3.12',
+            } satisfies metadataReader.InlineScriptMetadata;
+            const metadataByScript = new Map<string, metadataReader.InlineScriptMetadata>([
+                [normalizePath(firstUri.fsPath), VALID_METADATA],
+                [normalizePath(secondUri.fsPath), secondMetadata],
+            ]);
+            readMetadataStub.callsFake(async (uri: Uri) => metadataByScript.get(normalizePath(uri.fsPath)));
+            registerCacheKey(CACHE_KEY, ['requests', 'pytest'], baseExecutable);
+
+            let continueCreation: (() => void) | undefined;
+            let creationStarted: (() => void) | undefined;
+            let secondCallHashed: (() => void) | undefined;
+            const started = new Promise<void>((resolve) => {
+                creationStarted = resolve;
+            });
+            const secondHashed = new Promise<void>((resolve) => {
+                secondCallHashed = resolve;
+            });
+            const gate = new Promise<void>((resolve) => {
+                continueCreation = resolve;
+            });
+            computeCacheKeyStub.callsFake((inputs: cacheKey.CacheKeyInputs) => {
+                if (computeCacheKeyStub.callCount === 2) {
+                    secondCallHashed!();
+                }
+                return cacheKeysByInputs.get(getCacheKeyInputKey(inputs.dependencies, inputs.interpreterPath)) ?? CACHE_KEY;
+            });
+            createWithProgressStub.callsFake(async () => {
+                creationStarted!();
+                await gate;
+                return { envCreationErr: 'boom' };
+            });
+
+            const first = manager.create(firstUri, { additionalPackages: ['pytest'] });
+            await started;
+            const second = manager.create(secondUri, { additionalPackages: ['pytest'] });
+            await secondHashed;
+            continueCreation!();
+
+            assert.deepStrictEqual(await Promise.all([first, second]), [undefined, undefined]);
+            assert.strictEqual(writeMetaStub.callCount, 0);
+            assert.strictEqual(sidecarsByEnvDir.size, 0);
+        });
+
+        test('dedupes coalesced same-key provenance hashes before the first sidecar write', async () => {
+            const cacheKeyValue = 'fedcba9876543210';
+            const scriptSpecs = [
+                ['script-0.py', '>=3.0'],
+                ['script-1.py', '>=3.1'],
+                ['script-2.py', '>=3.2'],
+                ['script-3.py', '>=3.3'],
+                ['script-4.py', '>=3.4'],
+                ['script-5.py', '>=3.5'],
+                ['script-6.py', '>=3.6'],
+                ['script-7.py', '>=3.7'],
+                ['script-8.py', '>=3.8'],
+                ['script-9.py', '>=3.8'],
+            ] as const;
+            const metadataByScript = new Map<string, metadataReader.InlineScriptMetadata>(
+                scriptSpecs.map(([name, requiresPython]) => [
+                    normalizePath(scriptUri(name).fsPath),
+                    {
+                        ...VALID_METADATA,
+                        requiresPython,
+                    },
+                ]),
+            );
+            let expectedHashes: readonly string[] | undefined;
+            for (const [, requiresPython] of scriptSpecs) {
+                expectedHashes = cacheLayout.mergeSourceMetadataIdentityHashes(
+                    expectedHashes,
+                    cacheLayout.hashSourceMetadataIdentity(
+                        JSON.stringify({
+                            requiresPython,
+                            dependencies: ['requests'],
+                        }),
+                    ),
+                );
+            }
+            readMetadataStub.callsFake(async (uri: Uri) => metadataByScript.get(normalizePath(uri.fsPath)));
+            registerCacheKey(cacheKeyValue, ['requests', 'pytest'], baseExecutable);
+
+            let continueCreation: (() => void) | undefined;
+            let creationStarted: (() => void) | undefined;
+            const started = new Promise<void>((resolve) => {
+                creationStarted = resolve;
+            });
+            const gate = new Promise<void>((resolve) => {
+                continueCreation = resolve;
+            });
+            createWithProgressStub.callsFake(async (...args: unknown[]) => {
+                const target = args[6] as string;
+                await fs.outputFile(venvPythonPath(target), '');
+                const environment = makeEnvironment(
+                    'ms-python.python:inline-script',
+                    '3.12.4',
+                    venvPythonPath(target),
+                    target,
+                );
+                environmentsByExecutablePath.set(normalizePath(environment.environmentPath.fsPath), environment);
+                creationStarted!();
+                await gate;
+                return { environment };
+            });
+
+            const pendingCreates = [manager.create(scriptUri(scriptSpecs[0][0]), { additionalPackages: ['pytest'] })];
+            await started;
+            const pendingCreations = (
+                manager as unknown as {
+                    pendingCreations: Map<string, { sourceMetadataIdentityHashes?: readonly string[] }>;
+                }
+            ).pendingCreations;
+            const addPendingCreationSourceMetadataIdentityHashStub = sinon
+                .stub(
+                    manager as unknown as {
+                        addPendingCreationSourceMetadataIdentityHash(
+                            pendingCreation: { sourceMetadataIdentityHashes?: readonly string[] },
+                            sourceMetadataIdentityHash: string | undefined,
+                        ): void;
+                    },
+                    'addPendingCreationSourceMetadataIdentityHash',
+                )
+                .callThrough();
+            for (const [name, requiresPython] of scriptSpecs.slice(1)) {
+                const hash = cacheLayout.hashSourceMetadataIdentity(
+                    JSON.stringify({
+                        requiresPython,
+                        dependencies: ['requests'],
+                    }),
+                );
+                pendingCreates.push(manager.create(scriptUri(name), { additionalPackages: ['pytest'] }));
+                await waitForStubCallCount(addPendingCreationSourceMetadataIdentityHashStub, pendingCreates.length - 1);
+                assert.strictEqual(
+                    pendingCreations.get(cacheKeyValue)?.sourceMetadataIdentityHashes?.includes(hash),
+                    true,
+                );
+            }
+            assert.deepStrictEqual(
+                [...(pendingCreations.get(cacheKeyValue)?.sourceMetadataIdentityHashes ?? [])].sort(),
+                [...(expectedHashes ?? [])].sort(),
+            );
+            continueCreation!();
+            const environments = await Promise.all(pendingCreates);
+
+            assert.ok(environments[0]);
+            assert.ok(environments.every((environment) => environment === environments[0]));
+            assert.strictEqual(lockStub.callCount, 1);
+            const sourceMetadataIdentityHashes = (
+                sidecarsByEnvDir.get(
+                    normalizePath(cacheLayout.getScriptEnvDir(globalStorageUri, cacheKeyValue).fsPath),
+                ) as cacheLayout.InlineScriptEnvMeta
+            ).sourceMetadataIdentityHashes;
+            assert.deepStrictEqual([...(sourceMetadataIdentityHashes ?? [])].sort(), [...(expectedHashes ?? [])].sort());
+            assert.strictEqual(sourceMetadataIdentityHashes?.length, expectedHashes?.length);
+            assert.strictEqual(sourceMetadataIdentityHashes ? new Set(sourceMetadataIdentityHashes).size : 0, sourceMetadataIdentityHashes?.length);
+        });
+
         test('returns undefined without building when the cache lock cannot be acquired', async () => {
             lockStub.rejects(Object.assign(new Error('already locked'), { code: 'ELOCKED' }));
             assert.strictEqual(await manager.create(scriptUri()), undefined);
@@ -1115,8 +1849,88 @@ suite('InlineScriptEnvManager', () => {
             assert.strictEqual(resolveVenvStub.firstCall.args[0], venvPythonPath(envDir().fsPath));
             assert.deepStrictEqual(writeMetaStub.firstCall.args, [
                 envDir(),
-                { ...sidecar, lastUsedAt: NOW.toISOString() },
+                {
+                    ...sidecar,
+                    lastUsedAt: NOW.toISOString(),
+                    sourceMetadataIdentityHashes: [
+                        cacheLayout.hashSourceMetadataIdentity(VALID_METADATA_IDENTITY),
+                    ],
+                },
             ]);
+        });
+
+        test('merges the current metadata identity hash into a reused cache sidecar', async () => {
+            await fs.ensureDir(envDir().fsPath);
+            setSidecar({
+                schemaVersion: cacheLayout.META_SCHEMA_VERSION,
+                baseInterpreterPath: baseExecutable,
+                baseInterpreterVersion: baseEnvironment.version,
+                lastUsedAt: '2026-07-01T00:00:00.000Z',
+                sourceMetadataIdentityHashes: [cacheLayout.hashSourceMetadataIdentity('{"requiresPython":">=3.12","dependencies":["rich"]}')],
+            });
+            const cached = makeEnvironment(
+                'ms-python.python:inline-script',
+                '3.12.4',
+                venvPythonPath(envDir().fsPath),
+                envDir().fsPath,
+            );
+            await fs.outputFile(venvPythonPath(envDir().fsPath), '');
+            resolveVenvStub.resolves(cached);
+
+            await manager.create(scriptUri());
+
+            assert.deepStrictEqual(writeMetaStub.firstCall.args[1], {
+                schemaVersion: cacheLayout.META_SCHEMA_VERSION,
+                baseInterpreterPath: baseExecutable,
+                baseInterpreterVersion: baseEnvironment.version,
+                lastUsedAt: NOW.toISOString(),
+                sourceMetadataIdentityHashes: [
+                    cacheLayout.hashSourceMetadataIdentity('{"requiresPython":">=3.12","dependencies":["rich"]}'),
+                    cacheLayout.hashSourceMetadataIdentity(VALID_METADATA_IDENTITY),
+                ],
+            });
+        });
+
+        test('dedupes and caps reused cache provenance hashes', async () => {
+            await fs.ensureDir(envDir().fsPath);
+            const currentHash = cacheLayout.hashSourceMetadataIdentity(VALID_METADATA_IDENTITY);
+            const hashes = [
+                currentHash,
+                ...Array.from({ length: cacheLayout.MAX_SOURCE_METADATA_IDENTITY_HASHES - 1 }, (_, index) =>
+                    cacheLayout.hashSourceMetadataIdentity(`identity-${index}`),
+                ),
+            ];
+            setSidecar({
+                schemaVersion: cacheLayout.META_SCHEMA_VERSION,
+                baseInterpreterPath: baseExecutable,
+                baseInterpreterVersion: baseEnvironment.version,
+                lastUsedAt: '2026-07-01T00:00:00.000Z',
+                sourceMetadataIdentityHashes: hashes,
+            });
+            const cached = makeEnvironment(
+                'ms-python.python:inline-script',
+                '3.12.4',
+                venvPythonPath(envDir().fsPath),
+                envDir().fsPath,
+            );
+            await fs.outputFile(venvPythonPath(envDir().fsPath), '');
+            resolveVenvStub.resolves(cached);
+
+            await manager.create(scriptUri());
+
+            assert.strictEqual((writeMetaStub.firstCall.args[1] as cacheLayout.InlineScriptEnvMeta).sourceMetadataIdentityHashes?.length, cacheLayout.MAX_SOURCE_METADATA_IDENTITY_HASHES);
+        });
+
+        test('preserves a cache entry with a future sidecar schema version', async () => {
+            await fs.ensureDir(envDir().fsPath);
+            await fs.outputFile(venvPythonPath(envDir().fsPath), '');
+            const markerPath = path.join(envDir().fsPath, 'keep.txt');
+            await fs.outputFile(markerPath, 'keep');
+            sidecarsByEnvDir.set(normalizePath(envDir().fsPath), 'unavailable');
+            inspectMetaStub.callsFake(async () => ({ kind: 'unsupported' } as cacheLayout.InlineScriptMetaReadResult));
+
+            assert.strictEqual(await manager.create(scriptUri()), undefined);
+            assert.strictEqual(await fs.pathExists(markerPath), true);
         });
 
         test('returns a valid hit even when the last-used timestamp cannot be updated', async () => {
@@ -2360,6 +3174,47 @@ suite('InlineScriptEnvManager', () => {
             assert.strictEqual(telemetryCalls(EventNames.INLINE_SCRIPT_ENV_ERROR).length, 0);
         });
 
+        test('emits one setup-failure when coalesced cache-root creation fails', async () => {
+            readMetadataStub.onSecondCall().resolves({ ...VALID_METADATA, requiresPython: '>=3.12' });
+            const cacheRootPath = cacheLayout.getScriptEnvCacheRoot(globalStorageUri).fsPath;
+            const originalEnsureDir = fsExtra.ensureDir;
+            let rejectCacheRoot: ((error: Error) => void) | undefined;
+            let signalCacheRoot: (() => void) | undefined;
+            const cacheRootStarted = new Promise<void>((resolve) => {
+                signalCacheRoot = resolve;
+            });
+            const cacheRootGate = new Promise<void>((_resolve, reject) => {
+                rejectCacheRoot = reject;
+            });
+            sinon.stub(fsExtra, 'ensureDir').callsFake(async (target: string) => {
+                if (normalizePath(target) === normalizePath(cacheRootPath)) {
+                    signalCacheRoot!();
+                    return cacheRootGate;
+                }
+                return originalEnsureDir(target);
+            });
+
+            const first = manager.create(scriptUri('a.py'));
+            await cacheRootStarted;
+            const second = manager.create(scriptUri('b.py'));
+            const pendingManager = manager as unknown as {
+                pendingCreations: Map<string, { sourceMetadataIdentityHashes?: readonly string[] }>;
+            };
+            await waitForCondition(
+                () => [...pendingManager.pendingCreations.values()][0]?.sourceMetadataIdentityHashes?.length === 2,
+                'Expected the second request to join the pending cache creation',
+            );
+            rejectCacheRoot!(new Error('global storage unavailable'));
+
+            assert.deepStrictEqual(await Promise.all([first, second]), [undefined, undefined]);
+            assert.deepStrictEqual(
+                telemetryCalls(EventNames.INLINE_SCRIPT_ENV_ERROR).map((call) => call.args),
+                [[EventNames.INLINE_SCRIPT_ENV_ERROR, undefined, { category: 'setup-failure' }]],
+            );
+            assert.strictEqual(lockStub.callCount, 0);
+            assert.strictEqual(createWithProgressStub.callCount, 0);
+        });
+
         test('excludes lock and cache inspection time from envCreated duration', async () => {
             await fs.ensureDir(envDir().fsPath);
             lockStub.callsFake(async () => {
@@ -2494,7 +3349,7 @@ suite('InlineScriptEnvManager', () => {
 
             assert.strictEqual(await manager.get(uri), environment);
             assert.deepStrictEqual(persistedAssociations, {
-                [normalizePath(uri.fsPath)]: environment.environmentPath.fsPath,
+                [normalizePath(uri.fsPath)]: matchedAssociationRecord(environment.environmentPath.fsPath),
             });
             assert.strictEqual(workspaceState.set.firstCall.args[0], INLINE_SCRIPT_ENVS_KEY);
             assert.strictEqual(listener.callCount, 1);
@@ -2509,6 +3364,511 @@ suite('InlineScriptEnvManager', () => {
             assert.deepStrictEqual(listener.secondCall.args[0], { uri, old: environment, new: undefined });
         });
 
+        test('updates validated routing state when selections are set and unset', async () => {
+            const uri = scriptUri();
+            const environment = await createOwnedEnvironment();
+            routingRegistry.setMetadata(uri, VALID_METADATA);
+
+            assert.strictEqual(routingRegistry.hasValidatedAssociation(uri), false);
+
+            await manager.set(uri, environment);
+            assert.strictEqual(routingRegistry.hasValidatedAssociation(uri), true);
+
+            await manager.set(uri, undefined);
+            assert.strictEqual(routingRegistry.hasValidatedAssociation(uri), false);
+        });
+
+        test('persists the saved metadata identity separately from the environment path', async () => {
+            const uri = scriptUri();
+            const environment = await createOwnedEnvironment();
+
+            await manager.set(uri, environment);
+
+            assert.deepStrictEqual(persistedAssociations, {
+                [normalizePath(uri.fsPath)]: matchedAssociationRecord(environment.environmentPath.fsPath),
+            });
+        });
+
+        test('routes an environment created with additional packages by saved metadata identity', async () => {
+            const uri = scriptUri();
+            routingRegistry.setMetadata(uri, VALID_METADATA);
+            registerCacheKey('fedcba9876543210', ['requests', 'pytest'], baseExecutable);
+            const environment = await manager.create(uri, { additionalPackages: ['pytest'] });
+            assert.ok(environment);
+
+            await manager.set(uri, environment!);
+
+            assert.strictEqual(await manager.get(uri), environment);
+            assert.strictEqual(routingRegistry.hasValidatedAssociation(uri), true);
+        });
+
+        test('reselecting the same matched additional-packages environment after restart preserves matched provenance', async () => {
+            const uri = scriptUri();
+            registerCacheKey('fedcba9876543210', ['requests', 'pytest'], baseExecutable);
+            const environment = await manager.create(uri, { additionalPackages: ['pytest'] });
+            assert.ok(environment);
+            await manager.set(uri, environment!);
+
+            const restartRoutingRegistry = new InlineScriptRoutingRegistry();
+            const restarted = new InlineScriptEnvManager(
+                nativeFinder,
+                api,
+                baseManager,
+                globalStorageUri,
+                makeFakeLog(),
+                restartRoutingRegistry,
+            );
+
+            await restarted.set(uri, environment!);
+
+            assert.deepStrictEqual(persistedAssociations, {
+                [normalizePath(uri.fsPath)]: matchedAssociationRecord(environment!.environmentPath.fsPath),
+            });
+            restarted.dispose();
+        });
+
+        test('create with additional packages can route after reload before the first set via sidecar provenance', async () => {
+            const uri = scriptUri();
+            registerCacheKey('fedcba9876543210', ['requests', 'pytest'], baseExecutable);
+            const environment = await manager.create(uri, { additionalPackages: ['pytest'] });
+            assert.ok(environment);
+            persistedAssociations = {};
+
+            const restartRoutingRegistry = new InlineScriptRoutingRegistry();
+            const restarted = new InlineScriptEnvManager(
+                nativeFinder,
+                api,
+                baseManager,
+                globalStorageUri,
+                makeFakeLog(),
+                restartRoutingRegistry,
+            );
+
+            await restarted.set(uri, environment!);
+
+            assert.deepStrictEqual(persistedAssociations, {
+                [normalizePath(uri.fsPath)]: matchedAssociationRecord(environment!.environmentPath.fsPath),
+            });
+            restarted.dispose();
+        });
+
+        test('does not reuse matched provenance after the same cache path is rebuilt for a different generation', async () => {
+            const uri = scriptUri();
+            const cacheKeyValue = 'fedcba9876543210';
+            routingRegistry.setMetadata(uri, VALID_METADATA);
+            const environment = await createOwnedEnvironment(cacheKeyValue);
+            setSidecar(
+                {
+                    schemaVersion: cacheLayout.META_SCHEMA_VERSION,
+                    baseInterpreterPath: path.join(
+                        tempRoot,
+                        `base-python-${cacheKeyValue}`,
+                        isWindows() ? 'python.exe' : 'python',
+                    ),
+                    baseInterpreterVersion: baseEnvironment.version,
+                    lastUsedAt: NOW.toISOString(),
+                    sourceMetadataIdentityHashes: [
+                        cacheLayout.hashSourceMetadataIdentity(VALID_METADATA_IDENTITY),
+                    ],
+                },
+                Uri.file(path.dirname(path.dirname(environment.environmentPath.fsPath))),
+            );
+
+            await manager.set(uri, environment);
+            assert.deepStrictEqual(persistedAssociations, {
+                [normalizePath(uri.fsPath)]: matchedAssociationRecord(environment!.environmentPath.fsPath),
+            });
+
+            const rebuiltMetadata = {
+                ...VALID_METADATA,
+                requiresPython: '>=3.12',
+            } satisfies metadataReader.InlineScriptMetadata;
+            const rebuiltBaseExecutable = path.join(tempRoot, 'rebuilt-base', isWindows() ? 'python.exe' : 'python');
+            await fs.outputFile(rebuiltBaseExecutable, '');
+            setSidecar(
+                {
+                    schemaVersion: cacheLayout.META_SCHEMA_VERSION,
+                    baseInterpreterPath: rebuiltBaseExecutable,
+                    baseInterpreterVersion: '3.12.9',
+                    lastUsedAt: NOW.toISOString(),
+                    sourceMetadataIdentityHashes: [
+                        cacheLayout.hashSourceMetadataIdentity(
+                            JSON.stringify({
+                                requiresPython: rebuiltMetadata.requiresPython,
+                                dependencies: rebuiltMetadata.dependencies,
+                            }),
+                        ),
+                    ],
+                },
+                Uri.file(path.dirname(path.dirname(environment!.environmentPath.fsPath))),
+            );
+
+            await manager.set(uri, environment);
+
+            assert.deepStrictEqual(persistedAssociations, {
+                [normalizePath(uri.fsPath)]: pendingAssociationRecord(environment!.environmentPath.fsPath),
+            });
+            assert.strictEqual(routingRegistry.hasValidatedAssociation(uri), false);
+        });
+
+        test('does not infer matched provenance when the sidecar source identity hash does not match', async () => {
+            const sourceUri = scriptUri('source.py');
+            const targetUri = scriptUri('target.py');
+            const sourceMetadata = {
+                ...VALID_METADATA,
+                dependencies: ['rich'],
+            } satisfies metadataReader.InlineScriptMetadata;
+            routingRegistry.setMetadata(targetUri, VALID_METADATA);
+            registerCacheKey('fedcba9876543210', ['rich', 'pytest'], baseExecutable);
+            readMetadataStub.resolves(sourceMetadata);
+            const environment = await manager.create(sourceUri, { additionalPackages: ['pytest'] });
+            assert.ok(environment);
+            readMetadataStub.resolves(VALID_METADATA);
+
+            await manager.set(targetUri, environment!);
+
+            assert.deepStrictEqual(persistedAssociations, {
+                [normalizePath(targetUri.fsPath)]: pendingAssociationRecord(environment!.environmentPath.fsPath),
+            });
+            assert.strictEqual(routingRegistry.hasValidatedAssociation(targetUri), false);
+        });
+
+        test('reselecting a different owned env after restart does not inherit matched provenance', async () => {
+            const uri = scriptUri();
+            const otherUri = scriptUri('other.py');
+            registerCacheKey('fedcba9876543210', ['requests', 'pytest'], baseExecutable);
+            const matchedEnvironment = await manager.create(uri, { additionalPackages: ['pytest'] });
+            const otherMetadata = {
+                ...VALID_METADATA,
+                dependencies: ['urllib3'],
+            } satisfies metadataReader.InlineScriptMetadata;
+            registerCacheKey('0011223344556677', ['urllib3', 'pytest', 'rich'], baseExecutable);
+            readMetadataStub.resolves(otherMetadata);
+            const differentOwnedEnvironment = await manager.create(otherUri, { additionalPackages: ['pytest', 'rich'] });
+            readMetadataStub.resolves(VALID_METADATA);
+            assert.ok(matchedEnvironment);
+            assert.ok(differentOwnedEnvironment);
+            await manager.set(uri, matchedEnvironment!);
+
+            const restartRoutingRegistry = new InlineScriptRoutingRegistry();
+            const restarted = new InlineScriptEnvManager(
+                nativeFinder,
+                api,
+                baseManager,
+                globalStorageUri,
+                makeFakeLog(),
+                restartRoutingRegistry,
+            );
+
+            await restarted.set(uri, differentOwnedEnvironment!);
+
+            assert.deepStrictEqual(persistedAssociations, {
+                [normalizePath(uri.fsPath)]: pendingAssociationRecord(
+                    differentOwnedEnvironment!.environmentPath.fsPath,
+                ),
+            });
+            restarted.dispose();
+        });
+
+        test('old sidecars without provenance keep additional-packages envs conservative on reload', async () => {
+            const uri = scriptUri();
+            registerCacheKey('fedcba9876543210', ['requests', 'pytest'], baseExecutable);
+            const environment = await manager.create(uri, { additionalPackages: ['pytest'] });
+            assert.ok(environment);
+            const envDirPath = path.dirname(path.dirname(environment!.environmentPath.fsPath));
+            setSidecar({
+                schemaVersion: cacheLayout.META_SCHEMA_VERSION,
+                baseInterpreterPath: baseExecutable,
+                baseInterpreterVersion: baseEnvironment.version,
+                lastUsedAt: NOW.toISOString(),
+            }, Uri.file(envDirPath));
+            persistedAssociations = {};
+
+            const restartRoutingRegistry = new InlineScriptRoutingRegistry();
+            const restarted = new InlineScriptEnvManager(
+                nativeFinder,
+                api,
+                baseManager,
+                globalStorageUri,
+                makeFakeLog(),
+                restartRoutingRegistry,
+            );
+
+            await restarted.set(uri, environment);
+
+            assert.deepStrictEqual(persistedAssociations, {
+                [normalizePath(uri.fsPath)]: pendingAssociationRecord(environment!.environmentPath.fsPath),
+            });
+            restarted.dispose();
+        });
+
+        test('stores a pending verified binding for a dirty selection and promotes it on matching save', async () => {
+            const uri = scriptUri();
+            const openDocumentsStub = workspaceApis.getOpenTextDocuments as unknown as sinon.SinonStub;
+            openDocumentsStub.returns([{ uri, isDirty: true } as unknown as TextDocument]);
+            registerCacheKey('fedcba9876543210', ['requests', 'pytest'], baseExecutable);
+            const environment = await manager.create(uri, { additionalPackages: ['pytest'] });
+            assert.ok(environment);
+
+            await manager.set(uri, environment!);
+            assert.deepStrictEqual(persistedAssociations, {
+                [normalizePath(uri.fsPath)]: pendingAssociationRecord(environment!.environmentPath.fsPath),
+            });
+            assert.strictEqual(routingRegistry.hasValidatedAssociation(uri), false);
+
+            openDocumentsStub.returns([]);
+            await triggerSavedMetadataChange(routingRegistry, manager, uri);
+
+            assert.deepStrictEqual(persistedAssociations, {
+                [normalizePath(uri.fsPath)]: matchedAssociationRecord(environment!.environmentPath.fsPath),
+            });
+            assert.strictEqual(routingRegistry.hasValidatedAssociation(uri), true);
+        });
+
+        test('dirty pending binding for the same path after restart keeps pending until saved metadata is consistent', async () => {
+            const uri = scriptUri();
+            const environment = await createOwnedEnvironment('fedcba9876543210');
+            persistedAssociations = {
+                [normalizePath(uri.fsPath)]: pendingAssociationRecord(environment.environmentPath.fsPath),
+            };
+            const openDocumentsStub = workspaceApis.getOpenTextDocuments as unknown as sinon.SinonStub;
+            openDocumentsStub.returns([{ uri, isDirty: true } as unknown as TextDocument]);
+            const restartRoutingRegistry = new InlineScriptRoutingRegistry();
+            const restarted = new InlineScriptEnvManager(
+                nativeFinder,
+                api,
+                baseManager,
+                globalStorageUri,
+                makeFakeLog(),
+                restartRoutingRegistry,
+            );
+
+            await restarted.set(uri, environment);
+            assert.deepStrictEqual(persistedAssociations, {
+                [normalizePath(uri.fsPath)]: pendingAssociationRecord(environment.environmentPath.fsPath),
+            });
+            assert.strictEqual(restartRoutingRegistry.hasValidatedAssociation(uri), false);
+            restarted.dispose();
+        });
+
+        test('keeps a dirty pending binding non-routeable when the saved metadata identity no longer matches', async () => {
+            const uri = scriptUri();
+            const changedMetadata = {
+                ...VALID_METADATA,
+                dependencies: ['urllib3'],
+            } satisfies metadataReader.InlineScriptMetadata;
+            const openDocumentsStub = workspaceApis.getOpenTextDocuments as unknown as sinon.SinonStub;
+            openDocumentsStub.returns([{ uri, isDirty: true } as unknown as TextDocument]);
+            registerCacheKey('fedcba9876543210', ['requests', 'pytest'], baseExecutable);
+            const environment = await manager.create(uri, { additionalPackages: ['pytest'] });
+            assert.ok(environment);
+
+            await manager.set(uri, environment!);
+            assert.deepStrictEqual(persistedAssociations, {
+                [normalizePath(uri.fsPath)]: pendingAssociationRecord(environment!.environmentPath.fsPath),
+            });
+
+            openDocumentsStub.returns([]);
+            routingRegistry.setMetadata(uri, changedMetadata);
+            await triggerSavedMetadataChange(routingRegistry, manager, uri, changedMetadata);
+
+            assert.deepStrictEqual(persistedAssociations, {
+                [normalizePath(uri.fsPath)]: pendingAssociationRecord(environment!.environmentPath.fsPath),
+            });
+            assert.strictEqual(routingRegistry.hasValidatedAssociation(uri), false);
+        });
+
+        test('failed pending bind invalidates warm validation before a retry within 5s', async () => {
+            const uri = scriptUri();
+            const environment = await createOwnedEnvironment('fedcba9876543210');
+            persistedAssociations = {
+                [normalizePath(uri.fsPath)]: pendingAssociationRecord(environment.environmentPath.fsPath),
+            };
+            const restartRoutingRegistry = new InlineScriptRoutingRegistry();
+            resolveVenvStub.resolves(environment);
+
+            const restarted = new InlineScriptEnvManager(
+                nativeFinder,
+                api,
+                baseManager,
+                globalStorageUri,
+                makeFakeLog(),
+                restartRoutingRegistry,
+            );
+            await nextTurn();
+
+            workspaceState.set.onFirstCall().rejects(new Error('Memento unavailable'));
+            await triggerSavedMetadataChange(restartRoutingRegistry, restarted, uri);
+            await fs.remove(environment.environmentPath.fsPath);
+            clock.tick(5_000 - 1);
+
+            await triggerSavedMetadataChange(restartRoutingRegistry, restarted, uri);
+
+            assert.deepStrictEqual(persistedAssociations, {});
+            assert.strictEqual(restartRoutingRegistry.hasValidatedAssociation(uri), false);
+            restarted.dispose();
+        });
+
+        test('removes a dirty pending binding when the environment was deleted before save validation', async () => {
+            const uri = scriptUri();
+            const openDocumentsStub = workspaceApis.getOpenTextDocuments as unknown as sinon.SinonStub;
+            openDocumentsStub.returns([{ uri, isDirty: true } as unknown as TextDocument]);
+            registerCacheKey('fedcba9876543210', ['requests', 'pytest'], baseExecutable);
+            const environment = await manager.create(uri, { additionalPackages: ['pytest'] });
+            assert.ok(environment);
+
+            await manager.set(uri, environment!);
+            await fs.remove(environment!.environmentPath.fsPath);
+
+            openDocumentsStub.returns([]);
+            routingRegistry.setMetadata(uri, VALID_METADATA);
+            await triggerSavedMetadataChange(routingRegistry, manager, uri);
+
+            assert.deepStrictEqual(persistedAssociations, {});
+            assert.strictEqual(routingRegistry.hasValidatedAssociation(uri), false);
+        });
+
+        test('keeps a dirty pending binding non-routeable when validation is transiently unavailable on save', async () => {
+            const uri = scriptUri();
+            const openDocumentsStub = workspaceApis.getOpenTextDocuments as unknown as sinon.SinonStub;
+            openDocumentsStub.returns([{ uri, isDirty: true } as unknown as TextDocument]);
+            registerCacheKey('fedcba9876543210', ['requests', 'pytest'], baseExecutable);
+            const environment = await manager.create(uri, { additionalPackages: ['pytest'] });
+            assert.ok(environment);
+
+            await manager.set(uri, environment!);
+            resolveVenvStub.resolves(undefined);
+            openDocumentsStub.returns([]);
+            routingRegistry.setMetadata(uri, VALID_METADATA);
+            await triggerSavedMetadataChange(routingRegistry, manager, uri);
+
+            assert.deepStrictEqual(persistedAssociations, {
+                [normalizePath(uri.fsPath)]: pendingAssociationRecord(environment!.environmentPath.fsPath),
+            });
+            assert.strictEqual(routingRegistry.hasValidatedAssociation(uri), false);
+        });
+
+        test('keeps a dirty pending binding non-routeable when ownership validation changes on save', async () => {
+            const uri = scriptUri();
+            const openDocumentsStub = workspaceApis.getOpenTextDocuments as unknown as sinon.SinonStub;
+            openDocumentsStub.returns([{ uri, isDirty: true } as unknown as TextDocument]);
+            registerCacheKey('fedcba9876543210', ['requests', 'pytest'], baseExecutable);
+            const environment = await manager.create(uri, { additionalPackages: ['pytest'] });
+            assert.ok(environment);
+
+            await manager.set(uri, environment!);
+            resolveVenvStub.resolves({
+                ...environment!,
+                envId: { ...environment!.envId, managerId: 'ms-python.python:system' },
+            });
+            openDocumentsStub.returns([]);
+            routingRegistry.setMetadata(uri, VALID_METADATA);
+            await triggerSavedMetadataChange(routingRegistry, manager, uri);
+
+            assert.deepStrictEqual(persistedAssociations, {
+                [normalizePath(uri.fsPath)]: pendingAssociationRecord(environment!.environmentPath.fsPath),
+            });
+            assert.strictEqual(routingRegistry.hasValidatedAssociation(uri), false);
+        });
+
+        test('removes only the requested malformed entry while preserving valid and legacy records', async () => {
+            const invalidUri = scriptUri('invalid.py');
+            const validUri = scriptUri('valid.py');
+            const legacyUri = scriptUri('legacy.py');
+            const validEnvironment = await createOwnedEnvironment('fedcba9876543210');
+            const legacyEnvironment = await createOwnedEnvironment('0011223344556677');
+            persistedAssociations = {
+                [normalizePath(invalidUri.fsPath)]: { schemaVersion: 1, environmentPath: '', metadataBinding: { kind: 'pending' } },
+                [normalizePath(validUri.fsPath)]: matchedAssociationRecord(validEnvironment.environmentPath.fsPath),
+                [normalizePath(legacyUri.fsPath)]: legacyEnvironment.environmentPath.fsPath,
+            };
+            resolveVenvStub.callsFake(async (environmentPath: string) => {
+                const normalized = normalizePath(environmentPath);
+                if (normalized === normalizePath(validEnvironment.environmentPath.fsPath)) {
+                    return validEnvironment;
+                }
+                if (normalized === normalizePath(legacyEnvironment.environmentPath.fsPath)) {
+                    return legacyEnvironment;
+                }
+                return undefined;
+            });
+
+            assert.strictEqual(await manager.get(invalidUri), undefined);
+            assert.deepStrictEqual(persistedAssociations, {
+                [normalizePath(validUri.fsPath)]: matchedAssociationRecord(validEnvironment.environmentPath.fsPath),
+                [normalizePath(legacyUri.fsPath)]: legacyEnvironment.environmentPath.fsPath,
+            });
+            assert.strictEqual(await manager.get(validUri), validEnvironment);
+            assert.strictEqual(await manager.get(legacyUri), legacyEnvironment);
+        });
+
+        test('preserves unknown future-version entries when repairing a malformed requested entry', async () => {
+            const invalidUri = scriptUri('invalid.py');
+            const futureUri = scriptUri('future.py');
+            const futureEnvironment = await createOwnedEnvironment('8899aabbccddeeff');
+            persistedAssociations = {
+                [normalizePath(invalidUri.fsPath)]: { schemaVersion: 1, environmentPath: '', metadataBinding: { kind: 'pending' } },
+                [normalizePath(futureUri.fsPath)]: futureAssociationRecord(futureEnvironment.environmentPath.fsPath),
+            };
+
+            assert.strictEqual(await manager.get(invalidUri), undefined);
+            assert.deepStrictEqual(persistedAssociations, {
+                [normalizePath(futureUri.fsPath)]: futureAssociationRecord(futureEnvironment.environmentPath.fsPath),
+            });
+            assert.strictEqual(await manager.get(futureUri), undefined);
+        });
+
+        for (const schemaVersion of [0, -1, 1.5, Number.NaN, Number.POSITIVE_INFINITY]) {
+            test(`repairs a malformed numeric schema version (${String(schemaVersion)})`, async () => {
+                const invalidUri = scriptUri('invalid.py');
+                const validUri = scriptUri('valid.py');
+                const invalidEnvironment = await createOwnedEnvironment('0011223344556677');
+                const validEnvironment = await createOwnedEnvironment('fedcba9876543210');
+                persistedAssociations = {
+                    [normalizePath(invalidUri.fsPath)]: {
+                        schemaVersion,
+                        environmentPath: invalidEnvironment.environmentPath.fsPath,
+                        metadataBinding: {
+                            kind: 'matched',
+                            sourceIdentity: VALID_METADATA_IDENTITY,
+                        },
+                    },
+                    [normalizePath(validUri.fsPath)]: matchedAssociationRecord(
+                        validEnvironment.environmentPath.fsPath,
+                    ),
+                };
+
+                assert.strictEqual(await manager.get(invalidUri), undefined);
+
+                assert.deepStrictEqual(persistedAssociations, {
+                    [normalizePath(validUri.fsPath)]: matchedAssociationRecord(
+                        validEnvironment.environmentPath.fsPath,
+                    ),
+                });
+            });
+        }
+
+        test('removes a requested record with an unknown current binding kind without affecting unrelated entries', async () => {
+            const invalidUri = scriptUri('invalid.py');
+            const validUri = scriptUri('valid.py');
+            const validEnvironment = await createOwnedEnvironment('fedcba9876543210');
+            persistedAssociations = {
+                [normalizePath(invalidUri.fsPath)]: {
+                    schemaVersion: 1,
+                    environmentPath: validEnvironment.environmentPath.fsPath,
+                    metadataBinding: { kind: 'mystery' },
+                },
+                [normalizePath(validUri.fsPath)]: matchedAssociationRecord(validEnvironment.environmentPath.fsPath),
+            };
+            resolveVenvStub.resolves(validEnvironment);
+
+            assert.strictEqual(await manager.get(invalidUri), undefined);
+            assert.deepStrictEqual(persistedAssociations, {
+                [normalizePath(validUri.fsPath)]: matchedAssociationRecord(validEnvironment.environmentPath.fsPath),
+            });
+            assert.strictEqual(await manager.get(validUri), validEnvironment);
+        });
+
         test('persists a batch atomically and reports each distinct script URI exactly once', async () => {
             const first = scriptUri('first.py');
             const second = scriptUri('second.py');
@@ -2519,10 +3879,10 @@ suite('InlineScriptEnvManager', () => {
             await manager.set([first, second, first], environment);
 
             assert.deepStrictEqual(persistedAssociations, {
-                [normalizePath(first.fsPath)]: environment.environmentPath.fsPath,
-                [normalizePath(second.fsPath)]: environment.environmentPath.fsPath,
+                [normalizePath(first.fsPath)]: matchedAssociationRecord(environment.environmentPath.fsPath),
+                [normalizePath(second.fsPath)]: matchedAssociationRecord(environment.environmentPath.fsPath),
             });
-            assert.strictEqual(workspaceState.set.callCount, 1);
+            assert.strictEqual(workspaceStateSetCalls(INLINE_SCRIPT_ENVS_KEY).length, 1);
             assert.strictEqual(listener.callCount, 2);
             assert.strictEqual(listener.firstCall.args[0].uri, first);
             assert.strictEqual(listener.secondCall.args[0].uri, second);
@@ -2542,25 +3902,801 @@ suite('InlineScriptEnvManager', () => {
             ]);
 
             assert.deepStrictEqual(persistedAssociations, {
-                [normalizePath(firstUri.fsPath)]: firstEnvironment.environmentPath.fsPath,
-                [normalizePath(secondUri.fsPath)]: secondEnvironment.environmentPath.fsPath,
+                [normalizePath(firstUri.fsPath)]: matchedAssociationRecord(firstEnvironment.environmentPath.fsPath),
+                [normalizePath(secondUri.fsPath)]: matchedAssociationRecord(secondEnvironment.environmentPath.fsPath),
             });
             assert.strictEqual(await manager.get(firstUri), firstEnvironment);
             assert.strictEqual(await manager.get(secondUri), secondEnvironment);
         });
 
+        test('does not let pending binding overwrite a newer unset', async () => {
+            const uri = scriptUri();
+            const environment = await createOwnedEnvironment();
+            persistedAssociations = {
+                [normalizePath(uri.fsPath)]: pendingAssociationRecord(environment.environmentPath.fsPath),
+            };
+            const restartRoutingRegistry = new InlineScriptRoutingRegistry();
+            let resolvePending: ((value: PythonEnvironment | undefined) => void) | undefined;
+            resolveVenvStub.callsFake(
+                () =>
+                    new Promise<PythonEnvironment | undefined>((resolve) => {
+                        resolvePending = resolve;
+                    }),
+            );
+
+            const restarted = new InlineScriptEnvManager(
+                nativeFinder,
+                api,
+                baseManager,
+                globalStorageUri,
+                makeFakeLog(),
+                restartRoutingRegistry,
+            );
+            await nextTurn();
+
+            const pendingBind = triggerSavedMetadataChange(restartRoutingRegistry, restarted, uri);
+            await waitForStubCall(resolveVenvStub);
+            await restarted.set(uri, undefined);
+            resolvePending!(environment);
+            await pendingBind;
+
+            assert.deepStrictEqual(persistedAssociations, {});
+            assert.strictEqual(restartRoutingRegistry.hasValidatedAssociation(uri), false);
+            restarted.dispose();
+        });
+
+        test('does not let pending binding overwrite a newer matched selection', async () => {
+            const uri = scriptUri();
+            const oldEnvironment = await createOwnedEnvironment();
+            const newEnvironment = await createOwnedEnvironment('fedcba9876543210');
+            persistedAssociations = {
+                [normalizePath(uri.fsPath)]: pendingAssociationRecord(oldEnvironment.environmentPath.fsPath),
+            };
+            const restartRoutingRegistry = new InlineScriptRoutingRegistry();
+            let resolvePending: ((value: PythonEnvironment | undefined) => void) | undefined;
+            resolveVenvStub.callsFake(
+                () =>
+                    new Promise<PythonEnvironment | undefined>((resolve) => {
+                        resolvePending = resolve;
+                    }),
+            );
+
+            const restarted = new InlineScriptEnvManager(
+                nativeFinder,
+                api,
+                baseManager,
+                globalStorageUri,
+                makeFakeLog(),
+                restartRoutingRegistry,
+            );
+            await nextTurn();
+
+            const pendingBind = triggerSavedMetadataChange(restartRoutingRegistry, restarted, uri);
+            await waitForStubCall(resolveVenvStub);
+            await restarted.set(uri, newEnvironment);
+            resolvePending!(oldEnvironment);
+            await pendingBind;
+
+            assert.deepStrictEqual(persistedAssociations, {
+                [normalizePath(uri.fsPath)]: matchedAssociationRecord(newEnvironment.environmentPath.fsPath),
+            });
+            assert.strictEqual(await restarted.get(uri), newEnvironment);
+            restarted.dispose();
+        });
+
+        test('preserves a concurrent valid set while repairing an unrelated malformed entry', async () => {
+            const invalidUri = scriptUri('invalid.py');
+            const validUri = scriptUri('valid.py');
+            const validEnvironment = await createOwnedEnvironment('fedcba9876543210');
+            persistedAssociations = {
+                [normalizePath(invalidUri.fsPath)]: { schemaVersion: 1, environmentPath: '', metadataBinding: { kind: 'pending' } },
+            };
+
+            await Promise.all([manager.get(invalidUri), manager.set(validUri, validEnvironment)]);
+
+            assert.deepStrictEqual(persistedAssociations, {
+                [normalizePath(validUri.fsPath)]: matchedAssociationRecord(validEnvironment.environmentPath.fsPath),
+            });
+            assert.strictEqual(await manager.get(validUri), validEnvironment);
+        });
+
+        test('leaves a pending binding non-routeable when persistence fails', async () => {
+            const uri = scriptUri();
+            const environment = await createOwnedEnvironment();
+            persistedAssociations = {
+                [normalizePath(uri.fsPath)]: pendingAssociationRecord(environment.environmentPath.fsPath),
+            };
+            const restartRoutingRegistry = new InlineScriptRoutingRegistry();
+            resolveVenvStub.resolves(environment);
+
+            const restarted = new InlineScriptEnvManager(
+                nativeFinder,
+                api,
+                baseManager,
+                globalStorageUri,
+                makeFakeLog(),
+                restartRoutingRegistry,
+            );
+            await nextTurn();
+
+            ((restarted as unknown as { subscriptions: Disposable[] }).subscriptions[0]).dispose();
+            workspaceState.set.onFirstCall().rejects(new Error('Memento unavailable'));
+            workspaceState.set.onSecondCall().rejects(new Error('Memento unavailable'));
+            await triggerSavedMetadataChange(restartRoutingRegistry, restarted, uri);
+
+            assert.deepStrictEqual(persistedAssociations, {
+                [normalizePath(uri.fsPath)]: pendingAssociationRecord(environment.environmentPath.fsPath),
+            });
+            assert.strictEqual(restartRoutingRegistry.hasValidatedAssociation(uri), false);
+            restarted.dispose();
+        });
+
+        test('does not publish routeability from raw persisted associations after startup', async () => {
+            const uri = scriptUri();
+            const environment = await createOwnedEnvironment();
+            persistedAssociations = { [normalizePath(uri.fsPath)]: environment.environmentPath.fsPath };
+            const restartRoutingRegistry = new InlineScriptRoutingRegistry();
+
+            const restarted = new InlineScriptEnvManager(
+                nativeFinder,
+                api,
+                baseManager,
+                globalStorageUri,
+                makeFakeLog(),
+                restartRoutingRegistry,
+            );
+            await nextTurn();
+
+            assert.strictEqual(restartRoutingRegistry.hasValidatedAssociation(uri), false);
+            assert.strictEqual(await restarted.get(uri), environment);
+            restarted.dispose();
+        });
+
+        test('legacy string associations stay non-routeable after restart but remain retrievable', async () => {
+            const uri = scriptUri();
+            const environment = await createOwnedEnvironment();
+            persistedAssociations = { [normalizePath(uri.fsPath)]: environment.environmentPath.fsPath };
+            const restartRoutingRegistry = new InlineScriptRoutingRegistry();
+
+            const restarted = new InlineScriptEnvManager(
+                nativeFinder,
+                api,
+                baseManager,
+                globalStorageUri,
+                makeFakeLog(),
+                restartRoutingRegistry,
+            );
+            await nextTurn();
+
+            await triggerSavedMetadataChange(restartRoutingRegistry, restarted, uri);
+
+            assert.strictEqual(restartRoutingRegistry.hasValidatedAssociation(uri), false);
+            assert.strictEqual(await restarted.get(uri), environment);
+            restarted.dispose();
+        });
+
+        test('routes a persisted matched additional-packages association on restart when the current sidecar hash matches', async () => {
+            const uri = scriptUri();
+            routingRegistry.setMetadata(uri, VALID_METADATA);
+            registerCacheKey('fedcba9876543210', ['requests', 'pytest'], baseExecutable);
+            const environment = await manager.create(uri, { additionalPackages: ['pytest'] });
+            assert.ok(environment);
+            persistedAssociations = {
+                [normalizePath(uri.fsPath)]: matchedAssociationRecord(environment.environmentPath.fsPath),
+            };
+            const restartRoutingRegistry = new InlineScriptRoutingRegistry();
+
+            const restarted = new InlineScriptEnvManager(
+                nativeFinder,
+                api,
+                baseManager,
+                globalStorageUri,
+                makeFakeLog(),
+                restartRoutingRegistry,
+            );
+            await nextTurn();
+
+            await triggerSavedMetadataChange(restartRoutingRegistry, restarted, uri);
+
+            assert.strictEqual(restartRoutingRegistry.hasValidatedAssociation(uri), true);
+            restarted.dispose();
+        });
+
+        test('does not route a persisted matched association on restart when the same cache path was rebuilt for another identity', async () => {
+            const uri = scriptUri();
+            const cacheKeyValue = 'fedcba9876543210';
+            const environment = await createOwnedEnvironment(cacheKeyValue);
+            persistedAssociations = {
+                [normalizePath(uri.fsPath)]: matchedAssociationRecord(environment.environmentPath.fsPath),
+            };
+            const rebuiltMetadata = {
+                ...VALID_METADATA,
+                requiresPython: '>=3.12',
+            } satisfies metadataReader.InlineScriptMetadata;
+            const rebuiltBaseExecutable = path.join(tempRoot, 'rebuilt-base-restart', isWindows() ? 'python.exe' : 'python');
+            await fs.outputFile(rebuiltBaseExecutable, '');
+            setSidecar(
+                {
+                    schemaVersion: cacheLayout.META_SCHEMA_VERSION,
+                    baseInterpreterPath: rebuiltBaseExecutable,
+                    baseInterpreterVersion: '3.12.9',
+                    lastUsedAt: NOW.toISOString(),
+                    sourceMetadataIdentityHashes: [
+                        cacheLayout.hashSourceMetadataIdentity(
+                            JSON.stringify({
+                                requiresPython: rebuiltMetadata.requiresPython,
+                                dependencies: rebuiltMetadata.dependencies,
+                            }),
+                        ),
+                    ],
+                },
+                Uri.file(path.dirname(path.dirname(environment.environmentPath.fsPath))),
+            );
+            const restartRoutingRegistry = new InlineScriptRoutingRegistry();
+
+            const restarted = new InlineScriptEnvManager(
+                nativeFinder,
+                api,
+                baseManager,
+                globalStorageUri,
+                makeFakeLog(),
+                restartRoutingRegistry,
+            );
+            await nextTurn();
+
+            await triggerSavedMetadataChange(restartRoutingRegistry, restarted, uri);
+
+            assert.deepStrictEqual(persistedAssociations, {
+                [normalizePath(uri.fsPath)]: matchedAssociationRecord(environment.environmentPath.fsPath),
+            });
+            assert.strictEqual(restartRoutingRegistry.hasValidatedAssociation(uri), false);
+            assert.strictEqual(await restarted.get(uri), undefined);
+            restarted.dispose();
+        });
+
+        test('does not promote a pending association when the current sidecar hash does not prove its source identity', async () => {
+            const uri = scriptUri();
+            const environment = await createOwnedEnvironment('fedcba9876543210');
+            persistedAssociations = {
+                [normalizePath(uri.fsPath)]: pendingAssociationRecord(environment.environmentPath.fsPath),
+            };
+            setSidecar(
+                {
+                    schemaVersion: cacheLayout.META_SCHEMA_VERSION,
+                    baseInterpreterPath: path.join(
+                        tempRoot,
+                        'base-python-fedcba9876543210',
+                        isWindows() ? 'python.exe' : 'python',
+                    ),
+                    baseInterpreterVersion: baseEnvironment.version,
+                    lastUsedAt: NOW.toISOString(),
+                    sourceMetadataIdentityHashes: [
+                        cacheLayout.hashSourceMetadataIdentity('{"requiresPython":">=3.12","dependencies":["requests"]}'),
+                    ],
+                },
+                Uri.file(path.dirname(path.dirname(environment.environmentPath.fsPath))),
+            );
+            const restartRoutingRegistry = new InlineScriptRoutingRegistry();
+
+            const restarted = new InlineScriptEnvManager(
+                nativeFinder,
+                api,
+                baseManager,
+                globalStorageUri,
+                makeFakeLog(),
+                restartRoutingRegistry,
+            );
+            await nextTurn();
+
+            await triggerSavedMetadataChange(restartRoutingRegistry, restarted, uri);
+
+            assert.deepStrictEqual(persistedAssociations, {
+                [normalizePath(uri.fsPath)]: pendingAssociationRecord(environment.environmentPath.fsPath),
+            });
+            assert.strictEqual(restartRoutingRegistry.hasValidatedAssociation(uri), false);
+            restarted.dispose();
+        });
+
+        test('preserves a persisted matched association with a future sidecar but leaves it non-routeable', async () => {
+            const uri = scriptUri();
+            const environment = await createOwnedEnvironment();
+            const markerPath = path.join(environment.sysPrefix, 'keep.txt');
+            await fs.outputFile(markerPath, 'keep');
+            persistedAssociations = {
+                [normalizePath(uri.fsPath)]: matchedAssociationRecord(environment.environmentPath.fsPath),
+            };
+            inspectMetaStub.callsFake(async (envDir: Uri) =>
+                normalizePath(envDir.fsPath) === normalizePath(environment.sysPrefix)
+                    ? ({ kind: 'unsupported' } as cacheLayout.InlineScriptMetaReadResult)
+                    : ({ kind: 'missing' } as cacheLayout.InlineScriptMetaReadResult),
+            );
+            const restartRoutingRegistry = new InlineScriptRoutingRegistry();
+
+            const restarted = new InlineScriptEnvManager(
+                nativeFinder,
+                api,
+                baseManager,
+                globalStorageUri,
+                makeFakeLog(),
+                restartRoutingRegistry,
+            );
+            await nextTurn();
+
+            await triggerSavedMetadataChange(restartRoutingRegistry, restarted, uri);
+
+            assert.deepStrictEqual(persistedAssociations, {
+                [normalizePath(uri.fsPath)]: matchedAssociationRecord(environment.environmentPath.fsPath),
+            });
+            assert.strictEqual(restartRoutingRegistry.hasValidatedAssociation(uri), false);
+            assert.strictEqual(await restarted.get(uri), environment);
+            assert.strictEqual(await fs.pathExists(markerPath), true);
+            restarted.dispose();
+        });
+
+        test('keeps a persisted matched additional-packages association non-routeable on restart when only an old sidecar remains', async () => {
+            const uri = scriptUri();
+            routingRegistry.setMetadata(uri, VALID_METADATA);
+            registerCacheKey('fedcba9876543210', ['requests', 'pytest'], baseExecutable);
+            const environment = await manager.create(uri, { additionalPackages: ['pytest'] });
+            assert.ok(environment);
+            setSidecar(
+                {
+                    schemaVersion: cacheLayout.META_SCHEMA_VERSION,
+                    baseInterpreterPath: baseExecutable,
+                    baseInterpreterVersion: baseEnvironment.version,
+                    lastUsedAt: NOW.toISOString(),
+                },
+                Uri.file(path.dirname(path.dirname(environment.environmentPath.fsPath))),
+            );
+            persistedAssociations = {
+                [normalizePath(uri.fsPath)]: matchedAssociationRecord(environment.environmentPath.fsPath),
+            };
+            const restartRoutingRegistry = new InlineScriptRoutingRegistry();
+
+            const restarted = new InlineScriptEnvManager(
+                nativeFinder,
+                api,
+                baseManager,
+                globalStorageUri,
+                makeFakeLog(),
+                restartRoutingRegistry,
+            );
+            await nextTurn();
+
+            await triggerSavedMetadataChange(restartRoutingRegistry, restarted, uri);
+
+            assert.deepStrictEqual(persistedAssociations, {
+                [normalizePath(uri.fsPath)]: matchedAssociationRecord(environment.environmentPath.fsPath),
+            });
+            assert.strictEqual(restartRoutingRegistry.hasValidatedAssociation(uri), false);
+            restarted.dispose();
+        });
+
+        test('enables routeability only after persisted validation succeeds on restart', async () => {
+            const uri = scriptUri();
+            const environment = await createOwnedEnvironment();
+            persistedAssociations = { [normalizePath(uri.fsPath)]: matchedAssociationRecord(environment.environmentPath.fsPath) };
+            resolveVenvStub.resolves(environment);
+            const restartRoutingRegistry = new InlineScriptRoutingRegistry();
+
+            const restarted = new InlineScriptEnvManager(
+                nativeFinder,
+                api,
+                baseManager,
+                globalStorageUri,
+                makeFakeLog(),
+                restartRoutingRegistry,
+            );
+            await nextTurn();
+
+            const pending = triggerSavedMetadataChange(restartRoutingRegistry, restarted, uri);
+            await waitForStubCall(resolveVenvStub);
+            await pending;
+
+            assert.strictEqual(restartRoutingRegistry.hasValidatedAssociation(uri), true);
+            restarted.dispose();
+        });
+
+        test('validates restart routeability through the public registry event path', async () => {
+            const uri = scriptUri();
+            const environment = await createOwnedEnvironment();
+            persistedAssociations = {
+                [normalizePath(uri.fsPath)]: matchedAssociationRecord(environment.environmentPath.fsPath),
+            };
+            resolveVenvStub.resolves(environment);
+            const restartRoutingRegistry = new InlineScriptRoutingRegistry();
+            const restarted = new InlineScriptEnvManager(
+                nativeFinder,
+                api,
+                baseManager,
+                globalStorageUri,
+                makeFakeLog(),
+                restartRoutingRegistry,
+            );
+            await nextTurn();
+
+            restartRoutingRegistry.setMetadata(uri, VALID_METADATA);
+            await waitForCondition(
+                () => restartRoutingRegistry.hasValidatedAssociation(uri),
+                'Expected the registry metadata event to validate the persisted association',
+            );
+
+            assert.strictEqual(restartRoutingRegistry.shouldRoute(uri), true);
+            restarted.dispose();
+        });
+
+        test('rejects restart routeability when runtime Python differs from the sidecar base version', async () => {
+            const uri = scriptUri();
+            const environment = await createOwnedEnvironment();
+            const rebuilt = { ...environment, version: '3.13.0' };
+            persistedAssociations = {
+                [normalizePath(uri.fsPath)]: matchedAssociationRecord(environment.environmentPath.fsPath),
+            };
+            setSidecar(
+                {
+                    schemaVersion: cacheLayout.META_SCHEMA_VERSION,
+                    baseInterpreterPath: baseExecutable,
+                    baseInterpreterVersion: '3.12.4',
+                    lastUsedAt: NOW.toISOString(),
+                    sourceMetadataIdentityHashes: [
+                        cacheLayout.hashSourceMetadataIdentity(VALID_METADATA_IDENTITY),
+                    ],
+                },
+                Uri.file(environment.sysPrefix),
+            );
+            resolveVenvStub.resolves(rebuilt);
+            const restartRoutingRegistry = new InlineScriptRoutingRegistry();
+            const restarted = new InlineScriptEnvManager(
+                nativeFinder,
+                api,
+                baseManager,
+                globalStorageUri,
+                makeFakeLog(),
+                restartRoutingRegistry,
+            );
+            await nextTurn();
+
+            restartRoutingRegistry.setMetadata(uri, VALID_METADATA);
+            await waitForStubCall(resolveVenvStub);
+            await nextTurn();
+
+            assert.strictEqual(restartRoutingRegistry.hasValidatedAssociation(uri), false);
+            assert.strictEqual(await restarted.get(uri), undefined);
+            restarted.dispose();
+        });
+
+        test('rejects restart routeability when runtime Python does not satisfy requires-python', async () => {
+            const uri = scriptUri();
+            const environment = await createOwnedEnvironment();
+            const metadata = {
+                ...VALID_METADATA,
+                requiresPython: '>=3.13',
+            } satisfies metadataReader.InlineScriptMetadata;
+            const metadataIdentity = JSON.stringify({
+                requiresPython: '>=3.13',
+                dependencies: ['requests'],
+            });
+            persistedAssociations = {
+                [normalizePath(uri.fsPath)]: matchedAssociationRecord(
+                    environment.environmentPath.fsPath,
+                    metadataIdentity,
+                ),
+            };
+            setSidecar(
+                {
+                    schemaVersion: cacheLayout.META_SCHEMA_VERSION,
+                    baseInterpreterPath: baseExecutable,
+                    baseInterpreterVersion: environment.version,
+                    lastUsedAt: NOW.toISOString(),
+                    sourceMetadataIdentityHashes: [
+                        cacheLayout.hashSourceMetadataIdentity(metadataIdentity),
+                    ],
+                },
+                Uri.file(environment.sysPrefix),
+            );
+            resolveVenvStub.resolves(environment);
+            const restartRoutingRegistry = new InlineScriptRoutingRegistry();
+            const restarted = new InlineScriptEnvManager(
+                nativeFinder,
+                api,
+                baseManager,
+                globalStorageUri,
+                makeFakeLog(),
+                restartRoutingRegistry,
+            );
+            await nextTurn();
+
+            restartRoutingRegistry.setMetadata(uri, metadata);
+            await waitForStubCall(resolveVenvStub);
+            await nextTurn();
+
+            assert.strictEqual(restartRoutingRegistry.hasValidatedAssociation(uri), false);
+            restarted.dispose();
+        });
+
+        test('keeps routeability disabled while persisted restart validation is still in flight', async () => {
+            const uri = scriptUri();
+            const environment = await createOwnedEnvironment();
+            persistedAssociations = { [normalizePath(uri.fsPath)]: matchedAssociationRecord(environment.environmentPath.fsPath) };
+            let resolveRehydration: ((value: PythonEnvironment) => void) | undefined;
+            resolveVenvStub.callsFake(
+                () =>
+                    new Promise<PythonEnvironment>((resolve) => {
+                        resolveRehydration = resolve;
+                    }),
+            );
+            const restartRoutingRegistry = new InlineScriptRoutingRegistry();
+
+            const restarted = new InlineScriptEnvManager(
+                nativeFinder,
+                api,
+                baseManager,
+                globalStorageUri,
+                makeFakeLog(),
+                restartRoutingRegistry,
+            );
+            await nextTurn();
+
+            const pending = triggerSavedMetadataChange(restartRoutingRegistry, restarted, uri);
+            await waitForStubCall(resolveVenvStub);
+            assert.strictEqual(restartRoutingRegistry.hasValidatedAssociation(uri), false);
+            resolveRehydration!(environment);
+            await pending;
+
+            assert.strictEqual(restartRoutingRegistry.hasValidatedAssociation(uri), true);
+            restarted.dispose();
+        });
+
+        test('ignores a stale saved-metadata refresh when metadata changes while sidecar proof awaits', async () => {
+            const uri = scriptUri();
+            const scriptPath = normalizePath(uri.fsPath);
+            const environment = await createOwnedEnvironment();
+            await manager.set(uri, environment);
+            const refreshManager = asMetadataRefreshManager(manager);
+            refreshManager.subscriptions[0].dispose();
+            const validatedAtBefore = refreshManager.cachedAssociationValidatedAt.get(scriptPath);
+            assert.ok(validatedAtBefore !== undefined);
+            const routeabilityListener = sinon.spy();
+            routingRegistry.onDidChangeRouteability(routeabilityListener);
+            clock.tick(1);
+            routingRegistry.setMetadata(uri, VALID_METADATA);
+            const metadataIdentity = routingRegistry.getMetadataIdentity(uri)!;
+            const metadataRevision = routingRegistry.getMetadataRevision(uri);
+            let resolveProof: ((value: boolean) => void) | undefined;
+            const proofStub = sinon.stub(refreshManager, 'currentCacheEntryProvesSourceMetadataIdentity').callThrough();
+            proofStub.onFirstCall().returns(
+                new Promise<boolean>((resolve) => {
+                    resolveProof = resolve;
+                }),
+            );
+
+            const pendingRefresh = refreshManager.refreshValidatedAssociationForMetadataInternal(
+                scriptPath,
+                uri,
+                VALID_METADATA,
+                metadataIdentity,
+                metadataRevision,
+                refreshManager.associationRevisions.get(scriptPath) ?? 0,
+            );
+            await waitForStubCall(proofStub);
+            routingRegistry.setMetadata(uri, {
+                ...VALID_METADATA,
+                requiresPython: '>=3.12',
+            });
+            resolveProof!(true);
+            await pendingRefresh;
+
+            assert.strictEqual(routingRegistry.hasValidatedAssociation(uri), false);
+            assert.strictEqual(routeabilityListener.callCount, 0);
+            assert.strictEqual(refreshManager.cachedAssociationValidatedAt.get(scriptPath), validatedAtBefore);
+            assert.strictEqual(refreshManager.lastValidatedMetadataIdentities.get(scriptPath), VALID_METADATA_IDENTITY);
+            assert.strictEqual(refreshManager.lastValidatedMetadataIdentityProofs.has(scriptPath), false);
+        });
+
+        test('ignores a stale refresh when the same metadata returns after routeability is cleared', async () => {
+            const uri = scriptUri();
+            const scriptPath = normalizePath(uri.fsPath);
+            const environment = await createOwnedEnvironment();
+            await manager.set(uri, environment);
+            const refreshManager = asMetadataRefreshManager(manager);
+            refreshManager.subscriptions[0].dispose();
+            routingRegistry.setMetadata(uri, VALID_METADATA);
+            const metadataIdentity = routingRegistry.getMetadataIdentity(uri)!;
+            const staleRevision = routingRegistry.getMetadataRevision(uri);
+            let resolveProof: ((value: boolean) => void) | undefined;
+            const proofStub = sinon.stub(refreshManager, 'currentCacheEntryProvesSourceMetadataIdentity').returns(
+                new Promise<boolean>((resolve) => {
+                    resolveProof = resolve;
+                }),
+            );
+
+            const pendingRefresh = refreshManager.refreshValidatedAssociationForMetadataInternal(
+                scriptPath,
+                uri,
+                VALID_METADATA,
+                metadataIdentity,
+                staleRevision,
+                refreshManager.associationRevisions.get(scriptPath) ?? 0,
+            );
+            await waitForStubCall(proofStub);
+            routingRegistry.clearMetadata(uri);
+            routingRegistry.setMetadata(uri, VALID_METADATA);
+            assert.ok(routingRegistry.getMetadataRevision(uri) > staleRevision);
+            resolveProof!(true);
+            await pendingRefresh;
+
+            assert.strictEqual(routingRegistry.hasValidatedAssociation(uri), false);
+        });
+
+        test('ignores a stale saved-metadata refresh when an unset wins while sidecar proof awaits', async () => {
+            const uri = scriptUri();
+            const scriptPath = normalizePath(uri.fsPath);
+            const environment = await createOwnedEnvironment();
+            const refreshManager = asMetadataRefreshManager(manager);
+            refreshManager.subscriptions[0].dispose();
+            routingRegistry.setMetadata(uri, VALID_METADATA);
+            await manager.set(uri, environment);
+            const routeabilityListener = sinon.spy();
+            routingRegistry.onDidChangeRouteability(routeabilityListener);
+            clock.tick(1);
+            let resolveProof: ((value: boolean) => void) | undefined;
+            const proofStub = sinon.stub(refreshManager, 'currentCacheEntryProvesSourceMetadataIdentity').callThrough();
+            proofStub.onFirstCall().returns(
+                new Promise<boolean>((resolve) => {
+                    resolveProof = resolve;
+                }),
+            );
+
+            const pendingRefresh = refreshManager.refreshValidatedAssociationForMetadataInternal(
+                scriptPath,
+                uri,
+                VALID_METADATA,
+                routingRegistry.getMetadataIdentity(uri)!,
+                routingRegistry.getMetadataRevision(uri),
+                refreshManager.associationRevisions.get(scriptPath) ?? 0,
+            );
+            await waitForStubCall(proofStub);
+            await manager.set(uri, undefined);
+            resolveProof!(true);
+            await pendingRefresh;
+
+            assert.strictEqual(routingRegistry.hasValidatedAssociation(uri), false);
+            sinon.assert.calledOnceWithExactly(routeabilityListener, {
+                uri,
+                previousRouteable: true,
+                routeable: false,
+            });
+            assert.strictEqual(refreshManager.cachedAssociationValidatedAt.has(scriptPath), false);
+            assert.strictEqual(refreshManager.lastValidatedMetadataIdentities.has(scriptPath), false);
+            assert.strictEqual(refreshManager.lastValidatedMetadataIdentityProofs.has(scriptPath), false);
+            assert.deepStrictEqual(persistedAssociations, {});
+        });
+
+        test('ignores a stale saved-metadata refresh when a replacement wins while sidecar proof awaits', async () => {
+            const uri = scriptUri();
+            const scriptPath = normalizePath(uri.fsPath);
+            const oldEnvironment = await createOwnedEnvironment();
+            const replacementEnvironment = await createOwnedEnvironment('fedcba9876543210');
+            const refreshManager = asMetadataRefreshManager(manager);
+            refreshManager.subscriptions[0].dispose();
+            routingRegistry.setMetadata(uri, VALID_METADATA);
+            await manager.set(uri, oldEnvironment);
+            const routeabilityListener = sinon.spy();
+            routingRegistry.onDidChangeRouteability(routeabilityListener);
+            clock.tick(1);
+            let resolveProof: ((value: boolean) => void) | undefined;
+            const proofStub = sinon.stub(refreshManager, 'currentCacheEntryProvesSourceMetadataIdentity').callThrough();
+            proofStub.onFirstCall().returns(
+                new Promise<boolean>((resolve) => {
+                    resolveProof = resolve;
+                }),
+            );
+
+            const pendingRefresh = refreshManager.refreshValidatedAssociationForMetadataInternal(
+                scriptPath,
+                uri,
+                VALID_METADATA,
+                routingRegistry.getMetadataIdentity(uri)!,
+                routingRegistry.getMetadataRevision(uri),
+                refreshManager.associationRevisions.get(scriptPath) ?? 0,
+            );
+            await waitForStubCall(proofStub);
+            await manager.set(uri, replacementEnvironment);
+            const validatedAtAfterReplacement = refreshManager.cachedAssociationValidatedAt.get(scriptPath);
+            resolveProof!(false);
+            await pendingRefresh;
+
+            assert.strictEqual(routingRegistry.hasValidatedAssociation(uri), true);
+            assert.strictEqual(routeabilityListener.callCount, 0);
+            assert.strictEqual(
+                refreshManager.cachedAssociationValidatedAt.get(scriptPath),
+                validatedAtAfterReplacement,
+            );
+            assert.strictEqual(refreshManager.lastValidatedMetadataIdentities.get(scriptPath), VALID_METADATA_IDENTITY);
+            assert.strictEqual(refreshManager.lastValidatedMetadataIdentityProofs.has(scriptPath), false);
+            assert.deepStrictEqual(persistedAssociations, {
+                [scriptPath]: matchedAssociationRecord(replacementEnvironment.environmentPath.fsPath),
+            });
+        });
+
+        test('preserves a persisted restart candidate after transient validation failure and retries later', async () => {
+            const uri = scriptUri();
+            const environment = await createOwnedEnvironment();
+            persistedAssociations = { [normalizePath(uri.fsPath)]: matchedAssociationRecord(environment.environmentPath.fsPath) };
+            resolveVenvStub.onFirstCall().rejects(new Error('resolver unavailable'));
+            resolveVenvStub.onSecondCall().resolves(environment);
+            const restartRoutingRegistry = new InlineScriptRoutingRegistry();
+
+            const restarted = new InlineScriptEnvManager(
+                nativeFinder,
+                api,
+                baseManager,
+                globalStorageUri,
+                makeFakeLog(),
+                restartRoutingRegistry,
+            );
+            await nextTurn();
+
+            await triggerSavedMetadataChange(restartRoutingRegistry, restarted, uri);
+            await waitForStubCall(resolveVenvStub);
+
+            assert.strictEqual(restartRoutingRegistry.hasValidatedAssociation(uri), false);
+            assert.deepStrictEqual(persistedAssociations, {
+                [normalizePath(uri.fsPath)]: matchedAssociationRecord(environment.environmentPath.fsPath),
+            });
+
+            await triggerSavedMetadataChange(restartRoutingRegistry, restarted, uri);
+
+            assert.strictEqual(restartRoutingRegistry.hasValidatedAssociation(uri), true);
+            restarted.dispose();
+        });
+
+        test('clears a stale persisted restart candidate instead of routing it', async () => {
+            const uri = scriptUri();
+            const environment = await createOwnedEnvironment();
+            persistedAssociations = { [normalizePath(uri.fsPath)]: matchedAssociationRecord(environment.environmentPath.fsPath) };
+            await fs.remove(environment.environmentPath.fsPath);
+            const restartRoutingRegistry = new InlineScriptRoutingRegistry();
+
+            const restarted = new InlineScriptEnvManager(
+                nativeFinder,
+                api,
+                baseManager,
+                globalStorageUri,
+                makeFakeLog(),
+                restartRoutingRegistry,
+            );
+            await nextTurn();
+
+            await triggerSavedMetadataChange(restartRoutingRegistry, restarted, uri);
+
+            assert.deepStrictEqual(persistedAssociations, {});
+            assert.strictEqual(restartRoutingRegistry.hasValidatedAssociation(uri), false);
+            restarted.dispose();
+        });
+
         test('rehydrates a persisted owned association on demand after restart', async () => {
             const uri = scriptUri();
             const persistedEnvironment = await createOwnedEnvironment();
-            persistedAssociations = { [normalizePath(uri.fsPath)]: persistedEnvironment.environmentPath.fsPath };
+            persistedAssociations = {
+                [normalizePath(uri.fsPath)]: matchedAssociationRecord(persistedEnvironment.environmentPath.fsPath),
+            };
             const rehydrated = { ...persistedEnvironment, envId: { ...persistedEnvironment.envId, id: 'rehydrated' } };
             resolveVenvStub.resolves(rehydrated);
-            const restarted = new InlineScriptEnvManager(nativeFinder, api, baseManager, globalStorageUri, makeFakeLog());
+            const restartRoutingRegistry = new InlineScriptRoutingRegistry();
+            const restarted = new InlineScriptEnvManager(
+                nativeFinder,
+                api,
+                baseManager,
+                globalStorageUri,
+                makeFakeLog(),
+                restartRoutingRegistry,
+            );
 
             assert.strictEqual(await restarted.get(uri), rehydrated);
             assert.strictEqual(resolveVenvStub.callCount, 1);
             assert.deepStrictEqual(persistedAssociations, {
-                [normalizePath(uri.fsPath)]: persistedEnvironment.environmentPath.fsPath,
+                [normalizePath(uri.fsPath)]: matchedAssociationRecord(persistedEnvironment.environmentPath.fsPath),
             });
 
             const listener = sinon.spy();
@@ -2574,13 +4710,13 @@ suite('InlineScriptEnvManager', () => {
         test('preserves and retries a cold association when resolution rejects', async () => {
             const uri = scriptUri();
             const environment = await createOwnedEnvironment();
-            persistedAssociations = { [normalizePath(uri.fsPath)]: environment.environmentPath.fsPath };
+            persistedAssociations = { [normalizePath(uri.fsPath)]: matchedAssociationRecord(environment.environmentPath.fsPath) };
             resolveVenvStub.onFirstCall().rejects(new Error('resolver unavailable'));
             resolveVenvStub.onSecondCall().resolves(environment);
 
             assert.strictEqual(await manager.get(uri), undefined);
             assert.deepStrictEqual(persistedAssociations, {
-                [normalizePath(uri.fsPath)]: environment.environmentPath.fsPath,
+                [normalizePath(uri.fsPath)]: matchedAssociationRecord(environment.environmentPath.fsPath),
             });
             assert.strictEqual(await manager.get(uri), environment);
         });
@@ -2588,7 +4724,7 @@ suite('InlineScriptEnvManager', () => {
         test('preserves and retries a cold association when ownership inspection rejects', async () => {
             const uri = scriptUri();
             const environment = await createOwnedEnvironment();
-            persistedAssociations = { [normalizePath(uri.fsPath)]: environment.environmentPath.fsPath };
+            persistedAssociations = { [normalizePath(uri.fsPath)]: matchedAssociationRecord(environment.environmentPath.fsPath) };
             resolveVenvStub.resolves(environment);
             const inspectionManager = manager as unknown as {
                 inspectAssociationOwnership(
@@ -2600,7 +4736,7 @@ suite('InlineScriptEnvManager', () => {
 
             assert.strictEqual(await manager.get(uri), undefined);
             assert.deepStrictEqual(persistedAssociations, {
-                [normalizePath(uri.fsPath)]: environment.environmentPath.fsPath,
+                [normalizePath(uri.fsPath)]: matchedAssociationRecord(environment.environmentPath.fsPath),
             });
             assert.strictEqual(await manager.get(uri), environment);
         });
@@ -2608,7 +4744,7 @@ suite('InlineScriptEnvManager', () => {
         test('notifies when a slow persisted association finishes rehydrating', async () => {
             const uri = scriptUri();
             const environment = await createOwnedEnvironment();
-            persistedAssociations = { [normalizePath(uri.fsPath)]: environment.environmentPath.fsPath };
+            persistedAssociations = { [normalizePath(uri.fsPath)]: matchedAssociationRecord(environment.environmentPath.fsPath) };
             let resolveRehydration: ((value: PythonEnvironment) => void) | undefined;
             resolveVenvStub.callsFake(
                 () =>
@@ -2628,18 +4764,63 @@ suite('InlineScriptEnvManager', () => {
             sinon.assert.calledOnceWithExactly(listener, { uri, old: undefined, new: environment });
         });
 
+        test('coalesces repeated saved-metadata validation for the same identity', async () => {
+            const uri = scriptUri();
+            const environment = await createOwnedEnvironment();
+            persistedAssociations = { [normalizePath(uri.fsPath)]: matchedAssociationRecord(environment.environmentPath.fsPath) };
+            const restartRoutingRegistry = new InlineScriptRoutingRegistry();
+            let resolveRehydration: ((value: PythonEnvironment | undefined) => void) | undefined;
+            resolveVenvStub.callsFake(
+                () =>
+                    new Promise<PythonEnvironment | undefined>((resolve) => {
+                        resolveRehydration = resolve;
+                    }),
+            );
+            const restarted = new InlineScriptEnvManager(
+                nativeFinder,
+                api,
+                baseManager,
+                globalStorageUri,
+                makeFakeLog(),
+                restartRoutingRegistry,
+            );
+            const listener = sinon.spy();
+            restarted.onDidChangeEnvironment(listener);
+            await nextTurn();
+
+            const first = triggerSavedMetadataChange(restartRoutingRegistry, restarted, uri);
+            await waitForStubCall(resolveVenvStub);
+            const second = triggerSavedMetadataChange(restartRoutingRegistry, restarted, uri);
+            assert.strictEqual(resolveVenvStub.callCount, 1);
+
+            resolveRehydration!(environment);
+            await Promise.all([first, second]);
+
+            assert.strictEqual(listener.callCount, 1);
+            assert.strictEqual(restartRoutingRegistry.hasValidatedAssociation(uri), true);
+            restarted.dispose();
+        });
+
         test('does not rewrite or notify when a restart reselects the same persisted executable', async () => {
             const uri = scriptUri();
             const environment = await createOwnedEnvironment();
-            persistedAssociations = { [normalizePath(uri.fsPath)]: environment.environmentPath.fsPath };
-            const restarted = new InlineScriptEnvManager(nativeFinder, api, baseManager, globalStorageUri, makeFakeLog());
+            persistedAssociations = { [normalizePath(uri.fsPath)]: matchedAssociationRecord(environment.environmentPath.fsPath) };
+            const restartRoutingRegistry = new InlineScriptRoutingRegistry();
+            const restarted = new InlineScriptEnvManager(
+                nativeFinder,
+                api,
+                baseManager,
+                globalStorageUri,
+                makeFakeLog(),
+                restartRoutingRegistry,
+            );
             const listener = sinon.spy();
             restarted.onDidChangeEnvironment(listener);
 
             await restarted.set(uri, environment);
 
             assert.deepStrictEqual(persistedAssociations, {
-                [normalizePath(uri.fsPath)]: environment.environmentPath.fsPath,
+                [normalizePath(uri.fsPath)]: matchedAssociationRecord(environment.environmentPath.fsPath),
             });
             assert.strictEqual(workspaceState.set.callCount, 0);
             assert.strictEqual(listener.callCount, 0);
@@ -2656,23 +4837,44 @@ suite('InlineScriptEnvManager', () => {
 
             assert.strictEqual(await manager.get(uri), undefined);
             assert.deepStrictEqual(persistedAssociations, {
-                [normalizePath(uri.fsPath)]: environment.environmentPath.fsPath,
+                [normalizePath(uri.fsPath)]: matchedAssociationRecord(environment.environmentPath.fsPath),
             });
 
             readMetadataStub.resolves(VALID_METADATA);
             assert.strictEqual(await manager.get(uri), environment);
         });
 
-        test('uses full PEP 440 semantics when validating a retained association', async () => {
+        test('does not return a retained association when current metadata dependencies changed', async () => {
+            const uri = scriptUri();
+            const environment = await createOwnedEnvironment();
+            await manager.set(uri, environment);
+            computeCacheKeyStub
+                .withArgs(
+                    sinon.match((inputs: cacheKey.CacheKeyInputs) => inputs.dependencies.length === 1 && inputs.dependencies[0] === 'urllib3'),
+                )
+                .returns('different-cache-key');
+            readMetadataStub.resolves({ ...VALID_METADATA, dependencies: ['urllib3'] });
+
+            assert.strictEqual(await manager.get(uri), undefined);
+            assert.deepStrictEqual(persistedAssociations, {
+                [normalizePath(uri.fsPath)]: matchedAssociationRecord(environment.environmentPath.fsPath),
+            });
+
+            readMetadataStub.resolves(VALID_METADATA);
+            assert.strictEqual(await manager.get(uri), environment);
+        });
+
+        test('does not return a retained association when current requires-python identity changed, even if compatible', async () => {
             const uri = scriptUri();
             const environment = {
                 ...(await createOwnedEnvironment()),
                 version: '3.15.0',
             };
             await manager.set(uri, environment);
+            resolveVenvStub.resolves(environment);
             readMetadataStub.resolves({ ...VALID_METADATA, requiresPython: '!=3.15.0rc2' });
 
-            assert.strictEqual(await manager.get(uri), environment);
+            assert.strictEqual(await manager.get(uri), undefined);
         });
 
         test('does not resolve or discard an association when metadata is absent or unreadable', async () => {
@@ -2701,6 +4903,114 @@ suite('InlineScriptEnvManager', () => {
             });
             assert.strictEqual(workspaceState.set.callCount, 0);
             assert.strictEqual(resolveVenvStub.callCount, 0);
+        });
+
+        test('clears the routing registry when a stale persisted association is removed', async () => {
+            const uri = scriptUri();
+            const environment = await createOwnedEnvironment();
+            persistedAssociations = { [normalizePath(uri.fsPath)]: matchedAssociationRecord(environment.environmentPath.fsPath) };
+            resolveVenvStub.resolves(environment);
+            const restartRoutingRegistry = new InlineScriptRoutingRegistry();
+
+            const restarted = new InlineScriptEnvManager(
+                nativeFinder,
+                api,
+                baseManager,
+                globalStorageUri,
+                makeFakeLog(),
+                restartRoutingRegistry,
+            );
+            await nextTurn();
+            await triggerSavedMetadataChange(restartRoutingRegistry, restarted, uri);
+            assert.strictEqual(restartRoutingRegistry.hasValidatedAssociation(uri), true);
+
+            await fs.remove(environment.environmentPath.fsPath);
+            clock.tick(5_000);
+            assert.strictEqual(await restarted.get(uri), undefined);
+            assert.strictEqual(restartRoutingRegistry.hasValidatedAssociation(uri), false);
+
+            restarted.dispose();
+        });
+
+        test('clears persisted association state when the script path is deleted', async () => {
+            const uri = scriptUri();
+            const environment = await createOwnedEnvironment();
+            await manager.set(uri, environment);
+
+            fireDelete(uri);
+            await nextTurn();
+            await nextTurn();
+
+            assert.deepStrictEqual(persistedAssociations, {});
+            assert.strictEqual(await manager.get(uri), undefined);
+            assert.strictEqual(routingRegistry.hasValidatedAssociation(uri), false);
+        });
+
+        test('waits for persisted association initialization before handling a script deletion', async () => {
+            await nextTurn();
+            manager.dispose();
+            const uri = scriptUri();
+            const scriptPath = normalizePath(uri.fsPath);
+            persistedAssociations = {
+                [scriptPath]: matchedAssociationRecord(path.join(tempRoot, 'cached-python')),
+            };
+            let signalInitialRead!: () => void;
+            let releaseInitialRead!: () => void;
+            const initialReadStarted = new Promise<void>((resolve) => {
+                signalInitialRead = resolve;
+            });
+            const initialReadBarrier = new Promise<void>((resolve) => {
+                releaseInitialRead = resolve;
+            });
+            let associationReads = 0;
+            workspaceState.get.callsFake(async (key: string) => {
+                if (key !== INLINE_SCRIPT_ENVS_KEY) {
+                    return undefined;
+                }
+                associationReads += 1;
+                if (associationReads === 1) {
+                    signalInitialRead();
+                    await initialReadBarrier;
+                }
+                return persistedAssociations;
+            });
+            workspaceState.set.resetHistory();
+            manager = new InlineScriptEnvManager(
+                nativeFinder,
+                api,
+                baseManager,
+                globalStorageUri,
+                makeFakeLog(),
+                routingRegistry,
+            );
+            await initialReadStarted;
+
+            fireDelete(uri);
+            await nextTurn();
+            releaseInitialRead();
+            await waitForCondition(
+                () => workspaceStateSetCalls(INLINE_SCRIPT_ENVS_KEY).length === 1,
+                'deleted association should be persisted after initialization completes',
+            );
+
+            assert.deepStrictEqual(persistedAssociations, {});
+            assert.strictEqual(await manager.get(uri), undefined);
+            assert.strictEqual(routingRegistry.hasValidatedAssociation(uri), false);
+        });
+
+        test('clears persisted association state for the old path when a script is renamed', async () => {
+            const oldUri = scriptUri('old.py');
+            const newUri = scriptUri('new.py');
+            const environment = await createOwnedEnvironment();
+            await manager.set(oldUri, environment);
+
+            fireRename(oldUri, newUri);
+            await nextTurn();
+            await nextTurn();
+
+            assert.deepStrictEqual(persistedAssociations, {});
+            assert.strictEqual(await manager.get(oldUri), undefined);
+            assert.strictEqual(routingRegistry.hasValidatedAssociation(oldUri), false);
         });
 
         test('removes and notifies for a warm association whose executable was deleted', async () => {
@@ -2753,7 +5063,7 @@ suite('InlineScriptEnvManager', () => {
 
             assert.strictEqual(await manager.get(uri), undefined);
             assert.deepStrictEqual(persistedAssociations, {
-                [normalizePath(uri.fsPath)]: environment.environmentPath.fsPath,
+                [normalizePath(uri.fsPath)]: matchedAssociationRecord(environment.environmentPath.fsPath),
             });
             assert.strictEqual(listener.callCount, 0);
         });
@@ -2775,12 +5085,12 @@ suite('InlineScriptEnvManager', () => {
 
             assert.strictEqual(await manager.get(uri), undefined);
             assert.deepStrictEqual(persistedAssociations, {
-                [normalizePath(uri.fsPath)]: environment.environmentPath.fsPath,
+                [normalizePath(uri.fsPath)]: matchedAssociationRecord(environment.environmentPath.fsPath),
             });
             assert.strictEqual(listener.callCount, 0);
         });
 
-        test('refreshes a warm association rebuilt at the same cache path', async () => {
+        test('rejects a warm association rebuilt at the same cache path with a different Python release', async () => {
             const uri = scriptUri();
             const environment = await createOwnedEnvironment();
             await manager.set(uri, environment);
@@ -2794,8 +5104,8 @@ suite('InlineScriptEnvManager', () => {
             manager.onDidChangeEnvironment(listener);
             clock.tick(5_000);
 
-            assert.strictEqual(await manager.get(uri), rebuilt);
-            sinon.assert.calledOnceWithExactly(listener, { uri, old: environment, new: rebuilt });
+            assert.strictEqual(await manager.get(uri), undefined);
+            assert.strictEqual(listener.callCount, 0);
         });
 
         test('retains warm environment identity when validation finds the same version', async () => {
@@ -2814,6 +5124,100 @@ suite('InlineScriptEnvManager', () => {
             assert.strictEqual(listener.callCount, 0);
         });
 
+        test('refreshes warm validation timestamps when validation keeps the same environment', async () => {
+            const uri = scriptUri();
+            const environment = await createOwnedEnvironment();
+            await manager.set(uri, environment);
+            resolveVenvStub.resolves({
+                ...environment,
+                envId: { ...environment.envId, id: 'new-generated-id' },
+            });
+            clock.tick(5_000);
+
+            assert.strictEqual(await manager.get(uri), environment);
+            assert.strictEqual(resolveVenvStub.callCount, 1);
+            assert.strictEqual(await manager.get(uri), environment);
+            assert.strictEqual(resolveVenvStub.callCount, 1);
+        });
+
+        test('lets an unset win while warm validation awaits sidecar proof', async () => {
+            const uri = scriptUri();
+            const environment = await createOwnedEnvironment();
+            await manager.set(uri, environment);
+            const validationManager = manager as unknown as {
+                readCurrentCacheEntrySidecar(
+                    candidate: PythonEnvironment,
+                ): Promise<cacheLayout.InlineScriptEnvMeta | undefined>;
+            };
+            const sidecar = await makeSidecar({
+                sourceMetadataIdentityHashes: [
+                    cacheLayout.hashSourceMetadataIdentity(VALID_METADATA_IDENTITY),
+                ],
+            });
+            let resolveSidecar: ((value: cacheLayout.InlineScriptEnvMeta) => void) | undefined;
+            const sidecarStub = sinon.stub(validationManager, 'readCurrentCacheEntrySidecar').callThrough();
+            sidecarStub.onFirstCall().returns(
+                new Promise<cacheLayout.InlineScriptEnvMeta>((resolve) => {
+                    resolveSidecar = resolve;
+                }),
+            );
+            const listener = sinon.spy();
+            manager.onDidChangeEnvironment(listener);
+            clock.tick(5_000);
+
+            const pendingGet = manager.get(uri);
+            await waitForStubCall(sidecarStub);
+            await manager.set(uri, undefined);
+            resolveSidecar!(sidecar);
+
+            assert.strictEqual(await pendingGet, undefined);
+            assert.strictEqual(await manager.get(uri), undefined);
+            sinon.assert.calledOnceWithExactly(listener, { uri, old: environment, new: undefined });
+        });
+
+        test('lets a replacement win while warm validation awaits sidecar proof', async () => {
+            const uri = scriptUri();
+            const oldEnvironment = await createOwnedEnvironment();
+            const replacementEnvironment = await createOwnedEnvironment('fedcba9876543210');
+            await manager.set(uri, oldEnvironment);
+            const validationManager = manager as unknown as {
+                readCurrentCacheEntrySidecar(
+                    candidate: PythonEnvironment,
+                ): Promise<cacheLayout.InlineScriptEnvMeta | undefined>;
+            };
+            const sidecar = await makeSidecar({
+                sourceMetadataIdentityHashes: [
+                    cacheLayout.hashSourceMetadataIdentity(VALID_METADATA_IDENTITY),
+                ],
+            });
+            let resolveSidecar: ((value: cacheLayout.InlineScriptEnvMeta) => void) | undefined;
+            const sidecarStub = sinon.stub(validationManager, 'readCurrentCacheEntrySidecar').callThrough();
+            sidecarStub.onFirstCall().returns(
+                new Promise<cacheLayout.InlineScriptEnvMeta>((resolve) => {
+                    resolveSidecar = resolve;
+                }),
+            );
+            const listener = sinon.spy();
+            manager.onDidChangeEnvironment(listener);
+            clock.tick(5_000);
+
+            const pendingGet = manager.get(uri);
+            await waitForStubCall(sidecarStub);
+            await manager.set(uri, replacementEnvironment);
+            resolveSidecar!(sidecar);
+
+            assert.strictEqual(await pendingGet, replacementEnvironment);
+            assert.strictEqual(await manager.get(uri), replacementEnvironment);
+            assert.deepStrictEqual(persistedAssociations, {
+                [normalizePath(uri.fsPath)]: matchedAssociationRecord(replacementEnvironment.environmentPath.fsPath),
+            });
+            sinon.assert.calledOnceWithExactly(listener, {
+                uri,
+                old: oldEnvironment,
+                new: replacementEnvironment,
+            });
+        });
+
         test('coalesces concurrent validation of an expired warm association', async () => {
             const uri = scriptUri();
             const environment = await createOwnedEnvironment();
@@ -2823,6 +5227,15 @@ suite('InlineScriptEnvManager', () => {
                 envId: { ...environment.envId, id: 'rebuilt' },
                 version: '3.13.1',
             };
+            setSidecar({
+                schemaVersion: cacheLayout.META_SCHEMA_VERSION,
+                baseInterpreterPath: baseExecutable,
+                baseInterpreterVersion: rebuilt.version,
+                lastUsedAt: NOW.toISOString(),
+                sourceMetadataIdentityHashes: [
+                    cacheLayout.hashSourceMetadataIdentity(VALID_METADATA_IDENTITY),
+                ],
+            });
             let resolveValidation: ((value: PythonEnvironment) => void) | undefined;
             resolveVenvStub.callsFake(
                 () =>
@@ -2876,7 +5289,7 @@ suite('InlineScriptEnvManager', () => {
             assert.strictEqual(await pendingGet, selectedEnvironment);
             assert.strictEqual(await manager.get(uri), selectedEnvironment);
             assert.deepStrictEqual(persistedAssociations, {
-                [normalizePath(uri.fsPath)]: selectedEnvironment.environmentPath.fsPath,
+                [normalizePath(uri.fsPath)]: matchedAssociationRecord(selectedEnvironment.environmentPath.fsPath),
             });
             assert.strictEqual(resolveVenvStub.callCount, 0);
             sinon.assert.calledOnceWithExactly(listener, {
@@ -2938,14 +5351,22 @@ suite('InlineScriptEnvManager', () => {
             const environment = await createOwnedEnvironment();
             const scriptPath = normalizePath(uri.fsPath);
             persistedAssociations = { [scriptPath]: 42 };
-            workspaceState.get.onSecondCall().callsFake(async () => {
-                persistedAssociations = { [scriptPath]: environment.environmentPath.fsPath };
-                return persistedAssociations;
+            let envKeyReads = 0;
+            workspaceState.get.callsFake(async (key: string) => {
+                if (key === INLINE_SCRIPT_ENVS_KEY) {
+                    envKeyReads += 1;
+                    if (envKeyReads === 1) {
+                        return { [scriptPath]: 42 };
+                    }
+                    persistedAssociations = { [scriptPath]: matchedAssociationRecord(environment.environmentPath.fsPath) };
+                    return persistedAssociations;
+                }
+                return undefined;
             });
 
-            assert.strictEqual(await manager.get(uri), undefined);
+            assert.strictEqual(await manager.get(uri), environment);
             assert.deepStrictEqual(persistedAssociations, {
-                [scriptPath]: environment.environmentPath.fsPath,
+                [scriptPath]: matchedAssociationRecord(environment.environmentPath.fsPath),
             });
             assert.strictEqual(workspaceState.set.callCount, 0);
         });
@@ -3028,7 +5449,7 @@ suite('InlineScriptEnvManager', () => {
 
             assert.strictEqual(await manager.get(uri), first);
             assert.deepStrictEqual(persistedAssociations, {
-                [normalizePath(uri.fsPath)]: first.environmentPath.fsPath,
+                [normalizePath(uri.fsPath)]: matchedAssociationRecord(first.environmentPath.fsPath),
             });
             assert.strictEqual(listener.callCount, 1);
         });
@@ -3045,7 +5466,7 @@ suite('InlineScriptEnvManager', () => {
             await assert.rejects(manager.set(uri, undefined), /Memento unavailable/);
             assert.strictEqual(await manager.get(uri), environment);
             assert.deepStrictEqual(persistedAssociations, {
-                [normalizePath(uri.fsPath)]: environment.environmentPath.fsPath,
+                [normalizePath(uri.fsPath)]: matchedAssociationRecord(environment.environmentPath.fsPath),
             });
             assert.strictEqual(listener.callCount, 1);
         });
@@ -3127,9 +5548,9 @@ suite('InlineScriptEnvManager', () => {
             assert.strictEqual(await pendingGet, environment);
             assert.strictEqual(await manager.get(uri), environment);
             assert.deepStrictEqual(persistedAssociations, {
-                [normalizePath(uri.fsPath)]: environment.environmentPath.fsPath,
+                [normalizePath(uri.fsPath)]: matchedAssociationRecord(environment.environmentPath.fsPath),
             });
-            assert.strictEqual(workspaceState.set.callCount, 0);
+            assert.strictEqual(workspaceStateSetCalls(INLINE_SCRIPT_ENVS_KEY).length, 1);
         });
 
         test('retains a pending rehydration when a competing persistence write fails', async () => {
@@ -3345,7 +5766,7 @@ suite('InlineScriptEnvManager', () => {
             await assert.rejects(manager.clearCache(), /being created/);
 
             assert.deepStrictEqual(persistedAssociations, {
-                [normalizePath(uri.fsPath)]: environment.environmentPath.fsPath,
+                [normalizePath(uri.fsPath)]: matchedAssociationRecord(environment.environmentPath.fsPath),
             });
             assert.strictEqual(await manager.get(uri), environment);
         });
@@ -3500,7 +5921,9 @@ suite('InlineScriptEnvManager', () => {
             assert.strictEqual(await fs.pathExists(firstEnvironment.sysPrefix), false);
             assert.strictEqual(await fs.pathExists(secondEnvironment.sysPrefix), true);
             assert.deepStrictEqual(persistedAssociations, {
-                [normalizePath(secondUri.fsPath)]: secondEnvironment.environmentPath.fsPath,
+                [normalizePath(secondUri.fsPath)]: matchedAssociationRecord(
+                    secondEnvironment.environmentPath.fsPath,
+                ),
             });
             assert.strictEqual(await manager.get(firstUri), undefined);
             assert.strictEqual(await manager.get(secondUri), secondEnvironment);
