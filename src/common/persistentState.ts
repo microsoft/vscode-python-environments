@@ -41,7 +41,13 @@ class PersistentStateImpl implements PersistentState {
         const preservedKeys = new Set(options?.preserveKeys ?? []);
         const operation = this.clearQueue.then(async () => {
             const keysToClear = (requestedKeys ?? this.momento.keys()).filter((key) => !preservedKeys.has(key));
-            await Promise.all(keysToClear.map((key) => this.momento.update(key, undefined)));
+            const results = await Promise.allSettled(keysToClear.map((key) => this.momento.update(key, undefined)));
+            const failure = results.find(
+                (result): result is PromiseRejectedResult => result.status === 'rejected',
+            );
+            if (failure) {
+                throw failure.reason;
+            }
         });
         this.clearQueue = operation.catch(() => undefined);
         return operation;

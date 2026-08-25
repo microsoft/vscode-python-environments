@@ -136,6 +136,46 @@ suite('persistent state clearing', () => {
         await workspaceState.clear(['new-key']);
         assert.strictEqual(await workspaceState.get('new-key'), undefined);
     });
+
+    test('holds the queue until every deletion settles when a clear partially fails', async () => {
+        workspace.reset({
+            'fail-fast': 'unused',
+            'slow-delete': 'stale',
+        });
+        const gate = createGate();
+        workspace.beforeUpdate = async (key, value) => {
+            if (key === 'fail-fast' && value === undefined) {
+                throw new Error('memento update failed');
+            }
+            if (key === 'slow-delete' && value === undefined) {
+                gate.started.resolve();
+                await gate.release.promise;
+            }
+        };
+
+        const failedClear = workspaceState.clear(['fail-fast', 'slow-delete']);
+        await gate.started.promise;
+
+        // A later write is queued while the failing clear's slow deletion is still pending.
+        const laterSet = workspaceState.set('slow-delete', 'written-later');
+
+        // The queue must not advance past the clear until the slow deletion settles,
+        // so the later write has not been applied yet.
+        assert.strictEqual(workspace.values.get('slow-delete'), 'stale');
+
+        gate.release.resolve();
+        await assert.rejects(failedClear, /memento update failed/);
+        await laterSet;
+
+        // The later write wins because it was serialized strictly after the deletion settled;
+        // it is not clobbered by a late in-flight deletion from the failed clear.
+        assert.strictEqual(workspace.values.get('slow-delete'), 'written-later');
+        assert.strictEqual(await workspaceState.get('slow-delete'), 'written-later');
+        assert.deepStrictEqual(
+            workspace.updates.filter((update) => update.key === 'slow-delete').map((update) => update.value),
+            [undefined, 'written-later'],
+        );
+    });
 });
 
 interface TestMemento {
