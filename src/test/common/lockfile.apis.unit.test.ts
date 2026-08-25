@@ -236,6 +236,43 @@ suite('lockfile APIs', () => {
         sinon.assert.called(renameStub);
     });
 
+    test('release stays resumable when both retirement and ownership restoration fail', async () => {
+        const lock = await acquireFileLock(targetPath, OPTIONS);
+        const lockPath = getFileLockPath(targetPath);
+        const originalRename = fsExtra.rename;
+        let blockTransition = true;
+        sinon.stub(fsExtra, 'rename').callsFake(async (source, destination) => {
+            const resolvedSource = path.resolve(String(source));
+            if (blockTransition) {
+                // Fail the canonical retirement (lockPath -> .retired-*)...
+                if (resolvedSource === path.resolve(lockPath)) {
+                    throw Object.assign(new Error('access denied'), { code: 'EACCES' });
+                }
+                // ...and fail the restoration rename (.release-* -> owner-*), while still
+                // allowing the initial owner-* -> .release-* transition to succeed.
+                if (path.basename(resolvedSource).startsWith(FILE_LOCK_RELEASE_MARKER_PREFIX)) {
+                    throw Object.assign(new Error('access denied'), { code: 'EACCES' });
+                }
+            }
+            await originalRename(source, destination);
+        });
+
+        await assert.rejects(
+            lock.release(),
+            (error: NodeJS.ErrnoException) => error.code === 'ELOCKRELEASEFAILED',
+        );
+        // Ownership was NOT restored: a live .release-* marker remains, no owner marker.
+        const during = await fs.readdir(lockPath);
+        assert.strictEqual(during.filter((e) => e.startsWith(FILE_LOCK_OWNER_MARKER_PREFIX)).length, 0);
+        assert.strictEqual(during.filter((e) => e.startsWith(FILE_LOCK_RELEASE_MARKER_PREFIX)).length, 1);
+        assert.strictEqual(await inspectFileLock(targetPath), 'held');
+
+        // Retry on the SAME handle: it resumes retirement from the 'releasing' state.
+        blockTransition = false;
+        await lock.release();
+        assert.strictEqual(await inspectFileLock(targetPath), 'missing');
+    });
+
     test('retained locks fail fast without waiting for the acquisition timeout', async () => {
         const lock = await acquireFileLock(targetPath, OPTIONS);
         await lock.retain();

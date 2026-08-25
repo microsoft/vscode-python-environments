@@ -31,7 +31,7 @@ export interface InspectFileLockOptions {
     readonly checkProcessLiveness?: (pid: number) => Promise<ProcessLiveness>;
 }
 
-type LockState = 'held' | 'released' | 'retained';
+type LockState = 'held' | 'releasing' | 'released' | 'retained';
 const LOCK_RETIRE_MAX_ATTEMPTS = 3;
 const LOCK_RETIRE_RETRY_MS = 10;
 
@@ -83,28 +83,37 @@ export async function acquireFileLock(filePath: string, options: AcquireFileLock
                     }
                 },
                 release: async () => {
-                    if (state !== 'held') {
+                    if (state === 'released' || state === 'retained') {
                         return;
                     }
-                    try {
-                        await fsapi.rename(ownerMarker, path.join(lockPath, releaseMarkerName));
-                    } catch (error) {
-                        if (hasErrorCode(error, 'ENOENT')) {
-                            throw createLockError('Lock ownership was compromised', 'ECOMPROMISED', lockPath);
+                    const releaseMarkerPath = path.join(lockPath, releaseMarkerName);
+                    if (state === 'held') {
+                        try {
+                            await fsapi.rename(ownerMarker, releaseMarkerPath);
+                        } catch (error) {
+                            if (hasErrorCode(error, 'ENOENT')) {
+                                throw createLockError('Lock ownership was compromised', 'ECOMPROMISED', lockPath);
+                            }
+                            throw error;
                         }
-                        throw error;
+                        state = 'releasing';
                     }
+                    // state === 'releasing': the release marker exists; retire the canonical
+                    // directory. Resumable: if retirement fails and ownership cannot be restored,
+                    // the handle stays 'releasing' so a later release() retries retirement instead
+                    // of leaving the handle unable to make progress.
                     const retiredPath = getRetiredLockPath(lockPath);
                     try {
                         await retireCanonicalLockDirectory(lockPath, retiredPath);
                     } catch (error) {
                         const restored = await fsapi
-                            .rename(path.join(lockPath, releaseMarkerName), ownerMarker)
+                            .rename(releaseMarkerPath, ownerMarker)
                             .then(
                                 () => true,
                                 () => false,
                             );
                         if (restored) {
+                            state = 'held';
                             throw createLockError(
                                 'Failed to retire the lock directory; ownership was restored',
                                 'ELOCKRELEASEFAILED',
@@ -112,7 +121,12 @@ export async function acquireFileLock(filePath: string, options: AcquireFileLock
                                 error,
                             );
                         }
-                        throw error;
+                        throw createLockError(
+                            'Failed to retire the lock directory; release can be retried',
+                            'ELOCKRELEASEFAILED',
+                            lockPath,
+                            error,
+                        );
                     }
                     state = 'released';
                     await cleanupRetiredLock(retiredPath, releaseMarkerName);
