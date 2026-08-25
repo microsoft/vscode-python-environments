@@ -23,6 +23,7 @@ import {
     PythonEnvironment,
     PythonEnvironmentApi,
 } from '../../api';
+import { showErrorMessageWithLogs } from '../../common/errors/utils';
 import { showErrorMessage, withProgress } from '../../common/window.apis';
 import { CommandConstructorOptions } from '../base/commands/index';
 import { updatePackagesAndNotify } from '../common/packageChanges';
@@ -227,11 +228,7 @@ export class PipPackageManager implements PackageManager, Disposable {
             this.log.error('Error refreshing packages', error);
             if (showErrors) {
                 setImmediate(async () => {
-                    const viewOutput = l10n.t('View Output');
-                    const result = await showErrorMessage(l10n.t('Error refreshing packages'), viewOutput);
-                    if (result === viewOutput) {
-                        this.log.show();
-                    }
+                    await showErrorMessageWithLogs(l10n.t('Error refreshing packages'), this.log);
                 });
             }
             return this.packages.get(environment.envId.id);

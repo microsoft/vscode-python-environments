@@ -11,6 +11,7 @@ import {
     PythonEnvironmentApi,
     isPackageVersionLookupNotSupportedError,
 } from '../../../api';
+import * as errorUtils from '../../../common/errors/utils';
 import * as windowApis from '../../../common/window.apis';
 import { PipListCommand } from '../../../managers/builtin/commands/list';
 import * as helpers from '../../../managers/builtin/helpers';
@@ -66,6 +67,24 @@ suite('PipPackageManager', () => {
         assert.strictEqual(firstResult, undefined);
         assert.strictEqual(secondResult, undefined);
         assert.strictEqual(listPackages.callCount, 2, 'A failed refresh should not populate the package cache');
+    });
+
+    test('offers to show logs when refreshing packages fails', async () => {
+        const environment = createEnvironment();
+        const log = createMockLogOutputChannel();
+        const manager = new PipPackageManager(
+            { createPackageItem: sinon.stub() } as unknown as PythonEnvironmentApi,
+            log,
+            {} as VenvManager,
+        );
+        sinon.stub(helpers, 'shouldUseUv').resolves(false);
+        sinon.stub(PipListCommand.prototype, 'execute').rejects(new Error('pip list failed'));
+        const showErrorMessageWithLogs = sinon.stub(errorUtils, 'showErrorMessageWithLogs').resolves();
+
+        await manager.getPackages(environment);
+        await new Promise<void>((resolve) => setImmediate(resolve));
+
+        assert.ok(showErrorMessageWithLogs.calledOnceWithExactly('Error refreshing packages', log));
     });
 
     test('reports version lookup as unsupported for pip older than 21.2', async () => {
