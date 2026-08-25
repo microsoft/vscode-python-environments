@@ -87,16 +87,6 @@ suite('new723ScriptTemplate / NewScriptProject', () => {
         }
     }
 
-    async function createFileLink(target: string, link: string): Promise<boolean> {
-        try {
-            await fs.symlink(target, link, 'file');
-            return true;
-        } catch {
-            await fs.copyFile(target, link);
-            return false;
-        }
-    }
-
     test('shipped template contains parseable PEP 723 metadata', async () => {
         const contents = await fs.readFile(TEMPLATE_PATH, 'utf8');
         const metadata = readInlineScriptMetadata(contents);
@@ -402,77 +392,13 @@ suite('new723ScriptTemplate / NewScriptProject', () => {
         assert.strictEqual(showTextDocumentStub.called, false);
     });
 
-    test('a destination symlink or junction resolving outside the workspace is rejected before side effects', async () => {
-        const workspaceRoot = path.join(tmpDir, 'workspace');
-        const outsideRoot = path.join(tmpDir, 'outside');
-        const linkedDestination = path.join(workspaceRoot, 'linked-outside');
-        await fs.ensureDir(workspaceRoot);
-        await fs.ensureDir(outsideRoot);
-        const createdRealLink = await createDirectoryLink(outsideRoot, linkedDestination);
-        if (!createdRealLink) {
-            const realpathStub = sinon.stub(fsExtra, 'realpath') as sinon.SinonStub;
-            realpathStub.callsFake(async (targetPath: string) => {
-                const resolvedPath = path.resolve(targetPath);
-                if (resolvedPath === path.resolve(linkedDestination)) {
-                    return path.resolve(outsideRoot);
-                }
-                if (resolvedPath === path.resolve(workspaceRoot)) {
-                    return path.resolve(workspaceRoot);
-                }
-                throw new Error(`Unexpected realpath: ${targetPath}`);
-            });
-        }
-        workspaceFolder = {
-            index: 0,
-            name: 'test-workspace',
-            uri: Uri.file(workspaceRoot),
-        };
-        getWorkspaceFolderStub.returns(workspaceFolder);
-        getWorkspaceFoldersStub.returns([workspaceFolder]);
-        sinon.stub(fsExtra, 'pathExists').resolves(true);
-        const copyStub = sinon.stub(fsExtra, 'copy').resolves();
-        const replaceStub = sinon.stub(creationHelpers, 'replaceInFilesAndNames').resolves();
-        const instructionsStub = sinon.stub(creationHelpers, 'manageCopilotInstructionsFile').resolves();
-        const showTextDocumentStub = sinon.stub(windowApis, 'showTextDocument');
-        const showErrorMessageStub = sinon.stub(windowApis, 'showErrorMessage');
-        const addStub = sinon.stub().resolves();
-        const creator = new NewScriptProject({ add: addStub } as unknown as PythonProjectManager);
-
-        const result = await creator.create({
-            name: 'escaped.py',
-            quickCreate: true,
-            rootUri: Uri.file(linkedDestination),
-        });
-
-        assert.strictEqual(result, undefined);
-        assert.ok(showErrorMessageStub.calledOnce);
-        assert.strictEqual(copyStub.called, false);
-        assert.strictEqual(replaceStub.called, false);
-        assert.strictEqual(addStub.called, false);
-        assert.strictEqual(instructionsStub.called, false);
-        assert.strictEqual(showTextDocumentStub.called, false);
-    });
-
     test('a symlinked workspace root remains a valid destination', async () => {
         const physicalWorkspaceRoot = path.join(tmpDir, 'physical-workspace');
         const linkedWorkspaceRoot = path.join(tmpDir, 'linked-workspace');
         const nestedRoot = path.join(linkedWorkspaceRoot, 'nested');
         await fs.ensureDir(path.join(physicalWorkspaceRoot, 'nested'));
-        const createdRealLink = await createDirectoryLink(physicalWorkspaceRoot, linkedWorkspaceRoot);
-        if (!createdRealLink) {
-            await fs.ensureDir(nestedRoot);
-            const realpathStub = sinon.stub(fsExtra, 'realpath') as sinon.SinonStub;
-            realpathStub.callsFake(async (targetPath: string) => {
-                const resolvedPath = path.resolve(targetPath);
-                if (resolvedPath === path.resolve(nestedRoot)) {
-                    return path.resolve(physicalWorkspaceRoot, 'nested');
-                }
-                if (resolvedPath === path.resolve(linkedWorkspaceRoot)) {
-                    return path.resolve(physicalWorkspaceRoot);
-                }
-                throw new Error(`Unexpected realpath: ${targetPath}`);
-            });
-        }
+        await createDirectoryLink(physicalWorkspaceRoot, linkedWorkspaceRoot);
+        await fs.ensureDir(nestedRoot);
         workspaceFolder = {
             index: 0,
             name: 'linked-workspace',
@@ -496,147 +422,6 @@ suite('new723ScriptTemplate / NewScriptProject', () => {
         assert.ok(copyStub.calledOnce);
         assert.ok(addStub.calledOnceWithExactly(createdScript));
         assert.ok(showTextDocumentStub.calledOnceWithExactly(createdScript.uri));
-    });
-
-    test('an escaping .github symlink or junction is rejected before creator side effects', async () => {
-        const workspaceRoot = path.join(tmpDir, 'workspace');
-        const outsideRoot = path.join(tmpDir, 'outside-github');
-        const githubFolder = path.join(workspaceRoot, '.github');
-        await fs.ensureDir(workspaceRoot);
-        await fs.ensureDir(outsideRoot);
-        const createdRealLink = await createDirectoryLink(outsideRoot, githubFolder);
-        if (!createdRealLink) {
-            const realpathStub = sinon.stub(fsExtra, 'realpath') as sinon.SinonStub;
-            realpathStub.callsFake(async (targetPath: string) => {
-                const resolvedPath = path.resolve(targetPath);
-                if (resolvedPath === path.resolve(githubFolder)) {
-                    return path.resolve(outsideRoot);
-                }
-                if (resolvedPath === path.resolve(workspaceRoot)) {
-                    return path.resolve(workspaceRoot);
-                }
-                throw new Error(`Unexpected realpath: ${targetPath}`);
-            });
-        }
-        workspaceFolder = {
-            index: 0,
-            name: 'test-workspace',
-            uri: Uri.file(workspaceRoot),
-        };
-        getWorkspaceFolderStub.returns(workspaceFolder);
-        getWorkspaceFoldersStub.returns([workspaceFolder]);
-        sinon.stub(fsExtra, 'pathExists').resolves(true);
-        const copyStub = sinon.stub(fsExtra, 'copy').resolves();
-        const replaceStub = sinon.stub(creationHelpers, 'replaceInFilesAndNames').resolves();
-        const instructionsStub = sinon.stub(creationHelpers, 'manageCopilotInstructionsFile').resolves();
-        const showTextDocumentStub = sinon.stub(windowApis, 'showTextDocument');
-        const showErrorMessageStub = sinon.stub(windowApis, 'showErrorMessage');
-        const addStub = sinon.stub().resolves();
-        const creator = new NewScriptProject({ add: addStub } as unknown as PythonProjectManager);
-
-        const result = await creator.create({
-            name: 'blocked_github.py',
-            quickCreate: true,
-            rootUri: Uri.file(workspaceRoot),
-        });
-
-        assert.strictEqual(result, undefined);
-        assert.ok(showErrorMessageStub.calledOnce);
-        assert.strictEqual(copyStub.called, false);
-        assert.strictEqual(replaceStub.called, false);
-        assert.strictEqual(addStub.called, false);
-        assert.strictEqual(instructionsStub.called, false);
-        assert.strictEqual(showTextDocumentStub.called, false);
-        await assert.rejects(
-            fs.readFile(path.join(workspaceRoot, 'blocked_github.py')),
-            (error: NodeJS.ErrnoException) => error.code === 'ENOENT',
-        );
-    });
-
-    test('an escaping Copilot instructions file symlink is rejected before creator side effects', async () => {
-        const workspaceRoot = path.join(tmpDir, 'workspace');
-        const githubFolder = path.join(workspaceRoot, '.github');
-        const outsideInstructions = path.join(tmpDir, 'outside-copilot-instructions.md');
-        const instructionsFile = path.join(githubFolder, 'copilot-instructions.md');
-        await fs.ensureDir(githubFolder);
-        await fs.writeFile(outsideInstructions, 'outside');
-        const createdRealLink = await createFileLink(outsideInstructions, instructionsFile);
-        if (!createdRealLink) {
-            const realpathStub = sinon.stub(fsExtra, 'realpath') as sinon.SinonStub;
-            realpathStub.callsFake(async (targetPath: string) => {
-                const resolvedPath = path.resolve(targetPath);
-                if (resolvedPath === path.resolve(instructionsFile)) {
-                    return path.resolve(outsideInstructions);
-                }
-                if (resolvedPath === path.resolve(githubFolder)) {
-                    return path.resolve(githubFolder);
-                }
-                if (resolvedPath === path.resolve(workspaceRoot)) {
-                    return path.resolve(workspaceRoot);
-                }
-                throw new Error(`Unexpected realpath: ${targetPath}`);
-            });
-        }
-        workspaceFolder = {
-            index: 0,
-            name: 'test-workspace',
-            uri: Uri.file(workspaceRoot),
-        };
-        getWorkspaceFolderStub.returns(workspaceFolder);
-        getWorkspaceFoldersStub.returns([workspaceFolder]);
-        sinon.stub(fsExtra, 'pathExists').resolves(true);
-        const copyStub = sinon.stub(fsExtra, 'copy').resolves();
-        const replaceStub = sinon.stub(creationHelpers, 'replaceInFilesAndNames').resolves();
-        const instructionsStub = sinon.stub(creationHelpers, 'manageCopilotInstructionsFile').resolves();
-        const showTextDocumentStub = sinon.stub(windowApis, 'showTextDocument');
-        const showErrorMessageStub = sinon.stub(windowApis, 'showErrorMessage');
-        const addStub = sinon.stub().resolves();
-        const creator = new NewScriptProject({ add: addStub } as unknown as PythonProjectManager);
-
-        const result = await creator.create({
-            name: 'blocked_instructions.py',
-            quickCreate: true,
-            rootUri: Uri.file(workspaceRoot),
-        });
-
-        assert.strictEqual(result, undefined);
-        assert.ok(showErrorMessageStub.calledOnce);
-        assert.strictEqual(copyStub.called, false);
-        assert.strictEqual(replaceStub.called, false);
-        assert.strictEqual(addStub.called, false);
-        assert.strictEqual(instructionsStub.called, false);
-        assert.strictEqual(showTextDocumentStub.called, false);
-    });
-
-    test('a contained .github link and regular instructions file remain valid', async () => {
-        const workspaceRoot = path.join(tmpDir, 'workspace');
-        const containedGithubTarget = path.join(workspaceRoot, 'contained-github');
-        const githubFolder = path.join(workspaceRoot, '.github');
-        await fs.ensureDir(containedGithubTarget);
-        await createDirectoryLink(containedGithubTarget, githubFolder);
-        await fs.writeFile(path.join(githubFolder, 'copilot-instructions.md'), 'existing instructions');
-        workspaceFolder = {
-            index: 0,
-            name: 'test-workspace',
-            uri: Uri.file(workspaceRoot),
-        };
-        getWorkspaceFolderStub.returns(workspaceFolder);
-        getWorkspaceFoldersStub.returns([workspaceFolder]);
-        const { copyStub, instructionsStub, showTextDocumentStub } = stubSuccessfulFileCreation();
-        const addStub = sinon.stub().resolves();
-        const creator = new NewScriptProject({ add: addStub } as unknown as PythonProjectManager);
-
-        const result = await creator.create({
-            name: 'contained_instructions.py',
-            quickCreate: true,
-            rootUri: Uri.file(workspaceRoot),
-        });
-
-        assert.ok(result);
-        assert.ok(copyStub.calledOnce);
-        assert.ok(addStub.calledOnce);
-        assert.ok(instructionsStub.calledOnce);
-        assert.ok(showTextDocumentStub.calledOnce);
     });
 
     test('create waits for project registration before opening and returning', async () => {

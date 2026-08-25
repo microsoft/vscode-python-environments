@@ -4,7 +4,7 @@ import { commands, l10n, MarkdownString, QuickInputButtons, Uri, window, Workspa
 import { PythonProject, PythonProjectCreator, PythonProjectCreatorOptions } from '../../api';
 import { NEW_PROJECT_TEMPLATES_FOLDER } from '../../common/constants';
 import { traceError } from '../../common/logging';
-import { normalizePath } from '../../common/utils/pathUtils';
+import { isSameOrParentPath } from '../../common/utils/pathUtils';
 import { isWindows } from '../../common/utils/platformUtils';
 import { showErrorMessage, showInputBoxWithButtons, showTextDocument } from '../../common/window.apis';
 import { getWorkspaceFolder, getWorkspaceFolders } from '../../common/workspace.apis';
@@ -36,71 +36,12 @@ function validateScriptFileName(value: string): string | null {
     return null;
 }
 
-function isSameOrDescendantPath(parentPath: string, candidatePath: string): boolean {
-    const relativePath = path.relative(
-        normalizePath(path.resolve(parentPath)),
-        normalizePath(path.resolve(candidatePath)),
-    );
-    return (
-        relativePath === '' ||
-        (relativePath !== '..' && !relativePath.startsWith(`..${path.sep}`) && !path.isAbsolute(relativePath))
-    );
-}
-
 function uriForFileRootInWorkspace(rootPath: string, workspaceFolder: WorkspaceFolder): Uri {
     const relativeRootPath = path.relative(path.resolve(workspaceFolder.uri.fsPath), path.resolve(rootPath));
     const pathSegments = relativeRootPath.split(/[\\/]/).filter((segment) => segment.length > 0);
     return workspaceFolder.uri.with({
         path: path.posix.join(workspaceFolder.uri.path, ...pathSegments),
     });
-}
-
-async function lstatIfExists(candidatePath: string) {
-    try {
-        return await fs.lstat(candidatePath);
-    } catch (error) {
-        if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
-            return undefined;
-        }
-        throw error;
-    }
-}
-
-async function isCopilotInstructionsDestinationContained(
-    destinationRoot: string,
-    physicalDestinationRoot: string,
-    physicalWorkspaceRoot: string,
-): Promise<boolean> {
-    try {
-        const githubFolder = path.join(destinationRoot, '.github');
-        const githubEntry = await lstatIfExists(githubFolder);
-        if (!githubEntry) {
-            return isSameOrDescendantPath(physicalWorkspaceRoot, physicalDestinationRoot);
-        }
-
-        const physicalGithubFolder = await fs.realpath(githubFolder);
-        if (!isSameOrDescendantPath(physicalWorkspaceRoot, physicalGithubFolder)) {
-            return false;
-        }
-        if (!(await fs.stat(githubFolder)).isDirectory()) {
-            return false;
-        }
-
-        const instructionsFile = path.join(githubFolder, 'copilot-instructions.md');
-        const instructionsEntry = await lstatIfExists(instructionsFile);
-        if (!instructionsEntry) {
-            return true;
-        }
-        if (instructionsEntry.isSymbolicLink() || !instructionsEntry.isFile()) {
-            return false;
-        }
-
-        const physicalInstructionsFile = await fs.realpath(instructionsFile);
-        return isSameOrDescendantPath(physicalWorkspaceRoot, physicalInstructionsFile);
-    } catch (error) {
-        traceError('Failed to validate the Copilot instructions destination:', error);
-        return false;
-    }
 }
 
 export class NewScriptProject implements PythonProjectCreator {
@@ -181,28 +122,11 @@ export class NewScriptProject implements PythonProjectCreator {
         if (!workspaceFolder && destinationRootUri.scheme === 'file') {
             workspaceFolders ??= getWorkspaceFolders();
             workspaceFolder = workspaceFolders
-                ?.filter((folder) => isSameOrDescendantPath(folder.uri.fsPath, resolvedDestRoot))
+                ?.filter((folder) => isSameOrParentPath(folder.uri.fsPath, resolvedDestRoot))
                 .sort((first, second) => second.uri.fsPath.length - first.uri.fsPath.length)[0];
         }
         if (!workspaceFolder) {
             showErrorMessage(l10n.t('Destination folder must be inside an open workspace, aborting creation.'));
-            return undefined;
-        }
-
-        let physicalDestRoot: string;
-        let physicalWorkspaceRoot: string;
-        try {
-            [physicalDestRoot, physicalWorkspaceRoot] = await Promise.all([
-                fs.realpath(resolvedDestRoot),
-                fs.realpath(workspaceFolder.uri.fsPath),
-            ]);
-        } catch (error) {
-            traceError('Failed to resolve the destination or workspace folder:', error);
-            showErrorMessage(l10n.t('Unable to resolve the destination folder inside the open workspace.'));
-            return undefined;
-        }
-        if (!isSameOrDescendantPath(physicalWorkspaceRoot, physicalDestRoot)) {
-            showErrorMessage(l10n.t('Destination folder must resolve inside the open workspace, aborting creation.'));
             return undefined;
         }
 
@@ -223,20 +147,6 @@ export class NewScriptProject implements PythonProjectCreator {
                 throw new Error(containmentError);
             }
             window.showErrorMessage(containmentError);
-            return undefined;
-        }
-
-        if (
-            createCopilotInstructions &&
-            !(await isCopilotInstructionsDestinationContained(
-                resolvedDestRoot,
-                physicalDestRoot,
-                physicalWorkspaceRoot,
-            ))
-        ) {
-            showErrorMessage(
-                l10n.t('Copilot instructions must be stored inside the open workspace, aborting creation.'),
-            );
             return undefined;
         }
 

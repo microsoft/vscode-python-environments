@@ -65,6 +65,28 @@ export function normalizePath(fsPath: string): string {
     return path1;
 }
 
+/**
+ * Determines whether `candidatePath` is the same as, or nested inside, `parentPath`.
+ *
+ * Both paths are resolved to absolute form and normalized (case-insensitive on
+ * Windows) before comparison, so differences in separators or drive-letter case
+ * do not affect the result.
+ *
+ * @param parentPath The candidate parent (or ancestor) directory.
+ * @param candidatePath The path being tested for containment.
+ * @returns `true` when `candidatePath` equals `parentPath` or is a descendant of it.
+ */
+export function isSameOrParentPath(parentPath: string, candidatePath: string): boolean {
+    const relative = path.relative(
+        normalizePath(path.resolve(parentPath)),
+        normalizePath(path.resolve(candidatePath)),
+    );
+    return (
+        relative === '' ||
+        (relative !== '..' && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative))
+    );
+}
+
 export function getResourceUri(resourcePath: string, root?: string): Uri | undefined {
     try {
         if (!resourcePath) {
