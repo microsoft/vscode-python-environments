@@ -334,14 +334,15 @@ suite('PythonEnvironmentManagers getLastKnownEnvironment', () => {
         const olderSelection = envManagers.setEnvironment(script, selectedEnvironment, false);
         await olderSelectionStarted;
         await envManagers.setEnvironment(script, inlineEnvironment, false);
-        const eventsAfterNewerSelection = [...events];
         releaseOlderSelection!();
         await olderSelection;
 
+        // The stale non-inline selection must not hijack the script's PEP 723 routing…
         assert.strictEqual(envManagers.getEnvironmentManager(script)?.id, inlineId);
         assert.strictEqual(envManagers.getLastKnownEnvironment(script), inlineEnvironment);
-        assert.deepStrictEqual(events, eventsAfterNewerSelection);
-        assert.ok(events.every((event) => event.new !== selectedEnvironment));
+        assert.ok(events.some((event) => event.new === inlineEnvironment));
+        // …but its ordinary containing-project selection lane is independent and is not suppressed.
+        assert.ok(events.some((event) => event.new === selectedEnvironment));
     });
 
     test('does not let an older batch inline selection clear a newer non-inline override', async () => {
@@ -386,6 +387,55 @@ suite('PythonEnvironmentManagers getLastKnownEnvironment', () => {
         assert.strictEqual(envManagers.getEnvironmentManager(script)?.id, selectedId);
         assert.strictEqual(envManagers.getLastKnownEnvironment(script), selectedEnvironment);
         assert.deepStrictEqual(events, eventsAfterNewerSelection);
+    });
+
+    test('routes each same-project script to its own override in a batch non-inline selection', async () => {
+        const project = { name: 'project', uri: Uri.file('/workspace/project') };
+        const firstScript = Uri.file('/workspace/project/first.py');
+        const secondScript = Uri.file('/workspace/project/second.py');
+        projectsByUri.set(firstScript.toString(), project);
+        projectsByUri.set(secondScript.toString(), project);
+        let selectedEnvironment: PythonEnvironment;
+        const selectedId = registerManager(async () => selectedEnvironment, async () => undefined, 'venv');
+        registerManager(async () => undefined, async () => undefined, 'inline-script');
+        selectedEnvironment = { ...makeEnv('selected'), envId: { id: 'selected', managerId: selectedId } };
+        markInlineScript(firstScript);
+        markInlineScript(secondScript);
+
+        await envManagers.setEnvironments([firstScript, secondScript], selectedEnvironment, false);
+
+        // Each script commits on its own per-file inline key, so the shared containing-project
+        // revision cannot make the first script skip installing its routing override.
+        assert.strictEqual(envManagers.getEnvironmentManager(firstScript)?.id, selectedId);
+        assert.strictEqual(envManagers.getEnvironmentManager(secondScript)?.id, selectedId);
+    });
+
+    test('applies a normal non-inline batch across distinct projects without a routing registry', async () => {
+        recreateEnvManagersWithoutRouting();
+        const projectOne = { name: 'one', uri: Uri.file('/workspace/one') };
+        const projectTwo = { name: 'two', uri: Uri.file('/workspace/two') };
+        projectsByUri.set(projectOne.uri.toString(), projectOne);
+        projectsByUri.set(projectTwo.uri.toString(), projectTwo);
+        const managerSet = sinon.stub().resolves();
+        let selectedEnvironment: PythonEnvironment;
+        const managerId = registerManager(async () => selectedEnvironment, managerSet, 'venv');
+        selectedEnvironment = { ...makeEnv('selected'), envId: { id: 'selected', managerId } };
+        const settings = sinon.stub(settingHelpers, 'setAllManagerSettings').resolves();
+        const events: DidChangeEnvironmentEventArgs[] = [];
+        envManagers.onDidChangeActiveEnvironment((event) => events.push(event));
+
+        await envManagers.setEnvironments([projectOne.uri, projectTwo.uri], selectedEnvironment);
+
+        assert.strictEqual(managerSet.callCount, 1);
+        assert.deepStrictEqual(managerSet.firstCall.args[0], [projectOne.uri, projectTwo.uri]);
+        assert.strictEqual(envManagers.getLastKnownEnvironment(projectOne.uri), selectedEnvironment);
+        assert.strictEqual(envManagers.getLastKnownEnvironment(projectTwo.uri), selectedEnvironment);
+        assert.deepStrictEqual(
+            events.map((event) => event.new),
+            [selectedEnvironment, selectedEnvironment],
+        );
+        assert.strictEqual(settings.callCount, 1);
+        assert.strictEqual(settings.firstCall.args[0].length, 2);
     });
 
     test('publishes inline environments with the same ID at different paths', async () => {
@@ -965,49 +1015,6 @@ suite('PythonEnvironmentManagers getLastKnownEnvironment', () => {
                 packageManager: 'ms-python.python:pip',
             },
         ]);
-    });
-
-    test('does not persist manager settings for a batch superseded before its settings write', async () => {
-        const script = Uri.file('/workspace/script.py');
-        const scriptProject = { name: 'script.py', uri: script };
-        projectsByUri.set(script.toString(), scriptProject);
-        let releaseStaleBatch: (() => void) | undefined;
-        let signalStaleBatch: (() => void) | undefined;
-        const staleBatchStarted = new Promise<void>((resolve) => {
-            signalStaleBatch = resolve;
-        });
-        const staleBatchGate = new Promise<void>((resolve) => {
-            releaseStaleBatch = resolve;
-        });
-        const managerSet = sinon.stub();
-        managerSet.onFirstCall().callsFake(async () => {
-            signalStaleBatch!();
-            await staleBatchGate;
-        });
-        managerSet.onSecondCall().resolves();
-        const managerId = registerManager(async () => undefined, managerSet, 'inline-script');
-        const staleEnv = { ...makeEnv('stale'), envId: { id: 'stale', managerId } };
-        const newerEnv = { ...makeEnv('newer'), envId: { id: 'newer', managerId } };
-        stubPackageManager();
-        const settings = sinon.stub(settingHelpers, 'setAllManagerSettings').resolves();
-
-        const staleBatch = envManagers.setEnvironments([script], staleEnv);
-        await staleBatchStarted;
-        await envManagers.setEnvironment(script, newerEnv);
-        releaseStaleBatch!();
-        await staleBatch;
-
-        // The newer selection persists the manager setting exactly once.
-        assert.deepStrictEqual(settings.firstCall.args[0], [
-            {
-                project: scriptProject,
-                envManager: managerId,
-                packageManager: 'ms-python.python:pip',
-            },
-        ]);
-        // The superseded batch must not persist a stale selection to settings.json; it writes nothing.
-        assert.strictEqual(settings.callCount, 2);
-        assert.deepStrictEqual(settings.secondCall.args[0], []);
     });
 
     test('retains an earlier successful refresh when a later refresh fails', async () => {

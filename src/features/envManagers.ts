@@ -18,6 +18,7 @@ import {
 import {
     InlineScriptRouteabilityChangeEvent,
     InlineScriptRoutingRegistry,
+    getInlineScriptRoutingKey,
 } from '../common/inlineScript/routingRegistry';
 import { traceError, traceVerbose } from '../common/logging';
 import { StopWatch } from '../common/stopWatch';
@@ -420,33 +421,29 @@ export class PythonEnvironmentManagers implements EnvironmentManagers {
         }
 
         if (scope instanceof Uri) {
-            const inlineOperation =
-                manager.id === INLINE_SCRIPT_MANAGER_ID
-                    ? operation
-                    : (inlineOverrideHandoffOperation ?? inlineClearOperation);
             if (
-                !this.commitSelectionOperations([
-                    { key, operation },
-                    ...(inlineOperation === undefined
-                        ? []
-                        : [{ key: this.getInlineScriptSelectionKey(scope), operation: inlineOperation }]),
-                ])
-            ) {
-                return;
-            }
-            this.updateInlineRoutingOverride(scope, manager, environment);
-            this.clearInlineActiveSelection(scope, manager, inlineOperation);
-            if (
-                clearingInlineRoutingOverride &&
-                (await this.publishEffectiveEnvironmentAfterOverrideClear(
+                this.commitInlineRoutingOperation(
                     scope,
                     manager,
-                    key,
                     operation,
+                    inlineClearOperation,
                     inlineOverrideHandoffOperation,
-                ))
+                )
             ) {
-                return;
+                this.updateInlineRoutingOverride(scope, manager, environment);
+                this.clearInlineActiveSelection(scope, manager, inlineOverrideHandoffOperation ?? inlineClearOperation);
+                if (
+                    clearingInlineRoutingOverride &&
+                    (await this.publishEffectiveEnvironmentAfterOverrideClear(
+                        scope,
+                        manager,
+                        key,
+                        operation,
+                        inlineOverrideHandoffOperation,
+                    ))
+                ) {
+                    return;
+                }
             }
         }
         if (!publishInlineSelection) {
@@ -507,13 +504,7 @@ export class PythonEnvironmentManagers implements EnvironmentManagers {
             if (Array.isArray(scope) && scope.every((s) => s instanceof Uri)) {
                 const selections = scope.map((uri) => this.beginPendingSelection(uri, manager));
                 await manager.set(scope, environment);
-                // Commit the winning (non-superseded) selections BEFORE persisting settings so an
-                // out-of-order older batch cannot write a manager setting to settings.json while its
-                // matching routing/selection update is rejected (settings/routing divergence).
-                const committedSelections = selections.filter((selection) =>
-                    this.commitPendingSelection(selection, manager),
-                );
-                committedSelections.forEach((selection) => {
+                selections.forEach((selection) => {
                     const m = this.getEnvironmentManager(selection.scope);
                     // Always add settings when persisting, OR when manager differs
                     if (
@@ -530,16 +521,25 @@ export class PythonEnvironmentManagers implements EnvironmentManagers {
                 if (shouldPersistSettings) {
                     await setAllManagerSettings(settings);
                 }
-                committedSelections.forEach((selection) => {
-                    // Re-validate across the (awaited) settings write: a newer selection may have
-                    // superseded this one while settings were being persisted, in which case its
-                    // routing override and active-selection publish must be skipped.
-                    if (!this.commitPendingSelection(selection, manager)) {
+                selections.forEach((selection) => {
+                    // Only a current (non-superseded) PEP 723 routing operation may mutate the
+                    // per-script override; the ordinary project/global selection lane below is
+                    // committed independently so a stale inline op cannot suppress it.
+                    if (
+                        this.commitInlineRoutingOperation(
+                            selection.scope,
+                            manager,
+                            selection.operation,
+                            selection.inlineClearOperation,
+                        )
+                    ) {
+                        this.updateInlineRoutingOverride(selection.scope, manager, environment);
+                        this.clearInlineActiveSelection(selection.scope, manager, selection.inlineClearOperation);
+                    }
+                    if (!selection.publishInlineSelection) {
                         return;
                     }
-                    this.updateInlineRoutingOverride(selection.scope, manager, environment);
-                    this.clearInlineActiveSelection(selection.scope, manager, selection.inlineClearOperation);
-                    if (!selection.publishInlineSelection) {
+                    if (!this.commitSelectionOperation(selection.key, selection.operation)) {
                         return;
                     }
                     const oldEnv = this._activeSelection.get(selection.key);
@@ -955,18 +955,26 @@ export class PythonEnvironmentManagers implements EnvironmentManagers {
         }
     }
 
-    private commitPendingSelection(
-        selection: PendingEnvironmentSelection,
+    private commitInlineRoutingOperation(
+        scope: Uri,
         manager: InternalEnvironmentManager,
+        selectionOperation: number,
+        inlineClearOperation?: number,
+        inlineOverrideHandoffOperation?: number,
     ): boolean {
-        const inlineOperation =
-            manager.id === INLINE_SCRIPT_MANAGER_ID ? selection.operation : selection.inlineClearOperation;
-        return this.commitSelectionOperations([
-            { key: selection.key, operation: selection.operation },
-            ...(inlineOperation === undefined
-                ? []
-                : [{ key: this.getInlineScriptSelectionKey(selection.scope), operation: inlineOperation }]),
-        ]);
+        // Gate strictly to the manually enabled PEP 723 routing feature and to file .py scopes.
+        // For the feature-off or non-script case, proceed exactly as before.
+        if (!this.inlineScriptRouting || getInlineScriptRoutingKey(scope) === undefined) {
+            return true;
+        }
+        const operation =
+            manager.id === INLINE_SCRIPT_MANAGER_ID
+                ? selectionOperation
+                : (inlineOverrideHandoffOperation ?? inlineClearOperation);
+        return (
+            operation === undefined ||
+            this.commitSelectionOperation(this.getInlineScriptSelectionKey(scope), operation)
+        );
     }
 
     private canPersistManagerSettingForScope(
@@ -988,24 +996,10 @@ export class PythonEnvironmentManagers implements EnvironmentManagers {
     }
 
     private commitSelectionOperation(key: string, operation: number): boolean {
-        return this.commitSelectionOperations([{ key, operation }]);
-    }
-
-    private commitSelectionOperations(
-        operations: readonly { readonly key: string; readonly operation: number }[],
-    ): boolean {
-        const latestByKey = new Map<string, number>();
-        for (const { key, operation } of operations) {
-            latestByKey.set(key, Math.max(latestByKey.get(key) ?? operation, operation));
+        if ((this._selectionRevisions.get(key) ?? 0) > operation) {
+            return false;
         }
-        for (const [key, operation] of latestByKey) {
-            if ((this._selectionRevisions.get(key) ?? 0) > operation) {
-                return false;
-            }
-        }
-        for (const [key, operation] of latestByKey) {
-            this._selectionRevisions.set(key, operation);
-        }
+        this._selectionRevisions.set(key, operation);
         return true;
     }
 
