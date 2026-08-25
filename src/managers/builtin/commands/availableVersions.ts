@@ -2,9 +2,24 @@ import type { Pep440Version } from '@renovatebot/pep440';
 import { AvailableVersionsCommand, type AvailableVersionsExecuteArgs } from '../../base/commands/index';
 import { runPython, runUV } from '../helpers';
 
+function parseVersionsJson(output: string, tool: 'pip' | 'uv'): string[] {
+    const parsed: unknown = JSON.parse(output);
+    if (
+        typeof parsed !== 'object' ||
+        parsed === null ||
+        !('versions' in parsed) ||
+        !Array.isArray(parsed.versions) ||
+        !parsed.versions.every((version) => typeof version === 'string')
+    ) {
+        throw new Error(`Unexpected package version JSON from ${tool}.`);
+    }
+
+    return parsed.versions;
+}
+
 /**
  * Pip available versions command.
- * Parsed command: `python -m pip index versions <package> --json --python-version <version>`
+ * Parsed command: `python -m pip index versions <package> --json --disable-pip-version-check --python-version <version>`
  * Official documentation: https://pip.pypa.io/en/stable/cli/pip_index/
  */
 export class PipAvailableVersionsCommand extends AvailableVersionsCommand {
@@ -16,6 +31,7 @@ export class PipAvailableVersionsCommand extends AvailableVersionsCommand {
             'versions',
             executeArgs.packageName,
             '--json',
+            '--disable-pip-version-check',
             '--python-version',
             executeArgs.pythonVersion,
         ];
@@ -30,20 +46,41 @@ export class PipAvailableVersionsCommand extends AvailableVersionsCommand {
             executeArgs.cancellationToken,
             this.timeout,
         );
-        const match = output.match(/{[\s\S]*}/);
-        if (!match) {
-            return [];
-        }
+        return this.parseVersions(parseVersionsJson(output, 'pip'), executeArgs.includePrerelease);
+    }
+}
 
-        try {
-            const parsed = JSON.parse(match[0]) as { versions?: string[] };
-            return this.parseVersions(
-                Array.isArray(parsed.versions) ? parsed.versions : [],
-                executeArgs.includePrerelease,
-            );
-        } catch {
-            return [];
+/**
+ * Pip available versions command for Pip 21.2 through 25.0, before JSON output was supported.
+ */
+export class PipAvailableVersionsTextCommand extends AvailableVersionsCommand {
+    protected buildCommand(executeArgs: AvailableVersionsExecuteArgs): string[] {
+        return [
+            '-m',
+            'pip',
+            'index',
+            'versions',
+            executeArgs.packageName,
+            '--disable-pip-version-check',
+            '--python-version',
+            executeArgs.pythonVersion,
+        ];
+    }
+
+    async execute(executeArgs: AvailableVersionsExecuteArgs): Promise<Pep440Version[]> {
+        const output = await runPython(
+            this.pythonExecutable,
+            this.buildCommand(executeArgs),
+            undefined,
+            this.log,
+            executeArgs.cancellationToken,
+            this.timeout,
+        );
+        const match = output.match(/^Available versions:\s*(.+)$/im);
+        if (!match) {
+            throw new Error('Unable to parse available package versions from pip output.');
         }
+        return this.parseVersions(match[1].split(','), executeArgs.includePrerelease);
     }
 }
 
@@ -75,19 +112,6 @@ export class UvAvailableVersionsCommand extends AvailableVersionsCommand {
             executeArgs.cancellationToken,
             this.timeout,
         );
-        const match = output.match(/{[\s\S]*}/);
-        if (!match) {
-            return [];
-        }
-
-        try {
-            const parsed = JSON.parse(match[0]) as { versions?: string[] };
-            return this.parseVersions(
-                Array.isArray(parsed.versions) ? parsed.versions : [],
-                executeArgs.includePrerelease,
-            );
-        } catch {
-            return [];
-        }
+        return this.parseVersions(parseVersionsJson(output, 'uv'), executeArgs.includePrerelease);
     }
 }
