@@ -75,9 +75,9 @@ Use this to scaffold a brand new Python project with the correct structure and f
    - **Package**: A structured Python package with `pyproject.toml`, tests folder, and package directory
    - **Script**: A simple standalone Python file using PEP 723 inline metadata
 4. Enter a name for your project.
-5. Choose whether to create a virtual environment.
+5. If you're creating a package, choose whether to create a virtual environment.
 
-The extension creates the project structure, adds it to your workspace, and optionally creates a virtual environment.
+The extension creates the project structure and adds it to your workspace. For packages, it can also create a virtual environment.
 
 #### Package template structure
 
