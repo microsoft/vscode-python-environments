@@ -286,7 +286,10 @@ export async function getWorkspacePackagesToInstall(
                     PipListCommand,
                     UvListCommand,
                 );
-                const data = await listCmd.execute();
+const data = await withProgress(
+                    { location: ProgressLocation.Notification },
+                    () => listCmd.execute(),
+                );
                 installed = data.map((pkg) => pkg.name);
             } catch (error) {
                 log?.error('Error listing installed packages', error);

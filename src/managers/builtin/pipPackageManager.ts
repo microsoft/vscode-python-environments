@@ -226,9 +226,9 @@ export class PipPackageManager implements PackageManager, Disposable {
             this.log.error('Error refreshing packages', error);
             if (showErrors) {
                 setImmediate(async () => {
-                    const result = await showErrorMessage('Error refreshing packages', 'View Output');
-                    if (result === 'View Output') {
-                        this.log.show();
+const viewOutput = l10n.t('View Output');
+                    const result = await showErrorMessage(l10n.t('Error refreshing packages'), viewOutput);
+                    if (result === viewOutput) {
                     }
                 });
             }
@@ -282,9 +282,9 @@ export class PipPackageManager implements PackageManager, Disposable {
 
         // For pip < 21.2.0, check version first.
         if (availableVersionsCmd instanceof PipAvailableVersionsCommand) {
-            const pipVersion = await this.getVersion(environment);
+const pipVersionCmd = new PipVersionCommand({ pythonExecutable, log: this.log });
+            const pipVersion = await pipVersionCmd.execute();
             if (!pipVersion) {
-                throw new Error(`Unable to determine pip version for environment: ${environment.envId.id}`);
             }
             if (compare(pipVersion.public, '21.2.0') < 0) {
                 throw new PackageVersionLookupNotSupportedError(
