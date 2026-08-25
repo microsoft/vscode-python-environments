@@ -2363,16 +2363,19 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
                 this.baseManager,
             );
             const executable = resolved?.execInfo?.run.executable;
-            if (resolved && executable && pickCompatibleInterpreter([resolved], metadata.requiresPython)) {
+            if (
+                resolved &&
+                executable &&
+                pickCompatibleInterpreter([resolved], undefined) &&
+                (!requiresPython || this.matchesInstallConstraint(requiresPython, resolved.version))
+            ) {
                 try {
                     const canonicalPath = await fs.realpath(executable);
-                    if (!requiresPython || this.matchesInstallConstraint(requiresPython, resolved.version)) {
-                        this.directlyResolvedBaseInterpreters.set(canonicalPath, resolved);
-                        selected = {
-                            environment: resolved,
-                            canonicalPath,
-                        };
-                    }
+                    this.directlyResolvedBaseInterpreters.set(canonicalPath, resolved);
+                    selected = {
+                        environment: resolved,
+                        canonicalPath,
+                    };
                 } catch (error) {
                     this.log.warn(
                         `Unable to resolve the Python installed for an inline script at ${executable}: ${getErrorMessage(error)}`,
@@ -2403,12 +2406,17 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
             return { version: prereleaseLowerBound };
         }
         const lowerBoundRelease = lowerBound ? parseReleaseSegments(lowerBound) : undefined;
+        let needsCompleteCatalog = false;
         if (lowerBound && lowerBoundRelease?.[0] === 3) {
             if (/^>=\s*[^,]+$/.test(requiresPython) && this.matchesInstallConstraint(requiresPython, lowerBound)) {
                 return { version: lowerBound };
             }
+            // PEP 440 `==3.13` is exact, while uv treats `3.13` as a broad minor selector.
             if (/^==\s*[^,*]+$/.test(requiresPython) && this.matchesInstallConstraint(requiresPython, lowerBound)) {
-                return { version: lowerBound };
+                if (lowerBoundRelease.length >= 3) {
+                    return { version: lowerBound };
+                }
+                needsCompleteCatalog = true;
             }
         }
 
@@ -2424,7 +2432,9 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
                         uvLookupResult === 'declined' ? 'compatible-python-declined' : 'install-failure',
                 };
             }
-            available = await uvPythonInstaller.getAvailablePythonVersions();
+            available = needsCompleteCatalog
+                ? await uvPythonInstaller.getAvailablePythonVersions({ allVersions: true })
+                : await uvPythonInstaller.getAvailablePythonVersions();
         } catch (error) {
             this.log.warn(`Unable to query Python versions available from uv: ${getErrorMessage(error)}`);
             return { errorCategory: 'install-failure' };

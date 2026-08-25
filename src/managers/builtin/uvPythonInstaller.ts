@@ -76,6 +76,10 @@ export interface UvPythonVersion {
     arch: string;
 }
 
+export interface GetAvailablePythonVersionsOptions {
+    readonly allVersions?: boolean;
+}
+
 /**
  * Checks if a command is available on the system.
  */
@@ -276,12 +280,20 @@ export async function getUvPythonPath(version?: string): Promise<string | undefi
 
 /**
  * Gets available Python versions from uv.
+ * @param options Set `allVersions` only when older patch releases are needed.
  * @returns Promise that resolves to an array of Python versions
  */
-export async function getAvailablePythonVersions(): Promise<UvPythonVersion[]> {
+export async function getAvailablePythonVersions(
+    options?: GetAvailablePythonVersionsOptions,
+): Promise<UvPythonVersion[]> {
     return new Promise((resolve) => {
         const chunks: string[] = [];
-        const proc = spawnProcess('uv', ['python', 'list', '--output-format', 'json']);
+        const args = ['python', 'list'];
+        if (options?.allVersions) {
+            args.push('--all-versions');
+        }
+        args.push('--output-format', 'json');
+        const proc = spawnProcess('uv', args);
         proc.stdout?.on('data', (data) => chunks.push(data.toString()));
         proc.on('error', () => resolve([]));
         proc.on('exit', (code) => {

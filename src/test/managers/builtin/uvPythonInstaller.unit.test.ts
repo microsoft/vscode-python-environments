@@ -835,6 +835,32 @@ suite('uvPythonInstaller - getAvailablePythonVersions', () => {
         assert.strictEqual(result.length, 2, 'Should return all versions');
         assert.strictEqual(result[0].version, '3.13.1');
         assert.strictEqual(result[1].version, '3.12.8');
+        sinon.assert.calledOnceWithExactly(spawnStub, 'uv', ['python', 'list', '--output-format', 'json']);
+    });
+
+    test('should request older patch releases only when all versions are requested', async () => {
+        const versions: UvPythonVersion[] = [
+            makeUvPythonVersion({ version: '3.13.2', path: null }),
+            makeUvPythonVersion({ version: '3.13.0', path: null }),
+        ];
+        const args = ['python', 'list', '--all-versions', '--output-format', 'json'];
+        const mockProcess = new MockChildProcess('uv', args);
+        spawnStub.returns(mockProcess);
+
+        const resultPromise = getAvailablePythonVersions({ allVersions: true });
+
+        setTimeout(() => {
+            mockProcess.stdout?.emit('data', JSON.stringify(versions));
+            mockProcess.emit('exit', 0, null);
+        }, 10);
+
+        const result = await resultPromise;
+
+        assert.deepStrictEqual(
+            result.map((version) => version.version),
+            ['3.13.2', '3.13.0'],
+        );
+        sinon.assert.calledOnceWithExactly(spawnStub, 'uv', args);
     });
 
     test('should return empty array on process error', async () => {
