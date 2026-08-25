@@ -4,7 +4,7 @@ import { LogOutputChannel, Uri } from 'vscode';
 import * as workspaceApis from '../../../common/workspace.apis';
 import { CondaAvailableVersionsCommand } from '../../../managers/conda/commands/availableVersions';
 import { CondaInstallCommand } from '../../../managers/conda/commands/install';
-import { CondaListCommand } from '../../../managers/conda/commands/list';
+import { CondaListCommand, CondaListOutputError } from '../../../managers/conda/commands/list';
 import { CondaUninstallCommand } from '../../../managers/conda/commands/uninstall';
 import { CondaVersionCommand } from '../../../managers/conda/commands/version';
 import * as condaUtils from '../../../managers/conda/condaUtils';
@@ -125,7 +125,7 @@ suite('Conda commands', () => {
             log: mockLog,
         });
 
-        await assert.rejects(() => command.execute(), SyntaxError);
+        await assert.rejects(() => command.execute(), CondaListOutputError);
         assert.ok((mockLog.error as sinon.SinonStub).calledOnce);
     });
 

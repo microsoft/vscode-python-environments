@@ -32,6 +32,7 @@ import {
     CondaAvailableVersionsCommand,
     CondaInstallCommand,
     CondaListCommand,
+    CondaListOutputError,
     CondaUninstallCommand,
     CondaVersionCommand,
 } from './commands/index';
@@ -159,7 +160,16 @@ export class CondaPackageManager implements PackageManager, Disposable {
                 condaEnvironmentPath: environment.environmentPath.fsPath,
                 log: this.log,
             });
-            const data = await listCmd.execute();
+            let data;
+            try {
+                data = await listCmd.execute();
+            } catch (error) {
+                if (error instanceof CondaListOutputError) {
+                    this.log.error('Error parsing installed Conda packages', error);
+                    return [];
+                }
+                throw error;
+            }
             const packages = (data ?? []).map((pkg) => this.api.createPackageItem(pkg, environment, this));
             this.packages.set(environment.envId.id, packages);
             return packages;

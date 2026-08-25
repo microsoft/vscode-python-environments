@@ -4,6 +4,19 @@ import { runCondaExecutable } from '../condaUtils';
 import { CondaCommandConstructorOptions } from './condaCommandOptions';
 
 /**
+ * Indicates that `conda list` completed but returned malformed or unexpected output.
+ */
+export class CondaListOutputError extends Error {
+    constructor(
+        message: string,
+        public readonly cause?: unknown,
+    ) {
+        super(message);
+        this.name = 'CondaListOutputError';
+    }
+}
+
+/**
  * Conda list command.
  * Parsed command: `conda list -p <environment_path> --json`
  * Official documentation: https://docs.conda.io/projects/conda/en/latest/commands/list.html
@@ -27,10 +40,10 @@ export class CondaListCommand extends ListCommand {
             parsed = JSON.parse(output);
         } catch (error) {
             this.log?.error('Failed to parse conda list output', error);
-            throw error;
+            throw new CondaListOutputError('Failed to parse conda list output', error);
         }
         if (!Array.isArray(parsed)) {
-            const error = new Error('Invalid conda list output: expected a JSON array');
+            const error = new CondaListOutputError('Invalid conda list output: expected a JSON array');
             this.log?.error(error.message);
             throw error;
         }

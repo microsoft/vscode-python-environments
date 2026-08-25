@@ -9,7 +9,7 @@ import * as errorUtils from '../../../common/errors/utils';
 import * as windowApis from '../../../common/window.apis';
 import { CondaAvailableVersionsCommand } from '../../../managers/conda/commands/availableVersions';
 import { CondaInstallCommand } from '../../../managers/conda/commands/install';
-import { CondaListCommand } from '../../../managers/conda/commands/list';
+import { CondaListCommand, CondaListOutputError } from '../../../managers/conda/commands/list';
 import { CondaPackageManager } from '../../../managers/conda/condaPackageManager';
 
 suite('CondaPackageManager', () => {
@@ -66,8 +66,9 @@ suite('CondaPackageManager', () => {
         const api = {
             createPackageItem: sinon.stub().callsFake((pkg) => pkg),
         } as unknown as PythonEnvironmentApi;
-        const manager = new CondaPackageManager(api, { error: sinon.stub() } as unknown as LogOutputChannel);
-        const parseError = new SyntaxError('Unexpected token');
+        const logError = sinon.stub();
+        const manager = new CondaPackageManager(api, { error: logError } as unknown as LogOutputChannel);
+        const parseError = new CondaListOutputError('Failed to parse conda list output');
         const execute = sinon.stub(CondaListCommand.prototype, 'execute');
         execute.onFirstCall().rejects(parseError);
         execute.onSecondCall().resolves([
@@ -79,12 +80,29 @@ suite('CondaPackageManager', () => {
             },
         ]);
 
-        await assert.rejects(manager.getPackages(environment), (error: unknown) => error === parseError);
+        const failedPackages = await manager.getPackages(environment);
         const packages = await manager.getPackages(environment);
         const cachedPackages = await manager.getPackages(environment);
 
+        assert.deepStrictEqual(failedPackages, []);
         assert.deepStrictEqual(packages?.map((pkg) => pkg.name), ['requests']);
         assert.deepStrictEqual(cachedPackages?.map((pkg) => pkg.name), ['requests']);
+        assert.ok(logError.calledOnceWithExactly('Error parsing installed Conda packages', parseError));
         assert.strictEqual(execute.callCount, 2, 'Only the successful list result should populate the cache');
+    });
+
+    test('propagates Conda list process failures', async () => {
+        const environment = {
+            envId: { id: 'test-environment', managerId: 'test-manager' },
+            environmentPath: Uri.file('.'),
+        } as PythonEnvironment;
+        const manager = new CondaPackageManager(
+            {} as PythonEnvironmentApi,
+            { error: sinon.stub() } as unknown as LogOutputChannel,
+        );
+        const processError = new Error('conda list failed');
+        sinon.stub(CondaListCommand.prototype, 'execute').rejects(processError);
+
+        await assert.rejects(manager.getPackages(environment), (error: unknown) => error === processError);
     });
 });
