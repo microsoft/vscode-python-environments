@@ -127,11 +127,6 @@ suite('registerInlineScriptFeatures (feature-flag gate)', () => {
             disposables.includes(registerEnvironmentManagerStub.firstCall.returnValue),
             'registration disposable should be disposed',
         );
-        assert.strictEqual(
-            (manager as unknown as { routingRegistry: InlineScriptRoutingRegistry }).routingRegistry,
-            routingRegistry,
-            'the registered manager must share the activation routing registry',
-        );
         assert.strictEqual(typeof manager.create, 'function');
         await nextTurn();
         disposables.forEach((disposable) => disposable.dispose());

@@ -151,39 +151,17 @@ type CacheEntryInspection =
     | { readonly kind: 'absent' | 'stale' | 'uncertain' }
     | { readonly kind: 'reusable'; readonly environment: PythonEnvironment };
 
-type AssociationValidationResult =
-    | { readonly kind: 'resolved'; readonly environment: PythonEnvironment }
-    | { readonly kind: 'missing' }
-    | { readonly kind: 'busy' };
-
-type AssociationValidationOrigin = 'ordinary' | 'retry';
-
 interface PendingAssociationValidation {
-    readonly origin: AssociationValidationOrigin;
-    readonly retryGeneration?: number;
     readonly metadataIdentity: string;
     readonly associationRevision: number;
-    readonly promise: Promise<AssociationValidationResult>;
+    readonly promise: Promise<PythonEnvironment | undefined>;
 }
 
 interface PendingMetadataRefresh {
-    readonly origin: AssociationValidationOrigin;
-    readonly retryGeneration?: number;
     readonly metadataIdentity: string;
     readonly metadataRevision: number;
     readonly associationRevision: number;
     readonly promise: Promise<void>;
-}
-
-interface AssociationValidationRetry {
-    readonly uri: Uri;
-    readonly metadata: InlineScriptMetadata;
-    readonly metadataIdentity: string;
-    readonly metadataRevision: number;
-    readonly associationRevision: number;
-    readonly retryGeneration: number;
-    attempt: number;
-    timer?: ReturnType<typeof setTimeout>;
 }
 
 interface ParsedPersistedAssociations {
@@ -204,9 +182,8 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
     private readonly directlyResolvedBaseInterpreters = new Map<string, PythonEnvironment>();
     private baseInterpreterInstallationQueue: Promise<void> = Promise.resolve();
     private collection: PythonEnvironment[] = [];
-    private readonly pendingRehydrations = new Map<string, Map<string, PendingAssociationValidation>>();
-    private readonly pendingMetadataRefreshes = new Map<string, Map<string, PendingMetadataRefresh>>();
-    private readonly associationValidationRetries = new Map<string, AssociationValidationRetry>();
+    private readonly pendingRehydrations = new Map<string, PendingAssociationValidation>();
+    private readonly pendingMetadataRefreshes = new Map<string, PendingMetadataRefresh>();
     private readonly fsPathToEnv = new Map<string, PythonEnvironment>();
     private readonly fsPathToPersistedAssociation = new Map<string, PersistedAssociationRecord>();
     private readonly cachedAssociationValidatedAt = new Map<string, number>();
@@ -226,7 +203,6 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
     private cacheMaintenanceBarrier: Deferred<void> | undefined;
     private pendingCacheMaintenances = 0;
     private activeCreateOperations = 0;
-    private associationValidationRetryGeneration = 0;
     private disposed = false;
 
     private readonly _onDidChangeEnvironments = new EventEmitter<DidChangeEnvironmentsEventArgs>();
@@ -252,7 +228,7 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
         private readonly baseManager: EnvironmentManager,
         private readonly globalStorageUri: Uri,
         public readonly log: LogOutputChannel,
-        private readonly routingRegistry: InlineScriptRoutingRegistry,
+        private readonly routingRegistry: InlineScriptRoutingRegistry = new InlineScriptRoutingRegistry(),
     ) {
         this.subscriptions.push(
             this.routingRegistry.onDidChangeMetadata((event) => {
@@ -1009,12 +985,11 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
             return undefined;
         }
 
-        const association = await this.getAssociationForMetadata(
+        return this.getAssociationForMetadata(
             normalizePath(scope.fsPath),
             scope,
             metadata,
         );
-        return association.kind === 'resolved' ? association.environment : undefined;
     }
 
     private getScriptUris(scope: SetEnvironmentScope): ScriptReference[] {
@@ -1043,11 +1018,8 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
         scriptPath: string,
         scriptUri: Uri,
         metadata: InlineScriptMetadata,
-        retryGeneration?: number,
-    ): Promise<AssociationValidationResult> {
-        const operationKey = this.getAssociationValidationOperationKey(retryGeneration);
-        const pendingForScript = this.pendingRehydrations.get(scriptPath);
-        const pending = pendingForScript?.get(operationKey);
+    ): Promise<PythonEnvironment | undefined> {
+        const pending = this.pendingRehydrations.get(scriptPath);
         const cached = this.fsPathToEnv.get(scriptPath);
         const revision = this.associationRevisions.get(scriptPath) ?? 0;
         const metadataIdentity = getInlineScriptMetadataRoutingIdentity(metadata)!;
@@ -1068,7 +1040,7 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
                 this.lastValidatedMetadataIdentities.get(scriptPath) === metadataIdentity &&
                 Date.now() - validatedAt < CACHED_ASSOCIATION_VALIDATION_INTERVAL_MS
             ) {
-                return { kind: 'resolved', environment: cached };
+                return cached;
             }
             const validation = this.validateCachedAssociation(
                 scriptPath,
@@ -1077,25 +1049,17 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
                 revision,
                 metadataIdentity,
                 metadata,
-                retryGeneration,
             );
-            const operations = pendingForScript ?? new Map<string, PendingAssociationValidation>();
-            operations.set(operationKey, {
-                origin: this.getAssociationValidationOrigin(retryGeneration),
-                retryGeneration,
+            this.pendingRehydrations.set(scriptPath, {
                 metadataIdentity,
                 associationRevision: revision,
                 promise: validation,
             });
-            this.pendingRehydrations.set(scriptPath, operations);
             try {
                 return await validation;
             } finally {
-                if (operations.get(operationKey)?.promise === validation) {
-                    operations.delete(operationKey);
-                    if (operations.size === 0 && this.pendingRehydrations.get(scriptPath) === operations) {
-                        this.pendingRehydrations.delete(scriptPath);
-                    }
+                if (this.pendingRehydrations.get(scriptPath)?.promise === validation) {
+                    this.pendingRehydrations.delete(scriptPath);
                 }
             }
         }
@@ -1106,25 +1070,17 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
             revision,
             metadataIdentity,
             metadata,
-            retryGeneration,
         );
-        const operations = pendingForScript ?? new Map<string, PendingAssociationValidation>();
-        operations.set(operationKey, {
-            origin: this.getAssociationValidationOrigin(retryGeneration),
-            retryGeneration,
+        this.pendingRehydrations.set(scriptPath, {
             metadataIdentity,
             associationRevision: revision,
             promise: rehydration,
         });
-        this.pendingRehydrations.set(scriptPath, operations);
         try {
             return await rehydration;
         } finally {
-            if (operations.get(operationKey)?.promise === rehydration) {
-                operations.delete(operationKey);
-                if (operations.size === 0 && this.pendingRehydrations.get(scriptPath) === operations) {
-                    this.pendingRehydrations.delete(scriptPath);
-                }
+            if (this.pendingRehydrations.get(scriptPath)?.promise === rehydration) {
+                this.pendingRehydrations.delete(scriptPath);
             }
         }
     }
@@ -1145,22 +1101,21 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
         revision: number,
         metadataIdentity: string,
         metadata: InlineScriptMetadata,
-        retryGeneration?: number,
-    ): Promise<AssociationValidationResult> {
+    ): Promise<PythonEnvironment | undefined> {
         const environmentPath = cached.environmentPath.fsPath;
         const expectedPersistedAssociation = this.fsPathToPersistedAssociation.get(scriptPath);
         const envDirPath = path.dirname(path.dirname(environmentPath));
         const busy = await this.isCacheEntryBusy(envDirPath);
-        if (!this.isCurrentAssociationValidationTask(scriptPath, revision, retryGeneration)) {
-            return this.getCurrentAssociationValidationResult(scriptPath);
+        if (!this.isCurrentAssociationRevision(scriptPath, revision)) {
+            return this.fsPathToEnv.get(scriptPath);
         }
         if (busy) {
-            return { kind: 'busy' };
+            return undefined;
         }
         try {
             const stat = await fs.stat(environmentPath);
-            if (!this.isCurrentAssociationValidationTask(scriptPath, revision, retryGeneration)) {
-                return this.getCurrentAssociationValidationResult(scriptPath);
+            if (!this.isCurrentAssociationRevision(scriptPath, revision)) {
+                return this.fsPathToEnv.get(scriptPath);
             }
             if (stat.isFile()) {
                 const resolved = await resolveVenvPythonEnvironmentPath(
@@ -1170,15 +1125,15 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
                     this,
                     this.baseManager,
                 );
-                if (!this.isCurrentAssociationValidationTask(scriptPath, revision, retryGeneration)) {
-                    return this.getCurrentAssociationValidationResult(scriptPath);
+                if (!this.isCurrentAssociationRevision(scriptPath, revision)) {
+                    return this.fsPathToEnv.get(scriptPath);
                 }
                 if (!resolved) {
-                    return { kind: 'missing' };
+                    return undefined;
                 }
                 const ownership = await this.inspectAssociationOwnership(resolved);
-                if (!this.isCurrentAssociationValidationTask(scriptPath, revision, retryGeneration)) {
-                    return this.getCurrentAssociationValidationResult(scriptPath);
+                if (!this.isCurrentAssociationRevision(scriptPath, revision)) {
+                    return this.fsPathToEnv.get(scriptPath);
                 }
                 if (ownership === 'stale') {
                     await this.removeStalePersistedAssociation(
@@ -1187,88 +1142,80 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
                         revision,
                         scriptUri,
                         expectedPersistedAssociation,
-                        retryGeneration,
                     );
-                    return { kind: 'missing' };
+                    return undefined;
                 }
                 if (ownership !== 'expected') {
-                    return { kind: 'missing' };
+                    return undefined;
                 }
                 const metadataMatch = this.inspectAssociationMetadata(scriptPath, metadataIdentity, true);
-                if (!this.isCurrentAssociationValidationTask(scriptPath, revision, retryGeneration)) {
-                    return this.getCurrentAssociationValidationResult(scriptPath);
+                if (!this.isCurrentAssociationRevision(scriptPath, revision)) {
+                    return this.fsPathToEnv.get(scriptPath);
                 }
                 if (metadataMatch === 'mismatched') {
-                    return { kind: 'missing' };
+                    return undefined;
                 }
                 const sidecar = await this.readCurrentCacheEntrySidecar(resolved);
-                if (!this.isCurrentAssociationValidationTask(scriptPath, revision, retryGeneration)) {
-                    return this.getCurrentAssociationValidationResult(scriptPath);
-                }
                 if (sidecar && !this.cacheEntryMatchesRuntimeAndMetadata(sidecar, resolved, metadata)) {
-                    return { kind: 'missing' };
+                    return undefined;
                 }
                 const metadataIdentityProven =
                     !!sidecar && this.cacheEntryProvesSourceMetadataIdentity(sidecar, resolved, metadataIdentity, metadata);
-                if (!this.isCurrentAssociationValidationTask(scriptPath, revision, retryGeneration)) {
-                    return this.getCurrentAssociationValidationResult(scriptPath);
+                if (!this.isCurrentAssociationRevision(scriptPath, revision)) {
+                    return this.fsPathToEnv.get(scriptPath);
                 }
                 const current = this.fsPathToEnv.get(scriptPath);
                 this.cachedAssociationValidatedAt.set(scriptPath, Date.now());
                 this.lastValidatedMetadataIdentities.set(scriptPath, metadataIdentity);
                 this.lastValidatedMetadataIdentityProofs.set(scriptPath, metadataIdentityProven);
                 if (current && this.isSameEnvironment(current, resolved)) {
-                    return { kind: 'resolved', environment: current };
+                    return current;
                 }
                 if (cached.version === resolved.version) {
-                    return { kind: 'resolved', environment: cached };
+                    return cached;
                 }
                 this.fsPathToEnv.set(scriptPath, resolved);
                 this._onDidChangeEnvironment.fire({ uri: scriptUri, old: cached, new: resolved });
-                return { kind: 'resolved', environment: resolved };
+                return resolved;
             }
             const becameBusy = await this.isCacheEntryBusy(envDirPath);
-            if (!this.isCurrentAssociationValidationTask(scriptPath, revision, retryGeneration)) {
-                return this.getCurrentAssociationValidationResult(scriptPath);
+            if (!this.isCurrentAssociationRevision(scriptPath, revision)) {
+                return this.fsPathToEnv.get(scriptPath);
             }
-            if (becameBusy) {
-                return { kind: 'busy' };
-            }
-            await this.removeStalePersistedAssociation(
-                scriptPath,
-                environmentPath,
-                revision,
-                scriptUri,
-                expectedPersistedAssociation,
-                retryGeneration,
-            );
-        } catch (error) {
-            if (!this.isCurrentAssociationValidationTask(scriptPath, revision, retryGeneration)) {
-                return this.getCurrentAssociationValidationResult(scriptPath);
-            }
-            if (this.isDefinitivelyStalePathError(error)) {
-                const becameBusy = await this.isCacheEntryBusy(envDirPath);
-                if (!this.isCurrentAssociationValidationTask(scriptPath, revision, retryGeneration)) {
-                    return this.getCurrentAssociationValidationResult(scriptPath);
-                }
-                if (becameBusy) {
-                    return { kind: 'busy' };
-                }
+            if (!becameBusy) {
                 await this.removeStalePersistedAssociation(
                     scriptPath,
                     environmentPath,
                     revision,
                     scriptUri,
                     expectedPersistedAssociation,
-                    retryGeneration,
                 );
+            }
+        } catch (error) {
+            if (!this.isCurrentAssociationRevision(scriptPath, revision)) {
+                return this.fsPathToEnv.get(scriptPath);
+            }
+            if (this.isDefinitivelyStalePathError(error)) {
+                const becameBusy = await this.isCacheEntryBusy(envDirPath);
+                if (!this.isCurrentAssociationRevision(scriptPath, revision)) {
+                    return this.fsPathToEnv.get(scriptPath);
+                }
+                if (!becameBusy) {
+                    await this.removeStalePersistedAssociation(
+                        scriptPath,
+                        environmentPath,
+                        revision,
+                        scriptUri,
+                        expectedPersistedAssociation,
+                    );
+                }
             } else {
                 this.log.warn(
                     `Unable to inspect cached inline-script environment ${environmentPath}: ${getErrorMessage(error)}`,
                 );
             }
         }
-        return { kind: 'missing' };
+        return undefined;
     }
 
     private async rehydrateAssociation(
@@ -1277,21 +1224,20 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
         revision: number,
         metadataIdentity: string,
         metadata: InlineScriptMetadata,
-        retryGeneration?: number,
-    ): Promise<AssociationValidationResult> {
+    ): Promise<PythonEnvironment | undefined> {
         let persistedAssociation: PersistedAssociationRecord | undefined;
         try {
-            persistedAssociation = await this.getPersistedAssociation(scriptPath, retryGeneration);
+            persistedAssociation = await this.getPersistedAssociation(scriptPath);
         } catch (error) {
             this.log.warn(`Failed to read inline-script environment association: ${getErrorMessage(error)}`);
-            return { kind: 'missing' };
-        }
-        if (!this.isCurrentAssociationValidationTask(scriptPath, revision, retryGeneration)) {
-            return this.getCurrentAssociationValidationResult(scriptPath);
+            return undefined;
         }
         const environmentPath = persistedAssociation?.environmentPath;
         if (!environmentPath) {
-            return { kind: 'missing' };
+            return undefined;
+        }
+        if (!this.isCurrentAssociationRevision(scriptPath, revision)) {
+            return this.fsPathToEnv.get(scriptPath);
         }
         if (!path.isAbsolute(environmentPath)) {
             await this.removeStalePersistedAssociation(
@@ -1300,68 +1246,45 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
                 revision,
                 scriptUri,
                 persistedAssociation,
-                retryGeneration,
             );
-            return { kind: 'missing' };
+            return undefined;
         }
         const envDirPath = path.dirname(path.dirname(environmentPath));
-        const busy = await this.isCacheEntryBusy(envDirPath);
-        if (!this.isCurrentAssociationValidationTask(scriptPath, revision, retryGeneration)) {
-            return this.getCurrentAssociationValidationResult(scriptPath);
-        }
-        if (busy) {
-            return { kind: 'busy' };
+        if (await this.isCacheEntryBusy(envDirPath)) {
+            return undefined;
         }
 
         try {
             const stat = await fs.stat(environmentPath);
-            if (!this.isCurrentAssociationValidationTask(scriptPath, revision, retryGeneration)) {
-                return this.getCurrentAssociationValidationResult(scriptPath);
-            }
             if (!stat.isFile()) {
-                const becameBusy = await this.isCacheEntryBusy(envDirPath);
-                if (!this.isCurrentAssociationValidationTask(scriptPath, revision, retryGeneration)) {
-                    return this.getCurrentAssociationValidationResult(scriptPath);
+                if (!(await this.isCacheEntryBusy(envDirPath))) {
+                    await this.removeStalePersistedAssociation(
+                        scriptPath,
+                        environmentPath,
+                        revision,
+                        scriptUri,
+                        persistedAssociation,
+                    );
                 }
-                if (becameBusy) {
-                    return { kind: 'busy' };
-                }
-                await this.removeStalePersistedAssociation(
-                    scriptPath,
-                    environmentPath,
-                    revision,
-                    scriptUri,
-                    persistedAssociation,
-                    retryGeneration,
-                );
-                return { kind: 'missing' };
+                return undefined;
             }
         } catch (error) {
-            if (!this.isCurrentAssociationValidationTask(scriptPath, revision, retryGeneration)) {
-                return this.getCurrentAssociationValidationResult(scriptPath);
-            }
             if (this.isDefinitivelyStalePathError(error)) {
-                const becameBusy = await this.isCacheEntryBusy(envDirPath);
-                if (!this.isCurrentAssociationValidationTask(scriptPath, revision, retryGeneration)) {
-                    return this.getCurrentAssociationValidationResult(scriptPath);
+                if (!(await this.isCacheEntryBusy(envDirPath))) {
+                    await this.removeStalePersistedAssociation(
+                        scriptPath,
+                        environmentPath,
+                        revision,
+                        scriptUri,
+                        persistedAssociation,
+                    );
                 }
-                if (becameBusy) {
-                    return { kind: 'busy' };
-                }
-                await this.removeStalePersistedAssociation(
-                    scriptPath,
-                    environmentPath,
-                    revision,
-                    scriptUri,
-                    persistedAssociation,
-                    retryGeneration,
-                );
             } else {
                 this.log.warn(
                     `Unable to inspect persisted inline-script environment ${environmentPath}: ${getErrorMessage(error)}`,
                 );
             }
-            return { kind: 'missing' };
+            return undefined;
         }
 
         let resolved: PythonEnvironment | undefined;
@@ -1377,14 +1300,15 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
             this.log.warn(
                 `Unable to resolve persisted inline-script environment ${environmentPath}: ${getErrorMessage(error)}`,
             );
-            return { kind: 'missing' };
-        }
-        if (!this.isCurrentAssociationValidationTask(scriptPath, revision, retryGeneration)) {
-            return this.getCurrentAssociationValidationResult(scriptPath);
+            return undefined;
         }
         if (!resolved) {
             // PET/API resolution can fail transiently. Keep the association for a later retry.
-            return { kind: 'missing' };
+            return undefined;
+        }
+
+        if (!this.isCurrentAssociationRevision(scriptPath, revision)) {
+            return this.fsPathToEnv.get(scriptPath);
         }
         let ownership: CacheEnvironmentInspection;
         try {
@@ -1393,10 +1317,7 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
             this.log.warn(
                 `Unable to inspect persisted inline-script environment ${environmentPath}: ${getErrorMessage(error)}`,
             );
-            return { kind: 'missing' };
-        }
-        if (!this.isCurrentAssociationValidationTask(scriptPath, revision, retryGeneration)) {
-            return this.getCurrentAssociationValidationResult(scriptPath);
+            return undefined;
         }
         if (ownership === 'stale') {
             await this.removeStalePersistedAssociation(
@@ -1405,28 +1326,24 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
                 revision,
                 scriptUri,
                 persistedAssociation,
-                retryGeneration,
             );
-            return { kind: 'missing' };
+            return undefined;
         }
         if (ownership !== 'expected') {
-            return { kind: 'missing' };
+            return undefined;
         }
         const metadataMatch = this.inspectAssociationMetadata(scriptPath, metadataIdentity, true);
         if (metadataMatch === 'mismatched') {
-            return { kind: 'missing' };
+            return undefined;
         }
         const sidecar = await this.readCurrentCacheEntrySidecar(resolved);
-        if (!this.isCurrentAssociationValidationTask(scriptPath, revision, retryGeneration)) {
-            return this.getCurrentAssociationValidationResult(scriptPath);
-        }
         if (sidecar && !this.cacheEntryMatchesRuntimeAndMetadata(sidecar, resolved, metadata)) {
-            return { kind: 'missing' };
+            return undefined;
         }
         const metadataIdentityProven =
             !!sidecar && this.cacheEntryProvesSourceMetadataIdentity(sidecar, resolved, metadataIdentity, metadata);
-        if (!this.isCurrentAssociationValidationTask(scriptPath, revision, retryGeneration)) {
-            return this.getCurrentAssociationValidationResult(scriptPath);
+        if (!this.isCurrentAssociationRevision(scriptPath, revision)) {
+            return this.fsPathToEnv.get(scriptPath);
         }
 
         const current = this.fsPathToEnv.get(scriptPath);
@@ -1434,30 +1351,14 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
         this.lastValidatedMetadataIdentities.set(scriptPath, metadataIdentity);
         this.lastValidatedMetadataIdentityProofs.set(scriptPath, metadataIdentityProven);
         if (current && this.isSameEnvironment(current, resolved)) {
-            return { kind: 'resolved', environment: current };
+            return current;
         }
-        if (
-            !this.isCurrentAssociationValidationTask(scriptPath, revision, retryGeneration) ||
-            this.fsPathToEnv.has(scriptPath)
-        ) {
-            return this.getCurrentAssociationValidationResult(scriptPath);
+        if (!this.isCurrentAssociationRevision(scriptPath, revision) || this.fsPathToEnv.has(scriptPath)) {
+            return this.fsPathToEnv.get(scriptPath);
         }
         this.fsPathToEnv.set(scriptPath, resolved);
         this._onDidChangeEnvironment.fire({ uri: scriptUri, old: undefined, new: resolved });
-        return { kind: 'resolved', environment: resolved };
-    }
-
-    private getCurrentAssociationValidationResult(scriptPath: string): AssociationValidationResult {
-        const environment = this.fsPathToEnv.get(scriptPath);
-        return environment ? { kind: 'resolved', environment } : { kind: 'missing' };
-    }
-
-    private getAssociationValidationOperationKey(retryGeneration?: number): string {
-        return retryGeneration === undefined ? 'ordinary' : `retry:${retryGeneration}`;
-    }
-
-    private getAssociationValidationOrigin(retryGeneration?: number): AssociationValidationOrigin {
-        return retryGeneration === undefined ? 'ordinary' : 'retry';
+        return resolved;
     }
 
     private inspectAssociationMetadata(
@@ -1502,7 +1403,6 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
 
     private async handleSavedMetadataChange(event: InlineScriptMetadataChangeEvent): Promise<void> {
         if (event.metadata === undefined) {
-            this.cancelAssociationValidationRetry(normalizePath(event.uri.fsPath));
             this.clearValidatedRouteableState(event.uri);
             return;
         }
@@ -1519,19 +1419,10 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
         metadata: InlineScriptMetadata,
         metadataIdentity: string,
         metadataRevision: number,
-        retryGeneration?: number,
     ): Promise<void> {
         const scriptPath = normalizePath(uri.fsPath);
         const associationRevision = this.associationRevisions.get(scriptPath) ?? 0;
-        this.cancelStaleAssociationValidationRetry(
-            scriptPath,
-            metadataIdentity,
-            metadataRevision,
-            associationRevision,
-        );
-        const operationKey = this.getAssociationValidationOperationKey(retryGeneration);
-        const pendingForScript = this.pendingMetadataRefreshes.get(scriptPath);
-        const pendingRefresh = pendingForScript?.get(operationKey);
+        const pendingRefresh = this.pendingMetadataRefreshes.get(scriptPath);
         if (
             pendingRefresh &&
             pendingRefresh.metadataIdentity === metadataIdentity &&
@@ -1547,26 +1438,18 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
             metadataIdentity,
             metadataRevision,
             associationRevision,
-            retryGeneration,
         );
-        const operations = pendingForScript ?? new Map<string, PendingMetadataRefresh>();
-        operations.set(operationKey, {
-            origin: this.getAssociationValidationOrigin(retryGeneration),
-            retryGeneration,
+        this.pendingMetadataRefreshes.set(scriptPath, {
             metadataIdentity,
             metadataRevision,
             associationRevision,
             promise: refresh,
         });
-        this.pendingMetadataRefreshes.set(scriptPath, operations);
         try {
             await refresh;
         } finally {
-            if (operations.get(operationKey)?.promise === refresh) {
-                operations.delete(operationKey);
-                if (operations.size === 0 && this.pendingMetadataRefreshes.get(scriptPath) === operations) {
-                    this.pendingMetadataRefreshes.delete(scriptPath);
-                }
+            if (this.pendingMetadataRefreshes.get(scriptPath)?.promise === refresh) {
+                this.pendingMetadataRefreshes.delete(scriptPath);
             }
         }
     }
@@ -1578,40 +1461,15 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
         metadataIdentity: string,
         metadataRevision: number,
         associationRevision: number,
-        retryGeneration?: number,
     ): Promise<void> {
-        const association = await this.getAssociationForMetadata(scriptPath, uri, metadata, retryGeneration);
-        if (
-            !this.isCurrentMetadataRefreshTask(
-                uri,
-                metadataIdentity,
-                metadataRevision,
-                scriptPath,
-                associationRevision,
-                retryGeneration,
-            )
-        ) {
+        const environment = await this.getAssociationForMetadata(scriptPath, uri, metadata);
+        if (!this.isCurrentMetadataRefreshTask(uri, metadataIdentity, metadataRevision, scriptPath, associationRevision)) {
             return;
         }
-        if (association.kind === 'busy') {
-            this.clearValidatedRouteableState(uri);
-            this.scheduleAssociationValidationRetry(
-                scriptPath,
-                uri,
-                metadata,
-                metadataIdentity,
-                metadataRevision,
-                associationRevision,
-                retryGeneration,
-            );
-            return;
-        }
-        this.cancelAssociationValidationRetry(scriptPath);
-        if (association.kind === 'missing') {
+        if (!environment) {
             this.clearValidatedRouteableState(uri);
             return;
         }
-        const environment = association.environment;
         let metadataIdentityProven = this.lastValidatedMetadataIdentityProofs.get(scriptPath);
         if (
             this.lastValidatedMetadataIdentities.get(scriptPath) !== metadataIdentity ||
@@ -1629,7 +1487,6 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
                     metadataRevision,
                     scriptPath,
                     associationRevision,
-                    retryGeneration,
                 )
             ) {
                 return;
@@ -1651,18 +1508,8 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
                 metadataRevision,
                 associationRevision,
                 uri,
-                retryGeneration,
             );
-            if (
-                !this.isCurrentMetadataRefreshTask(
-                    uri,
-                    metadataIdentity,
-                    metadataRevision,
-                    scriptPath,
-                    associationRevision,
-                    retryGeneration,
-                )
-            ) {
+            if (!this.isCurrentRoutingMetadata(uri, metadataIdentity, metadataRevision)) {
                 return;
             }
             if (
@@ -1684,7 +1531,6 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
                         metadataRevision,
                         currentAssociationRevision,
                         uri,
-                        retryGeneration,
                     );
                     if (
                         !this.isCurrentMetadataRefreshTask(
@@ -1693,19 +1539,12 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
                             metadataRevision,
                             scriptPath,
                             currentAssociationRevision,
-                            retryGeneration,
                         )
                     ) {
                         return;
                     }
                 }
-            } else if (
-                !this.isCurrentAssociationValidationTask(
-                    scriptPath,
-                    associationRevision,
-                    retryGeneration,
-                )
-            ) {
+            } else if (!this.isCurrentAssociationRevision(scriptPath, associationRevision)) {
                 return;
             }
             if (bindResult !== 'bound') {
@@ -1725,114 +1564,6 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
             return;
         }
         this.routingRegistry.setValidatedAssociation(uri, true);
-    }
-
-    private scheduleAssociationValidationRetry(
-        scriptPath: string,
-        uri: Uri,
-        metadata: InlineScriptMetadata,
-        metadataIdentity: string,
-        metadataRevision: number,
-        associationRevision: number,
-        retryGeneration?: number,
-    ): void {
-        if (this.disposed) {
-            return;
-        }
-        this.cancelStaleAssociationValidationRetry(
-            scriptPath,
-            metadataIdentity,
-            metadataRevision,
-            associationRevision,
-        );
-        const existingRetry = this.associationValidationRetries.get(scriptPath);
-        const retry =
-            existingRetry ??
-            {
-                uri,
-                metadata,
-                metadataIdentity,
-                metadataRevision,
-                associationRevision,
-                retryGeneration: retryGeneration ?? this.associationValidationRetryGeneration,
-                attempt: 0,
-            };
-        if (!existingRetry) {
-            this.associationValidationRetries.set(scriptPath, retry);
-        }
-        if (retry.timer) {
-            return;
-        }
-
-        const delayMs = this.getAssociationValidationRetryDelayMs(retry.attempt);
-        if (delayMs === undefined) {
-            return;
-        }
-        retry.attempt += 1;
-        retry.timer = setTimeout(() => {
-            if (this.associationValidationRetries.get(scriptPath) !== retry) {
-                return;
-            }
-            retry.timer = undefined;
-            if (
-                this.disposed ||
-                !this.isCurrentMetadataRefreshTask(
-                    retry.uri,
-                    retry.metadataIdentity,
-                    retry.metadataRevision,
-                    scriptPath,
-                    retry.associationRevision,
-                    retry.retryGeneration,
-                )
-            ) {
-                this.cancelAssociationValidationRetry(scriptPath);
-                return;
-            }
-            void this.refreshValidatedAssociationForMetadata(
-                retry.uri,
-                retry.metadata,
-                retry.metadataIdentity,
-                retry.metadataRevision,
-                retry.retryGeneration,
-            ).catch((error) => {
-                this.log.warn(`Failed to retry inline-script association validation: ${getErrorMessage(error)}`);
-            });
-        }, delayMs);
-    }
-
-    private getAssociationValidationRetryDelayMs(attempt: number): number | undefined {
-        return DISCOVERY_RETRY_DELAYS_MS[attempt];
-    }
-
-    private cancelStaleAssociationValidationRetry(
-        scriptPath: string,
-        metadataIdentity: string,
-        metadataRevision: number,
-        associationRevision: number,
-    ): void {
-        const retry = this.associationValidationRetries.get(scriptPath);
-        if (
-            retry &&
-            (retry.metadataIdentity !== metadataIdentity ||
-                retry.metadataRevision !== metadataRevision ||
-                retry.associationRevision !== associationRevision)
-        ) {
-            this.cancelAssociationValidationRetry(scriptPath);
-        }
-    }
-
-    private cancelAssociationValidationRetry(scriptPath: string): void {
-        const retry = this.associationValidationRetries.get(scriptPath);
-        if (retry?.timer) {
-            clearTimeout(retry.timer);
-        }
-        this.associationValidationRetries.delete(scriptPath);
-    }
-
-    private cancelAllAssociationValidationRetries(): void {
-        for (const scriptPath of this.associationValidationRetries.keys()) {
-            this.cancelAssociationValidationRetry(scriptPath);
-        }
     }
 
     private async updateValidatedStateForSelection(script: ScriptReference): Promise<void> {
@@ -2006,11 +1737,10 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
         metadataRevision: number,
         associationRevision: number,
         uri: Uri,
-        retryGeneration?: number,
     ): Promise<'bound' | 'stale' | 'failed'> {
         return this.enqueueSelection(async () => {
             if (
-                !this.isCurrentAssociationValidationTask(scriptPath, associationRevision, retryGeneration) ||
+                !this.isCurrentAssociationRevision(scriptPath, associationRevision) ||
                 !this.isCurrentRoutingMetadata(uri, metadataIdentity, metadataRevision)
             ) {
                 return 'stale';
@@ -2033,13 +1763,13 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
                         persistedAssociation: matchedAssociation,
                         expectedPersistedAssociation: expectedAssociation,
                     },
-                ], retryGeneration);
+                ]);
             } catch (error) {
                 this.log.warn(`Failed to bind inline-script metadata identity: ${getErrorMessage(error)}`);
                 return 'failed';
             }
             if (
-                !this.isCurrentAssociationValidationTask(scriptPath, associationRevision, retryGeneration) ||
+                !this.isCurrentAssociationRevision(scriptPath, associationRevision) ||
                 !this.isCurrentRoutingMetadata(uri, metadataIdentity, metadataRevision)
             ) {
                 return 'stale';
@@ -2056,30 +1786,10 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
         metadataRevision: number,
         scriptPath: string,
         associationRevision: number,
-        retryGeneration?: number,
     ): boolean {
         return (
-            !this.disposed &&
             this.isCurrentRoutingMetadata(uri, metadataIdentity, metadataRevision) &&
-            this.isCurrentAssociationValidationTask(scriptPath, associationRevision, retryGeneration)
-        );
-    }
-
-    private isCurrentAssociationValidationTask(
-        scriptPath: string,
-        associationRevision: number,
-        retryGeneration?: number,
-    ): boolean {
-        return (
-            this.isCurrentAssociationRevision(scriptPath, associationRevision) &&
-            this.isCurrentAssociationValidationRetry(retryGeneration)
-        );
-    }
-
-    private isCurrentAssociationValidationRetry(retryGeneration?: number): boolean {
-        return (
-            retryGeneration === undefined ||
-            (!this.disposed && retryGeneration === this.associationValidationRetryGeneration)
+            this.isCurrentAssociationRevision(scriptPath, associationRevision)
         );
     }
 
@@ -2129,37 +1839,22 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
         });
     }
 
-    private async getPersistedAssociation(
-        scriptPath: string,
-        retryGeneration?: number,
-    ): Promise<PersistedAssociationRecord | undefined> {
+    private async getPersistedAssociation(scriptPath: string): Promise<PersistedAssociationRecord | undefined> {
         await this.persistenceQueue;
-        if (!this.isCurrentAssociationValidationRetry(retryGeneration)) {
-            return this.getPersistedAssociationFromMemory(scriptPath);
-        }
         const state = await getWorkspacePersistentState();
-        if (!this.isCurrentAssociationValidationRetry(retryGeneration)) {
-            return this.getPersistedAssociationFromMemory(scriptPath);
-        }
         const rawAssociations = await state.get<unknown>(INLINE_SCRIPT_ENVS_KEY);
-        if (!this.isCurrentAssociationValidationRetry(retryGeneration)) {
-            return this.getPersistedAssociationFromMemory(scriptPath);
-        }
         if (rawAssociations === undefined) {
             this.applyPersistedAssociations({});
             return undefined;
         }
         const parsed = this.parsePersistedAssociations(rawAssociations);
         if (!parsed) {
-            await this.removeInvalidPersistedAssociation(scriptPath, retryGeneration);
+            await this.removeInvalidPersistedAssociation(scriptPath);
             return this.getPersistedAssociationFromMemory(scriptPath);
         }
         const rawValue = (rawAssociations as Record<string, unknown>)[scriptPath];
         if (rawValue !== undefined && this.parsePersistedAssociationValue(rawValue).kind === 'invalid') {
-            await this.removeInvalidPersistedAssociation(scriptPath, retryGeneration);
-            return this.getPersistedAssociationFromMemory(scriptPath);
-        }
-        if (!this.isCurrentAssociationValidationRetry(retryGeneration)) {
+            await this.removeInvalidPersistedAssociation(scriptPath);
             return this.getPersistedAssociationFromMemory(scriptPath);
         }
         this.applyPersistedAssociations(parsed.records);
@@ -2172,10 +1867,9 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
         revision: number,
         scriptUri?: Uri,
         expectedPersistedAssociation?: PersistedAssociationRecord,
-        retryGeneration?: number,
     ): Promise<void> {
         await this.enqueueSelection(async () => {
-            if (!this.isCurrentAssociationValidationTask(scriptPath, revision, retryGeneration)) {
+            if (!this.isCurrentAssociationRevision(scriptPath, revision)) {
                 return;
             }
             try {
@@ -2186,11 +1880,11 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
                         expectedEnvironmentPath,
                         expectedPersistedAssociation,
                     },
-                ], retryGeneration);
+                ]);
                 if (
                     normalizePath(persistedPathBeforeUpdate ?? '') === normalizePath(expectedEnvironmentPath) &&
                     !this.fsPathToPersistedAssociation.has(scriptPath) &&
-                    this.isCurrentAssociationValidationTask(scriptPath, revision, retryGeneration)
+                    this.isCurrentAssociationRevision(scriptPath, revision)
                 ) {
                     const old = this.fsPathToEnv.get(scriptPath);
                     this.bumpAssociationRevision(scriptPath);
@@ -2209,28 +1903,16 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
         });
     }
 
-    private removeInvalidPersistedAssociation(scriptPath: string, retryGeneration?: number): Promise<void> {
+    private removeInvalidPersistedAssociation(scriptPath: string): Promise<void> {
         return this.enqueuePersistence(async (state) => {
-            if (!this.isCurrentAssociationValidationRetry(retryGeneration)) {
-                return;
-            }
             const rawAssociations = await state.get<unknown>(INLINE_SCRIPT_ENVS_KEY);
-            if (!this.isCurrentAssociationValidationRetry(retryGeneration)) {
-                return;
-            }
             if (rawAssociations === undefined) {
                 this.applyPersistedAssociations({});
                 return;
             }
             const parsed = this.parsePersistedAssociations(rawAssociations);
             if (!parsed) {
-                if (!this.isCurrentAssociationValidationRetry(retryGeneration)) {
-                    return;
-                }
                 await state.set(INLINE_SCRIPT_ENVS_KEY, {});
-                if (!this.isCurrentAssociationValidationRetry(retryGeneration)) {
-                    return;
-                }
                 this.applyPersistedAssociations({});
                 return;
             }
@@ -2238,30 +1920,15 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
                 delete parsed.rawEntries[scriptPath];
                 delete parsed.records[scriptPath];
                 parsed.invalidKeys.delete(scriptPath);
-                if (!this.isCurrentAssociationValidationRetry(retryGeneration)) {
-                    return;
-                }
                 await state.set(INLINE_SCRIPT_ENVS_KEY, parsed.rawEntries);
-            }
-            if (!this.isCurrentAssociationValidationRetry(retryGeneration)) {
-                return;
             }
             this.applyPersistedAssociations(parsed.records);
         });
     }
 
-    private updatePersistedAssociations(
-        changes: readonly PersistedAssociationChange[],
-        retryGeneration?: number,
-    ): Promise<void> {
+    private updatePersistedAssociations(changes: readonly PersistedAssociationChange[]): Promise<void> {
         return this.enqueuePersistence(async (state) => {
-            if (!this.isCurrentAssociationValidationRetry(retryGeneration)) {
-                return;
-            }
             const rawAssociations = await state.get<unknown>(INLINE_SCRIPT_ENVS_KEY);
-            if (!this.isCurrentAssociationValidationRetry(retryGeneration)) {
-                return;
-            }
             const parsed = this.parsePersistedAssociations(rawAssociations);
             const rawEntries = { ...(parsed?.rawEntries ?? {}) };
             const associations = { ...(parsed?.records ?? {}) };
@@ -2288,13 +1955,7 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
                     delete rawEntries[change.scriptPath];
                 }
             }
-            if (!this.isCurrentAssociationValidationRetry(retryGeneration)) {
-                return;
-            }
             await state.set(INLINE_SCRIPT_ENVS_KEY, rawEntries);
-            if (!this.isCurrentAssociationValidationRetry(retryGeneration)) {
-                return;
-            }
             this.applyPersistedAssociations(associations);
         });
     }
@@ -2550,7 +2211,6 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
     }
 
     private bumpAssociationRevision(scriptPath: string): void {
-        this.cancelAssociationValidationRetry(scriptPath);
         this.associationRevisions.set(scriptPath, (this.associationRevisions.get(scriptPath) ?? 0) + 1);
     }
 
@@ -3646,10 +3306,8 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
     }
 
     dispose(): void {
-        this.associationValidationRetryGeneration += 1;
         this.disposed = true;
         this.stopActivationDiscovery();
-        this.cancelAllAssociationValidationRetries();
         this.pendingMetadataRefreshes.clear();
         this.subscriptions.forEach((subscription) => subscription.dispose());
         this._onDidChangeEnvironments.dispose();
@@ -3660,7 +3318,6 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
         const nextPaths = new Set(Object.keys(associations));
         for (const scriptPath of this.fsPathToPersistedAssociation.keys()) {
             if (!nextPaths.has(scriptPath)) {
-                this.cancelAssociationValidationRetry(scriptPath);
                 this.fsPathToPersistedAssociation.delete(scriptPath);
                 this.clearValidatedRouteableState(scriptPath);
             }

@@ -967,6 +967,49 @@ suite('PythonEnvironmentManagers getLastKnownEnvironment', () => {
         ]);
     });
 
+    test('does not persist manager settings for a batch superseded before its settings write', async () => {
+        const script = Uri.file('/workspace/script.py');
+        const scriptProject = { name: 'script.py', uri: script };
+        projectsByUri.set(script.toString(), scriptProject);
+        let releaseStaleBatch: (() => void) | undefined;
+        let signalStaleBatch: (() => void) | undefined;
+        const staleBatchStarted = new Promise<void>((resolve) => {
+            signalStaleBatch = resolve;
+        });
+        const staleBatchGate = new Promise<void>((resolve) => {
+            releaseStaleBatch = resolve;
+        });
+        const managerSet = sinon.stub();
+        managerSet.onFirstCall().callsFake(async () => {
+            signalStaleBatch!();
+            await staleBatchGate;
+        });
+        managerSet.onSecondCall().resolves();
+        const managerId = registerManager(async () => undefined, managerSet, 'inline-script');
+        const staleEnv = { ...makeEnv('stale'), envId: { id: 'stale', managerId } };
+        const newerEnv = { ...makeEnv('newer'), envId: { id: 'newer', managerId } };
+        stubPackageManager();
+        const settings = sinon.stub(settingHelpers, 'setAllManagerSettings').resolves();
+
+        const staleBatch = envManagers.setEnvironments([script], staleEnv);
+        await staleBatchStarted;
+        await envManagers.setEnvironment(script, newerEnv);
+        releaseStaleBatch!();
+        await staleBatch;
+
+        // The newer selection persists the manager setting exactly once.
+        assert.deepStrictEqual(settings.firstCall.args[0], [
+            {
+                project: scriptProject,
+                envManager: managerId,
+                packageManager: 'ms-python.python:pip',
+            },
+        ]);
+        // The superseded batch must not persist a stale selection to settings.json; it writes nothing.
+        assert.strictEqual(settings.callCount, 2);
+        assert.deepStrictEqual(settings.secondCall.args[0], []);
+    });
+
     test('retains an earlier successful refresh when a later refresh fails', async () => {
         const refreshed = makeEnv('refreshed');
         let resolveFirst: ((environment: PythonEnvironment) => void) | undefined;

@@ -507,7 +507,13 @@ export class PythonEnvironmentManagers implements EnvironmentManagers {
             if (Array.isArray(scope) && scope.every((s) => s instanceof Uri)) {
                 const selections = scope.map((uri) => this.beginPendingSelection(uri, manager));
                 await manager.set(scope, environment);
-                selections.forEach((selection) => {
+                // Commit the winning (non-superseded) selections BEFORE persisting settings so an
+                // out-of-order older batch cannot write a manager setting to settings.json while its
+                // matching routing/selection update is rejected (settings/routing divergence).
+                const committedSelections = selections.filter((selection) =>
+                    this.commitPendingSelection(selection, manager),
+                );
+                committedSelections.forEach((selection) => {
                     const m = this.getEnvironmentManager(selection.scope);
                     // Always add settings when persisting, OR when manager differs
                     if (
@@ -524,16 +530,16 @@ export class PythonEnvironmentManagers implements EnvironmentManagers {
                 if (shouldPersistSettings) {
                     await setAllManagerSettings(settings);
                 }
-                selections.forEach((selection) => {
+                committedSelections.forEach((selection) => {
+                    // Re-validate across the (awaited) settings write: a newer selection may have
+                    // superseded this one while settings were being persisted, in which case its
+                    // routing override and active-selection publish must be skipped.
                     if (!this.commitPendingSelection(selection, manager)) {
                         return;
                     }
                     this.updateInlineRoutingOverride(selection.scope, manager, environment);
                     this.clearInlineActiveSelection(selection.scope, manager, selection.inlineClearOperation);
                     if (!selection.publishInlineSelection) {
-                        return;
-                    }
-                    if (!this.commitSelectionOperation(selection.key, selection.operation)) {
                         return;
                     }
                     const oldEnv = this._activeSelection.get(selection.key);
