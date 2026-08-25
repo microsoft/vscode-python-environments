@@ -4,17 +4,21 @@ import * as typeMoq from 'typemoq';
 import { Uri } from 'vscode';
 import { PythonEnvironment, PythonProject } from '../../api';
 import * as commandApi from '../../common/command.api';
-import { INLINE_SCRIPT_MANAGER_ID } from '../../common/constants';
+import { INLINE_SCRIPT_ENVS_KEY, INLINE_SCRIPT_MANAGER_ID } from '../../common/constants';
+import * as persistentState from '../../common/persistentState';
 import * as managerApi from '../../common/pickers/managers';
 import * as projectApi from '../../common/pickers/projects';
 import * as windowApis from '../../common/window.apis';
 import {
+    clearEnvironmentCachesCommand,
     clearScriptEnvironmentCacheCommand,
     createAnyEnvironmentCommand,
     removePythonProject,
     revealEnvInManagerView,
 } from '../../features/envCommands';
 import * as settingHelpers from '../../features/settings/settingHelpers';
+import * as shellProviders from '../../features/terminal/shells/providers';
+import { ShellStartupScriptProvider } from '../../features/terminal/shells/startupProvider';
 import { EnvManagerView } from '../../features/views/envManagersView';
 import { ProjectEnvironment, ProjectItem } from '../../features/views/treeViewItems';
 import { EnvironmentManagers, InternalEnvironmentManager, PythonProjectManager } from '../../internal.api';
@@ -252,12 +256,16 @@ suite('Clear Script Environment Cache Command Tests', () => {
 
     test('clears cache before inline settings cleanup and unloads removed projects', async () => {
         const calls: string[] = [];
+        const selectionEvents: string[] = [];
+        let associationPresent = true;
         const inlineProject: PythonProject = {
             uri: Uri.file('/workspace/script.py'),
             name: 'script.py',
         };
         const clearCache = sinon.stub().callsFake(async () => {
             calls.push('clearCache');
+            associationPresent = false;
+            selectionEvents.push('cleared');
         });
         const envManagers = {
             getEnvironmentManager: sinon.stub().withArgs(INLINE_SCRIPT_MANAGER_ID).returns({
@@ -280,6 +288,8 @@ suite('Clear Script Environment Cache Command Tests', () => {
             .callsFake(async (projects) => {
                 calls.push('removeInlineSettings');
                 assert.deepStrictEqual(projects, [inlineProject]);
+                assert.strictEqual(associationPresent, false);
+                assert.deepStrictEqual(selectionEvents, ['cleared']);
                 return [inlineProject];
             });
 
@@ -291,10 +301,10 @@ suite('Clear Script Environment Cache Command Tests', () => {
         assert.deepStrictEqual(calls, ['clearCache', 'getProjects', 'removeInlineSettings', 'removeProjects']);
     });
 
-    test('keeps loaded projects when inline settings cleanup leaves them configured', async () => {
-        const inlineProject: PythonProject = {
-            uri: Uri.file('/workspace/runner'),
-            name: 'runner',
+    test('keeps the intrinsic workspace-root project loaded after its inline setting is cleaned', async () => {
+        const workspaceRootProject: PythonProject = {
+            uri: Uri.file('/workspace'),
+            name: 'workspace',
         };
         const clearCache = sinon.stub().resolves();
         const envManagers = {
@@ -304,16 +314,21 @@ suite('Clear Script Environment Cache Command Tests', () => {
             }),
         } as unknown as EnvironmentManagers;
         const projectManager = {
-            getProjects: sinon.stub().returns([inlineProject]),
+            getProjects: sinon.stub().returns([workspaceRootProject]),
             remove: sinon.stub(),
         } as unknown as PythonProjectManager;
         sinon.stub(windowApis, 'showWarningMessage').resolves('Clear Cache' as never);
-        const removeInlineSettings = sinon.stub(settingHelpers, 'removeInlineScriptPythonProjectSettings').resolves([]);
+        const removeInlineSettings = sinon
+            .stub(settingHelpers, 'removeInlineScriptPythonProjectSettings')
+            .callsFake(async (projects) => {
+                assert.deepStrictEqual(projects, [workspaceRootProject]);
+                return [];
+            });
 
         await clearScriptEnvironmentCacheCommand(envManagers, projectManager);
 
         sinon.assert.calledOnce(clearCache);
-        sinon.assert.calledOnceWithExactly(removeInlineSettings, [inlineProject]);
+        sinon.assert.calledOnceWithExactly(removeInlineSettings, [workspaceRootProject]);
         sinon.assert.notCalled(projectManager.remove as sinon.SinonStub);
     });
 
@@ -337,6 +352,51 @@ suite('Clear Script Environment Cache Command Tests', () => {
         sinon.assert.calledOnce(clearCache);
         sinon.assert.notCalled(removeInlineSettings);
         sinon.assert.notCalled(projectManager.remove as sinon.SinonStub);
+    });
+});
+
+suite('Clear Environment Caches Command Tests', () => {
+    teardown(() => {
+        sinon.restore();
+    });
+
+    test('generic clear preserves inline association persistence while clearing other state and managers', async () => {
+        const inlineAssociations = { 'C:\\workspace\\script.py': 'C:\\cache\\python.exe' };
+        const workspaceState = new Map<string, unknown>([
+            [INLINE_SCRIPT_ENVS_KEY, inlineAssociations],
+            ['other-workspace-state', { stale: true }],
+        ]);
+        const calls: string[] = [];
+        sinon.stub(persistentState, 'clearPersistentState').callsFake(async (options) => {
+            calls.push('persistent');
+            const preserved = new Set(options?.preserveWorkspaceKeys ?? []);
+            for (const key of workspaceState.keys()) {
+                if (!preserved.has(key)) {
+                    workspaceState.delete(key);
+                }
+            }
+        });
+        const envManagers = {
+            clearCache: sinon.stub().callsFake(async () => {
+                calls.push('managers');
+                assert.deepStrictEqual(workspaceState.get(INLINE_SCRIPT_ENVS_KEY), inlineAssociations);
+            }),
+        } as unknown as EnvironmentManagers;
+        const startupProvider = {
+            clearCache: sinon.stub().callsFake(async () => {
+                calls.push('shells');
+            }),
+        } as unknown as ShellStartupScriptProvider;
+        sinon.stub(shellProviders, 'clearShellProfileCache').callsFake(async (providers) => {
+            await Promise.all(providers.map((provider) => provider.clearCache()));
+        });
+
+        await clearEnvironmentCachesCommand(envManagers, [startupProvider]);
+
+        assert.deepStrictEqual(calls, ['persistent', 'managers', 'shells']);
+        assert.deepStrictEqual(workspaceState.get(INLINE_SCRIPT_ENVS_KEY), inlineAssociations);
+        assert.strictEqual(workspaceState.has('other-workspace-state'), false);
+        sinon.assert.calledOnceWithExactly(envManagers.clearCache as sinon.SinonStub, undefined);
     });
 });
 

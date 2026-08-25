@@ -11,3 +11,9 @@ export class RemoveEnvironmentNotSupported extends BaseError {
         super('NotSupported', message);
     }
 }
+
+export class ClearCacheNotSupported extends BaseError {
+    constructor(message: string) {
+        super('NotSupported', message);
+    }
+}

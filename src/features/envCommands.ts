@@ -21,6 +21,7 @@ import {
     isPackageVersionLookupNotSupportedError,
 } from '../api';
 import { traceError, traceInfo, traceVerbose } from '../common/logging';
+import * as persistentState from '../common/persistentState';
 import {
     EnvironmentManagers,
     InternalEnvironmentManager,
@@ -60,9 +61,11 @@ import {
     showWarningMessage,
     withProgress,
 } from '../common/window.apis';
-import { INLINE_SCRIPT_MANAGER_ID } from '../common/constants';
+import { INLINE_SCRIPT_ENVS_KEY, INLINE_SCRIPT_MANAGER_ID } from '../common/constants';
 import { runAsTask } from './execution/runAsTask';
 import { runInTerminal } from './terminal/runInTerminal';
+import * as shellProviders from './terminal/shells/providers';
+import { ShellStartupScriptProvider } from './terminal/shells/startupProvider';
 import { TerminalManager } from './terminal/terminalManager';
 import { EnvManagerView } from './views/envManagersView';
 import {
@@ -678,6 +681,15 @@ export async function removePythonProject(
     await em.setEnvironment(item.project.uri, undefined);
     await removePythonProjectSetting([{ project: item.project }]);
     wm.remove(item.project);
+}
+
+export async function clearEnvironmentCachesCommand(
+    em: EnvironmentManagers,
+    startupProviders: ShellStartupScriptProvider[],
+): Promise<void> {
+    await persistentState.clearPersistentState({ preserveWorkspaceKeys: [INLINE_SCRIPT_ENVS_KEY] });
+    await em.clearCache(undefined);
+    await shellProviders.clearShellProfileCache(startupProviders);
 }
 
 export async function clearScriptEnvironmentCacheCommand(

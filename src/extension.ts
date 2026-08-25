@@ -13,7 +13,7 @@ import { PythonEnvironment, PythonEnvironmentApi, PythonProjectCreator } from '.
 import { ENVS_EXTENSION_ID } from './common/constants';
 import { ensureCorrectVersion } from './common/extVersion';
 import { registerLogger, traceError, traceInfo, traceWarn } from './common/logging';
-import { clearPersistentState, setPersistentState } from './common/persistentState';
+import { setPersistentState } from './common/persistentState';
 import { newProjectSelection } from './common/pickers/managers';
 import { StopWatch } from './common/stopWatch';
 import { EventNames } from './common/telemetry/constants';
@@ -45,6 +45,7 @@ import { ProjectCreatorsImpl } from './features/creators/projectCreators';
 import {
     addPythonProjectCommand,
     copyPathToClipboard,
+    clearEnvironmentCachesCommand,
     clearScriptEnvironmentCacheCommand,
     createAnyEnvironmentCommand,
     createEnvironmentCommand,
@@ -78,11 +79,7 @@ import { registerCompletionProvider } from './features/settings/settingCompletio
 import { migrateGlobalDefaultEnvManagerSetting } from './features/settings/settingHelpers';
 import { setActivateMenuButtonContext } from './features/terminal/activateMenuButton';
 import { normalizeShellPath } from './features/terminal/shells/common/shellUtils';
-import {
-    clearShellProfileCache,
-    createShellEnvProviders,
-    createShellStartupProviders,
-} from './features/terminal/shells/providers';
+import { createShellEnvProviders, createShellStartupProviders } from './features/terminal/shells/providers';
 import { ShellStartupActivationVariablesManagerImpl } from './features/terminal/shellStartupActivationVariablesManager';
 import { cleanupStartupScripts } from './features/terminal/shellStartupSetupHandlers';
 import { TerminalActivationImpl } from './features/terminal/terminalActivationState';
@@ -405,9 +402,7 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
             await removePythonProject(item, projectManager, envManagers);
         }),
         commands.registerCommand('python-envs.clearCache', async () => {
-            await clearPersistentState();
-            await envManagers.clearCache(undefined);
-            await clearShellProfileCache(shellStartupProviders);
+            await clearEnvironmentCachesCommand(envManagers, shellStartupProviders);
         }),
         ...(isInlineScriptsFeatureEnabled()
             ? [

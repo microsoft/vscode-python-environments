@@ -7,6 +7,7 @@ import * as assert from 'assert';
 import * as sinon from 'sinon';
 import { Uri } from 'vscode';
 import { PythonEnvironment } from '../../api';
+import { ClearCacheNotSupported } from '../../common/errors/NotSupportedError';
 import * as frameUtils from '../../common/utils/frameUtils';
 import * as workspaceApis from '../../common/workspace.apis';
 import { PythonEnvironmentManagers } from '../../features/envManagers';
@@ -392,5 +393,48 @@ suite('PythonEnvironmentManagers - clearCache', () => {
 
         sinon.assert.calledOnce(systemClearCache);
         sinon.assert.notCalled(inlineClearCache);
+    });
+
+    test('rejects an explicitly scoped inline clear in favor of the dedicated lifecycle', async () => {
+        const inlineClearCache = sandbox.stub().resolves();
+        registerManager('inline-script', inlineClearCache);
+
+        await assert.rejects(
+            envManagers.clearCache('ms-python.python:inline-script'),
+            (error: unknown) =>
+                error instanceof ClearCacheNotSupported &&
+                error.category === 'NotSupported' &&
+                /dedicated inline-script cache lifecycle/.test(error.message),
+        );
+
+        sinon.assert.notCalled(inlineClearCache);
+    });
+
+    test('rejects an explicit inline manager id even when the manager is unregistered', async () => {
+        await assert.rejects(
+            envManagers.clearCache('ms-python.python:inline-script'),
+            (error: unknown) =>
+                error instanceof ClearCacheNotSupported &&
+                error.category === 'NotSupported' &&
+                /dedicated inline-script cache lifecycle/.test(error.message),
+        );
+    });
+
+    test('rejects an explicit inline environment even when the manager is unregistered', async () => {
+        const inlineEnvironment = {
+            envId: { id: 'inline-cache-entry', managerId: 'ms-python.python:inline-script' },
+        } as PythonEnvironment;
+
+        await assert.rejects(
+            envManagers.clearCache(inlineEnvironment),
+            (error: unknown) =>
+                error instanceof ClearCacheNotSupported &&
+                error.category === 'NotSupported' &&
+                /dedicated inline-script cache lifecycle/.test(error.message),
+        );
+    });
+
+    test('retains URI routing behavior when no inline manager is registered', async () => {
+        await envManagers.clearCache(Uri.file('/workspace/script.py'));
     });
 });
