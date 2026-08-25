@@ -424,6 +424,58 @@ suite('new723ScriptTemplate / NewScriptProject', () => {
         assert.ok(showTextDocumentStub.calledOnceWithExactly(createdScript.uri));
     });
 
+    test('a destination that physically escapes the workspace is rejected before writing', async () => {
+        const workspaceRoot = path.join(tmpDir, 'workspace');
+        const outsideRoot = path.join(tmpDir, 'outside');
+        const linkedDestination = path.join(workspaceRoot, 'linked-outside');
+        await fs.ensureDir(workspaceRoot);
+        await fs.ensureDir(outsideRoot);
+
+        // Simulate a destination that is lexically inside the workspace but whose
+        // real path (via a symlink/junction) resolves outside of it.
+        const realpathStub = sinon.stub(fsExtra, 'realpath') as sinon.SinonStub;
+        realpathStub.callsFake(async (targetPath: string) => {
+            const resolved = path.resolve(String(targetPath));
+            if (path.relative(resolved, path.resolve(linkedDestination)) === '') {
+                return path.resolve(outsideRoot);
+            }
+            if (path.relative(resolved, path.resolve(workspaceRoot)) === '') {
+                return path.resolve(workspaceRoot);
+            }
+            throw new Error(`Unexpected realpath: ${targetPath}`);
+        });
+
+        workspaceFolder = {
+            index: 0,
+            name: 'test-workspace',
+            uri: Uri.file(workspaceRoot),
+        };
+        getWorkspaceFolderStub.returns(workspaceFolder);
+        getWorkspaceFoldersStub.returns([workspaceFolder]);
+        sinon.stub(fsExtra, 'pathExists').resolves(true);
+        const copyStub = sinon.stub(fsExtra, 'copy').resolves();
+        const replaceStub = sinon.stub(creationHelpers, 'replaceInFilesAndNames').resolves();
+        const instructionsStub = sinon.stub(creationHelpers, 'manageCopilotInstructionsFile').resolves();
+        const showTextDocumentStub = sinon.stub(windowApis, 'showTextDocument');
+        const showErrorMessageStub = sinon.stub(windowApis, 'showErrorMessage');
+        const addStub = sinon.stub().resolves();
+        const creator = new NewScriptProject({ add: addStub } as unknown as PythonProjectManager);
+
+        const result = await creator.create({
+            name: 'escaped.py',
+            quickCreate: true,
+            rootUri: Uri.file(linkedDestination),
+        });
+
+        assert.strictEqual(result, undefined);
+        assert.ok(showErrorMessageStub.calledOnce);
+        assert.strictEqual(copyStub.called, false);
+        assert.strictEqual(replaceStub.called, false);
+        assert.strictEqual(addStub.called, false);
+        assert.strictEqual(instructionsStub.called, false);
+        assert.strictEqual(showTextDocumentStub.called, false);
+    });
+
     test('create waits for project registration before opening and returning', async () => {
         const scriptFileName = 'wait_for_registration.py';
         const rootUri = Uri.file(tmpDir);

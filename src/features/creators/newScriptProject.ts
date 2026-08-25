@@ -130,6 +130,23 @@ export class NewScriptProject implements PythonProjectCreator {
             return undefined;
         }
 
+        let physicalDestRoot: string;
+        let physicalWorkspaceRoot: string;
+        try {
+            [physicalDestRoot, physicalWorkspaceRoot] = await Promise.all([
+                fs.realpath(resolvedDestRoot),
+                fs.realpath(workspaceFolder.uri.fsPath),
+            ]);
+        } catch (error) {
+            traceError('Failed to resolve the destination or workspace folder:', error);
+            showErrorMessage(l10n.t('Unable to resolve the destination folder inside the open workspace.'));
+            return undefined;
+        }
+        if (!isSameOrParentPath(physicalWorkspaceRoot, physicalDestRoot)) {
+            showErrorMessage(l10n.t('Destination folder must resolve inside the open workspace, aborting creation.'));
+            return undefined;
+        }
+
         const identityRootUri =
             destinationRootUri.scheme === 'file' && workspaceFolder.uri.scheme !== 'file'
                 ? uriForFileRootInWorkspace(resolvedDestRoot, workspaceFolder)
