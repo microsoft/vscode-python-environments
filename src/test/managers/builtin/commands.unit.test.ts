@@ -148,9 +148,9 @@ suite('Pip and UV command parsing', () => {
 
     test('PipAvailableVersionsCommand parses, deduplicates, and filters versions', async () => {
         runPythonStub.resolves(
-            `warning before JSON\n${JSON.stringify({
+            JSON.stringify({
                 versions: ['2.0.0', '2.0.0', '2.1.0rc1', ' invalid ', '1.0.0'],
-            })}\nwarning after JSON`,
+            }),
         );
         const command = new PipAvailableVersionsCommand({ pythonExecutable: 'python', log });
 
@@ -169,10 +169,7 @@ suite('Pip and UV command parsing', () => {
     test('PipAvailableVersionsCommand rejects malformed output', async () => {
         const command = new PipAvailableVersionsCommand({ pythonExecutable: 'python', log });
         runPythonStub.resolves('no JSON here');
-        await assert.rejects(
-            command.execute({ packageName: 'package', pythonVersion: '3.13' }),
-            /Unable to find package version JSON/,
-        );
+        await assert.rejects(command.execute({ packageName: 'package', pythonVersion: '3.13' }), SyntaxError);
 
         runPythonStub.resolves('{not valid JSON}');
         await assert.rejects(command.execute({ packageName: 'package', pythonVersion: '3.13' }), SyntaxError);
@@ -288,13 +285,11 @@ suite('Pip and UV command parsing', () => {
         assert.deepStrictEqual(result.map((version) => version.public), ['1.0.0']);
     });
 
-    test('UvAvailableVersionsCommand parses embedded JSON', async () => {
+    test('UvAvailableVersionsCommand rejects output surrounding JSON', async () => {
         runUvStub.resolves(`Some preamble\n${JSON.stringify({ versions: ['1.0.0'] })}`);
         const command = new UvAvailableVersionsCommand({ pythonExecutable: 'python', log: mockLog });
 
-        const result = await command.execute({ packageName: 'package', pythonVersion: '3.13.1' });
-
-        assert.deepStrictEqual(result.map((version) => version.public), ['1.0.0']);
+        await assert.rejects(command.execute({ packageName: 'package', pythonVersion: '3.13.1' }), SyntaxError);
     });
 
     test('PipListCommand parses packages and drops incomplete entries', async () => {

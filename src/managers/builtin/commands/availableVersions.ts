@@ -3,12 +3,7 @@ import { AvailableVersionsCommand, type AvailableVersionsExecuteArgs } from '../
 import { runPython, runUV } from '../helpers';
 
 function parseVersionsJson(output: string, tool: 'pip' | 'uv'): string[] {
-    const match = output.match(/{[\s\S]*}/);
-    if (!match) {
-        throw new Error(`Unable to find package version JSON in ${tool} output.`);
-    }
-
-    const parsed: unknown = JSON.parse(match[0]);
+    const parsed: unknown = JSON.parse(output);
     if (
         typeof parsed !== 'object' ||
         parsed === null ||
