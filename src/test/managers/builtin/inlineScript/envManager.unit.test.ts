@@ -122,7 +122,6 @@ suite('InlineScriptEnvManager', () => {
     let inspectMetaStub: sinon.SinonStub;
     let retainLockStub: sinon.SinonStub;
     let releaseLockStub: sinon.SinonStub;
-    let releaseRootLifecycleLockStub: sinon.SinonStub;
     let resolveSystemPythonStub: sinon.SinonStub;
     let resolveVenvStub: sinon.SinonStub;
     let routingRegistry: InlineScriptRoutingRegistry;
@@ -206,12 +205,9 @@ suite('InlineScriptEnvManager', () => {
         });
         retainLockStub = sinon.stub().resolves();
         releaseLockStub = sinon.stub().resolves();
-        releaseRootLifecycleLockStub = sinon.stub().resolves();
-        lockStub = sinon.stub(lockfileApis, 'acquireFileLock').callsFake(async (targetPath: string) =>
-            normalizePath(targetPath) === normalizePath(cacheLayout.getScriptEnvCacheRoot(globalStorageUri).fsPath)
-                ? { release: releaseRootLifecycleLockStub, retain: sinon.stub().resolves() }
-                : { release: releaseLockStub, retain: retainLockStub },
-        );
+        lockStub = sinon
+            .stub(lockfileApis, 'acquireFileLock')
+            .resolves({ release: releaseLockStub, retain: retainLockStub });
         resolveSystemPythonStub = sinon.stub(builtinUtils, 'resolveSystemPythonEnvironmentPath').resolves(undefined);
         resolveVenvStub = sinon.stub(venvUtils, 'resolveVenvPythonEnvironmentPath').callsFake(async (environmentPath: string) => {
             return environmentsByExecutablePath.get(normalizePath(environmentPath));
@@ -270,11 +266,6 @@ suite('InlineScriptEnvManager', () => {
 
     function envDir(): Uri {
         return cacheLayout.getScriptEnvDir(globalStorageUri, CACHE_KEY);
-    }
-
-    function cacheEntryLockCalls(): readonly sinon.SinonSpyCall[] {
-        const cacheRootPath = normalizePath(cacheLayout.getScriptEnvCacheRoot(globalStorageUri).fsPath);
-        return lockStub.getCalls().filter((call) => normalizePath(call.args[0]) !== cacheRootPath);
     }
 
     function getCacheKeyInputKey(dependencies: readonly string[], interpreterPath: string): string {
@@ -1238,252 +1229,13 @@ suite('InlineScriptEnvManager', () => {
             assert.ok(releaseLockStub.calledOnce);
         });
 
-        test('uses nonblocking entry admission at the final cache path', async () => {
+        test('uses a bounded cross-process lock at the final cache path', async () => {
             await manager.create(scriptUri());
 
-            assert.strictEqual(
-                lockStub.firstCall.args[0],
-                cacheLayout.getScriptEnvCacheRoot(globalStorageUri).fsPath,
-            );
-            assert.strictEqual(lockStub.firstCall.args[1].timeoutMs, 0);
-            const entryLockCall = cacheEntryLockCalls()[0];
-            assert.ok(entryLockCall);
-            assert.strictEqual(entryLockCall.args[0], envDir().fsPath);
-            const options = entryLockCall.args[1];
-            assert.strictEqual(options.timeoutMs, 0);
+            assert.strictEqual(lockStub.firstCall.args[0], envDir().fsPath);
+            const options = lockStub.firstCall.args[1];
+            assert.ok(options.timeoutMs > 0);
             assert.ok(options.retryIntervalMs > 0);
-        });
-
-        test('releases the root lifecycle lock after entry admission while the build continues', async () => {
-            let continueCreation: (() => void) | undefined;
-            let signalCreationStarted: (() => void) | undefined;
-            const creationStarted = new Promise<void>((resolve) => {
-                signalCreationStarted = resolve;
-            });
-            const creationGate = new Promise<void>((resolve) => {
-                continueCreation = resolve;
-            });
-            createWithProgressStub.callsFake(async (...args: unknown[]) => {
-                const target = args[6] as string;
-                await fs.outputFile(venvPythonPath(target), '');
-                signalCreationStarted!();
-                await creationGate;
-                return {
-                    environment: makeEnvironment(
-                        'ms-python.python:inline-script',
-                        '3.12.4',
-                        venvPythonPath(target),
-                        target,
-                    ),
-                };
-            });
-
-            const createPromise = manager.create(scriptUri());
-            await creationStarted;
-
-            sinon.assert.calledOnce(releaseRootLifecycleLockStub);
-            sinon.assert.notCalled(releaseLockStub);
-
-            continueCreation!();
-            assert.ok(await createPromise);
-            sinon.assert.calledOnce(releaseLockStub);
-        });
-
-        test('retains a lifecycle lock handle when terminal release fails', async () => {
-            const failedRootRelease = sinon
-                .stub()
-                .rejects(Object.assign(new Error('retirement failed'), { code: 'ELOCKRELEASEFAILED' }));
-            const retainedRoot = sinon.stub().resolves();
-            const rootPath = normalizePath(cacheLayout.getScriptEnvCacheRoot(globalStorageUri).fsPath);
-            lockStub.callsFake(async (targetPath: string) =>
-                normalizePath(targetPath) === rootPath
-                    ? { release: failedRootRelease, retain: retainedRoot }
-                    : { release: releaseLockStub, retain: retainLockStub },
-            );
-
-            assert.strictEqual(await manager.create(scriptUri()), undefined);
-
-            sinon.assert.calledOnce(failedRootRelease);
-            sinon.assert.calledOnce(retainedRoot);
-            sinon.assert.calledOnce(releaseLockStub);
-            assert.strictEqual(createWithProgressStub.callCount, 0);
-        });
-
-        test('key-A contention does not block independent key-B admission at the root', async () => {
-            const otherCacheKey = 'fedcba9876543210';
-            const firstUri = scriptUri('a.py');
-            const secondUri = scriptUri('b.py');
-            const secondMetadata = { ...VALID_METADATA, dependencies: ['flask'] };
-            readMetadataStub.callsFake(async (uri: Uri) =>
-                normalizePath(uri.fsPath) === normalizePath(secondUri.fsPath) ? secondMetadata : VALID_METADATA,
-            );
-            registerCacheKey(otherCacheKey, secondMetadata.dependencies, baseExecutable);
-
-            const rootPath = normalizePath(cacheLayout.getScriptEnvCacheRoot(globalStorageUri).fsPath);
-            const firstEntryPath = normalizePath(envDir().fsPath);
-            const secondEntryPath = normalizePath(
-                cacheLayout.getScriptEnvDir(globalStorageUri, otherCacheKey).fsPath,
-            );
-            let rootHeld = false;
-            let allowFirstEntry = false;
-            const calls: string[] = [];
-            lockStub.callsFake(async (targetPath: string) => {
-                const normalizedTarget = normalizePath(targetPath);
-                if (normalizedTarget === rootPath) {
-                    assert.strictEqual(rootHeld, false, 'root lifecycle lock must be released before another admission');
-                    rootHeld = true;
-                    return {
-                        retain: sinon.stub().resolves(),
-                        release: async () => {
-                            calls.push('release-root');
-                            rootHeld = false;
-                        },
-                    };
-                }
-                assert.strictEqual(rootHeld, true, 'entry admission must follow root acquisition');
-                if (normalizedTarget === firstEntryPath && !allowFirstEntry) {
-                    calls.push('contend-a');
-                    throw Object.assign(new Error('key A is locked'), { code: 'ELOCKED' });
-                }
-                calls.push(normalizedTarget === secondEntryPath ? 'admit-b' : 'admit-a');
-                return { release: sinon.stub().resolves(), retain: sinon.stub().resolves() };
-            });
-
-            let resumeFirstRetry: (() => void) | undefined;
-            let signalFirstWaiting: (() => void) | undefined;
-            const firstWaiting = new Promise<void>((resolve) => {
-                signalFirstWaiting = resolve;
-            });
-            const internalManager = manager as unknown as {
-                waitForCacheEntryRetry(deadline: number): Promise<void>;
-            };
-            sinon.stub(internalManager, 'waitForCacheEntryRetry').callsFake(
-                () =>
-                    new Promise<void>((resolve) => {
-                        signalFirstWaiting!();
-                        resumeFirstRetry = resolve;
-                    }),
-            );
-
-            const firstCreate = manager.create(firstUri);
-            await firstWaiting;
-            assert.deepStrictEqual(calls.slice(0, 2), ['contend-a', 'release-root']);
-
-            const secondEnvironment = await manager.create(secondUri);
-            assert.ok(secondEnvironment, 'independent key B should be admitted while key A waits');
-            assert.ok(calls.indexOf('admit-b') > calls.indexOf('release-root'));
-
-            allowFirstEntry = true;
-            resumeFirstRetry!();
-            assert.ok(await firstCreate);
-            assert.strictEqual(rootHeld, false);
-        });
-
-        test('entry admission contention stops at the shared deadline without spinning', async () => {
-            const rootPath = normalizePath(cacheLayout.getScriptEnvCacheRoot(globalStorageUri).fsPath);
-            lockStub.callsFake(async (targetPath: string) => {
-                if (normalizePath(targetPath) === rootPath) {
-                    return { release: releaseRootLifecycleLockStub, retain: sinon.stub().resolves() };
-                }
-                throw Object.assign(new Error('entry remains locked'), { code: 'ELOCKED' });
-            });
-            const internalManager = manager as unknown as {
-                waitForCacheEntryRetry(deadline: number): Promise<void>;
-            };
-            const waitStub = sinon.stub(internalManager, 'waitForCacheEntryRetry').callsFake(async (deadline) => {
-                clock.tick(Math.max(0, deadline - Date.now()));
-            });
-
-            assert.strictEqual(await manager.create(scriptUri()), undefined);
-
-            sinon.assert.calledOnce(waitStub);
-            assert.strictEqual(cacheEntryLockCalls().length, 1);
-            sinon.assert.calledOnce(releaseRootLifecycleLockStub);
-            assert.strictEqual(createWithProgressStub.callCount, 0);
-        });
-
-        test('root generation remains stable when entry children mutate ctime-backed directory stats', async () => {
-            const cacheRoot = cacheLayout.getScriptEnvCacheRoot(globalStorageUri);
-            await fs.ensureDir(cacheRoot.fsPath);
-            const internalManager = manager as unknown as {
-                getPhysicalOwnedCacheRoot(
-                    cacheRoot: Uri,
-                ): Promise<{ path: string; generation: string } | undefined>;
-            };
-
-            const before = await internalManager.getPhysicalOwnedCacheRoot(cacheRoot);
-            await fs.ensureDir(path.join(cacheRoot.fsPath, 'child.lock'));
-            await fs.writeFile(path.join(cacheRoot.fsPath, 'child.lock', 'marker'), '');
-            const after = await internalManager.getPhysicalOwnedCacheRoot(cacheRoot);
-
-            assert.ok(before);
-            assert.ok(after);
-            assert.strictEqual(after!.generation, before!.generation);
-        });
-
-        test('root generation changes when the same physical path is deleted and recreated', async () => {
-            const cacheRoot = cacheLayout.getScriptEnvCacheRoot(globalStorageUri);
-            await fs.ensureDir(cacheRoot.fsPath);
-            const internalManager = manager as unknown as {
-                getPhysicalOwnedCacheRoot(
-                    cacheRoot: Uri,
-                ): Promise<{ path: string; generation: string } | undefined>;
-            };
-
-            const before = await internalManager.getPhysicalOwnedCacheRoot(cacheRoot);
-            await fs.remove(cacheRoot.fsPath);
-            await fs.ensureDir(cacheRoot.fsPath);
-            const after = await internalManager.getPhysicalOwnedCacheRoot(cacheRoot);
-
-            assert.ok(before);
-            assert.ok(after);
-            assert.strictEqual(normalizePath(after!.path), normalizePath(before!.path));
-            assert.notStrictEqual(after!.generation, before!.generation);
-        });
-
-        for (const malformedPayload of ['', 'partial', 'g'.repeat(32)]) {
-            test(`recovers malformed root generation payload ${JSON.stringify(malformedPayload)}`, async () => {
-                const cacheRoot = cacheLayout.getScriptEnvCacheRoot(globalStorageUri);
-                const markerPath = path.join(cacheRoot.fsPath, '.root-generation');
-                await fs.outputFile(markerPath, malformedPayload);
-
-                assert.ok(await manager.create(scriptUri()));
-
-                assert.match(await fs.readFile(markerPath, 'utf8'), /^[0-9a-f]{32}$/);
-                assert.deepStrictEqual(
-                    (await fs.readdir(cacheRoot.fsPath)).filter((entry) =>
-                        entry.startsWith('.root-generation.'),
-                    ),
-                    [],
-                );
-            });
-        }
-
-        test('cleans interrupted generation temp artifacts before atomically publishing the final marker', async () => {
-            const cacheRoot = cacheLayout.getScriptEnvCacheRoot(globalStorageUri);
-            const markerPath = path.join(cacheRoot.fsPath, '.root-generation');
-            const interruptedTempPath = path.join(
-                cacheRoot.fsPath,
-                `.root-generation.tmp-424242-${'a'.repeat(32)}`,
-            );
-            await fs.outputFile(interruptedTempPath, 'partial');
-            const renameSpy = sinon.spy(fsExtra, 'rename');
-
-            assert.ok(await manager.create(scriptUri()));
-
-            assert.strictEqual(await fs.pathExists(interruptedTempPath), false);
-            assert.match(await fs.readFile(markerPath, 'utf8'), /^[0-9a-f]{32}$/);
-            assert.ok(
-                renameSpy.getCalls().some((call) => {
-                    const source = String(call.args[0]);
-                    const destination = String(call.args[1]);
-                    return (
-                        destination === markerPath &&
-                        path.basename(source).startsWith(`.root-generation.tmp-${process.pid}-`)
-                    );
-                }),
-                'generation must be published by renaming a complete unique temp file',
-            );
         });
 
         test('reuses a restart cache entry from an older backup matching the selected base', async () => {
@@ -1583,7 +1335,7 @@ suite('InlineScriptEnvManager', () => {
             const [firstResult, secondResult] = await Promise.all([first, second]);
 
             assert.strictEqual(firstResult, secondResult);
-            assert.strictEqual(cacheEntryLockCalls().length, 1);
+            assert.strictEqual(lockStub.callCount, 1);
             assert.strictEqual(createWithProgressStub.callCount, 1);
         });
 
@@ -1651,7 +1403,7 @@ suite('InlineScriptEnvManager', () => {
 
             assert.ok(firstEnvironment);
             assert.strictEqual(firstEnvironment, secondEnvironment);
-            assert.strictEqual(cacheEntryLockCalls().length, 1);
+            assert.strictEqual(lockStub.callCount, 1);
             assert.strictEqual(createWithProgressStub.callCount, 1);
             assert.deepStrictEqual(
                 (
@@ -1788,7 +1540,7 @@ suite('InlineScriptEnvManager', () => {
             assert.ok(firstEnvironment);
             assert.strictEqual(firstEnvironment, secondEnvironment);
             assert.strictEqual(createWithProgressStub.callCount, 1);
-            assert.strictEqual(cacheEntryLockCalls().length, 2);
+            assert.strictEqual(lockStub.callCount, 2);
             assert.deepStrictEqual(
                 (
                     sidecarsByEnvDir.get(
@@ -1847,7 +1599,7 @@ suite('InlineScriptEnvManager', () => {
                     sidecarsByEnvDir.set(normalizePath(envDir.fsPath), meta);
                 });
                 if (failureMode === 'lock') {
-                    lockStub.onCall(3).rejects(new Error('merge lock failed'));
+                    lockStub.onSecondCall().rejects(new Error('merge lock failed'));
                 } else if (failureMode === 'read') {
                     inspectMetaStub.onFirstCall().rejects(new Error('merge read failed'));
                 } else {
@@ -2052,7 +1804,7 @@ suite('InlineScriptEnvManager', () => {
 
             assert.ok(environments[0]);
             assert.ok(environments.every((environment) => environment === environments[0]));
-            assert.strictEqual(cacheEntryLockCalls().length, 1);
+            assert.strictEqual(lockStub.callCount, 1);
             const sourceMetadataIdentityHashes = (
                 sidecarsByEnvDir.get(
                     normalizePath(cacheLayout.getScriptEnvDir(globalStorageUri, cacheKeyValue).fsPath),
@@ -3459,7 +3211,7 @@ suite('InlineScriptEnvManager', () => {
                 telemetryCalls(EventNames.INLINE_SCRIPT_ENV_ERROR).map((call) => call.args),
                 [[EventNames.INLINE_SCRIPT_ENV_ERROR, undefined, { category: 'setup-failure' }]],
             );
-            assert.strictEqual(cacheEntryLockCalls().length, 0);
+            assert.strictEqual(lockStub.callCount, 0);
             assert.strictEqual(createWithProgressStub.callCount, 0);
         });
 
@@ -6196,34 +5948,6 @@ suite('InlineScriptEnvManager', () => {
             assert.strictEqual(await fs.pathExists(environment.sysPrefix), true);
         });
 
-        test('stops before deletion when the cache root is replaced at the same physical path', async () => {
-            const environment = await createOwnedEnvironment();
-            const physicalCacheRootPath = await fs.realpath(
-                cacheLayout.getScriptEnvCacheRoot(globalStorageUri).fsPath,
-            );
-            const internalManager = manager as unknown as {
-                acquireCacheEntryLockForClear(envDirPath: string): Promise<lockfileApis.AcquiredFileLock>;
-                deleteCacheEntryForClear(entryPath: string): Promise<void>;
-            };
-            const acquireEntryLock = internalManager.acquireCacheEntryLockForClear.bind(manager);
-            sinon.stub(internalManager, 'acquireCacheEntryLockForClear').callsFake(async (entryPath) => {
-                const entryLock = await acquireEntryLock(entryPath);
-                await fs.remove(physicalCacheRootPath);
-                await fs.outputFile(path.join(physicalCacheRootPath, CACHE_KEY, 'replacement.txt'), 'keep');
-                return entryLock;
-            });
-            const deleteStub = sinon.stub(internalManager, 'deleteCacheEntryForClear').callThrough();
-
-            await assert.rejects(manager.clearCache(), /physical root changed/);
-
-            sinon.assert.notCalled(deleteStub);
-            assert.strictEqual(
-                await fs.readFile(path.join(physicalCacheRootPath, CACHE_KEY, 'replacement.txt'), 'utf8'),
-                'keep',
-            );
-            assert.strictEqual(await fs.pathExists(environment.sysPrefix), true);
-        });
-
         test('does not let a pending rehydration restore an association after clear cache', async () => {
             const uri = scriptUri();
             const environment = await createOwnedEnvironment();
@@ -6296,46 +6020,6 @@ suite('InlineScriptEnvManager', () => {
 
             assert.ok(await createPromise);
             assert.ok(readMetadataStub.calledOnce);
-        });
-
-        test('does not count a create queued between two clear requests as active', async () => {
-            const uri = scriptUri();
-            const calls: string[] = [];
-            let releaseFirstClear: (() => void) | undefined;
-            let signalFirstClearStarted: (() => void) | undefined;
-            const firstClearStarted = new Promise<void>((resolve) => {
-                signalFirstClearStarted = resolve;
-            });
-            const firstClearGate = new Promise<void>((resolve) => {
-                releaseFirstClear = resolve;
-            });
-            workspaceState.clear.onFirstCall().callsFake(async () => {
-                calls.push('firstClear');
-                signalFirstClearStarted!();
-                await firstClearGate;
-                persistedAssociations = undefined;
-            });
-            workspaceState.clear.onSecondCall().callsFake(async () => {
-                calls.push('secondClear');
-                persistedAssociations = undefined;
-            });
-            readMetadataStub.callsFake(async () => {
-                calls.push('create');
-                return VALID_METADATA;
-            });
-
-            const firstClear = manager.clearCache();
-            await firstClearStarted;
-            const createPromise = manager.create(uri);
-            const secondClear = manager.clearCache();
-
-            assert.strictEqual(readMetadataStub.callCount, 0);
-            releaseFirstClear!();
-            await Promise.all([firstClear, secondClear]);
-
-            assert.ok(await createPromise);
-            assert.ok(readMetadataStub.calledOnce);
-            assert.deepStrictEqual(calls, ['firstClear', 'secondClear', 'create']);
         });
     });
 });

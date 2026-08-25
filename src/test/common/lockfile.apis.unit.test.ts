@@ -12,7 +12,6 @@ import {
     acquireFileLock,
     AcquireFileLockOptions,
     FILE_LOCK_OWNER_MARKER_PREFIX,
-    FILE_LOCK_RECLAIM_MARKER_PREFIX,
     FILE_LOCK_RELEASE_MARKER_PREFIX,
     FILE_LOCK_RETAINED_MARKER,
     FILE_LOCK_RETAINED_MARKER_PREFIX,
@@ -318,53 +317,6 @@ suite('lockfile APIs', () => {
 
         assert.strictEqual(await reclaimFileLock(targetPath), true);
         assert.strictEqual(await inspectFileLock(targetPath), 'missing');
-        const replacement = await acquireFileLock(targetPath, OPTIONS);
-        await replacement.release();
-    });
-
-    test('recovers an interrupted generation-specific reclaim after its claimant exits', async () => {
-        const lockPath = getFileLockPath(targetPath);
-        const generationMarker = `${FILE_LOCK_RETAINED_MARKER_PREFIX}424241-generation`;
-        const reclaimMarker =
-            `${FILE_LOCK_RECLAIM_MARKER_PREFIX}424242-${'a'.repeat(32)}-${generationMarker}`;
-        await fs.ensureDir(lockPath);
-        await fs.writeFile(path.join(lockPath, reclaimMarker), '');
-        const checkProcessLiveness = sinon.stub().withArgs(424242).resolves('dead');
-
-        assert.strictEqual(await inspectFileLock(targetPath, { checkProcessLiveness }), 'stale');
-        assert.strictEqual(await reclaimFileLock(targetPath, { checkProcessLiveness }), true);
-        assert.strictEqual(await inspectFileLock(targetPath), 'missing');
-    });
-
-    test('does not reclaim an in-progress generation-specific reclaim', async () => {
-        const lockPath = getFileLockPath(targetPath);
-        const generationMarker = `${FILE_LOCK_OWNER_MARKER_PREFIX}424241-generation`;
-        const reclaimMarker =
-            `${FILE_LOCK_RECLAIM_MARKER_PREFIX}${process.pid}-${'b'.repeat(32)}-${generationMarker}`;
-        await fs.ensureDir(lockPath);
-        await fs.writeFile(path.join(lockPath, reclaimMarker), '');
-        const checkProcessLiveness = sinon.stub().withArgs(process.pid).resolves('live');
-
-        assert.strictEqual(await inspectFileLock(targetPath, { checkProcessLiveness }), 'held');
-        assert.strictEqual(await reclaimFileLock(targetPath, { checkProcessLiveness }), false);
-        assert.strictEqual(await fs.pathExists(path.join(lockPath, reclaimMarker)), true);
-    });
-
-    test('reclaim keeps the canonical path reusable when retired-directory rmdir fails', async () => {
-        const lock = await acquireFileLock(targetPath, OPTIONS);
-        await lock.retain();
-        const rmdirStub = sinon
-            .stub(fsExtra, 'rmdir')
-            .rejects(Object.assign(new Error('rmdir failed'), { code: 'EACCES' }));
-
-        assert.strictEqual(await reclaimFileLock(targetPath), true);
-        assert.strictEqual(await inspectFileLock(targetPath), 'missing');
-        sinon.assert.called(rmdirStub);
-        assert.deepStrictEqual(
-            (await fs.readdir(tempRoot)).filter((entry) => entry.includes(FILE_LOCK_RETIRED_DIR_INFIX)),
-            [],
-        );
-        rmdirStub.restore();
         const replacement = await acquireFileLock(targetPath, OPTIONS);
         await replacement.release();
     });

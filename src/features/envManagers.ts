@@ -15,7 +15,6 @@ import {
     EnvironmentManagerAlreadyRegisteredError,
     PackageManagerAlreadyRegisteredError,
 } from '../common/errors/AlreadyRegisteredError';
-import { ClearCacheNotSupported } from '../common/errors/NotSupportedError';
 import {
     InlineScriptRouteabilityChangeEvent,
     InlineScriptRoutingRegistry,
@@ -337,27 +336,10 @@ export class PythonEnvironmentManagers implements EnvironmentManagers {
             return;
         }
 
-        if (
-            scope === INLINE_SCRIPT_MANAGER_ID ||
-            (!(scope instanceof Uri) &&
-                typeof scope !== 'string' &&
-                scope.envId.managerId === INLINE_SCRIPT_MANAGER_ID)
-        ) {
-            this.throwInlineClearNotSupported();
-        }
         const manager = this.getEnvironmentManager(scope);
-        if (manager?.id === INLINE_SCRIPT_MANAGER_ID) {
-            this.throwInlineClearNotSupported();
-        }
-        if (manager) {
+        if (manager && manager.id !== INLINE_SCRIPT_MANAGER_ID) {
             await manager.clearCache();
         }
-    }
-
-    private throwInlineClearNotSupported(): never {
-        throw new ClearCacheNotSupported(
-            `Clear Cache for ${INLINE_SCRIPT_MANAGER_ID} requires the dedicated inline-script cache lifecycle.`,
-        );
     }
 
     /**

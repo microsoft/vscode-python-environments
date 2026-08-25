@@ -858,31 +858,6 @@ suite('Setting Helpers - Project Removal', () => {
             ]);
         });
 
-        test('removes an inline root setting without returning the intrinsic workspace project for unloading', async () => {
-            const rootProject = new PythonProjectsImpl(firstWorkspace.name, firstWorkspace.uri);
-            const config = createProjectConfig({
-                workspaceName: firstWorkspace.name,
-                workspaceValue: [
-                    { path: '.', envManager: INLINE_MANAGER_ID, packageManager: PIP_MANAGER_ID },
-                ],
-            });
-            sinon.stub(workspaceApis, 'getWorkspaceFolders').returns([firstWorkspace]);
-            sinon.stub(workspaceApis, 'getWorkspaceFolder').returns(firstWorkspace);
-            sinon.stub(workspaceApis, 'getConfiguration').returns(config);
-
-            const removedProjects = await removeInlineScriptPythonProjectSettings([rootProject]);
-
-            assert.deepStrictEqual(removedProjects, []);
-            assert.deepStrictEqual(updateCalls, [
-                {
-                    workspace: firstWorkspace.name,
-                    key: 'pythonProjects',
-                    value: undefined,
-                    target: ConfigurationTarget.Workspace,
-                },
-            ]);
-        });
-
         test('removes inline-script settings even when the project is not loaded', async () => {
             const config = createProjectConfig({
                 workspaceName: firstWorkspace.name,

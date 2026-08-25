@@ -635,13 +635,9 @@ export async function removeInlineScriptPythonProjectSettings(
 
     await Promise.all(promises);
 
-    const workspaceRootPaths = new Set(workspaceFolders.map((folder) => normalizePath(folder.uri.fsPath)));
     return Array.from(removedProjects.values())
         .map((project) => currentProjectsByUri.get(project.uri.toString()))
-        .filter(
-            (project): project is PythonProject =>
-                project !== undefined && !workspaceRootPaths.has(normalizePath(project.uri.fsPath)),
-        );
+        .filter((project): project is PythonProject => project !== undefined);
 }
 
 export async function addPythonProjectSetting(edits: EditProjectSettings[]): Promise<void> {

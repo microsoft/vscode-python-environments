@@ -1,7 +1,6 @@
 // Copyright (c) Microsoft Corporation. All rights reserved.
 // Licensed under the MIT License.
 
-import * as crypto from 'crypto';
 import * as fs from 'fs-extra';
 import * as path from 'path';
 import type { Stats } from 'fs';
@@ -91,12 +90,9 @@ const BASE_INTERPRETER_MANAGER_IDS = new Set([
 
 const CACHE_LOCK_TIMEOUT_MS = 5 * 60 * 1000;
 const CACHE_LOCK_RETRY_MS = 500;
-const CACHE_ROOT_GENERATION_FILENAME = '.root-generation';
-const CACHE_ROOT_GENERATION_ARTIFACT_PATTERN =
-    /^\.root-generation\.(?:tmp|invalid)-\d+-[0-9a-f]{32}$/;
-const CACHE_ROOT_GENERATION_PATTERN = /^[0-9a-f]{32}$/;
 const CACHED_ASSOCIATION_VALIDATION_INTERVAL_MS = 5_000;
 const DISCOVERY_RETRY_DELAYS_MS = [1_000, 5_000, 30_000] as const;
+/** Workspace-state key for PEP 723 script path to environment executable associations. */
 export { INLINE_SCRIPT_ENVS_KEY };
 const PERSISTED_ASSOCIATION_SCHEMA_VERSION = 1 as const;
 
@@ -177,11 +173,6 @@ interface ParsedPersistedAssociations {
 interface SavedMetadataSnapshot {
     readonly metadata?: InlineScriptMetadata;
     readonly identity?: string;
-}
-
-interface PhysicalCacheRoot {
-    readonly path: string;
-    readonly generation: string;
 }
 
 /** Manages extension-owned PEP 723 script environments. */
@@ -268,9 +259,9 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
         scope: CreateEnvironmentScope,
         options?: CreateEnvironmentOptions,
     ): Promise<PythonEnvironment | undefined> {
-        return this.waitForCacheMaintenance(async () => {
-            this.activeCreateOperations += 1;
-            try {
+        this.activeCreateOperations += 1;
+        try {
+            return await this.waitForCacheMaintenance(async () => {
                 try {
                     const scriptUri = this.getScriptUri(scope);
                     if (!scriptUri) {
@@ -313,10 +304,10 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
                     this.log.error(`Failed to set up inline-script environment: ${getErrorMessage(error)}`);
                     return undefined;
                 }
-            } finally {
-                this.activeCreateOperations -= 1;
-            }
-        });
+            });
+        } finally {
+            this.activeCreateOperations -= 1;
+        }
     }
 
     private async createForScript(
@@ -484,11 +475,8 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
 
     async clearCache(): Promise<void> {
         const activeCreatesAtStart = this.activeCreateOperations;
-        const cacheRoot = getScriptEnvCacheRoot(this.globalStorageUri);
         return this.enqueueCacheMaintenance(() =>
-            this.enqueueSelection(() =>
-                this.withCacheRootLifecycleLock(cacheRoot, () => this.clearCacheInternal(activeCreatesAtStart)),
-            ),
+            this.enqueueSelection(() => this.clearCacheInternal(activeCreatesAtStart)),
         );
     }
 
@@ -2536,189 +2524,18 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
         envDir: Uri,
         action: (lock: AcquiredFileLock) => Promise<T>,
     ): Promise<T> {
-        const lock = await this.acquireCacheEntryLockForMutation(envDir);
+        const lock = await acquireFileLock(envDir.fsPath, {
+            timeoutMs: CACHE_LOCK_TIMEOUT_MS,
+            retryIntervalMs: CACHE_LOCK_RETRY_MS,
+        });
         try {
             return await action(lock);
         } finally {
-            await this.releaseCacheLockOrRetain(lock, 'inline-script cache entry');
-        }
-    }
-
-    private async acquireCacheEntryLockForMutation(envDir: Uri): Promise<AcquiredFileLock> {
-        const cacheRoot = getScriptEnvCacheRoot(this.globalStorageUri);
-        const deadline = Date.now() + CACHE_LOCK_TIMEOUT_MS;
-        let contentionError: unknown;
-        while (true) {
-            if (contentionError && Date.now() >= deadline) {
-                throw contentionError;
-            }
-            const remainingMs = Math.max(0, deadline - Date.now());
-            const lifecycleLock = await this.acquireCacheRootLifecycleLock(cacheRoot, remainingMs);
-            let entryLock: AcquiredFileLock | undefined;
-            let admissionError: unknown;
             try {
-                await fs.ensureDir(cacheRoot.fsPath);
-                if (!(await this.getPhysicalOwnedCacheRoot(cacheRoot))) {
-                    throw new Error(l10n.t('Unable to establish the script environment cache root generation.'));
-                }
-                entryLock = await acquireFileLock(envDir.fsPath, {
-                    timeoutMs: 0,
-                    retryIntervalMs: CACHE_LOCK_RETRY_MS,
-                });
+                await lock.release();
             } catch (error) {
-                admissionError = error;
+                this.log.warn(`Failed to release inline-script cache lock: ${getErrorMessage(error)}`);
             }
-
-            const lifecycleReleaseError = await this.releaseCacheLockOrRetain(
-                lifecycleLock,
-                'inline-script cache lifecycle',
-            );
-            if (lifecycleReleaseError) {
-                if (entryLock) {
-                    await this.releaseCacheLockOrRetain(entryLock, 'inline-script cache entry');
-                }
-                throw lifecycleReleaseError;
-            }
-            if (entryLock) {
-                return entryLock;
-            }
-            if (!this.isEntryLockWaitError(admissionError)) {
-                throw admissionError;
-            }
-            contentionError = admissionError;
-            if (Date.now() >= deadline) {
-                throw contentionError;
-            }
-            await this.waitForCacheEntryRetry(deadline);
-        }
-    }
-
-    private isEntryLockWaitError(error: unknown): boolean {
-        return (
-            typeof error === 'object' &&
-            error !== null &&
-            'code' in error &&
-            (error as NodeJS.ErrnoException).code === 'ELOCKED'
-        );
-    }
-
-    private async waitForCacheEntryRetry(deadline: number): Promise<void> {
-        const delayMs = Math.min(CACHE_LOCK_RETRY_MS, Math.max(0, deadline - Date.now()));
-        if (delayMs > 0) {
-            await new Promise<void>((resolve) => setTimeout(resolve, delayMs));
-        }
-    }
-
-    // Creation holds this only through entry-lock acquisition; clear holds it for the sweep.
-    private async withCacheRootLifecycleLock<T>(cacheRoot: Uri, operation: () => Promise<T>): Promise<T> {
-        const lock = await this.acquireCacheRootLifecycleLock(cacheRoot);
-        let operationFailed = false;
-        try {
-            return await operation();
-        } catch (error) {
-            operationFailed = true;
-            throw error;
-        } finally {
-            const releaseError = await this.releaseCacheLockOrRetain(lock, 'inline-script cache lifecycle');
-            if (releaseError && !operationFailed) {
-                throw releaseError;
-            }
-        }
-    }
-
-    private async acquireCacheRootLifecycleLock(
-        cacheRoot: Uri,
-        timeoutMs: number = CACHE_LOCK_TIMEOUT_MS,
-    ): Promise<AcquiredFileLock> {
-        await this.prepareCacheRootLifecycleLock(cacheRoot);
-        let lastError: unknown;
-        for (let attempt = 0; attempt < 3; attempt += 1) {
-            try {
-                return await acquireFileLock(cacheRoot.fsPath, {
-                    timeoutMs: 0,
-                    retryIntervalMs: CACHE_LOCK_RETRY_MS,
-                });
-            } catch (error) {
-                lastError = error;
-                if (!this.isLockContentionError(error)) {
-                    throw error;
-                }
-                const currentState = await inspectFileLock(cacheRoot.fsPath);
-                if (
-                    (currentState === 'stale' || currentState === 'retained') &&
-                    (await reclaimFileLock(cacheRoot.fsPath))
-                ) {
-                    continue;
-                }
-                if (currentState === 'missing') {
-                    continue;
-                }
-                if (currentState === 'held') {
-                    try {
-                        return await acquireFileLock(cacheRoot.fsPath, {
-                            timeoutMs,
-                            retryIntervalMs: CACHE_LOCK_RETRY_MS,
-                        });
-                    } catch (waitError) {
-                        if (!this.isLockContentionError(waitError)) {
-                            throw waitError;
-                        }
-                        const finalState = await inspectFileLock(cacheRoot.fsPath);
-                        if (
-                            (finalState === 'stale' || finalState === 'retained') &&
-                            (await reclaimFileLock(cacheRoot.fsPath))
-                        ) {
-                            continue;
-                        }
-                        if (finalState === 'missing') {
-                            continue;
-                        }
-                        throw waitError;
-                    }
-                }
-                throw error;
-            }
-        }
-        if (lastError) {
-            throw lastError;
-        }
-        throw new Error(l10n.t('Unable to acquire the script environment cache lifecycle lock.'));
-    }
-
-    private async prepareCacheRootLifecycleLock(cacheRoot: Uri): Promise<void> {
-        this.validateCacheRootLocation(cacheRoot);
-        const globalStoragePath = path.resolve(this.globalStorageUri.fsPath);
-        await fs.ensureDir(globalStoragePath);
-        const globalStorageStat = await fs.lstat(globalStoragePath);
-        if (!globalStorageStat.isDirectory() || globalStorageStat.isSymbolicLink()) {
-            this.log.error(
-                `Refusing to use inline-script cache lifecycle lock from redirected globalStorage root: ${globalStoragePath}`,
-            );
-            throw new Error(
-                l10n.t(
-                    'Refusing to clear the script environment cache because the global storage root is not a normal directory.',
-                ),
-            );
-        }
-    }
-
-    private async releaseCacheLockOrRetain(
-        lock: AcquiredFileLock,
-        label: string,
-    ): Promise<unknown | undefined> {
-        try {
-            await lock.release();
-            return undefined;
-        } catch (error) {
-            try {
-                await lock.retain();
-            } catch (retainError) {
-                this.log.error(
-                    `Failed to retain ${label} after release failed: ${getErrorMessage(retainError)}`,
-                );
-            }
-            this.log.warn(`Failed to release ${label}: ${getErrorMessage(error)}`);
-            return error;
         }
     }
 
@@ -2781,6 +2598,7 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
         const envDir = getScriptEnvDir(this.globalStorageUri, cacheKey);
 
         try {
+            await fs.ensureDir(cacheRoot.fsPath);
             return await this.withCacheEntryLock(envDir, async (lock) => {
                 const cached = await this.inspectCacheEntry(
                     cacheRoot,
@@ -3022,7 +2840,7 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
         }
 
         const cacheRoot = getScriptEnvCacheRoot(this.globalStorageUri);
-        const physicalCacheRoot = await this.getPhysicalOwnedCacheRoot(cacheRoot);
+        const physicalCacheRootPath = await this.getPhysicalOwnedCacheRootPath(cacheRoot);
         const persistedAssociations = await this.getPersistedAssociationSnapshot();
         const scriptPaths = new Set<string>([
             ...Object.keys(persistedAssociations),
@@ -3042,10 +2860,10 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
 
         const removedCacheEntries = new Set<string>();
         const deletionErrors: unknown[] = [];
-        if (physicalCacheRoot) {
+        if (physicalCacheRootPath) {
             let entryNames: string[];
             try {
-                entryNames = await fs.readdir(physicalCacheRoot.path);
+                entryNames = await fs.readdir(physicalCacheRootPath);
             } catch (error) {
                 if (isFileNotFoundError(error)) {
                     entryNames = [];
@@ -3056,16 +2874,13 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
 
             const cacheEntryNames = new Set<string>();
             for (const entryName of entryNames) {
-                if (entryName === CACHE_ROOT_GENERATION_FILENAME) {
-                    continue;
-                }
                 if (entryName.endsWith(FILE_LOCK_DIR_SUFFIX)) {
                     const envName = entryName.slice(0, -FILE_LOCK_DIR_SUFFIX.length);
                     if (envName.length === 0) {
                         const message = l10n.t(
                             'Refusing to clear the script environment cache because a lock entry is malformed.',
                         );
-                        this.log.error(`${message} (${path.join(physicalCacheRoot.path, entryName)})`);
+                        this.log.error(`${message} (${path.join(physicalCacheRootPath, entryName)})`);
                         throw new Error(message);
                     }
                     cacheEntryNames.add(envName);
@@ -3078,7 +2893,7 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
                 try {
                     const removed = await this.removeCacheEntryForClear(
                         cacheRoot,
-                        physicalCacheRoot,
+                        physicalCacheRootPath,
                         entryName,
                     );
                     if (removed) {
@@ -3087,7 +2902,7 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
                 } catch (error) {
                     deletionErrors.push(error);
                     this.log.error(
-                        `Failed to remove inline-script cache entry ${path.join(physicalCacheRoot.path, entryName)}: ${getErrorMessage(error)}`,
+                        `Failed to remove inline-script cache entry ${path.join(physicalCacheRootPath, entryName)}: ${getErrorMessage(error)}`,
                     );
                 }
             }
@@ -3117,31 +2932,32 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
 
     private async removeCacheEntryForClear(
         cacheRoot: Uri,
-        originalPhysicalCacheRoot: PhysicalCacheRoot,
+        originalPhysicalCacheRootPath: string,
         entryName: string,
     ): Promise<string | undefined> {
-        const envDirPath = path.join(originalPhysicalCacheRoot.path, entryName);
+        const envDirPath = path.join(originalPhysicalCacheRootPath, entryName);
         let lock: AcquiredFileLock | undefined;
         try {
             lock = await this.acquireCacheEntryLockForClear(envDirPath);
-            const currentPhysicalCacheRoot = await this.getPhysicalOwnedCacheRoot(cacheRoot);
+            const currentPhysicalCacheRootPath = await this.getPhysicalOwnedCacheRootPath(cacheRoot);
+            if (!currentPhysicalCacheRootPath) {
+                return undefined;
+            }
             if (
-                !currentPhysicalCacheRoot ||
-                normalizePath(currentPhysicalCacheRoot.path) !== normalizePath(originalPhysicalCacheRoot.path) ||
-                currentPhysicalCacheRoot.generation !== originalPhysicalCacheRoot.generation
+                normalizePath(currentPhysicalCacheRootPath) !== normalizePath(originalPhysicalCacheRootPath)
             ) {
                 const message = l10n.t(
-                    'Refusing to clear the script environment cache because its physical root changed during cleanup (a different root generation was observed).',
+                    'Refusing to clear the script environment cache because its physical root changed during cleanup.',
                 );
                 this.log.error(
-                    `${message} (${originalPhysicalCacheRoot.path} -> ${currentPhysicalCacheRoot?.path ?? 'missing'})`,
+                    `${message} (${originalPhysicalCacheRootPath} -> ${currentPhysicalCacheRootPath})`,
                 );
                 throw new Error(message);
             }
 
             const entryPath = await this.getClearableCacheEntryPath(
-                Uri.file(currentPhysicalCacheRoot.path),
-                path.join(currentPhysicalCacheRoot.path, entryName),
+                Uri.file(currentPhysicalCacheRootPath),
+                path.join(currentPhysicalCacheRootPath, entryName),
             );
             if (!entryPath) {
                 return undefined;
@@ -3150,13 +2966,7 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
             return entryPath;
         } finally {
             if (lock) {
-                const releaseError = await this.releaseCacheLockOrRetain(
-                    lock,
-                    'inline-script cache entry during cleanup',
-                );
-                if (releaseError) {
-                    throw releaseError;
-                }
+                await lock.release();
             }
         }
     }
@@ -3215,153 +3025,17 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
         throw new Error(message);
     }
 
-    private async getPhysicalOwnedCacheRoot(cacheRoot: Uri): Promise<PhysicalCacheRoot | undefined> {
-        const physicalPath = await this.getPhysicalOwnedCacheRootPath(cacheRoot);
-        if (!physicalPath) {
-            return undefined;
-        }
-        try {
-            const stat = await fs.lstat(physicalPath);
-            if (!stat.isDirectory() || stat.isSymbolicLink()) {
-                return undefined;
-            }
-            return {
-                path: physicalPath,
-                generation: await this.getOrCreateCacheRootGenerationUnderLifecycleLock(physicalPath),
-            };
-        } catch (error) {
-            if (isFileNotFoundError(error)) {
-                return undefined;
-            }
-            throw error;
-        }
-    }
-
-    private async getOrCreateCacheRootGenerationUnderLifecycleLock(
-        physicalCacheRootPath: string,
-    ): Promise<string> {
-        const markerPath = path.join(physicalCacheRootPath, CACHE_ROOT_GENERATION_FILENAME);
-        await this.cleanupCacheRootGenerationArtifacts(physicalCacheRootPath);
-        let currentGeneration = await this.inspectCacheRootGeneration(markerPath);
-        if (currentGeneration.kind === 'valid') {
-            return currentGeneration.generation;
-        }
-        if (currentGeneration.kind === 'malformed') {
-            const invalidPath = path.join(
-                physicalCacheRootPath,
-                `${CACHE_ROOT_GENERATION_FILENAME}.invalid-${process.pid}-${crypto.randomBytes(16).toString('hex')}`,
-            );
-            try {
-                await fs.rename(markerPath, invalidPath);
-            } catch (error) {
-                if (!isFileNotFoundError(error)) {
-                    throw error;
-                }
-            }
-            await fs.unlink(invalidPath).catch((error) => {
-                if (!isFileNotFoundError(error)) {
-                    throw error;
-                }
-            });
-            currentGeneration = await this.inspectCacheRootGeneration(markerPath);
-            if (currentGeneration.kind === 'valid') {
-                return currentGeneration.generation;
-            }
-            if (currentGeneration.kind !== 'missing') {
-                throw new Error(
-                    l10n.t(
-                        'Refusing to use the script environment cache because its root generation marker could not be recovered.',
-                    ),
-                );
-            }
-        }
-
-        const proposedGeneration = crypto.randomBytes(16).toString('hex');
-        const tempPath = path.join(
-            physicalCacheRootPath,
-            `${CACHE_ROOT_GENERATION_FILENAME}.tmp-${process.pid}-${crypto.randomBytes(16).toString('hex')}`,
-        );
-        try {
-            await fs.writeFile(tempPath, proposedGeneration, { encoding: 'utf8', flag: 'wx' });
-            await fs.rename(tempPath, markerPath);
-        } finally {
-            await fs.unlink(tempPath).catch(() => undefined);
-        }
-
-        const publishedGeneration = await this.inspectCacheRootGeneration(markerPath);
-        if (publishedGeneration.kind !== 'valid') {
-            throw new Error(
-                l10n.t('Refusing to use the script environment cache because its root generation could not be published.'),
-            );
-        }
-        return publishedGeneration.generation;
-    }
-
-    private async inspectCacheRootGeneration(
-        markerPath: string,
-    ): Promise<
-        | { readonly kind: 'missing' | 'malformed' }
-        | { readonly kind: 'valid'; readonly generation: string }
-    > {
-        let markerStat;
-        try {
-            markerStat = await fs.lstat(markerPath);
-        } catch (error) {
-            if (isFileNotFoundError(error)) {
-                return { kind: 'missing' };
-            }
-            throw error;
-        }
-        if (!markerStat.isFile() || markerStat.isSymbolicLink()) {
-            throw new Error(
-                l10n.t(
-                    'Refusing to use the script environment cache because its root generation marker is not a normal file.',
-                ),
-            );
-        }
-        let generation: string;
-        try {
-            generation = await fs.readFile(markerPath, 'utf8');
-        } catch (error) {
-            if (isFileNotFoundError(error)) {
-                return { kind: 'missing' };
-            }
-            throw error;
-        }
-        if (!CACHE_ROOT_GENERATION_PATTERN.test(generation)) {
-            return { kind: 'malformed' };
-        }
-        return { kind: 'valid', generation };
-    }
-
-    private async cleanupCacheRootGenerationArtifacts(physicalCacheRootPath: string): Promise<void> {
-        const entries = await fs.readdir(physicalCacheRootPath);
-        for (const entry of entries.filter((candidate) => CACHE_ROOT_GENERATION_ARTIFACT_PATTERN.test(candidate))) {
-            const artifactPath = path.join(physicalCacheRootPath, entry);
-            let stat;
-            try {
-                stat = await fs.lstat(artifactPath);
-            } catch (error) {
-                if (isFileNotFoundError(error)) {
-                    continue;
-                }
-                throw error;
-            }
-            if (!stat.isFile() || stat.isSymbolicLink()) {
-                throw new Error(
-                    l10n.t(
-                        'Refusing to use the script environment cache because a root generation artifact is not a normal file.',
-                    ),
-                );
-            }
-            await fs.unlink(artifactPath);
-        }
-    }
-
     private async getPhysicalOwnedCacheRootPath(cacheRoot: Uri): Promise<string | undefined> {
-        this.validateCacheRootLocation(cacheRoot);
         const globalStoragePath = path.resolve(this.globalStorageUri.fsPath);
         const cacheRootPath = path.resolve(cacheRoot.fsPath);
+        if (path.basename(cacheRootPath) !== INLINE_SCRIPT_CACHE_DIR_NAME || normalizePath(path.dirname(cacheRootPath)) !== normalizePath(globalStoragePath)) {
+            this.log.error(`Refusing to clear inline-script cache from unsafe root: ${cacheRootPath}`);
+            throw new Error(l10n.t('Refusing to clear the script environment cache from an unsafe cache root.'));
+        }
+        if (isDriveRoot(globalStoragePath) || !hasMinimumPathDepth(cacheRootPath, 3)) {
+            this.log.error(`Refusing to clear inline-script cache from unsafe root: ${cacheRootPath}`);
+            throw new Error(l10n.t('Refusing to clear the script environment cache from an unsafe cache root.'));
+        }
 
         let globalStorageStat;
         try {
@@ -3427,20 +3101,6 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
             );
         }
         return resolvedCacheRootPath;
-    }
-
-    private validateCacheRootLocation(cacheRoot: Uri): void {
-        const globalStoragePath = path.resolve(this.globalStorageUri.fsPath);
-        const cacheRootPath = path.resolve(cacheRoot.fsPath);
-        if (
-            path.basename(cacheRootPath) !== INLINE_SCRIPT_CACHE_DIR_NAME ||
-            normalizePath(path.dirname(cacheRootPath)) !== normalizePath(globalStoragePath) ||
-            isDriveRoot(globalStoragePath) ||
-            !hasMinimumPathDepth(cacheRootPath, 3)
-        ) {
-            this.log.error(`Refusing to clear inline-script cache from unsafe root: ${cacheRootPath}`);
-            throw new Error(l10n.t('Refusing to clear the script environment cache from an unsafe cache root.'));
-        }
     }
 
     private async getClearableCacheEntryPath(cacheRoot: Uri, entryPath: string): Promise<string | undefined> {

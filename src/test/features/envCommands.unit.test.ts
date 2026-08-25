@@ -301,10 +301,10 @@ suite('Clear Script Environment Cache Command Tests', () => {
         assert.deepStrictEqual(calls, ['clearCache', 'getProjects', 'removeInlineSettings', 'removeProjects']);
     });
 
-    test('keeps the intrinsic workspace-root project loaded after its inline setting is cleaned', async () => {
-        const workspaceRootProject: PythonProject = {
-            uri: Uri.file('/workspace'),
-            name: 'workspace',
+    test('keeps loaded projects when inline settings cleanup leaves them configured', async () => {
+        const inlineProject: PythonProject = {
+            uri: Uri.file('/workspace/runner'),
+            name: 'runner',
         };
         const clearCache = sinon.stub().resolves();
         const envManagers = {
@@ -314,21 +314,16 @@ suite('Clear Script Environment Cache Command Tests', () => {
             }),
         } as unknown as EnvironmentManagers;
         const projectManager = {
-            getProjects: sinon.stub().returns([workspaceRootProject]),
+            getProjects: sinon.stub().returns([inlineProject]),
             remove: sinon.stub(),
         } as unknown as PythonProjectManager;
         sinon.stub(windowApis, 'showWarningMessage').resolves('Clear Cache' as never);
-        const removeInlineSettings = sinon
-            .stub(settingHelpers, 'removeInlineScriptPythonProjectSettings')
-            .callsFake(async (projects) => {
-                assert.deepStrictEqual(projects, [workspaceRootProject]);
-                return [];
-            });
+        const removeInlineSettings = sinon.stub(settingHelpers, 'removeInlineScriptPythonProjectSettings').resolves([]);
 
         await clearScriptEnvironmentCacheCommand(envManagers, projectManager);
 
         sinon.assert.calledOnce(clearCache);
-        sinon.assert.calledOnceWithExactly(removeInlineSettings, [workspaceRootProject]);
+        sinon.assert.calledOnceWithExactly(removeInlineSettings, [inlineProject]);
         sinon.assert.notCalled(projectManager.remove as sinon.SinonStub);
     });
 

@@ -19,7 +19,6 @@ export interface AcquiredFileLock {
 export const FILE_LOCK_DIR_SUFFIX = '.lock';
 export const FILE_LOCK_OWNER_MARKER_PREFIX = 'owner-';
 export const FILE_LOCK_RETAINED_MARKER_PREFIX = 'retained-';
-export const FILE_LOCK_RECLAIM_MARKER_PREFIX = '.reclaim-';
 export const FILE_LOCK_RELEASE_MARKER_PREFIX = '.release-';
 export const FILE_LOCK_RETIRED_DIR_INFIX = '.retired-';
 /** Legacy retained marker. It remains recognizable but cannot be safely reclaimed. */
@@ -141,7 +140,7 @@ export async function inspectFileLock(filePath: string, options?: InspectFileLoc
 interface FileLockSnapshot {
     readonly state: FileLockState;
     readonly marker?: string;
-    readonly markerKind?: 'owner' | 'retained' | 'reclaim' | 'release';
+    readonly markerKind?: 'owner' | 'retained' | 'release';
     readonly generationMarker?: string;
 }
 
@@ -176,14 +175,12 @@ async function inspectFileLockSnapshot(
     }
     const ownerEntries = entries.filter((entry) => entry.startsWith(FILE_LOCK_OWNER_MARKER_PREFIX));
     const generationRetainedEntries = entries.filter((entry) => entry.startsWith(FILE_LOCK_RETAINED_MARKER_PREFIX));
-    const reclaimEntries = entries.filter((entry) => entry.startsWith(FILE_LOCK_RECLAIM_MARKER_PREFIX));
     const releaseEntries = entries.filter((entry) => entry.startsWith(FILE_LOCK_RELEASE_MARKER_PREFIX));
     const retainedEntries = entries.filter((entry) => entry === FILE_LOCK_RETAINED_MARKER);
     const unknownEntries = entries.filter(
         (entry) =>
             !entry.startsWith(FILE_LOCK_OWNER_MARKER_PREFIX) &&
             !entry.startsWith(FILE_LOCK_RETAINED_MARKER_PREFIX) &&
-            !entry.startsWith(FILE_LOCK_RECLAIM_MARKER_PREFIX) &&
             !entry.startsWith(FILE_LOCK_RELEASE_MARKER_PREFIX) &&
             entry !== FILE_LOCK_RETAINED_MARKER,
     );
@@ -192,13 +189,11 @@ async function inspectFileLockSnapshot(
         unknownEntries.length > 0 ||
         ownerEntries.length > 1 ||
         generationRetainedEntries.length > 1 ||
-        reclaimEntries.length > 1 ||
         releaseEntries.length > 1 ||
         retainedEntries.length > 1 ||
-        (retainedEntries.length === 1 &&
-            generationRetainedEntries.length + reclaimEntries.length + releaseEntries.length > 0) ||
+        (retainedEntries.length === 1 && generationRetainedEntries.length + releaseEntries.length > 0) ||
         (retainedEntries.length === 0 &&
-            ownerEntries.length + generationRetainedEntries.length + reclaimEntries.length + releaseEntries.length > 1)
+            ownerEntries.length + generationRetainedEntries.length + releaseEntries.length > 1)
     ) {
         return { state: 'malformed' };
     }
@@ -211,27 +206,6 @@ async function inspectFileLockSnapshot(
             return { state: 'malformed' };
         }
         return { state: 'retained', marker: generationRetainedEntries[0], markerKind: 'retained' };
-    }
-    if (reclaimEntries.length === 1) {
-        const reclaimMarker = parseTransitionMarker(reclaimEntries[0], FILE_LOCK_RECLAIM_MARKER_PREFIX);
-        if (!reclaimMarker) {
-            return { state: 'malformed' };
-        }
-        const liveness = await (options?.checkProcessLiveness ?? getProcessLiveness)(reclaimMarker.pid);
-        if (liveness === 'dead') {
-            return {
-                state: 'stale',
-                marker: reclaimEntries[0],
-                markerKind: 'reclaim',
-                generationMarker: reclaimMarker.generationMarker,
-            };
-        }
-        return {
-            state: liveness === 'live' ? 'held' : 'unavailable',
-            marker: reclaimEntries[0],
-            markerKind: 'reclaim',
-            generationMarker: reclaimMarker.generationMarker,
-        };
     }
     if (releaseEntries.length === 1) {
         const releaseMarker = parseTransitionMarker(releaseEntries[0], FILE_LOCK_RELEASE_MARKER_PREFIX);
@@ -269,7 +243,7 @@ async function inspectFileLockSnapshot(
 }
 
 /**
- * Claim the exact observed stale or retained generation, then atomically retire its canonical directory.
+ * Claim and remove the exact observed stale or retained generation without releasing the lock directory.
  */
 export async function reclaimFileLock(filePath: string, options?: InspectFileLockOptions): Promise<boolean> {
     const lockPath = getFileLockPath(filePath);
@@ -282,13 +256,12 @@ export async function reclaimFileLock(filePath: string, options?: InspectFileLoc
         return false;
     }
 
-    const generationMarker = snapshot.generationMarker ?? snapshot.marker;
-    const claimedMarkerName =
-        `${FILE_LOCK_RECLAIM_MARKER_PREFIX}${process.pid}-${crypto.randomBytes(16).toString('hex')}-${generationMarker}`;
-    const claimedMarker = path.join(lockPath, claimedMarkerName);
-    const observedMarker = path.join(lockPath, snapshot.marker);
+    const claimedMarker = path.join(
+        lockPath,
+        `.reclaim-${process.pid}-${crypto.randomBytes(16).toString('hex')}-${snapshot.marker}`,
+    );
     try {
-        await fsapi.rename(observedMarker, claimedMarker);
+        await fsapi.rename(path.join(lockPath, snapshot.marker), claimedMarker);
     } catch (error) {
         if (hasErrorCode(error, 'ENOENT') || hasErrorCode(error, 'EEXIST')) {
             return false;
@@ -296,18 +269,16 @@ export async function reclaimFileLock(filePath: string, options?: InspectFileLoc
         throw error;
     }
 
-    const retiredPath = getRetiredLockPath(lockPath);
     try {
-        await retireCanonicalLockDirectory(lockPath, retiredPath);
+        await fsapi.unlink(claimedMarker);
+        await fsapi.rmdir(lockPath);
+        return true;
     } catch (error) {
-        await fsapi.rename(claimedMarker, observedMarker).catch(() => undefined);
         if (hasErrorCode(error, 'ENOENT') || hasErrorCode(error, 'ENOTEMPTY')) {
             return false;
         }
         throw error;
     }
-    await cleanupRetiredLock(retiredPath, claimedMarkerName);
-    return true;
 }
 
 export async function getProcessLiveness(pid: number): Promise<ProcessLiveness> {
