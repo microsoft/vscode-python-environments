@@ -95,6 +95,31 @@ suite('PipPackageManager', () => {
         );
     });
 
+    test('propagates pip version command failures during version lookup', async () => {
+        const manager = createManager();
+        const environment = createEnvironment();
+        const versionError = new Error('pip version failed');
+        sinon.stub(helpers, 'shouldUseUv').resolves(false);
+        sinon.stub(helpers, 'runPython').rejects(versionError);
+
+        await assert.rejects(
+            manager.getPackageAvailableVersions(environment, 'requests'),
+            (error: unknown) => error === versionError,
+        );
+    });
+
+    test('rejects version lookup when pip version output cannot be parsed', async () => {
+        const manager = createManager();
+        const environment = createEnvironment();
+        sinon.stub(helpers, 'shouldUseUv').resolves(false);
+        sinon.stub(helpers, 'runPython').resolves('unexpected version output');
+
+        await assert.rejects(
+            manager.getPackageAvailableVersions(environment, 'requests'),
+            /Unable to determine pip version for environment: test-environment/,
+        );
+    });
+
     test('normalizes discovered Python versions for pip lookup', async () => {
         const manager = createManager();
         const environment = {

@@ -1,7 +1,7 @@
 import assert from 'assert';
 import * as path from 'path';
 import * as sinon from 'sinon';
-import { CancellationToken, LogOutputChannel, Progress, ProgressOptions, Uri } from 'vscode';
+import { CancellationToken, LogOutputChannel, Progress, ProgressLocation, ProgressOptions, Uri } from 'vscode';
 import * as fse from 'fs-extra';
 import * as os from 'os';
 import { PythonEnvironment, PythonEnvironmentApi, PythonProject } from '../../../api';
@@ -86,6 +86,35 @@ suite('Pip Utils - getProjectInstallable', () => {
             assert.strictEqual(result, undefined);
             assert.ok(logError.calledOnceWithExactly('Error listing installed packages', listError));
             assert.ok(showQuickPick.calledOnce, 'The package picker should still open after a list failure');
+        });
+
+        test('shows progress while listing installed packages', async () => {
+            const environment = {
+                environmentPath: Uri.file('.'),
+                execInfo: { run: { executable: 'python' } },
+            } as PythonEnvironment;
+            const workspacePath = Uri.file('/test/path/root').fsPath;
+            findFilesStub.callsFake((pattern: string) =>
+                Promise.resolve(
+                    pattern === '*requirements*.txt'
+                        ? [Uri.file(path.join(workspacePath, 'requirements.txt'))]
+                        : [],
+                ),
+            );
+            sinon.stub(helpers, 'shouldUseUv').resolves(false);
+            sinon.stub(PipListCommand.prototype, 'execute').resolves([]);
+            const showQuickPick = sinon.stub(winapi, 'showQuickPickWithButtons').resolves(undefined);
+
+            await getWorkspacePackagesToInstall(
+                mockApi as PythonEnvironmentApi,
+                { install: [] },
+                [{ name: 'workspace', uri: Uri.file(workspacePath) }],
+                environment,
+            );
+
+            assert.strictEqual(withProgressStub.callCount, 2);
+            assert.strictEqual(withProgressStub.secondCall.args[0].location, ProgressLocation.Notification);
+            assert.ok(withProgressStub.secondCall.calledBefore(showQuickPick.firstCall));
         });
     });
 

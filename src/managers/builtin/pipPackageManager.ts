@@ -145,8 +145,9 @@ export class PipPackageManager implements PackageManager, Disposable {
                 this.log.error('Error managing packages', e);
                 if (!options.runHeadless) {
                     setImmediate(async () => {
-                        const result = await showErrorMessage('Error managing packages', 'View Output');
-                        if (result === 'View Output') {
+                        const viewOutput = l10n.t('View Output');
+                        const result = await showErrorMessage(l10n.t('Error managing packages'), viewOutput);
+                        if (result === viewOutput) {
                             this.log.show();
                         }
                     });
@@ -178,7 +179,7 @@ export class PipPackageManager implements PackageManager, Disposable {
         await withProgress(
             {
                 location: ProgressLocation.Window,
-                title: 'Refreshing packages',
+                title: l10n.t('Refreshing packages'),
             },
             async () => {
                 const packages = await updatePackagesAndNotify(
@@ -226,9 +227,10 @@ export class PipPackageManager implements PackageManager, Disposable {
             this.log.error('Error refreshing packages', error);
             if (showErrors) {
                 setImmediate(async () => {
-const viewOutput = l10n.t('View Output');
+                    const viewOutput = l10n.t('View Output');
                     const result = await showErrorMessage(l10n.t('Error refreshing packages'), viewOutput);
                     if (result === viewOutput) {
+                        this.log.show();
                     }
                 });
             }
@@ -282,9 +284,9 @@ const viewOutput = l10n.t('View Output');
 
         // For pip < 21.2.0, check version first.
         if (availableVersionsCmd instanceof PipAvailableVersionsCommand) {
-const pipVersionCmd = new PipVersionCommand({ pythonExecutable, log: this.log });
-            const pipVersion = await pipVersionCmd.execute();
+            const pipVersion = await new PipVersionCommand({ pythonExecutable, log: this.log }).execute();
             if (!pipVersion) {
+                throw new Error(`Unable to determine pip version for environment: ${environment.envId.id}`);
             }
             if (compare(pipVersion.public, '21.2.0') < 0) {
                 throw new PackageVersionLookupNotSupportedError(
