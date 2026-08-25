@@ -126,7 +126,7 @@ suite('Conda commands', () => {
         });
 
         await assert.rejects(() => command.execute(), CondaListOutputError);
-        assert.ok((mockLog.error as sinon.SinonStub).calledOnce);
+        assert.ok((mockLog.error as sinon.SinonStub).notCalled);
     });
 
     test('CondaListCommand rejects non-array JSON', async () => {
@@ -138,7 +138,7 @@ suite('Conda commands', () => {
         });
 
         await assert.rejects(() => command.execute(), /expected a JSON array/);
-        assert.ok((mockLog.error as sinon.SinonStub).calledOnce);
+        assert.ok((mockLog.error as sinon.SinonStub).notCalled);
     });
 
     test('CondaVersionCommand parses the version', async () => {

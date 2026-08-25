@@ -41,6 +41,25 @@ suite('CondaPackageManager', () => {
         assert.ok(showErrorMessageWithLogs.notCalled);
     });
 
+    test('does not fail a successful mutation when follow-up list output is malformed', async () => {
+        const environment = {
+            envId: { id: 'test-environment', managerId: 'test-manager' },
+            environmentPath: Uri.file('.'),
+        } as PythonEnvironment;
+        const logError = sinon.stub();
+        const manager = new CondaPackageManager(
+            { createPackageItem: sinon.stub() } as unknown as PythonEnvironmentApi,
+            { error: logError } as unknown as LogOutputChannel,
+        );
+        sinon.stub(CondaInstallCommand.prototype, 'execute').resolves();
+        const parseError = new CondaListOutputError('Failed to parse conda list output');
+        sinon.stub(CondaListCommand.prototype, 'execute').rejects(parseError);
+
+        await manager.manage(environment, { install: ['requests'], runHeadless: true });
+
+        assert.ok(logError.calledOnceWithExactly('Error parsing installed Conda packages', parseError));
+    });
+
     test('propagates package version lookup failures', async () => {
         const environment = {
             envId: { id: 'test-environment', managerId: 'test-manager' },
@@ -104,5 +123,36 @@ suite('CondaPackageManager', () => {
         sinon.stub(CondaListCommand.prototype, 'execute').rejects(processError);
 
         await assert.rejects(manager.getPackages(environment), (error: unknown) => error === processError);
+    });
+
+    test('does not report removals or replace the cache when refresh output is malformed', async () => {
+        const environment = {
+            envId: { id: 'test-environment', managerId: 'test-manager' },
+            environmentPath: Uri.file('.'),
+        } as PythonEnvironment;
+        const cachedPackage = {
+            name: 'requests',
+            displayName: 'requests',
+            version: '2.32.0',
+            description: '2.32.0',
+        };
+        const api = {
+            createPackageItem: sinon.stub().callsFake((pkg) => pkg),
+        } as unknown as PythonEnvironmentApi;
+        const manager = new CondaPackageManager(api, { error: sinon.stub() } as unknown as LogOutputChannel);
+        const execute = sinon.stub(CondaListCommand.prototype, 'execute');
+        execute.onFirstCall().resolves([cachedPackage]);
+        execute.onSecondCall().rejects(new CondaListOutputError('Failed to parse conda list output'));
+        sinon.stub(windowApis, 'withProgress').callsFake(async (_options, task) => task({} as never, {} as never));
+        const onDidChangePackages = sinon.stub();
+        manager.onDidChangePackages(onDidChangePackages);
+
+        await manager.getPackages(environment);
+        await manager.refresh(environment);
+        const packages = await manager.getPackages(environment);
+
+        assert.deepStrictEqual(packages?.map((pkg) => pkg.name), ['requests']);
+        assert.ok(onDidChangePackages.notCalled);
+        assert.strictEqual(execute.callCount, 2);
     });
 });

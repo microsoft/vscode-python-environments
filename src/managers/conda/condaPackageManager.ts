@@ -101,9 +101,15 @@ export class CondaPackageManager implements PackageManager, Disposable {
                     });
                 }
 
-                await updatePackagesAndNotify(this, environment, this.packages.get(environment.envId.id), (changes) => {
-                    this._onDidChangePackages.fire({ environment, manager: this, changes });
-                });
+                await updatePackagesAndNotify(
+                    this,
+                    environment,
+                    this.packages.get(environment.envId.id),
+                    (changes) => {
+                        this._onDidChangePackages.fire({ environment, manager: this, changes });
+                    },
+                    () => this.fetchPackages(environment),
+                );
             } catch (e) {
                 if (e instanceof CancellationError) {
                     throw e;
@@ -147,34 +153,40 @@ export class CondaPackageManager implements PackageManager, Disposable {
                     (changes) => {
                         this._onDidChangePackages.fire({ environment, manager: this, changes });
                     },
+                    () => this.fetchPackages(environment),
                 );
-                this.packages.set(environment.envId.id, packages ?? []);
+                if (packages !== undefined) {
+                    this.packages.set(environment.envId.id, packages);
+                }
             },
         );
     }
 
     async getPackages(environment: PythonEnvironment, options?: GetPackagesOptions): Promise<Package[] | undefined> {
         if (options?.skipCache || !this.packages.has(environment.envId.id)) {
-            const listCmd = new CondaListCommand({
-                pythonExecutable: 'conda',
-                condaEnvironmentPath: environment.environmentPath.fsPath,
-                log: this.log,
-            });
-            let data;
-            try {
-                data = await listCmd.execute();
-            } catch (error) {
-                if (error instanceof CondaListOutputError) {
-                    this.log.error('Error parsing installed Conda packages', error);
-                    return [];
-                }
-                throw error;
-            }
-            const packages = (data ?? []).map((pkg) => this.api.createPackageItem(pkg, environment, this));
-            this.packages.set(environment.envId.id, packages);
-            return packages;
+            return (await this.fetchPackages(environment)) ?? [];
         }
         return this.packages.get(environment.envId.id);
+    }
+
+    private async fetchPackages(environment: PythonEnvironment): Promise<Package[] | undefined> {
+        const listCmd = new CondaListCommand({
+            pythonExecutable: 'conda',
+            condaEnvironmentPath: environment.environmentPath.fsPath,
+            log: this.log,
+        });
+        try {
+            const data = await listCmd.execute();
+            const packages = data.map((pkg) => this.api.createPackageItem(pkg, environment, this));
+            this.packages.set(environment.envId.id, packages);
+            return packages;
+        } catch (error) {
+            if (error instanceof CondaListOutputError) {
+                this.log.error('Error parsing installed Conda packages', error);
+                return undefined;
+            }
+            throw error;
+        }
     }
 
     formatInstallSpec(packageName: string, version: string): string {

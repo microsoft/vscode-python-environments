@@ -39,13 +39,10 @@ export class CondaListCommand extends ListCommand {
         try {
             parsed = JSON.parse(output);
         } catch (error) {
-            this.log?.error('Failed to parse conda list output', error);
             throw new CondaListOutputError('Failed to parse conda list output', error);
         }
         if (!Array.isArray(parsed)) {
-            const error = new CondaListOutputError('Invalid conda list output: expected a JSON array');
-            this.log?.error(error.message);
-            throw error;
+            throw new CondaListOutputError('Invalid conda list output: expected a JSON array');
         }
 
         const packages: PackageInfo[] = [];
