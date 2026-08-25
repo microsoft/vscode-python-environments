@@ -831,6 +831,7 @@ export async function runInTerminalCommand(
                 args: [item.fsPath],
                 show: true,
             });
+            return;
         }
     }
     throw new Error(`Invalid context for run-in-terminal: ${item}`);
@@ -855,6 +856,7 @@ export async function runInDedicatedTerminalCommand(
                 args: [item.fsPath],
                 show: true,
             });
+            return;
         }
     }
     throw new Error(`Invalid context for run-in-terminal: ${item}`);
