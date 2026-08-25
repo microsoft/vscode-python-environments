@@ -299,6 +299,95 @@ suite('PythonEnvironmentManagers getLastKnownEnvironment', () => {
         assert.deepStrictEqual(events.map((event) => event.new), [second]);
     });
 
+    test('does not let an older non-inline selection install an override after a newer inline selection', async () => {
+        const script = Uri.file('/workspace/project/script.py');
+        projectsByUri.set(script.toString(), { name: 'project', uri: Uri.file('/workspace/project') });
+        let releaseOlderSelection: (() => void) | undefined;
+        let signalOlderSelection: (() => void) | undefined;
+        const olderSelectionStarted = new Promise<void>((resolve) => {
+            signalOlderSelection = resolve;
+        });
+        const olderSelectionGate = new Promise<void>((resolve) => {
+            releaseOlderSelection = resolve;
+        });
+        const selectedSet = sinon.stub().callsFake(async () => {
+            signalOlderSelection!();
+            await olderSelectionGate;
+        });
+        let selectedEnvironment: PythonEnvironment;
+        const selectedId = registerManager(async () => selectedEnvironment, selectedSet, 'venv');
+        let inlineEnvironment: PythonEnvironment;
+        const inlineId = registerManager(async () => inlineEnvironment, async () => undefined, 'inline-script');
+        selectedEnvironment = {
+            ...makeEnv('selected'),
+            envId: { id: 'selected', managerId: selectedId },
+        };
+        inlineEnvironment = {
+            ...makeEnv('inline'),
+            envId: { id: 'inline', managerId: inlineId },
+        };
+        defaultManagerId = selectedId;
+        markInlineScript(script);
+        const events: DidChangeEnvironmentEventArgs[] = [];
+        envManagers.onDidChangeActiveEnvironment((event) => events.push(event));
+
+        const olderSelection = envManagers.setEnvironment(script, selectedEnvironment, false);
+        await olderSelectionStarted;
+        await envManagers.setEnvironment(script, inlineEnvironment, false);
+        const eventsAfterNewerSelection = [...events];
+        releaseOlderSelection!();
+        await olderSelection;
+
+        assert.strictEqual(envManagers.getEnvironmentManager(script)?.id, inlineId);
+        assert.strictEqual(envManagers.getLastKnownEnvironment(script), inlineEnvironment);
+        assert.deepStrictEqual(events, eventsAfterNewerSelection);
+        assert.ok(events.every((event) => event.new !== selectedEnvironment));
+    });
+
+    test('does not let an older batch inline selection clear a newer non-inline override', async () => {
+        const script = Uri.file('/workspace/project/script.py');
+        projectsByUri.set(script.toString(), { name: 'project', uri: Uri.file('/workspace/project') });
+        let releaseOlderBatch: (() => void) | undefined;
+        let signalOlderBatch: (() => void) | undefined;
+        const olderBatchStarted = new Promise<void>((resolve) => {
+            signalOlderBatch = resolve;
+        });
+        const olderBatchGate = new Promise<void>((resolve) => {
+            releaseOlderBatch = resolve;
+        });
+        let selectedEnvironment: PythonEnvironment;
+        const selectedId = registerManager(async () => selectedEnvironment, async () => undefined, 'venv');
+        const inlineSet = sinon.stub().callsFake(async () => {
+            signalOlderBatch!();
+            await olderBatchGate;
+        });
+        let inlineEnvironment: PythonEnvironment;
+        const inlineId = registerManager(async () => inlineEnvironment, inlineSet, 'inline-script');
+        selectedEnvironment = {
+            ...makeEnv('selected'),
+            envId: { id: 'selected', managerId: selectedId },
+        };
+        inlineEnvironment = {
+            ...makeEnv('inline'),
+            envId: { id: 'inline', managerId: inlineId },
+        };
+        defaultManagerId = selectedId;
+        markInlineScript(script);
+        const events: DidChangeEnvironmentEventArgs[] = [];
+        envManagers.onDidChangeActiveEnvironment((event) => events.push(event));
+
+        const olderBatch = envManagers.setEnvironments([script], inlineEnvironment, false);
+        await olderBatchStarted;
+        await envManagers.setEnvironment(script, selectedEnvironment, false);
+        const eventsAfterNewerSelection = [...events];
+        releaseOlderBatch!();
+        await olderBatch;
+
+        assert.strictEqual(envManagers.getEnvironmentManager(script)?.id, selectedId);
+        assert.strictEqual(envManagers.getLastKnownEnvironment(script), selectedEnvironment);
+        assert.deepStrictEqual(events, eventsAfterNewerSelection);
+    });
+
     test('publishes inline environments with the same ID at different paths', async () => {
         const scope = Uri.file('/workspace/script.py');
         const managerId = registerManager(async () => undefined, async () => undefined, 'inline-script');

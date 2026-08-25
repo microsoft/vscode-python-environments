@@ -151,10 +151,13 @@ export async function restoreMetaJsonBackupUnderLock(
     }
 
     const validBackups: Array<{ readonly path: string; readonly metadata: InlineScriptEnvMeta }> = [];
+    let hasUnsupportedBackup = false;
     for (const entry of entries.filter((name) => META_JSON_BACKUP_FILENAME_RE.test(name))) {
         const result = await inspectMetaJsonFile(path.join(envDir.fsPath, entry));
         if (result.kind === 'valid' && isCompatible(result.metadata)) {
             validBackups.push({ path: path.join(envDir.fsPath, entry), metadata: result.metadata });
+        } else if (result.kind === 'unsupported') {
+            hasUnsupportedBackup = true;
         } else if (result.kind === 'unavailable' || result.kind === 'missing') {
             // A listed candidate changing or becoming unreadable is an
             // uncertain scan; preserve the entry rather than rebuilding it.
@@ -163,7 +166,7 @@ export async function restoreMetaJsonBackupUnderLock(
     }
 
     if (validBackups.length === 0) {
-        return { kind: 'missing' };
+        return { kind: hasUnsupportedBackup ? 'unsupported' : 'missing' };
     }
 
     // `lastUsedAt` is schema-validated canonical ISO text. Prefer the newest

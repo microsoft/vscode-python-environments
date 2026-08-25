@@ -1293,6 +1293,23 @@ suite('InlineScriptEnvManager', () => {
             assert.strictEqual(createWithProgressStub.callCount, 0);
         });
 
+        test('preserves a restart cache entry whose only usable backup has a future schema', async () => {
+            const directory = envDir();
+            const markerPath = path.join(directory.fsPath, 'keep.txt');
+            const backupPath = `${cacheLayout.getMetaJsonPath(directory).fsPath}.backup-abcdef123456`;
+            await fs.outputFile(markerPath, 'keep');
+            await fs.writeFile(
+                backupPath,
+                JSON.stringify({ ...(await makeSidecar()), schemaVersion: cacheLayout.META_SCHEMA_VERSION + 1 }),
+            );
+            inspectMetaStub.restore();
+
+            assert.strictEqual(await manager.create(scriptUri()), undefined);
+            assert.strictEqual(await fs.readFile(markerPath, 'utf8'), 'keep');
+            assert.strictEqual(await fs.pathExists(backupPath), true);
+            assert.strictEqual(createWithProgressStub.callCount, 0);
+        });
+
         test('coalesces simultaneous same-key creation within one extension host', async () => {
             let continueCreation: (() => void) | undefined;
             let creationStarted: (() => void) | undefined;
@@ -4905,6 +4922,459 @@ suite('InlineScriptEnvManager', () => {
             assert.strictEqual(resolveVenvStub.callCount, 0);
         });
 
+        test('autonomously validates a persisted association after its cache lock is released', async () => {
+            const uri = scriptUri();
+            const environment = await createOwnedEnvironment();
+            persistedAssociations = {
+                [normalizePath(uri.fsPath)]: matchedAssociationRecord(environment.environmentPath.fsPath),
+            };
+            const lockPath = `${path.resolve(environment.sysPrefix)}.lock`;
+            await fs.ensureDir(lockPath);
+            const restartRoutingRegistry = new InlineScriptRoutingRegistry();
+            const restarted = new InlineScriptEnvManager(
+                nativeFinder,
+                api,
+                baseManager,
+                globalStorageUri,
+                makeFakeLog(),
+                restartRoutingRegistry,
+            );
+            const retryManager = restarted as unknown as {
+                getAssociationValidationRetryDelayMs(attempt: number): number | undefined;
+            };
+            const retryDelayStub = sinon
+                .stub(retryManager, 'getAssociationValidationRetryDelayMs')
+                .callsFake((attempt) => (attempt === 0 ? 25 : undefined));
+            await nextTurn();
+
+            await triggerSavedMetadataChange(restartRoutingRegistry, restarted, uri);
+
+            assert.strictEqual(retryDelayStub.callCount, 1, 'duplicate validation must share one retry');
+            assert.strictEqual(restartRoutingRegistry.hasValidatedAssociation(uri), false);
+            assert.strictEqual(resolveVenvStub.callCount, 0);
+
+            await fs.remove(lockPath);
+            await waitForCondition(
+                () => restartRoutingRegistry.hasValidatedAssociation(uri),
+                'Expected lock release to be followed by autonomous association validation',
+            );
+
+            assert.strictEqual(resolveVenvStub.callCount, 1);
+            restarted.dispose();
+        });
+
+        test('bounds repeated busy association validation retries', async () => {
+            const uri = scriptUri();
+            const environment = await createOwnedEnvironment();
+            persistedAssociations = {
+                [normalizePath(uri.fsPath)]: matchedAssociationRecord(environment.environmentPath.fsPath),
+            };
+            await fs.ensureDir(`${path.resolve(environment.sysPrefix)}.lock`);
+            const restartRoutingRegistry = new InlineScriptRoutingRegistry();
+            const restarted = new InlineScriptEnvManager(
+                nativeFinder,
+                api,
+                baseManager,
+                globalStorageUri,
+                makeFakeLog(),
+                restartRoutingRegistry,
+            );
+            const retryManager = restarted as unknown as {
+                getAssociationValidationRetryDelayMs(attempt: number): number | undefined;
+            };
+            const retryDelayStub = sinon
+                .stub(retryManager, 'getAssociationValidationRetryDelayMs')
+                .callsFake((attempt) => (attempt < 3 ? 0 : undefined));
+            await nextTurn();
+
+            await triggerSavedMetadataChange(restartRoutingRegistry, restarted, uri);
+            await waitForCondition(
+                () => retryDelayStub.callCount === 4,
+                'Expected three bounded follow-up validation attempts',
+            );
+            await new Promise((resolve) => setTimeout(resolve, 25));
+
+            assert.strictEqual(retryDelayStub.callCount, 4, 'busy validation must stop after the retry budget');
+            assert.strictEqual(resolveVenvStub.callCount, 0);
+            assert.strictEqual(restartRoutingRegistry.hasValidatedAssociation(uri), false);
+            restarted.dispose();
+        });
+
+        test('cancels a busy validation retry when the association revision changes', async () => {
+            const uri = scriptUri();
+            const environment = await createOwnedEnvironment();
+            persistedAssociations = {
+                [normalizePath(uri.fsPath)]: matchedAssociationRecord(environment.environmentPath.fsPath),
+            };
+            const lockPath = `${path.resolve(environment.sysPrefix)}.lock`;
+            await fs.ensureDir(lockPath);
+            const restartRoutingRegistry = new InlineScriptRoutingRegistry();
+            const restarted = new InlineScriptEnvManager(
+                nativeFinder,
+                api,
+                baseManager,
+                globalStorageUri,
+                makeFakeLog(),
+                restartRoutingRegistry,
+            );
+            const retryManager = restarted as unknown as {
+                getAssociationValidationRetryDelayMs(attempt: number): number | undefined;
+            };
+            const retryDelayStub = sinon
+                .stub(retryManager, 'getAssociationValidationRetryDelayMs')
+                .callsFake((attempt) => (attempt === 0 ? 25 : undefined));
+            await nextTurn();
+            await triggerSavedMetadataChange(restartRoutingRegistry, restarted, uri);
+            sinon.assert.calledOnce(retryDelayStub);
+
+            await restarted.set(uri, undefined);
+            await fs.remove(lockPath);
+            await new Promise((resolve) => setTimeout(resolve, 40));
+
+            assert.deepStrictEqual(persistedAssociations, {});
+            assert.strictEqual(resolveVenvStub.callCount, 0);
+            assert.strictEqual(restartRoutingRegistry.hasValidatedAssociation(uri), false);
+            restarted.dispose();
+        });
+
+        test('dispose cancels a pending busy association validation retry', async () => {
+            const uri = scriptUri();
+            const environment = await createOwnedEnvironment();
+            persistedAssociations = {
+                [normalizePath(uri.fsPath)]: matchedAssociationRecord(environment.environmentPath.fsPath),
+            };
+            const lockPath = `${path.resolve(environment.sysPrefix)}.lock`;
+            await fs.ensureDir(lockPath);
+            const restartRoutingRegistry = new InlineScriptRoutingRegistry();
+            const restarted = new InlineScriptEnvManager(
+                nativeFinder,
+                api,
+                baseManager,
+                globalStorageUri,
+                makeFakeLog(),
+                restartRoutingRegistry,
+            );
+            const retryManager = restarted as unknown as {
+                getAssociationValidationRetryDelayMs(attempt: number): number | undefined;
+            };
+            const retryDelayStub = sinon
+                .stub(retryManager, 'getAssociationValidationRetryDelayMs')
+                .callsFake((attempt) => (attempt === 0 ? 25 : undefined));
+            await nextTurn();
+            await triggerSavedMetadataChange(restartRoutingRegistry, restarted, uri);
+            sinon.assert.calledOnce(retryDelayStub);
+
+            restarted.dispose();
+            await fs.remove(lockPath);
+            await new Promise((resolve) => setTimeout(resolve, 40));
+
+            assert.strictEqual(resolveVenvStub.callCount, 0);
+            assert.strictEqual(restartRoutingRegistry.hasValidatedAssociation(uri), false);
+        });
+
+        test('dispose invalidates an already-fired busy association validation retry', async () => {
+            const uri = scriptUri();
+            const scriptPath = normalizePath(uri.fsPath);
+            const environment = await createOwnedEnvironment();
+            persistedAssociations = {
+                [scriptPath]: matchedAssociationRecord(environment.environmentPath.fsPath),
+            };
+            const restartRoutingRegistry = new InlineScriptRoutingRegistry();
+            const restarted = new InlineScriptEnvManager(
+                nativeFinder,
+                api,
+                baseManager,
+                globalStorageUri,
+                makeFakeLog(),
+                restartRoutingRegistry,
+            );
+            let signalRetryBusyCheck: (() => void) | undefined;
+            let releaseRetryBusyCheck: ((busy: boolean) => void) | undefined;
+            const retryBusyCheckStarted = new Promise<void>((resolve) => {
+                signalRetryBusyCheck = resolve;
+            });
+            const retryBusyCheckGate = new Promise<boolean>((resolve) => {
+                releaseRetryBusyCheck = resolve;
+            });
+            const retryManager = restarted as unknown as {
+                getAssociationValidationRetryDelayMs(attempt: number): number | undefined;
+                isCacheEntryBusy(envDirPath: string): Promise<boolean>;
+                pendingMetadataRefreshes: Map<
+                    string,
+                    Map<string, { readonly origin: 'ordinary' | 'retry'; readonly promise: Promise<void> }>
+                >;
+                fsPathToEnv: Map<string, PythonEnvironment>;
+                fsPathToPersistedAssociation: Map<string, unknown>;
+                _onDidChangeEnvironment: { fire(event: unknown): void };
+            };
+            sinon
+                .stub(retryManager, 'getAssociationValidationRetryDelayMs')
+                .callsFake((attempt) => (attempt === 0 ? 0 : undefined));
+            const busyCheckStub = sinon.stub(retryManager, 'isCacheEntryBusy');
+            busyCheckStub.onFirstCall().resolves(true);
+            busyCheckStub.onSecondCall().callsFake(async () => {
+                signalRetryBusyCheck!();
+                return retryBusyCheckGate;
+            });
+            const environmentEventFire = sinon.spy(retryManager._onDidChangeEnvironment, 'fire');
+            const routePublication = sinon.spy(restartRoutingRegistry, 'setValidatedAssociation');
+            await nextTurn();
+
+            await triggerSavedMetadataChange(restartRoutingRegistry, restarted, uri);
+            await retryBusyCheckStarted;
+            const inFlightRetry = Array.from(
+                retryManager.pendingMetadataRefreshes.get(scriptPath)?.values() ?? [],
+            ).find((operation) => operation.origin === 'retry')?.promise;
+            assert.ok(inFlightRetry, 'retry should be in flight before disposal');
+            assert.strictEqual(busyCheckStub.callCount, 2);
+            assert.strictEqual(retryManager.fsPathToEnv.has(scriptPath), false);
+            workspaceState.set.resetHistory();
+            environmentEventFire.resetHistory();
+            routePublication.resetHistory();
+
+            restarted.dispose();
+            releaseRetryBusyCheck!(false);
+            await inFlightRetry;
+
+            assert.deepStrictEqual(persistedAssociations, {
+                [scriptPath]: matchedAssociationRecord(environment.environmentPath.fsPath),
+            });
+            assert.strictEqual(workspaceState.set.callCount, 0, 'disposed retry must not remove persistence');
+            assert.strictEqual(retryManager.fsPathToPersistedAssociation.has(scriptPath), true);
+            assert.strictEqual(retryManager.fsPathToEnv.has(scriptPath), false, 'disposed retry must not repopulate cache');
+            assert.strictEqual(resolveVenvStub.callCount, 0);
+            assert.strictEqual(environmentEventFire.callCount, 0, 'disposed retry must not fire manager events');
+            assert.strictEqual(routePublication.callCount, 0, 'disposed retry must not publish routeability');
+            assert.strictEqual(restartRoutingRegistry.hasValidatedAssociation(uri), false);
+        });
+
+        test('keeps an ordinary get independent when it arrives during a fired retry', async () => {
+            const uri = scriptUri();
+            const scriptPath = normalizePath(uri.fsPath);
+            const environment = await createOwnedEnvironment();
+            persistedAssociations = {
+                [scriptPath]: matchedAssociationRecord(environment.environmentPath.fsPath),
+            };
+            const restartRoutingRegistry = new InlineScriptRoutingRegistry();
+            const restarted = new InlineScriptEnvManager(
+                nativeFinder,
+                api,
+                baseManager,
+                globalStorageUri,
+                makeFakeLog(),
+                restartRoutingRegistry,
+            );
+            let signalRetryBusyCheck: (() => void) | undefined;
+            let releaseRetryBusyCheck: ((busy: boolean) => void) | undefined;
+            const retryBusyCheckStarted = new Promise<void>((resolve) => {
+                signalRetryBusyCheck = resolve;
+            });
+            const retryBusyCheckGate = new Promise<boolean>((resolve) => {
+                releaseRetryBusyCheck = resolve;
+            });
+            let releaseOrdinaryResolution: (() => void) | undefined;
+            const ordinaryResolutionGate = new Promise<void>((resolve) => {
+                releaseOrdinaryResolution = resolve;
+            });
+            const retryManager = restarted as unknown as {
+                getAssociationValidationRetryDelayMs(attempt: number): number | undefined;
+                isCacheEntryBusy(envDirPath: string): Promise<boolean>;
+                refreshValidatedAssociationForMetadata(
+                    candidate: Uri,
+                    metadata: metadataReader.InlineScriptMetadata,
+                    metadataIdentity: string,
+                    metadataRevision: number,
+                    retryGeneration?: number,
+                ): Promise<void>;
+                pendingRehydrations: Map<
+                    string,
+                    Map<string, { readonly origin: 'ordinary' | 'retry'; readonly promise: Promise<unknown> }>
+                >;
+                pendingMetadataRefreshes: Map<
+                    string,
+                    Map<
+                        string,
+                        {
+                            readonly origin: 'ordinary' | 'retry';
+                            readonly retryGeneration?: number;
+                            readonly promise: Promise<void>;
+                        }
+                    >
+                >;
+                fsPathToEnv: Map<string, PythonEnvironment>;
+                fsPathToPersistedAssociation: Map<string, unknown>;
+                _onDidChangeEnvironment: { fire(event: unknown): void };
+            };
+            sinon
+                .stub(retryManager, 'getAssociationValidationRetryDelayMs')
+                .callsFake((attempt) => (attempt === 0 ? 0 : undefined));
+            const busyCheckStub = sinon.stub(retryManager, 'isCacheEntryBusy');
+            busyCheckStub.onFirstCall().resolves(true);
+            busyCheckStub.onSecondCall().callsFake(async () => {
+                signalRetryBusyCheck!();
+                return retryBusyCheckGate;
+            });
+            busyCheckStub.onThirdCall().resolves(false);
+            resolveVenvStub.callsFake(async () => {
+                await ordinaryResolutionGate;
+                return environment;
+            });
+            const environmentEventFire = sinon.spy(retryManager._onDidChangeEnvironment, 'fire');
+            const routePublication = sinon.spy(restartRoutingRegistry, 'setValidatedAssociation');
+            await nextTurn();
+
+            await triggerSavedMetadataChange(restartRoutingRegistry, restarted, uri);
+            await retryBusyCheckStarted;
+            const retryRefresh = Array.from(
+                retryManager.pendingMetadataRefreshes.get(scriptPath)?.values() ?? [],
+            ).find((operation) => operation.origin === 'retry');
+            assert.ok(retryRefresh?.retryGeneration !== undefined);
+            const equivalentRetry = retryManager.refreshValidatedAssociationForMetadata(
+                uri,
+                VALID_METADATA,
+                restartRoutingRegistry.getMetadataIdentity(uri)!,
+                restartRoutingRegistry.getMetadataRevision(uri),
+                retryRefresh!.retryGeneration,
+            );
+            await nextTurn();
+            assert.strictEqual(busyCheckStub.callCount, 2, 'same-generation retries must coalesce');
+
+            const ordinaryGet = restarted.get(uri);
+            await waitForStubCall(resolveVenvStub);
+            assert.deepStrictEqual(
+                Array.from(retryManager.pendingRehydrations.get(scriptPath)?.values() ?? [])
+                    .map((operation) => operation.origin)
+                    .sort(),
+                ['ordinary', 'retry'],
+            );
+            workspaceState.set.resetHistory();
+            environmentEventFire.resetHistory();
+            routePublication.resetHistory();
+
+            restarted.dispose();
+            releaseRetryBusyCheck!(false);
+            releaseOrdinaryResolution!();
+            const ordinaryResult = await ordinaryGet;
+            await Promise.all([retryRefresh!.promise, equivalentRetry]);
+
+            assert.strictEqual(ordinaryResult, environment, 'ordinary get must survive retry disposal');
+            assert.deepStrictEqual(persistedAssociations, {
+                [scriptPath]: matchedAssociationRecord(environment.environmentPath.fsPath),
+            });
+            assert.strictEqual(workspaceState.set.callCount, 0);
+            assert.strictEqual(retryManager.fsPathToPersistedAssociation.has(scriptPath), true);
+            assert.strictEqual(retryManager.fsPathToEnv.get(scriptPath), environment);
+            assert.strictEqual(environmentEventFire.callCount, 1, 'only ordinary work may publish a manager event');
+            assert.strictEqual(routePublication.callCount, 0, 'disposed retry must not publish routeability');
+            assert.strictEqual(restartRoutingRegistry.hasValidatedAssociation(uri), false);
+        });
+
+        test('keeps a fired retry independent from an existing ordinary validation', async () => {
+            const uri = scriptUri();
+            const scriptPath = normalizePath(uri.fsPath);
+            const environment = await createOwnedEnvironment();
+            persistedAssociations = {
+                [scriptPath]: matchedAssociationRecord(environment.environmentPath.fsPath),
+            };
+            const restartRoutingRegistry = new InlineScriptRoutingRegistry();
+            const restarted = new InlineScriptEnvManager(
+                nativeFinder,
+                api,
+                baseManager,
+                globalStorageUri,
+                makeFakeLog(),
+                restartRoutingRegistry,
+            );
+            let releaseOrdinaryResolution: (() => void) | undefined;
+            const ordinaryResolutionGate = new Promise<void>((resolve) => {
+                releaseOrdinaryResolution = resolve;
+            });
+            let signalRetryBusyCheck: (() => void) | undefined;
+            let releaseRetryBusyCheck: ((busy: boolean) => void) | undefined;
+            const retryBusyCheckStarted = new Promise<void>((resolve) => {
+                signalRetryBusyCheck = resolve;
+            });
+            const retryBusyCheckGate = new Promise<boolean>((resolve) => {
+                releaseRetryBusyCheck = resolve;
+            });
+            const retryManager = restarted as unknown as {
+                getAssociationValidationRetryDelayMs(attempt: number): number | undefined;
+                isCacheEntryBusy(envDirPath: string): Promise<boolean>;
+                pendingRehydrations: Map<
+                    string,
+                    Map<string, { readonly origin: 'ordinary' | 'retry'; readonly promise: Promise<unknown> }>
+                >;
+                pendingMetadataRefreshes: Map<
+                    string,
+                    Map<string, { readonly origin: 'ordinary' | 'retry'; readonly promise: Promise<void> }>
+                >;
+                fsPathToEnv: Map<string, PythonEnvironment>;
+                fsPathToPersistedAssociation: Map<string, unknown>;
+                _onDidChangeEnvironment: { fire(event: unknown): void };
+            };
+            sinon
+                .stub(retryManager, 'getAssociationValidationRetryDelayMs')
+                .callsFake((attempt) => (attempt === 0 ? 25 : undefined));
+            const busyCheckStub = sinon.stub(retryManager, 'isCacheEntryBusy');
+            busyCheckStub.onFirstCall().resolves(true);
+            busyCheckStub.onSecondCall().resolves(false);
+            busyCheckStub.onThirdCall().callsFake(async () => {
+                signalRetryBusyCheck!();
+                return retryBusyCheckGate;
+            });
+            resolveVenvStub.callsFake(async () => {
+                await ordinaryResolutionGate;
+                return environment;
+            });
+            const environmentEventFire = sinon.spy(retryManager._onDidChangeEnvironment, 'fire');
+            const routePublication = sinon.spy(restartRoutingRegistry, 'setValidatedAssociation');
+            await nextTurn();
+
+            await triggerSavedMetadataChange(restartRoutingRegistry, restarted, uri);
+            const ordinaryGet = restarted.get(uri);
+            await waitForStubCall(resolveVenvStub);
+            const equivalentOrdinaryGet = restarted.get(uri);
+            await nextTurn();
+            assert.strictEqual(resolveVenvStub.callCount, 1, 'equivalent ordinary gets must coalesce');
+
+            await waitForStubCallCount(busyCheckStub, 3);
+            await retryBusyCheckStarted;
+            assert.deepStrictEqual(
+                Array.from(retryManager.pendingRehydrations.get(scriptPath)?.values() ?? [])
+                    .map((operation) => operation.origin)
+                    .sort(),
+                ['ordinary', 'retry'],
+            );
+            const retryPromise = Array.from(
+                retryManager.pendingMetadataRefreshes.get(scriptPath)?.values() ?? [],
+            ).find((operation) => operation.origin === 'retry')?.promise;
+            assert.ok(retryPromise);
+            workspaceState.set.resetHistory();
+            environmentEventFire.resetHistory();
+            routePublication.resetHistory();
+
+            restarted.dispose();
+            releaseRetryBusyCheck!(false);
+            releaseOrdinaryResolution!();
+            const [ordinaryResult, equivalentOrdinaryResult] = await Promise.all([
+                ordinaryGet,
+                equivalentOrdinaryGet,
+            ]);
+            await retryPromise;
+
+            assert.strictEqual(ordinaryResult, environment);
+            assert.strictEqual(equivalentOrdinaryResult, environment);
+            assert.deepStrictEqual(persistedAssociations, {
+                [scriptPath]: matchedAssociationRecord(environment.environmentPath.fsPath),
+            });
+            assert.strictEqual(workspaceState.set.callCount, 0);
+            assert.strictEqual(retryManager.fsPathToPersistedAssociation.has(scriptPath), true);
+            assert.strictEqual(retryManager.fsPathToEnv.get(scriptPath), environment);
+            assert.strictEqual(environmentEventFire.callCount, 1, 'coalesced ordinary work publishes once');
+            assert.strictEqual(routePublication.callCount, 0, 'disposed retry must not publish routeability');
+            assert.strictEqual(restartRoutingRegistry.hasValidatedAssociation(uri), false);
+        });
+
         test('clears the routing registry when a stale persisted association is removed', async () => {
             const uri = scriptUri();
             const environment = await createOwnedEnvironment();
@@ -5666,6 +6136,7 @@ suite('InlineScriptEnvManager', () => {
                 baseManager,
                 Uri.file(process.platform === 'win32' ? `${process.env.SystemDrive ?? 'C:'}\\` : '/'),
                 makeFakeLog(),
+                routingRegistry,
             );
 
             await assert.rejects(
@@ -5684,6 +6155,7 @@ suite('InlineScriptEnvManager', () => {
                 baseManager,
                 symlinkStorageUri,
                 makeFakeLog(),
+                routingRegistry,
             );
             const realCacheRoot = cacheLayout.getScriptEnvCacheRoot(symlinkStorageUri).fsPath;
             const externalCacheRoot = path.join(tempRoot, 'external-cache-root');
@@ -5718,6 +6190,7 @@ suite('InlineScriptEnvManager', () => {
                 baseManager,
                 Uri.file(redirectedStoragePath),
                 makeFakeLog(),
+                routingRegistry,
             );
             try {
                 await fs.remove(redirectedStoragePath);

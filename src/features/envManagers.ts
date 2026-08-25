@@ -420,8 +420,22 @@ export class PythonEnvironmentManagers implements EnvironmentManagers {
         }
 
         if (scope instanceof Uri) {
+            const inlineOperation =
+                manager.id === INLINE_SCRIPT_MANAGER_ID
+                    ? operation
+                    : (inlineOverrideHandoffOperation ?? inlineClearOperation);
+            if (
+                !this.commitSelectionOperations([
+                    { key, operation },
+                    ...(inlineOperation === undefined
+                        ? []
+                        : [{ key: this.getInlineScriptSelectionKey(scope), operation: inlineOperation }]),
+                ])
+            ) {
+                return;
+            }
             this.updateInlineRoutingOverride(scope, manager, environment);
-            this.clearInlineActiveSelection(scope, manager, inlineClearOperation);
+            this.clearInlineActiveSelection(scope, manager, inlineOperation);
             if (
                 clearingInlineRoutingOverride &&
                 (await this.publishEffectiveEnvironmentAfterOverrideClear(
@@ -511,6 +525,9 @@ export class PythonEnvironmentManagers implements EnvironmentManagers {
                     await setAllManagerSettings(settings);
                 }
                 selections.forEach((selection) => {
+                    if (!this.commitPendingSelection(selection, manager)) {
+                        return;
+                    }
                     this.updateInlineRoutingOverride(selection.scope, manager, environment);
                     this.clearInlineActiveSelection(selection.scope, manager, selection.inlineClearOperation);
                     if (!selection.publishInlineSelection) {
@@ -932,6 +949,20 @@ export class PythonEnvironmentManagers implements EnvironmentManagers {
         }
     }
 
+    private commitPendingSelection(
+        selection: PendingEnvironmentSelection,
+        manager: InternalEnvironmentManager,
+    ): boolean {
+        const inlineOperation =
+            manager.id === INLINE_SCRIPT_MANAGER_ID ? selection.operation : selection.inlineClearOperation;
+        return this.commitSelectionOperations([
+            { key: selection.key, operation: selection.operation },
+            ...(inlineOperation === undefined
+                ? []
+                : [{ key: this.getInlineScriptSelectionKey(selection.scope), operation: inlineOperation }]),
+        ]);
+    }
+
     private canPersistManagerSettingForScope(
         scope: Uri,
         manager: InternalEnvironmentManager,
@@ -951,10 +982,24 @@ export class PythonEnvironmentManagers implements EnvironmentManagers {
     }
 
     private commitSelectionOperation(key: string, operation: number): boolean {
-        if ((this._selectionRevisions.get(key) ?? 0) > operation) {
-            return false;
+        return this.commitSelectionOperations([{ key, operation }]);
+    }
+
+    private commitSelectionOperations(
+        operations: readonly { readonly key: string; readonly operation: number }[],
+    ): boolean {
+        const latestByKey = new Map<string, number>();
+        for (const { key, operation } of operations) {
+            latestByKey.set(key, Math.max(latestByKey.get(key) ?? operation, operation));
         }
-        this._selectionRevisions.set(key, operation);
+        for (const [key, operation] of latestByKey) {
+            if ((this._selectionRevisions.get(key) ?? 0) > operation) {
+                return false;
+            }
+        }
+        for (const [key, operation] of latestByKey) {
+            this._selectionRevisions.set(key, operation);
+        }
         return true;
     }
 
