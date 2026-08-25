@@ -69,6 +69,24 @@ suite('Conda commands', () => {
         assert.deepStrictEqual(result.map((version) => version.public), ['1.0.0', '2.0.0']);
     });
 
+    test('CondaAvailableVersionsCommand rejects malformed or unexpected output', async () => {
+        const command = new CondaAvailableVersionsCommand({ pythonExecutable: 'conda', log: mockLog });
+        runCondaStub.resolves('not json');
+        await assert.rejects(command.execute({ packageName: 'package', pythonVersion: '' }), SyntaxError);
+
+        runCondaStub.resolves('{}');
+        await assert.rejects(
+            command.execute({ packageName: 'package', pythonVersion: '' }),
+            /unexpected package version data/,
+        );
+
+        runCondaStub.resolves(JSON.stringify({ package: [{ name: 'package' }] }));
+        await assert.rejects(
+            command.execute({ packageName: 'package', pythonVersion: '' }),
+            /invalid package version entry/,
+        );
+    });
+
     test('CondaListCommand parses packages and drops incomplete entries', async () => {
         runCondaStub.resolves(JSON.stringify([{ name: 'package', version: '1.0.0' }, { name: 'broken' }]));
         const command = new CondaListCommand({

@@ -11,7 +11,6 @@ import {
     MarkdownString,
     ProgressLocation,
     ThemeIcon,
-    window,
 } from 'vscode';
 import {
     DidChangePackagesEventArgs,
@@ -24,13 +23,14 @@ import {
     PythonEnvironment,
     PythonEnvironmentApi,
 } from '../../api';
-import { withProgress } from '../../common/window.apis';
+import { showErrorMessage, withProgress } from '../../common/window.apis';
 import { CommandConstructorOptions } from '../base/commands/index';
 import { updatePackagesAndNotify } from '../common/packageChanges';
 import { parsePackageSpecs } from '../common/packageUtils';
 import { createPipOrUvCommand } from './commands/factory';
 import {
     PipAvailableVersionsCommand,
+    PipAvailableVersionsTextCommand,
     PipInstallCommand,
     PipListCommand,
     PipListDirectNamesCommand,
@@ -145,7 +145,7 @@ export class PipPackageManager implements PackageManager, Disposable {
                 this.log.error('Error managing packages', e);
                 if (!options.runHeadless) {
                     setImmediate(async () => {
-                        const result = await window.showErrorMessage('Error managing packages', 'View Output');
+                        const result = await showErrorMessage('Error managing packages', 'View Output');
                         if (result === 'View Output') {
                             this.log.show();
                         }
@@ -175,7 +175,7 @@ export class PipPackageManager implements PackageManager, Disposable {
     }
 
     async refresh(environment: PythonEnvironment): Promise<void> {
-        await window.withProgress(
+        await withProgress(
             {
                 location: ProgressLocation.Window,
                 title: 'Refreshing packages',
@@ -226,7 +226,7 @@ export class PipPackageManager implements PackageManager, Disposable {
             this.log.error('Error refreshing packages', error);
             if (showErrors) {
                 setImmediate(async () => {
-                    const result = await window.showErrorMessage('Error refreshing packages', 'View Output');
+                    const result = await showErrorMessage('Error refreshing packages', 'View Output');
                     if (result === 'View Output') {
                         this.log.show();
                     }
@@ -263,11 +263,11 @@ export class PipPackageManager implements PackageManager, Disposable {
             throw new Error(`Python executable is unavailable for environment: ${environment.envId.id}`);
         }
 
-            // Normalize versions like '3.13.1.final.0' (Python's sys.version_info format) to '3.13.1'
-            // before parsing, since pep440 only accepts valid PEP 440 version strings.
-            const versionMatch = (environment.version ?? '').match(/^(\d+(?:\.\d+)*)/);
-            const normalizedVersion = versionMatch?.[1] ?? '';
-            const baseVersion = parse(normalizedVersion)?.base_version;
+        // Normalize versions like '3.13.1.final.0' (Python's sys.version_info format) to '3.13.1'
+        // before parsing, since pep440 only accepts valid PEP 440 version strings.
+        const versionMatch = (environment.version ?? '').match(/^(\d+(?:\.\d+)*)/);
+        const normalizedVersion = versionMatch?.[1] ?? '';
+        const baseVersion = parse(normalizedVersion)?.base_version;
         if (!baseVersion) {
             throw new Error(`Python version is unavailable for environment: ${environment.envId.id}`);
         }
@@ -280,7 +280,7 @@ export class PipPackageManager implements PackageManager, Disposable {
                 UvAvailableVersionsCommand,
             );
 
-            // For pip < 21.2.0, check version first
+        // For pip < 21.2.0, check version first.
         if (availableVersionsCmd instanceof PipAvailableVersionsCommand) {
             const pipVersion = await this.getVersion(environment);
             if (!pipVersion) {
@@ -291,12 +291,17 @@ export class PipPackageManager implements PackageManager, Disposable {
                     `Package version lookup requires pip 21.2 or newer; the environment has pip ${pipVersion.public}.`,
                 );
             }
-            const versions = await availableVersionsCmd.execute({
-                packageName,
-                pythonVersion: baseVersion,
-                useJson: compare(pipVersion.public, '25.1') >= 0,
-            });
-            return versions.sort((a, b) => compare(b.public, a.public));
+            if (compare(pipVersion.public, '25.1') >= 0) {
+                const versions = await availableVersionsCmd.execute({
+                    packageName,
+                    pythonVersion: baseVersion,
+                });
+                return versions.sort((a, b) => compare(b.public, a.public));
+            }
+
+            const textCommand = new PipAvailableVersionsTextCommand({ pythonExecutable, log: this.log });
+            const textVersions = await textCommand.execute({ packageName, pythonVersion: baseVersion });
+            return textVersions.sort((a, b) => compare(b.public, a.public));
         }
 
         const versions = await availableVersionsCmd.execute({

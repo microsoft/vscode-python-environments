@@ -115,9 +115,36 @@ suite('PipPackageManager', () => {
             'versions',
             'requests',
             '--json',
+            '--disable-pip-version-check',
             '--python-version',
             '3.13.14',
         ]);
+    });
+
+    test('uses text output for Pip versions before JSON support', async () => {
+        const manager = createManager();
+        const environment = createEnvironment();
+        sinon.stub(helpers, 'shouldUseUv').resolves(false);
+        const runPython = sinon.stub(helpers, 'runPython');
+        runPython.onFirstCall().resolves('pip 24.3 from /path/to/pip (python 3.12)');
+        runPython.onSecondCall().resolves('Available versions: 2.32.5, 2.31.0');
+
+        const versions = await manager.getPackageAvailableVersions(environment, 'requests');
+
+        assert.deepStrictEqual(runPython.secondCall.args[1], [
+            '-m',
+            'pip',
+            'index',
+            'versions',
+            'requests',
+            '--disable-pip-version-check',
+            '--python-version',
+            '3.12.0',
+        ]);
+        assert.deepStrictEqual(
+            versions.map((version) => version.public),
+            ['2.32.5', '2.31.0'],
+        );
     });
 
     test('rejects package management for Python 2 environments', async () => {

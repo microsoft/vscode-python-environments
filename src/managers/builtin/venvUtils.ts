@@ -25,7 +25,6 @@ import { getWorkspacePersistentState } from '../../common/persistentState';
 import { EventNames } from '../../common/telemetry/constants';
 import { sendTelemetryEvent } from '../../common/telemetry/sender';
 import { normalizePath } from '../../common/utils/pathUtils';
-import { isTestExecution } from '../../common/utils/testing';
 import { getVenvPythonPath } from '../../common/utils/virtualEnvironment';
 import {
     showErrorMessage,
@@ -581,7 +580,6 @@ export async function removeVenv(
 
     const confirmed =
         options?.runHeadless === true ||
-        isTestExecution() ||
         (
             await showWarningMessage(
                 l10n.t('Are you sure you want to remove {0}?', displayPath),

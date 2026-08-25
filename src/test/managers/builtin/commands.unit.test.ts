@@ -10,6 +10,7 @@ import { LogOutputChannel } from 'vscode';
 import * as workspaceApis from '../../../common/workspace.apis';
 import {
     PipAvailableVersionsCommand,
+    PipAvailableVersionsTextCommand,
     UvAvailableVersionsCommand,
 } from '../../../managers/builtin/commands/availableVersions';
 import { PipInstallCommand, UvInstallCommand } from '../../../managers/builtin/commands/install';
@@ -111,6 +112,14 @@ suite('Pip and UV command parsing', () => {
         const command = new PipListDirectNamesCommand({ pythonExecutable: 'python', log });
 
         assert.deepStrictEqual(await command.execute(), new Set(['my-package']));
+        assert.deepStrictEqual(runPythonStub.firstCall.args[1], [
+            '-m',
+            'pip',
+            'list',
+            '--format=json',
+            '--not-required',
+            '--disable-pip-version-check',
+        ]);
     });
 
     test('UvListDirectNamesCommand parses top-level packages only', async () => {
@@ -157,25 +166,29 @@ suite('Pip and UV command parsing', () => {
         );
     });
 
-    test('PipAvailableVersionsCommand handles malformed output', async () => {
+    test('PipAvailableVersionsCommand rejects malformed output', async () => {
         const command = new PipAvailableVersionsCommand({ pythonExecutable: 'python', log });
         runPythonStub.resolves('no JSON here');
-        assert.deepStrictEqual(
-            await command.execute({ packageName: 'package', pythonVersion: '3.13' }),
-            [],
+        await assert.rejects(
+            command.execute({ packageName: 'package', pythonVersion: '3.13' }),
+            /Unable to find package version JSON/,
         );
 
         runPythonStub.resolves('{not valid JSON}');
-        assert.deepStrictEqual(
-            await command.execute({ packageName: 'package', pythonVersion: '3.13' }),
-            [],
-        );
+        await assert.rejects(command.execute({ packageName: 'package', pythonVersion: '3.13' }), SyntaxError);
 
         runPythonStub.resolves(JSON.stringify({ versions: '1.0.0' }));
-        assert.deepStrictEqual(
-            await command.execute({ packageName: 'package', pythonVersion: '3.13' }),
-            [],
+        await assert.rejects(
+            command.execute({ packageName: 'package', pythonVersion: '3.13' }),
+            /Unexpected package version JSON/,
         );
+    });
+
+    test('PipAvailableVersionsCommand accepts a valid empty versions array', async () => {
+        runPythonStub.resolves(JSON.stringify({ versions: [] }));
+        const command = new PipAvailableVersionsCommand({ pythonExecutable: 'python', log });
+
+        assert.deepStrictEqual(await command.execute({ packageName: 'package', pythonVersion: '3.13' }), []);
     });
 
     test('UvAvailableVersionsCommand returns parsed prerelease versions when requested', async () => {
@@ -200,6 +213,7 @@ suite('Pip and UV command parsing', () => {
         });
 
         assert.deepStrictEqual(runPythonStub.firstCall.args[1], ['-m', 'pip', 'install', '--upgrade', '-e', '.[dev]']);
+        assert.strictEqual(runPythonStub.firstCall.args[5], undefined);
     });
 
     test('UvInstallCommand targets the selected interpreter', async () => {
@@ -208,6 +222,7 @@ suite('Pip and UV command parsing', () => {
         await command.execute({ packages: [{ packageName: 'requests' }] });
 
         assert.deepStrictEqual(runUvStub.firstCall.args[0], ['pip', 'install', '--python', 'python', 'requests']);
+        assert.strictEqual(runUvStub.firstCall.args[4], undefined);
     });
 
     test('PipUninstallCommand includes automatic confirmation', async () => {
@@ -234,7 +249,6 @@ suite('Pip and UV command parsing', () => {
             packageName: 'package',
             pythonVersion: '3.13.1',
             includePrerelease: false,
-            useJson: true,
         });
 
         assert.deepStrictEqual(runPythonStub.firstCall.args[1], [
@@ -244,21 +258,21 @@ suite('Pip and UV command parsing', () => {
             'versions',
             'package',
             '--json',
+            '--disable-pip-version-check',
             '--python-version',
             '3.13.1',
         ]);
         assert.deepStrictEqual(result.map((version) => version.public), ['1.0.0']);
     });
 
-    test('PipAvailableVersionsCommand parses text output for Pip 21.2 through 25.0', async () => {
+    test('PipAvailableVersionsTextCommand parses text output for Pip 21.2 through 25.0', async () => {
         runPythonStub.resolves('Available versions: 2.0.0rc1, 1.0.0');
-        const command = new PipAvailableVersionsCommand({ pythonExecutable: 'python', log: mockLog });
+        const command = new PipAvailableVersionsTextCommand({ pythonExecutable: 'python', log: mockLog });
 
         const result = await command.execute({
             packageName: 'package',
             pythonVersion: '3.13.1',
             includePrerelease: false,
-            useJson: false,
         });
 
         assert.deepStrictEqual(runPythonStub.firstCall.args[1], [
@@ -267,6 +281,7 @@ suite('Pip and UV command parsing', () => {
             'index',
             'versions',
             'package',
+            '--disable-pip-version-check',
             '--python-version',
             '3.13.1',
         ]);
@@ -295,6 +310,7 @@ suite('Pip and UV command parsing', () => {
             '--format=json',
             '--disable-pip-version-check',
         ]);
+        assert.strictEqual(runPythonStub.firstCall.args[5], 30_000);
         assert.deepStrictEqual(
             result.map((pkg) => ({ name: pkg.name, version: pkg.version })),
             [{ name: 'package', version: '1.0.0' }],
