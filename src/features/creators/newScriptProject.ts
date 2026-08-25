@@ -176,32 +176,37 @@ export class NewScriptProject implements PythonProjectCreator {
             );
             return undefined;
         }
-        await fs.copy(newScriptTemplateFile, scriptDestination);
-
-        // 2. Replace 'script_name' in the file using a helper (just script name remove .py)
-        await replaceInFilesAndNames(scriptDestination, 'script_name', scriptFileName.replace(/\.py$/, ''));
-
-        // Add the created script to the project manager
+        // Build the project entry up front so copying the template, substituting
+        // the script name, and registering the project share one cleanup boundary:
+        // if any step fails, the partially created script is removed so a retry
+        // starts from a clean state.
         const createdScript: PythonProject = {
             name: scriptFileName,
             uri: identityRootUri.with({
                 path: path.posix.join(identityRootUri.path, scriptFileName),
             }),
         };
+        let projectRegistrationAttempted = false;
         try {
+            await fs.copy(newScriptTemplateFile, scriptDestination);
+            // Replace 'script_name' in the file (script name without the .py suffix).
+            await replaceInFilesAndNames(scriptDestination, 'script_name', scriptFileName.replace(/\.py$/, ''));
+            projectRegistrationAttempted = true;
             await this.projectManager.add(createdScript);
-        } catch (registrationError) {
-            try {
-                this.projectManager.remove(createdScript);
-            } catch (rollbackError) {
-                traceError('Failed to remove the new script project after registration failed:', rollbackError);
+        } catch (creationError) {
+            if (projectRegistrationAttempted) {
+                try {
+                    this.projectManager.remove(createdScript);
+                } catch (rollbackError) {
+                    traceError('Failed to remove the new script project after creation failed:', rollbackError);
+                }
             }
             try {
                 await fs.remove(scriptDestination);
             } catch (rollbackError) {
-                traceError('Failed to delete the new script after registration failed:', rollbackError);
+                traceError('Failed to delete the new script after creation failed:', rollbackError);
             }
-            throw registrationError;
+            throw creationError;
         }
 
         // 3. add custom github copilot instructions

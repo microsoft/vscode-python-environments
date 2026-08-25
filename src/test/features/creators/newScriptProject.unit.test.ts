@@ -63,12 +63,17 @@ suite('new723ScriptTemplate / NewScriptProject', () => {
     });
 
     function stubSuccessfulFileCreation() {
+        const templateFile = path.resolve(
+            path.join(NEW_PROJECT_TEMPLATES_FOLDER, 'new723ScriptTemplate', 'script.py'),
+        );
         const showTextDocumentStub = sinon
             .stub(windowApis, 'showTextDocument')
             .resolves({} as TextEditor);
-        const pathExistsStub = sinon.stub(fsExtra, 'pathExists');
-        pathExistsStub.onFirstCall().resolves(true);
-        pathExistsStub.onSecondCall().resolves(false);
+        // Resolve existence by the requested path (the template exists, the new
+        // script does not) so the fixture does not depend on probe call order.
+        sinon.stub(fsExtra, 'pathExists').callsFake(async (checkedPath) => {
+            return path.resolve(String(checkedPath)) === templateFile;
+        });
         const copyStub = sinon.stub(fsExtra, 'copy').callsFake(async (_source, destination) => {
             await fs.copyFile(TEMPLATE_PATH, destination);
         });
@@ -556,6 +561,47 @@ suite('new723ScriptTemplate / NewScriptProject', () => {
         await assert.rejects(fs.readFile(scriptDestination), (error: NodeJS.ErrnoException) => error.code === 'ENOENT');
         assert.strictEqual(showTextDocumentStub.called, false);
         assert.strictEqual(instructionsStub.called, false);
+        assert.strictEqual(promptStub.called, false);
+    });
+
+    test('a substitution failure after copy removes the partially created script', async () => {
+        const rootUri = Uri.file(tmpDir);
+        const scriptDestination = path.resolve(rootUri.fsPath, 'substitution_failure.py');
+        const { copyStub, instructionsStub, replaceStub, showTextDocumentStub } = stubSuccessfulFileCreation();
+        const substitutionError = new Error('template substitution failed');
+        replaceStub.rejects(substitutionError);
+        const promptStub = sinon.stub(windowApis, 'showInputBoxWithButtons');
+        const addStub = sinon.stub().resolves();
+        const removeStub = sinon.stub();
+        const creator = new NewScriptProject({
+            add: addStub,
+            remove: removeStub,
+        } as unknown as PythonProjectManager);
+
+        await assert.rejects(
+            creator.create({
+                name: 'substitution_failure.py',
+                quickCreate: true,
+                rootUri,
+            }),
+            (error: unknown) => error === substitutionError,
+        );
+
+        assert.ok(copyStub.calledOnce, 'the template must be copied before substitution runs');
+        assert.ok(replaceStub.calledOnce);
+        await assert.rejects(
+            fs.readFile(scriptDestination),
+            (error: NodeJS.ErrnoException) => error.code === 'ENOENT',
+            'the copied script must be removed when substitution fails',
+        );
+        assert.strictEqual(addStub.called, false, 'registration must not run when substitution fails');
+        assert.strictEqual(
+            removeStub.called,
+            false,
+            'project rollback must not run when registration was never attempted',
+        );
+        assert.strictEqual(instructionsStub.called, false);
+        assert.strictEqual(showTextDocumentStub.called, false);
         assert.strictEqual(promptStub.called, false);
     });
 });
