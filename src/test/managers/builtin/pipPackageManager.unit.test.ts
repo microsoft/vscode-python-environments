@@ -191,6 +191,22 @@ suite('PipPackageManager', () => {
         );
     });
 
+    test('uses UV version lookup without querying the Pip version', async () => {
+        const manager = createManager();
+        const environment = createEnvironment();
+        sinon.stub(helpers, 'shouldUseUv').resolves(true);
+        const runPython = sinon.stub(helpers, 'runPython');
+        sinon.stub(helpers, 'runUV').resolves(JSON.stringify({ versions: ['2.32.5', '2.31.0'] }));
+
+        const versions = await manager.getPackageAvailableVersions(environment, 'requests');
+
+        assert.ok(runPython.notCalled);
+        assert.deepStrictEqual(
+            versions.map((version) => version.public),
+            ['2.32.5', '2.31.0'],
+        );
+    });
+
     test('rejects package management for Python 2 environments', async () => {
         const shouldUseUvStub = sinon.stub(helpers, 'shouldUseUv');
         const environment = createMockPythonEnvironment({

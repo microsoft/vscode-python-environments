@@ -28,7 +28,7 @@ import { showErrorMessage, withProgress } from '../../common/window.apis';
 import { CommandConstructorOptions } from '../base/commands/index';
 import { updatePackagesAndNotify } from '../common/packageChanges';
 import { parsePackageSpecs } from '../common/packageUtils';
-import { createPipOrUvCommand } from './commands/factory';
+import { createPipOrUvCommand, createPipOrUvCommandWithKind } from './commands/factory';
 import {
     PipAvailableVersionsCommand,
     PipAvailableVersionsTextCommand,
@@ -271,16 +271,15 @@ export class PipPackageManager implements PackageManager, Disposable {
             throw new Error(`Python version is unavailable for environment: ${environment.envId.id}`);
         }
 
-        const availableVersionsCmd: PipAvailableVersionsCommand | UvAvailableVersionsCommand =
-            await createPipOrUvCommand(
-                { pythonExecutable, log: this.log },
-                environment.environmentPath.fsPath,
-                PipAvailableVersionsCommand,
-                UvAvailableVersionsCommand,
-            );
+        const availableVersions = await createPipOrUvCommandWithKind(
+            { pythonExecutable, log: this.log },
+            environment.environmentPath.fsPath,
+            PipAvailableVersionsCommand,
+            UvAvailableVersionsCommand,
+        );
 
         // For pip < 21.2.0, check version first.
-        if (availableVersionsCmd instanceof PipAvailableVersionsCommand) {
+        if (availableVersions.kind === 'pip') {
             const pipVersion = await new PipVersionCommand({ pythonExecutable, log: this.log }).execute();
             if (!pipVersion) {
                 throw new Error(`Unable to determine pip version for environment: ${environment.envId.id}`);
@@ -291,7 +290,7 @@ export class PipPackageManager implements PackageManager, Disposable {
                 );
             }
             if (compare(pipVersion.public, '25.1') >= 0) {
-                const versions = await availableVersionsCmd.execute({
+                const versions = await availableVersions.command.execute({
                     packageName,
                     pythonVersion: baseVersion,
                 });
@@ -303,7 +302,7 @@ export class PipPackageManager implements PackageManager, Disposable {
             return textVersions.sort((a, b) => compare(b.public, a.public));
         }
 
-        const versions = await availableVersionsCmd.execute({
+        const versions = await availableVersions.command.execute({
             packageName,
             pythonVersion: baseVersion,
         });
