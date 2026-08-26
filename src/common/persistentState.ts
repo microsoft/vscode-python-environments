@@ -5,12 +5,7 @@ import { createDeferred, Deferred } from './utils/deferred';
 export interface PersistentState {
     get<T>(key: string, defaultValue?: T): Promise<T | undefined>;
     set<T>(key: string, value: T): Promise<void>;
-    clear(keys?: string[], options?: { readonly preserveKeys?: readonly string[] }): Promise<void>;
-}
-
-export interface ClearPersistentStateOptions {
-    readonly preserveWorkspaceKeys?: readonly string[];
-    readonly preserveGlobalKeys?: readonly string[];
+    clear(keys?: string[]): Promise<void>;
 }
 
 class PersistentStateImpl implements PersistentState {
@@ -37,11 +32,10 @@ class PersistentStateImpl implements PersistentState {
             traceError('Error while updating state for key:', key);
         }
     }
-    async clear(keys?: string[], options?: { readonly preserveKeys?: readonly string[] }): Promise<void> {
+    async clear(keys?: string[]): Promise<void> {
         if (this.clearing.completed) {
             this.clearing = createDeferred<void>();
-            const preservedKeys = new Set(options?.preserveKeys ?? []);
-            const _keys = (keys ?? this.momento.keys()).filter((key) => !preservedKeys.has(key));
+            const _keys = keys ?? this.momento.keys();
             await Promise.all(_keys.map((key) => this.momento.update(key, undefined)));
             this.clearing.resolve();
         }
@@ -65,11 +59,8 @@ export function getGlobalPersistentState(): Promise<PersistentState> {
     return _global.promise;
 }
 
-export async function clearPersistentState(options?: ClearPersistentStateOptions): Promise<void> {
+export async function clearPersistentState(): Promise<void> {
     const [workspace, global] = await Promise.all([_workspace.promise, _global.promise]);
-    await Promise.all([
-        workspace.clear(undefined, { preserveKeys: options?.preserveWorkspaceKeys }),
-        global.clear(undefined, { preserveKeys: options?.preserveGlobalKeys }),
-    ]);
+    await Promise.all([workspace.clear(), global.clear()]);
     return undefined;
 }

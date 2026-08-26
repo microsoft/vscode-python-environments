@@ -7,7 +7,7 @@ import * as fs from 'fs-extra';
 import * as os from 'os';
 import * as path from 'path';
 import * as sinon from 'sinon';
-import { Disposable, LogOutputChannel, TextDocument, Uri } from 'vscode';
+import { Disposable, LogOutputChannel, Memento, TextDocument, Uri } from 'vscode';
 import {
     EnvironmentChangeKind,
     EnvironmentManager,
@@ -19,17 +19,14 @@ import * as cacheLayout from '../../../../common/inlineScript/cacheLayout';
 import * as metadataReader from '../../../../common/inlineScript/metadata';
 import { InlineScriptRoutingRegistry } from '../../../../common/inlineScript/routingRegistry';
 import * as lockfileApis from '../../../../common/lockfile.apis';
-import * as persistentState from '../../../../common/persistentState';
+import { INLINE_SCRIPT_ENVS_KEY } from '../../../../common/constants';
 import { EventNames } from '../../../../common/telemetry/constants';
 import * as telemetrySender from '../../../../common/telemetry/sender';
 import { isWindows } from '../../../../common/utils/platformUtils';
 import { normalizePath } from '../../../../common/utils/pathUtils';
 import { getVenvPythonPath } from '../../../../common/utils/virtualEnvironment';
 import * as workspaceApis from '../../../../common/workspace.apis';
-import {
-    InlineScriptEnvManager,
-    INLINE_SCRIPT_ENVS_KEY,
-} from '../../../../managers/builtin/inlineScript/envManager';
+import { InlineScriptEnvManager } from '../../../../managers/builtin/inlineScript/envManager';
 import * as builtinUtils from '../../../../managers/builtin/utils';
 import * as uvPythonInstaller from '../../../../managers/builtin/uvPythonInstaller';
 import * as venvUtils from '../../../../managers/builtin/venvUtils';
@@ -135,9 +132,10 @@ suite('InlineScriptEnvManager', () => {
     let renameFilesListener: ((e: { files: readonly { oldUri: Uri; newUri: Uri }[] }) => unknown) | undefined;
     let workspaceState: {
         get: sinon.SinonStub;
-        set: sinon.SinonStub;
-        clear: sinon.SinonStub;
+        update: sinon.SinonStub;
+        keys: sinon.SinonStub;
     };
+    let workspaceMemento: Memento;
     let persistedAssociations: unknown;
 
     setup(async () => {
@@ -166,18 +164,16 @@ suite('InlineScriptEnvManager', () => {
             get: sinon.stub().callsFake(async (key: string) => {
                 return key === INLINE_SCRIPT_ENVS_KEY ? persistedAssociations : undefined;
             }),
-            set: sinon.stub().callsFake(async (key: string, value: unknown) => {
+            update: sinon.stub().callsFake(async (key: string, value: unknown) => {
                 if (key === INLINE_SCRIPT_ENVS_KEY) {
                     persistedAssociations = value;
                 }
             }),
-            clear: sinon.stub().callsFake(async (keys?: string[]) => {
-                if (!keys || keys.includes(INLINE_SCRIPT_ENVS_KEY)) {
-                    persistedAssociations = undefined;
-                }
-            }),
+            keys: sinon.stub().callsFake(() =>
+                persistedAssociations === undefined ? [] : [INLINE_SCRIPT_ENVS_KEY],
+            ),
         };
-        sinon.stub(persistentState, 'getWorkspacePersistentState').resolves(workspaceState);
+        workspaceMemento = workspaceState as unknown as Memento;
 
         readMetadataStub = sinon.stub(metadataReader, 'readInlineScriptMetadataFromFile').resolves(VALID_METADATA);
         computeCacheKeyStub = sinon.stub(cacheKey, 'computeCacheKey').callsFake((inputs) => {
@@ -250,6 +246,7 @@ suite('InlineScriptEnvManager', () => {
             baseManager,
             globalStorageUri,
             makeFakeLog(),
+            workspaceMemento,
             routingRegistry,
         );
     });
@@ -381,7 +378,7 @@ suite('InlineScriptEnvManager', () => {
     }
 
     function workspaceStateSetCalls(key: string): readonly sinon.SinonSpyCall[] {
-        return workspaceState.set.getCalls().filter((call) => call.args[0] === key);
+        return workspaceState.update.getCalls().filter((call) => call.args[0] === key);
     }
 
     function matchedAssociationRecord(environmentPath: string, metadataIdentity: string = VALID_METADATA_IDENTITY): unknown {
@@ -1495,6 +1492,7 @@ suite('InlineScriptEnvManager', () => {
                 baseManager,
                 globalStorageUri,
                 makeFakeLog(),
+                workspaceMemento,
                 restartRoutingRegistry,
             );
 
@@ -3410,7 +3408,7 @@ suite('InlineScriptEnvManager', () => {
             assert.deepStrictEqual(persistedAssociations, {
                 [normalizePath(uri.fsPath)]: matchedAssociationRecord(environment.environmentPath.fsPath),
             });
-            assert.strictEqual(workspaceState.set.firstCall.args[0], INLINE_SCRIPT_ENVS_KEY);
+            assert.strictEqual(workspaceState.update.firstCall.args[0], INLINE_SCRIPT_ENVS_KEY);
             assert.strictEqual(listener.callCount, 1);
             assert.deepStrictEqual(listener.firstCall.args[0], { uri, old: undefined, new: environment });
 
@@ -3475,6 +3473,7 @@ suite('InlineScriptEnvManager', () => {
                 baseManager,
                 globalStorageUri,
                 makeFakeLog(),
+                workspaceMemento,
                 restartRoutingRegistry,
             );
 
@@ -3500,6 +3499,7 @@ suite('InlineScriptEnvManager', () => {
                 baseManager,
                 globalStorageUri,
                 makeFakeLog(),
+                workspaceMemento,
                 restartRoutingRegistry,
             );
 
@@ -3616,6 +3616,7 @@ suite('InlineScriptEnvManager', () => {
                 baseManager,
                 globalStorageUri,
                 makeFakeLog(),
+                workspaceMemento,
                 restartRoutingRegistry,
             );
 
@@ -3650,6 +3651,7 @@ suite('InlineScriptEnvManager', () => {
                 baseManager,
                 globalStorageUri,
                 makeFakeLog(),
+                workspaceMemento,
                 restartRoutingRegistry,
             );
 
@@ -3699,6 +3701,7 @@ suite('InlineScriptEnvManager', () => {
                 baseManager,
                 globalStorageUri,
                 makeFakeLog(),
+                workspaceMemento,
                 restartRoutingRegistry,
             );
 
@@ -3752,11 +3755,12 @@ suite('InlineScriptEnvManager', () => {
                 baseManager,
                 globalStorageUri,
                 makeFakeLog(),
+                workspaceMemento,
                 restartRoutingRegistry,
             );
             await nextTurn();
 
-            workspaceState.set.onFirstCall().rejects(new Error('Memento unavailable'));
+            workspaceState.update.onFirstCall().rejects(new Error('Memento unavailable'));
             await triggerSavedMetadataChange(restartRoutingRegistry, restarted, uri);
             await fs.remove(environment.environmentPath.fsPath);
             clock.tick(5_000 - 1);
@@ -3989,6 +3993,7 @@ suite('InlineScriptEnvManager', () => {
                 baseManager,
                 globalStorageUri,
                 makeFakeLog(),
+                workspaceMemento,
                 restartRoutingRegistry,
             );
             await nextTurn();
@@ -4026,6 +4031,7 @@ suite('InlineScriptEnvManager', () => {
                 baseManager,
                 globalStorageUri,
                 makeFakeLog(),
+                workspaceMemento,
                 restartRoutingRegistry,
             );
             await nextTurn();
@@ -4074,13 +4080,14 @@ suite('InlineScriptEnvManager', () => {
                 baseManager,
                 globalStorageUri,
                 makeFakeLog(),
+                workspaceMemento,
                 restartRoutingRegistry,
             );
             await nextTurn();
 
             ((restarted as unknown as { subscriptions: Disposable[] }).subscriptions[0]).dispose();
-            workspaceState.set.onFirstCall().rejects(new Error('Memento unavailable'));
-            workspaceState.set.onSecondCall().rejects(new Error('Memento unavailable'));
+            workspaceState.update.onFirstCall().rejects(new Error('Memento unavailable'));
+            workspaceState.update.onSecondCall().rejects(new Error('Memento unavailable'));
             await triggerSavedMetadataChange(restartRoutingRegistry, restarted, uri);
 
             assert.deepStrictEqual(persistedAssociations, {
@@ -4102,6 +4109,7 @@ suite('InlineScriptEnvManager', () => {
                 baseManager,
                 globalStorageUri,
                 makeFakeLog(),
+                workspaceMemento,
                 restartRoutingRegistry,
             );
             await nextTurn();
@@ -4123,6 +4131,7 @@ suite('InlineScriptEnvManager', () => {
                 baseManager,
                 globalStorageUri,
                 makeFakeLog(),
+                workspaceMemento,
                 restartRoutingRegistry,
             );
             await nextTurn();
@@ -4151,6 +4160,7 @@ suite('InlineScriptEnvManager', () => {
                 baseManager,
                 globalStorageUri,
                 makeFakeLog(),
+                workspaceMemento,
                 restartRoutingRegistry,
             );
             await nextTurn();
@@ -4199,6 +4209,7 @@ suite('InlineScriptEnvManager', () => {
                 baseManager,
                 globalStorageUri,
                 makeFakeLog(),
+                workspaceMemento,
                 restartRoutingRegistry,
             );
             await nextTurn();
@@ -4243,6 +4254,7 @@ suite('InlineScriptEnvManager', () => {
                 baseManager,
                 globalStorageUri,
                 makeFakeLog(),
+                workspaceMemento,
                 restartRoutingRegistry,
             );
             await nextTurn();
@@ -4277,6 +4289,7 @@ suite('InlineScriptEnvManager', () => {
                 baseManager,
                 globalStorageUri,
                 makeFakeLog(),
+                workspaceMemento,
                 restartRoutingRegistry,
             );
             await nextTurn();
@@ -4318,6 +4331,7 @@ suite('InlineScriptEnvManager', () => {
                 baseManager,
                 globalStorageUri,
                 makeFakeLog(),
+                workspaceMemento,
                 restartRoutingRegistry,
             );
             await nextTurn();
@@ -4344,6 +4358,7 @@ suite('InlineScriptEnvManager', () => {
                 baseManager,
                 globalStorageUri,
                 makeFakeLog(),
+                workspaceMemento,
                 restartRoutingRegistry,
             );
             await nextTurn();
@@ -4370,6 +4385,7 @@ suite('InlineScriptEnvManager', () => {
                 baseManager,
                 globalStorageUri,
                 makeFakeLog(),
+                workspaceMemento,
                 restartRoutingRegistry,
             );
             await nextTurn();
@@ -4411,6 +4427,7 @@ suite('InlineScriptEnvManager', () => {
                 baseManager,
                 globalStorageUri,
                 makeFakeLog(),
+                workspaceMemento,
                 restartRoutingRegistry,
             );
             await nextTurn();
@@ -4461,6 +4478,7 @@ suite('InlineScriptEnvManager', () => {
                 baseManager,
                 globalStorageUri,
                 makeFakeLog(),
+                workspaceMemento,
                 restartRoutingRegistry,
             );
             await nextTurn();
@@ -4492,6 +4510,7 @@ suite('InlineScriptEnvManager', () => {
                 baseManager,
                 globalStorageUri,
                 makeFakeLog(),
+                workspaceMemento,
                 restartRoutingRegistry,
             );
             await nextTurn();
@@ -4692,6 +4711,7 @@ suite('InlineScriptEnvManager', () => {
                 baseManager,
                 globalStorageUri,
                 makeFakeLog(),
+                workspaceMemento,
                 restartRoutingRegistry,
             );
             await nextTurn();
@@ -4723,6 +4743,7 @@ suite('InlineScriptEnvManager', () => {
                 baseManager,
                 globalStorageUri,
                 makeFakeLog(),
+                workspaceMemento,
                 restartRoutingRegistry,
             );
             await nextTurn();
@@ -4749,6 +4770,7 @@ suite('InlineScriptEnvManager', () => {
                 baseManager,
                 globalStorageUri,
                 makeFakeLog(),
+                workspaceMemento,
                 restartRoutingRegistry,
             );
 
@@ -4841,6 +4863,7 @@ suite('InlineScriptEnvManager', () => {
                 baseManager,
                 globalStorageUri,
                 makeFakeLog(),
+                workspaceMemento,
                 restartRoutingRegistry,
             );
             const listener = sinon.spy();
@@ -4871,6 +4894,7 @@ suite('InlineScriptEnvManager', () => {
                 baseManager,
                 globalStorageUri,
                 makeFakeLog(),
+                workspaceMemento,
                 restartRoutingRegistry,
             );
             const listener = sinon.spy();
@@ -4881,7 +4905,7 @@ suite('InlineScriptEnvManager', () => {
             assert.deepStrictEqual(persistedAssociations, {
                 [normalizePath(uri.fsPath)]: matchedAssociationRecord(environment.environmentPath.fsPath),
             });
-            assert.strictEqual(workspaceState.set.callCount, 0);
+            assert.strictEqual(workspaceState.update.callCount, 0);
             assert.strictEqual(listener.callCount, 0);
             assert.strictEqual(resolveVenvStub.callCount, 0);
 
@@ -4960,7 +4984,7 @@ suite('InlineScriptEnvManager', () => {
             assert.deepStrictEqual(persistedAssociations, {
                 [normalizePath(uri.fsPath)]: environment.environmentPath.fsPath,
             });
-            assert.strictEqual(workspaceState.set.callCount, 0);
+            assert.strictEqual(workspaceState.update.callCount, 0);
             assert.strictEqual(resolveVenvStub.callCount, 0);
         });
 
@@ -4977,6 +5001,7 @@ suite('InlineScriptEnvManager', () => {
                 baseManager,
                 globalStorageUri,
                 makeFakeLog(),
+                workspaceMemento,
                 restartRoutingRegistry,
             );
             await nextTurn();
@@ -5033,13 +5058,14 @@ suite('InlineScriptEnvManager', () => {
                 }
                 return persistedAssociations;
             });
-            workspaceState.set.resetHistory();
+            workspaceState.update.resetHistory();
             manager = new InlineScriptEnvManager(
                 nativeFinder,
                 api,
                 baseManager,
                 globalStorageUri,
                 makeFakeLog(),
+                workspaceMemento,
                 routingRegistry,
             );
             await initialReadStarted;
@@ -5427,7 +5453,7 @@ suite('InlineScriptEnvManager', () => {
             assert.deepStrictEqual(persistedAssociations, {
                 [scriptPath]: matchedAssociationRecord(environment.environmentPath.fsPath),
             });
-            assert.strictEqual(workspaceState.set.callCount, 0);
+            assert.strictEqual(workspaceState.update.callCount, 0);
         });
 
         test('preserves an association when fallback resolution reports another manager', async () => {
@@ -5443,7 +5469,7 @@ suite('InlineScriptEnvManager', () => {
             assert.deepStrictEqual(persistedAssociations, {
                 [normalizePath(uri.fsPath)]: environment.environmentPath.fsPath,
             });
-            assert.strictEqual(workspaceState.set.callCount, 0);
+            assert.strictEqual(workspaceState.update.callCount, 0);
         });
 
         test('rejects resolved and selected environments that are outside the owned cache', async () => {
@@ -5465,11 +5491,11 @@ suite('InlineScriptEnvManager', () => {
 
             assert.strictEqual(await manager.get(uri), undefined);
             assert.deepStrictEqual(persistedAssociations, {});
-            workspaceState.set.resetHistory();
+            workspaceState.update.resetHistory();
 
             await assert.rejects(manager.set(uri, unowned), /not an owned cache entry/);
             assert.deepStrictEqual(persistedAssociations, {});
-            assert.strictEqual(workspaceState.set.callCount, 0);
+            assert.strictEqual(workspaceState.update.callCount, 0);
             assert.strictEqual(listener.callCount, 0);
         });
 
@@ -5503,7 +5529,7 @@ suite('InlineScriptEnvManager', () => {
             manager.onDidChangeEnvironment(listener);
 
             await manager.set(uri, first);
-            workspaceState.set.onSecondCall().rejects(new Error('Memento unavailable'));
+            workspaceState.update.onSecondCall().rejects(new Error('Memento unavailable'));
             await assert.rejects(manager.set(uri, second), /Memento unavailable/);
 
             assert.strictEqual(await manager.get(uri), first);
@@ -5520,7 +5546,7 @@ suite('InlineScriptEnvManager', () => {
             manager.onDidChangeEnvironment(listener);
 
             await manager.set(uri, environment);
-            workspaceState.set.onSecondCall().rejects(new Error('Memento unavailable'));
+            workspaceState.update.onSecondCall().rejects(new Error('Memento unavailable'));
 
             await assert.rejects(manager.set(uri, undefined), /Memento unavailable/);
             assert.strictEqual(await manager.get(uri), environment);
@@ -5630,7 +5656,7 @@ suite('InlineScriptEnvManager', () => {
             const pendingGet = manager.get(uri);
             await waitForStubCall(resolveVenvStub);
 
-            workspaceState.set.onFirstCall().rejects(new Error('Memento unavailable'));
+            workspaceState.update.onFirstCall().rejects(new Error('Memento unavailable'));
             await assert.rejects(manager.set(uri, newEnvironment), /Memento unavailable/);
 
             resolvePending!(oldEnvironment);
@@ -5653,7 +5679,7 @@ suite('InlineScriptEnvManager', () => {
                 /one or more local file URIs/,
             );
 
-            assert.strictEqual(workspaceState.set.callCount, 0);
+            assert.strictEqual(workspaceState.update.callCount, 0);
             assert.strictEqual(await manager.get(valid), undefined);
             assert.strictEqual(await manager.get(undefined), undefined);
             assert.strictEqual(await manager.get(Uri.parse('untitled:script.py')), undefined);
@@ -5725,6 +5751,7 @@ suite('InlineScriptEnvManager', () => {
                 baseManager,
                 Uri.file(process.platform === 'win32' ? `${process.env.SystemDrive ?? 'C:'}\\` : '/'),
                 makeFakeLog(),
+                workspaceMemento,
             );
 
             await assert.rejects(
@@ -5743,6 +5770,7 @@ suite('InlineScriptEnvManager', () => {
                 baseManager,
                 symlinkStorageUri,
                 makeFakeLog(),
+                workspaceMemento,
             );
             const realCacheRoot = cacheLayout.getScriptEnvCacheRoot(symlinkStorageUri).fsPath;
             const externalCacheRoot = path.join(tempRoot, 'external-cache-root');
@@ -5777,6 +5805,7 @@ suite('InlineScriptEnvManager', () => {
                 baseManager,
                 Uri.file(redirectedStoragePath),
                 makeFakeLog(),
+                workspaceMemento,
             );
             try {
                 await fs.remove(redirectedStoragePath);
@@ -5944,7 +5973,7 @@ suite('InlineScriptEnvManager', () => {
             await manager.set(uri, environment);
             const listener = sinon.spy();
             manager.onDidChangeEnvironment(listener);
-            workspaceState.set.withArgs(INLINE_SCRIPT_ENVS_KEY, undefined).rejects(new Error('Memento unavailable'));
+            workspaceState.update.withArgs(INLINE_SCRIPT_ENVS_KEY, undefined).rejects(new Error('Memento unavailable'));
 
             await assert.rejects(manager.clearCache(), /Memento unavailable/);
 
@@ -6056,7 +6085,7 @@ suite('InlineScriptEnvManager', () => {
             const clearStarted = new Promise<void>((resolve) => {
                 signalClearStarted = resolve;
             });
-            workspaceState.set.withArgs(INLINE_SCRIPT_ENVS_KEY, undefined).callsFake(
+            workspaceState.update.withArgs(INLINE_SCRIPT_ENVS_KEY, undefined).callsFake(
                 async () =>
                     new Promise<void>((resolve) => {
                         signalClearStarted!();
@@ -6088,7 +6117,7 @@ suite('InlineScriptEnvManager', () => {
             const writeStarted = new Promise<void>((resolve) => {
                 signalWriteStarted = resolve;
             });
-            workspaceState.set
+            workspaceState.update
                 .withArgs(INLINE_SCRIPT_ENVS_KEY, sinon.match((value: unknown) => value !== undefined))
                 .callsFake(
                     (_key: string, value: unknown) =>
@@ -6115,7 +6144,7 @@ suite('InlineScriptEnvManager', () => {
             const firstUri = scriptUri('first.py');
             const environment = await createOwnedEnvironment();
             await manager.set(firstUri, environment);
-            workspaceState.set
+            workspaceState.update
                 .withArgs(INLINE_SCRIPT_ENVS_KEY, undefined)
                 .onFirstCall()
                 .rejects(new Error('Memento unavailable'));

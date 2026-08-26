@@ -402,7 +402,7 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
             await removePythonProject(item, projectManager, envManagers);
         }),
         commands.registerCommand('python-envs.clearCache', async () => {
-            await clearEnvironmentCachesCommand(envManagers, shellStartupProviders);
+            await clearEnvironmentCachesCommand(envManagers, shellStartupProviders, context.workspaceState);
         }),
         ...(isInlineScriptsFeatureEnabled()
             ? [
@@ -699,6 +699,7 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
                               sysMgr,
                               context.globalStorageUri,
                               inlineScriptFeatureActivation,
+                              context.workspaceState,
                           )
                         : Promise.resolve(),
                 ),

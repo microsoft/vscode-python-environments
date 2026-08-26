@@ -6,6 +6,7 @@ import {
     TaskExecution,
     TaskRevealKind,
     Terminal,
+    Memento,
     Uri,
     l10n,
     workspace,
@@ -686,8 +687,17 @@ export async function removePythonProject(
 export async function clearEnvironmentCachesCommand(
     em: EnvironmentManagers,
     startupProviders: ShellStartupScriptProvider[],
+    workspaceState: Memento,
 ): Promise<void> {
-    await persistentState.clearPersistentState({ preserveWorkspaceKeys: [INLINE_SCRIPT_ENVS_KEY] });
+    // Preserve the inline-script association key without changing the shared PersistentState
+    // implementation: clear every current workspace key except the inline key by passing an
+    // explicit filtered list to the existing `clear(keys)`, alongside the existing global clear.
+    const [workspacePersistentState, globalPersistentState] = await Promise.all([
+        persistentState.getWorkspacePersistentState(),
+        persistentState.getGlobalPersistentState(),
+    ]);
+    const workspaceKeys = workspaceState.keys().filter((key) => key !== INLINE_SCRIPT_ENVS_KEY);
+    await Promise.all([workspacePersistentState.clear(workspaceKeys), globalPersistentState.clear()]);
     await em.clearCache(undefined);
     await shellProviders.clearShellProfileCache(startupProviders);
 }
