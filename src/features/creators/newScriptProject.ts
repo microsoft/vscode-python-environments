@@ -4,8 +4,7 @@ import { commands, l10n, MarkdownString, QuickInputButtons, Uri, window, Workspa
 import { PythonProject, PythonProjectCreator, PythonProjectCreatorOptions } from '../../api';
 import { NEW_PROJECT_TEMPLATES_FOLDER } from '../../common/constants';
 import { traceError } from '../../common/logging';
-import { isSameOrParentPath } from '../../common/utils/pathUtils';
-import { isWindows } from '../../common/utils/platformUtils';
+import { isSameOrParentPath, isWindowsReservedDeviceName } from '../../common/utils/pathUtils';
 import { showErrorMessage, showInputBoxWithButtons, showTextDocument } from '../../common/window.apis';
 import { getWorkspaceFolder, getWorkspaceFolders } from '../../common/workspace.apis';
 import { PythonProjectManager } from '../../internal.api';
@@ -20,8 +19,7 @@ function validateScriptFileName(value: string): string | null {
         return l10n.t('Script name must end with ".py".');
     }
     const baseName = value.replace(/\.py$/, '');
-    const deviceBaseName = baseName.split('.')[0];
-    if (isWindows() && /^(con|prn|aux|nul|com[1-9]|lpt[1-9])$/i.test(deviceBaseName)) {
+    if (isWindowsReservedDeviceName(baseName)) {
         return l10n.t('Script name uses a reserved Windows device name.');
     }
     // following PyPI (PEP 508) rules for package names
@@ -97,7 +95,7 @@ export class NewScriptProject implements PythonProjectCreator {
         }
 
         // 1. Copy template file
-        const newScriptTemplateFile = path.join(NEW_PROJECT_TEMPLATES_FOLDER, 'new723ScriptTemplate', 'script.py');
+        const newScriptTemplateFile = path.join(NEW_PROJECT_TEMPLATES_FOLDER, 'newInlineScriptTemplate', 'script.py');
         if (!(await fs.pathExists(newScriptTemplateFile))) {
             window.showErrorMessage(l10n.t('Template file does not exist, aborting creation.'));
             traceError(`Template file not found at: ${newScriptTemplateFile}`);

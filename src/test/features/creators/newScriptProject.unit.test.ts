@@ -28,7 +28,7 @@ const TEMPLATE_PATH = path.join(
     '..',
     'files',
     'templates',
-    'new723ScriptTemplate',
+    'newInlineScriptTemplate',
     'script.py',
 );
 
@@ -40,7 +40,7 @@ function asRemoteUri(fsPath: string, authority = 'ssh-remote+test-host'): Uri {
     });
 }
 
-suite('new723ScriptTemplate / NewScriptProject', () => {
+suite('newInlineScriptTemplate / NewScriptProject', () => {
     let tmpDir: string;
     let getWorkspaceFolderStub: sinon.SinonStub;
     let getWorkspaceFoldersStub: sinon.SinonStub;
@@ -64,7 +64,7 @@ suite('new723ScriptTemplate / NewScriptProject', () => {
 
     function stubSuccessfulFileCreation() {
         const templateFile = path.resolve(
-            path.join(NEW_PROJECT_TEMPLATES_FOLDER, 'new723ScriptTemplate', 'script.py'),
+            path.join(NEW_PROJECT_TEMPLATES_FOLDER, 'newInlineScriptTemplate', 'script.py'),
         );
         const showTextDocumentStub = sinon
             .stub(windowApis, 'showTextDocument')
@@ -250,7 +250,7 @@ suite('new723ScriptTemplate / NewScriptProject', () => {
         const scriptDestination = path.resolve(rootUri.fsPath, scriptFileName);
         const expectedTemplatePath = path.join(
             NEW_PROJECT_TEMPLATES_FOLDER,
-            'new723ScriptTemplate',
+            'newInlineScriptTemplate',
             'script.py',
         );
         const addStub = sinon.stub().resolves();

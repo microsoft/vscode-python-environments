@@ -87,6 +87,22 @@ export function isSameOrParentPath(parentPath: string, candidatePath: string): b
     );
 }
 
+/**
+ * Determines whether `value` maps to a reserved Windows device name (e.g. `CON`,
+ * `PRN`, `AUX`, `NUL`, `COM1`-`COM9`, `LPT1`-`LPT9`).
+ *
+ * The check inspects the portion of the name before the first dot, since Windows
+ * disallows these names regardless of extension, and only reports `true` on
+ * Windows, where the restriction applies.
+ *
+ * @param value The base file name (without directory) to test.
+ * @returns `true` on Windows when `value` resolves to a reserved device name.
+ */
+export function isWindowsReservedDeviceName(value: string): boolean {
+    const deviceBaseName = value.split('.')[0];
+    return isWindows() && /^(con|prn|aux|nul|com[1-9]|lpt[1-9])$/i.test(deviceBaseName);
+}
+
 export function getResourceUri(resourcePath: string, root?: string): Uri | undefined {
     try {
         if (!resourcePath) {
