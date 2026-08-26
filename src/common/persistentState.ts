@@ -26,15 +26,18 @@ class PersistentStateImpl implements PersistentState {
         return this.momento.get<T>(key, defaultValue);
     }
     async set<T>(key: string, value: T): Promise<void> {
-        await this.clearQueue;
-        await this.momento.update(key, value);
+        const operation = this.clearQueue.then(async () => {
+            await this.momento.update(key, value);
 
-        const before = JSON.stringify(value);
-        const after = JSON.stringify(await this.momento.get<T>(key));
-        if (before !== after) {
-            await this.momento.update(key, undefined);
-            traceError('Error while updating state for key:', key);
-        }
+            const before = JSON.stringify(value);
+            const after = JSON.stringify(await this.momento.get<T>(key));
+            if (before !== after) {
+                await this.momento.update(key, undefined);
+                traceError('Error while updating state for key:', key);
+            }
+        });
+        this.clearQueue = operation.catch(() => undefined);
+        return operation;
     }
     async clear(keys?: string[], options?: { readonly preserveKeys?: readonly string[] }): Promise<void> {
         const requestedKeys = keys ? [...keys] : undefined;

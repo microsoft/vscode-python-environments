@@ -273,6 +273,37 @@ suite('lockfile APIs', () => {
         assert.strictEqual(await inspectFileLock(targetPath), 'missing');
     });
 
+    test('serializes concurrent release() calls through a shared in-flight promise', async () => {
+        const lock = await acquireFileLock(targetPath, OPTIONS);
+        const originalRename = fsExtra.rename;
+        let ownerToReleaseRenames = 0;
+        let signalStarted!: () => void;
+        const started = new Promise<void>((resolve) => {
+            signalStarted = resolve;
+        });
+        let openGate!: () => void;
+        const gate = new Promise<void>((resolve) => {
+            openGate = resolve;
+        });
+        sinon.stub(fsExtra, 'rename').callsFake(async (source, destination) => {
+            if (path.basename(String(destination)).startsWith(FILE_LOCK_RELEASE_MARKER_PREFIX)) {
+                ownerToReleaseRenames += 1;
+                signalStarted();
+                await gate;
+            }
+            await originalRename(source, destination);
+        });
+
+        const first = lock.release();
+        await started;
+        const second = lock.release();
+        openGate();
+        await Promise.all([first, second]);
+
+        assert.strictEqual(ownerToReleaseRenames, 1);
+        assert.strictEqual(await inspectFileLock(targetPath), 'missing');
+    });
+
     test('retained locks fail fast without waiting for the acquisition timeout', async () => {
         const lock = await acquireFileLock(targetPath, OPTIONS);
         await lock.retain();

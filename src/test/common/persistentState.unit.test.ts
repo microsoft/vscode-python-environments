@@ -176,6 +176,37 @@ suite('persistent state clearing', () => {
             [undefined, 'written-later'],
         );
     });
+
+    test('serializes a gated write before a later clear so the clear is not resurrected', async () => {
+        workspace.reset();
+        const gate = createGate();
+        workspace.beforeUpdate = async (key, value) => {
+            if (key === 'race-key' && value === 'written') {
+                gate.started.resolve();
+                await gate.release.promise;
+            }
+        };
+
+        // A write is in flight (gated mid-update)...
+        const gatedSet = workspaceState.set('race-key', 'written');
+        await gate.started.promise;
+
+        // ...and a clear for the same key is requested after it.
+        const laterClear = workspaceState.clear(['race-key']);
+
+        gate.release.resolve();
+        await gatedSet;
+        await laterClear;
+
+        // The clear was requested after the write, so it must win: the lagging write
+        // cannot resurrect the key after the clear resolves.
+        assert.strictEqual(workspace.values.has('race-key'), false);
+        assert.strictEqual(await workspaceState.get('race-key'), undefined);
+        assert.deepStrictEqual(
+            workspace.updates.filter((update) => update.key === 'race-key').map((update) => update.value),
+            ['written', undefined],
+        );
+    });
 });
 
 interface TestMemento {

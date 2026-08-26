@@ -70,6 +70,56 @@ export async function acquireFileLock(filePath: string, options: AcquireFileLock
             }
 
             let state: LockState = 'held';
+            let releaseInFlight: Promise<void> | undefined;
+            const performRelease = async (): Promise<void> => {
+                if (state === 'released' || state === 'retained') {
+                    return;
+                }
+                const releaseMarkerPath = path.join(lockPath, releaseMarkerName);
+                if (state === 'held') {
+                    try {
+                        await fsapi.rename(ownerMarker, releaseMarkerPath);
+                    } catch (error) {
+                        if (hasErrorCode(error, 'ENOENT')) {
+                            throw createLockError('Lock ownership was compromised', 'ECOMPROMISED', lockPath);
+                        }
+                        throw error;
+                    }
+                    state = 'releasing';
+                }
+                // state === 'releasing': the release marker exists; retire the canonical
+                // directory. Resumable: if retirement fails and ownership cannot be restored,
+                // the handle stays 'releasing' so a later release() retries retirement instead
+                // of leaving the handle unable to make progress.
+                const retiredPath = getRetiredLockPath(lockPath);
+                try {
+                    await retireCanonicalLockDirectory(lockPath, retiredPath);
+                } catch (error) {
+                    const restored = await fsapi
+                        .rename(releaseMarkerPath, ownerMarker)
+                        .then(
+                            () => true,
+                            () => false,
+                        );
+                    if (restored) {
+                        state = 'held';
+                        throw createLockError(
+                            'Failed to retire the lock directory; ownership was restored',
+                            'ELOCKRELEASEFAILED',
+                            lockPath,
+                            error,
+                        );
+                    }
+                    throw createLockError(
+                        'Failed to retire the lock directory; release can be retried',
+                        'ELOCKRELEASEFAILED',
+                        lockPath,
+                        error,
+                    );
+                }
+                state = 'released';
+                await cleanupRetiredLock(retiredPath, releaseMarkerName);
+            };
             return {
                 retain: async () => {
                     if (state !== 'held') {
@@ -82,54 +132,18 @@ export async function acquireFileLock(filePath: string, options: AcquireFileLock
                         throw createLockError('Failed to mark the lock as retained', 'ERETAINFAILED', lockPath);
                     }
                 },
-                release: async () => {
-                    if (state === 'released' || state === 'retained') {
-                        return;
+                release: () => {
+                    // Serialize concurrent release() calls on the same handle: without this,
+                    // two callers can both observe state === 'held' before either owner-marker
+                    // rename completes, and the loser sees ENOENT and reports ECOMPROMISED even
+                    // though the lock was validly released. Sharing one in-flight promise de-dupes
+                    // concurrent calls; clearing it on settle preserves retry-after-failure.
+                    if (!releaseInFlight) {
+                        releaseInFlight = performRelease().finally(() => {
+                            releaseInFlight = undefined;
+                        });
                     }
-                    const releaseMarkerPath = path.join(lockPath, releaseMarkerName);
-                    if (state === 'held') {
-                        try {
-                            await fsapi.rename(ownerMarker, releaseMarkerPath);
-                        } catch (error) {
-                            if (hasErrorCode(error, 'ENOENT')) {
-                                throw createLockError('Lock ownership was compromised', 'ECOMPROMISED', lockPath);
-                            }
-                            throw error;
-                        }
-                        state = 'releasing';
-                    }
-                    // state === 'releasing': the release marker exists; retire the canonical
-                    // directory. Resumable: if retirement fails and ownership cannot be restored,
-                    // the handle stays 'releasing' so a later release() retries retirement instead
-                    // of leaving the handle unable to make progress.
-                    const retiredPath = getRetiredLockPath(lockPath);
-                    try {
-                        await retireCanonicalLockDirectory(lockPath, retiredPath);
-                    } catch (error) {
-                        const restored = await fsapi
-                            .rename(releaseMarkerPath, ownerMarker)
-                            .then(
-                                () => true,
-                                () => false,
-                            );
-                        if (restored) {
-                            state = 'held';
-                            throw createLockError(
-                                'Failed to retire the lock directory; ownership was restored',
-                                'ELOCKRELEASEFAILED',
-                                lockPath,
-                                error,
-                            );
-                        }
-                        throw createLockError(
-                            'Failed to retire the lock directory; release can be retried',
-                            'ELOCKRELEASEFAILED',
-                            lockPath,
-                            error,
-                        );
-                    }
-                    state = 'released';
-                    await cleanupRetiredLock(retiredPath, releaseMarkerName);
+                    return releaseInFlight;
                 },
             };
         } catch (error) {
