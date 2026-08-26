@@ -1,14 +1,16 @@
 import * as assert from 'assert';
 import * as sinon from 'sinon';
 import * as typeMoq from 'typemoq';
-import { Terminal, Uri } from 'vscode';
+import { Memento, Terminal, Uri } from 'vscode';
 import { PythonEnvironment, PythonEnvironmentApi, PythonProject } from '../../api';
 import * as commandApi from '../../common/command.api';
-import { INLINE_SCRIPT_MANAGER_ID } from '../../common/constants';
+import { INLINE_SCRIPT_ENVS_KEY, INLINE_SCRIPT_MANAGER_ID } from '../../common/constants';
+import * as persistentState from '../../common/persistentState';
 import * as managerApi from '../../common/pickers/managers';
 import * as projectApi from '../../common/pickers/projects';
 import * as windowApis from '../../common/window.apis';
 import {
+    clearEnvironmentCachesCommand,
     clearScriptEnvironmentCacheCommand,
     createAnyEnvironmentCommand,
     removePythonProject,
@@ -18,6 +20,8 @@ import {
 } from '../../features/envCommands';
 import * as settingHelpers from '../../features/settings/settingHelpers';
 import * as terminalRunner from '../../features/terminal/runInTerminal';
+import * as shellProviders from '../../features/terminal/shells/providers';
+import { ShellStartupScriptProvider } from '../../features/terminal/shells/startupProvider';
 import { TerminalManager } from '../../features/terminal/terminalManager';
 import { EnvManagerView } from '../../features/views/envManagersView';
 import { ProjectEnvironment, ProjectItem } from '../../features/views/treeViewItems';
@@ -257,12 +261,16 @@ suite('Clear Script Environment Cache Command Tests', () => {
 
     test('clears cache before inline settings cleanup and unloads removed projects', async () => {
         const calls: string[] = [];
+        const selectionEvents: string[] = [];
+        let associationPresent = true;
         const inlineProject: PythonProject = {
             uri: Uri.file('/workspace/script.py'),
             name: 'script.py',
         };
         const clearCache = sinon.stub().callsFake(async () => {
             calls.push('clearCache');
+            associationPresent = false;
+            selectionEvents.push('cleared');
         });
         const envManagers = {
             getEnvironmentManager: sinon.stub().withArgs(INLINE_SCRIPT_MANAGER_ID).returns({
@@ -285,6 +293,8 @@ suite('Clear Script Environment Cache Command Tests', () => {
             .callsFake(async (projects) => {
                 calls.push('removeInlineSettings');
                 assert.deepStrictEqual(projects, [inlineProject]);
+                assert.strictEqual(associationPresent, false);
+                assert.deepStrictEqual(selectionEvents, ['cleared']);
                 return [inlineProject];
             });
 
@@ -342,6 +352,119 @@ suite('Clear Script Environment Cache Command Tests', () => {
         sinon.assert.calledOnce(clearCache);
         sinon.assert.notCalled(removeInlineSettings);
         sinon.assert.notCalled(projectManager.remove as sinon.SinonStub);
+    });
+});
+
+suite('Clear Environment Caches Command Tests', () => {
+    teardown(() => {
+        sinon.restore();
+    });
+
+    function makeWorkspaceMemento(store: Map<string, unknown>): Memento {
+        return {
+            get: <T>(key: string) => store.get(key) as T | undefined,
+            update: async (key: string, value: unknown) => {
+                if (value === undefined) {
+                    store.delete(key);
+                } else {
+                    store.set(key, value);
+                }
+            },
+            keys: () => [...store.keys()],
+        } as unknown as Memento;
+    }
+
+    test('generic clear preserves the inline association key while clearing other workspace/global state and managers', async () => {
+        const inlineAssociations = { 'C:\\workspace\\script.py': 'C:\\cache\\python.exe' };
+        const store = new Map<string, unknown>([
+            [INLINE_SCRIPT_ENVS_KEY, inlineAssociations],
+            ['other-workspace-state', { stale: true }],
+        ]);
+        const workspaceState = makeWorkspaceMemento(store);
+
+        const calls: string[] = [];
+        let clearedWorkspaceKeys: readonly string[] | undefined;
+        let globalCleared = false;
+        const workspacePersistent = {
+            clear: sinon.stub().callsFake(async (keys?: string[]) => {
+                calls.push('workspace');
+                clearedWorkspaceKeys = keys;
+                for (const key of keys ?? [...store.keys()]) {
+                    store.delete(key);
+                }
+            }),
+        } as unknown as persistentState.PersistentState;
+        const globalPersistent = {
+            clear: sinon.stub().callsFake(async () => {
+                calls.push('global');
+                globalCleared = true;
+            }),
+        } as unknown as persistentState.PersistentState;
+        sinon.stub(persistentState, 'getWorkspacePersistentState').resolves(workspacePersistent);
+        sinon.stub(persistentState, 'getGlobalPersistentState').resolves(globalPersistent);
+
+        const envManagers = {
+            clearCache: sinon.stub().callsFake(async () => {
+                calls.push('managers');
+                // The inline association key must still be present when non-inline managers run.
+                assert.deepStrictEqual(store.get(INLINE_SCRIPT_ENVS_KEY), inlineAssociations);
+            }),
+        } as unknown as EnvironmentManagers;
+        const startupProvider = {
+            clearCache: sinon.stub().callsFake(async () => {
+                calls.push('shells');
+            }),
+        } as unknown as ShellStartupScriptProvider;
+        sinon.stub(shellProviders, 'clearShellProfileCache').callsFake(async (providers) => {
+            await Promise.all(providers.map((provider) => provider.clearCache()));
+        });
+
+        await clearEnvironmentCachesCommand(envManagers, [startupProvider], workspaceState);
+
+        // Only the inline key is excluded from the explicit workspace key list handed to clear().
+        assert.deepStrictEqual(clearedWorkspaceKeys, ['other-workspace-state']);
+        assert.strictEqual(globalCleared, true);
+        // Persistent state (workspace + global) is cleared before managers, which run before shells.
+        assert.ok(calls.indexOf('managers') > calls.indexOf('workspace'), 'managers run after workspace clear');
+        assert.ok(calls.indexOf('managers') > calls.indexOf('global'), 'managers run after global clear');
+        assert.ok(calls.indexOf('shells') > calls.indexOf('managers'), 'shells run after managers');
+        assert.strictEqual(calls[calls.length - 1], 'shells');
+        // Inline association key preserved; other workspace key cleared.
+        assert.deepStrictEqual(store.get(INLINE_SCRIPT_ENVS_KEY), inlineAssociations);
+        assert.strictEqual(store.has('other-workspace-state'), false);
+        sinon.assert.calledOnceWithExactly(envManagers.clearCache as sinon.SinonStub, undefined);
+    });
+
+    test('generic clear preserves a dormant inline association key when the inline manager is not registered', async () => {
+        const inlineAssociations = { 'C:\\workspace\\script.py': 'C:\\cache\\python.exe' };
+        const store = new Map<string, unknown>([[INLINE_SCRIPT_ENVS_KEY, inlineAssociations]]);
+        const workspaceState = makeWorkspaceMemento(store);
+
+        let clearedWorkspaceKeys: readonly string[] | undefined;
+        const workspacePersistent = {
+            clear: sinon.stub().callsFake(async (keys?: string[]) => {
+                clearedWorkspaceKeys = keys;
+                for (const key of keys ?? [...store.keys()]) {
+                    store.delete(key);
+                }
+            }),
+        } as unknown as persistentState.PersistentState;
+        const globalPersistent = {
+            clear: sinon.stub().resolves(),
+        } as unknown as persistentState.PersistentState;
+        sinon.stub(persistentState, 'getWorkspacePersistentState').resolves(workspacePersistent);
+        sinon.stub(persistentState, 'getGlobalPersistentState').resolves(globalPersistent);
+
+        const envManagers = {
+            clearCache: sinon.stub().resolves(),
+        } as unknown as EnvironmentManagers;
+        sinon.stub(shellProviders, 'clearShellProfileCache').resolves();
+
+        await clearEnvironmentCachesCommand(envManagers, [], workspaceState);
+
+        // The only workspace key is the inline key, so the explicit list is empty and it is preserved.
+        assert.deepStrictEqual(clearedWorkspaceKeys, []);
+        assert.deepStrictEqual(store.get(INLINE_SCRIPT_ENVS_KEY), inlineAssociations);
     });
 });
 
