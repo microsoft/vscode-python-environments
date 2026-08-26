@@ -16,6 +16,10 @@ This guide covers the full testing lifecycle:
 4. **🛠️ Fixing Problems** - Resolve compilation and runtime issues
 5. **✅ Validation** - Ensure coverage and resilience
 
+## Learnings
+
+- Pip commands that return JSON must pass `--disable-pip-version-check`; the process helper combines stderr with stdout, so update notices can otherwise make valid JSON unparseable (1).
+
 ### When to Use This Guide
 
 **User Requests Testing:**
@@ -599,6 +603,7 @@ envConfig.inspect
 - Create shared mock helpers (e.g., `createMockLogOutputChannel()`) instead of duplicating mock setup across multiple test files (1)
 - Use `sinon.useFakeTimers()` with `clock.tickAsync()` instead of `await new Promise(resolve => setTimeout(resolve, ms))` for debounce/timeout handling - eliminates flakiness and speeds up tests significantly (1)
 - Always compile tests (`npm run compile-tests`) before running them after adding new test cases - test counts will be wrong if running against stale compiled output (1)
+- **Delete stale compiled test output after removing a test source file**: `compile-tests` does not remove the corresponding file under `out/`, so local unit or integration runs may execute a deleted test until that artifact is cleaned (1)
 - Never create "documentation tests" that just `assert.ok(true)` — if mocking limitations prevent testing, either test a different layer that IS mockable, or skip the test entirely with a clear explanation (1)
 - When stubbing vscode APIs in tests via wrapper modules (e.g., `workspaceApis`), the production code must also use those wrappers — sinon cannot stub properties directly on the vscode namespace like `workspace.workspaceFolders`, so both production and test code must reference the same stubbable wrapper functions (4)
 - **Before writing tests**, check if the function under test calls VS Code APIs directly (e.g., `commands.executeCommand`, `window.createTreeView`, `workspace.getConfiguration`). If so, FIRST update the production code to use wrapper functions from `src/common/*.apis.ts` (create the wrapper if it doesn't exist), THEN write tests that stub those wrappers. This prevents CI failures where sinon cannot stub the vscode namespace (4)
@@ -606,3 +611,5 @@ envConfig.inspect
 - **Never skip tests to hide infrastructure problems**: If tests require native binaries (like `pet`), the CI workflow must build/download them. Skipping tests when infrastructure is missing gives false confidence. Build from source (like vscode-python does) rather than skipping. Tests should fail clearly when something is wrong (2)
 - **No retries for masking flakiness**: Mocha `retries` should not be used to mask test flakiness. If a test is flaky, fix the root cause. Retries hide real issues and slow down CI (1)
 - **pet binary is required for environment manager registration**: The smoke/E2E/integration tests require the `pet` binary from `microsoft/python-environment-tools` to be built and placed in `python-env-tools/bin/`. Without it, `waitForApiReady()` will timeout because managers never register. CI must build pet from source using `cargo build --release --package pet` (2)
+- **Check exact project registration with `getPythonProjects()`**: `getPythonProject(uri)` can return a containing parent project, so it cannot prove that a nested project was registered or unregistered (1)
+- **Use controlled fixture providers for package lifecycle integration tests**: Discovering an existing Conda environment does not guarantee API quick-create can succeed. Use `createEnvironmentFixture()` so creation prerequisites and cleanup are deterministic (1)

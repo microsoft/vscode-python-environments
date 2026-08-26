@@ -10,12 +10,14 @@ import {
     EnvironmentManager,
     GetEnvironmentScope,
     GetEnvironmentsScope,
+    GetPackageAvailableVersionsOptions,
     GetPackagesOptions,
     Package,
     PackageId,
     PackageInfo,
     PackageManagementOptions,
     PackageManager,
+    PackageVersionLookupNotSupportedError,
     Pep440Version,
     PythonBackgroundRunOptions,
     PythonEnvironment,
@@ -29,6 +31,7 @@ import {
     PythonTerminalCreateOptions,
     PythonTerminalExecutionOptions,
     RefreshEnvironmentsScope,
+    RemoveEnvironmentOptions,
     ResolveEnvironmentContext,
     SetEnvironmentScope,
 } from '../api';
@@ -107,9 +110,7 @@ export class PythonEnvironmentApiImpl implements PythonEnvironmentApi {
 
                 this.previousProjects = current;
                 if (added.length > 0 || removed.length > 0) {
-                    traceInfo(
-                        `Python API: Projects changed. Added: ${added.length}, Removed: ${removed.length}`,
-                    );
+                    traceInfo(`Python API: Projects changed. Added: ${added.length}, Removed: ${removed.length}`);
                     this._onDidChangePythonProjects.fire({ added, removed });
                 }
             }),
@@ -197,13 +198,13 @@ export class PythonEnvironmentApiImpl implements PythonEnvironmentApi {
             return result;
         }
     }
-    async removeEnvironment(environment: PythonEnvironment): Promise<void> {
+    async removeEnvironment(environment: PythonEnvironment, options?: RemoveEnvironmentOptions): Promise<void> {
         await waitForEnvManagerId([environment.envId.managerId]);
         const manager = this.envManagers.getEnvironmentManager(environment);
         if (!manager) {
             return Promise.reject(new Error('No environment manager found'));
         }
-        return manager.remove(environment);
+        return manager.remove(environment, options);
     }
     async refreshEnvironments(scope: RefreshEnvironmentsScope): Promise<void> {
         const currentScope = checkUri(scope) as RefreshEnvironmentsScope;
@@ -320,16 +321,32 @@ export class PythonEnvironmentApiImpl implements PythonEnvironmentApi {
         }
         return manager.getPackages(context, options);
     }
+    getPackageAvailableVersions(
+        context: PythonEnvironment,
+        packageName: string,
+        options: GetPackageAvailableVersionsOptions & { errorMode: 'throw' },
+    ): Promise<Pep440Version[]>;
+    getPackageAvailableVersions(
+        context: PythonEnvironment,
+        packageName: string,
+        options?: GetPackageAvailableVersionsOptions,
+    ): Promise<Pep440Version[] | undefined>;
     async getPackageAvailableVersions(
         context: PythonEnvironment,
         packageName: string,
+        options?: GetPackageAvailableVersionsOptions,
     ): Promise<Pep440Version[] | undefined> {
         await waitForEnvManagerId([context.envId.managerId]);
         const manager = this.envManagers.getPackageManager(context);
         if (!manager) {
-            return Promise.resolve(undefined);
+            if (options?.errorMode === 'throw') {
+                throw new PackageVersionLookupNotSupportedError(
+                    `No package manager is available to look up versions for: ${context.envId.id}`,
+                );
+            }
+            return undefined;
         }
-        return manager.getPackageAvailableVersions(context, packageName);
+        return manager.getPackageAvailableVersions(context, packageName, options);
     }
     onDidChangePackages: Event<DidChangePackagesEventArgs> = this._onDidChangePackages.event;
 

@@ -10,6 +10,7 @@ import {
     EnvironmentManager,
     GetEnvironmentScope,
     GetEnvironmentsScope,
+    GetPackageAvailableVersionsOptions,
     GetPackagesOptions,
     IconPath,
     Package,
@@ -18,6 +19,7 @@ import {
     PackageInfo,
     PackageManagementOptions,
     PackageManager,
+    PackageVersionLookupNotSupportedError,
     PythonEnvironment,
     PythonEnvironmentExecutionInfo,
     PythonEnvironmentId,
@@ -26,6 +28,7 @@ import {
     PythonProjectCreator,
     QuickCreateConfig,
     RefreshEnvironmentsScope,
+    RemoveEnvironmentOptions,
     ResolveEnvironmentContext,
     SetEnvironmentScope,
 } from './api';
@@ -208,9 +211,9 @@ export class InternalEnvironmentManager implements EnvironmentManager {
         return this.manager.remove !== undefined;
     }
 
-    remove(scope: PythonEnvironment): Promise<void> {
+    remove(scope: PythonEnvironment, options?: RemoveEnvironmentOptions): Promise<void> {
         return this.manager.remove
-            ? this.manager.remove(scope)
+            ? this.manager.remove(scope, options)
             : Promise.reject(new RemoveEnvironmentNotSupported(`Remove Environment not supported by: ${this.id}`));
     }
 
@@ -399,9 +402,47 @@ export class InternalPackageManager implements PackageManager {
     getPackageAvailableVersions(
         environment: PythonEnvironment,
         packageName: string,
+        options: GetPackageAvailableVersionsOptions & { errorMode: 'throw' },
+    ): Promise<Pep440Version[]>;
+    getPackageAvailableVersions(
+        environment: PythonEnvironment,
+        packageName: string,
+        options?: GetPackageAvailableVersionsOptions,
+    ): Promise<Pep440Version[] | undefined>;
+
+    /**
+     * Delegates version lookup to the underlying package manager using the requested error mode.
+     */
+    async getPackageAvailableVersions(
+        environment: PythonEnvironment,
+        packageName: string,
+        options?: GetPackageAvailableVersionsOptions,
     ): Promise<Pep440Version[] | undefined> {
-        return this.manager.getPackageAvailableVersions
-            ? this.manager.getPackageAvailableVersions(environment, packageName)
+        const shouldThrow = options?.errorMode === 'throw';
+        try {
+            if (!this.manager.getPackageAvailableVersions) {
+                throw new PackageVersionLookupNotSupportedError(
+                    `Package version lookup is not supported by package manager: ${this.id}`,
+                );
+            }
+            const versions = await this.manager.getPackageAvailableVersions(environment, packageName);
+            if (versions === undefined && shouldThrow) {
+                throw new PackageVersionLookupNotSupportedError(
+                    `Package version lookup is not supported by package manager: ${this.id}`,
+                );
+            }
+            return versions;
+        } catch (error) {
+            if (shouldThrow) {
+                throw error;
+            }
+            return undefined;
+        }
+    }
+
+    getDirectPackageNames(environment: PythonEnvironment): Promise<Set<string> | undefined> {
+        return this.manager.getDirectPackageNames
+            ? this.manager.getDirectPackageNames(environment)
             : Promise.resolve(undefined);
     }
 

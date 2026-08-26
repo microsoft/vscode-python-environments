@@ -47,12 +47,11 @@ function createManager(
     const baseManager = {
         getEnvironments: sinon.stub().resolves(baseEnvironments),
     } as any as EnvironmentManager;
-    const manager = new VenvManager(
-        {} as NativePythonFinder,
-        api,
-        baseManager,
-        { info: sinon.stub(), error: sinon.stub(), warn: sinon.stub() } as any,
-    );
+    const manager = new VenvManager({} as NativePythonFinder, api, baseManager, {
+        info: sinon.stub(),
+        error: sinon.stub(),
+        warn: sinon.stub(),
+    } as any);
     (manager as any)._initialized = { completed: true, promise: Promise.resolve() };
     (manager as any).collection = [];
     return manager;
@@ -219,6 +218,17 @@ suite('VenvManager.remove - orchestration', () => {
         assert.strictEqual(events.length, 1);
         assert.strictEqual(events[0][0].kind, EnvironmentChangeKind.remove);
         assert.strictEqual(events[0][0].environment, env);
+    });
+
+    test('forwards headless removal options to the removal helper', async () => {
+        const manager = createManager();
+        const env = environment();
+        removeVenvStub.resolves(true);
+
+        await manager.remove(env, { runHeadless: true });
+
+        assert.strictEqual(removeVenvStub.firstCall.args[0], env);
+        assert.deepStrictEqual(removeVenvStub.firstCall.args[2], { runHeadless: true });
     });
 
     test('does not mutate state when the removal helper returns false', async () => {

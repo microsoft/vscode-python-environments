@@ -23,6 +23,8 @@ import {
     PythonProject,
 } from '../../api';
 import * as extensionApis from '../../common/extension.apis';
+import { InlineScriptMetadata } from '../../common/inlineScript/metadata';
+import { InlineScriptRoutingRegistry } from '../../common/inlineScript/routingRegistry';
 import { PythonEnvironmentManagers } from '../../features/envManagers';
 import * as settingHelpers from '../../features/settings/settingHelpers';
 import { InternalPackageManager, PythonProjectManager } from '../../internal.api';
@@ -34,6 +36,13 @@ suite('PythonEnvironmentManagers getLastKnownEnvironment', () => {
     let projectsByUri: Map<string, PythonProject>;
     let defaultManagerId: string;
     let exactManagerSettings: Map<string, string>;
+    let routingRegistry: InlineScriptRoutingRegistry;
+
+    const INLINE_METADATA: InlineScriptMetadata = {
+        requiresPython: '>=3.11',
+        dependencies: ['requests'],
+        range: { start: 0, end: 40 },
+    };
 
     function makeEnv(id: string): PythonEnvironment {
         const envId: PythonEnvironmentId = { id, managerId: 'test-manager' };
@@ -64,11 +73,12 @@ suite('PythonEnvironmentManagers getLastKnownEnvironment', () => {
         setupNonThenable(projectManager);
         projectsByUri = new Map();
         exactManagerSettings = new Map();
+        routingRegistry = new InlineScriptRoutingRegistry();
         projectManager
             .setup((pm) => pm.get(typeMoq.It.isAny()))
             .returns((uri) => projectsByUri.get(uri.toString()));
 
-        envManagers = new PythonEnvironmentManagers(projectManager.object);
+        envManagers = new PythonEnvironmentManagers(projectManager.object, routingRegistry);
         sinon.stub(settingHelpers, 'getDefaultEnvManagerSetting').callsFake(() => defaultManagerId);
         sinon
             .stub(settingHelpers, 'getProjectEnvironmentManagerSetting')
@@ -112,6 +122,16 @@ suite('PythonEnvironmentManagers getLastKnownEnvironment', () => {
         setupNonThenable(packageManager);
         packageManager.setup((manager) => manager.id).returns(() => id);
         sinon.stub(envManagers, 'getPackageManager').returns(packageManager.object);
+    }
+
+    function markInlineScript(uri: Uri, associated: boolean = true, metadata: InlineScriptMetadata = INLINE_METADATA): void {
+        routingRegistry.setMetadata(uri, metadata);
+        routingRegistry.setValidatedAssociation(uri, associated);
+    }
+
+    function recreateEnvManagersWithoutRouting(): void {
+        envManagers.dispose();
+        envManagers = new PythonEnvironmentManagers(projectManager.object);
     }
 
     test('returns undefined before any environment has been resolved', () => {
@@ -267,6 +287,7 @@ suite('PythonEnvironmentManagers getLastKnownEnvironment', () => {
         settings.onSecondCall().resolves();
         const events: DidChangeEnvironmentEventArgs[] = [];
         envManagers.onDidChangeActiveEnvironment((event) => events.push(event));
+        markInlineScript(scope);
 
         const olderSelection = envManagers.setEnvironment(scope, first);
         await firstWriteStarted;
@@ -293,6 +314,7 @@ suite('PythonEnvironmentManagers getLastKnownEnvironment', () => {
         };
         const events: DidChangeEnvironmentEventArgs[] = [];
         envManagers.onDidChangeActiveEnvironment((event) => events.push(event));
+        markInlineScript(scope);
 
         await envManagers.setEnvironment(scope, first, false);
         await envManagers.setEnvironment(scope, second, false);
@@ -322,6 +344,7 @@ suite('PythonEnvironmentManagers getLastKnownEnvironment', () => {
         };
         const events: DidChangeEnvironmentEventArgs[] = [];
         envManagers.onDidChangeActiveEnvironment((event) => events.push(event));
+        markInlineScript(scope);
 
         await envManagers.setEnvironment(scope, first, false);
         await envManagers.setEnvironment(scope, regenerated, false);
@@ -369,12 +392,70 @@ suite('PythonEnvironmentManagers getLastKnownEnvironment', () => {
         const managerId = registerManager(async () => undefined, async () => undefined, 'inline-script');
         const first = { ...makeEnv('first'), envId: { id: 'first', managerId } };
         const second = { ...makeEnv('second'), envId: { id: 'second', managerId } };
+        markInlineScript(firstUri);
+        markInlineScript(secondUri);
 
         await envManagers.setEnvironment(firstUri, first, false);
         await envManagers.setEnvironment(secondUri, second, false);
 
         assert.strictEqual(envManagers.getLastKnownEnvironment(firstUri), first);
         assert.strictEqual(envManagers.getLastKnownEnvironment(secondUri), second);
+    });
+
+    test('does not route inline metadata without an associated environment', () => {
+        const script = Uri.file('/workspace/project/script.py');
+        projectsByUri.set(script.toString(), { name: 'project', uri: Uri.file('/workspace/project') });
+        const defaultId = registerManager(async () => makeEnv('default'), async () => undefined, 'venv');
+        registerManager(async () => makeEnv('inline'), async () => undefined, 'inline-script');
+        defaultManagerId = defaultId;
+        routingRegistry.setMetadata(script, INLINE_METADATA);
+
+        assert.strictEqual(envManagers.getEnvironmentManager(script)?.id, defaultId);
+    });
+
+    test('does not route an associated inline environment without known metadata', () => {
+        const script = Uri.file('/workspace/project/script.py');
+        projectsByUri.set(script.toString(), { name: 'project', uri: Uri.file('/workspace/project') });
+        const defaultId = registerManager(async () => makeEnv('default'), async () => undefined, 'venv');
+        registerManager(async () => makeEnv('inline'), async () => undefined, 'inline-script');
+        defaultManagerId = defaultId;
+        routingRegistry.setValidatedAssociation(script, true);
+
+        assert.strictEqual(envManagers.getEnvironmentManager(script)?.id, defaultId);
+    });
+
+    test('without a routing registry, does not route metadata-only inline associations', () => {
+        recreateEnvManagersWithoutRouting();
+        const shouldRouteSpy = sinon.spy(InlineScriptRoutingRegistry.prototype, 'shouldRoute');
+        const script = Uri.file('/workspace/project/script.py');
+        projectsByUri.set(script.toString(), { name: 'project', uri: Uri.file('/workspace/project') });
+        const defaultId = registerManager(async () => makeEnv('default'), async () => undefined, 'venv');
+        registerManager(async () => makeEnv('inline'), async () => undefined, 'inline-script');
+        defaultManagerId = defaultId;
+        routingRegistry.setMetadata(script, INLINE_METADATA);
+        routingRegistry.setValidatedAssociation(script, true);
+
+        assert.strictEqual(envManagers.getEnvironmentManager(script)?.id, defaultId);
+        assert.strictEqual(shouldRouteSpy.called, false, 'off-mode should not consult inline routeability');
+    });
+
+    test('without a routing registry, keeps baseline cached inline selections without routeability checks', async () => {
+        recreateEnvManagersWithoutRouting();
+        const shouldRouteSpy = sinon.spy(InlineScriptRoutingRegistry.prototype, 'shouldRoute');
+        const script = Uri.file('/workspace/project/script.py');
+        projectsByUri.set(script.toString(), { name: 'project', uri: Uri.file('/workspace/project') });
+        const defaultId = registerManager(async () => makeEnv('default'), async () => undefined, 'venv');
+        let inlineEnvironment: PythonEnvironment;
+        const inlineId = registerManager(async () => inlineEnvironment, async () => undefined, 'inline-script');
+        inlineEnvironment = { ...makeEnv('inline'), envId: { id: 'inline', managerId: inlineId } };
+        defaultManagerId = defaultId;
+
+        await envManagers.setEnvironment(script, inlineEnvironment, false);
+
+        assert.strictEqual(envManagers.getEnvironmentManager(script)?.id, inlineId);
+        assert.strictEqual(await envManagers.getEnvironment(script), inlineEnvironment);
+        assert.strictEqual(envManagers.getLastKnownEnvironment(script), inlineEnvironment);
+        assert.strictEqual(shouldRouteSpy.called, false, 'off-mode should not consult inline routeability');
     });
 
     test('routes an active inline-script selection before the containing project default', async () => {
@@ -385,6 +466,7 @@ suite('PythonEnvironmentManagers getLastKnownEnvironment', () => {
         const inlineId = registerManager(async () => inlineEnvironment, async () => undefined, 'inline-script');
         inlineEnvironment = { ...makeEnv('inline'), envId: { id: 'inline', managerId: inlineId } };
         defaultManagerId = defaultId;
+        markInlineScript(script);
 
         await envManagers.setEnvironment(script, inlineEnvironment, false);
 
@@ -400,6 +482,7 @@ suite('PythonEnvironmentManagers getLastKnownEnvironment', () => {
         const inlineId = registerManager(async () => inlineEnvironment, async () => undefined, 'inline-script');
         inlineEnvironment = { ...makeEnv('inline'), envId: { id: 'inline', managerId: inlineId } };
         defaultManagerId = selectedId;
+        markInlineScript(script);
 
         await envManagers.setEnvironment(script, inlineEnvironment, false);
         exactManagerSettings.set(script.toString(), selectedId);
@@ -417,11 +500,160 @@ suite('PythonEnvironmentManagers getLastKnownEnvironment', () => {
         selectedEnvironment = { ...makeEnv('selected'), envId: { id: 'selected', managerId: selectedId } };
         inlineEnvironment = { ...makeEnv('inline'), envId: { id: 'inline', managerId: inlineId } };
         defaultManagerId = selectedId;
+        markInlineScript(script);
 
         await envManagers.setEnvironment(script, inlineEnvironment, false);
         await envManagers.setEnvironment(script, selectedEnvironment, false);
 
         assert.strictEqual(envManagers.getEnvironmentManager(script)?.id, selectedId);
+    });
+
+    test('ignores routeability changes while an explicit non-inline override wins', async () => {
+        const script = Uri.file('/workspace/project/script.py');
+        projectsByUri.set(script.toString(), { name: 'project', uri: Uri.file('/workspace/project') });
+        let selectedEnvironment: PythonEnvironment;
+        const selectedId = registerManager(async () => selectedEnvironment, async () => undefined, 'venv');
+        let inlineEnvironment: PythonEnvironment;
+        const inlineId = registerManager(async () => inlineEnvironment, async () => undefined, 'inline-script');
+        selectedEnvironment = { ...makeEnv('selected'), envId: { id: 'selected', managerId: selectedId } };
+        inlineEnvironment = { ...makeEnv('inline'), envId: { id: 'inline', managerId: inlineId } };
+        defaultManagerId = selectedId;
+        markInlineScript(script);
+
+        await envManagers.setEnvironment(script, inlineEnvironment, false);
+        await envManagers.setEnvironment(script, selectedEnvironment, false);
+        await new Promise((resolve) => setImmediate(resolve));
+
+        const events: DidChangeEnvironmentEventArgs[] = [];
+        envManagers.onDidChangeActiveEnvironment((event) => events.push(event));
+        routingRegistry.clearMetadata(script);
+        await new Promise((resolve) => setImmediate(resolve));
+        await new Promise((resolve) => setImmediate(resolve));
+
+        assert.deepStrictEqual(events, []);
+        assert.strictEqual(envManagers.getEnvironmentManager(script)?.id, selectedId);
+        assert.strictEqual(envManagers.getLastKnownEnvironment(script), selectedEnvironment);
+    });
+
+    test('preserves an explicit non-inline override during a batch manager refresh', async () => {
+        const script = Uri.file('/workspace/project/script.py');
+        projectsByUri.set(script.toString(), { name: 'project', uri: Uri.file('/workspace/project') });
+        let selectedEnvironment: PythonEnvironment;
+        const selectedId = registerManager(async () => selectedEnvironment, async () => undefined, 'venv');
+        let inlineEnvironment: PythonEnvironment;
+        const inlineId = registerManager(async () => inlineEnvironment, async () => undefined, 'inline-script');
+        selectedEnvironment = { ...makeEnv('selected'), envId: { id: 'selected', managerId: selectedId } };
+        inlineEnvironment = { ...makeEnv('inline'), envId: { id: 'inline', managerId: inlineId } };
+        defaultManagerId = selectedId;
+        markInlineScript(script);
+        await envManagers.setEnvironment(script, inlineEnvironment, false);
+        await envManagers.setEnvironment(script, selectedEnvironment, false);
+
+        await envManagers.setEnvironments([script], undefined, false);
+
+        assert.strictEqual(envManagers.getEnvironmentManager(script)?.id, selectedId);
+        assert.strictEqual(envManagers.getLastKnownEnvironment(script), selectedEnvironment);
+    });
+
+    test('publishes through the inline manager after an explicit override is cleared', async () => {
+        const script = Uri.file('/workspace/project/script.py');
+        projectsByUri.set(script.toString(), { name: 'project', uri: Uri.file('/workspace/project') });
+        const selectedSet = sinon.stub().resolves();
+        let selectedEnvironment: PythonEnvironment;
+        const selectedId = registerManager(async () => selectedEnvironment, selectedSet, 'venv');
+        let inlineEnvironment: PythonEnvironment;
+        const inlineGet = sinon.stub().callsFake(async () => inlineEnvironment);
+        const inlineId = registerManager(inlineGet, async () => undefined, 'inline-script');
+        selectedEnvironment = { ...makeEnv('selected'), envId: { id: 'selected', managerId: selectedId } };
+        inlineEnvironment = { ...makeEnv('inline'), envId: { id: 'inline', managerId: inlineId } };
+        defaultManagerId = selectedId;
+        markInlineScript(script);
+        await envManagers.setEnvironment(script, inlineEnvironment, false);
+        await envManagers.setEnvironment(script, selectedEnvironment, false);
+        await new Promise((resolve) => setImmediate(resolve));
+        selectedSet.resetHistory();
+        inlineGet.resetHistory();
+        const events: DidChangeEnvironmentEventArgs[] = [];
+        envManagers.onDidChangeActiveEnvironment((event) => events.push(event));
+
+        await envManagers.setEnvironment(script, undefined, false);
+
+        sinon.assert.calledOnceWithExactly(selectedSet, script, undefined);
+        sinon.assert.calledOnceWithExactly(inlineGet, script);
+        assert.strictEqual(envManagers.getEnvironmentManager(script)?.id, inlineId);
+        assert.strictEqual(envManagers.getLastKnownEnvironment(script), inlineEnvironment);
+        assert.deepStrictEqual(events, [
+            {
+                uri: script,
+                old: selectedEnvironment,
+                new: inlineEnvironment,
+            },
+        ]);
+    });
+
+    test('does not let override clearing overwrite a newer inline selection', async () => {
+        const script = Uri.file('/workspace/project/script.py');
+        projectsByUri.set(script.toString(), { name: 'project', uri: Uri.file('/workspace/project') });
+        let releaseOverrideClear: (() => void) | undefined;
+        let signalOverrideClear: (() => void) | undefined;
+        const overrideClearStarted = new Promise<void>((resolve) => {
+            signalOverrideClear = resolve;
+        });
+        const overrideClearGate = new Promise<void>((resolve) => {
+            releaseOverrideClear = resolve;
+        });
+        const selectedSet = sinon.stub();
+        selectedSet.onFirstCall().resolves();
+        selectedSet.onSecondCall().callsFake(async () => {
+            signalOverrideClear!();
+            await overrideClearGate;
+        });
+        let selectedEnvironment: PythonEnvironment;
+        const selectedId = registerManager(async () => selectedEnvironment, selectedSet, 'venv');
+
+        let releaseNewInline: (() => void) | undefined;
+        let signalNewInline: (() => void) | undefined;
+        const newInlineStarted = new Promise<void>((resolve) => {
+            signalNewInline = resolve;
+        });
+        const newInlineGate = new Promise<void>((resolve) => {
+            releaseNewInline = resolve;
+        });
+        const inlineSet = sinon.stub();
+        inlineSet.onFirstCall().resolves();
+        inlineSet.onSecondCall().callsFake(async () => {
+            signalNewInline!();
+            await newInlineGate;
+        });
+        let inlineEnvironment: PythonEnvironment;
+        const inlineId = registerManager(async () => inlineEnvironment, inlineSet, 'inline-script');
+        const oldInline = {
+            ...makeEnv('old-inline'),
+            envId: { id: 'old-inline', managerId: inlineId },
+        };
+        const newInline = {
+            ...makeEnv('new-inline'),
+            envId: { id: 'new-inline', managerId: inlineId },
+        };
+        inlineEnvironment = oldInline;
+        selectedEnvironment = { ...makeEnv('selected'), envId: { id: 'selected', managerId: selectedId } };
+        defaultManagerId = selectedId;
+        markInlineScript(script);
+        await envManagers.setEnvironment(script, oldInline, false);
+        await envManagers.setEnvironment(script, selectedEnvironment, false);
+
+        const clearOverride = envManagers.setEnvironment(script, undefined, false);
+        await overrideClearStarted;
+        inlineEnvironment = newInline;
+        const newerSelection = envManagers.setEnvironment(script, newInline, false);
+        await newInlineStarted;
+        releaseOverrideClear!();
+        await clearOverride;
+        releaseNewInline!();
+        await newerSelection;
+
+        assert.strictEqual(envManagers.getEnvironmentManager(script)?.id, inlineId);
+        assert.strictEqual(envManagers.getLastKnownEnvironment(script), newInline);
     });
 
     test('clears inline routing after a no-op inline refresh during settings persistence', async () => {
@@ -434,6 +666,7 @@ suite('PythonEnvironmentManagers getLastKnownEnvironment', () => {
         selectedEnvironment = { ...makeEnv('selected'), envId: { id: 'selected', managerId: selectedId } };
         inlineEnvironment = { ...makeEnv('inline'), envId: { id: 'inline', managerId: inlineId } };
         defaultManagerId = selectedId;
+        markInlineScript(script);
         await envManagers.setEnvironment(script, inlineEnvironment, false);
         stubPackageManager();
         let releaseSettings: (() => void) | undefined;
@@ -457,6 +690,133 @@ suite('PythonEnvironmentManagers getLastKnownEnvironment', () => {
 
         assert.strictEqual(envManagers.getEnvironmentManager(script)?.id, selectedId);
         assert.strictEqual(envManagers.getLastKnownEnvironment(script), selectedEnvironment);
+    });
+
+    test('refreshes to the inline manager when a persisted association becomes routeable', async () => {
+        const script = Uri.file('/workspace/project/script.py');
+        projectsByUri.set(script.toString(), { name: 'project', uri: Uri.file('/workspace/project') });
+        const defaultEnvironment = makeEnv('default');
+        const defaultId = registerManager(async () => defaultEnvironment, async () => undefined, 'venv');
+        let inlineEnvironment: PythonEnvironment;
+        const inlineId = registerManager(async () => inlineEnvironment, async () => undefined, 'inline-script');
+        inlineEnvironment = { ...makeEnv('inline'), envId: { id: 'inline', managerId: inlineId } };
+        defaultManagerId = defaultId;
+        routingRegistry.setMetadata(script, INLINE_METADATA);
+
+        await envManagers.refreshEnvironment(script);
+        routingRegistry.setValidatedAssociation(script, true);
+        await new Promise((resolve) => setImmediate(resolve));
+
+        assert.strictEqual(envManagers.getEnvironmentManager(script)?.id, inlineId);
+        assert.strictEqual(envManagers.getLastKnownEnvironment(script), inlineEnvironment);
+    });
+
+    test('does not publish an inline selection while routeability is false, then publishes once when it validates', async () => {
+        const script = Uri.file('/workspace/project/script.py');
+        const project = { name: 'project', uri: Uri.file('/workspace/project') };
+        projectsByUri.set(script.toString(), project);
+        const defaultEnvironment = makeEnv('default');
+        const defaultId = registerManager(async () => defaultEnvironment, async () => undefined, 'venv');
+        let inlineEnvironment: PythonEnvironment;
+        const inlineId = registerManager(async () => inlineEnvironment, async () => undefined, 'inline-script');
+        inlineEnvironment = { ...makeEnv('inline'), envId: { id: 'inline', managerId: inlineId } };
+        defaultManagerId = defaultId;
+
+        await envManagers.refreshEnvironment(script);
+        await new Promise((resolve) => setImmediate(resolve));
+        const events: DidChangeEnvironmentEventArgs[] = [];
+        envManagers.onDidChangeActiveEnvironment((event) => events.push(event));
+
+        await envManagers.setEnvironment(script, inlineEnvironment, false);
+        await new Promise((resolve) => setImmediate(resolve));
+
+        assert.strictEqual(envManagers.getEnvironmentManager(script)?.id, defaultId);
+        assert.strictEqual(envManagers.getLastKnownEnvironment(script), defaultEnvironment);
+        assert.deepStrictEqual(events, []);
+
+        routingRegistry.setMetadata(script, INLINE_METADATA);
+        routingRegistry.setValidatedAssociation(script, true);
+        await new Promise((resolve) => setImmediate(resolve));
+        await new Promise((resolve) => setImmediate(resolve));
+
+        assert.strictEqual(envManagers.getEnvironmentManager(script)?.id, inlineId);
+        assert.strictEqual(envManagers.getLastKnownEnvironment(script), inlineEnvironment);
+        assert.deepStrictEqual(events, [{ uri: script, old: defaultEnvironment, new: inlineEnvironment }]);
+    });
+
+    test('does not publish batch inline selections until each script becomes routeable', async () => {
+        const first = Uri.file('/workspace/project/first.py');
+        const second = Uri.file('/workspace/project/second.py');
+        const project = { name: 'project', uri: Uri.file('/workspace/project') };
+        projectsByUri.set(first.toString(), project);
+        projectsByUri.set(second.toString(), project);
+        const defaultEnvironment = makeEnv('default');
+        const defaultId = registerManager(async () => defaultEnvironment, async () => undefined, 'venv');
+        let inlineEnvironment: PythonEnvironment;
+        const inlineId = registerManager(async () => inlineEnvironment, async () => undefined, 'inline-script');
+        inlineEnvironment = { ...makeEnv('inline'), envId: { id: 'inline', managerId: inlineId } };
+        defaultManagerId = defaultId;
+
+        await envManagers.refreshEnvironment(first);
+        await envManagers.refreshEnvironment(second);
+        await new Promise((resolve) => setImmediate(resolve));
+        const events: DidChangeEnvironmentEventArgs[] = [];
+        envManagers.onDidChangeActiveEnvironment((event) => events.push(event));
+
+        await envManagers.setEnvironments([first, second], inlineEnvironment, false);
+        await new Promise((resolve) => setImmediate(resolve));
+
+        assert.strictEqual(envManagers.getLastKnownEnvironment(first), defaultEnvironment);
+        assert.strictEqual(envManagers.getLastKnownEnvironment(second), defaultEnvironment);
+        assert.deepStrictEqual(events, []);
+
+        routingRegistry.setMetadata(first, INLINE_METADATA);
+        routingRegistry.setValidatedAssociation(first, true);
+        await new Promise((resolve) => setImmediate(resolve));
+        await new Promise((resolve) => setImmediate(resolve));
+
+        assert.strictEqual(envManagers.getLastKnownEnvironment(first), inlineEnvironment);
+        assert.strictEqual(envManagers.getLastKnownEnvironment(second), defaultEnvironment);
+        assert.deepStrictEqual(events, [{ uri: first, old: defaultEnvironment, new: inlineEnvironment }]);
+    });
+
+    test('falls back when inline-script metadata is invalidated after routing', async () => {
+        const script = Uri.file('/workspace/project/script.py');
+        const project = { name: 'project', uri: Uri.file('/workspace/project') };
+        projectsByUri.set(script.toString(), project);
+        const defaultEnvironment = makeEnv('default');
+        const defaultId = registerManager(async () => defaultEnvironment, async () => undefined, 'venv');
+        let inlineEnvironment: PythonEnvironment;
+        const inlineId = registerManager(async () => inlineEnvironment, async () => undefined, 'inline-script');
+        inlineEnvironment = { ...makeEnv('inline'), envId: { id: 'inline', managerId: inlineId } };
+        defaultManagerId = defaultId;
+        await envManagers.refreshEnvironment(script);
+        markInlineScript(script);
+        await new Promise((resolve) => setImmediate(resolve));
+        await new Promise((resolve) => setImmediate(resolve));
+        const events: DidChangeEnvironmentEventArgs[] = [];
+        envManagers.onDidChangeActiveEnvironment((event) => events.push(event));
+        routingRegistry.clearMetadata(script);
+        await new Promise((resolve) => setImmediate(resolve));
+        await new Promise((resolve) => setImmediate(resolve));
+
+        assert.strictEqual(envManagers.getEnvironmentManager(script)?.id, defaultId);
+        assert.strictEqual(envManagers.getLastKnownEnvironment(script), defaultEnvironment);
+        assert.deepStrictEqual(events[events.length - 1], {
+            uri: project.uri,
+            old: inlineEnvironment,
+            new: defaultEnvironment,
+        });
+    });
+
+    test('ignores routeable inline state when the inline manager is not registered', () => {
+        const script = Uri.file('/workspace/project/script.py');
+        projectsByUri.set(script.toString(), { name: 'project', uri: Uri.file('/workspace/project') });
+        const defaultId = registerManager(async () => makeEnv('default'), async () => undefined, 'venv');
+        defaultManagerId = defaultId;
+        markInlineScript(script);
+
+        assert.strictEqual(envManagers.getEnvironmentManager(script)?.id, defaultId);
     });
 
     test('does not persist an inline-script manager for the containing project', async () => {

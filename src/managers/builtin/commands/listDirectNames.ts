@@ -1,15 +1,15 @@
 import { ListDirectNamesCommand, type BaseExecuteArgs } from '../../base/commands/index';
+import { normalizePackageName } from '../../common/packageUtils';
 import { runPython, runUV } from '../helpers';
-import { normalizePackageName } from '../utils';
 
 /**
  * Pip list direct names command.
- * Parsed command: `python -m pip list --format=json --not-required`
+ * Parsed command: `python -m pip list --format=json --not-required --disable-pip-version-check`
  * Official documentation: https://pip.pypa.io/en/stable/cli/pip_list/
  */
 export class PipListDirectNamesCommand extends ListDirectNamesCommand {
     protected buildCommand(): string[] {
-        return ['-m', 'pip', 'list', '--format=json', '--not-required'];
+        return ['-m', 'pip', 'list', '--format=json', '--not-required', '--disable-pip-version-check'];
     }
 
     async execute(executeArgs?: BaseExecuteArgs): Promise<Set<string>> {

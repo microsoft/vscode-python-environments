@@ -336,3 +336,61 @@ suite('PythonEnvironmentManagers - refreshEnvironment', () => {
         await envManagers.refreshEnvironment(Uri.file('/unknown/path'));
     });
 });
+
+suite('PythonEnvironmentManagers - clearCache', () => {
+    let sandbox: sinon.SinonSandbox;
+    let envManagers: PythonEnvironmentManagers;
+
+    setup(() => {
+        sandbox = sinon.createSandbox();
+        sandbox.stub(frameUtils, 'getCallingExtension').returns('ms-python.python');
+        envManagers = new PythonEnvironmentManagers({
+            get: sandbox.stub().returns(undefined),
+            getProjects: sandbox.stub().returns([]),
+        } as unknown as PythonProjectManager);
+    });
+
+    teardown(() => {
+        sandbox.restore();
+    });
+
+    function registerManager(name: string, clearCache: sinon.SinonStub): void {
+        envManagers.registerEnvironmentManager(
+            {
+                name,
+                displayName: name,
+                preferredPackageManagerId: 'ms-python.python:pip',
+                get: sandbox.stub().resolves(undefined),
+                set: sandbox.stub().resolves(),
+                resolve: sandbox.stub().resolves(undefined),
+                refresh: sandbox.stub().resolves(),
+                getEnvironments: sandbox.stub().resolves([]),
+                clearCache,
+                onDidChangeEnvironments: sandbox.stub().returns({ dispose: () => {} }),
+                onDidChangeEnvironment: sandbox.stub().returns({ dispose: () => {} }),
+            } as any,
+            { extensionId: 'ms-python.python' },
+        );
+    }
+
+    test('clears every existing manager when the inline preview manager is absent', async () => {
+        const systemClearCache = sandbox.stub().resolves();
+        registerManager('system', systemClearCache);
+
+        await envManagers.clearCache(undefined);
+
+        sinon.assert.calledOnce(systemClearCache);
+    });
+
+    test('does not clear the preview inline manager through the generic command path', async () => {
+        const systemClearCache = sandbox.stub().resolves();
+        const inlineClearCache = sandbox.stub().resolves();
+        registerManager('system', systemClearCache);
+        registerManager('inline-script', inlineClearCache);
+
+        await envManagers.clearCache(undefined);
+
+        sinon.assert.calledOnce(systemClearCache);
+        sinon.assert.notCalled(inlineClearCache);
+    });
+});

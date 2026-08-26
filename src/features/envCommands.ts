@@ -12,11 +12,13 @@ import {
 } from 'vscode';
 import {
     CreateEnvironmentOptions,
+    Pep440Version,
     PythonEnvironment,
     PythonEnvironmentApi,
     PythonProject,
     PythonProjectCreator,
     PythonProjectCreatorOptions,
+    isPackageVersionLookupNotSupportedError,
 } from '../api';
 import { traceError, traceInfo, traceVerbose } from '../common/logging';
 import {
@@ -26,7 +28,12 @@ import {
     ProjectCreators,
     PythonProjectManager,
 } from '../internal.api';
-import { removePythonProjectSetting, setEnvironmentManager, setPackageManager } from './settings/settingHelpers';
+import {
+    removeInlineScriptPythonProjectSettings,
+    removePythonProjectSetting,
+    setEnvironmentManager,
+    setPackageManager,
+} from './settings/settingHelpers';
 
 import { valid as pep440Valid } from '@renovatebot/pep440';
 import { executeCommand } from '../common/command.api';
@@ -50,8 +57,10 @@ import {
     showInputBox,
     showOpenDialog,
     showQuickPick,
+    showWarningMessage,
     withProgress,
 } from '../common/window.apis';
+import { INLINE_SCRIPT_MANAGER_ID } from '../common/constants';
 import { runAsTask } from './execution/runAsTask';
 import { runInTerminal } from './terminal/runInTerminal';
 import { TerminalManager } from './terminal/terminalManager';
@@ -362,11 +371,20 @@ export async function managePackageVersion(context: unknown, em: EnvironmentMana
 
         let version: string | undefined;
 
-        // Try to fetch available versions for a QuickPick experience
-        const availableVersions = await withProgress(
-            { location: ProgressLocation.Window, title: l10n.t('Fetching available versions for {0}...', pkg.name) },
-            () => packageManager.getPackageAvailableVersions(environment, pkg.name),
-        );
+        // Try to fetch available versions for a QuickPick experience. Only a typed
+        // unsupported-capability error falls back to manual entry; any other failure
+        // (command, network, or malformed output) propagates for normal handling.
+        let availableVersions: Pep440Version[] | undefined;
+        try {
+            availableVersions = await withProgress(
+                { location: ProgressLocation.Window, title: l10n.t('Fetching available versions for {0}...', pkg.name) },
+                () => packageManager.getPackageAvailableVersions(environment, pkg.name, { errorMode: 'throw' }),
+            );
+        } catch (error) {
+            if (!isPackageVersionLookupNotSupportedError(error)) {
+                throw error;
+            }
+        }
 
         if (availableVersions && availableVersions.length > 0) {
             const items = availableVersions.map((v) => ({
@@ -660,6 +678,36 @@ export async function removePythonProject(
     await em.setEnvironment(item.project.uri, undefined);
     await removePythonProjectSetting([{ project: item.project }]);
     wm.remove(item.project);
+}
+
+export async function clearScriptEnvironmentCacheCommand(
+    em: EnvironmentManagers,
+    wm: PythonProjectManager,
+): Promise<void> {
+    const manager = em.getEnvironmentManager(INLINE_SCRIPT_MANAGER_ID);
+    if (!manager || !manager.supportsClearCache()) {
+        throw new Error(
+            l10n.t('Inline-script environment cache is unavailable because the inline-script manager is not registered.'),
+        );
+    }
+
+    const clearLabel = l10n.t('Clear Cache');
+    const confirmation = await showWarningMessage(
+        l10n.t(
+            'This will delete all cached inline-script environments, forget their script associations, and remove inline-script project entries from settings.',
+        ),
+        { modal: true },
+        clearLabel,
+    );
+    if (confirmation !== clearLabel) {
+        return;
+    }
+
+    await manager.clearCache();
+    const loadedProjectsToRemove = await removeInlineScriptPythonProjectSettings(wm.getProjects());
+    if (loadedProjectsToRemove.length > 0) {
+        wm.remove(loadedProjectsToRemove);
+    }
 }
 
 export async function getPackageCommandOptions(

@@ -11,10 +11,12 @@ import * as windowApis from '../../../common/window.apis';
 import * as helpers from '../../../managers/builtin/helpers';
 import {
     clearDontAskAgain,
+    ensureUvForInlineScriptVersionLookupDetailed,
     ensureUvForInlineScriptVersionLookup,
     getAvailablePythonVersions,
     getUvPythonPath,
     isDontAskAgainSet,
+    promptInstallPythonViaUvDetailed,
     promptInstallPythonViaUv,
     UV_INSTALL_PYTHON_DONT_ASK_KEY,
     UvPythonVersion,
@@ -68,6 +70,15 @@ suite('uvPythonInstaller - promptInstallPythonViaUv', () => {
         return executeTaskStub;
     }
 
+    test('should report available from the detailed uv lookup API', async () => {
+        isUvInstalledStub.resolves(true);
+
+        const result = await ensureUvForInlineScriptVersionLookupDetailed('>=3.13,<3.14', mockLog);
+
+        assert.strictEqual(result, 'available');
+        assert(showInformationMessageStub.notCalled, 'Should not prompt when uv is already available');
+    });
+
     test('should return undefined when "Don\'t ask again" is set', async () => {
         mockState.get.resolves(true);
 
@@ -94,6 +105,15 @@ suite('uvPythonInstaller - promptInstallPythonViaUv', () => {
             ),
             'Should show install Python prompt when uv is installed',
         );
+    });
+
+    test('should report a declined detailed uv lookup distinctly from the boolean wrapper', async () => {
+        isUvInstalledStub.resolves(false);
+        showInformationMessageStub.resolves(undefined);
+
+        const result = await ensureUvForInlineScriptVersionLookupDetailed('>=3.13,<3.14', mockLog);
+
+        assert.strictEqual(result, 'declined');
     });
 
     test('should show correct prompt when uv is NOT installed', async () => {
@@ -214,6 +234,28 @@ suite('uvPythonInstaller - promptInstallPythonViaUv', () => {
         assert(isUvInstalledStub.notCalled, 'Should stop before checking or installing uv');
     });
 
+    test('should report a failed detailed Python install prompt distinctly from the undefined wrapper', async () => {
+        mockState.get.resolves(false);
+
+        const result = await promptInstallPythonViaUvDetailed('inlineScript', mockLog, {
+            requiresPython: '>=3.13',
+            version: 'latest\nInstall anyway',
+        });
+
+        assert.deepStrictEqual(result, { kind: 'failed' });
+        assert(showInformationMessageStub.notCalled, 'Should not display an invalid install version');
+    });
+
+    test('should report a declined detailed Python install prompt distinctly from the undefined wrapper', async () => {
+        mockState.get.resolves(false);
+        isUvInstalledStub.resolves(true);
+        showInformationMessageStub.resolves(undefined);
+
+        const result = await promptInstallPythonViaUvDetailed('activation', mockLog);
+
+        assert.deepStrictEqual(result, { kind: 'declined' });
+    });
+
     test('should allow a validated prerelease install version', async () => {
         mockState.get.resolves(false);
         isUvInstalledStub.resolves(true);
@@ -250,6 +292,16 @@ suite('uvPythonInstaller - promptInstallPythonViaUv', () => {
         assert.strictEqual(isUvInstalledStub.callCount, 2);
         assert.strictEqual(executeTaskStub.callCount, 1);
         assert.strictEqual(showErrorMessageStub.callCount, 0);
+    });
+
+    test('should report a failed detailed uv lookup distinctly from the boolean wrapper', async () => {
+        isUvInstalledStub.resolves(false);
+        showInformationMessageStub.resolves(UvInstallStrings.installUv);
+        stubUvInstallTask(1);
+
+        const result = await ensureUvForInlineScriptVersionLookupDetailed('>=3.13,<3.14', mockLog);
+
+        assert.strictEqual(result, 'failed');
     });
 
     test('should stop version lookup when uv installation fails', async () => {
@@ -402,7 +454,7 @@ suite('uvPythonInstaller - promptInstallPythonViaUv', () => {
         const spawnStub: sinon.SinonStub = sinon.stub(childProcessApis, 'spawnProcess');
         spawnStub.returns(mockProcess);
 
-        const resultPromise = promptInstallPythonViaUv('inlineScript', mockLog, {
+        const resultPromise = promptInstallPythonViaUvDetailed('inlineScript', mockLog, {
             requiresPython: '>=3.13',
             version: '3.13',
         });
@@ -411,7 +463,7 @@ suite('uvPythonInstaller - promptInstallPythonViaUv', () => {
             mockProcess.emit('exit', 0, null);
         }, 10);
 
-        assert.strictEqual(await resultPromise, '/usr/bin/python3.13');
+        assert.deepStrictEqual(await resultPromise, { kind: 'installed', pythonPath: '/usr/bin/python3.13' });
         const installTask = executeTaskStub.firstCall.args[0];
         const execution = installTask.execution as ShellExecution;
         assert.strictEqual(execution.command, 'uv');
