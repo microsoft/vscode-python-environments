@@ -5944,7 +5944,7 @@ suite('InlineScriptEnvManager', () => {
             await manager.set(uri, environment);
             const listener = sinon.spy();
             manager.onDidChangeEnvironment(listener);
-            workspaceState.clear.onFirstCall().rejects(new Error('Memento unavailable'));
+            workspaceState.set.withArgs(INLINE_SCRIPT_ENVS_KEY, undefined).rejects(new Error('Memento unavailable'));
 
             await assert.rejects(manager.clearCache(), /Memento unavailable/);
 
@@ -6056,14 +6056,12 @@ suite('InlineScriptEnvManager', () => {
             const clearStarted = new Promise<void>((resolve) => {
                 signalClearStarted = resolve;
             });
-            workspaceState.clear.callsFake(
-                async (keys?: string[]) =>
+            workspaceState.set.withArgs(INLINE_SCRIPT_ENVS_KEY, undefined).callsFake(
+                async () =>
                     new Promise<void>((resolve) => {
                         signalClearStarted!();
                         releaseClear = () => {
-                            if (!keys || keys.includes(INLINE_SCRIPT_ENVS_KEY)) {
-                                persistedAssociations = undefined;
-                            }
+                            persistedAssociations = undefined;
                             resolve();
                         };
                     }),
@@ -6079,6 +6077,61 @@ suite('InlineScriptEnvManager', () => {
 
             assert.ok(await createPromise);
             assert.ok(readMetadataStub.calledOnce);
+        });
+
+        test('serializes a dedicated clear-cache deletion after an in-flight association write so the write cannot resurrect it', async () => {
+            const uri = scriptUri();
+            const environment = await createOwnedEnvironment();
+
+            let releaseWrite: (() => void) | undefined;
+            let signalWriteStarted: (() => void) | undefined;
+            const writeStarted = new Promise<void>((resolve) => {
+                signalWriteStarted = resolve;
+            });
+            workspaceState.set
+                .withArgs(INLINE_SCRIPT_ENVS_KEY, sinon.match((value: unknown) => value !== undefined))
+                .callsFake(
+                    (_key: string, value: unknown) =>
+                        new Promise<void>((resolve) => {
+                            persistedAssociations = value;
+                            signalWriteStarted!();
+                            releaseWrite = resolve;
+                        }),
+                );
+
+            const writePromise = manager.set(uri, environment);
+            await writeStarted;
+
+            // Request the dedicated clear while the association write is still in flight.
+            const clearPromise = manager.clearCache();
+            releaseWrite!();
+            await Promise.all([writePromise, clearPromise]);
+
+            assert.strictEqual(persistedAssociations, undefined);
+            assert.strictEqual(await manager.get(uri), undefined);
+        });
+
+        test('keeps the inline persistence queue usable after a failed dedicated deletion', async () => {
+            const firstUri = scriptUri('first.py');
+            const environment = await createOwnedEnvironment();
+            await manager.set(firstUri, environment);
+            workspaceState.set
+                .withArgs(INLINE_SCRIPT_ENVS_KEY, undefined)
+                .onFirstCall()
+                .rejects(new Error('Memento unavailable'));
+
+            await assert.rejects(manager.clearCache(), /Memento unavailable/);
+
+            // The inline-owned queue recovers: a later association write still persists.
+            const secondUri = scriptUri('second.py');
+            const secondEnvironment = await createOwnedEnvironment('fedcba9876543210');
+            await manager.set(secondUri, secondEnvironment);
+
+            assert.strictEqual(await manager.get(secondUri), secondEnvironment);
+            assert.deepStrictEqual(
+                (persistedAssociations as Record<string, unknown> | undefined)?.[normalizePath(secondUri.fsPath)],
+                matchedAssociationRecord(secondEnvironment.environmentPath.fsPath),
+            );
         });
     });
 });

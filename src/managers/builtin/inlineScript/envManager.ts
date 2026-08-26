@@ -2130,6 +2130,22 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
         return run;
     }
 
+    /**
+     * Deletes the entire inline-script association record through the inline-owned
+     * persistence queue using a direct key update (`set(key, undefined)`) rather than
+     * `PersistentState.clear([key])`.
+     *
+     * `PersistentState.clear()` coalesces onto an already in-flight clear, so a dedicated
+     * inline cache clear issued while the generic "Clear Cache" command is running (that
+     * command preserves this key) could be silently dropped. A `set()` is never coalesced
+     * — it runs strictly after any in-flight clear and then unconditionally writes — so the
+     * dedicated deletion cannot be lost or resurrected. The generic clear never mutates this
+     * key, keeping the two operations key-disjoint and deterministic.
+     */
+    private clearPersistedAssociations(): Promise<void> {
+        return this.enqueuePersistence(async (state) => state.set(INLINE_SCRIPT_ENVS_KEY, undefined));
+    }
+
     private async waitForCacheMaintenance<T>(operation: () => Promise<T>): Promise<T> {
         const barrier = this.cacheMaintenanceBarrier;
         if (barrier) {
@@ -3198,7 +3214,7 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
                 return undefined;
             }
             try {
-                await this.enqueuePersistence(async (state) => state.clear([INLINE_SCRIPT_ENVS_KEY]));
+                await this.clearPersistedAssociations();
                 return undefined;
             } catch (error) {
                 this.log.error(`Failed to clear inline-script environment associations: ${getErrorMessage(error)}`);
@@ -3212,7 +3228,7 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
         );
         try {
             if (persistedPathsToClear.length === Object.keys(persistedAssociations).length) {
-                await this.enqueuePersistence(async (state) => state.clear([INLINE_SCRIPT_ENVS_KEY]));
+                await this.clearPersistedAssociations();
             } else if (persistedPathsToClear.length > 0) {
                 await this.updatePersistedAssociations(
                     persistedPathsToClear.map((scriptPath) => ({

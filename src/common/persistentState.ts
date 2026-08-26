@@ -1,6 +1,6 @@
 import { ExtensionContext, Memento } from 'vscode';
 import { traceError } from './logging';
-import { createDeferred } from './utils/deferred';
+import { createDeferred, Deferred } from './utils/deferred';
 
 export interface PersistentState {
     get<T>(key: string, defaultValue?: T): Promise<T | undefined>;
@@ -14,46 +14,38 @@ export interface ClearPersistentStateOptions {
 }
 
 class PersistentStateImpl implements PersistentState {
-    private clearQueue: Promise<void> = Promise.resolve();
-
-    constructor(private readonly momento: Memento) {}
-
+    private clearing: Deferred<void>;
+    constructor(private readonly momento: Memento) {
+        this.clearing = createDeferred<void>();
+        this.clearing.resolve();
+    }
     async get<T>(key: string, defaultValue?: T): Promise<T | undefined> {
-        await this.clearQueue;
+        await this.clearing.promise;
         if (defaultValue === undefined) {
             return this.momento.get<T>(key);
         }
         return this.momento.get<T>(key, defaultValue);
     }
     async set<T>(key: string, value: T): Promise<void> {
-        const operation = this.clearQueue.then(async () => {
-            await this.momento.update(key, value);
+        await this.clearing.promise;
+        await this.momento.update(key, value);
 
-            const before = JSON.stringify(value);
-            const after = JSON.stringify(await this.momento.get<T>(key));
-            if (before !== after) {
-                await this.momento.update(key, undefined);
-                traceError('Error while updating state for key:', key);
-            }
-        });
-        this.clearQueue = operation.catch(() => undefined);
-        return operation;
+        const before = JSON.stringify(value);
+        const after = JSON.stringify(await this.momento.get<T>(key));
+        if (before !== after) {
+            await this.momento.update(key, undefined);
+            traceError('Error while updating state for key:', key);
+        }
     }
     async clear(keys?: string[], options?: { readonly preserveKeys?: readonly string[] }): Promise<void> {
-        const requestedKeys = keys ? [...keys] : undefined;
-        const preservedKeys = new Set(options?.preserveKeys ?? []);
-        const operation = this.clearQueue.then(async () => {
-            const keysToClear = (requestedKeys ?? this.momento.keys()).filter((key) => !preservedKeys.has(key));
-            const results = await Promise.allSettled(keysToClear.map((key) => this.momento.update(key, undefined)));
-            const failure = results.find(
-                (result): result is PromiseRejectedResult => result.status === 'rejected',
-            );
-            if (failure) {
-                throw failure.reason;
-            }
-        });
-        this.clearQueue = operation.catch(() => undefined);
-        return operation;
+        if (this.clearing.completed) {
+            this.clearing = createDeferred<void>();
+            const preservedKeys = new Set(options?.preserveKeys ?? []);
+            const _keys = (keys ?? this.momento.keys()).filter((key) => !preservedKeys.has(key));
+            await Promise.all(_keys.map((key) => this.momento.update(key, undefined)));
+            this.clearing.resolve();
+        }
+        return this.clearing.promise;
     }
 }
 

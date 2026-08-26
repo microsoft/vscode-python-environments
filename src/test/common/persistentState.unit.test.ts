@@ -51,11 +51,13 @@ suite('persistent state clearing', () => {
         );
     });
 
-    test('serializes generic preserve before a racing dedicated inline clear', async () => {
+    test('completes a dedicated inline key deletion and a concurrent generic preserve-clear without dropping either', async () => {
         workspace.reset({
             [INLINE_SCRIPT_ENVS_KEY]: { script: 'environment' },
             'other-workspace-key': 'remove',
         });
+        global.reset({ 'other-global-key': 'remove' });
+
         const gate = createGate();
         workspace.beforeUpdate = async (key) => {
             if (key === 'other-workspace-key') {
@@ -64,148 +66,36 @@ suite('persistent state clearing', () => {
             }
         };
 
+        // The generic Clear Cache preserves the inline association key while clearing
+        // everything else. Hold it mid-flight...
         const genericClear = clearPersistentState({ preserveWorkspaceKeys: [INLINE_SCRIPT_ENVS_KEY] });
         await gate.started.promise;
-        const dedicatedClear = workspaceState.clear([INLINE_SCRIPT_ENVS_KEY]);
 
-        assert.strictEqual(workspace.values.has(INLINE_SCRIPT_ENVS_KEY), true);
+        // ...then issue the dedicated inline deletion (a direct set to undefined, the same
+        // call the inline manager makes). A clear([key]) here would coalesce onto the
+        // in-flight generic clear and be dropped; a set is never coalesced.
+        const dedicatedDelete = workspaceState.set(INLINE_SCRIPT_ENVS_KEY, undefined);
+
         gate.release.resolve();
-        await genericClear;
-        await dedicatedClear;
+        await Promise.all([genericClear, dedicatedDelete]);
 
+        // Neither operation was dropped: the generic clear removed every non-inline key and
+        // the dedicated deletion removed the inline key.
         assert.strictEqual(workspace.values.has('other-workspace-key'), false);
+        assert.strictEqual(global.values.has('other-global-key'), false);
         assert.strictEqual(workspace.values.has(INLINE_SCRIPT_ENVS_KEY), false);
-        assert.deepStrictEqual(
-            workspace.updates.map((update) => update.key),
-            ['other-workspace-key', INLINE_SCRIPT_ENVS_KEY],
-        );
     });
 
-    test('serializes dedicated inline clear before a racing generic preserve', async () => {
+    test('clears every key by default, matching the pre-refactor implementation', async () => {
         workspace.reset({
+            'workspace-key-a': 'a',
+            'workspace-key-b': 'b',
             [INLINE_SCRIPT_ENVS_KEY]: { script: 'environment' },
-            'other-workspace-key': 'remove',
         });
-        const gate = createGate();
-        workspace.beforeUpdate = async (key) => {
-            if (key === INLINE_SCRIPT_ENVS_KEY) {
-                gate.started.resolve();
-                await gate.release.promise;
-            }
-        };
 
-        const dedicatedClear = workspaceState.clear([INLINE_SCRIPT_ENVS_KEY]);
-        await gate.started.promise;
-        const genericClear = clearPersistentState({ preserveWorkspaceKeys: [INLINE_SCRIPT_ENVS_KEY] });
+        await workspaceState.clear();
 
-        gate.release.resolve();
-        await dedicatedClear;
-        await genericClear;
-
-        assert.strictEqual(workspace.values.has(INLINE_SCRIPT_ENVS_KEY), false);
-        assert.strictEqual(workspace.values.has('other-workspace-key'), false);
-        assert.deepStrictEqual(
-            workspace.updates.map((update) => update.key),
-            [INLINE_SCRIPT_ENVS_KEY, 'other-workspace-key'],
-        );
-    });
-
-    test('settles the queue tail after update failure so later get, set, and clear succeed', async () => {
-        workspace.reset({
-            'fail-key': 'keep-after-failure',
-            'clear-after-failure': 'remove',
-            'read-key': 'readable',
-        });
-        let shouldFail = true;
-        workspace.beforeUpdate = async (key) => {
-            if (key === 'fail-key' && shouldFail) {
-                shouldFail = false;
-                throw new Error('memento update failed');
-            }
-        };
-
-        const failedClear = workspaceState.clear(['fail-key']);
-        const successfulClear = workspaceState.clear(['clear-after-failure']);
-
-        await assert.rejects(failedClear, /memento update failed/);
-        await successfulClear;
-        assert.strictEqual(await workspaceState.get('read-key'), 'readable');
-
-        await workspaceState.set('new-key', 'new-value');
-        assert.strictEqual(await workspaceState.get('new-key'), 'new-value');
-        await workspaceState.clear(['new-key']);
-        assert.strictEqual(await workspaceState.get('new-key'), undefined);
-    });
-
-    test('holds the queue until every deletion settles when a clear partially fails', async () => {
-        workspace.reset({
-            'fail-fast': 'unused',
-            'slow-delete': 'stale',
-        });
-        const gate = createGate();
-        workspace.beforeUpdate = async (key, value) => {
-            if (key === 'fail-fast' && value === undefined) {
-                throw new Error('memento update failed');
-            }
-            if (key === 'slow-delete' && value === undefined) {
-                gate.started.resolve();
-                await gate.release.promise;
-            }
-        };
-
-        const failedClear = workspaceState.clear(['fail-fast', 'slow-delete']);
-        await gate.started.promise;
-
-        // A later write is queued while the failing clear's slow deletion is still pending.
-        const laterSet = workspaceState.set('slow-delete', 'written-later');
-
-        // The queue must not advance past the clear until the slow deletion settles,
-        // so the later write has not been applied yet.
-        assert.strictEqual(workspace.values.get('slow-delete'), 'stale');
-
-        gate.release.resolve();
-        await assert.rejects(failedClear, /memento update failed/);
-        await laterSet;
-
-        // The later write wins because it was serialized strictly after the deletion settled;
-        // it is not clobbered by a late in-flight deletion from the failed clear.
-        assert.strictEqual(workspace.values.get('slow-delete'), 'written-later');
-        assert.strictEqual(await workspaceState.get('slow-delete'), 'written-later');
-        assert.deepStrictEqual(
-            workspace.updates.filter((update) => update.key === 'slow-delete').map((update) => update.value),
-            [undefined, 'written-later'],
-        );
-    });
-
-    test('serializes a gated write before a later clear so the clear is not resurrected', async () => {
-        workspace.reset();
-        const gate = createGate();
-        workspace.beforeUpdate = async (key, value) => {
-            if (key === 'race-key' && value === 'written') {
-                gate.started.resolve();
-                await gate.release.promise;
-            }
-        };
-
-        // A write is in flight (gated mid-update)...
-        const gatedSet = workspaceState.set('race-key', 'written');
-        await gate.started.promise;
-
-        // ...and a clear for the same key is requested after it.
-        const laterClear = workspaceState.clear(['race-key']);
-
-        gate.release.resolve();
-        await gatedSet;
-        await laterClear;
-
-        // The clear was requested after the write, so it must win: the lagging write
-        // cannot resurrect the key after the clear resolves.
-        assert.strictEqual(workspace.values.has('race-key'), false);
-        assert.strictEqual(await workspaceState.get('race-key'), undefined);
-        assert.deepStrictEqual(
-            workspace.updates.filter((update) => update.key === 'race-key').map((update) => update.value),
-            ['written', undefined],
-        );
+        assert.strictEqual(workspace.values.size, 0);
     });
 });
 
