@@ -11,6 +11,7 @@ import { VENV_MANAGER_ID } from '../../common/constants';
 import { traceError, traceVerbose } from '../../common/logging';
 import { timeout } from '../../common/utils/asyncUtils';
 import { createSimpleDebounce } from '../../common/utils/debounce';
+import { isSameOrParentPath } from '../../common/utils/pathUtils';
 import { onDidChangeTerminalShellIntegration, onDidWriteTerminalData } from '../../common/window.apis';
 import { getConfiguration, getWorkspaceFolders } from '../../common/workspace.apis';
 import { identifyTerminalShell } from '../common/shellDetector';
@@ -197,11 +198,6 @@ async function getDistinctProjectEnvs(
         }),
     );
     return envs;
-}
-
-function isSameOrParentPath(parentPath: string, candidatePath: string): boolean {
-    const relative = path.relative(path.resolve(parentPath), path.resolve(candidatePath));
-    return relative === '' || (relative !== '..' && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative));
 }
 
 function getProjectForCwd(projects: readonly PythonProject[], cwd: string): PythonProject | undefined {

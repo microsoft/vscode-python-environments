@@ -744,6 +744,25 @@ suite('InlineScriptEnvManager', () => {
             assert.strictEqual(createWithProgressStub.callCount, 1);
         });
 
+        test('uses strict PEP 440 matching for a directly resolved final release', async () => {
+            const uvExecutable = path.join(tempRoot, 'uv-python', isWindows() ? 'python.exe' : 'python');
+            await fs.outputFile(uvExecutable, '');
+            const uvBase = makeEnvironment('ms-python.python:system', '3.15.0', uvExecutable);
+            readMetadataStub.resolves({ ...VALID_METADATA, requiresPython: '!=3.15.0rc2' });
+            apiGetEnvironmentsStub.resolves([]);
+            getAvailablePythonVersionsStub.resolves([makeUvPythonVersion('3.15.0')]);
+            promptInstallPythonViaUvStub.resolves({ kind: 'installed', pythonPath: uvExecutable });
+            resolveSystemPythonStub.resolves(uvBase);
+
+            assert.ok(await manager.create(scriptUri()));
+
+            sinon.assert.calledOnceWithExactly(promptInstallPythonViaUvStub, 'inlineScript', manager.log, {
+                requiresPython: '!=3.15.0rc2',
+                version: '3.15.0',
+            });
+            assert.strictEqual(createWithProgressStub.firstCall.args[4], uvBase);
+        });
+
         test('selects an available uv release that satisfies exclusion clauses', async () => {
             const uvExecutable = path.join(tempRoot, 'uv-python', isWindows() ? 'python.exe' : 'python');
             await fs.outputFile(uvExecutable, '');
@@ -834,6 +853,46 @@ suite('InlineScriptEnvManager', () => {
                 requiresPython: '>=3.11,<3.12',
                 version: '3.11.14',
             });
+            sinon.assert.calledOnceWithExactly(getAvailablePythonVersionsStub);
+        });
+
+        test('resolves a short exact requirement to an advertised concrete release', async () => {
+            const uvExecutable = path.join(tempRoot, 'uv-python', isWindows() ? 'python.exe' : 'python');
+            await fs.outputFile(uvExecutable, '');
+            const uvBase = makeEnvironment('ms-python.python:system', '3.13.0', uvExecutable);
+            readMetadataStub.resolves({ ...VALID_METADATA, requiresPython: '==3.13' });
+            apiGetEnvironmentsStub.onFirstCall().resolves([baseEnvironment]);
+            apiGetEnvironmentsStub.onSecondCall().resolves([baseEnvironment]);
+            apiGetEnvironmentsStub.onThirdCall().resolves([uvBase]);
+            const defaultCatalog = [makeUvPythonVersion('3.13.2')];
+            const completeCatalog = [...defaultCatalog, makeUvPythonVersion('3.13.0')];
+            getAvailablePythonVersionsStub.callsFake(async (options?: { allVersions?: boolean }) =>
+                options?.allVersions ? completeCatalog : defaultCatalog,
+            );
+            promptInstallPythonViaUvStub.resolves({ kind: 'installed', pythonPath: uvExecutable });
+
+            assert.ok(await manager.create(scriptUri()));
+
+            sinon.assert.calledOnceWithExactly(ensureUvForVersionLookupStub, '==3.13', manager.log);
+            sinon.assert.calledOnceWithExactly(getAvailablePythonVersionsStub, { allVersions: true });
+            sinon.assert.calledOnceWithExactly(promptInstallPythonViaUvStub, 'inlineScript', manager.log, {
+                requiresPython: '==3.13',
+                version: '3.13.0',
+            });
+        });
+
+        test('does not install a short exact requirement without an exact catalog candidate', async () => {
+            readMetadataStub.resolves({ ...VALID_METADATA, requiresPython: '==3.13' });
+            apiGetEnvironmentsStub.resolves([baseEnvironment]);
+            getAvailablePythonVersionsStub.resolves([makeUvPythonVersion('3.13.2')]);
+
+            assert.strictEqual(await manager.create(scriptUri()), undefined);
+
+            sinon.assert.calledOnceWithExactly(ensureUvForVersionLookupStub, '==3.13', manager.log);
+            sinon.assert.calledOnceWithExactly(getAvailablePythonVersionsStub, { allVersions: true });
+            assert.strictEqual(promptInstallPythonViaUvStub.callCount, 0);
+            assert.strictEqual(apiRefreshEnvironmentsStub.callCount, 0);
+            assert.strictEqual(createWithProgressStub.callCount, 0);
         });
 
         test('uses an exact requirement without needing an existing uv catalog', async () => {

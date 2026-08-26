@@ -18,6 +18,7 @@ import {
 import {
     InlineScriptRouteabilityChangeEvent,
     InlineScriptRoutingRegistry,
+    getInlineScriptRoutingKey,
 } from '../common/inlineScript/routingRegistry';
 import { traceError, traceVerbose } from '../common/logging';
 import { StopWatch } from '../common/stopWatch';
@@ -420,19 +421,29 @@ export class PythonEnvironmentManagers implements EnvironmentManagers {
         }
 
         if (scope instanceof Uri) {
-            this.updateInlineRoutingOverride(scope, manager, environment);
-            this.clearInlineActiveSelection(scope, manager, inlineClearOperation);
             if (
-                clearingInlineRoutingOverride &&
-                (await this.publishEffectiveEnvironmentAfterOverrideClear(
+                this.commitInlineRoutingOperation(
                     scope,
                     manager,
-                    key,
                     operation,
+                    inlineClearOperation,
                     inlineOverrideHandoffOperation,
-                ))
+                )
             ) {
-                return;
+                this.updateInlineRoutingOverride(scope, manager, environment);
+                this.clearInlineActiveSelection(scope, manager, inlineOverrideHandoffOperation ?? inlineClearOperation);
+                if (
+                    clearingInlineRoutingOverride &&
+                    (await this.publishEffectiveEnvironmentAfterOverrideClear(
+                        scope,
+                        manager,
+                        key,
+                        operation,
+                        inlineOverrideHandoffOperation,
+                    ))
+                ) {
+                    return;
+                }
             }
         }
         if (!publishInlineSelection) {
@@ -511,8 +522,20 @@ export class PythonEnvironmentManagers implements EnvironmentManagers {
                     await setAllManagerSettings(settings);
                 }
                 selections.forEach((selection) => {
-                    this.updateInlineRoutingOverride(selection.scope, manager, environment);
-                    this.clearInlineActiveSelection(selection.scope, manager, selection.inlineClearOperation);
+                    // Only a current (non-superseded) PEP 723 routing operation may mutate the
+                    // per-script override; the ordinary project/global selection lane below is
+                    // committed independently so a stale inline op cannot suppress it.
+                    if (
+                        this.commitInlineRoutingOperation(
+                            selection.scope,
+                            manager,
+                            selection.operation,
+                            selection.inlineClearOperation,
+                        )
+                    ) {
+                        this.updateInlineRoutingOverride(selection.scope, manager, environment);
+                        this.clearInlineActiveSelection(selection.scope, manager, selection.inlineClearOperation);
+                    }
                     if (!selection.publishInlineSelection) {
                         return;
                     }
@@ -930,6 +953,28 @@ export class PythonEnvironmentManagers implements EnvironmentManagers {
         if (this.commitSelectionOperation(key, operation)) {
             this._activeSelection.delete(key);
         }
+    }
+
+    private commitInlineRoutingOperation(
+        scope: Uri,
+        manager: InternalEnvironmentManager,
+        selectionOperation: number,
+        inlineClearOperation?: number,
+        inlineOverrideHandoffOperation?: number,
+    ): boolean {
+        // Gate strictly to the manually enabled PEP 723 routing feature and to file .py scopes.
+        // For the feature-off or non-script case, proceed exactly as before.
+        if (!this.inlineScriptRouting || getInlineScriptRoutingKey(scope) === undefined) {
+            return true;
+        }
+        const operation =
+            manager.id === INLINE_SCRIPT_MANAGER_ID
+                ? selectionOperation
+                : (inlineOverrideHandoffOperation ?? inlineClearOperation);
+        return (
+            operation === undefined ||
+            this.commitSelectionOperation(this.getInlineScriptSelectionKey(scope), operation)
+        );
     }
 
     private canPersistManagerSettingForScope(

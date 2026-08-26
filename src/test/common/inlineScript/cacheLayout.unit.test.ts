@@ -330,16 +330,27 @@ suite('inlineScriptCacheLayout', () => {
             assert.strictEqual(await fs.pathExists(getMetaJsonPath(envDir).fsPath), false);
         });
 
-        test('rejects temp, malformed, unsupported, and oversized artifacts without restoring them', async () => {
+        test('rejects temp, malformed, and oversized artifacts without restoring them', async () => {
             const finalPath = getMetaJsonPath(envDir).fsPath;
             await fs.writeFile(`${finalPath}.tmp-abcdef123456`, JSON.stringify(makeMeta()));
             await fs.writeFile(`${finalPath}.backup-ABCDEF123456`, JSON.stringify(makeMeta()));
             await writeBackup('111111111111', 'not json');
-            await writeBackup('222222222222', JSON.stringify({ ...makeMeta(), schemaVersion: 99 }));
             await writeBackup('333333333333', Buffer.alloc(1024 * 1024 + 1, 0x20));
 
             assert.deepStrictEqual(await restoreMetaJsonBackupUnderLock(envDir), { kind: 'missing' });
             assert.strictEqual(await fs.pathExists(finalPath), false);
+        });
+
+        test('preserves a future-schema backup as unsupported when the primary is absent', async () => {
+            const finalPath = getMetaJsonPath(envDir).fsPath;
+            const backup = backupPath('222222222222');
+            await writeBackup('111111111111', 'not json');
+            await writeBackup('222222222222', JSON.stringify({ ...makeMeta(), schemaVersion: 99 }));
+            await writeBackup('333333333333', Buffer.alloc(1024 * 1024 + 1, 0x20));
+
+            assert.deepStrictEqual(await restoreMetaJsonBackupUnderLock(envDir), { kind: 'unsupported' });
+            assert.strictEqual(await fs.pathExists(finalPath), false);
+            assert.strictEqual(await fs.pathExists(backup), true);
         });
 
         test('rejects a symlink backup without restoring it', async function () {

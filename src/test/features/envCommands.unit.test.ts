@@ -1,8 +1,8 @@
 import * as assert from 'assert';
 import * as sinon from 'sinon';
 import * as typeMoq from 'typemoq';
-import { Uri } from 'vscode';
-import { PythonEnvironment, PythonProject } from '../../api';
+import { Terminal, Uri } from 'vscode';
+import { PythonEnvironment, PythonEnvironmentApi, PythonProject } from '../../api';
 import * as commandApi from '../../common/command.api';
 import { INLINE_SCRIPT_ENVS_KEY, INLINE_SCRIPT_MANAGER_ID } from '../../common/constants';
 import * as persistentState from '../../common/persistentState';
@@ -15,14 +15,19 @@ import {
     createAnyEnvironmentCommand,
     removePythonProject,
     revealEnvInManagerView,
+    runInDedicatedTerminalCommand,
+    runInTerminalCommand,
 } from '../../features/envCommands';
 import * as settingHelpers from '../../features/settings/settingHelpers';
+import * as terminalRunner from '../../features/terminal/runInTerminal';
 import * as shellProviders from '../../features/terminal/shells/providers';
 import { ShellStartupScriptProvider } from '../../features/terminal/shells/startupProvider';
+import { TerminalManager } from '../../features/terminal/terminalManager';
 import { EnvManagerView } from '../../features/views/envManagersView';
 import { ProjectEnvironment, ProjectItem } from '../../features/views/treeViewItems';
 import { EnvironmentManagers, InternalEnvironmentManager, PythonProjectManager } from '../../internal.api';
 import { setupNonThenable } from '../mocks/helper';
+import { createMockPythonEnvironment } from '../mocks/pythonEnvironment';
 
 suite('Create Any Environment Command Tests', () => {
     let em: typeMoq.IMock<EnvironmentManagers>;
@@ -438,5 +443,139 @@ suite('Reveal Env In Manager View Command Tests', () => {
         // Assert
         assert.ok(executeCommandStub.calledOnceWith('env-managers.focus'), 'Should focus the env-managers view');
         managerView.verify((m) => m.reveal(environment), typeMoq.Times.once());
+    });
+});
+
+suite('Run In Terminal Command Tests', () => {
+    const scriptUri = Uri.file('/some/test/workspace/folder/script.py');
+    const project: PythonProject = {
+        uri: Uri.file('/some/test/workspace/folder'),
+        name: 'test-folder',
+    };
+
+    let environment: PythonEnvironment;
+    let resolvedEnvironment: PythonEnvironment;
+    let terminal: Terminal;
+    let api: PythonEnvironmentApi;
+    let terminalManager: TerminalManager;
+    let getPythonProject: sinon.SinonStub;
+    let getEnvironment: sinon.SinonStub;
+    let resolveEnvironment: sinon.SinonStub;
+    let getProjectTerminal: sinon.SinonStub;
+    let getDedicatedTerminal: sinon.SinonStub;
+    let runInTerminalStub: sinon.SinonStub;
+
+    setup(() => {
+        environment = createMockPythonEnvironment({
+            envPath: '/some/test/env/python',
+            id: 'discovered-environment',
+        });
+        resolvedEnvironment = createMockPythonEnvironment({
+            envPath: '/some/test/resolved-env/python',
+            id: 'resolved-environment',
+        });
+        terminal = {} as Terminal;
+
+        getPythonProject = sinon.stub().returns(project);
+        getEnvironment = sinon.stub().resolves(environment);
+        resolveEnvironment = sinon.stub().resolves(resolvedEnvironment);
+        api = {
+            getPythonProject,
+            getEnvironment,
+            resolveEnvironment,
+        } as unknown as PythonEnvironmentApi;
+
+        getProjectTerminal = sinon.stub().resolves(terminal);
+        getDedicatedTerminal = sinon.stub().resolves(terminal);
+        terminalManager = {
+            getProjectTerminal,
+            getDedicatedTerminal,
+        } as unknown as TerminalManager;
+
+        runInTerminalStub = sinon.stub(terminalRunner, 'runInTerminal').resolves();
+    });
+
+    teardown(() => {
+        sinon.restore();
+    });
+
+    test('successful normal terminal dispatch resolves and uses the resolved environment', async () => {
+        const result = await runInTerminalCommand(scriptUri, api, terminalManager);
+
+        assert.strictEqual(result, undefined);
+        sinon.assert.calledOnceWithExactly(resolveEnvironment, environment.environmentPath);
+        sinon.assert.calledOnceWithExactly(getProjectTerminal, project, resolvedEnvironment);
+        sinon.assert.calledOnce(runInTerminalStub);
+        const [receivedEnvironment, receivedTerminal, receivedOptions] = runInTerminalStub.firstCall.args;
+        assert.strictEqual(receivedEnvironment, resolvedEnvironment);
+        assert.strictEqual(receivedTerminal, terminal);
+        assert.deepStrictEqual(receivedOptions, {
+            cwd: project.uri,
+            args: [scriptUri.fsPath],
+            show: true,
+        });
+    });
+
+    test('successful dedicated terminal dispatch resolves and falls back to the discovered environment', async () => {
+        resolveEnvironment.resolves(undefined);
+
+        const result = await runInDedicatedTerminalCommand(scriptUri, api, terminalManager);
+
+        assert.strictEqual(result, undefined);
+        sinon.assert.calledOnceWithExactly(resolveEnvironment, environment.environmentPath);
+        sinon.assert.calledOnceWithExactly(getDedicatedTerminal, scriptUri, project, environment);
+        sinon.assert.calledOnce(runInTerminalStub);
+        const [receivedEnvironment, receivedTerminal, receivedOptions] = runInTerminalStub.firstCall.args;
+        assert.strictEqual(receivedEnvironment, environment);
+        assert.strictEqual(receivedTerminal, terminal);
+        assert.deepStrictEqual(receivedOptions, {
+            cwd: project.uri,
+            args: [scriptUri.fsPath],
+            show: true,
+        });
+    });
+
+    test('normal terminal dispatch rejects non-URI and missing project/environment contexts', async () => {
+        await assert.rejects(
+            runInTerminalCommand('not-a-uri', api, terminalManager),
+            /Invalid context for run-in-terminal/,
+        );
+        sinon.assert.notCalled(getPythonProject);
+        sinon.assert.notCalled(getEnvironment);
+
+        getPythonProject.returns(undefined);
+        await assert.rejects(runInTerminalCommand(scriptUri, api, terminalManager), /Invalid context for run-in-terminal/);
+
+        getPythonProject.returns(project);
+        getEnvironment.resolves(undefined);
+        await assert.rejects(runInTerminalCommand(scriptUri, api, terminalManager), /Invalid context for run-in-terminal/);
+
+        sinon.assert.notCalled(getProjectTerminal);
+        sinon.assert.notCalled(runInTerminalStub);
+    });
+
+    test('dedicated terminal dispatch rejects non-URI and missing project/environment contexts', async () => {
+        await assert.rejects(
+            runInDedicatedTerminalCommand('not-a-uri', api, terminalManager),
+            /Invalid context for run-in-terminal/,
+        );
+        sinon.assert.notCalled(getPythonProject);
+        sinon.assert.notCalled(getEnvironment);
+
+        getPythonProject.returns(undefined);
+        await assert.rejects(
+            runInDedicatedTerminalCommand(scriptUri, api, terminalManager),
+            /Invalid context for run-in-terminal/,
+        );
+
+        getPythonProject.returns(project);
+        getEnvironment.resolves(undefined);
+        await assert.rejects(
+            runInDedicatedTerminalCommand(scriptUri, api, terminalManager),
+            /Invalid context for run-in-terminal/,
+        );
+
+        sinon.assert.notCalled(getDedicatedTerminal);
+        sinon.assert.notCalled(runInTerminalStub);
     });
 });
