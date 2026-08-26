@@ -5,7 +5,10 @@ import { PythonEnvironmentApi } from '../../../api';
 import { CondaEnvManager } from '../../../managers/conda/condaEnvManager';
 import * as condaUtils from '../../../managers/conda/condaUtils';
 import { NativePythonFinder } from '../../../managers/common/nativePythonFinder';
-import { makeMockCondaEnvironment as makeEnv } from '../../mocks/pythonEnvironment';
+import {
+    makeMockCondaEnvironment as makeEnv,
+    makeMockCondaEnvironmentWithoutPython as makeNoPythonEnv,
+} from '../../mocks/pythonEnvironment';
 
 function createManager(): CondaEnvManager {
     const manager = new CondaEnvManager(
@@ -78,7 +81,7 @@ suite('CondaEnvManager.set - globalEnv update', () => {
     test('set(undefined, noPythonEnv) where user declines install clears globalEnv', async () => {
         const manager = createManager();
         const oldEnv = makeEnv('base', '/miniconda3', '3.11.0');
-        const noPythonEnv = makeEnv('nopy', '/miniconda3/envs/nopy', '');
+        const noPythonEnv = makeNoPythonEnv('nopy', '/miniconda3/envs/nopy');
         (manager as any).globalEnv = oldEnv;
 
         // User declined to install Python

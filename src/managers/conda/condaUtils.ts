@@ -765,8 +765,23 @@ function getCondaWithoutPython(name: string, prefix: string, conda: string): Pyt
     };
 }
 
+const PYTHON_EXECUTABLE_NAME = /^(python|pypy)/i;
+
+/**
+ * Whether `environment` describes a conda prefix that has no Python interpreter at all.
+ *
+ * Such environments come only from {@link getCondaWithoutPython}, whose `execInfo.run` points at the
+ * conda launcher because there is no interpreter to run; that runner is what classifies them here.
+ * An empty `version` is deliberately not sufficient on its own: it is the generic "version unknown"
+ * value, and other producers (`defaultInterpreterPath` resolution, for one) emit it for interpreters
+ * that have a real executable and run fine. Those must not be sent through the install-Python flow.
+ */
 export function isCondaEnvWithoutPython(environment: PythonEnvironment): boolean {
-    return environment.version === '';
+    if (environment.version !== '') {
+        return false;
+    }
+    const runner = environment.execInfo?.run?.executable ?? '';
+    return !PYTHON_EXECUTABLE_NAME.test(path.basename(runner));
 }
 
 async function nativeToPythonEnv(

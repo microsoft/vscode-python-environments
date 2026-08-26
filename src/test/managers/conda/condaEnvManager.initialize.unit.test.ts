@@ -13,7 +13,10 @@ import { NativePythonFinder } from '../../../managers/common/nativePythonFinder'
 import { CondaEnvManager } from '../../../managers/conda/condaEnvManager';
 import * as condaSourcingUtils from '../../../managers/conda/condaSourcingUtils';
 import * as condaUtils from '../../../managers/conda/condaUtils';
-import { makeMockCondaEnvironment as makeEnv } from '../../mocks/pythonEnvironment';
+import {
+    makeMockCondaEnvironment as makeEnv,
+    makeMockCondaEnvironmentWithoutPython as makeNoPythonEnv,
+} from '../../mocks/pythonEnvironment';
 
 /**
  * Tests for the lazy-registration flow on CondaEnvManager.initialize().
@@ -106,7 +109,7 @@ suite('CondaEnvManager.initialize - lazy registration flow', () => {
     test('does not use a no-Python base as the implicit global fallback', async () => {
         getCondaStub.resolves('/usr/bin/conda');
         constructSourcingStub.resolves({ toString: () => '' } as any);
-        const base = makeEnv('base', Uri.file('/opt/miniconda3').fsPath, '');
+        const base = makeNoPythonEnv('base', Uri.file('/opt/miniconda3').fsPath);
         refreshCondaEnvsStub.resolves([base]);
 
         const mgr = createManager();
@@ -131,7 +134,7 @@ suite('CondaEnvManager.initialize - lazy registration flow', () => {
         getCondaStub.resolves('/usr/bin/conda');
         constructSourcingStub.resolves({ toString: () => '' } as any);
         const basePath = Uri.file('/opt/miniconda3').fsPath;
-        const base = makeEnv('base', basePath, '');
+        const base = makeNoPythonEnv('base', basePath);
         refreshCondaEnvsStub.resolves([base]);
         getCondaForGlobalStub.resolves(basePath);
 
