@@ -11,9 +11,14 @@ export async function createPipOrUvCommandWithKind<P, U>(
     PipCommand: CommandConstructor<P>,
     UvCommand: CommandConstructor<U>,
 ): Promise<PipOrUvCommand<P, U>> {
-    return (await shouldUseUv(options.log, environmentPath))
-        ? { kind: 'uv', command: new UvCommand(options) }
-        : { kind: 'pip', command: new PipCommand(options) };
+    if (await shouldUseUv(options.log, environmentPath)) {
+        // uv accepts an environment directory as its `--python` target. A symlinked
+        // environment executable (for example Pipenv) can resolve to the externally
+        // managed base interpreter, so passing the environment directory preserves
+        // the environment boundary. Pip commands keep using the interpreter itself.
+        return { kind: 'uv', command: new UvCommand({ ...options, pythonExecutable: environmentPath }) };
+    }
+    return { kind: 'pip', command: new PipCommand(options) };
 }
 
 export async function createPipOrUvCommand<T, P extends T, U extends T>(
