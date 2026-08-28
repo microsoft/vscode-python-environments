@@ -65,6 +65,44 @@ export function normalizePath(fsPath: string): string {
     return path1;
 }
 
+/**
+ * Determines whether `candidatePath` is the same as, or nested inside, `parentPath`.
+ *
+ * Both paths are resolved to absolute form and normalized (case-insensitive on
+ * Windows) before comparison, so differences in separators or drive-letter case
+ * do not affect the result.
+ *
+ * @param parentPath The candidate parent (or ancestor) directory.
+ * @param candidatePath The path being tested for containment.
+ * @returns `true` when `candidatePath` equals `parentPath` or is a descendant of it.
+ */
+export function isSameOrParentPath(parentPath: string, candidatePath: string): boolean {
+    const relative = path.relative(
+        normalizePath(path.resolve(parentPath)),
+        normalizePath(path.resolve(candidatePath)),
+    );
+    return (
+        relative === '' ||
+        (relative !== '..' && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative))
+    );
+}
+
+/**
+ * Determines whether `value` maps to a reserved Windows device name (e.g. `CON`,
+ * `PRN`, `AUX`, `NUL`, `COM1`-`COM9`, `LPT1`-`LPT9`).
+ *
+ * The check inspects the portion of the name before the first dot, since Windows
+ * disallows these names regardless of extension, and only reports `true` on
+ * Windows, where the restriction applies.
+ *
+ * @param value The base file name (without directory) to test.
+ * @returns `true` on Windows when `value` resolves to a reserved device name.
+ */
+export function isWindowsReservedDeviceName(value: string): boolean {
+    const deviceBaseName = value.split('.')[0];
+    return isWindows() && /^(con|prn|aux|nul|com[1-9]|lpt[1-9])$/i.test(deviceBaseName);
+}
+
 export function getResourceUri(resourcePath: string, root?: string): Uri | undefined {
     try {
         if (!resourcePath) {

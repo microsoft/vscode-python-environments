@@ -6,6 +6,7 @@ import {
     TaskExecution,
     TaskRevealKind,
     Terminal,
+    Memento,
     Uri,
     l10n,
     workspace,
@@ -21,6 +22,7 @@ import {
     isPackageVersionLookupNotSupportedError,
 } from '../api';
 import { traceError, traceInfo, traceVerbose } from '../common/logging';
+import * as persistentState from '../common/persistentState';
 import {
     EnvironmentManagers,
     InternalEnvironmentManager,
@@ -60,9 +62,11 @@ import {
     showWarningMessage,
     withProgress,
 } from '../common/window.apis';
-import { INLINE_SCRIPT_MANAGER_ID } from '../common/constants';
+import { INLINE_SCRIPT_ENVS_KEY, INLINE_SCRIPT_MANAGER_ID } from '../common/constants';
 import { runAsTask } from './execution/runAsTask';
 import { runInTerminal } from './terminal/runInTerminal';
+import * as shellProviders from './terminal/shells/providers';
+import { ShellStartupScriptProvider } from './terminal/shells/startupProvider';
 import { TerminalManager } from './terminal/terminalManager';
 import { EnvManagerView } from './views/envManagersView';
 import {
@@ -680,6 +684,24 @@ export async function removePythonProject(
     wm.remove(item.project);
 }
 
+export async function clearEnvironmentCachesCommand(
+    em: EnvironmentManagers,
+    startupProviders: ShellStartupScriptProvider[],
+    workspaceState: Memento,
+): Promise<void> {
+    // Preserve the inline-script association key without changing the shared PersistentState
+    // implementation: clear every current workspace key except the inline key by passing an
+    // explicit filtered list to the existing `clear(keys)`, alongside the existing global clear.
+    const [workspacePersistentState, globalPersistentState] = await Promise.all([
+        persistentState.getWorkspacePersistentState(),
+        persistentState.getGlobalPersistentState(),
+    ]);
+    const workspaceKeys = workspaceState.keys().filter((key) => key !== INLINE_SCRIPT_ENVS_KEY);
+    await Promise.all([workspacePersistentState.clear(workspaceKeys), globalPersistentState.clear()]);
+    await em.clearCache(undefined);
+    await shellProviders.clearShellProfileCache(startupProviders);
+}
+
 export async function clearScriptEnvironmentCacheCommand(
     em: EnvironmentManagers,
     wm: PythonProjectManager,
@@ -831,6 +853,7 @@ export async function runInTerminalCommand(
                 args: [item.fsPath],
                 show: true,
             });
+            return;
         }
     }
     throw new Error(`Invalid context for run-in-terminal: ${item}`);
@@ -855,6 +878,7 @@ export async function runInDedicatedTerminalCommand(
                 args: [item.fsPath],
                 show: true,
             });
+            return;
         }
     }
     throw new Error(`Invalid context for run-in-terminal: ${item}`);

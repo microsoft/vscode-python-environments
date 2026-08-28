@@ -5,7 +5,7 @@ import * as fs from 'fs-extra';
 import * as path from 'path';
 import type { Stats } from 'fs';
 import { clean as cleanPep440, satisfies as satisfiesPep440 } from '@renovatebot/pep440';
-import { Disposable, Event, EventEmitter, l10n, LogOutputChannel, MarkdownString, ThemeIcon, Uri } from 'vscode';
+import { Disposable, Event, EventEmitter, l10n, LogOutputChannel, MarkdownString, Memento, ThemeIcon, Uri } from 'vscode';
 import {
     CreateEnvironmentOptions,
     CreateEnvironmentScope,
@@ -49,7 +49,6 @@ import {
 } from '../../../common/inlineScript/routingRegistry';
 import {
     CONDA_MANAGER_ID,
-    ENVS_EXTENSION_ID,
     INLINE_SCRIPT_MANAGER_ID,
     PYENV_MANAGER_ID,
     SYSTEM_MANAGER_ID,
@@ -62,7 +61,7 @@ import {
     inspectFileLock,
     reclaimFileLock,
 } from '../../../common/lockfile.apis';
-import { getWorkspacePersistentState, PersistentState } from '../../../common/persistentState';
+import { InlineAssociationAccessor, InlineScriptAssociationStore } from './associationStore';
 import { EventNames, InlineScriptEnvErrorCategory } from '../../../common/telemetry/constants';
 import { sendTelemetryEvent } from '../../../common/telemetry/sender';
 import { createDeferred, Deferred } from '../../../common/utils/deferred';
@@ -92,8 +91,6 @@ const CACHE_LOCK_TIMEOUT_MS = 5 * 60 * 1000;
 const CACHE_LOCK_RETRY_MS = 500;
 const CACHED_ASSOCIATION_VALIDATION_INTERVAL_MS = 5_000;
 const DISCOVERY_RETRY_DELAYS_MS = [1_000, 5_000, 30_000] as const;
-/** Workspace-state key for PEP 723 script path to environment executable associations. */
-export const INLINE_SCRIPT_ENVS_KEY = `${ENVS_EXTENSION_ID}:inline-script:SCRIPT_ENVIRONMENTS`;
 const PERSISTED_ASSOCIATION_SCHEMA_VERSION = 1 as const;
 
 interface SelectedBaseInterpreter {
@@ -196,7 +193,7 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
     private discoveryRetryAttempt = 0;
     private discoveryRetryTimer: ReturnType<typeof setTimeout> | undefined;
     private readonly subscriptions: Disposable[] = [];
-    private persistenceQueue: Promise<void> = Promise.resolve();
+    private readonly associationStore: InlineScriptAssociationStore;
     private readonly persistedAssociationsLoaded: Promise<void>;
     private selectionQueue: Promise<void> = Promise.resolve();
     private cacheMaintenanceQueue: Promise<void> = Promise.resolve();
@@ -228,8 +225,10 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
         private readonly baseManager: EnvironmentManager,
         private readonly globalStorageUri: Uri,
         public readonly log: LogOutputChannel,
+        workspaceState: Memento,
         private readonly routingRegistry: InlineScriptRoutingRegistry = new InlineScriptRoutingRegistry(),
     ) {
+        this.associationStore = new InlineScriptAssociationStore(workspaceState);
         this.subscriptions.push(
             this.routingRegistry.onDidChangeMetadata((event) => {
                 void this.handleSavedMetadataChange(event).catch((error) => {
@@ -1814,7 +1813,7 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
 
     private loadPersistedAssociations(): Promise<void> {
         return this.enqueuePersistence(async (state) => {
-            const rawAssociations = await state.get<unknown>(INLINE_SCRIPT_ENVS_KEY);
+            const rawAssociations = await state.get<unknown>();
             const parsed = this.parsePersistedAssociations(rawAssociations);
             this.applyPersistedAssociations(parsed?.records ?? {});
         });
@@ -1840,9 +1839,7 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
     }
 
     private async getPersistedAssociation(scriptPath: string): Promise<PersistedAssociationRecord | undefined> {
-        await this.persistenceQueue;
-        const state = await getWorkspacePersistentState();
-        const rawAssociations = await state.get<unknown>(INLINE_SCRIPT_ENVS_KEY);
+        const rawAssociations = await this.associationStore.read<unknown>();
         if (rawAssociations === undefined) {
             this.applyPersistedAssociations({});
             return undefined;
@@ -1905,14 +1902,14 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
 
     private removeInvalidPersistedAssociation(scriptPath: string): Promise<void> {
         return this.enqueuePersistence(async (state) => {
-            const rawAssociations = await state.get<unknown>(INLINE_SCRIPT_ENVS_KEY);
+            const rawAssociations = await state.get<unknown>();
             if (rawAssociations === undefined) {
                 this.applyPersistedAssociations({});
                 return;
             }
             const parsed = this.parsePersistedAssociations(rawAssociations);
             if (!parsed) {
-                await state.set(INLINE_SCRIPT_ENVS_KEY, {});
+                await state.update({});
                 this.applyPersistedAssociations({});
                 return;
             }
@@ -1920,7 +1917,7 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
                 delete parsed.rawEntries[scriptPath];
                 delete parsed.records[scriptPath];
                 parsed.invalidKeys.delete(scriptPath);
-                await state.set(INLINE_SCRIPT_ENVS_KEY, parsed.rawEntries);
+                await state.update(parsed.rawEntries);
             }
             this.applyPersistedAssociations(parsed.records);
         });
@@ -1928,7 +1925,7 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
 
     private updatePersistedAssociations(changes: readonly PersistedAssociationChange[]): Promise<void> {
         return this.enqueuePersistence(async (state) => {
-            const rawAssociations = await state.get<unknown>(INLINE_SCRIPT_ENVS_KEY);
+            const rawAssociations = await state.get<unknown>();
             const parsed = this.parsePersistedAssociations(rawAssociations);
             const rawEntries = { ...(parsed?.rawEntries ?? {}) };
             const associations = { ...(parsed?.records ?? {}) };
@@ -1955,7 +1952,7 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
                     delete rawEntries[change.scriptPath];
                 }
             }
-            await state.set(INLINE_SCRIPT_ENVS_KEY, rawEntries);
+            await state.update(rawEntries);
             this.applyPersistedAssociations(associations);
         });
     }
@@ -2124,10 +2121,22 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
         };
     }
 
-    private enqueuePersistence(operation: (state: PersistentState) => Promise<void>): Promise<void> {
-        const run = this.persistenceQueue.then(async () => operation(await getWorkspacePersistentState()));
-        this.persistenceQueue = run.catch(() => undefined);
-        return run;
+    private enqueuePersistence(operation: (state: InlineAssociationAccessor) => Promise<void>): Promise<void> {
+        return this.associationStore.runExclusive(operation);
+    }
+
+    /**
+     * Deletes the entire inline-script association record through the inline-owned association
+     * store's failure-isolated queue.
+     *
+     * The store issues a direct key update to `undefined` on the inline-owned queue rather than a
+     * shared `PersistentState.clear`. A generic "Clear Cache" preserves this key and never mutates
+     * it, so the two operations are key-disjoint; and because this deletion is an ordinary queued
+     * write (never coalesced onto an in-flight shared clear) it cannot be silently dropped or
+     * resurrected.
+     */
+    private clearPersistedAssociations(): Promise<void> {
+        return this.associationStore.clear();
     }
 
     private async waitForCacheMaintenance<T>(operation: () => Promise<T>): Promise<T> {
@@ -3198,7 +3207,7 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
                 return undefined;
             }
             try {
-                await this.enqueuePersistence(async (state) => state.clear([INLINE_SCRIPT_ENVS_KEY]));
+                await this.clearPersistedAssociations();
                 return undefined;
             } catch (error) {
                 this.log.error(`Failed to clear inline-script environment associations: ${getErrorMessage(error)}`);
@@ -3212,7 +3221,7 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
         );
         try {
             if (persistedPathsToClear.length === Object.keys(persistedAssociations).length) {
-                await this.enqueuePersistence(async (state) => state.clear([INLINE_SCRIPT_ENVS_KEY]));
+                await this.clearPersistedAssociations();
             } else if (persistedPathsToClear.length > 0) {
                 await this.updatePersistedAssociations(
                     persistedPathsToClear.map((scriptPath) => ({
@@ -3248,9 +3257,7 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
     }
 
     private async getPersistedAssociationSnapshot(): Promise<PersistedInlineScriptEnvironments> {
-        await this.persistenceQueue;
-        const state = await getWorkspacePersistentState();
-        return this.parsePersistedAssociations(await state.get<unknown>(INLINE_SCRIPT_ENVS_KEY))?.records ?? {};
+        return this.parsePersistedAssociations(await this.associationStore.read<unknown>())?.records ?? {};
     }
 
     private async removeCacheEntry(envDir: Uri): Promise<boolean> {

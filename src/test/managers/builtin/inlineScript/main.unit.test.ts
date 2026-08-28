@@ -3,7 +3,7 @@
 
 import assert from 'assert';
 import * as sinon from 'sinon';
-import { Disposable, LogOutputChannel, Uri } from 'vscode';
+import { Disposable, LogOutputChannel, Memento, Uri } from 'vscode';
 import { EnvironmentManager, PythonEnvironmentApi } from '../../../../api';
 import * as cacheLayout from '../../../../common/inlineScript/cacheLayout';
 import { InlineScriptRoutingRegistry } from '../../../../common/inlineScript/routingRegistry';
@@ -49,6 +49,11 @@ suite('registerInlineScriptFeatures (feature-flag gate)', () => {
     const baseManager = {} as EnvironmentManager;
     const globalStorageUri = Uri.file('inline-script-global-storage');
     const routingRegistry = new InlineScriptRoutingRegistry();
+    const workspaceMemento = {
+        get: () => undefined,
+        update: async () => undefined,
+        keys: () => [],
+    } as unknown as Memento;
 
     setup(() => {
         isEnabledStub = sinon.stub(helpers, 'isInlineScriptsFeatureEnabled');
@@ -79,6 +84,7 @@ suite('registerInlineScriptFeatures (feature-flag gate)', () => {
             baseManager,
             globalStorageUri,
             { enabled: false, routingRegistry: undefined },
+            workspaceMemento,
         );
 
         assert.strictEqual(disposables.length, 0, 'no disposables should be added when flag is off');
@@ -97,6 +103,7 @@ suite('registerInlineScriptFeatures (feature-flag gate)', () => {
                 baseManager,
                 globalStorageUri,
                 { enabled: true, routingRegistry: undefined },
+                workspaceMemento,
             ),
             /routing registry/i,
         );
@@ -116,6 +123,7 @@ suite('registerInlineScriptFeatures (feature-flag gate)', () => {
             baseManager,
             globalStorageUri,
             { enabled: true, routingRegistry },
+            workspaceMemento,
         );
 
         assert.strictEqual(getPythonApiStub.callCount, 1);
@@ -142,6 +150,7 @@ suite('registerInlineScriptFeatures (feature-flag gate)', () => {
             baseManager,
             globalStorageUri,
             { enabled: true, routingRegistry },
+            workspaceMemento,
         );
 
         assert.strictEqual(
@@ -170,6 +179,7 @@ suite('registerInlineScriptFeatures (feature-flag gate)', () => {
                   baseManager,
                   globalStorageUri,
                   activation,
+                  workspaceMemento,
               )
             : Promise.resolve());
 
@@ -203,6 +213,7 @@ suite('registerInlineScriptFeatures (feature-flag gate)', () => {
                   baseManager,
                   globalStorageUri,
                   activation,
+                  workspaceMemento,
               )
             : Promise.resolve());
         await nextTurn();
@@ -236,6 +247,7 @@ suite('registerInlineScriptFeatures (feature-flag gate)', () => {
                   baseManager,
                   globalStorageUri,
                   activation,
+                  workspaceMemento,
               )
             : Promise.resolve());
 
