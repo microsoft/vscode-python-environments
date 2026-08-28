@@ -407,7 +407,7 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
         ...(isInlineScriptsFeatureEnabled()
             ? [
                   commands.registerCommand('python-envs.clearScriptEnvCache', async () => {
-                      await clearScriptEnvironmentCacheCommand(envManagers, projectManager);
+                      await clearScriptEnvironmentCacheCommand(envManagers);
                   }),
               ]
             : []),

@@ -116,6 +116,7 @@ export interface EnvironmentManagers extends Disposable {
     packageManagers: InternalPackageManager[];
 
     clearCache(scope: EnvironmentManagerScope): Promise<void>;
+    clearInlineScriptCache(): Promise<void>;
 
     /**
      * Sets the environment for a scope.
@@ -460,11 +461,20 @@ export interface PythonProjectManager extends Disposable {
         uri: Uri,
         options?: { description?: string; tooltip?: string | MarkdownString; iconPath?: IconPath },
     ): PythonProject;
-    add(pyWorkspace: PythonProject | PythonProject[]): Promise<void>;
+    add(
+        pyWorkspace: PythonProject | PythonProject[],
+        options?: { persistSettings?: boolean },
+    ): Promise<void>;
     remove(pyWorkspace: PythonProject | PythonProject[]): void;
     getProjects(uris?: Uri[]): ReadonlyArray<PythonProject>;
     get(uri: Uri): PythonProject | undefined;
     onDidChangeProjects: Event<PythonProject[] | undefined>;
+}
+
+export type InlineScriptProjectRegistrationKind = 'created' | 'adopted';
+
+export interface InlineScriptProjectRegistrationMarker {
+    readonly kind: InlineScriptProjectRegistrationKind;
 }
 
 export interface PythonProjectSettings {
@@ -472,6 +482,7 @@ export interface PythonProjectSettings {
     envManager: string;
     packageManager: string;
     workspace?: string;
+    _inlineScriptRegistration?: InlineScriptProjectRegistrationMarker;
 }
 
 export class PythonEnvironmentImpl implements PythonEnvironment {
