@@ -1886,7 +1886,7 @@ suite('InlineScriptEnvManager', () => {
                 schemaVersion: cacheLayout.META_SCHEMA_VERSION,
                 baseInterpreterPath: baseExecutable,
                 baseInterpreterVersion: baseEnvironment.version,
-                lastUsedAt: '2026-07-01T00:00:00.000Z',
+                lastUsedAt: '2026-07-20T00:00:00.000Z',
             };
             const cached = makeEnvironment(
                 'ms-python.python:inline-script',
@@ -1922,7 +1922,7 @@ suite('InlineScriptEnvManager', () => {
                 schemaVersion: cacheLayout.META_SCHEMA_VERSION,
                 baseInterpreterPath: baseExecutable,
                 baseInterpreterVersion: baseEnvironment.version,
-                lastUsedAt: '2026-07-01T00:00:00.000Z',
+                lastUsedAt: '2026-07-20T00:00:00.000Z',
                 sourceMetadataIdentityHashes: [cacheLayout.hashSourceMetadataIdentity('{"requiresPython":">=3.12","dependencies":["rich"]}')],
             });
             const cached = makeEnvironment(
@@ -1961,7 +1961,7 @@ suite('InlineScriptEnvManager', () => {
                 schemaVersion: cacheLayout.META_SCHEMA_VERSION,
                 baseInterpreterPath: baseExecutable,
                 baseInterpreterVersion: baseEnvironment.version,
-                lastUsedAt: '2026-07-01T00:00:00.000Z',
+                lastUsedAt: '2026-07-20T00:00:00.000Z',
                 sourceMetadataIdentityHashes: hashes,
             });
             const cached = makeEnvironment(
@@ -1996,7 +1996,7 @@ suite('InlineScriptEnvManager', () => {
                 schemaVersion: cacheLayout.META_SCHEMA_VERSION,
                 baseInterpreterPath: baseExecutable,
                 baseInterpreterVersion: baseEnvironment.version,
-                lastUsedAt: '2026-07-01T00:00:00.000Z',
+                lastUsedAt: '2026-07-20T00:00:00.000Z',
             });
             const cached = makeEnvironment(
                 'ms-python.python:inline-script',
@@ -2237,7 +2237,12 @@ suite('InlineScriptEnvManager', () => {
             assert.strictEqual(await manager.create(scriptUri()), undefined);
             assert.strictEqual(await fs.readFile(markerPath, 'utf8'), 'keep');
             assert.strictEqual((await fs.lstat(envDir().fsPath)).isSymbolicLink(), true);
-            assert.strictEqual(inspectMetaStub.callCount, 0);
+            assert.strictEqual(
+                inspectMetaStub
+                    .getCalls()
+                    .some((call) => normalizePath(call.args[0].fsPath) === normalizePath(envDir().fsPath)),
+                false,
+            );
             assert.strictEqual(writeMetaStub.callCount, 0);
             assert.strictEqual(createWithProgressStub.callCount, 0);
         });
@@ -2261,7 +2266,12 @@ suite('InlineScriptEnvManager', () => {
             assert.strictEqual(await manager.create(scriptUri()), undefined);
             assert.strictEqual(await fs.readFile(markerPath, 'utf8'), 'keep');
             assert.strictEqual((await fs.lstat(envDir().fsPath)).isSymbolicLink(), true);
-            assert.strictEqual(inspectMetaStub.callCount, 0);
+            assert.strictEqual(
+                inspectMetaStub
+                    .getCalls()
+                    .some((call) => normalizePath(call.args[0].fsPath) === normalizePath(envDir().fsPath)),
+                false,
+            );
             assert.strictEqual(writeMetaStub.callCount, 0);
             assert.strictEqual(createWithProgressStub.callCount, 0);
         });
@@ -5683,6 +5693,234 @@ suite('InlineScriptEnvManager', () => {
             assert.strictEqual(await manager.get(valid), undefined);
             assert.strictEqual(await manager.get(undefined), undefined);
             assert.strictEqual(await manager.get(Uri.parse('untitled:script.py')), undefined);
+        });
+    });
+
+    suite('TTL eviction', () => {
+        const TTL_MS = 14 * 24 * 60 * 60 * 1000;
+
+        async function setLastUsedAt(environment: PythonEnvironment, lastUsedAt: Date): Promise<void> {
+            setSidecar(
+                await makeSidecar({ lastUsedAt: lastUsedAt.toISOString() }),
+                Uri.file(environment.sysPrefix),
+            );
+        }
+
+        test('evicts only entries older than 14 days before the first create', async () => {
+            const stale = await createOwnedEnvironment('aaaaaaaaaaaaaaaa');
+            const recent = await createOwnedEnvironment('bbbbbbbbbbbbbbbb');
+            const exactCutoff = await createOwnedEnvironment('cccccccccccccccc');
+            await setLastUsedAt(stale, new Date(NOW.getTime() - TTL_MS - 1));
+            await setLastUsedAt(recent, new Date(NOW.getTime() - TTL_MS + 1));
+            await setLastUsedAt(exactCutoff, new Date(NOW.getTime() - TTL_MS));
+
+            const created = await manager.create(scriptUri());
+
+            assert.ok(created);
+            assert.strictEqual(await fs.pathExists(stale.sysPrefix), false);
+            assert.strictEqual(await fs.pathExists(recent.sysPrefix), true);
+            assert.strictEqual(await fs.pathExists(exactCutoff.sysPrefix), true);
+        });
+
+        test('attempts the eviction sweep once and does not block creation when it fails', async () => {
+            const internalManager = manager as unknown as {
+                evictStaleCacheEntries(): Promise<void>;
+            };
+            const eviction = sinon
+                .stub(internalManager, 'evictStaleCacheEntries')
+                .rejects(new Error('cache scan unavailable'));
+
+            assert.ok(await manager.create(scriptUri('first.py')));
+            assert.ok(await manager.create(scriptUri('second.py')));
+
+            sinon.assert.calledOnce(eviction);
+        });
+
+        test('rechecks lastUsedAt under the entry lock before deleting', async () => {
+            const stale = await createOwnedEnvironment('aaaaaaaaaaaaaaaa');
+            await setLastUsedAt(stale, new Date(NOW.getTime() - TTL_MS - 1));
+            lockStub.callsFake(async (entryPath: string) => {
+                if (normalizePath(entryPath) === normalizePath(stale.sysPrefix)) {
+                    await setLastUsedAt(stale, NOW);
+                }
+                return { release: releaseLockStub, retain: retainLockStub };
+            });
+
+            assert.ok(await manager.create(scriptUri()));
+
+            assert.strictEqual(await fs.pathExists(stale.sysPrefix), true);
+        });
+
+        test('preserves a locked stale entry without failing the triggering create', async () => {
+            const stale = await createOwnedEnvironment('aaaaaaaaaaaaaaaa');
+            await setLastUsedAt(stale, new Date(NOW.getTime() - TTL_MS - 1));
+            lockStub.callsFake(async (entryPath: string) => {
+                if (normalizePath(entryPath) === normalizePath(stale.sysPrefix)) {
+                    throw Object.assign(new Error('cache entry is locked'), { code: 'ELOCKED' });
+                }
+                return { release: releaseLockStub, retain: retainLockStub };
+            });
+
+            const created = await manager.create(scriptUri());
+
+            assert.ok(created);
+            assert.strictEqual(await fs.pathExists(stale.sysPrefix), true);
+        });
+
+        test('does not reclaim a retained lock during silent eviction', async () => {
+            lockStub.restore();
+            const stale = await createOwnedEnvironment('aaaaaaaaaaaaaaaa');
+            await setLastUsedAt(stale, new Date(NOW.getTime() - TTL_MS - 1));
+            const lock = await lockfileApis.acquireFileLock(stale.sysPrefix, {
+                timeoutMs: 0,
+                retryIntervalMs: 1,
+            });
+            await lock.retain();
+
+            assert.ok(await manager.create(scriptUri()));
+
+            assert.strictEqual(await fs.pathExists(stale.sysPrefix), true);
+            assert.strictEqual(await fs.pathExists(lockfileApis.getFileLockPath(stale.sysPrefix)), true);
+        });
+
+        test('preserves a stale entry when deletion fails without failing creation', async () => {
+            const stale = await createOwnedEnvironment('aaaaaaaaaaaaaaaa');
+            await setLastUsedAt(stale, new Date(NOW.getTime() - TTL_MS - 1));
+            const internalManager = manager as unknown as {
+                deleteCacheEntryForClear(entryPath: string): Promise<void>;
+            };
+            const originalDelete = internalManager.deleteCacheEntryForClear.bind(manager);
+            sinon.stub(internalManager, 'deleteCacheEntryForClear').callsFake(async (entryPath) => {
+                if (normalizePath(entryPath) === normalizePath(stale.sysPrefix)) {
+                    throw new Error('deletion unavailable');
+                }
+                return originalDelete(entryPath);
+            });
+
+            const created = await manager.create(scriptUri());
+
+            assert.ok(created);
+            assert.strictEqual(await fs.pathExists(stale.sysPrefix), true);
+        });
+
+        test('invalidates associations and discovered environments for deleted entries', async () => {
+            const uri = scriptUri('associated.py');
+            const stale = await createOwnedEnvironment('aaaaaaaaaaaaaaaa');
+            await setLastUsedAt(stale, new Date(NOW.getTime() - TTL_MS - 1));
+            await manager.set(uri, stale);
+            (manager as unknown as { collection: PythonEnvironment[] }).collection = [stale];
+            const selectionListener = sinon.spy();
+            const collectionListener = sinon.spy();
+            manager.onDidChangeEnvironment(selectionListener);
+            manager.onDidChangeEnvironments(collectionListener);
+
+            assert.ok(await manager.create(scriptUri('trigger.py')));
+
+            assert.strictEqual(await manager.get(uri), undefined);
+            assert.strictEqual(persistedAssociations, undefined);
+            assert.deepStrictEqual(await manager.getEnvironments('all'), []);
+            sinon.assert.calledOnce(selectionListener);
+            assert.strictEqual(
+                normalizePath(selectionListener.firstCall.args[0].uri.fsPath),
+                normalizePath(uri.fsPath),
+            );
+            assert.strictEqual(selectionListener.firstCall.args[0].old, stale);
+            assert.strictEqual(selectionListener.firstCall.args[0].new, undefined);
+            sinon.assert.calledOnceWithExactly(collectionListener, [
+                { kind: EnvironmentChangeKind.remove, environment: stale },
+            ]);
+        });
+
+        test('invalidates an association when another host removes the stale entry first', async () => {
+            const uri = scriptUri('associated.py');
+            const stale = await createOwnedEnvironment('aaaaaaaaaaaaaaaa');
+            await setLastUsedAt(stale, new Date(NOW.getTime() - TTL_MS - 1));
+            await manager.set(uri, stale);
+            const internalManager = manager as unknown as {
+                removeCacheEntryForClear(
+                    cacheRoot: Uri,
+                    physicalCacheRootPath: string,
+                    entryName: string,
+                    options?: {
+                        shouldRemove?: (entryPath: string) => Promise<boolean>;
+                        reclaimRetainedLock?: boolean;
+                    },
+                ): Promise<string | undefined>;
+            };
+            sinon.stub(internalManager, 'removeCacheEntryForClear').callsFake(async () => {
+                await fs.remove(stale.sysPrefix);
+                return undefined;
+            });
+
+            assert.ok(await manager.create(scriptUri('trigger.py')));
+
+            assert.strictEqual(persistedAssociations, undefined);
+            assert.strictEqual(await manager.get(uri), undefined);
+        });
+
+        test('does not let an in-flight refresh re-add an evicted environment', async () => {
+            const stale = await createOwnedEnvironment('aaaaaaaaaaaaaaaa');
+            await setLastUsedAt(stale, new Date(NOW.getTime() - TTL_MS - 1));
+            let releaseRefresh: (() => void) | undefined;
+            let signalRefreshStarted: (() => void) | undefined;
+            const refreshStarted = new Promise<void>((resolve) => {
+                signalRefreshStarted = resolve;
+            });
+            const refreshGate = new Promise<void>((resolve) => {
+                releaseRefresh = resolve;
+            });
+            const internalManager = manager as unknown as {
+                inspectDiscoveredCacheEntry(
+                    cacheRoot: Uri,
+                    envDir: Uri,
+                ): Promise<{
+                    kind: 'resolved';
+                    environment: PythonEnvironment;
+                    fingerprint: string;
+                }>;
+            };
+            sinon.stub(internalManager, 'inspectDiscoveredCacheEntry').callsFake(async () => {
+                signalRefreshStarted!();
+                await refreshGate;
+                return { kind: 'resolved', environment: stale, fingerprint: 'stale-snapshot' };
+            });
+
+            const refresh = manager.refresh(undefined);
+            await refreshStarted;
+            const create = manager.create(scriptUri('trigger.py'));
+            await waitForCondition(
+                async () => !(await fs.pathExists(stale.sysPrefix)),
+                'Expected TTL eviction to delete the stale entry',
+            );
+            releaseRefresh!();
+            await Promise.all([refresh, create]);
+
+            assert.strictEqual(await fs.pathExists(stale.sysPrefix), false);
+            assert.deepStrictEqual(await manager.getEnvironments('all'), []);
+        });
+
+        test('does not treat transient access errors as confirmed cross-host deletion', async () => {
+            const entryPath = path.join(tempRoot, 'unavailable-entry');
+            const internalManager = manager as unknown as {
+                isCacheEntryDefinitelyMissing(candidate: string): Promise<boolean>;
+            };
+            sinon
+                .stub(fsExtra, 'lstat')
+                .withArgs(entryPath)
+                .rejects(Object.assign(new Error('access unavailable'), { code: 'EACCES' }));
+
+            assert.strictEqual(await internalManager.isCacheEntryDefinitelyMissing(entryPath), false);
+        });
+
+        test('does not fail creation when association cleanup cannot be persisted', async () => {
+            const uri = scriptUri('associated.py');
+            const stale = await createOwnedEnvironment('aaaaaaaaaaaaaaaa');
+            await setLastUsedAt(stale, new Date(NOW.getTime() - TTL_MS - 1));
+            await manager.set(uri, stale);
+            workspaceState.update.onSecondCall().rejects(new Error('Memento unavailable'));
+
+            assert.ok(await manager.create(scriptUri('trigger.py')));
+            assert.strictEqual(await fs.pathExists(stale.sysPrefix), false);
         });
     });
 
