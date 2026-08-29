@@ -5803,35 +5803,41 @@ suite('InlineScriptEnvManager', () => {
             assert.strictEqual(await fs.pathExists(stale.sysPrefix), true);
         });
 
-        test('invalidates associations and discovered environments for deleted entries', async () => {
+        test('removes discovered environments for evicted orphaned entries', async () => {
+            const stale = await createOwnedEnvironment('aaaaaaaaaaaaaaaa');
+            await setLastUsedAt(stale, new Date(NOW.getTime() - TTL_MS - 1));
+            (manager as unknown as { collection: PythonEnvironment[] }).collection = [stale];
+            const collectionListener = sinon.spy();
+            manager.onDidChangeEnvironments(collectionListener);
+
+            assert.ok(await manager.create(scriptUri('trigger.py')));
+
+            assert.strictEqual(await fs.pathExists(stale.sysPrefix), false);
+            assert.deepStrictEqual(await manager.getEnvironments('all'), []);
+            sinon.assert.calledOnceWithExactly(collectionListener, [
+                { kind: EnvironmentChangeKind.remove, environment: stale },
+            ]);
+        });
+
+        test('preserves a stale entry and its association while a script still references it', async () => {
             const uri = scriptUri('associated.py');
             const stale = await createOwnedEnvironment('aaaaaaaaaaaaaaaa');
             await setLastUsedAt(stale, new Date(NOW.getTime() - TTL_MS - 1));
             await manager.set(uri, stale);
             (manager as unknown as { collection: PythonEnvironment[] }).collection = [stale];
             const selectionListener = sinon.spy();
-            const collectionListener = sinon.spy();
             manager.onDidChangeEnvironment(selectionListener);
-            manager.onDidChangeEnvironments(collectionListener);
 
             assert.ok(await manager.create(scriptUri('trigger.py')));
 
-            assert.strictEqual(await manager.get(uri), undefined);
-            assert.strictEqual(persistedAssociations, undefined);
-            assert.deepStrictEqual(await manager.getEnvironments('all'), []);
-            sinon.assert.calledOnce(selectionListener);
-            assert.strictEqual(
-                normalizePath(selectionListener.firstCall.args[0].uri.fsPath),
-                normalizePath(uri.fsPath),
-            );
-            assert.strictEqual(selectionListener.firstCall.args[0].old, stale);
-            assert.strictEqual(selectionListener.firstCall.args[0].new, undefined);
-            sinon.assert.calledOnceWithExactly(collectionListener, [
-                { kind: EnvironmentChangeKind.remove, environment: stale },
-            ]);
+            assert.strictEqual(await fs.pathExists(stale.sysPrefix), true);
+            assert.strictEqual(await manager.get(uri), stale);
+            assert.notStrictEqual(persistedAssociations, undefined);
+            assert.ok((await manager.getEnvironments('all')).some((env) => env === stale));
+            sinon.assert.notCalled(selectionListener);
         });
 
-        test('invalidates an association when another host removes the stale entry first', async () => {
+        test('does not attempt to remove a stale entry that a script still references', async () => {
             const uri = scriptUri('associated.py');
             const stale = await createOwnedEnvironment('aaaaaaaaaaaaaaaa');
             await setLastUsedAt(stale, new Date(NOW.getTime() - TTL_MS - 1));
@@ -5847,15 +5853,14 @@ suite('InlineScriptEnvManager', () => {
                     },
                 ): Promise<string | undefined>;
             };
-            sinon.stub(internalManager, 'removeCacheEntryForClear').callsFake(async () => {
-                await fs.remove(stale.sysPrefix);
-                return undefined;
-            });
+            const removeSpy = sinon.spy(internalManager, 'removeCacheEntryForClear');
 
             assert.ok(await manager.create(scriptUri('trigger.py')));
 
-            assert.strictEqual(persistedAssociations, undefined);
-            assert.strictEqual(await manager.get(uri), undefined);
+            sinon.assert.notCalled(removeSpy);
+            assert.strictEqual(await fs.pathExists(stale.sysPrefix), true);
+            assert.strictEqual(await manager.get(uri), stale);
+            assert.notStrictEqual(persistedAssociations, undefined);
         });
 
         test('does not let an in-flight refresh re-add an evicted environment', async () => {
@@ -5913,14 +5918,19 @@ suite('InlineScriptEnvManager', () => {
         });
 
         test('does not fail creation when association cleanup cannot be persisted', async () => {
-            const uri = scriptUri('associated.py');
-            const stale = await createOwnedEnvironment('aaaaaaaaaaaaaaaa');
-            await setLastUsedAt(stale, new Date(NOW.getTime() - TTL_MS - 1));
-            await manager.set(uri, stale);
+            const orphan = await createOwnedEnvironment('aaaaaaaaaaaaaaaa');
+            await setLastUsedAt(orphan, new Date(NOW.getTime() - TTL_MS - 1));
+            // A separate association whose environment was deleted out from under us. Evicting the
+            // orphaned entry above drives the association cleanup pass, and persisting that cleanup is
+            // what fails here.
+            const missingUri = scriptUri('missing.py');
+            const missing = await createOwnedEnvironment('bbbbbbbbbbbbbbbb');
+            await manager.set(missingUri, missing);
+            await fs.remove(missing.sysPrefix);
             workspaceState.update.onSecondCall().rejects(new Error('Memento unavailable'));
 
             assert.ok(await manager.create(scriptUri('trigger.py')));
-            assert.strictEqual(await fs.pathExists(stale.sysPrefix), false);
+            assert.strictEqual(await fs.pathExists(orphan.sysPrefix), false);
         });
     });
 

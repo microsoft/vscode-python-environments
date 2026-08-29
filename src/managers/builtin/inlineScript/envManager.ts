@@ -2933,8 +2933,19 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
         const persistedAssociations = await this.getPersistedAssociationSnapshot();
         const scriptPaths = this.getTrackedScriptPaths(persistedAssociations);
         const priorSelections = this.getPriorSelections(scriptPaths);
+        // Never evict an environment that a script association still points to. `lastUsedAt` is only
+        // refreshed when an environment is created or reused (never when it is resolved for run, debug,
+        // or Pylance), so an actively-used environment can look stale here. Reclaim only orphaned entries
+        // (e.g. superseded by a dependency change, or left behind by a deleted or deselected script).
+        const referencedEnvDirs = this.getReferencedCacheEntryDirs(persistedAssociations, scriptPaths);
+        const evictableStaleEntries = staleEntries.filter(
+            (staleEntry) => !referencedEnvDirs.has(normalizePath(staleEntry)),
+        );
+        if (evictableStaleEntries.length === 0) {
+            return;
+        }
         const removedCacheEntries = new Set<string>();
-        for (const staleEntry of staleEntries) {
+        for (const staleEntry of evictableStaleEntries) {
             try {
                 const removed = await this.removeCacheEntryForClear(
                     cacheRoot,
@@ -3321,6 +3332,26 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
 
     private deleteCacheEntryForClear(entryPath: string): Promise<void> {
         return fs.remove(entryPath);
+    }
+
+    private getReferencedCacheEntryDirs(
+        persistedAssociations: PersistedInlineScriptEnvironments,
+        scriptPaths: ReadonlySet<string>,
+    ): Set<string> {
+        const referenced = new Set<string>();
+        for (const scriptPath of scriptPaths) {
+            const environmentPaths = [
+                persistedAssociations[scriptPath]?.environmentPath,
+                this.fsPathToPersistedAssociation.get(scriptPath)?.environmentPath,
+                this.fsPathToEnv.get(scriptPath)?.environmentPath.fsPath,
+            ].filter((value): value is string => value !== undefined);
+            for (const environmentPath of environmentPaths) {
+                // Mirror isRemovedOrMissingCacheAssociation: the cache-entry dir is two levels above the
+                // interpreter executable (e.g. <envDir>/bin/python -> <envDir>).
+                referenced.add(normalizePath(path.dirname(path.dirname(environmentPath))));
+            }
+        }
+        return referenced;
     }
 
     private async getInvalidatedAssociationPaths(
