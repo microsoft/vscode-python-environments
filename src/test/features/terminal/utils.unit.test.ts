@@ -1,6 +1,9 @@
 import * as assert from 'assert';
+import * as path from 'path';
 import * as sinon from 'sinon';
-import { ExtensionTerminalOptions, Terminal, TerminalOptions } from 'vscode';
+import { ExtensionTerminalOptions, Terminal, TerminalOptions, Uri } from 'vscode';
+import { PythonEnvironment, PythonEnvironmentApi, PythonProject } from '../../../api';
+import { VENV_MANAGER_ID } from '../../../common/constants';
 import * as windowApis from '../../../common/window.apis';
 import * as workspaceApis from '../../../common/workspace.apis';
 import * as shellDetector from '../../../features/common/shellDetector';
@@ -10,16 +13,299 @@ import {
     ACT_TYPE_SHELL,
     AutoActivationType,
     getAutoActivationType,
+    getEnvironmentForTerminal,
     shouldActivateInCurrentTerminal,
     shouldSkipTerminalActivation,
     waitForShellIntegration,
 } from '../../../features/terminal/utils';
+import { createMockPythonEnvironment } from '../../mocks/pythonEnvironment';
 
 interface MockWorkspaceConfig {
     get: sinon.SinonStub;
     inspect: sinon.SinonStub;
     update: sinon.SinonStub;
 }
+
+suite('Terminal Utils - getEnvironmentForTerminal', () => {
+    const workspaceRoot = path.resolve('terminal-cwd-workspace');
+
+    teardown(() => {
+        sinon.restore();
+    });
+
+    function createProject(name: string, fsPath: string): PythonProject {
+        return { name, uri: Uri.file(fsPath) } as PythonProject;
+    }
+
+    function createVenv(projectPath: string, id: string, directory: string = '.venv'): PythonEnvironment {
+        const sysPrefix = path.join(projectPath, directory);
+        return createMockPythonEnvironment({
+            name: directory,
+            id,
+            managerId: VENV_MANAGER_ID,
+            envPath: path.join(sysPrefix, 'bin', 'python'),
+            sysPrefix,
+        });
+    }
+
+    function createExternalEnvironment(id: string): PythonEnvironment {
+        return createMockPythonEnvironment({
+            name: id,
+            id,
+            managerId: 'ms-python.python:conda',
+            envPath: path.resolve('external-environments', id, 'python'),
+        });
+    }
+
+    function createTerminal(cwd?: string, shellCwd?: string): Terminal {
+        return {
+            creationOptions: cwd ? ({ cwd } as TerminalOptions) : ({} as TerminalOptions),
+            shellIntegration: shellCwd ? ({ cwd: Uri.file(shellCwd) } as Terminal['shellIntegration']) : undefined,
+        } as Terminal;
+    }
+
+    function createApi(
+        projects: PythonProject[],
+        environmentsByProject: Map<string, PythonEnvironment | undefined>,
+        environments: PythonEnvironment[],
+        globalEnvironment?: PythonEnvironment,
+    ): PythonEnvironmentApi {
+        return {
+            getPythonProjects: sinon.stub().returns(projects),
+            getEnvironment: sinon.stub().callsFake(async (scope: Uri | undefined) => {
+                if (!scope) {
+                    return globalEnvironment;
+                }
+                return environmentsByProject.get(scope.toString());
+            }),
+            getEnvironments: sinon.stub().resolves(environments),
+        } as unknown as PythonEnvironmentApi;
+    }
+
+    test('preserves a workspace-root venv for terminals in project subdirectories', async () => {
+        const project = createProject('workspace', workspaceRoot);
+        const environment = createVenv(workspaceRoot, 'root');
+        const api = createApi([project], new Map([[project.uri.toString(), environment]]), [environment]);
+
+        const result = await getEnvironmentForTerminal(api, createTerminal(path.join(workspaceRoot, 'src')));
+
+        assert.strictEqual(result, environment);
+        sinon.assert.notCalled(api.getEnvironments as sinon.SinonStub);
+    });
+
+    test('uses the venv associated with terminal cwd instead of a sibling project venv', async () => {
+        const projectA = path.join(workspaceRoot, 'ProjectA');
+        const projectB = path.join(workspaceRoot, 'ProjectB');
+        const projectC = path.join(workspaceRoot, 'ProjectC');
+        const rootProject = createProject('workspace', workspaceRoot);
+        const envA = createVenv(projectA, 'a');
+        const envB = createVenv(projectB, 'b');
+        const envC = createVenv(projectC, 'c');
+        const api = createApi(
+            [rootProject],
+            new Map([[rootProject.uri.toString(), envA]]),
+            [envA, envB, envC],
+        );
+
+        const result = await getEnvironmentForTerminal(api, createTerminal(projectC));
+
+        assert.strictEqual(result, envC);
+        sinon.assert.calledOnceWithExactly(api.getEnvironments as sinon.SinonStub, 'all');
+    });
+
+    test('prefers shell integration cwd over terminal creation cwd', async () => {
+        const projectA = path.join(workspaceRoot, 'ProjectA');
+        const projectC = path.join(workspaceRoot, 'ProjectC');
+        const rootProject = createProject('workspace', workspaceRoot);
+        const envA = createVenv(projectA, 'a');
+        const envC = createVenv(projectC, 'c');
+        const api = createApi([rootProject], new Map([[rootProject.uri.toString(), envA]]), [envA, envC]);
+
+        const result = await getEnvironmentForTerminal(api, createTerminal(projectA, projectC));
+
+        assert.strictEqual(result, envC);
+    });
+
+    test('returns undefined when multiple venvs are equally close to terminal cwd', async () => {
+        const projectA = path.join(workspaceRoot, 'ProjectA');
+        const projectC = path.join(workspaceRoot, 'ProjectC');
+        const rootProject = createProject('workspace', workspaceRoot);
+        const envA = createVenv(projectA, 'a');
+        const envC1 = createVenv(projectC, 'c-1', '.venv');
+        const envC2 = createVenv(projectC, 'c-2', 'venv');
+        const api = createApi(
+            [rootProject],
+            new Map([[rootProject.uri.toString(), envA]]),
+            [envA, envC1, envC2],
+        );
+
+        const result = await getEnvironmentForTerminal(api, createTerminal(projectC));
+
+        assert.strictEqual(result, undefined);
+    });
+
+    test('returns undefined rather than using a sibling venv when cwd has no local venv', async () => {
+        const projectA = path.join(workspaceRoot, 'ProjectA');
+        const projectC = path.join(workspaceRoot, 'ProjectC');
+        const rootProject = createProject('workspace', workspaceRoot);
+        const envA = createVenv(projectA, 'a');
+        const api = createApi([rootProject], new Map([[rootProject.uri.toString(), envA]]), [envA]);
+
+        const result = await getEnvironmentForTerminal(api, createTerminal(projectC));
+
+        assert.strictEqual(result, undefined);
+    });
+
+    test('does not treat a global venv as local to terminal cwd', async () => {
+        const projectA = path.join(workspaceRoot, 'ProjectA');
+        const projectC = path.join(workspaceRoot, 'ProjectC');
+        const rootProject = createProject('workspace', workspaceRoot);
+        const envA = createVenv(projectA, 'a');
+        const globalEnv = createVenv(path.parse(workspaceRoot).root, 'global');
+        const api = createApi(
+            [rootProject],
+            new Map([[rootProject.uri.toString(), envA]]),
+            [envA, globalEnv],
+        );
+
+        const result = await getEnvironmentForTerminal(api, createTerminal(projectC));
+
+        assert.strictEqual(result, undefined);
+    });
+
+    test('preserves a selected descendant venv when terminal cwd is the workspace root', async () => {
+        const projectA = path.join(workspaceRoot, 'ProjectA');
+        const rootProject = createProject('workspace', workspaceRoot);
+        const envA = createVenv(projectA, 'a');
+        const api = createApi([rootProject], new Map([[rootProject.uri.toString(), envA]]), [envA]);
+
+        const result = await getEnvironmentForTerminal(api, createTerminal(workspaceRoot));
+
+        assert.strictEqual(result, envA);
+        sinon.assert.notCalled(api.getEnvironments as sinon.SinonStub);
+    });
+
+    test('does not infer a venv when the containing project has no selected environment', async () => {
+        const projectC = path.join(workspaceRoot, 'ProjectC');
+        const rootProject = createProject('workspace', workspaceRoot);
+        const envC = createVenv(projectC, 'c');
+        const api = createApi([rootProject], new Map([[rootProject.uri.toString(), undefined]]), [envC]);
+
+        const result = await getEnvironmentForTerminal(api, createTerminal(projectC));
+
+        assert.strictEqual(result, undefined);
+        sinon.assert.notCalled(api.getEnvironments as sinon.SinonStub);
+    });
+
+    test('does not use another project environment when the cwd project has no selection', async () => {
+        const projectAPath = path.join(workspaceRoot, 'ProjectA');
+        const projectCPath = path.join(workspaceRoot, 'ProjectC');
+        const projectA = createProject('ProjectA', projectAPath);
+        const projectC = createProject('ProjectC', projectCPath);
+        const envA = createVenv(projectAPath, 'a');
+        const api = createApi(
+            [projectA, projectC],
+            new Map([
+                [projectA.uri.toString(), envA],
+                [projectC.uri.toString(), undefined],
+            ]),
+            [envA],
+        );
+
+        const result = await getEnvironmentForTerminal(api, createTerminal(projectCPath));
+
+        assert.strictEqual(result, undefined);
+        sinon.assert.notCalled(api.getEnvironments as sinon.SinonStub);
+    });
+
+    test('fails closed when listing environments rejects', async () => {
+        const projectA = path.join(workspaceRoot, 'ProjectA');
+        const projectC = path.join(workspaceRoot, 'ProjectC');
+        const rootProject = createProject('workspace', workspaceRoot);
+        const envA = createVenv(projectA, 'a');
+        const api = createApi([rootProject], new Map([[rootProject.uri.toString(), envA]]), [envA]);
+        (api.getEnvironments as sinon.SinonStub).rejects(new Error('lookup failed'));
+
+        const result = await getEnvironmentForTerminal(api, createTerminal(projectC));
+
+        assert.strictEqual(result, undefined);
+    });
+
+    test('fails closed when listing environments times out', async () => {
+        const clock = sinon.useFakeTimers();
+        const projectA = path.join(workspaceRoot, 'ProjectA');
+        const projectC = path.join(workspaceRoot, 'ProjectC');
+        const rootProject = createProject('workspace', workspaceRoot);
+        const envA = createVenv(projectA, 'a');
+        const api = createApi([rootProject], new Map([[rootProject.uri.toString(), envA]]), [envA]);
+        (api.getEnvironments as sinon.SinonStub).returns(new Promise<PythonEnvironment[]>(() => undefined));
+
+        const resultPromise = getEnvironmentForTerminal(api, createTerminal(projectC));
+        await clock.tickAsync(1000);
+
+        assert.strictEqual(await resultPromise, undefined);
+    });
+
+    test('preserves an external environment selected for the containing project', async () => {
+        const rootProject = createProject('workspace', workspaceRoot);
+        const environment = createExternalEnvironment('external');
+        const api = createApi([rootProject], new Map([[rootProject.uri.toString(), environment]]), []);
+
+        const result = await getEnvironmentForTerminal(
+            api,
+            createTerminal(path.join(workspaceRoot, 'ProjectC')),
+        );
+
+        assert.strictEqual(result, environment);
+        sinon.assert.notCalled(api.getEnvironments as sinon.SinonStub);
+    });
+
+    test('preserves the selected environment for the most specific registered project', async () => {
+        const projectCPath = path.join(workspaceRoot, 'ProjectC');
+        const rootProject = createProject('workspace', workspaceRoot);
+        const projectC = createProject('ProjectC', projectCPath);
+        const rootEnvironment = createVenv(path.join(workspaceRoot, 'ProjectA'), 'a');
+        const projectEnvironment = createExternalEnvironment('project-c');
+        const api = createApi(
+            [rootProject, projectC],
+            new Map([
+                [rootProject.uri.toString(), rootEnvironment],
+                [projectC.uri.toString(), projectEnvironment],
+            ]),
+            [rootEnvironment],
+        );
+
+        const result = await getEnvironmentForTerminal(
+            api,
+            createTerminal(path.join(projectCPath, 'src')),
+        );
+
+        assert.strictEqual(result, projectEnvironment);
+        sinon.assert.notCalled(api.getEnvironments as sinon.SinonStub);
+    });
+
+    test('preserves the existing project fallback when terminal cwd is outside the workspace', async () => {
+        const rootProject = createProject('workspace', workspaceRoot);
+        const environment = createVenv(path.join(workspaceRoot, 'ProjectA'), 'a');
+        const api = createApi([rootProject], new Map([[rootProject.uri.toString(), environment]]), [environment]);
+
+        const result = await getEnvironmentForTerminal(api, createTerminal(path.resolve('outside-workspace')));
+
+        assert.strictEqual(result, environment);
+        sinon.assert.notCalled(api.getEnvironments as sinon.SinonStub);
+    });
+
+    test('preserves the existing single-project behavior when terminal cwd is unavailable', async () => {
+        const rootProject = createProject('workspace', workspaceRoot);
+        const environment = createVenv(path.join(workspaceRoot, 'ProjectA'), 'a');
+        const api = createApi([rootProject], new Map([[rootProject.uri.toString(), environment]]), [environment]);
+
+        const result = await getEnvironmentForTerminal(api, createTerminal());
+
+        assert.strictEqual(result, environment);
+        sinon.assert.notCalled(api.getEnvironments as sinon.SinonStub);
+    });
+});
 
 suite('Terminal Utils - getAutoActivationType', () => {
     let mockGetConfiguration: sinon.SinonStub;

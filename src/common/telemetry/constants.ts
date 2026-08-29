@@ -222,6 +222,29 @@ export enum EventNames {
      */
     INLINE_SCRIPT_DETECTED = 'inlineScript.detected',
     /**
+     * Telemetry event fired when inline-script environment creation completes
+     * successfully with a newly-built cache entry that passed verification and
+     * metadata persistence.
+     * Measures:
+     * - duration: number (ms spent in the underlying create/rebuild operation)
+     * - dependencyCount: number (normalized dependency count in the cache key)
+     */
+    INLINE_SCRIPT_ENV_CREATED = 'inlineScript.envCreated',
+    /**
+     * Telemetry event fired when inline-script environment creation validates
+     * and reuses an existing cache entry without rebuilding it.
+     * Measures:
+     * - dependencyCount: number (normalized dependency count in the cache key)
+     */
+    INLINE_SCRIPT_ENV_REUSE_HIT = 'inlineScript.envReuseHit',
+    /**
+     * Telemetry event fired when inline-script environment creation cannot
+     * complete.
+     * Properties:
+     * - category: stable low-cardinality failure category
+     */
+    INLINE_SCRIPT_ENV_ERROR = 'inlineScript.envError',
+    /**
      * Telemetry event fired once per session, per URI, the first time a `.py`
      * file that previously raised an `inlineScript.detected` event receives a
      * real text edit. Together with `inlineScript.detected` this measures the
@@ -231,6 +254,16 @@ export enum EventNames {
      */
     INLINE_SCRIPT_EDITED = 'inlineScript.edited',
 }
+
+export type InlineScriptEnvErrorCategory =
+    | 'compatible-python-declined'
+    | 'discovery-failure'
+    | 'no-compatible-python'
+    | 'package-install-cancelled'
+    | 'install-failure'
+    | 'setup-failure'
+    | 'lock-timeout'
+    | 'lock-unavailable';
 
 // Map all events to their properties
 export interface IEventNamePropertyMapping {
@@ -601,27 +634,10 @@ export interface IEventNamePropertyMapping {
             "<duration>": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "isMeasurement": true, "owner": "eleanorjboyd" }
         }
     */
+    // Numeric fields declared in the GDPR block are sent through the measurements payload.
     [EventNames.PET_REFRESH]: {
         result: 'success' | 'timeout' | 'error';
-        envCount?: number;
-        /** Number of discovered environments whose kind is Conda. Lets us slice refresh duration by conda footprint. */
-        condaEnvCount?: number;
-        /** Number of discovered environment managers (conda/pyenv/poetry/etc.). */
-        managerCount?: number;
-        unresolvedCount?: number;
-        workspaceDirCount?: number;
-        searchPathCount?: number;
-        attempt: number;
         errorType?: string;
-        // breakdown* fields go through the measures payload (numeric); listed here for GDPR only.
-        /** ms in the Locators phase. */
-        breakdownLocators?: number;
-        /** ms walking PATH env var entries (not a file path). */
-        breakdownPathEnv?: number;
-        /** ms scanning global virtual-env dirs. */
-        breakdownGlobalVirtualEnvs?: number;
-        /** ms scanning workspace dirs. */
-        breakdownWorkspaces?: number;
         /** JSON-serialized Record<locatorName, ms>. Parse with parse_json() in Kusto. */
         locatorsJson?: string;
         /** PET crate version reported by the `info` RPC. 'unknown' if the call failed or the PET binary doesn't implement it. */
@@ -638,14 +654,14 @@ export interface IEventNamePropertyMapping {
             "workspaceDirCount": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "isMeasurement": true, "owner": "eleanorjboyd" },
             "envDirCount": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "isMeasurement": true, "owner": "eleanorjboyd" },
             "retryCount": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "isMeasurement": true, "owner": "eleanorjboyd" },
+            "errorType": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "owner": "eleanorjboyd" },
             "<duration>": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "isMeasurement": true, "owner": "eleanorjboyd" }
         }
     */
+    // Numeric fields declared in the GDPR block are sent through the measurements payload.
     [EventNames.PET_CONFIGURE]: {
         result: 'success' | 'timeout' | 'error' | 'skipped';
-        workspaceDirCount?: number;
-        envDirCount?: number;
-        retryCount: number;
+        errorType?: string;
     };
 
     /* __GDPR__
@@ -660,8 +676,8 @@ export interface IEventNamePropertyMapping {
             "<duration>": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "isMeasurement": true, "owner": "eleanorjboyd" }
         }
     */
+    // `attempt` is declared in the GDPR block and sent through the measurements payload.
     [EventNames.PET_PROCESS_RESTART]: {
-        attempt: number;
         result: 'success' | 'error';
         errorType?: string;
         /**
@@ -710,6 +726,36 @@ export interface IEventNamePropertyMapping {
     [EventNames.MIGRATION_SYSTEM_ENV_MANAGER]: {
         outcome: 'removed' | 'partial' | 'not_set' | 'failed';
         errorType?: string;
+    };
+
+    /* __GDPR__
+        "inlineScript.envCreated": {
+            "dependencyCount": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "isMeasurement": true, "owner": "StellaHuang95" },
+            "<duration>": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "isMeasurement": true, "owner": "StellaHuang95" }
+        }
+    */
+    [EventNames.INLINE_SCRIPT_ENV_CREATED]: {
+        // Goes through the measures payload (numeric); listed here for GDPR only.
+        dependencyCount?: number;
+    };
+
+    /* __GDPR__
+        "inlineScript.envReuseHit": {
+            "dependencyCount": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "isMeasurement": true, "owner": "StellaHuang95" }
+        }
+    */
+    [EventNames.INLINE_SCRIPT_ENV_REUSE_HIT]: {
+        // Goes through the measures payload (numeric); listed here for GDPR only.
+        dependencyCount?: number;
+    };
+
+    /* __GDPR__
+        "inlineScript.envError": {
+            "category": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "owner": "StellaHuang95" }
+        }
+    */
+    [EventNames.INLINE_SCRIPT_ENV_ERROR]: {
+        category: InlineScriptEnvErrorCategory;
     };
 
     /* __GDPR__

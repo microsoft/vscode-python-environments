@@ -346,6 +346,17 @@ export interface QuickCreateConfig {
 }
 
 /**
+ * Options controlling environment removal.
+ */
+export interface RemoveEnvironmentOptions {
+    /**
+     * When `true`, removes the environment without prompting for confirmation.
+     * Intended for automated or headless scenarios. Defaults to `false`.
+     */
+    runHeadless?: boolean;
+}
+
+/**
  * Interface representing an environment manager.
  *
  * @remarks
@@ -425,7 +436,7 @@ export interface EnvironmentManager {
      * Invoked to delete the given environment. Typical triggers include an explicit user
      * action (such as a "Delete Environment" command) and programmatic removal via the API.
      */
-    remove?(environment: PythonEnvironment): Promise<void>;
+    remove?(environment: PythonEnvironment, options?: RemoveEnvironmentOptions): Promise<void>;
 
     /**
      * Refreshes the list of Python environments within the specified scope.
@@ -679,9 +690,9 @@ export interface PackageManager {
     /**
      * Refreshes the package list for the specified Python environment.
      * @param environment - The Python environment for which to refresh the package list.
-     * @returns A promise that resolves with the refreshed list of packages, or undefined.
+     * @returns A promise that resolves when the refresh is complete.
      */
-    refresh(environment: PythonEnvironment): Promise<Package[] | undefined>;
+    refresh(environment: PythonEnvironment): Promise<void>;
 
     /**
      * Retrieves the list of packages for the specified Python environment.
@@ -735,11 +746,22 @@ export interface PackageManager {
     getVersion?(environment: PythonEnvironment): Promise<Pep440Version | undefined>;
 
     /**
-     * Retrieves the list of available versions for a given package.
+     * Retrieves the list of available versions for a given package, newest first.
+     *
+     * Implementations should:
+     * - resolve to an array of {@link Pep440Version} objects on success;
+     * - throw a {@link PackageVersionLookupNotSupportedError} when this manager cannot look up
+     *   versions at all (an unsupported capability);
+     * - let operational failures (command, network, or malformed/unparseable output) propagate
+     *   instead of swallowing them into `undefined`.
+     *
+     * Resolving to `undefined` is treated by callers as an unsupported capability, equivalent to
+     * throwing {@link PackageVersionLookupNotSupportedError}.
+     *
      * @param environment - The Python environment context for the lookup.
      * @param packageName - The name of the package to look up.
-     * @returns A promise that resolves to an array of {@link Pep440Version} objects (newest first),
-     *          or `undefined` if this manager does not support version listing.
+     * @returns A promise that resolves to an array of {@link Pep440Version} objects (newest first).
+     * @throws {@link PackageVersionLookupNotSupportedError} when version lookup is unsupported.
      */
     getPackageAvailableVersions?(
         environment: PythonEnvironment,
@@ -872,47 +894,63 @@ export interface GetPackagesOptions {
     skipCache?: boolean;
 }
 
-export type PackageManagementOptions =
-    | {
-          /**
-           * Upgrade the packages if they are already installed.
-           */
-          upgrade?: boolean;
+/**
+ * Options controlling user interaction during package management operations.
+ */
+export interface PackageManagementInteractionOptions {
+    /**
+     * When `true`, the package management operation runs without any user prompts or
+     * interaction and relies solely on the packages provided in the options. Any step
+     * that would normally require user input — such as selecting packages to install
+     * when none are specified — is skipped instead of prompting the user. Intended for
+     * automated or headless scenarios such as integration tests. Defaults to `false`.
+     */
+    runHeadless?: boolean;
+}
 
-          /**
-           * Show option to skip package installation or uninstallation.
-           */
-          showSkipOption?: boolean;
-          /**
-           * The list of packages to install.
-           */
-          install: string[];
+export type PackageManagementOptions = PackageManagementInteractionOptions &
+    (
+        | {
+              /**
+               * Upgrade the packages if they are already installed.
+               */
+              upgrade?: boolean;
 
-          /**
-           * The list of packages to uninstall.
-           */
-          uninstall?: string[];
-      }
-    | {
-          /**
-           * Upgrade the packages if they are already installed.
-           */
-          upgrade?: boolean;
+              /**
+               * Show option to skip package installation or uninstallation.
+               */
+              showSkipOption?: boolean;
+              /**
+               * The list of packages to install.
+               */
+              install: string[];
 
-          /**
-           * Show option to skip package installation or uninstallation.
-           */
-          showSkipOption?: boolean;
-          /**
-           * The list of packages to install.
-           */
-          install?: string[];
+              /**
+               * The list of packages to uninstall.
+               */
+              uninstall?: string[];
+          }
+        | {
+              /**
+               * Upgrade the packages if they are already installed.
+               */
+              upgrade?: boolean;
 
-          /**
-           * The list of packages to uninstall.
-           */
-          uninstall: string[];
-      };
+              /**
+               * Show option to skip package installation or uninstallation.
+               */
+              showSkipOption?: boolean;
+              /**
+               * The list of packages to install.
+               */
+              install?: string[];
+
+              /**
+               * The list of packages to uninstall.
+               */
+              uninstall: string[];
+          }
+    );
 
 /**
  * Options for creating a Python environment.
@@ -1011,9 +1049,10 @@ export interface PythonEnvironmentManagementApi {
      * Remove a Python environment.
      *
      * @param environment The Python environment to remove.
+     * @param options Optional parameters controlling environment removal.
      * @returns A promise that resolves when the environment has been removed.
      */
-    removeEnvironment(environment: PythonEnvironment): Promise<void>;
+    removeEnvironment(environment: PythonEnvironment, options?: RemoveEnvironmentOptions): Promise<void>;
 }
 
 export interface PythonEnvironmentsApi {
@@ -1090,14 +1129,80 @@ export interface PythonPackageManagerRegistrationApi {
     registerPackageManager(manager: PackageManager, options?: { extensionId?: string }): Disposable;
 }
 
+/**
+ * Error thrown when a package manager cannot list available package versions.
+ *
+ * This distinguishes an *unsupported capability* from an *operational failure* (such as a
+ * failed command, a network error, or malformed/unparseable output). Consumers of
+ * {@link PythonPackageGetterApi.getPackageAvailableVersions} should treat this specific error
+ * as a signal to fall back to manual version entry, while letting any other error propagate.
+ *
+ * The {@link code} property carries a stable, string-literal discriminator so the error can be
+ * recognized reliably across extension bundle boundaries, where `instanceof` may fail because
+ * each bundle can load its own copy of this class. Prefer {@link isPackageVersionLookupNotSupportedError}
+ * over a bare `instanceof` check for that reason.
+ */
+export class PackageVersionLookupNotSupportedError extends Error {
+    /**
+     * Stable discriminator identifying this error type across bundle boundaries.
+     */
+    public readonly code = 'PackageVersionLookupNotSupported';
+
+    constructor(message?: string) {
+        super(message ?? 'The package manager does not support looking up available package versions.');
+        this.name = 'PackageVersionLookupNotSupportedError';
+        // Preserve the prototype chain when this class is transpiled to older targets so that
+        // `instanceof` continues to work within a single bundle.
+        Object.setPrototypeOf(this, PackageVersionLookupNotSupportedError.prototype);
+    }
+}
+
+/**
+ * Type guard reporting whether an error represents unsupported package version lookup.
+ *
+ * Uses the stable {@link PackageVersionLookupNotSupportedError.code} discriminator, so it returns
+ * `true` even when the error crossed an extension bundle boundary and `instanceof` would fail.
+ *
+ * @param error The value to test.
+ * @returns `true` if `error` is a {@link PackageVersionLookupNotSupportedError} (or a structurally
+ *          equivalent error carrying the same `code`).
+ */
+export function isPackageVersionLookupNotSupportedError(
+    error: unknown,
+): error is PackageVersionLookupNotSupportedError {
+    return (
+        error instanceof PackageVersionLookupNotSupportedError ||
+        (typeof error === 'object' &&
+            error !== null &&
+            'code' in error &&
+            (error as { code?: unknown }).code === 'PackageVersionLookupNotSupported')
+    );
+}
+
+/**
+ * Controls how package version lookup failures are reported.
+ */
+export interface GetPackageAvailableVersionsOptions {
+    /**
+     * Determines whether lookup failures preserve the legacy `undefined` result or reject.
+     *
+     * - `legacy` resolves to `undefined` for unsupported lookups and operational failures.
+     *   This remains the default for backward compatibility, but may be removed in a future
+     *   major API version.
+     * - `throw` rejects with {@link PackageVersionLookupNotSupportedError} for unsupported
+     *   lookups and propagates operational failures unchanged.
+     */
+    errorMode?: 'legacy' | 'throw';
+}
+
 export interface PythonPackageGetterApi {
     /**
      * Refresh the list of packages in a Python Environment.
      *
      * @param environment The Python Environment for which the list of packages is to be refreshed.
-     * @returns A promise that resolves with the refreshed list of packages, or undefined.
+     * @returns A promise that resolves when the list of packages has been refreshed.
      */
-    refreshPackages(environment: PythonEnvironment): Promise<Package[] | undefined>;
+    refreshPackages(environment: PythonEnvironment): Promise<void>;
 
     /**
      * Get the list of packages in a Python Environment.
@@ -1107,6 +1212,31 @@ export interface PythonPackageGetterApi {
      * @returns The list of packages in the Python Environment.
      */
     getPackages(environment: PythonEnvironment, options?: GetPackagesOptions): Promise<Package[] | undefined>;
+
+    /**
+     * Get the list of available versions for a package, newest first.
+     *
+     * By default, this preserves the legacy behavior of resolving to `undefined` for unsupported
+     * lookups and operational failures. Pass `{ errorMode: 'throw' }` to distinguish unsupported
+     * capabilities from operational failures: unsupported lookups reject with
+     * {@link PackageVersionLookupNotSupportedError}, while other failures propagate unchanged.
+     *
+     * @param environment The Python Environment context for the lookup.
+     * @param packageName The name of the package to look up.
+     * @param options Controls how lookup failures are reported.
+     * @returns A promise that resolves to an array of {@link Pep440Version} objects (newest first),
+     *          or `undefined` in legacy mode when lookup is unsupported or fails.
+     */
+    getPackageAvailableVersions(
+        environment: PythonEnvironment,
+        packageName: string,
+        options: GetPackageAvailableVersionsOptions & { errorMode: 'throw' },
+    ): Promise<Pep440Version[]>;
+    getPackageAvailableVersions(
+        environment: PythonEnvironment,
+        packageName: string,
+        options?: GetPackageAvailableVersionsOptions,
+    ): Promise<Pep440Version[] | undefined>;
 
     /**
      * Event raised when the list of packages in a Python Environment changes.

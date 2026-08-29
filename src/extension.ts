@@ -13,7 +13,7 @@ import { PythonEnvironment, PythonEnvironmentApi, PythonProjectCreator } from '.
 import { ENVS_EXTENSION_ID } from './common/constants';
 import { ensureCorrectVersion } from './common/extVersion';
 import { registerLogger, traceError, traceInfo, traceWarn } from './common/logging';
-import { clearPersistentState, setPersistentState } from './common/persistentState';
+import { setPersistentState } from './common/persistentState';
 import { newProjectSelection } from './common/pickers/managers';
 import { StopWatch } from './common/stopWatch';
 import { EventNames } from './common/telemetry/constants';
@@ -45,6 +45,8 @@ import { ProjectCreatorsImpl } from './features/creators/projectCreators';
 import {
     addPythonProjectCommand,
     copyPathToClipboard,
+    clearEnvironmentCachesCommand,
+    clearScriptEnvironmentCacheCommand,
     createAnyEnvironmentCommand,
     createEnvironmentCommand,
     createTerminalCommand,
@@ -65,7 +67,8 @@ import {
 } from './features/envCommands';
 import { PythonEnvironmentManagers } from './features/envManagers';
 import { EnvVarManager, PythonEnvVariableManager } from './features/execution/envVariableManager';
-import { InlineScriptLazyDetector } from './features/inlineScriptLazyDetector';
+import { latchInlineScriptFeatureActivation } from './features/inlineScript/activation';
+import { InlineScriptLazyDetector } from './features/inlineScript/lazyDetector';
 import {
     applyInitialEnvironmentSelection,
     registerInterpreterSettingsChangeListener,
@@ -76,17 +79,12 @@ import { registerCompletionProvider } from './features/settings/settingCompletio
 import { migrateGlobalDefaultEnvManagerSetting } from './features/settings/settingHelpers';
 import { setActivateMenuButtonContext } from './features/terminal/activateMenuButton';
 import { normalizeShellPath } from './features/terminal/shells/common/shellUtils';
-import {
-    clearShellProfileCache,
-    createShellEnvProviders,
-    createShellStartupProviders,
-} from './features/terminal/shells/providers';
+import { createShellEnvProviders, createShellStartupProviders } from './features/terminal/shells/providers';
 import { ShellStartupActivationVariablesManagerImpl } from './features/terminal/shellStartupActivationVariablesManager';
 import { cleanupStartupScripts } from './features/terminal/shellStartupSetupHandlers';
 import { TerminalActivationImpl } from './features/terminal/terminalActivationState';
 import { TerminalEnvVarInjector } from './features/terminal/terminalEnvVarInjector';
 import { TerminalManager, TerminalManagerImpl } from './features/terminal/terminalManager';
-import { registerTerminalPackageWatcher } from './features/terminal/terminalPackageWatcher';
 import { getEnvironmentForTerminal } from './features/terminal/utils';
 import { openSearchSettings } from './features/views/envManagerSearch';
 import { EnvManagerView } from './features/views/envManagersView';
@@ -94,11 +92,16 @@ import { ProjectView } from './features/views/projectView';
 import { PythonStatusBarImpl } from './features/views/pythonStatusBar';
 import { updateViewsAndStatus } from './features/views/revealHandler';
 import { TemporaryStateManager } from './features/views/temporaryStateManager';
-import { ProjectItem, PythonEnvTreeItem } from './features/views/treeViewItems';
-import { collectEnvironmentInfo, getEnvManagerAndPackageManagerConfigLevels, runPetInTerminalImpl } from './helpers';
+import { PythonEnvTreeItem } from './features/views/treeViewItems';
+import {
+    collectEnvironmentInfo,
+    getEnvManagerAndPackageManagerConfigLevels,
+    isInlineScriptsFeatureEnabled,
+    runPetInTerminalImpl,
+} from './helpers';
 import { EnvironmentManagers, ProjectCreators, PythonProjectManager } from './internal.api';
+import { registerInlineScriptFeatures } from './managers/builtin/inlineScript/main';
 import { registerSystemPythonFeatures } from './managers/builtin/main';
-import { registerInlineScriptFeatures } from './managers/builtin/inlineScriptMain';
 import { SysPythonManager } from './managers/builtin/sysPythonManager';
 import {
     createNativePythonFinder,
@@ -106,6 +109,7 @@ import {
     getNativePythonToolsVersion,
     NativePythonFinder,
 } from './managers/common/nativePythonFinder';
+import { registerPackageWatchers } from './managers/common/packageWatcher';
 import { IDisposable } from './managers/common/types';
 import { registerCondaFeatures } from './managers/conda/main';
 import { registerPipenvFeatures } from './managers/pipenv/main';
@@ -181,10 +185,16 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
     const projectManager: PythonProjectManager = new PythonProjectManagerImpl();
     context.subscriptions.push(projectManager);
 
+    const inlineScriptFeatureActivation = latchInlineScriptFeatureActivation();
+    const inlineScriptRouting = inlineScriptFeatureActivation.routingRegistry;
+    if (inlineScriptRouting) {
+        context.subscriptions.push(inlineScriptRouting);
+    }
+
     const envVarManager: EnvVarManager = new PythonEnvVariableManager(projectManager);
     context.subscriptions.push(envVarManager);
 
-    const envManagers: EnvironmentManagers = new PythonEnvironmentManagers(projectManager);
+    const envManagers: EnvironmentManagers = new PythonEnvironmentManagers(projectManager, inlineScriptRouting);
     createManagerReady(envManagers, projectManager, context.subscriptions);
     context.subscriptions.push(envManagers);
 
@@ -211,7 +221,7 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
     // Silent observer for `.py` files that declare PEP 723 inline
     // script metadata. Emits anonymized telemetry (inlineScript.detected /
     // inlineScript.edited) but does not register projects or surface any UI.
-    const inlineScriptLazyDetector = new InlineScriptLazyDetector();
+    const inlineScriptLazyDetector = new InlineScriptLazyDetector(inlineScriptRouting);
     inlineScriptLazyDetector.activate();
     context.subscriptions.push(inlineScriptLazyDetector);
 
@@ -258,6 +268,31 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
                 },
             );
         }),
+        ...(process.env.VSC_PYTHON_INTEGRATION_TEST === '1'
+            ? [
+                  commands.registerCommand('python-envs.test.getPackageManagerIds', () =>
+                      envManagers.packageManagers.map((manager) => manager.id),
+                  ),
+                  commands.registerCommand(
+                      'python-envs.test.resolveEnvironmentWithManager',
+                      async (managerId: string, environmentUri: Uri) => {
+                          const manager = envManagers.getEnvironmentManager(managerId);
+                          if (!manager) {
+                              throw new Error(`Environment manager not found: ${managerId}`);
+                          }
+                          return manager.resolve(environmentUri);
+                      },
+                  ),
+                  commands.registerCommand(
+                      'python-envs.test.getDirectPackageNames',
+                      async (environment: PythonEnvironment) => {
+                          const manager = envManagers.getPackageManager(environment);
+                          const names = await manager?.getDirectPackageNames?.(environment);
+                          return names ? Array.from(names) : undefined;
+                      },
+                  ),
+              ]
+            : []),
         commands.registerCommand('python-envs.searchSettings', async () => {
             await openSearchSettings();
         }),
@@ -364,23 +399,18 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
             });
         }),
         commands.registerCommand('python-envs.removePythonProject', async (item) => {
-            // Clear environment association before removing project
-            if (item instanceof ProjectItem) {
-                const uri = item.project.uri;
-                const manager = envManagers.getEnvironmentManager(uri);
-                if (manager) {
-                    manager.set(uri, undefined);
-                } else {
-                    traceError(`No environment manager found for ${uri.fsPath}`);
-                }
-            }
-            await removePythonProject(item, projectManager);
+            await removePythonProject(item, projectManager, envManagers);
         }),
         commands.registerCommand('python-envs.clearCache', async () => {
-            await clearPersistentState();
-            await envManagers.clearCache(undefined);
-            await clearShellProfileCache(shellStartupProviders);
+            await clearEnvironmentCachesCommand(envManagers, shellStartupProviders, context.workspaceState);
         }),
+        ...(isInlineScriptsFeatureEnabled()
+            ? [
+                  commands.registerCommand('python-envs.clearScriptEnvCache', async () => {
+                      await clearScriptEnvironmentCacheCommand(envManagers, projectManager);
+                  }),
+              ]
+            : []),
         commands.registerCommand('python-envs.runInTerminal', (item) => {
             return runInTerminalCommand(item, api, terminalManager);
         }),
@@ -523,13 +553,15 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
             }
         }),
         terminalActivation.onDidChangeTerminalActivationState(async (e) => {
-            await setActivateMenuButtonContext(e.terminal, e.environment, e.activated);
+            if (activeTerminal() === e.terminal) {
+                await setActivateMenuButtonContext(e.terminal, e.environment, e.activated);
+            }
         }),
         onDidChangeActiveTerminal(async (t) => {
             if (t) {
                 const env = terminalActivation.getEnvironment(t) ?? (await getEnvironmentForTerminal(api, t));
-                if (env) {
-                    await setActivateMenuButtonContext(t, env, terminalActivation.isActivated(t));
+                if (activeTerminal() === t) {
+                    await setActivateMenuButtonContext(t, env, env ? terminalActivation.isActivated(t) : false);
                 }
             }
         }),
@@ -657,9 +689,24 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
                     'poetry',
                     registerPoetryFeatures(nativeFinder, context.subscriptions, outputChannel, projectManager),
                 ),
-                safeRegister('inlineScript', registerInlineScriptFeatures(context.subscriptions, outputChannel)),
+                safeRegister(
+                    'inlineScript',
+                    inlineScriptFeatureActivation.enabled
+                        ? registerInlineScriptFeatures(
+                              nativeFinder,
+                              context.subscriptions,
+                              outputChannel,
+                              sysMgr,
+                              context.globalStorageUri,
+                              inlineScriptFeatureActivation,
+                              context.workspaceState,
+                          )
+                        : Promise.resolve(),
+                ),
                 safeRegister('shellStartupVars', shellStartupVarsMgr.initialize()),
             ]);
+
+            context.subscriptions.push(registerPackageWatchers(envManagers, terminalActivation, outputChannel));
 
             failureStage = 'envSelection';
             stageWatch.reset();
@@ -671,11 +718,6 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
                 start.elapsedTime,
                 globalScopeDeferredRef,
             );
-
-            // Register manager-agnostic terminal watcher for package-modifying commands
-            failureStage = 'terminalWatcher';
-            stageWatch.reset();
-            registerTerminalPackageWatcher(api, terminalActivation, outputChannel, context.subscriptions);
 
             // Register listener for interpreter settings changes for interpreter re-selection
             failureStage = 'settingsListener';

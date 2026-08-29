@@ -1,13 +1,15 @@
 import assert from 'assert';
 import * as path from 'path';
 import * as sinon from 'sinon';
-import { CancellationToken, Progress, ProgressOptions, Uri } from 'vscode';
+import { CancellationToken, LogOutputChannel, Progress, ProgressLocation, ProgressOptions, Uri } from 'vscode';
 import * as fse from 'fs-extra';
 import * as os from 'os';
-import { PythonEnvironmentApi, PythonProject } from '../../../api';
+import { PythonEnvironment, PythonEnvironmentApi, PythonProject } from '../../../api';
 import * as winapi from '../../../common/window.apis';
 import * as wapi from '../../../common/workspace.apis';
-import { getProjectInstallable } from '../../../managers/builtin/pipUtils';
+import { PipListCommand } from '../../../managers/builtin/commands/list';
+import * as helpers from '../../../managers/builtin/helpers';
+import { getProjectInstallable, getWorkspacePackagesToInstall } from '../../../managers/builtin/pipUtils';
 
 suite('Pip Utils - getProjectInstallable', () => {
     let findFilesStub: sinon.SinonStub;
@@ -45,6 +47,75 @@ suite('Pip Utils - getProjectInstallable', () => {
                 return undefined;
             },
         };
+    });
+
+    suite('Pip Utils - getWorkspacePackagesToInstall', () => {
+        teardown(() => {
+            sinon.restore();
+        });
+
+        test('opens the package picker when listing installed packages fails', async () => {
+            const listError = new Error('pip list failed');
+            const logError = sinon.stub();
+            const log = { error: logError } as unknown as LogOutputChannel;
+            const environment = {
+                environmentPath: Uri.file('.'),
+                execInfo: { run: { executable: 'python' } },
+            } as PythonEnvironment;
+            const workspacePath = Uri.file('/test/path/root').fsPath;
+            findFilesStub.callsFake((pattern: string) =>
+                Promise.resolve(
+                    pattern === '*requirements*.txt'
+                        ? [Uri.file(path.join(workspacePath, 'requirements.txt'))]
+                        : [],
+                ),
+            );
+
+            sinon.stub(helpers, 'shouldUseUv').resolves(false);
+            sinon.stub(PipListCommand.prototype, 'execute').rejects(listError);
+            const showQuickPick = sinon.stub(winapi, 'showQuickPickWithButtons').resolves(undefined);
+
+            const result = await getWorkspacePackagesToInstall(
+                mockApi as PythonEnvironmentApi,
+                { install: [], showSkipOption: true },
+                [{ name: 'workspace', uri: Uri.file(workspacePath) }],
+                environment,
+                log,
+            );
+
+            assert.strictEqual(result, undefined);
+            assert.ok(logError.calledOnceWithExactly('Error listing installed packages', listError));
+            assert.ok(showQuickPick.calledOnce, 'The package picker should still open after a list failure');
+        });
+
+        test('shows progress while listing installed packages', async () => {
+            const environment = {
+                environmentPath: Uri.file('.'),
+                execInfo: { run: { executable: 'python' } },
+            } as PythonEnvironment;
+            const workspacePath = Uri.file('/test/path/root').fsPath;
+            findFilesStub.callsFake((pattern: string) =>
+                Promise.resolve(
+                    pattern === '*requirements*.txt'
+                        ? [Uri.file(path.join(workspacePath, 'requirements.txt'))]
+                        : [],
+                ),
+            );
+            sinon.stub(helpers, 'shouldUseUv').resolves(false);
+            sinon.stub(PipListCommand.prototype, 'execute').resolves([]);
+            const showQuickPick = sinon.stub(winapi, 'showQuickPickWithButtons').resolves(undefined);
+
+            await getWorkspacePackagesToInstall(
+                mockApi as PythonEnvironmentApi,
+                { install: [] },
+                [{ name: 'workspace', uri: Uri.file(workspacePath) }],
+                environment,
+            );
+
+            assert.strictEqual(withProgressStub.callCount, 2);
+            assert.strictEqual(withProgressStub.secondCall.args[0].location, ProgressLocation.Notification);
+            assert.ok(withProgressStub.secondCall.calledBefore(showQuickPick.firstCall));
+        });
     });
 
     teardown(() => {

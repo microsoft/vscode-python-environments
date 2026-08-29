@@ -11,12 +11,17 @@ import { getExtension } from '../../common/extension.apis';
 import { traceError, traceVerbose, traceWarn } from '../../common/logging';
 import { StopWatch } from '../../common/stopWatch';
 import { EventNames } from '../../common/telemetry/constants';
-import { classifyError } from '../../common/telemetry/errorClassifier';
+import { classifyError, isTimeoutErrorType } from '../../common/telemetry/errorClassifier';
 import { sendTelemetryEvent } from '../../common/telemetry/sender';
 import { untildify, untildifyArray } from '../../common/utils/pathUtils';
 import { isWindows } from '../../common/utils/platformUtils';
 import { createRunningWorkerPool, WorkerPool } from '../../common/utils/workerPool';
 import { getConfiguration, getWorkspaceFolders } from '../../common/workspace.apis';
+import {
+    getRefreshTelemetryMeasures,
+    shouldRetainPetInfo,
+    type RefreshPerformance,
+} from './petTelemetry';
 import { noop } from './utils';
 
 // Timeout constants for JSON-RPC requests (in milliseconds)
@@ -25,6 +30,7 @@ const MAX_CONFIGURE_TIMEOUT_MS = 60_000; // Max configure timeout after retries 
 const REFRESH_TIMEOUT_MS = 30_000; // 30 seconds for full refresh (with 1 retry = 60s max)
 const RESOLVE_TIMEOUT_MS = 30_000; // 30 seconds for single resolve
 const INFO_TIMEOUT_MS = 2_000; // `info` is a const lookup on PET; 2s is generous
+const INFO_REQUEST_ATTEMPTS = 3; // Retry early startup timeouts without blocking PET operations
 
 // CLI fallback timeout: generous budget since it's a full process spawn doing a full scan
 const CLI_FALLBACK_TIMEOUT_MS = 120_000; // 2 minutes
@@ -249,15 +255,6 @@ interface RefreshOptions {
     searchPaths?: string[];
 }
 
-/** Performance breakdown sent by PET via the `telemetry` notification after a refresh. */
-interface RefreshPerformance {
-    total: number;
-    /** Phase name (Locators | Path | GlobalVirtualEnvs | Workspaces) → wall-clock ms */
-    breakdown: Record<string, number>;
-    /** Locator name (Conda | WindowsRegistry | …) → wall-clock ms; only ran locators are present */
-    locators: Record<string, number>;
-}
-
 /** Params shape of the PET `telemetry` JSON-RPC notification. */
 interface PetTelemetryNotification {
     event: string;
@@ -287,6 +284,29 @@ export class RpcTimeoutError extends Error {
     ) {
         super(`Request '${method}' timed out after ${timeoutMs}ms`);
         this.name = this.constructor.name;
+    }
+}
+
+/** Retries only JSON-RPC timeout failures; all other errors propagate immediately. */
+export async function retryRpcTimeout<T>(
+    request: () => Promise<T>,
+    maxAttempts: number,
+    shouldRetry: () => boolean = () => true,
+): Promise<T> {
+    if (!Number.isInteger(maxAttempts) || maxAttempts < 1) {
+        throw new RangeError('maxAttempts must be a positive integer');
+    }
+
+    let attempt = 0;
+    while (true) {
+        attempt++;
+        try {
+            return await request();
+        } catch (ex) {
+            if (!(ex instanceof RpcTimeoutError) || attempt >= maxAttempts || !shouldRetry()) {
+                throw ex;
+            }
+        }
     }
 }
 
@@ -340,12 +360,12 @@ class NativePythonFinderImpl implements NativePythonFinder {
     private processExitReason: string | undefined = undefined;
     private readonly configureRetry = new ConfigureRetryState();
     /**
-     * Cached PET `info` response for the current connection. Reset to undefined on every
-     * `start()` and re-populated asynchronously by `kickoffInfoFetch()`. Telemetry callers
-     * read this via `getPetInfoProperties()`; if the fetch hasn't finished yet (or the PET
-     * binary is too old to implement `info`), telemetry reports 'unknown'.
+     * Last successful PET `info` response. It survives process restarts because the executable
+     * path is unchanged, then refreshes asynchronously for each new connection. This prevents
+     * a transient startup timeout from erasing known build attribution.
      */
     private petInfo: NativePetInfo | undefined;
+    private petBinaryFingerprint: string | undefined;
 
     constructor(
         private readonly outputChannel: LogOutputChannel,
@@ -401,7 +421,7 @@ class NativePythonFinderImpl implements NativePythonFinder {
                 EventNames.PET_RESOLVE,
                 sw.elapsedTime,
                 {
-                    result: errorType === 'spawn_timeout' ? 'timeout' : 'error',
+                    result: isTimeoutErrorType(errorType) ? 'timeout' : 'error',
                     errorType,
                     ...this.getPetInfoProperties(),
                 },
@@ -484,21 +504,23 @@ class NativePythonFinderImpl implements NativePythonFinder {
             this.connection = this.start();
 
             this.outputChannel.info('[pet] Python Environment Tools restarted successfully');
-            sendTelemetryEvent(EventNames.PET_PROCESS_RESTART, sw.elapsedTime, {
-                attempt,
-                result: 'success',
-                triggerReason,
-                ...this.getPetInfoProperties(),
-            });
+            sendTelemetryEvent(
+                EventNames.PET_PROCESS_RESTART,
+                { duration: sw.elapsedTime, attempt },
+                {
+                    result: 'success',
+                    triggerReason,
+                    ...this.getPetInfoProperties(),
+                },
+            );
 
             // Reset restart attempts on successful start (process didn't immediately fail)
             // We'll reset this only after a successful request completes
         } catch (ex) {
             sendTelemetryEvent(
                 EventNames.PET_PROCESS_RESTART,
-                sw.elapsedTime,
+                { duration: sw.elapsedTime, attempt },
                 {
-                    attempt,
                     result: 'error',
                     errorType: classifyError(ex),
                     triggerReason,
@@ -756,24 +778,42 @@ class NativePythonFinderImpl implements NativePythonFinder {
 
         connection.listen();
 
+        this.updatePetBinaryFingerprint();
         // Stamp PET telemetry with version/buildId/commitSha. Fire-and-forget — must not block refresh.
-        this.petInfo = undefined;
         this.kickoffInfoFetch(connection);
 
         return connection;
+    }
+
+    private updatePetBinaryFingerprint(): void {
+        let currentFingerprint: string | undefined;
+        try {
+            const stat = fs.statSync(this.toolPath);
+            currentFingerprint = `${stat.size}:${stat.mtimeMs}`;
+        } catch (ex) {
+            this.outputChannel.debug('[pet] Unable to fingerprint PET binary:', ex);
+        }
+
+        if (!shouldRetainPetInfo(this.petInfo !== undefined, this.petBinaryFingerprint, currentFingerprint)) {
+            this.petInfo = undefined;
+        }
+        this.petBinaryFingerprint = currentFingerprint;
     }
 
     /**
      * Asks the PET server for its build metadata (version + optional buildId + optional commitSha)
      * and caches it in `this.petInfo` for downstream telemetry. Runs once per `start()` call.
      *
-     * Fire-and-forget by design — the response is not awaited so refresh/resolve callers are
-     * never blocked. The 2 s timeout caps the worst case if PET is misbehaving. If a newer
-     * connection has replaced `this.connection` by the time the response arrives, the response
-     * is dropped to avoid clobbering the cache for the newer process.
+     * Fire-and-forget by design: refresh/resolve callers are never blocked. Early timeout
+     * failures are retried with a bounded attempt count; older PET binaries and connection
+     * failures still fail immediately. Responses from superseded connections are discarded.
      */
     private kickoffInfoFetch(connection: rpc.MessageConnection): void {
-        sendRequestWithTimeout<NativePetInfo>(connection, 'info', {}, INFO_TIMEOUT_MS)
+        retryRpcTimeout(
+            () => sendRequestWithTimeout<NativePetInfo>(connection, 'info', {}, INFO_TIMEOUT_MS),
+            INFO_REQUEST_ATTEMPTS,
+            () => connection === this.connection,
+        )
             .then((result) => {
                 if (connection !== this.connection) {
                     return;
@@ -785,8 +825,8 @@ class NativePythonFinderImpl implements NativePythonFinder {
                 if (connection !== this.connection) {
                     return;
                 }
-                // Older PET binaries don't implement `info`; leave petInfo undefined so telemetry reports 'unknown'.
-                this.outputChannel.debug('[pet] info request failed:', ex);
+                // Older PET binaries don't implement `info`; preserve any prior successful attribution.
+                this.outputChannel.debug('[pet] info request failed after bounded retries:', ex);
             });
     }
 
@@ -801,32 +841,6 @@ class NativePythonFinderImpl implements NativePythonFinder {
             petBuildId: this.petInfo?.buildId ?? 'unknown',
             petCommitSha: this.petInfo?.commitSha ?? 'unknown',
         };
-    }
-
-    /**
-     * Computes environment-shape counts from a refresh result for telemetry. These let us slice
-     * refresh duration by how many environments (and how many conda environments) were discovered,
-     * to test whether the slow-refresh cohort is dominated by conda-heavy / many-env setups.
-     */
-    private getEnvShapeProperties(nativeInfo: NativeInfo[]): {
-        envCount: number;
-        condaEnvCount: number;
-        managerCount: number;
-    } {
-        let envCount = 0;
-        let condaEnvCount = 0;
-        let managerCount = 0;
-        for (const info of nativeInfo) {
-            if (isNativeEnvInfo(info)) {
-                envCount++;
-                if (info.kind === NativePythonEnvironmentKind.conda) {
-                    condaEnvCount++;
-                }
-            } else {
-                managerCount++;
-            }
-        }
-        return { envCount, condaEnvCount, managerCount };
     }
 
     private async doRefresh(options?: NativePythonEnvironmentKind | Uri[]): Promise<NativeInfo[]> {
@@ -885,11 +899,14 @@ class NativePythonFinderImpl implements NativePythonFinder {
         const sw = new StopWatch();
         let unresolvedCount = 0;
         let refreshPerf: RefreshPerformance | undefined;
+        let workspaceDirCount: number | undefined;
+        let searchPathCount: number | undefined;
         try {
-            await this.configure();
+            const configuration = await this.buildConfigurationOptions();
+            workspaceDirCount = configuration.workspaceDirectories.length;
+            searchPathCount = configuration.environmentDirectories.length;
+            await this.configure(configuration);
             const refreshOptions = this.getRefreshOptions(options);
-            const workspaceDirCount = this.lastConfiguration?.workspaceDirectories.length ?? 0;
-            const searchPathCount = this.lastConfiguration?.environmentDirectories.length ?? 0;
             disposables.push(
                 this.connection.onNotification('environment', (data: NativeEnvInfo) => {
                     this.outputChannel.info(`Discovered env: ${data.executable || data.prefix}`);
@@ -942,28 +959,18 @@ class NativePythonFinderImpl implements NativePythonFinder {
 
             sendTelemetryEvent(
                 EventNames.PET_REFRESH,
-                {
+                getRefreshTelemetryMeasures({
                     duration: sw.elapsedTime,
-                    ...(refreshPerf?.breakdown['Locators'] !== undefined && {
-                        breakdownLocators: refreshPerf.breakdown['Locators'],
-                    }),
-                    ...(refreshPerf?.breakdown['Path'] !== undefined && {
-                        breakdownPathEnv: refreshPerf.breakdown['Path'],
-                    }),
-                    ...(refreshPerf?.breakdown['GlobalVirtualEnvs'] !== undefined && {
-                        breakdownGlobalVirtualEnvs: refreshPerf.breakdown['GlobalVirtualEnvs'],
-                    }),
-                    ...(refreshPerf?.breakdown['Workspaces'] !== undefined && {
-                        breakdownWorkspaces: refreshPerf.breakdown['Workspaces'],
-                    }),
-                },
-                {
-                    result: 'success',
-                    ...this.getEnvShapeProperties(nativeInfo),
+                    nativeInfo,
+                    condaKind: NativePythonEnvironmentKind.conda,
                     unresolvedCount,
                     workspaceDirCount,
                     searchPathCount,
                     attempt,
+                    refreshPerformance: refreshPerf,
+                }),
+                {
+                    result: 'success',
                     locatorsJson: refreshPerf ? JSON.stringify(refreshPerf.locators) : undefined,
                     ...this.getPetInfoProperties(),
                 },
@@ -972,13 +979,20 @@ class NativePythonFinderImpl implements NativePythonFinder {
             const errorType = classifyError(ex);
             sendTelemetryEvent(
                 EventNames.PET_REFRESH,
-                sw.elapsedTime,
-                {
-                    result: errorType === 'spawn_timeout' ? 'timeout' : 'error',
-                    ...this.getEnvShapeProperties(nativeInfo),
+                getRefreshTelemetryMeasures({
+                    duration: sw.elapsedTime,
+                    nativeInfo,
+                    condaKind: NativePythonEnvironmentKind.conda,
                     unresolvedCount,
+                    workspaceDirCount,
+                    searchPathCount,
                     attempt,
+                    refreshPerformance: refreshPerf,
+                }),
+                {
+                    result: isTimeoutErrorType(errorType) ? 'timeout' : 'error',
                     errorType,
+                    locatorsJson: refreshPerf ? JSON.stringify(refreshPerf.locators) : undefined,
                     ...this.getPetInfoProperties(),
                 },
                 ex instanceof Error ? ex : undefined,
@@ -1008,15 +1022,21 @@ class NativePythonFinderImpl implements NativePythonFinder {
      * Configuration request, this must always be invoked before any other request.
      * Must be invoked when ever there are changes to any data related to the configuration details.
      */
-    private async configure() {
-        const options = await this.buildConfigurationOptions();
+    private async configure(options?: ConfigurationOptions) {
+        const configuration = options ?? (await this.buildConfigurationOptions());
+        const workspaceDirCount = configuration.workspaceDirectories.length;
+        const envDirCount = configuration.environmentDirectories.length;
         // No need to send a configuration request if there are no changes.
-        if (this.lastConfiguration && this.configurationEquals(options, this.lastConfiguration)) {
+        if (this.lastConfiguration && this.configurationEquals(configuration, this.lastConfiguration)) {
             this.outputChannel.debug('[pet] configure: No changes detected, skipping configuration update.');
-            sendTelemetryEvent(EventNames.PET_CONFIGURE, 0, { result: 'skipped', retryCount: 0 });
+            sendTelemetryEvent(
+                EventNames.PET_CONFIGURE,
+                { duration: 0, workspaceDirCount, envDirCount, retryCount: 0 },
+                { result: 'skipped' },
+            );
             return;
         }
-        this.outputChannel.info('[pet] configure: Sending configuration update:', JSON.stringify(options));
+        this.outputChannel.info('[pet] configure: Sending configuration update:', JSON.stringify(configuration));
         // Exponential backoff: 30s, 60s on retry. Capped at REFRESH_TIMEOUT_MS.
         const timeoutMs = this.configureRetry.getTimeoutMs();
         if (this.configureRetry.timeoutCount > 0) {
@@ -1026,28 +1046,24 @@ class NativePythonFinderImpl implements NativePythonFinder {
         }
         const sw = new StopWatch();
         const retryCount = this.configureRetry.timeoutCount;
-        const workspaceDirCount = options.workspaceDirectories.length;
-        const envDirCount = options.environmentDirectories.length;
         try {
-            await sendRequestWithTimeout(this.connection, 'configure', options, timeoutMs);
+            await sendRequestWithTimeout(this.connection, 'configure', configuration, timeoutMs);
             // Only cache after success so failed/timed-out calls will retry
-            this.lastConfiguration = options;
+            this.lastConfiguration = configuration;
             this.configureRetry.onSuccess();
-            sendTelemetryEvent(EventNames.PET_CONFIGURE, sw.elapsedTime, {
-                result: 'success',
-                workspaceDirCount,
-                envDirCount,
-                retryCount,
-            });
-        } catch (ex) {
             sendTelemetryEvent(
                 EventNames.PET_CONFIGURE,
-                sw.elapsedTime,
+                { duration: sw.elapsedTime, workspaceDirCount, envDirCount, retryCount },
+                { result: 'success' },
+            );
+        } catch (ex) {
+            const errorType = classifyError(ex);
+            sendTelemetryEvent(
+                EventNames.PET_CONFIGURE,
+                { duration: sw.elapsedTime, workspaceDirCount, envDirCount, retryCount },
                 {
-                    result: ex instanceof RpcTimeoutError ? 'timeout' : 'error',
-                    workspaceDirCount,
-                    envDirCount,
-                    retryCount,
+                    result: isTimeoutErrorType(errorType) ? 'timeout' : 'error',
+                    errorType,
                 },
                 ex instanceof Error ? ex : undefined,
             );

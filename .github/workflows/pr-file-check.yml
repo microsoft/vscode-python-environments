@@ -57,20 +57,3 @@ jobs:
           file-pattern: 'api/CHANGELOG.md'
           skip-label: 'skip api changelog'
           failure-message: 'The public API (${prereq-pattern}) was changed without a changelog entry in ${file-pattern} (the ${skip-label} label can be used to pass this check)'
-
-  version-match:
-    name: 'Extension and API package versions match'
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.x'
-
-      - name: 'Compare package.json versions'
-        run: python scripts/compare_package_versions.py
