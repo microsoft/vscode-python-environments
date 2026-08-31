@@ -534,7 +534,9 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
                 }
 
                 const confirmation = await window.showInformationMessage(
-                    l10n.t('This will open an issue on microsoft/vscode-python-envs. Do you want to continue?'),
+                    l10n.t(
+                        'This will create an issue in the Python Environments repository for the team to investigate. Do you want to proceed?',
+                    ),
                     { modal: true },
                     l10n.t('No'),
                     l10n.t('Yes'),
