@@ -16,7 +16,7 @@ suite('sortEnvironments', () => {
         );
     });
 
-    test('sorts prereleases before their final release', () => {
+    test('sorts final releases before prereleases', () => {
         const versions = ['3.14.0b2', '3.14.0', '3.14.0rc1', '3.14.0a1'];
         const environments = versions.map((version) =>
             createMockPythonEnvironment({ envPath: path.join('python', version), version }),
