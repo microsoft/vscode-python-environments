@@ -1,4 +1,4 @@
-import { major, minor, patch, compare as pep440Compare, valid as pep440Valid } from '@renovatebot/pep440';
+import { major, minor, patch, valid as pep440Valid } from '@renovatebot/pep440';
 import * as fs from 'fs-extra';
 import path from 'path';
 import { commands, ConfigurationTarget, l10n, window, workspace } from 'vscode';
@@ -47,10 +47,18 @@ export function sortEnvironments(collection: PythonEnvironment[]): PythonEnviron
             return -1;
         }
         if (a.version !== b.version) {
-            if (pep440Valid(a.version) && pep440Valid(b.version)) {
-                return pep440Compare(b.version, a.version); // descending
+            const aVersion = PythonVersion.tryParse(a.version);
+            const bVersion = PythonVersion.tryParse(b.version);
+            if (aVersion && bVersion) {
+                const comparison = bVersion.compareTo(aVersion);
+                if (comparison !== 0) {
+                    return comparison;
+                }
+            } else if (aVersion) {
+                return -1;
+            } else if (bVersion) {
+                return 1;
             }
-            return a.version ? 1 : -1;
         }
         const value = a.name.localeCompare(b.name);
         if (value !== 0) {
