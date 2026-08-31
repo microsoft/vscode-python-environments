@@ -197,7 +197,10 @@ export class PythonProjectManagerImpl implements PythonProjectManager {
         return new PythonProjectsImpl(name, uri, options);
     }
 
-    async add(projects: PythonProject | ProjectArray): Promise<void> {
+    async add(
+        projects: PythonProject | ProjectArray,
+        options?: { persistSettings?: boolean },
+    ): Promise<void> {
         const _projects = Array.isArray(projects) ? projects : [projects];
         if (_projects.length === 0) {
             return;
@@ -228,7 +231,7 @@ export class PythonProjectManagerImpl implements PythonProjectManager {
         });
         this._onDidChangeProjects.fire(Array.from(this._projects.values()));
 
-        if (edits.length > 0) {
+        if (options?.persistSettings !== false && edits.length > 0) {
             await addPythonProjectSetting(edits);
         }
     }

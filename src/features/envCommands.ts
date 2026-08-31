@@ -31,7 +31,6 @@ import {
     PythonProjectManager,
 } from '../internal.api';
 import {
-    removeInlineScriptPythonProjectSettings,
     removePythonProjectSetting,
     setEnvironmentManager,
     setPackageManager,
@@ -704,7 +703,6 @@ export async function clearEnvironmentCachesCommand(
 
 export async function clearScriptEnvironmentCacheCommand(
     em: EnvironmentManagers,
-    wm: PythonProjectManager,
 ): Promise<void> {
     const manager = em.getEnvironmentManager(INLINE_SCRIPT_MANAGER_ID);
     if (!manager || !manager.supportsClearCache()) {
@@ -725,11 +723,7 @@ export async function clearScriptEnvironmentCacheCommand(
         return;
     }
 
-    await manager.clearCache();
-    const loadedProjectsToRemove = await removeInlineScriptPythonProjectSettings(wm.getProjects());
-    if (loadedProjectsToRemove.length > 0) {
-        wm.remove(loadedProjectsToRemove);
-    }
+    await em.clearInlineScriptCache();
 }
 
 export async function getPackageCommandOptions(
