@@ -44,9 +44,9 @@ import { NewScriptProject } from './features/creators/newScriptProject';
 import { ProjectCreatorsImpl } from './features/creators/projectCreators';
 import {
     addPythonProjectCommand,
-    copyPathToClipboard,
     clearEnvironmentCachesCommand,
     clearScriptEnvironmentCacheCommand,
+    copyPathToClipboard,
     createAnyEnvironmentCommand,
     createEnvironmentCommand,
     createTerminalCommand,
@@ -528,8 +528,20 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
                 });
                 const description = rawDescription?.trim();
 
-                if (!description) {
+                if (!description || description.length < 3) {
                     // User cancelled or provided empty description
+                    return;
+                }
+
+                const confirmation = await window.showInformationMessage(
+                    l10n.t('Are you sure you want to open the issue reporter with this information?'),
+                    { modal: true },
+                    l10n.t('Yes'),
+                    l10n.t('No'),
+                );
+
+                if (confirmation !== l10n.t('Yes')) {
+                    // User chose not to proceed
                     return;
                 }
 
