@@ -309,7 +309,7 @@ export function matchesPythonVersion(requiresPython: string, version: string): b
         traceWarn(`inline script metadata: cannot parse Python version: ${JSON.stringify(version)}`);
         return false;
     }
-    const result = parsedVersion.matchSpecifier(requiresPython);
+    const result = parsedVersion.satisfies(requiresPython);
     if (result === undefined) {
         traceWarn(`inline script metadata: invalid requires-python specifier: ${JSON.stringify(requiresPython)}`);
         return false;

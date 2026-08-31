@@ -1,13 +1,8 @@
 type PythonReleaseLevel = 'alpha' | 'beta' | 'candidate' | 'final';
-type ComparisonOperator = '~=' | '==' | '!=' | '>=' | '<=' | '>' | '<';
-type ParsedClause =
-    | { readonly operator: '==='; readonly expected: string }
-    | { readonly operator: '==' | '!='; readonly wildcard: readonly number[] }
-    | { readonly operator: ComparisonOperator; readonly expected: PythonVersion };
 
 export class PythonVersion {
     private static readonly VERSION_PATTERN =
-        /^(\d+)(?:\.(\d+))?(?:\.(\d+))?(?:(?:\.(alpha|beta|candidate|final)\.(\d+))|(?:(a|b|rc)(\d+)))?$/i;
+        /^(?<major>\d+)(?:\.(?<minor>\d+))?(?:\.(?<patch>\d+))?(?:(?:\.(?<longLevel>alpha|beta|candidate|final)\.(?<longSerial>\d+))|(?:(?<shortLevel>a|b|rc)(?<shortSerial>\d+)))?$/i;
 
     private static readonly WILDCARD_PATTERN = /^(\d+)(?:\.(\d+))?(?:\.(\d+))?\.\*$/;
 
@@ -47,13 +42,14 @@ export class PythonVersion {
             throw new TypeError(`Invalid Python version: ${version}`);
         }
 
+        const groups = match.groups!;
         this.original = normalizedVersion;
-        this.releaseComponentCount = match[3] !== undefined ? 3 : match[2] !== undefined ? 2 : 1;
-        this.major = parseNumericComponent(match[1], version);
-        this.minor = parseNumericComponent(match[2], version);
-        this.patch = parseNumericComponent(match[3], version);
-        this.releaseLevel = PythonVersion.normalizeReleaseLevel(match[4] ?? match[6]);
-        this.releaseSerial = parseNumericComponent(match[5] ?? match[7], version);
+        this.releaseComponentCount = groups.patch !== undefined ? 3 : groups.minor !== undefined ? 2 : 1;
+        this.major = parseNumericComponent(groups.major, version);
+        this.minor = parseNumericComponent(groups.minor, version);
+        this.patch = parseNumericComponent(groups.patch, version);
+        this.releaseLevel = PythonVersion.normalizeReleaseLevel(groups.longLevel ?? groups.shortLevel);
+        this.releaseSerial = parseNumericComponent(groups.longSerial ?? groups.shortSerial, version);
         if (this.releaseLevel === 'final' && this.releaseSerial !== 0) {
             throw new TypeError(`Invalid Python version: ${version}`);
         }
@@ -104,17 +100,6 @@ export class PythonVersion {
     }
 
     /**
-     * Tests whether this version matches a release-prefix wildcard.
-     *
-     * @param wildcard A terminal wildcard such as `3.*`, `3.14.*`, or `3.14.0.*`.
-     * @returns `true` when all components before the wildcard match, otherwise `false`.
-     */
-    satisfiesWildcard(wildcard: unknown): boolean {
-        const expected = PythonVersion.parseWildcard(wildcard);
-        return expected !== undefined && this.matchesReleaseComponents(expected);
-    }
-
-    /**
      * Tests whether this version satisfies a Python version specifier.
      *
      * Supports `==`, `!=`, `>=`, `<=`, `>`, `<`, `~=`, and `===` operators,
@@ -123,21 +108,27 @@ export class PythonVersion {
      * comparisons, matching the inline-script interpreter behavior.
      *
      * @param specifier A version specifier such as `>=3.11,<3.14` or `==3.12.*`.
-     * @returns `true` when every clause matches; otherwise `false`.
+     * @returns Whether every clause matches, or `undefined` when the specifier is invalid.
      */
-    satisfies(specifier: unknown): boolean {
-        return this.matchSpecifier(specifier) ?? false;
-    }
+    satisfies(specifier: unknown): boolean | undefined {
+        if (typeof specifier !== 'string') {
+            return undefined;
+        }
 
-    /**
-     * Evaluates a Python version specifier while distinguishing invalid syntax.
-     *
-     * @param specifier The specifier to evaluate.
-     * @returns Whether this version matches, or `undefined` for an invalid specifier.
-     */
-    matchSpecifier(specifier: unknown): boolean | undefined {
-        const clauses = PythonVersion.parseSpecifier(specifier);
-        return clauses?.every((clause) => this.satisfiesClause(clause));
+        const clauses = specifier.split(',').map((clause) => clause.trim());
+        if (clauses.some((clause) => clause.length === 0)) {
+            return undefined;
+        }
+
+        let satisfiesAll = true;
+        for (const clause of clauses) {
+            const result = this.matchClause(clause);
+            if (result === undefined) {
+                return undefined;
+            }
+            satisfiesAll &&= result;
+        }
+        return satisfiesAll;
     }
 
     /** Returns the normalized Python version representation. */
@@ -159,24 +150,7 @@ export class PythonVersion {
         return value ? (PythonVersion.RELEASE_LEVEL_ALIASES[value.toLowerCase()] ?? 'final') : 'final';
     }
 
-    private static parseSpecifier(specifier: unknown): readonly ParsedClause[] | undefined {
-        if (typeof specifier !== 'string') {
-            return undefined;
-        }
-
-        const clauses = specifier
-            .split(',')
-            .map((clause) => clause.trim())
-            .filter((clause) => clause.length > 0);
-        if (clauses.length === 0) {
-            return undefined;
-        }
-
-        const parsed = clauses.map((clause) => PythonVersion.parseClause(clause));
-        return parsed.every((clause): clause is ParsedClause => clause !== undefined) ? parsed : undefined;
-    }
-
-    private static parseClause(clause: string): ParsedClause | undefined {
+    private matchClause(clause: string): boolean | undefined {
         const match = PythonVersion.SPECIFIER_PATTERN.exec(clause);
         if (!match) {
             return undefined;
@@ -185,31 +159,24 @@ export class PythonVersion {
         const operator = match[1];
         const expected = match[2].trim();
         if (operator === '===') {
-            return expected.length > 0 ? { operator, expected } : undefined;
+            return expected ? this.original.replace(/^v/i, '') === expected.replace(/^v/i, '') : undefined;
         }
         if (expected.endsWith('.*')) {
             const wildcard = PythonVersion.parseWildcard(expected);
-            return (operator === '==' || operator === '!=') && wildcard ? { operator, wildcard } : undefined;
+            if ((operator !== '==' && operator !== '!=') || !wildcard) {
+                return undefined;
+            }
+            const matches = this.matchesReleaseComponents(wildcard);
+            return operator === '==' ? matches : !matches;
         }
 
         const expectedVersion = PythonVersion.tryParse(expected);
         if (!expectedVersion || (operator === '~=' && expectedVersion.releaseComponentCount < 2)) {
             return undefined;
         }
-        return { operator: operator as ComparisonOperator, expected: expectedVersion };
-    }
 
-    private satisfiesClause(clause: ParsedClause): boolean {
-        if (clause.operator === '===') {
-            return this.original.replace(/^v/i, '') === clause.expected.replace(/^v/i, '');
-        }
-        if ('wildcard' in clause) {
-            const matches = this.matchesReleaseComponents(clause.wildcard);
-            return clause.operator === '==' ? matches : !matches;
-        }
-
-        const comparison = this.compareReleaseTo(clause.expected);
-        switch (clause.operator) {
+        const comparison = this.compareReleaseTo(expectedVersion);
+        switch (operator) {
             case '==':
                 return comparison === 0;
             case '!=':
@@ -226,7 +193,7 @@ export class PythonVersion {
                 return (
                     comparison >= 0 &&
                     this.matchesReleaseComponents(
-                        clause.expected.releaseComponents.slice(0, clause.expected.releaseComponentCount - 1),
+                        expectedVersion.releasePrefix(expectedVersion.releaseComponentCount - 1),
                     )
                 );
             default:
@@ -235,21 +202,23 @@ export class PythonVersion {
     }
 
     private compareReleaseTo(other: PythonVersion): number {
-        for (let index = 0; index < this.releaseComponents.length; index++) {
-            const comparison = compareNumbers(this.releaseComponents[index], other.releaseComponents[index]);
-            if (comparison !== 0) {
-                return comparison;
-            }
-        }
-        return 0;
+        return (
+            compareNumbers(this.major, other.major) ||
+            compareNumbers(this.minor, other.minor) ||
+            compareNumbers(this.patch, other.patch)
+        );
     }
 
-    private get releaseComponents(): readonly number[] {
-        return [this.major, this.minor, this.patch];
+    private releasePrefix(length: number): readonly number[] {
+        return [this.major, this.minor, this.patch].slice(0, length);
     }
 
     private matchesReleaseComponents(expected: readonly number[]): boolean {
-        return expected.every((component, index) => component === this.releaseComponents[index]);
+        return (
+            expected[0] === this.major &&
+            (expected.length < 2 || expected[1] === this.minor) &&
+            (expected.length < 3 || expected[2] === this.patch)
+        );
     }
 
     private static parseWildcard(wildcard: unknown): number[] | undefined {
