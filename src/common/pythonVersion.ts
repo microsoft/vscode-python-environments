@@ -4,6 +4,10 @@ export class PythonVersion {
     private static readonly VERSION_PATTERN =
         /^(\d+)(?:\.(\d+))?(?:\.(\d+))?(?:(?:\.(alpha|beta|candidate|final)\.(\d+))|(?:(a|b|rc)(\d+)))?$/i;
 
+    private static readonly WILDCARD_PATTERN = /^(\d+)(?:\.(\d+))?(?:\.(\d+))?\.\*$/;
+
+    private static readonly SPECIFIER_PATTERN = /^(===|~=|==|!=|>=|<=|>|<)\s*(.+)$/;
+
     private static readonly RELEASE_LEVEL_ALIASES: Readonly<Record<string, PythonReleaseLevel>> = {
         a: 'alpha',
         alpha: 'alpha',
@@ -32,11 +36,14 @@ export class PythonVersion {
      * @param version A Python release version.
      */
     constructor(version: string) {
-        const match = PythonVersion.VERSION_PATTERN.exec(version.trim());
+        const normalizedVersion = version.trim();
+        const match = PythonVersion.VERSION_PATTERN.exec(normalizedVersion);
         if (!match) {
             throw new TypeError(`Invalid Python version: ${version}`);
         }
 
+        this.original = normalizedVersion;
+    this.releaseComponentCount = match[3] !== undefined ? 3 : match[2] !== undefined ? 2 : 1;
         this.major = parseNumericComponent(match[1], version);
         this.minor = parseNumericComponent(match[2], version);
         this.patch = parseNumericComponent(match[3], version);
@@ -49,6 +56,8 @@ export class PythonVersion {
     readonly patch: number;
     readonly releaseLevel: PythonReleaseLevel;
     readonly releaseSerial: number;
+    private readonly original: string;
+    private readonly releaseComponentCount: number;
 
     /**
      * Attempts to parse a Python version without propagating malformed input errors.
@@ -88,6 +97,40 @@ export class PythonVersion {
         );
     }
 
+    /**
+     * Tests whether this version matches a release-prefix wildcard.
+     *
+     * @param wildcard A terminal wildcard such as `3.*`, `3.14.*`, or `3.14.0.*`.
+     * @returns `true` when all components before the wildcard match, otherwise `false`.
+     */
+    satisfiesWildcard(wildcard: unknown): boolean {
+        const expected = PythonVersion.parseWildcard(wildcard);
+        return expected !== undefined && this.matchesReleaseComponents(expected);
+    }
+
+    /**
+     * Tests whether this version satisfies a Python version specifier.
+     *
+     * Supports `==`, `!=`, `>=`, `<=`, `>`, `<`, `~=`, and `===` operators,
+     * comma-separated AND clauses, and terminal wildcards with `==` or `!=`.
+     * Prerelease suffixes are ignored for ordered and release-equality
+     * comparisons, matching the inline-script interpreter behavior.
+     *
+     * @param specifier A version specifier such as `>=3.11,<3.14` or `==3.12.*`.
+     * @returns `true` when every clause matches; otherwise `false`.
+     */
+    satisfies(specifier: unknown): boolean {
+        if (typeof specifier !== 'string') {
+            return false;
+        }
+
+        const clauses = specifier
+            .split(',')
+            .map((clause) => clause.trim())
+            .filter((clause) => clause.length > 0);
+        return clauses.length > 0 && clauses.every((clause) => this.satisfiesClause(clause));
+    }
+
     /** Returns the normalized Python version representation. */
     toString(): string {
         const release = `${this.major}.${this.minor}.${this.patch}`;
@@ -105,6 +148,97 @@ export class PythonVersion {
 
     private static normalizeReleaseLevel(value: string | undefined): PythonReleaseLevel {
         return value ? (PythonVersion.RELEASE_LEVEL_ALIASES[value.toLowerCase()] ?? 'final') : 'final';
+    }
+
+    private satisfiesClause(clause: string): boolean {
+        const match = PythonVersion.SPECIFIER_PATTERN.exec(clause);
+        if (!match) {
+            return false;
+        }
+
+        const operator = match[1];
+        const expected = match[2].trim();
+        if (operator === '===') {
+            return this.original.replace(/^v/i, '') === expected.replace(/^v/i, '');
+        }
+
+        if (expected.endsWith('.*')) {
+            if (operator !== '==' && operator !== '!=') {
+                return false;
+            }
+            const expectedComponents = PythonVersion.parseWildcard(expected);
+            if (!expectedComponents) {
+                return false;
+            }
+            const matches = this.matchesReleaseComponents(expectedComponents);
+            return operator === '==' ? matches : !matches;
+        }
+
+        const expectedVersion = PythonVersion.tryParse(expected);
+        if (!expectedVersion) {
+            return false;
+        }
+
+        const comparison = this.compareReleaseTo(expectedVersion);
+        switch (operator) {
+            case '==':
+                return comparison === 0;
+            case '!=':
+                return comparison !== 0;
+            case '>=':
+                return comparison >= 0;
+            case '<=':
+                return comparison <= 0;
+            case '>':
+                return comparison > 0;
+            case '<':
+                return comparison < 0;
+            case '~=':
+                return (
+                    expectedVersion.releaseComponentCount >= 2 &&
+                    comparison >= 0 &&
+                    this.matchesReleaseComponents(
+                        expectedVersion.releaseComponents.slice(0, expectedVersion.releaseComponentCount - 1),
+                    )
+                );
+            default:
+                return false;
+        }
+    }
+
+    private compareReleaseTo(other: PythonVersion): number {
+        for (let index = 0; index < this.releaseComponents.length; index++) {
+            const comparison = compareNumbers(this.releaseComponents[index], other.releaseComponents[index]);
+            if (comparison !== 0) {
+                return comparison;
+            }
+        }
+        return 0;
+    }
+
+    private get releaseComponents(): readonly number[] {
+        return [this.major, this.minor, this.patch];
+    }
+
+    private matchesReleaseComponents(expected: readonly number[]): boolean {
+        return expected.every((component, index) => component === this.releaseComponents[index]);
+    }
+
+    private static parseWildcard(wildcard: unknown): number[] | undefined {
+        if (typeof wildcard !== 'string') {
+            return undefined;
+        }
+
+        const match = PythonVersion.WILDCARD_PATTERN.exec(wildcard.trim());
+        if (!match) {
+            return undefined;
+        }
+
+        const components = match
+            .slice(1)
+            .filter((component): component is string => component !== undefined)
+            .map(Number);
+        return components.every(Number.isSafeInteger) ? components : undefined;
     }
 }
 
