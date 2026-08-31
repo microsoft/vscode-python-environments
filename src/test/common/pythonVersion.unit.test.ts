@@ -98,8 +98,22 @@ suite('PythonVersion', () => {
         assert.strictEqual(version.satisfies(undefined), false);
     });
 
+    test('distinguishes invalid specifiers from valid non-matches', () => {
+        const version = new PythonVersion('3.12.4');
+
+        assert.strictEqual(version.matchSpecifier('>=3.13'), false);
+        assert.strictEqual(version.matchSpecifier('>=3.12.*'), undefined);
+    });
+
     test('rejects versions that cannot be compared safely', () => {
-        for (const version of ['', '3.', '3.12.1.4', 'Python 3.12', `${Number.MAX_SAFE_INTEGER}0.1.0`]) {
+        for (const version of [
+            '',
+            '3.',
+            '3.12.1.4',
+            '3.12.1.final.1',
+            'Python 3.12',
+            `${Number.MAX_SAFE_INTEGER}0.1.0`,
+        ]) {
             assert.throws(() => new PythonVersion(version), TypeError);
         }
     });

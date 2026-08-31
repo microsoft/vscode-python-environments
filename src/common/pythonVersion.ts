@@ -1,4 +1,9 @@
 type PythonReleaseLevel = 'alpha' | 'beta' | 'candidate' | 'final';
+type ComparisonOperator = '~=' | '==' | '!=' | '>=' | '<=' | '>' | '<';
+type ParsedClause =
+    | { readonly operator: '==='; readonly expected: string }
+    | { readonly operator: '==' | '!='; readonly wildcard: readonly number[] }
+    | { readonly operator: ComparisonOperator; readonly expected: PythonVersion };
 
 export class PythonVersion {
     private static readonly VERSION_PATTERN =
@@ -43,12 +48,15 @@ export class PythonVersion {
         }
 
         this.original = normalizedVersion;
-    this.releaseComponentCount = match[3] !== undefined ? 3 : match[2] !== undefined ? 2 : 1;
+        this.releaseComponentCount = match[3] !== undefined ? 3 : match[2] !== undefined ? 2 : 1;
         this.major = parseNumericComponent(match[1], version);
         this.minor = parseNumericComponent(match[2], version);
         this.patch = parseNumericComponent(match[3], version);
         this.releaseLevel = PythonVersion.normalizeReleaseLevel(match[4] ?? match[6]);
         this.releaseSerial = parseNumericComponent(match[5] ?? match[7], version);
+        if (this.releaseLevel === 'final' && this.releaseSerial !== 0) {
+            throw new TypeError(`Invalid Python version: ${version}`);
+        }
     }
 
     readonly major: number;
@@ -86,9 +94,7 @@ export class PythonVersion {
      */
     compareTo(other: PythonVersion): number {
         return (
-            compareNumbers(this.major, other.major) ||
-            compareNumbers(this.minor, other.minor) ||
-            compareNumbers(this.patch, other.patch) ||
+            this.compareReleaseTo(other) ||
             compareNumbers(
                 PythonVersion.RELEASE_LEVEL_ORDER[this.releaseLevel],
                 PythonVersion.RELEASE_LEVEL_ORDER[other.releaseLevel],
@@ -120,15 +126,18 @@ export class PythonVersion {
      * @returns `true` when every clause matches; otherwise `false`.
      */
     satisfies(specifier: unknown): boolean {
-        if (typeof specifier !== 'string') {
-            return false;
-        }
+        return this.matchSpecifier(specifier) ?? false;
+    }
 
-        const clauses = specifier
-            .split(',')
-            .map((clause) => clause.trim())
-            .filter((clause) => clause.length > 0);
-        return clauses.length > 0 && clauses.every((clause) => this.satisfiesClause(clause));
+    /**
+     * Evaluates a Python version specifier while distinguishing invalid syntax.
+     *
+     * @param specifier The specifier to evaluate.
+     * @returns Whether this version matches, or `undefined` for an invalid specifier.
+     */
+    matchSpecifier(specifier: unknown): boolean | undefined {
+        const clauses = PythonVersion.parseSpecifier(specifier);
+        return clauses?.every((clause) => this.satisfiesClause(clause));
     }
 
     /** Returns the normalized Python version representation. */
@@ -150,37 +159,57 @@ export class PythonVersion {
         return value ? (PythonVersion.RELEASE_LEVEL_ALIASES[value.toLowerCase()] ?? 'final') : 'final';
     }
 
-    private satisfiesClause(clause: string): boolean {
+    private static parseSpecifier(specifier: unknown): readonly ParsedClause[] | undefined {
+        if (typeof specifier !== 'string') {
+            return undefined;
+        }
+
+        const clauses = specifier
+            .split(',')
+            .map((clause) => clause.trim())
+            .filter((clause) => clause.length > 0);
+        if (clauses.length === 0) {
+            return undefined;
+        }
+
+        const parsed = clauses.map((clause) => PythonVersion.parseClause(clause));
+        return parsed.every((clause): clause is ParsedClause => clause !== undefined) ? parsed : undefined;
+    }
+
+    private static parseClause(clause: string): ParsedClause | undefined {
         const match = PythonVersion.SPECIFIER_PATTERN.exec(clause);
         if (!match) {
-            return false;
+            return undefined;
         }
 
         const operator = match[1];
         const expected = match[2].trim();
         if (operator === '===') {
-            return this.original.replace(/^v/i, '') === expected.replace(/^v/i, '');
+            return expected.length > 0 ? { operator, expected } : undefined;
         }
-
         if (expected.endsWith('.*')) {
-            if (operator !== '==' && operator !== '!=') {
-                return false;
-            }
-            const expectedComponents = PythonVersion.parseWildcard(expected);
-            if (!expectedComponents) {
-                return false;
-            }
-            const matches = this.matchesReleaseComponents(expectedComponents);
-            return operator === '==' ? matches : !matches;
+            const wildcard = PythonVersion.parseWildcard(expected);
+            return (operator === '==' || operator === '!=') && wildcard ? { operator, wildcard } : undefined;
         }
 
         const expectedVersion = PythonVersion.tryParse(expected);
-        if (!expectedVersion) {
-            return false;
+        if (!expectedVersion || (operator === '~=' && expectedVersion.releaseComponentCount < 2)) {
+            return undefined;
+        }
+        return { operator: operator as ComparisonOperator, expected: expectedVersion };
+    }
+
+    private satisfiesClause(clause: ParsedClause): boolean {
+        if (clause.operator === '===') {
+            return this.original.replace(/^v/i, '') === clause.expected.replace(/^v/i, '');
+        }
+        if ('wildcard' in clause) {
+            const matches = this.matchesReleaseComponents(clause.wildcard);
+            return clause.operator === '==' ? matches : !matches;
         }
 
-        const comparison = this.compareReleaseTo(expectedVersion);
-        switch (operator) {
+        const comparison = this.compareReleaseTo(clause.expected);
+        switch (clause.operator) {
             case '==':
                 return comparison === 0;
             case '!=':
@@ -195,10 +224,9 @@ export class PythonVersion {
                 return comparison < 0;
             case '~=':
                 return (
-                    expectedVersion.releaseComponentCount >= 2 &&
                     comparison >= 0 &&
                     this.matchesReleaseComponents(
-                        expectedVersion.releaseComponents.slice(0, expectedVersion.releaseComponentCount - 1),
+                        clause.expected.releaseComponents.slice(0, clause.expected.releaseComponentCount - 1),
                     )
                 );
             default:
