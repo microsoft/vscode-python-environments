@@ -534,10 +534,10 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
                 }
 
                 const confirmation = await window.showInformationMessage(
-                    l10n.t('Are you sure you want to open the issue reporter with this information?'),
+                    l10n.t('This will open an issue on microsoft/vscode-python-envs. Do you want to continue?'),
                     { modal: true },
-                    l10n.t('Yes'),
                     l10n.t('No'),
+                    l10n.t('Yes'),
                 );
 
                 if (confirmation !== l10n.t('Yes')) {
