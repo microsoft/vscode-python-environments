@@ -4,6 +4,7 @@ import path from 'path';
 import { commands, ConfigurationTarget, l10n, window, workspace } from 'vscode';
 import { PythonCommandRunConfiguration, PythonEnvironment, PythonEnvironmentApi } from '../../api';
 import { traceLog, traceVerbose } from '../../common/logging';
+import { PythonVersion } from '../../common/pythonVersion';
 import { isWindows } from '../../common/utils/platformUtils';
 import { ShellConstants } from '../../features/common/shellConstants';
 import { getDefaultEnvManagerSetting, setDefaultEnvManagerBroken } from '../../features/settings/settingHelpers';
@@ -68,9 +69,12 @@ export function getLatest(collection: PythonEnvironment[]): PythonEnvironment | 
     const candidates = nonErroredEnvs.length > 0 ? nonErroredEnvs : collection;
 
     let latest = candidates[0];
+    let latestVersion: PythonVersion | undefined;
     for (const env of candidates) {
-        if (pep440Valid(env.version) && pep440Valid(latest.version) && pep440Compare(env.version, latest.version) > 0) {
+        const version = PythonVersion.tryParse(env.version);
+        if (version && (!latestVersion || version.compareTo(latestVersion) > 0)) {
             latest = env;
+            latestVersion = version;
         }
     }
     return latest;
