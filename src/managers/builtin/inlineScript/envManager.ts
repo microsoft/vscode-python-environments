@@ -69,7 +69,11 @@ import { sendTelemetryEvent } from '../../../common/telemetry/sender';
 import { createDeferred, Deferred } from '../../../common/utils/deferred';
 import { isFileNotFoundError } from '../../../common/utils/filesystem';
 import { normalizePath } from '../../../common/utils/pathUtils';
-import { compareReleaseSegments, parseReleaseSegments } from '../../../common/utils/pep440Release';
+import {
+    compareReleaseSegments,
+    normalizeCpythonVersionInfo,
+    parseReleaseSegments,
+} from '../../../common/utils/pep440Release';
 import { getVenvPythonPath } from '../../../common/utils/virtualEnvironment';
 import { getOpenTextDocuments, onDidDeleteFiles, onDidRenameFiles } from '../../../common/workspace.apis';
 import { NativePythonFinder } from '../../common/nativePythonFinder';
@@ -2503,7 +2507,7 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
 
     private matchesInstallConstraint(requiresPython: string, version: string): boolean {
         try {
-            return satisfiesPep440(version, requiresPython, {
+            return satisfiesPep440(normalizeCpythonVersionInfo(version), requiresPython, {
                 prereleases: /(?:(?:a|alpha|b|beta|c|rc|pre|preview)[._-]?\d+|dev[._-]?\d+)/i.test(
                     requiresPython,
                 ),
