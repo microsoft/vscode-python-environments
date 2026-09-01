@@ -14,8 +14,6 @@ interface VersionClause {
     readonly allowsPrereleases: boolean;
 }
 
-const CLAUSE_PATTERN = /^(===|~=|==|!=|>=|<=|>|<)\s*(.+)$/;
-
 /**
  * Splits a specifier clause into its operator and version literal.
  *
@@ -26,7 +24,7 @@ const CLAUSE_PATTERN = /^(===|~=|==|!=|>=|<=|>|<)\s*(.+)$/;
  * @returns The clause parts, or `undefined` when the clause is malformed.
  */
 export function splitClause(clause: string): { readonly operator: string; readonly literal: string } | undefined {
-    const match = CLAUSE_PATTERN.exec(clause.trim());
+    const match = PythonVersionSpecifier.CLAUSE_PATTERN.exec(clause.trim());
     if (!match) {
         return undefined;
     }
@@ -57,6 +55,8 @@ const COMPARISONS: Readonly<Record<string, (comparison: number) => boolean>> = {
  * dedicated PEP 440 implementation for package requirements.
  */
 export class PythonVersionSpecifier {
+    static readonly CLAUSE_PATTERN = /^(===|~=|==|!=|>=|<=|>|<)\s*(.+)$/;
+
     private constructor(private readonly clauses: readonly VersionClause[]) {}
 
     /**
