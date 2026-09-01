@@ -25,6 +25,7 @@ import {
 import { getErrorMessage } from '../../../common/errors/utils';
 import { computeCacheKey, normalizeDependency } from '../../../common/inlineScript/cacheKey';
 import {
+    CacheEntrySummary,
     CacheEnvironmentInspection,
     INLINE_SCRIPT_CACHE_DIR_NAME,
     InlineScriptEnvMeta,
@@ -38,6 +39,7 @@ import {
     inspectMetaJson,
     restoreMetaJsonBackupUnderLock,
     resolveCacheEntryPath,
+    selectStaleEntries,
     writeMetaJson,
 } from '../../../common/inlineScript/cacheLayout';
 import { extractLowerBoundVersion, pickCompatibleInterpreter } from '../../../common/inlineScript/interpreter';
@@ -89,6 +91,7 @@ const BASE_INTERPRETER_MANAGER_IDS = new Set([
 
 const CACHE_LOCK_TIMEOUT_MS = 5 * 60 * 1000;
 const CACHE_LOCK_RETRY_MS = 500;
+const CACHE_TTL_MS = 14 * 24 * 60 * 60 * 1000;
 const CACHED_ASSOCIATION_VALIDATION_INTERVAL_MS = 5_000;
 const DISCOVERY_RETRY_DELAYS_MS = [1_000, 5_000, 30_000] as const;
 const PERSISTED_ASSOCIATION_SCHEMA_VERSION = 1 as const;
@@ -142,6 +145,12 @@ interface PendingCreationContext {
 interface MergeCacheEntrySourceMetadataIdentityHashResult {
     readonly success: boolean;
     readonly sourceMetadataIdentityHashes?: readonly string[];
+}
+
+interface CacheEntryRemovalOptions {
+    readonly shouldRemove?: (entryPath: string) => Promise<boolean>;
+    readonly afterRemove?: () => void;
+    readonly reclaimRetainedLock?: boolean;
 }
 
 type CacheEntryInspection =
@@ -200,6 +209,8 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
     private cacheMaintenanceBarrier: Deferred<void> | undefined;
     private pendingCacheMaintenances = 0;
     private activeCreateOperations = 0;
+    private ttlEviction: Promise<void> | undefined;
+    private cacheMutationRevision = 0;
     private disposed = false;
 
     private readonly _onDidChangeEnvironments = new EventEmitter<DidChangeEnvironmentsEventArgs>();
@@ -260,6 +271,7 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
     ): Promise<PythonEnvironment | undefined> {
         this.activeCreateOperations += 1;
         try {
+            await this.runTtlEvictionOnce();
             return await this.waitForCacheMaintenance(async () => {
                 try {
                     const scriptUri = this.getScriptUri(scope);
@@ -583,6 +595,11 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
     }
 
     private async refreshDiscoveredEnvironments(checkForSnapshotChanges: boolean): Promise<boolean> {
+        const cacheMaintenance = this.cacheMaintenanceBarrier;
+        if (cacheMaintenance) {
+            await cacheMaintenance.promise;
+        }
+        const cacheMutationRevision = this.cacheMutationRevision;
         const cacheRoot = getScriptEnvCacheRoot(this.globalStorageUri);
         const previousByKey = new Map(
             this.collection.map((environment) => [this.getDiscoveredEnvironmentKey(environment), environment]),
@@ -698,6 +715,9 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
 
         if (this.disposed) {
             return false;
+        }
+        if (cacheMutationRevision !== this.cacheMutationRevision) {
+            return true;
         }
 
         // Preserve previously known entries when a refresh cannot safely classify
@@ -2139,6 +2159,17 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
         return this.associationStore.clear();
     }
 
+    private runTtlEvictionOnce(): Promise<void> {
+        if (!this.ttlEviction) {
+            this.ttlEviction = this.enqueueCacheMaintenance(() =>
+                this.enqueueSelection(() => this.evictStaleCacheEntries()),
+            ).catch((error) => {
+                this.log.warn(`Unable to evict stale inline-script environments: ${getErrorMessage(error)}`);
+            });
+        }
+        return this.ttlEviction;
+    }
+
     private async waitForCacheMaintenance<T>(operation: () => Promise<T>): Promise<T> {
         const barrier = this.cacheMaintenanceBarrier;
         if (barrier) {
@@ -2849,6 +2880,153 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
         return { environment: result.environment };
     }
 
+    private async evictStaleCacheEntries(): Promise<void> {
+        const cacheRoot = getScriptEnvCacheRoot(this.globalStorageUri);
+        const physicalCacheRootPath = await this.getPhysicalOwnedCacheRootPath(cacheRoot);
+        if (!physicalCacheRootPath) {
+            return;
+        }
+
+        let entryNames: string[];
+        try {
+            entryNames = await fs.readdir(physicalCacheRootPath);
+        } catch (error) {
+            if (isFileNotFoundError(error)) {
+                return;
+            }
+            throw error;
+        }
+
+        const now = new Date();
+        const entries: CacheEntrySummary[] = [];
+        for (const entryName of entryNames.sort()) {
+            if (entryName.endsWith(FILE_LOCK_DIR_SUFFIX)) {
+                continue;
+            }
+            const entryPath = path.join(physicalCacheRootPath, entryName);
+            try {
+                const stat = await fs.lstat(entryPath);
+                if (!stat.isDirectory() || stat.isSymbolicLink()) {
+                    continue;
+                }
+                const sidecar = await inspectMetaJson(Uri.file(entryPath));
+                if (sidecar.kind === 'valid') {
+                    entries.push({
+                        envDirPath: entryPath,
+                        lastUsedAt: new Date(sidecar.metadata.lastUsedAt),
+                    });
+                }
+            } catch (error) {
+                if (!isFileNotFoundError(error)) {
+                    this.log.warn(
+                        `Unable to inspect inline-script cache entry for TTL eviction ${entryPath}: ${getErrorMessage(error)}`,
+                    );
+                }
+            }
+        }
+
+        const staleEntries = selectStaleEntries(entries, now, CACHE_TTL_MS);
+        if (staleEntries.length === 0) {
+            return;
+        }
+
+        const persistedAssociations = await this.getPersistedAssociationSnapshot();
+        const scriptPaths = this.getTrackedScriptPaths(persistedAssociations);
+        const priorSelections = this.getPriorSelections(scriptPaths);
+        // Never evict an environment that a script association still points to. `lastUsedAt` is only
+        // refreshed when an environment is created or reused (never when it is resolved for run, debug,
+        // or Pylance), so an actively-used environment can look stale here. Reclaim only orphaned entries
+        // (e.g. superseded by a dependency change, or left behind by a deleted or deselected script).
+        const referencedEnvDirs = this.getReferencedCacheEntryDirs(persistedAssociations, scriptPaths);
+        const evictableStaleEntries = staleEntries.filter(
+            (staleEntry) => !referencedEnvDirs.has(normalizePath(staleEntry)),
+        );
+        if (evictableStaleEntries.length === 0) {
+            return;
+        }
+        const removedCacheEntries = new Set<string>();
+        for (const staleEntry of evictableStaleEntries) {
+            try {
+                const removed = await this.removeCacheEntryForClear(
+                    cacheRoot,
+                    physicalCacheRootPath,
+                    path.basename(staleEntry),
+                    {
+                        reclaimRetainedLock: false,
+                        afterRemove: () => {
+                            this.cacheMutationRevision += 1;
+                        },
+                        shouldRemove: async (entryPath) => {
+                            const sidecar = await inspectMetaJson(Uri.file(entryPath));
+                            return (
+                                sidecar.kind === 'valid' &&
+                                selectStaleEntries(
+                                    [
+                                        {
+                                            envDirPath: entryPath,
+                                            lastUsedAt: new Date(sidecar.metadata.lastUsedAt),
+                                        },
+                                    ],
+                                    now,
+                                    CACHE_TTL_MS,
+                                ).length === 1
+                            );
+                        },
+                    },
+                );
+                if (removed) {
+                    removedCacheEntries.add(normalizePath(removed));
+                } else if (await this.isCacheEntryDefinitelyMissing(staleEntry)) {
+                    this.cacheMutationRevision += 1;
+                    removedCacheEntries.add(normalizePath(staleEntry));
+                }
+            } catch (error) {
+                this.log.warn(
+                    `Unable to evict stale inline-script cache entry ${staleEntry}: ${getErrorMessage(error)}`,
+                );
+                if (await this.isCacheEntryDefinitelyMissing(staleEntry)) {
+                    this.cacheMutationRevision += 1;
+                    removedCacheEntries.add(normalizePath(staleEntry));
+                }
+            }
+        }
+
+        if (removedCacheEntries.size === 0) {
+            return;
+        }
+
+        this.replaceDiscoveredEnvironments(
+            this.collection.filter(
+                (environment) => !removedCacheEntries.has(normalizePath(environment.sysPrefix)),
+            ),
+        );
+        const invalidatedScriptPaths = await this.getInvalidatedAssociationPaths(
+            scriptPaths,
+            persistedAssociations,
+            removedCacheEntries,
+        );
+        await this.clearInvalidatedAssociations(
+            invalidatedScriptPaths,
+            persistedAssociations,
+            priorSelections,
+        );
+    }
+
+    private async isCacheEntryDefinitelyMissing(entryPath: string): Promise<boolean> {
+        try {
+            await fs.lstat(entryPath);
+            return false;
+        } catch (error) {
+            if (isFileNotFoundError(error)) {
+                return true;
+            }
+            this.log.warn(
+                `Unable to verify stale inline-script cache entry ${entryPath}: ${getErrorMessage(error)}`,
+            );
+            return false;
+        }
+    }
+
     private async clearCacheInternal(activeCreatesAtStart: number): Promise<void> {
         if (activeCreatesAtStart > 0) {
             const message = l10n.t(
@@ -2861,21 +3039,8 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
         const cacheRoot = getScriptEnvCacheRoot(this.globalStorageUri);
         const physicalCacheRootPath = await this.getPhysicalOwnedCacheRootPath(cacheRoot);
         const persistedAssociations = await this.getPersistedAssociationSnapshot();
-        const scriptPaths = new Set<string>([
-            ...Object.keys(persistedAssociations),
-            ...this.associationRevisions.keys(),
-            ...this.cachedAssociationValidatedAt.keys(),
-            ...this.lastValidatedMetadataIdentities.keys(),
-            ...this.lastValidatedMetadataIdentityProofs.keys(),
-            ...this.fsPathToEnv.keys(),
-            ...this.fsPathToPersistedAssociation.keys(),
-            ...this.pendingRehydrations.keys(),
-            ...this.pendingMetadataRefreshes.keys(),
-        ]);
-        const priorSelections = new Map<string, PythonEnvironment | undefined>();
-        scriptPaths.forEach((scriptPath) => {
-            priorSelections.set(scriptPath, this.fsPathToEnv.get(scriptPath));
-        });
+        const scriptPaths = this.getTrackedScriptPaths(persistedAssociations);
+        const priorSelections = this.getPriorSelections(scriptPaths);
 
         const removedCacheEntries = new Set<string>();
         const deletionErrors: unknown[] = [];
@@ -2953,11 +3118,15 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
         cacheRoot: Uri,
         originalPhysicalCacheRootPath: string,
         entryName: string,
+        options: CacheEntryRemovalOptions = {},
     ): Promise<string | undefined> {
         const envDirPath = path.join(originalPhysicalCacheRootPath, entryName);
         let lock: AcquiredFileLock | undefined;
         try {
-            lock = await this.acquireCacheEntryLockForClear(envDirPath);
+            lock = await this.acquireCacheEntryLockForClear(
+                envDirPath,
+                options.reclaimRetainedLock !== false,
+            );
             const currentPhysicalCacheRootPath = await this.getPhysicalOwnedCacheRootPath(cacheRoot);
             if (!currentPhysicalCacheRootPath) {
                 return undefined;
@@ -2981,7 +3150,11 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
             if (!entryPath) {
                 return undefined;
             }
+            if (options.shouldRemove && !(await options.shouldRemove(entryPath))) {
+                return undefined;
+            }
             await this.deleteCacheEntryForClear(entryPath);
+            options.afterRemove?.();
             return entryPath;
         } finally {
             if (lock) {
@@ -2990,7 +3163,10 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
         }
     }
 
-    private async acquireCacheEntryLockForClear(envDirPath: string): Promise<AcquiredFileLock> {
+    private async acquireCacheEntryLockForClear(
+        envDirPath: string,
+        reclaimRetainedLock: boolean = true,
+    ): Promise<AcquiredFileLock> {
         for (let attempt = 0; attempt < 3; attempt += 1) {
             try {
                 return await acquireFileLock(envDirPath, { timeoutMs: 0, retryIntervalMs: CACHE_LOCK_RETRY_MS });
@@ -2999,9 +3175,12 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
                     throw error;
                 }
                 const lockState = await inspectFileLock(envDirPath);
-                if (lockState === 'stale' || lockState === 'retained') {
+                if (lockState === 'stale' || (lockState === 'retained' && reclaimRetainedLock)) {
                     await reclaimFileLock(envDirPath);
                     continue;
+                }
+                if (lockState === 'retained') {
+                    throw error;
                 }
                 if (lockState === 'missing') {
                     continue;
@@ -3155,6 +3334,26 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
         return fs.remove(entryPath);
     }
 
+    private getReferencedCacheEntryDirs(
+        persistedAssociations: PersistedInlineScriptEnvironments,
+        scriptPaths: ReadonlySet<string>,
+    ): Set<string> {
+        const referenced = new Set<string>();
+        for (const scriptPath of scriptPaths) {
+            const environmentPaths = [
+                persistedAssociations[scriptPath]?.environmentPath,
+                this.fsPathToPersistedAssociation.get(scriptPath)?.environmentPath,
+                this.fsPathToEnv.get(scriptPath)?.environmentPath.fsPath,
+            ].filter((value): value is string => value !== undefined);
+            for (const environmentPath of environmentPaths) {
+                // Mirror isRemovedOrMissingCacheAssociation: the cache-entry dir is two levels above the
+                // interpreter executable (e.g. <envDir>/bin/python -> <envDir>).
+                referenced.add(normalizePath(path.dirname(path.dirname(environmentPath))));
+            }
+        }
+        return referenced;
+    }
+
     private async getInvalidatedAssociationPaths(
         scriptPaths: ReadonlySet<string>,
         persistedAssociations: PersistedInlineScriptEnvironments,
@@ -3258,6 +3457,30 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
 
     private async getPersistedAssociationSnapshot(): Promise<PersistedInlineScriptEnvironments> {
         return this.parsePersistedAssociations(await this.associationStore.read<unknown>())?.records ?? {};
+    }
+
+    private getTrackedScriptPaths(
+        persistedAssociations: PersistedInlineScriptEnvironments,
+    ): Set<string> {
+        return new Set([
+            ...Object.keys(persistedAssociations),
+            ...this.associationRevisions.keys(),
+            ...this.cachedAssociationValidatedAt.keys(),
+            ...this.lastValidatedMetadataIdentities.keys(),
+            ...this.lastValidatedMetadataIdentityProofs.keys(),
+            ...this.fsPathToEnv.keys(),
+            ...this.fsPathToPersistedAssociation.keys(),
+            ...this.pendingRehydrations.keys(),
+            ...this.pendingMetadataRefreshes.keys(),
+        ]);
+    }
+
+    private getPriorSelections(
+        scriptPaths: ReadonlySet<string>,
+    ): Map<string, PythonEnvironment | undefined> {
+        return new Map(
+            Array.from(scriptPaths, (scriptPath) => [scriptPath, this.fsPathToEnv.get(scriptPath)]),
+        );
     }
 
     private async removeCacheEntry(envDir: Uri): Promise<boolean> {
