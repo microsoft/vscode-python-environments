@@ -26,6 +26,28 @@ suite('PythonVersion', () => {
         assert.strictEqual(new PythonVersion('3.12').compareTo(new PythonVersion('3.12.0')), 0);
     });
 
+    test('orders prereleases before the final release of the same numeric release', () => {
+        const prerelease = new PythonVersion('3.14.0rc1');
+        const final = new PythonVersion('3.14.0');
+
+        assert.strictEqual(prerelease.compareTo(final), -1);
+        assert.strictEqual(final.compareTo(prerelease), 1);
+    });
+
+    test('preserves release precision for formatting and selector matching', () => {
+        const version = new PythonVersion('3.12.4');
+
+        assert.strictEqual(new PythonVersion('3').toReleaseString(), '3');
+        assert.strictEqual(new PythonVersion('3.12').toReleaseString(), '3.12');
+        assert.strictEqual(version.toReleaseString(), '3.12.4');
+        assert.strictEqual(new PythonVersion('3.14.0rc1').toReleaseString(), '3.14.0');
+        assert.strictEqual(version.matchesSelector(new PythonVersion('3.12')), true);
+        assert.strictEqual(new PythonVersion('3.120.1').matchesSelector(new PythonVersion('3.12')), false);
+        assert.strictEqual(version.matchesSelector(new PythonVersion('3.12.4')), true);
+        assert.strictEqual(version.matchesSelector(new PythonVersion('3.12.5')), false);
+        assert.strictEqual(new PythonVersion('3.14.0').matchesSelector(new PythonVersion('3.14.0rc1')), false);
+    });
+
     test('orders prereleases before the final release', () => {
         assert.ok(new PythonVersion('3.14.0a1').compareTo(new PythonVersion('3.14.0b1')) < 0);
         assert.ok(new PythonVersion('3.14.0b1').compareTo(new PythonVersion('3.14.0b2')) < 0);
@@ -33,79 +55,20 @@ suite('PythonVersion', () => {
         assert.ok(new PythonVersion('3.14.0rc1').compareTo(new PythonVersion('3.14.0')) < 0);
     });
 
-    test('satisfies release-prefix wildcard specifiers', () => {
-        const version = new PythonVersion('3.14.0b1');
+    test('preserves the version as supplied alongside the normalized form', () => {
+        const version = new PythonVersion(' 3.14.0.beta.1 ');
 
-        assert.strictEqual(version.satisfies('==3.*'), true);
-        assert.strictEqual(version.satisfies('==3.14.*'), true);
-        assert.strictEqual(version.satisfies('==3.14.0.*'), true);
-        assert.strictEqual(version.satisfies('==3.13.*'), false);
-        assert.strictEqual(version.satisfies('==4.*'), false);
+        assert.strictEqual(version.source, '3.14.0.beta.1');
+        assert.strictEqual(version.toString(), '3.14.0b1');
     });
 
-    test('rejects malformed wildcards without throwing', () => {
-        const version = new PythonVersion('3.14.0');
-
-        assert.strictEqual(version.satisfies('==*'), undefined);
-        assert.strictEqual(version.satisfies('==3.*.0'), undefined);
-        assert.strictEqual(version.satisfies('>=3.14.*'), undefined);
-        assert.strictEqual(version.satisfies(`==${Number.MAX_SAFE_INTEGER}0.*`), undefined);
-        assert.strictEqual(version.satisfies(undefined), undefined);
-    });
-
-    test('satisfies ordered and compound specifiers', () => {
+    test('compares a bounded number of leading release components', () => {
         const version = new PythonVersion('3.12.4');
 
-        assert.strictEqual(version.satisfies('>=3.11'), true);
-        assert.strictEqual(version.satisfies('>=3.10,<3.13'), true);
-        assert.strictEqual(version.satisfies('>=3.13'), false);
-        assert.strictEqual(version.satisfies('<=3.12.4'), true);
-        assert.strictEqual(version.satisfies('>3.12.4'), false);
-    });
-
-    test('satisfies equality and wildcard specifiers', () => {
-        const version = new PythonVersion('3.12.4');
-
-        assert.strictEqual(version.satisfies('==3.12.4'), true);
-        assert.strictEqual(version.satisfies('!=3.12.3'), true);
-        assert.strictEqual(version.satisfies('==3.12.*'), true);
-        assert.strictEqual(version.satisfies('!=3.12.*'), false);
-        assert.strictEqual(version.satisfies('==3.11.*'), false);
-    });
-
-    test('satisfies compatible-release specifiers', () => {
-        assert.strictEqual(new PythonVersion('3.12.4').satisfies('~=3.11'), true);
-        assert.strictEqual(new PythonVersion('4.0.0').satisfies('~=3.11'), false);
-        assert.strictEqual(new PythonVersion('3.11.10').satisfies('~=3.11.2'), true);
-        assert.strictEqual(new PythonVersion('3.12.0').satisfies('~=3.11.2'), false);
-    });
-
-    test('supports arbitrary equality and release equality', () => {
-        assert.strictEqual(new PythonVersion('3.11').satisfies('==3.11.0'), true);
-        assert.strictEqual(new PythonVersion('3.11').satisfies('===3.11'), true);
-        assert.strictEqual(new PythonVersion('3.11').satisfies('===3.11.0'), false);
-        assert.strictEqual(new PythonVersion('3.11.0rc1').satisfies('>=3.11'), true);
-    });
-
-    test('rejects malformed specifiers without throwing', () => {
-        const version = new PythonVersion('3.12.4');
-
-        assert.strictEqual(version.satisfies(''), undefined);
-        assert.strictEqual(version.satisfies('3.12'), undefined);
-        assert.strictEqual(version.satisfies('>=3.12.*'), undefined);
-        assert.strictEqual(version.satisfies(`!=${Number.MAX_SAFE_INTEGER}0.*`), undefined);
-        assert.strictEqual(version.satisfies('~=3'), undefined);
-        assert.strictEqual(version.satisfies('>=3.11,'), undefined);
-        assert.strictEqual(version.satisfies('>=3.11,,<4'), undefined);
-        assert.strictEqual(version.satisfies(undefined), undefined);
-    });
-
-    test('distinguishes invalid specifiers from valid non-matches', () => {
-        const version = new PythonVersion('3.12.4');
-
-        assert.strictEqual(version.satisfies('>=3.13'), false);
-        assert.strictEqual(version.satisfies('>=3.12.*'), undefined);
-        assert.strictEqual(version.satisfies('>=3.13,invalid'), undefined);
+        assert.strictEqual(version.matchesReleasePrefix(new PythonVersion('3.12')), true);
+        assert.strictEqual(version.matchesReleasePrefix(new PythonVersion('3.12.5')), false);
+        assert.strictEqual(version.matchesReleasePrefix(new PythonVersion('3.12.5'), 2), true);
+        assert.strictEqual(version.matchesReleasePrefix(new PythonVersion('3.13.4'), 1), true);
     });
 
     test('rejects versions that cannot be compared safely', () => {

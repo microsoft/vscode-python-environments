@@ -1,4 +1,3 @@
-import { major, minor, patch, valid as pep440Valid } from '@renovatebot/pep440';
 import * as fs from 'fs-extra';
 import path from 'path';
 import { commands, ConfigurationTarget, l10n, window, workspace } from 'vscode';
@@ -25,16 +24,16 @@ export function isNumber(obj: unknown): obj is number {
 
 /**
  * Returns a short display string: "X.Y.Z" if micro is present, otherwise "X.Y.x".
- * Returns `input` unchanged if it is not a valid PEP 440 version.
+ * Returns `input` unchanged if it is not a valid Python interpreter version.
  */
 export function shortenVersionString(input: string): string {
-    if (!pep440Valid(input)) {
+    const version = PythonVersion.tryParse(input);
+    if (!version) {
         return input;
     }
-    const p = patch(input);
-    return p !== 0 || input.split('.').length >= 3
-        ? `${major(input)}.${minor(input)}.${p}`
-        : `${major(input)}.${minor(input)}.x`;
+    return version.precision >= 3
+        ? `${version.major}.${version.minor}.${version.patch}`
+        : `${version.major}.${version.minor}.x`;
 }
 
 export function sortEnvironments(collection: PythonEnvironment[]): PythonEnvironment[] {

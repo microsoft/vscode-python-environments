@@ -163,13 +163,16 @@ suite('inlineScriptInterpreter', () => {
             assert.strictEqual(picked.version, '3.12.4');
         });
 
-        test('ranks versions with pre-release / dev / local suffixes by release segments only', () => {
-            // 3.12.0a1 and 3.12.0.dev1 both parse to [3,12,0]; stable sort
-            // means the first-listed 3.12 entry wins.
-            const envs = [makeEnv('3.12.0a1'), makeEnv('3.11.0'), makeEnv('3.12.0.dev1')];
+        test('ranks supported prereleases and rejects package-only version suffixes', () => {
+            const envs = [
+                makeEnv('3.12.0rc1'),
+                makeEnv('3.12.0'),
+                makeEnv('3.13.0.dev1'),
+                makeEnv('3.14.0+local'),
+            ];
             const picked = pickCompatibleInterpreter(envs, undefined);
             assert.ok(picked);
-            assert.strictEqual(picked.version, '3.12.0a1');
+            assert.strictEqual(picked.version, '3.12.0');
         });
     });
 
