@@ -467,6 +467,12 @@ suite('inlineScriptMetadata', () => {
             assert.strictEqual(matchesPythonVersion('>=3.11', '3.10.0rc1'), false);
         });
 
+        test('supports normalized interpreter version formats', () => {
+            assert.strictEqual(matchesPythonVersion('>=3.14', '3.14.3.final.0'), true);
+            assert.strictEqual(matchesPythonVersion('==3.14.*', '3.14.0b1'), true);
+            assert.strictEqual(matchesPythonVersion('<3.14', '3.14.0b1'), false);
+        });
+
         test('invalid specifier returns false and logs warn', () => {
             assert.strictEqual(matchesPythonVersion('weird-thing', '3.11'), false);
             assert.ok(traceWarnStub.called);

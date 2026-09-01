@@ -5,7 +5,7 @@ import * as tomljs from '@iarna/toml';
 import * as fs from 'fs/promises';
 import { Uri } from 'vscode';
 import { traceVerbose, traceWarn } from '../logging';
-import { compareReleaseSegments, parseReleaseSegments } from '../utils/pep440Release';
+import { PythonVersion } from '../pythonVersion';
 
 /**
  * Parsed and validated PEP 723 `script` metadata block.
@@ -304,101 +304,15 @@ export function matchesPythonVersion(requiresPython: string, version: string): b
     if (!requiresPython || !version) {
         return false;
     }
-    const clauses = requiresPython
-        .split(',')
-        .map((c) => c.trim())
-        .filter((c) => c.length > 0);
-    if (clauses.length === 0) {
+    const parsedVersion = PythonVersion.tryParse(version);
+    if (!parsedVersion) {
+        traceWarn(`inline script metadata: cannot parse Python version: ${JSON.stringify(version)}`);
         return false;
     }
-    for (const clause of clauses) {
-        if (!matchSingleClause(clause, version)) {
-            return false;
-        }
-    }
-    return true;
-}
-
-// Longest-match-first order matters: `===` must beat `==`, `~=` and
-// `>=` / `<=` / `!=` must beat the single-char operators.
-const SPECIFIER_RE = /^(===|~=|==|!=|>=|<=|>|<)\s*(.+)$/;
-
-function matchSingleClause(clause: string, version: string): boolean {
-    const m = clause.match(SPECIFIER_RE);
-    if (!m) {
-        traceWarn(`inline script metadata: unrecognized requires-python clause: ${JSON.stringify(clause)}`);
+    const result = parsedVersion.satisfies(requiresPython);
+    if (result === undefined) {
+        traceWarn(`inline script metadata: invalid requires-python specifier: ${JSON.stringify(requiresPython)}`);
         return false;
     }
-    const op = m[1];
-    const specVersion = m[2].trim();
-
-    if (op === '===') {
-        // Arbitrary-equality: exact string comparison after stripping
-        // a leading 'v' (which PEP 440 permits).
-        const normSpec = specVersion.replace(/^v/i, '');
-        const normVer = version.replace(/^v/i, '');
-        return normSpec === normVer;
-    }
-
-    if (specVersion.endsWith('.*')) {
-        if (op !== '==' && op !== '!=') {
-            traceWarn(
-                `inline script metadata: wildcard versions are only valid with '==' or '!=': ${JSON.stringify(clause)}`,
-            );
-            return false;
-        }
-        const prefix = parseReleaseSegments(specVersion.slice(0, -2));
-        const ver = parseReleaseSegments(version);
-        if (prefix === undefined || ver === undefined) {
-            traceWarn(`inline script metadata: cannot parse version for clause ${JSON.stringify(clause)}`);
-            return false;
-        }
-        const isPrefixMatch = ver.length >= prefix.length && prefix.every((seg, i) => ver[i] === seg);
-        return op === '==' ? isPrefixMatch : !isPrefixMatch;
-    }
-
-    const specSegs = parseReleaseSegments(specVersion);
-    const verSegs = parseReleaseSegments(version);
-    if (specSegs === undefined || verSegs === undefined) {
-        traceWarn(`inline script metadata: cannot parse version for clause ${JSON.stringify(clause)}`);
-        return false;
-    }
-
-    const cmp = compareReleaseSegments(verSegs, specSegs);
-    switch (op) {
-        case '==':
-            return cmp === 0;
-        case '!=':
-            return cmp !== 0;
-        case '>=':
-            return cmp >= 0;
-        case '<=':
-            return cmp <= 0;
-        case '>':
-            return cmp > 0;
-        case '<':
-            return cmp < 0;
-        case '~=': {
-            // Compatible release. `~=X.Y` is equivalent to
-            // `>= X.Y, == X.*`; `~=X.Y.Z` is `>= X.Y.Z, == X.Y.*`.
-            // PEP 440 requires at least two release segments here.
-            if (specSegs.length < 2) {
-                traceWarn(
-                    `inline script metadata: '~=' requires at least two release segments: ${JSON.stringify(clause)}`,
-                );
-                return false;
-            }
-            if (cmp < 0) {
-                return false;
-            }
-            const prefix = specSegs.slice(0, -1);
-            if (verSegs.length < prefix.length) {
-                return false;
-            }
-            return prefix.every((seg, i) => verSegs[i] === seg);
-        }
-        default:
-            // Unreachable — SPECIFIER_RE only matches the operators above.
-            return false;
-    }
+    return result;
 }
