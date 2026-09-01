@@ -78,7 +78,7 @@ suite('CondaEnvManager.set - globalEnv update', () => {
     test('set(undefined, noPythonEnv) where user declines install clears globalEnv', async () => {
         const manager = createManager();
         const oldEnv = makeEnv('base', '/miniconda3', '3.11.0');
-        const noPythonEnv = makeEnv('nopy', '/miniconda3/envs/nopy', 'no-python');
+        const noPythonEnv = makeEnv('nopy', '/miniconda3/envs/nopy', '');
         (manager as any).globalEnv = oldEnv;
 
         // User declined to install Python

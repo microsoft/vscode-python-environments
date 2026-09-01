@@ -106,7 +106,7 @@ suite('CondaEnvManager.initialize - lazy registration flow', () => {
     test('does not use a no-Python base as the implicit global fallback', async () => {
         getCondaStub.resolves('/usr/bin/conda');
         constructSourcingStub.resolves({ toString: () => '' } as any);
-        const base = makeEnv('base', Uri.file('/opt/miniconda3').fsPath, 'no-python');
+        const base = makeEnv('base', Uri.file('/opt/miniconda3').fsPath, '');
         refreshCondaEnvsStub.resolves([base]);
 
         const mgr = createManager();
@@ -131,7 +131,7 @@ suite('CondaEnvManager.initialize - lazy registration flow', () => {
         getCondaStub.resolves('/usr/bin/conda');
         constructSourcingStub.resolves({ toString: () => '' } as any);
         const basePath = Uri.file('/opt/miniconda3').fsPath;
-        const base = makeEnv('base', basePath, 'no-python');
+        const base = makeEnv('base', basePath, '');
         refreshCondaEnvsStub.resolves([base]);
         getCondaForGlobalStub.resolves(basePath);
 
