@@ -69,6 +69,7 @@ import { PythonEnvironmentManagers } from './features/envManagers';
 import { EnvVarManager, PythonEnvVariableManager } from './features/execution/envVariableManager';
 import { latchInlineScriptFeatureActivation } from './features/inlineScript/activation';
 import { InlineScriptLazyDetector } from './features/inlineScript/lazyDetector';
+import { registerInlineScriptUx } from './features/inlineScript/setupEnvironment';
 import {
     applyInitialEnvironmentSelection,
     registerInterpreterSettingsChangeListener,
@@ -411,6 +412,7 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
                   }),
               ]
             : []),
+        ...(inlineScriptRouting ? registerInlineScriptUx(envManagers, inlineScriptRouting) : []),
         commands.registerCommand('python-envs.runInTerminal', (item) => {
             return runInTerminalCommand(item, api, terminalManager);
         }),
