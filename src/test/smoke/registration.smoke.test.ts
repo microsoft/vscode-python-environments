@@ -113,22 +113,29 @@ suite('Smoke: Registration Checks', function () {
         );
     });
 
-    test('Internal inline clear command is not publicly contributed', function () {
+    test('Inline clear command is contributed but palette-gated behind the inline-scripts flag', function () {
         const extension = vscode.extensions.getExtension<PythonEnvironmentApi>(ENVS_EXTENSION_ID);
         assert.ok(extension, `Extension ${ENVS_EXTENSION_ID} not found`);
 
         const contributedCommands = (extension.packageJSON?.contributes?.commands ?? []) as Array<{ command: string }>;
         const commandPaletteEntries = (extension.packageJSON?.contributes?.menus?.commandPalette ?? []) as Array<{
             command: string;
+            when?: string;
         }>;
 
         assert.ok(
-            !contributedCommands.some((entry) => entry.command === 'python-envs.clearScriptEnvCache'),
-            'python-envs.clearScriptEnvCache should not be publicly contributed before rollout',
+            contributedCommands.some((entry) => entry.command === 'python-envs.clearScriptEnvCache'),
+            'python-envs.clearScriptEnvCache should be contributed so it can appear in the palette',
         );
+        const paletteEntry = commandPaletteEntries.find((entry) => entry.command === 'python-envs.clearScriptEnvCache');
         assert.ok(
-            !commandPaletteEntries.some((entry) => entry.command === 'python-envs.clearScriptEnvCache'),
-            'python-envs.clearScriptEnvCache should not appear in contributed menus before rollout',
+            paletteEntry,
+            'python-envs.clearScriptEnvCache should have a commandPalette entry that gates its visibility',
+        );
+        assert.strictEqual(
+            paletteEntry.when,
+            'pythonEnvsInlineScriptsEnabled',
+            'python-envs.clearScriptEnvCache should only appear when the inline-scripts feature flag is enabled',
         );
     });
 
