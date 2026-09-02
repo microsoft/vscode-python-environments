@@ -8,26 +8,18 @@ and `1.39.0` starts the next pre-release cycle.
 
 Complete these steps before release day:
 
-1. Create a pull request against `main` that updates the version in
-   `package.json` and `package-lock.json` to the next even minor version:
-
-   ```bash
-   npm version 1.38.0 --no-git-tag-version
-   ```
-
-2. Merge the version-bump pull request into `main`.
-3. Create the release branch from the updated `main` branch. Name it
+1. Change the version in `package.json` to the next even minor version, for
+   example `1.38.0`.
+2. Run `npm i` to update `package-lock.json`.
+3. Create and merge a pull request against `main`.
+4. Create the release branch from the updated `main` branch. Name it
    `release/1.<even minor>.0`, for example `release/1.38.0`, and push it to the
    upstream repository.
-4. Create a second pull request against `main` that updates `package.json` and
-   `package-lock.json` to the next odd minor version:
-
-   ```bash
-   npm version 1.39.0 --no-git-tag-version
-   ```
-
-5. Merge the pre-release version-bump pull request into `main`. Do not merge
-   this change into the release branch.
+5. Change the version in `package.json` to the next odd minor version, for
+   example `1.39.0`.
+6. Run `npm i` to update `package-lock.json`.
+7. Create and merge a second pull request against `main`. Do not merge this
+   change into the release branch.
 
 The release branch must therefore retain the even version while `main` moves
 back to an odd pre-release version.
@@ -49,17 +41,10 @@ Use the existing release branch for a patch to a stable release. For example,
 release `1.38.1` from `release/1.38.0`; do not create a
 `release/1.38.1` branch.
 
-1. Apply the required fixes to the existing release branch. If a fix was first
-   merged into `main`, cherry-pick the relevant commit onto a branch created
-   from the release branch.
-2. On that branch, update the version in `package.json` and
-   `package-lock.json` to the new patch version:
-
-   ```bash
-   npm version 1.38.1 --no-git-tag-version
-   ```
-
-3. Create and merge a pull request targeting the existing release branch, for
+1. Change the version in `package.json` to the new patch version, for example
+   `1.38.1`.
+2. Run `npm i` to update `package-lock.json`.
+3. Create and merge a pull request against the existing release branch, for
    example `release/1.38.0`.
 4. On release day, run the stable Azure Pipelines build from that release
    branch with **Publish Extension** set to `true`.
