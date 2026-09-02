@@ -69,6 +69,14 @@ suite('PythonVersionSpecifier', () => {
         assert.strictEqual(matches('3.14.0b1', '==3.14.*'), false);
     });
 
+    test('excludes prereleases of an exclusive upper bound', () => {
+        assert.strictEqual(matches('3.14.0rc1', '>=3.13.0rc1,<3.14'), false);
+        assert.strictEqual(matches('3.13.5rc1', '>=3.13.0rc1,<3.14'), true);
+        assert.strictEqual(matches('3.14.0rc1', '>=3.13.0rc1,<3.14.0rc2'), true);
+        assert.strictEqual(matches('3.14.0rc1', '>=3.13.0rc1,<=3.14'), true);
+        assert.strictEqual(matches('3.13.9', '>=3.13,<3.14'), true);
+    });
+
     test('accepts a leading v on the literal', () => {
         assert.strictEqual(matches('3.12.4', '>=v3.11'), true);
         assert.strictEqual(matches('3.12.4', '==v3.12.*'), true);

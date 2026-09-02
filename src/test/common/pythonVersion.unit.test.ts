@@ -19,6 +19,22 @@ suite('PythonVersion', () => {
         assert.strictEqual(new PythonVersion('3.15.0rc1').toString(), '3.15.0rc1');
     });
 
+    test('normalizes every prerelease spelling and separator', () => {
+        assert.strictEqual(new PythonVersion('3.14.0alpha1').toString(), '3.14.0a1');
+        assert.strictEqual(new PythonVersion('3.14.0beta1').toString(), '3.14.0b1');
+        assert.strictEqual(new PythonVersion('3.14.0candidate1').toString(), '3.14.0rc1');
+        assert.strictEqual(new PythonVersion('3.14.0-alpha-1').toString(), '3.14.0a1');
+        assert.strictEqual(new PythonVersion('3.14.0_alpha_1').toString(), '3.14.0a1');
+        assert.strictEqual(new PythonVersion('3.14.0.alpha.1').toString(), '3.14.0a1');
+        assert.strictEqual(new PythonVersion('3.14.0ALPHA1').toString(), '3.14.0a1');
+    });
+
+    test('treats every release-candidate alias as the same level', () => {
+        for (const alias of ['rc1', 'c1', 'pre1', 'preview1', 'candidate1']) {
+            assert.strictEqual(new PythonVersion(`3.14.0${alias}`).toString(), '3.14.0rc1', alias);
+        }
+    });
+
     test('compares each numeric component in order', () => {
         assert.ok(new PythonVersion('3.9').compareTo(new PythonVersion('3.10')) < 0);
         assert.ok(new PythonVersion('3.12.9').compareTo(new PythonVersion('3.12.10')) < 0);

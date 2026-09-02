@@ -8,7 +8,7 @@ import { PythonVersion } from './pythonVersion';
  * specifier as a whole.
  */
 interface VersionClause {
-    /** Tests a version against this clause alone, ignoring prerelease exclusion. */
+    /** Tests a version against this clause alone. */
     readonly matches: (version: PythonVersion) => boolean;
     /** Whether this clause explicitly names a prerelease. */
     readonly allowsPrereleases: boolean;
@@ -86,6 +86,8 @@ export class PythonVersionSpecifier {
      *
      * A prerelease only satisfies a specifier that itself names a prerelease,
      * so `3.14.0rc1` does not satisfy `>=3.11` but does satisfy `>=3.14.0rc1`.
+     * An exclusive upper bound still rejects prereleases of its own release,
+     * so `3.14.0rc1` does not satisfy `>=3.13.0rc1,<3.14`.
      *
      * @param version The version to test.
      */
@@ -147,5 +149,18 @@ function parseClause(clause: string): VersionClause | undefined {
     }
 
     const comparison = COMPARISONS[operator];
-    return comparison ? { matches: (version) => comparison(version.compareTo(bound)), allowsPrereleases } : undefined;
+    if (!comparison) {
+        return undefined;
+    }
+
+    // An exclusive upper bound never admits a prerelease of the bound itself,
+    // so `<3.14` rejects `3.14.0rc1` even when another clause names a
+    // prerelease, while `<3.14.0rc2` still admits it.
+    const excludesBoundPrereleases = operator === '<' && !allowsPrereleases;
+    return {
+        matches: (version) =>
+            comparison(version.compareTo(bound)) &&
+            !(excludesBoundPrereleases && version.releaseLevel !== 'final' && version.matchesReleasePrefix(bound, 3)),
+        allowsPrereleases,
+    };
 }

@@ -4,11 +4,11 @@ type PythonReleaseLevel = 'alpha' | 'beta' | 'candidate' | 'final';
 const RELEASE_LEVELS: readonly PythonReleaseLevel[] = ['alpha', 'beta', 'candidate', 'final'];
 
 /**
- * Maps the alternative spellings onto the release level they name.
+ * Maps the abbreviated spellings onto the release level they name.
  *
- * Python reports `alpha`, `beta`, and `candidate`, while version strings use
- * the compact `a`, `b`, and `rc`. A specifier may also spell a release
- * candidate `c`, `pre`, or `preview`.
+ * Python reports `alpha`, `beta`, and `candidate`, while version strings
+ * abbreviate them as `a`, `b`, and `rc`. A release candidate may also be
+ * spelled `c`, `pre`, or `preview`.
  */
 const RELEASE_LEVEL_ALIASES: Readonly<Record<string, PythonReleaseLevel>> = {
     a: 'alpha',
@@ -19,8 +19,16 @@ const RELEASE_LEVEL_ALIASES: Readonly<Record<string, PythonReleaseLevel>> = {
     preview: 'candidate',
 };
 
+/**
+ * Matches a release, optionally followed by a prerelease level and serial.
+ *
+ * Every spelling of a level is accepted in one alternation, so the dotted
+ * `sys.version_info` form and the compact and separated forms differ only in
+ * their optional `.`, `-`, or `_` separators. Longer spellings precede the
+ * abbreviations they start with, so `alpha` wins over `a`.
+ */
 const VERSION_PATTERN =
-    /^(?<major>\d+)(?:\.(?<minor>\d+))?(?:\.(?<patch>\d+))?(?:(?:\.(?<longLevel>alpha|beta|candidate|final)\.(?<longSerial>\d+))|(?:(?<shortLevel>preview|pre|rc|a|b|c)[._-]?(?<shortSerial>\d+)))?$/i;
+    /^(?<major>\d+)(?:\.(?<minor>\d+))?(?:\.(?<patch>\d+))?(?:[._-]?(?<level>alpha|beta|candidate|final|preview|pre|rc|a|b|c)[._-]?(?<serial>\d+))?$/i;
 
 /**
  * A Python interpreter release, such as `3.12.4` or `3.14.0rc1`.
@@ -35,9 +43,9 @@ export class PythonVersion {
     /**
      * Creates a normalized Python release version.
      *
-     * Missing minor and patch components are normalized to zero. Python
-     * `sys.version_info` suffixes and compact prerelease suffixes are
-     * normalized, so `3.14.0.beta.1` and `3.14.0b1` are both represented as
+     * Missing minor and patch components are normalized to zero. Every
+     * spelling of a prerelease is normalized, so `3.14.0.beta.1`,
+     * `3.14.0beta1`, `3.14.0-beta-1`, and `3.14.0b1` are all represented as
      * `3.14.0b1`.
      *
      * @param version A Python release version.
@@ -55,8 +63,8 @@ export class PythonVersion {
         this.major = Number(groups.major);
         this.minor = Number(groups.minor ?? 0);
         this.patch = Number(groups.patch ?? 0);
-        this.releaseLevel = toReleaseLevel(groups.longLevel ?? groups.shortLevel);
-        this.releaseSerial = Number(groups.longSerial ?? groups.shortSerial ?? 0);
+        this.releaseLevel = toReleaseLevel(groups.level);
+        this.releaseSerial = Number(groups.serial ?? 0);
         if (
             ![this.major, this.minor, this.patch, this.releaseSerial].every(Number.isSafeInteger) ||
             (this.releaseLevel === 'final' && this.releaseSerial !== 0)
