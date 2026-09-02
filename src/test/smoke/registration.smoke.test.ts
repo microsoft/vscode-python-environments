@@ -139,7 +139,35 @@ suite('Smoke: Registration Checks', function () {
         );
     });
 
-    test('Internal inline clear command is not registered while the feature flag is off', async function () {
+    test('Inline bulk setup command is contributed but palette-gated behind the inline-scripts flag', function () {
+        const extension = vscode.extensions.getExtension<PythonEnvironmentApi>(ENVS_EXTENSION_ID);
+        assert.ok(extension, `Extension ${ENVS_EXTENSION_ID} not found`);
+
+        const contributedCommands = (extension.packageJSON?.contributes?.commands ?? []) as Array<{ command: string }>;
+        const commandPaletteEntries = (extension.packageJSON?.contributes?.menus?.commandPalette ?? []) as Array<{
+            command: string;
+            when?: string;
+        }>;
+
+        assert.ok(
+            contributedCommands.some((entry) => entry.command === 'python-envs.setupInlineScriptEnvs'),
+            'python-envs.setupInlineScriptEnvs should be contributed so it can appear in the palette',
+        );
+        const paletteEntry = commandPaletteEntries.find(
+            (entry) => entry.command === 'python-envs.setupInlineScriptEnvs',
+        );
+        assert.ok(
+            paletteEntry,
+            'python-envs.setupInlineScriptEnvs should have a commandPalette entry that gates its visibility',
+        );
+        assert.strictEqual(
+            paletteEntry.when,
+            'pythonEnvsInlineScriptsEnabled',
+            'python-envs.setupInlineScriptEnvs should only appear when the inline-scripts feature flag is enabled',
+        );
+    });
+
+    test('Internal inline-script commands are not registered while the feature flag is off', async function () {
         const allCommands = await vscode.commands.getCommands(true);
 
         assert.ok(
@@ -148,6 +176,15 @@ suite('Smoke: Registration Checks', function () {
         );
         await assert.rejects(
             () => Promise.resolve(vscode.commands.executeCommand('python-envs.clearScriptEnvCache')),
+            /not found/i,
+        );
+
+        assert.ok(
+            !allCommands.includes('python-envs.setupInlineScriptEnvs'),
+            'python-envs.setupInlineScriptEnvs should not be registered by default',
+        );
+        await assert.rejects(
+            () => Promise.resolve(vscode.commands.executeCommand('python-envs.setupInlineScriptEnvs')),
             /not found/i,
         );
     });

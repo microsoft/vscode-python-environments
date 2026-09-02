@@ -36,6 +36,7 @@
     "python-envs.packages.title": "Manage Packages",
     "python-envs.clearCache.title": "Clear Cache",
     "python-envs.clearScriptEnvCache.title": "Clear Inline Script Environment Cache",
+    "python-envs.setupInlineScriptEnvs.title": "Set Up Environments for Inline Script Files",
     "python-envs.runInTerminal.title": "Run in Terminal",
     "python-envs.createTerminal.title": "Create Python Terminal",
     "python-envs.runAsTask.title": "Run as Task",

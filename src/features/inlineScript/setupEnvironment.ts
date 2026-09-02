@@ -19,8 +19,9 @@ import { registerInlineScriptCodeLens } from './codeLens';
 export const SETUP_INLINE_SCRIPT_ENV_COMMAND = 'python-envs.setupInlineScriptEnv';
 
 /**
- * Hidden command that scans the workspace and sets up environments for the selected inline-script
- * files. Intentionally not contributed in `package.json` while the feature is behind the internal flag.
+ * Command that scans the workspace and sets up environments for the selected inline-script files.
+ * Contributed in `package.json` but only shown in the Command Palette while the inline-scripts
+ * feature flag is enabled (gated by the `pythonEnvsInlineScriptsEnabled` context key).
  */
 export const SETUP_INLINE_SCRIPT_ENVS_COMMAND = 'python-envs.setupInlineScriptEnvs';
 
@@ -182,8 +183,8 @@ async function filterInlineScriptFiles(files: readonly Uri[]): Promise<Uri[]> {
 
 /**
  * Register the inline-script user-facing surfaces (the CodeLens and its setup commands). Only called
- * when the PEP 723 inline-script feature flag is enabled; the commands are intentionally hidden from
- * `package.json` for now.
+ * when the PEP 723 inline-script feature flag is enabled. The single-file setup command is invoked by
+ * the CodeLens and stays out of `package.json`; the bulk command is palette-gated behind the flag.
  */
 export function registerInlineScriptUx(em: EnvironmentManagers, routing: InlineScriptRoutingRegistry): Disposable[] {
     return [
