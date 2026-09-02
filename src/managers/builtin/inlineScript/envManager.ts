@@ -2475,17 +2475,17 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
             return { errorCategory: 'install-failure' };
         }
         const version = available
-            .filter(
-                (candidate) =>
+            .flatMap((candidate) => {
+                const parsed = PythonVersion.tryParse(candidate.version);
+                return parsed &&
                     candidate.implementation === 'cpython' &&
                     candidate.variant === 'default' &&
                     candidate.version_parts.major === 3 &&
-                    PythonVersion.tryParse(candidate.version) !== undefined &&
-                    this.matchesInstallConstraint(requiresPython, candidate.version),
-            )
-            .sort((left, right) =>
-                new PythonVersion(right.version).compareTo(new PythonVersion(left.version)),
-            )[0]?.version;
+                    this.matchesInstallConstraint(requiresPython, candidate.version)
+                    ? [{ parsed, raw: candidate.version }]
+                    : [];
+            })
+            .sort((left, right) => right.parsed.compareTo(left.parsed))[0]?.raw;
         return version ? { version } : { errorCategory: 'no-compatible-python' };
     }
 

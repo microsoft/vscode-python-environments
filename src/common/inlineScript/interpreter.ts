@@ -27,12 +27,14 @@ export function pickCompatibleInterpreter(
 ): PythonEnvironment | undefined {
     const trimmedConstraint = requiresPython?.trim();
     const constraint = trimmedConstraint ? trimmedConstraint : undefined;
-    const candidates = installed.filter((env) => isUsableBaseInterpreter(env, constraint));
+    const candidates = installed.flatMap((env) => {
+        const version = isUsableBaseInterpreter(env, constraint) ? PythonVersion.tryParse(env.version) : undefined;
+        return version ? [{ env, version }] : [];
+    });
     if (candidates.length === 0) {
         return undefined;
     }
-    const sorted = [...candidates].sort((a, b) => new PythonVersion(b.version).compareTo(new PythonVersion(a.version)));
-    return sorted[0];
+    return candidates.sort((a, b) => b.version.compareTo(a.version))[0].env;
 }
 
 /**

@@ -31,9 +31,7 @@ export function shortenVersionString(input: string): string {
     if (!version) {
         return input;
     }
-    return version.precision >= 3
-        ? `${version.major}.${version.minor}.${version.patch}`
-        : `${version.major}.${version.minor}.x`;
+    return version.precision >= 3 ? version.toReleaseString(3) : `${version.toReleaseString(2)}.x`;
 }
 
 export function sortEnvironments(collection: PythonEnvironment[]): PythonEnvironment[] {
