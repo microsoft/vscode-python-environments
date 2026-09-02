@@ -98,6 +98,7 @@ This project has adopted the [Microsoft Open Source Code of Conduct](https://ope
 ## Additional Resources
 
 - [Development Process](https://github.com/Microsoft/vscode-python/blob/main/CONTRIBUTING.md#development-process)
+- [Release Process](./docs/releasing.md)
 - [API Documentation](./src/api.ts)
 - [Project Documentation](./docs/projects-api-reference.md)
 
