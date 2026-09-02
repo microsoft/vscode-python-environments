@@ -553,6 +553,29 @@ suite('InlineScriptEnvManager', () => {
             assert.strictEqual(promptInstallPythonViaUvStub.callCount, 0);
         });
 
+        test('creates an environment when the resolved base reports a CPython sys.version_info version', async () => {
+            // `pet` reports interpreter versions as `major.minor.micro.releaselevel.serial`
+            // (e.g. "3.14.3.final.0"), which is not valid PEP 440. This must still satisfy
+            // requires-python (matchesInstallConstraint) and pass the post-create
+            // release-equality check (areEqualPythonReleases) instead of being discarded.
+            const versionInfoBase = makeEnvironment('ms-python.python:system', '3.14.3.final.0', baseExecutable);
+            apiGetEnvironmentsStub.resolves([versionInfoBase]);
+
+            assert.ok(await manager.create(scriptUri()));
+
+            assert.strictEqual(createWithProgressStub.firstCall.args[4], versionInfoBase);
+        });
+
+        test('creates an environment with a sys.version_info version when requires-python is absent', async () => {
+            readMetadataStub.resolves({ ...VALID_METADATA, requiresPython: undefined });
+            const versionInfoBase = makeEnvironment('ms-python.python:system', '3.14.3.final.0', baseExecutable);
+            apiGetEnvironmentsStub.resolves([versionInfoBase]);
+
+            assert.ok(await manager.create(scriptUri()));
+
+            assert.strictEqual(createWithProgressStub.firstCall.args[4], versionInfoBase);
+        });
+
         test('excludes named conda environments even when they are newer than conda base', async () => {
             const condaNamed = makeEnvironment(
                 'ms-python.python:conda',
