@@ -113,5 +113,5 @@ extends:
                   contentSource: 'Folder'
                   folderLocation: '$(Pipeline.Workspace)/npm-package'
                   waitForReleaseCompletion: true
-                  owners: 'grwheele@microsoft.com'
+                  owners: 'brcan@microsoft.com'
                   approvers: 'eduardovil@microsoft.com'
