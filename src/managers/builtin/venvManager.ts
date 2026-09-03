@@ -26,6 +26,7 @@ import { VenvManagerStrings } from '../../common/localize';
 import { traceError, traceWarn } from '../../common/logging';
 import { createDeferred, Deferred } from '../../common/utils/deferred';
 import { normalizePath } from '../../common/utils/pathUtils';
+import { PythonVersion } from '../../common/pythonVersion';
 import { showErrorMessage, showInformationMessage, withProgress } from '../../common/window.apis';
 import { findParentIfFile } from '../../features/envCommands';
 import { getProjectFsPathForScope, tryFastPathGet } from '../common/fastPath';
@@ -103,7 +104,7 @@ export class VenvManager implements EnvironmentManager {
      * Returns configuration for quick create in the workspace root, undefined if no suitable Python 3 version is found.
      */
     quickCreateConfig(): QuickCreateConfig | undefined {
-        if (!this.globalEnv || !this.globalEnv.version.startsWith('3.')) {
+        if (!this.globalEnv || PythonVersion.tryParse(this.globalEnv.version)?.major !== 3) {
             return undefined;
         }
         return {
@@ -149,7 +150,7 @@ export class VenvManager implements EnvironmentManager {
                     // Re-fetch environments after refresh
                     globals = await this.api.getEnvironments('global');
                     // Update globalEnv reference if we found any Python 3.x environments
-                    const python3Envs = globals.filter((e) => e.version.startsWith('3.'));
+                    const python3Envs = globals.filter((e) => PythonVersion.tryParse(e.version)?.major === 3);
                     if (python3Envs.length === 0) {
                         this.log.warn('Python installed via uv but no Python 3.x global environments were detected.');
                     } else {
@@ -166,7 +167,7 @@ export class VenvManager implements EnvironmentManager {
                     showErrorMessage(VenvManagerStrings.venvErrorNoBasePython);
                     throw new Error('No base python found');
                 }
-                if (!this.globalEnv.version.startsWith('3.')) {
+                if (PythonVersion.tryParse(this.globalEnv.version)?.major !== 3) {
                     this.log.error('Did not find any base python 3.*');
                     globals.forEach((e, i) => {
                         this.log.error(`${i}: ${e.version} : ${e.environmentPath.fsPath}`);
@@ -174,7 +175,7 @@ export class VenvManager implements EnvironmentManager {
                     showErrorMessage(VenvManagerStrings.venvErrorNoPython3);
                     throw new Error('Did not find any base python 3.*');
                 }
-                if (this.globalEnv && this.globalEnv.version.startsWith('3.')) {
+                if (this.globalEnv && PythonVersion.tryParse(this.globalEnv.version)?.major === 3) {
                     // quick create given correct information
                     result = await quickCreateVenv(
                         this.nativeFinder,

@@ -462,14 +462,15 @@ suite('inlineScriptMetadata', () => {
             assert.strictEqual(matchesPythonVersion('===3.11.0', '3.11'), false);
         });
 
-        test('input version with pre/dev suffix is truncated to release', () => {
-            assert.strictEqual(matchesPythonVersion('>=3.11', '3.11.0rc1'), true);
+        test('prereleases require an explicitly prerelease-compatible specifier', () => {
+            assert.strictEqual(matchesPythonVersion('>=3.11', '3.11.0rc1'), false);
+            assert.strictEqual(matchesPythonVersion('>=3.11.0rc1', '3.11.0rc1'), true);
             assert.strictEqual(matchesPythonVersion('>=3.11', '3.10.0rc1'), false);
         });
 
         test('supports normalized interpreter version formats', () => {
             assert.strictEqual(matchesPythonVersion('>=3.14', '3.14.3.final.0'), true);
-            assert.strictEqual(matchesPythonVersion('==3.14.*', '3.14.0b1'), true);
+            assert.strictEqual(matchesPythonVersion('==3.14.*', '3.14.0b1'), false);
             assert.strictEqual(matchesPythonVersion('<3.14', '3.14.0b1'), false);
         });
 

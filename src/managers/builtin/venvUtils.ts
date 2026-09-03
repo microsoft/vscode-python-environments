@@ -22,6 +22,7 @@ import { ENVS_EXTENSION_ID } from '../../common/constants';
 import { Common, VenvManagerStrings } from '../../common/localize';
 import { traceInfo, traceVerbose } from '../../common/logging';
 import { getWorkspacePersistentState } from '../../common/persistentState';
+import { PythonVersion } from '../../common/pythonVersion';
 import { EventNames } from '../../common/telemetry/constants';
 import { sendTelemetryEvent } from '../../common/telemetry/sender';
 import { normalizePath } from '../../common/utils/pathUtils';
@@ -441,7 +442,7 @@ export function ensureGlobalEnv(basePythons: PythonEnvironment[], log: LogOutput
         throw new Error('No base python found');
     }
 
-    const filtered = basePythons.filter((e) => e.version.startsWith('3.'));
+    const filtered = basePythons.filter((e) => PythonVersion.tryParse(e.version)?.major === 3);
     if (filtered.length === 0) {
         log.error('Did not find any base python 3.*');
         showErrorMessage(VenvManagerStrings.venvErrorNoPython3);

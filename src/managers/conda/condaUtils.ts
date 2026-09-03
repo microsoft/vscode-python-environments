@@ -1,4 +1,3 @@
-import { compare as pep440Compare, valid as pep440Valid } from '@renovatebot/pep440';
 import * as fse from 'fs-extra';
 import * as os from 'os';
 import * as path from 'path';
@@ -30,6 +29,7 @@ import { Common, CondaStrings, PackageManagement, Pickers } from '../../common/l
 import { traceError, traceInfo, traceVerbose, traceWarn } from '../../common/logging';
 import { getWorkspacePersistentState } from '../../common/persistentState';
 import { pickProject } from '../../common/pickers/projects';
+import { PythonVersion } from '../../common/pythonVersion';
 import { StopWatch } from '../../common/stopWatch';
 import { createDeferred } from '../../common/utils/deferred';
 import { untildify } from '../../common/utils/pathUtils';
@@ -952,31 +952,26 @@ export async function getLocation(api: PythonEnvironmentApi, uris: Uri | Uri[]):
 }
 const RECOMMENDED_CONDA_PYTHON = '3.11.11';
 
-export function trimVersionToMajorMinor(version: string): string {
-    const match = version.match(/^(\d+\.\d+\.\d+)/);
-    return match ? match[1] : version;
+/**
+ * Returns normalized, unique Python interpreter releases sorted newest first.
+ *
+ * @param environments Environments whose interpreter versions should be listed.
+ * @returns Valid Python releases in descending version order.
+ */
+export function getPythonVersionsForCreation(environments: ReadonlyArray<PythonEnvironment>): string[] {
+    const versions = environments
+        .map((environment) => PythonVersion.tryParse(environment.version))
+        .filter((version): version is PythonVersion => !!version)
+        .sort((left, right) => right.compareTo(left))
+        .map((version) => (version.releaseLevel === 'final' ? version.toReleaseString() : version.toString()));
+    return [...new Set(versions)];
 }
 export async function pickPythonVersion(
     api: PythonEnvironmentApi,
     token?: CancellationToken,
 ): Promise<string | undefined> {
     const envs = await api.getEnvironments('global');
-    let versions = Array.from(
-        new Set(
-            envs
-                .map((env) => env.version)
-                .filter(Boolean)
-                .map((v) => trimVersionToMajorMinor(v)), // cut to 3 digits
-        ),
-    );
-
-    // Sort versions descending using PEP 440 comparison
-    versions = versions.sort((a, b) => {
-        if (!pep440Valid(a) || !pep440Valid(b)) {
-            return 0;
-        }
-        return pep440Compare(b, a); // descending
-    });
+    let versions = getPythonVersionsForCreation(envs);
 
     if (!versions || versions.length === 0) {
         versions = ['3.13', '3.12', '3.11', '3.10', '3.9'];

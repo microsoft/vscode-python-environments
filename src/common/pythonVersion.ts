@@ -1,56 +1,74 @@
 type PythonReleaseLevel = 'alpha' | 'beta' | 'candidate' | 'final';
 
+/** Release levels from oldest to newest; the index of a level is its rank. */
+const RELEASE_LEVELS: readonly PythonReleaseLevel[] = ['alpha', 'beta', 'candidate', 'final'];
+
+/**
+ * Maps the abbreviated spellings onto the release level they name.
+ *
+ * Python reports `alpha`, `beta`, and `candidate`, while version strings
+ * abbreviate them as `a`, `b`, and `rc`. A release candidate may also be
+ * spelled `c`, `pre`, or `preview`.
+ */
+const RELEASE_LEVEL_ALIASES: Readonly<Record<string, PythonReleaseLevel>> = {
+    a: 'alpha',
+    b: 'beta',
+    rc: 'candidate',
+    c: 'candidate',
+    pre: 'candidate',
+    preview: 'candidate',
+};
+
+/**
+ * Matches a release, optionally followed by a prerelease level and serial.
+ *
+ * Every spelling of a level is accepted in one alternation, so the dotted
+ * `sys.version_info` form and the compact and separated forms differ only in
+ * their optional `.`, `-`, or `_` separators. Longer spellings precede the
+ * abbreviations they start with, so `alpha` wins over `a`.
+ */
+const VERSION_PATTERN =
+    /^(?<major>\d+)(?:\.(?<minor>\d+))?(?:\.(?<patch>\d+))?(?:[._-]?(?<level>alpha|beta|candidate|final|preview|pre|rc|a|b|c)[._-]?(?<serial>\d+))?$/i;
+
+/**
+ * A Python interpreter release, such as `3.12.4` or `3.14.0rc1`.
+ *
+ * This models the versions Python reports for itself through
+ * `sys.version_info`. It deliberately omits the PEP 440 packaging features
+ * that interpreters never use, such as epochs, post releases, dev releases,
+ * and local version labels; use a dedicated PEP 440 implementation for
+ * package versions.
+ */
 export class PythonVersion {
-    private static readonly VERSION_PATTERN =
-        /^(?<major>\d+)(?:\.(?<minor>\d+))?(?:\.(?<patch>\d+))?(?:(?:\.(?<longLevel>alpha|beta|candidate|final)\.(?<longSerial>\d+))|(?:(?<shortLevel>a|b|rc)(?<shortSerial>\d+)))?$/i;
-
-    private static readonly WILDCARD_PATTERN = /^(\d+)(?:\.(\d+))?(?:\.(\d+))?\.\*$/;
-
-    private static readonly SPECIFIER_PATTERN = /^(===|~=|==|!=|>=|<=|>|<)\s*(.+)$/;
-
-    private static readonly RELEASE_LEVEL_ALIASES: Readonly<Record<string, PythonReleaseLevel>> = {
-        a: 'alpha',
-        alpha: 'alpha',
-        b: 'beta',
-        beta: 'beta',
-        rc: 'candidate',
-        candidate: 'candidate',
-        final: 'final',
-    };
-
-    private static readonly RELEASE_LEVEL_ORDER: Readonly<Record<PythonReleaseLevel, number>> = {
-        alpha: 0,
-        beta: 1,
-        candidate: 2,
-        final: 3,
-    };
-
     /**
      * Creates a normalized Python release version.
      *
-     * Missing minor and patch components are normalized to zero. Python
-     * `sys.version_info` suffixes and compact prerelease suffixes are
-     * normalized, so `3.14.0.beta.1` and `3.14.0b1` are both represented as
+     * Missing minor and patch components are normalized to zero. Every
+     * spelling of a prerelease is normalized, so `3.14.0.beta.1`,
+     * `3.14.0beta1`, `3.14.0-beta-1`, and `3.14.0b1` are all represented as
      * `3.14.0b1`.
      *
      * @param version A Python release version.
+     * @throws TypeError When the version cannot be parsed.
      */
     constructor(version: string) {
-        const normalizedVersion = version.trim();
-        const match = PythonVersion.VERSION_PATTERN.exec(normalizedVersion);
-        if (!match) {
+        const source = version.trim();
+        const groups = VERSION_PATTERN.exec(source)?.groups;
+        if (!groups) {
             throw new TypeError(`Invalid Python version: ${version}`);
         }
 
-        const groups = match.groups!;
-        this.original = normalizedVersion;
-        this.releaseComponentCount = groups.patch !== undefined ? 3 : groups.minor !== undefined ? 2 : 1;
-        this.major = parseNumericComponent(groups.major, version);
-        this.minor = parseNumericComponent(groups.minor, version);
-        this.patch = parseNumericComponent(groups.patch, version);
-        this.releaseLevel = PythonVersion.normalizeReleaseLevel(groups.longLevel ?? groups.shortLevel);
-        this.releaseSerial = parseNumericComponent(groups.longSerial ?? groups.shortSerial, version);
-        if (this.releaseLevel === 'final' && this.releaseSerial !== 0) {
+        this.source = source;
+        this.precision = groups.patch !== undefined ? 3 : groups.minor !== undefined ? 2 : 1;
+        this.major = Number(groups.major);
+        this.minor = Number(groups.minor ?? 0);
+        this.patch = Number(groups.patch ?? 0);
+        this.releaseLevel = toReleaseLevel(groups.level);
+        this.releaseSerial = Number(groups.serial ?? 0);
+        if (
+            ![this.major, this.minor, this.patch, this.releaseSerial].every(Number.isSafeInteger) ||
+            (this.releaseLevel === 'final' && this.releaseSerial !== 0)
+        ) {
             throw new TypeError(`Invalid Python version: ${version}`);
         }
     }
@@ -60,8 +78,16 @@ export class PythonVersion {
     readonly patch: number;
     readonly releaseLevel: PythonReleaseLevel;
     readonly releaseSerial: number;
-    private readonly original: string;
-    private readonly releaseComponentCount: number;
+
+    /**
+     * How many release components were explicitly supplied: `1` for `3`, `2`
+     * for `3.12`, and `3` for `3.12.1`. Omitted components are normalized to
+     * zero, so this is the only record of how precisely the version was stated.
+     */
+    readonly precision: number;
+
+    /** The trimmed version exactly as it was supplied, before normalization. */
+    readonly source: string;
 
     /**
      * Attempts to parse a Python version without propagating malformed input errors.
@@ -82,7 +108,10 @@ export class PythonVersion {
     }
 
     /**
-     * Compares this version with another normalized Python version.
+     * Compares this version with another Python version.
+     *
+     * Prereleases order before the final release of the same numeric release,
+     * so `3.14.0rc1` is older than `3.14.0`.
      *
      * @param other The version to compare against.
      * @returns A negative number when this version is older, zero when both
@@ -90,50 +119,50 @@ export class PythonVersion {
      */
     compareTo(other: PythonVersion): number {
         return (
-            this.compareReleaseTo(other) ||
-            compareNumbers(
-                PythonVersion.RELEASE_LEVEL_ORDER[this.releaseLevel],
-                PythonVersion.RELEASE_LEVEL_ORDER[other.releaseLevel],
-            ) ||
-            compareNumbers(this.releaseSerial, other.releaseSerial)
+            this.major - other.major ||
+            this.minor - other.minor ||
+            this.patch - other.patch ||
+            RELEASE_LEVELS.indexOf(this.releaseLevel) - RELEASE_LEVELS.indexOf(other.releaseLevel) ||
+            this.releaseSerial - other.releaseSerial
         );
     }
 
     /**
-     * Tests whether this version satisfies a Python version specifier.
+     * Tests whether this version is selected by a partially specified version.
      *
-     * Supports `==`, `!=`, `>=`, `<=`, `>`, `<`, `~=`, and `===` operators,
-     * comma-separated AND clauses, and terminal wildcards with `==` or `!=`.
-     * Prerelease suffixes are ignored for ordered and release-equality
-     * comparisons, matching the inline-script interpreter behavior.
+     * A selector that omits release components matches any version sharing the
+     * components it does supply, so `3.12` selects `3.12.11`. A fully specified
+     * or prerelease selector must match exactly, so `3.14.0rc1` does not select
+     * `3.14.0`.
      *
-     * @param specifier A version specifier such as `>=3.11,<3.14` or `==3.12.*`.
-     * @returns Whether every clause matches, or `undefined` when the specifier is invalid.
+     * @param selector The requested version.
+     * @returns Whether this version satisfies the request.
      */
-    satisfies(specifier: unknown): boolean | undefined {
-        if (typeof specifier !== 'string') {
-            return undefined;
-        }
-
-        const clauses = specifier.split(',').map((clause) => clause.trim());
-        if (clauses.some((clause) => clause.length === 0)) {
-            return undefined;
-        }
-
-        let satisfiesAll = true;
-        for (const clause of clauses) {
-            const result = this.matchClause(clause);
-            if (result === undefined) {
-                return undefined;
-            }
-            satisfiesAll &&= result;
-        }
-        return satisfiesAll;
+    matchesSelector(selector: PythonVersion): boolean {
+        return selector.precision < 3 && selector.releaseLevel === 'final'
+            ? this.matchesReleasePrefix(selector)
+            : this.compareTo(selector) === 0;
     }
 
-    /** Returns the normalized Python version representation. */
+    /**
+     * Reports whether this version shares the leading release components of
+     * another version, ignoring any components beyond the compared count.
+     *
+     * @param other The version supplying the components to compare.
+     * @param count How many leading components to compare, defaulting to the
+     * number `other` explicitly supplied.
+     */
+    matchesReleasePrefix(other: PythonVersion, count: number = other.precision): boolean {
+        return (
+            (count < 1 || this.major === other.major) &&
+            (count < 2 || this.minor === other.minor) &&
+            (count < 3 || this.patch === other.patch)
+        );
+    }
+
+    /** Returns the fully normalized version, such as `3.12.4` or `3.14.0rc1`. */
     toString(): string {
-        const release = `${this.major}.${this.minor}.${this.patch}`;
+        const release = this.toReleaseString(3);
         switch (this.releaseLevel) {
             case 'alpha':
                 return `${release}a${this.releaseSerial}`;
@@ -146,107 +175,21 @@ export class PythonVersion {
         }
     }
 
-    private static normalizeReleaseLevel(value: string | undefined): PythonReleaseLevel {
-        return value ? (PythonVersion.RELEASE_LEVEL_ALIASES[value.toLowerCase()] ?? 'final') : 'final';
-    }
-
-    private matchClause(clause: string): boolean | undefined {
-        const match = PythonVersion.SPECIFIER_PATTERN.exec(clause);
-        if (!match) {
-            return undefined;
-        }
-
-        const operator = match[1];
-        const expected = match[2].trim();
-        if (operator === '===') {
-            return expected ? this.original.replace(/^v/i, '') === expected.replace(/^v/i, '') : undefined;
-        }
-        if (expected.endsWith('.*')) {
-            const wildcard = PythonVersion.parseWildcard(expected);
-            if ((operator !== '==' && operator !== '!=') || !wildcard) {
-                return undefined;
-            }
-            const matches = this.matchesReleaseComponents(wildcard);
-            return operator === '==' ? matches : !matches;
-        }
-
-        const expectedVersion = PythonVersion.tryParse(expected);
-        if (!expectedVersion || (operator === '~=' && expectedVersion.releaseComponentCount < 2)) {
-            return undefined;
-        }
-
-        const comparison = this.compareReleaseTo(expectedVersion);
-        switch (operator) {
-            case '==':
-                return comparison === 0;
-            case '!=':
-                return comparison !== 0;
-            case '>=':
-                return comparison >= 0;
-            case '<=':
-                return comparison <= 0;
-            case '>':
-                return comparison > 0;
-            case '<':
-                return comparison < 0;
-            case '~=':
-                return (
-                    comparison >= 0 &&
-                    this.matchesReleaseComponents(
-                        expectedVersion.releasePrefix(expectedVersion.releaseComponentCount - 1),
-                    )
-                );
-            default:
-                return false;
-        }
-    }
-
-    private compareReleaseTo(other: PythonVersion): number {
-        return (
-            compareNumbers(this.major, other.major) ||
-            compareNumbers(this.minor, other.minor) ||
-            compareNumbers(this.patch, other.patch)
-        );
-    }
-
-    private releasePrefix(length: number): readonly number[] {
-        return [this.major, this.minor, this.patch].slice(0, length);
-    }
-
-    private matchesReleaseComponents(expected: readonly number[]): boolean {
-        return (
-            expected[0] === this.major &&
-            (expected.length < 2 || expected[1] === this.minor) &&
-            (expected.length < 3 || expected[2] === this.patch)
-        );
-    }
-
-    private static parseWildcard(wildcard: unknown): number[] | undefined {
-        if (typeof wildcard !== 'string') {
-            return undefined;
-        }
-
-        const match = PythonVersion.WILDCARD_PATTERN.exec(wildcard.trim());
-        if (!match) {
-            return undefined;
-        }
-
-        const components = match
-            .slice(1)
-            .filter((component): component is string => component !== undefined)
-            .map(Number);
-        return components.every(Number.isSafeInteger) ? components : undefined;
+    /**
+     * Returns the numeric release components without any prerelease suffix.
+     *
+     * @param count How many components to emit, defaulting to the number that
+     * was explicitly supplied, so `3.12` renders as `3.12` rather than `3.12.0`.
+     */
+    toReleaseString(count: number = this.precision): string {
+        return [this.major, this.minor, this.patch].slice(0, count).join('.');
     }
 }
 
-function parseNumericComponent(value: string | undefined, version: string): number {
-    const parsed = Number(value ?? 0);
-    if (!Number.isSafeInteger(parsed)) {
-        throw new TypeError(`Invalid Python version: ${version}`);
+function toReleaseLevel(value: string | undefined): PythonReleaseLevel {
+    if (!value) {
+        return 'final';
     }
-    return parsed;
-}
-
-function compareNumbers(left: number, right: number): number {
-    return left === right ? 0 : left < right ? -1 : 1;
+    const normalized = value.toLowerCase();
+    return RELEASE_LEVEL_ALIASES[normalized] ?? RELEASE_LEVELS.find((level) => level === normalized) ?? 'final';
 }

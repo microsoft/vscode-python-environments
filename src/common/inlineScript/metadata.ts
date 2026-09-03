@@ -6,6 +6,7 @@ import * as fs from 'fs/promises';
 import { Uri } from 'vscode';
 import { traceVerbose, traceWarn } from '../logging';
 import { PythonVersion } from '../pythonVersion';
+import { PythonVersionSpecifier } from '../pythonVersionSpecifier';
 
 /**
  * Parsed and validated PEP 723 `script` metadata block.
@@ -309,10 +310,10 @@ export function matchesPythonVersion(requiresPython: string, version: string): b
         traceWarn(`inline script metadata: cannot parse Python version: ${JSON.stringify(version)}`);
         return false;
     }
-    const result = parsedVersion.satisfies(requiresPython);
-    if (result === undefined) {
+    const parsedSpecifier = PythonVersionSpecifier.tryParse(requiresPython);
+    if (!parsedSpecifier) {
         traceWarn(`inline script metadata: invalid requires-python specifier: ${JSON.stringify(requiresPython)}`);
         return false;
     }
-    return result;
+    return parsedSpecifier.matches(parsedVersion);
 }
