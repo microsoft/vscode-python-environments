@@ -4,11 +4,12 @@
 import { commands, Disposable, l10n, QuickPickItem, Uri, window } from 'vscode';
 import { PythonEnvironment } from '../../api';
 import { INLINE_SCRIPT_MANAGER_ID } from '../../common/constants';
-import { InlineScriptRoutingRegistry } from '../../common/inlineScript/routingRegistry';
 import { readInlineScriptMetadataFromFile } from '../../common/inlineScript/metadata';
+import { InlineScriptRoutingRegistry } from '../../common/inlineScript/routingRegistry';
 import { traceError, traceInfo } from '../../common/logging';
+import { normalizePath } from '../../common/utils/pathUtils';
 import { showErrorMessage, showInformationMessage, showQuickPickWithButtons } from '../../common/window.apis';
-import { asRelativePath, findFiles } from '../../common/workspace.apis';
+import { asRelativePath, findFiles, getOpenTextDocuments } from '../../common/workspace.apis';
 import { EnvironmentManagers } from '../../internal.api';
 import { registerInlineScriptCodeLens } from './codeLens';
 
@@ -54,6 +55,7 @@ export async function setUpInlineScriptEnvironment(
         traceError('Inline-script setup requested but the inline-script environment manager is not registered.');
         return undefined;
     }
+    await seedRoutingMetadataForClosedScript(scriptUri, routing);
     const metadataIdentityBeforeCreate = routing.getMetadataIdentity(scriptUri);
     const environment = await manager.create(scriptUri, undefined);
     if (!environment) {
@@ -68,6 +70,23 @@ export async function setUpInlineScriptEnvironment(
     }
     await em.setEnvironment(scriptUri, environment);
     return environment;
+}
+
+async function seedRoutingMetadataForClosedScript(scriptUri: Uri, routing: InlineScriptRoutingRegistry): Promise<void> {
+    if (routing.getMetadata(scriptUri)) {
+        return;
+    }
+    const scriptPath = normalizePath(scriptUri.fsPath);
+    const isOpen = getOpenTextDocuments().some(
+        (document) => document.uri.scheme === 'file' && normalizePath(document.uri.fsPath) === scriptPath,
+    );
+    if (isOpen) {
+        return;
+    }
+    const metadata = await readInlineScriptMetadataFromFile(scriptUri);
+    if (metadata && !routing.getMetadata(scriptUri)) {
+        routing.setMetadata(scriptUri, metadata);
+    }
 }
 
 function setupInlineScriptEnvironmentHandler(

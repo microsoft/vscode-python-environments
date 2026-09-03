@@ -1,9 +1,9 @@
 // Copyright (c) Microsoft Corporation. All rights reserved.
 // Licensed under the MIT License.
 
+import type { Stats } from 'fs';
 import * as fs from 'fs-extra';
 import * as path from 'path';
-import type { Stats } from 'fs';
 import {
     Disposable,
     Event,
@@ -20,8 +20,8 @@ import {
     CreateEnvironmentScope,
     DidChangeEnvironmentEventArgs,
     DidChangeEnvironmentsEventArgs,
-    EnvironmentManager,
     EnvironmentChangeKind,
+    EnvironmentManager,
     GetEnvironmentScope,
     GetEnvironmentsScope,
     IconPath,
@@ -31,23 +31,29 @@ import {
     ResolveEnvironmentContext,
     SetEnvironmentScope,
 } from '../../../api';
+import {
+    CONDA_MANAGER_ID,
+    INLINE_SCRIPT_MANAGER_ID,
+    PYENV_MANAGER_ID,
+    SYSTEM_MANAGER_ID,
+} from '../../../common/constants';
 import { getErrorMessage } from '../../../common/errors/utils';
 import { computeCacheKey, normalizeDependency } from '../../../common/inlineScript/cacheKey';
 import {
     CacheEntrySummary,
     CacheEnvironmentInspection,
-    INLINE_SCRIPT_CACHE_DIR_NAME,
-    InlineScriptEnvMeta,
-    hashSourceMetadataIdentity,
-    mergeSourceMetadataIdentityHashes,
-    META_SCHEMA_VERSION,
     getBaseInterpreterStatus,
     getScriptEnvCacheRoot,
     getScriptEnvDir,
-    inspectOwnedCacheEntry,
+    hashSourceMetadataIdentity,
+    INLINE_SCRIPT_CACHE_DIR_NAME,
+    InlineScriptEnvMeta,
     inspectMetaJson,
-    restoreMetaJsonBackupUnderLock,
+    inspectOwnedCacheEntry,
+    mergeSourceMetadataIdentityHashes,
+    META_SCHEMA_VERSION,
     resolveCacheEntryPath,
+    restoreMetaJsonBackupUnderLock,
     selectStaleEntries,
     writeMetaJson,
 } from '../../../common/inlineScript/cacheLayout';
@@ -59,20 +65,13 @@ import {
     InlineScriptRoutingRegistry,
 } from '../../../common/inlineScript/routingRegistry';
 import {
-    CONDA_MANAGER_ID,
-    INLINE_SCRIPT_MANAGER_ID,
-    PYENV_MANAGER_ID,
-    SYSTEM_MANAGER_ID,
-} from '../../../common/constants';
-import {
-    acquireFileLock,
     AcquiredFileLock,
+    acquireFileLock,
     FILE_LOCK_DIR_SUFFIX,
     getFileLockPath,
     inspectFileLock,
     reclaimFileLock,
 } from '../../../common/lockfile.apis';
-import { InlineAssociationAccessor, InlineScriptAssociationStore } from './associationStore';
 import { EventNames, InlineScriptEnvErrorCategory } from '../../../common/telemetry/constants';
 import { sendTelemetryEvent } from '../../../common/telemetry/sender';
 import { createDeferred, Deferred } from '../../../common/utils/deferred';
@@ -87,6 +86,7 @@ import { sortEnvironments } from '../../common/utils';
 import { resolveSystemPythonEnvironmentPath } from '../utils';
 import * as uvPythonInstaller from '../uvPythonInstaller';
 import { createWithProgress, hasMinimumPathDepth, isDriveRoot, resolveVenvPythonEnvironmentPath } from '../venvUtils';
+import { InlineAssociationAccessor, InlineScriptAssociationStore } from './associationStore';
 
 const BASE_INTERPRETER_MANAGER_IDS = new Set([SYSTEM_MANAGER_ID, CONDA_MANAGER_ID, PYENV_MANAGER_ID]);
 
@@ -1835,10 +1835,27 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
         });
     }
 
+    private async seedRoutingMetadataFromSavedFile(uri: Uri, scriptPath: string): Promise<void> {
+        if (this.routingRegistry.getMetadata(scriptPath) || this.isDocumentOpen(scriptPath)) {
+            return;
+        }
+        const metadata = await readInlineScriptMetadataFromFile(uri);
+        if (metadata && !this.routingRegistry.getMetadata(scriptPath)) {
+            this.routingRegistry.setMetadata(uri, metadata);
+        }
+    }
+
+    private isDocumentOpen(scriptPath: string): boolean {
+        return getOpenTextDocuments().some(
+            (document) => document.uri.scheme === 'file' && normalizePath(document.uri.fsPath) === scriptPath,
+        );
+    }
+
     private initializePersistedAssociations(): Promise<void> {
         return this.persistedAssociationsLoaded.then(async () => {
             await Promise.all(
                 [...this.fsPathToPersistedAssociation.keys()].map(async (scriptPath) => {
+                    await this.seedRoutingMetadataFromSavedFile(Uri.file(scriptPath), scriptPath);
                     const uri = this.routingRegistry.getUri(scriptPath);
                     const metadata = this.routingRegistry.getMetadata(scriptPath);
                     if (uri && metadata) {

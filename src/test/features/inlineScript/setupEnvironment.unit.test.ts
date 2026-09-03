@@ -44,11 +44,15 @@ suite('setUpInlineScriptEnvironment', () => {
     let em: typemoq.IMock<EnvironmentManagers>;
     let manager: typemoq.IMock<InternalEnvironmentManager>;
     let routing: InlineScriptRoutingRegistry;
+    let readMetadataStub: sinon.SinonStub;
+    let openDocumentsStub: sinon.SinonStub;
 
     setup(() => {
         em = typemoq.Mock.ofType<EnvironmentManagers>();
         manager = typemoq.Mock.ofType<InternalEnvironmentManager>();
         routing = new InlineScriptRoutingRegistry();
+        readMetadataStub = sinon.stub(metadataApi, 'readInlineScriptMetadataFromFile').resolves(undefined);
+        openDocumentsStub = sinon.stub(wapi, 'getOpenTextDocuments').returns([]);
         em.setup((m) => m.getEnvironmentManager(INLINE_SCRIPT_MANAGER_ID)).returns(() => manager.object);
     });
 
@@ -85,6 +89,49 @@ suite('setUpInlineScriptEnvironment', () => {
 
         assert.strictEqual(result, env);
         em.verify((m) => m.setEnvironment(scriptUri, env), typemoq.Times.once());
+    });
+
+    test('publishes saved metadata for a closed script so its project can route', async () => {
+        // The lazy detector only observes open documents, so bulk setup of a closed script would
+        // otherwise leave the registry with no metadata and the script permanently non-routeable.
+        const metadata = makeMetadata(['requests']);
+        readMetadataStub.resolves(metadata);
+        const env = makeEnv();
+        manager.setup((m) => m.create(scriptUri, undefined)).returns(() => Promise.resolve(env));
+        em.setup((m) => m.setEnvironment(scriptUri, env)).returns(() => Promise.resolve());
+
+        const result = await setUpInlineScriptEnvironment(scriptUri, em.object, routing);
+
+        assert.strictEqual(result, env);
+        assert.deepStrictEqual(routing.getMetadata(scriptUri), metadata);
+        sinon.assert.calledOnceWithExactly(readMetadataStub, scriptUri);
+    });
+
+    test('leaves an open document to the detector instead of publishing from disk', async () => {
+        openDocumentsStub.returns([{ uri: scriptUri, isDirty: true }]);
+        readMetadataStub.resolves(makeMetadata(['requests']));
+        const env = makeEnv();
+        manager.setup((m) => m.create(scriptUri, undefined)).returns(() => Promise.resolve(env));
+        em.setup((m) => m.setEnvironment(scriptUri, env)).returns(() => Promise.resolve());
+
+        await setUpInlineScriptEnvironment(scriptUri, em.object, routing);
+
+        assert.strictEqual(routing.getMetadata(scriptUri), undefined);
+        sinon.assert.notCalled(readMetadataStub);
+    });
+
+    test('does not overwrite metadata the detector already published', async () => {
+        const observed = makeMetadata(['observed']);
+        routing.setMetadata(scriptUri, observed);
+        readMetadataStub.resolves(makeMetadata(['from-disk']));
+        const env = makeEnv();
+        manager.setup((m) => m.create(scriptUri, undefined)).returns(() => Promise.resolve(env));
+        em.setup((m) => m.setEnvironment(scriptUri, env)).returns(() => Promise.resolve());
+
+        await setUpInlineScriptEnvironment(scriptUri, em.object, routing);
+
+        assert.deepStrictEqual(routing.getMetadata(scriptUri), observed);
+        sinon.assert.notCalled(readMetadataStub);
     });
 
     test('skips association when the script metadata changes during creation', async () => {
@@ -124,6 +171,7 @@ suite('setUpInlineScriptEnvironmentsInWorkspace', () => {
 
         findFilesStub = sinon.stub(wapi, 'findFiles');
         sinon.stub(wapi, 'asRelativePath').callsFake((p) => (p instanceof Uri ? p.fsPath : String(p)));
+        sinon.stub(wapi, 'getOpenTextDocuments').returns([]);
         readMetadataStub = sinon.stub(metadataApi, 'readInlineScriptMetadataFromFile');
         quickPickStub = sinon.stub(winapi, 'showQuickPickWithButtons');
         infoStub = sinon.stub(winapi, 'showInformationMessage');
