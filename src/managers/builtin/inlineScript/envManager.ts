@@ -108,6 +108,7 @@ interface CreateOrReuseEnvironmentOptions {
     readonly metadata: InlineScriptMetadata;
     readonly selectedBase: SelectedBaseInterpreter;
     readonly pendingCreation: PendingCreationContext;
+    readonly scriptUri: Uri;
 }
 
 interface BuildCacheEntryResult {
@@ -374,6 +375,7 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
             metadata,
             selectedBase,
             pendingCreation,
+            scriptUri,
         });
         pendingCreation.promise = creation;
         this.pendingCreations.set(cacheKey, pendingCreation);
@@ -780,6 +782,7 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
                 this.api,
                 this,
                 this.baseManager,
+                'inlineScript',
             );
         } catch (error) {
             this.log.warn(`Unable to resolve inline-script cache entry ${envDir.fsPath}: ${getErrorMessage(error)}`);
@@ -1132,6 +1135,7 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
                     this.api,
                     this,
                     this.baseManager,
+                    'inlineScript',
                 );
                 if (!this.isCurrentAssociationRevision(scriptPath, revision)) {
                     return this.fsPathToEnv.get(scriptPath);
@@ -1304,6 +1308,7 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
                 this.api,
                 this,
                 this.baseManager,
+                'inlineScript',
             );
         } catch (error) {
             this.log.warn(
@@ -2622,6 +2627,7 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
         metadata,
         selectedBase,
         pendingCreation,
+        scriptUri,
     }: CreateOrReuseEnvironmentOptions): Promise<PythonEnvironment | undefined> {
         const dependencyCount = this.getTelemetryDependencyCount(packages);
         const cacheRoot = getScriptEnvCacheRoot(this.globalStorageUri);
@@ -2650,7 +2656,14 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
                 }
 
                 const buildStartAtMs = Date.now();
-                const build = await this.buildCacheEntry(envDir, cacheRoot, packages, selectedBase, pendingCreation);
+                const build = await this.buildCacheEntry(
+                    envDir,
+                    cacheRoot,
+                    packages,
+                    selectedBase,
+                    pendingCreation,
+                    scriptUri,
+                );
                 if (build.retainLock) {
                     try {
                         await lock.retain();
@@ -2738,6 +2751,7 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
             this.api,
             this,
             this.baseManager,
+            'inlineScript',
         );
         if (!environment) {
             return { kind: 'uncertain' };
@@ -2784,6 +2798,7 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
         packages: ReadonlyArray<string>,
         selectedBase: SelectedBaseInterpreter,
         pendingCreation: PendingCreationContext,
+        scriptUri: Uri,
     ): Promise<BuildCacheEntryResult> {
         let result;
         try {
@@ -2797,6 +2812,10 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
                 envDir.fsPath,
                 { install: [...packages], uninstall: [] },
                 false, // trackUvEnvironment
+                {
+                    progressTitle: l10n.t('Setting up environment for {0}', path.basename(scriptUri.fsPath)),
+                    nameStyle: 'inlineScript',
+                },
             );
         } catch (error) {
             this.log.error(`Failed to build inline-script environment: ${getErrorMessage(error)}`);
