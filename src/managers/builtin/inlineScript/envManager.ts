@@ -223,7 +223,7 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
     public readonly onDidChangeEnvironment: Event<DidChangeEnvironmentEventArgs> = this._onDidChangeEnvironment.event;
 
     public readonly name = 'inline-script';
-    public readonly displayName = l10n.t('Inline script environments');
+    public readonly displayName = l10n.t('Inline scripts');
     public readonly preferredPackageManagerId = 'ms-python.python:pip';
     public readonly description: string | undefined = undefined;
     public readonly tooltip: string | MarkdownString = new MarkdownString(
