@@ -283,6 +283,7 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
                         this.log.warn('Inline-script environment creation requires exactly one local file URI.');
                         return undefined;
                     }
+                    this.routingRegistry.clearSetupOutcome(scriptUri);
 
                     const metadata = await readInlineScriptMetadataFromFile(scriptUri);
                     if (!metadata) {
@@ -337,6 +338,11 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
             if (baseSelection.errorCategory) {
                 this.sendInlineScriptEnvErrorTelemetry(baseSelection.errorCategory);
             }
+            this.routingRegistry.noteSetupOutcome(scriptUri, {
+                kind: 'failed',
+                category: baseSelection.errorCategory ?? 'setup-failure',
+                requiresPython: metadata.requiresPython,
+            });
             this.log.warn(
                 `No compatible Python is available for inline-script environment creation: ${scriptUri.fsPath}.`,
             );

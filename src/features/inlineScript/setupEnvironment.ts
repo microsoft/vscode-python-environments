@@ -8,7 +8,12 @@ import { readInlineScriptMetadataFromFile } from '../../common/inlineScript/meta
 import { InlineScriptRoutingRegistry } from '../../common/inlineScript/routingRegistry';
 import { traceError, traceInfo } from '../../common/logging';
 import { normalizePath } from '../../common/utils/pathUtils';
-import { showErrorMessage, showInformationMessage, showQuickPickWithButtons } from '../../common/window.apis';
+import {
+    showErrorMessage,
+    showInformationMessage,
+    showQuickPickWithButtons,
+    showWarningMessage,
+} from '../../common/window.apis';
 import { asRelativePath, findFiles, getOpenTextDocuments } from '../../common/workspace.apis';
 import { EnvironmentManagers } from '../../internal.api';
 import { registerInlineScriptCodeLens } from './codeLens';
@@ -41,9 +46,9 @@ const METADATA_READ_CONCURRENCY = 20;
  *  - `setEnvironment` persists the association, registers the exact script project, and publishes the
  *    per-file environment change so routing picks up the inline environment.
  *
- * Returns the environment on success, or `undefined` when creation produced none (the manager has
- * already surfaced the reason — a declined install, no compatible Python, or a cancelled/failed
- * build — and emitted telemetry).
+ * Returns the environment on success, or `undefined` when creation produced none. Failures and
+ * benign skips are recorded on the routing registry for the interactive setup command to surface or
+ * suppress; see {@link InlineScriptRoutingRegistry.takeSetupOutcome}.
  */
 export async function setUpInlineScriptEnvironment(
     scriptUri: Uri,
@@ -66,6 +71,7 @@ export async function setUpInlineScriptEnvironment(
         // environment was built for stale metadata. Skip associating it rather than overwrite a newer
         // setup; the current metadata's CodeLens stays so the user can run setup again.
         traceInfo(`Inline-script metadata for ${scriptUri.fsPath} changed during setup; skipping association.`);
+        routing.noteSetupOutcome(scriptUri, { kind: 'skipped' });
         return undefined;
     }
     await em.setEnvironment(scriptUri, environment);
@@ -103,7 +109,10 @@ function setupInlineScriptEnvironmentHandler(
             return;
         }
         try {
-            await setUpInlineScriptEnvironment(uri, em, routing);
+            const environment = await setUpInlineScriptEnvironment(uri, em, routing);
+            if (!environment) {
+                notifyInlineScriptSetupOutcome(uri, routing);
+            }
         } catch (error) {
             traceError(`Failed to set up the inline-script environment for ${uri.fsPath}:`, error);
             showErrorMessage(
@@ -113,6 +122,53 @@ function setupInlineScriptEnvironmentHandler(
             );
         }
     };
+}
+
+function notifyInlineScriptSetupOutcome(uri: Uri, routing: InlineScriptRoutingRegistry): void {
+    const outcome = routing.takeSetupOutcome(uri);
+    if (outcome?.kind === 'skipped') {
+        // Env built but intentionally not associated (metadata changed mid-setup); stay silent.
+        return;
+    }
+    if (outcome?.kind === 'failed') {
+        if (outcome.category === 'compatible-python-declined') {
+            // User declined the install prompt; don't nag.
+            return;
+        }
+        if (outcome.category === 'no-compatible-python') {
+            showWarningMessage(buildNoCompatiblePythonMessage(outcome.requiresPython));
+            return;
+        }
+    }
+    showErrorMessage(
+        l10n.t('Failed to set up the environment for this script. See the Python Environments output for details.'),
+    );
+}
+
+/**
+ * "No compatible Python" message. Calls out an exact two-segment pin like `==3.11` (PEP 440 =
+ * exactly 3.11.0, often not installable) so the user understands why nothing matched.
+ */
+function buildNoCompatiblePythonMessage(requiresPython?: string): string {
+    const spec = requiresPython?.trim();
+    if (!spec) {
+        return l10n.t(
+            'No compatible Python could be found or installed for this script. Install a Python 3 interpreter, then try again. See the Python Environments output for details.',
+        );
+    }
+    const exactMinor = /^==\s*(\d+\.\d+)\s*$/.exec(spec);
+    if (exactMinor) {
+        const minor = exactMinor[1];
+        return l10n.t(
+            'No compatible Python matches this script\'s requires-python "{0}". "{0}" requires exactly {1}.0, which may not be available to install.',
+            spec,
+            minor,
+        );
+    }
+    return l10n.t(
+        'No compatible Python was found or could be installed for requires-python "{0}". Try a broader version specifier. See the Python Environments output for details.',
+        spec,
+    );
 }
 
 interface InlineScriptQuickPickItem extends QuickPickItem {
