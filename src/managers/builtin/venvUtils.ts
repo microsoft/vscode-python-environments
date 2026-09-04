@@ -156,7 +156,10 @@ function getName(binPath: string): string {
     return path.basename(dir1);
 }
 
-async function getPythonInfo(env: NativeEnvInfo): Promise<PythonEnvironmentInfo> {
+/** Controls how {@link getPythonInfo} formats an environment's user-facing name. */
+export type VenvNameStyle = 'default' | 'inlineScript';
+
+async function getPythonInfo(env: NativeEnvInfo, nameStyle: VenvNameStyle = 'default'): Promise<PythonEnvironmentInfo> {
     // Handle broken environments that have an error field
     if (env.error) {
         const venvName = env.name ?? (env.prefix ? path.basename(env.prefix) : 'Unknown');
@@ -185,7 +188,12 @@ async function getPythonInfo(env: NativeEnvInfo): Promise<PythonEnvironmentInfo>
     if (env.executable && env.version && env.prefix) {
         const venvName = env.name ?? getName(env.executable);
         const sv = shortenVersionString(env.version);
-        const name = `${venvName} (${sv})`;
+        // Inline-script (PEP 723) environments live in content-addressed cache folders whose names
+        // are hashes. Surface a human-readable label instead of leaking that hash: the short form
+        // leads with the version (compact for the status bar), the full name reads "script env".
+        const isInlineScript = nameStyle === 'inlineScript';
+        const name = isInlineScript ? l10n.t('script env ({0})', sv) : `${venvName} (${sv})`;
+        const shortDisplayName = isInlineScript ? l10n.t('{0} (script)', sv) : `${sv} (${venvName})`;
         let description = undefined;
         if (env.kind === NativePythonEnvironmentKind.venvUv) {
             description = l10n.t('uv');
@@ -200,7 +208,7 @@ async function getPythonInfo(env: NativeEnvInfo): Promise<PythonEnvironmentInfo>
         return {
             name: name,
             displayName: name,
-            shortDisplayName: `${sv} (${venvName})`,
+            shortDisplayName: shortDisplayName,
             displayPath: env.executable,
             version: env.version,
             description: description,
@@ -351,6 +359,13 @@ export async function getGlobalVenvLocation(): Promise<Uri | undefined> {
     return undefined;
 }
 
+export interface CreateWithProgressOptions {
+    /** Overrides the progress-notification title shown while the environment is created. */
+    readonly progressTitle?: string;
+    /** Controls how the created environment's user-facing name is formatted. */
+    readonly nameStyle?: VenvNameStyle;
+}
+
 export async function createWithProgress(
     nativeFinder: NativePythonFinder,
     api: PythonEnvironmentApi,
@@ -361,17 +376,20 @@ export async function createWithProgress(
     envPath: string,
     packages?: PipPackages,
     trackUvEnvironment = true,
+    options?: CreateWithProgressOptions,
 ): Promise<CreateEnvironmentResult | undefined> {
     const pythonPath = getVenvPythonPath(envPath);
 
     return await withProgress(
         {
             location: ProgressLocation.Notification,
-            title: l10n.t(
-                'Creating virtual environment named {0} using python version {1}.',
-                path.basename(envPath),
-                basePython.version,
-            ),
+            title:
+                options?.progressTitle ??
+                l10n.t(
+                    'Creating virtual environment named {0} using python version {1}.',
+                    path.basename(envPath),
+                    basePython.version,
+                ),
         },
         async () => {
             const result: CreateEnvironmentResult = {};
@@ -400,7 +418,7 @@ export async function createWithProgress(
 
                 // handle admin of new env
                 const resolved = await nativeFinder.resolve(pythonPath);
-                const env = api.createPythonEnvironmentItem(await getPythonInfo(resolved), manager);
+                const env = api.createPythonEnvironmentItem(await getPythonInfo(resolved, options?.nameStyle), manager);
 
                 if (
                     trackUvEnvironment &&
@@ -622,6 +640,7 @@ export async function resolveVenvPythonEnvironmentPath(
     api: PythonEnvironmentApi,
     manager: EnvironmentManager,
     baseManager: EnvironmentManager,
+    nameStyle: VenvNameStyle = 'default',
 ): Promise<PythonEnvironment | undefined> {
     try {
         const resolved = await nativeFinder.resolve(fsPath);
@@ -631,7 +650,7 @@ export async function resolveVenvPythonEnvironmentPath(
             resolved.kind === NativePythonEnvironmentKind.venvUv ||
             resolved.kind === NativePythonEnvironmentKind.uvWorkspace
         ) {
-            const envInfo = await getPythonInfo(resolved);
+            const envInfo = await getPythonInfo(resolved, nameStyle);
             return api.createPythonEnvironmentItem(envInfo, manager);
         }
     } catch (ex) {

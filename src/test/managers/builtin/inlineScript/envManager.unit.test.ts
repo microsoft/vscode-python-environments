@@ -4916,6 +4916,91 @@ suite('InlineScriptEnvManager', () => {
             restarted.dispose();
         });
 
+        test('routes a persisted association after restart without opening the script', async () => {
+            // Regression: the lazy detector only publishes metadata for open documents, so a script
+            // set up in an earlier session stayed non-routeable after a reload and its project
+            // resolved through the default manager (wrong environment in the project view).
+            const uri = scriptUri();
+            const environment = await createOwnedEnvironment();
+            persistedAssociations = {
+                [normalizePath(uri.fsPath)]: matchedAssociationRecord(environment.environmentPath.fsPath),
+            };
+            const restartRoutingRegistry = new InlineScriptRoutingRegistry();
+
+            const restarted = new InlineScriptEnvManager(
+                nativeFinder,
+                api,
+                baseManager,
+                globalStorageUri,
+                makeFakeLog(),
+                workspaceMemento,
+                restartRoutingRegistry,
+            );
+
+            await waitForCondition(
+                () => restartRoutingRegistry.shouldRoute(uri),
+                'Expected the persisted association to route without the script being opened',
+            );
+            assert.strictEqual(await restarted.get(uri), environment);
+            restarted.dispose();
+        });
+
+        test('does not seed routing metadata for a persisted script that is open', async () => {
+            // Open documents belong to the detector, which withholds metadata while the block is
+            // being edited; seeding from disk would publish content the user has already changed.
+            const uri = scriptUri();
+            const environment = await createOwnedEnvironment();
+            persistedAssociations = {
+                [normalizePath(uri.fsPath)]: matchedAssociationRecord(environment.environmentPath.fsPath),
+            };
+            (workspaceApis.getOpenTextDocuments as sinon.SinonStub).returns([
+                { uri, isDirty: true } as unknown as TextDocument,
+            ]);
+            const restartRoutingRegistry = new InlineScriptRoutingRegistry();
+
+            const restarted = new InlineScriptEnvManager(
+                nativeFinder,
+                api,
+                baseManager,
+                globalStorageUri,
+                makeFakeLog(),
+                workspaceMemento,
+                restartRoutingRegistry,
+            );
+            await nextTurn();
+            await nextTurn();
+
+            assert.strictEqual(restartRoutingRegistry.getMetadata(uri), undefined);
+            assert.strictEqual(restartRoutingRegistry.shouldRoute(uri), false);
+            restarted.dispose();
+        });
+
+        test('does not seed routing metadata when the saved script no longer declares metadata', async () => {
+            const uri = scriptUri();
+            const environment = await createOwnedEnvironment();
+            persistedAssociations = {
+                [normalizePath(uri.fsPath)]: matchedAssociationRecord(environment.environmentPath.fsPath),
+            };
+            readMetadataStub.resolves(undefined);
+            const restartRoutingRegistry = new InlineScriptRoutingRegistry();
+
+            const restarted = new InlineScriptEnvManager(
+                nativeFinder,
+                api,
+                baseManager,
+                globalStorageUri,
+                makeFakeLog(),
+                workspaceMemento,
+                restartRoutingRegistry,
+            );
+            await nextTurn();
+            await nextTurn();
+
+            assert.strictEqual(restartRoutingRegistry.getMetadata(uri), undefined);
+            assert.strictEqual(restartRoutingRegistry.shouldRoute(uri), false);
+            restarted.dispose();
+        });
+
         test('does not rewrite or notify when a restart reselects the same persisted executable', async () => {
             const uri = scriptUri();
             const environment = await createOwnedEnvironment();
@@ -4930,6 +5015,15 @@ suite('InlineScriptEnvManager', () => {
                 workspaceMemento,
                 restartRoutingRegistry,
             );
+            // Startup now seeds routing metadata for persisted associations from the saved file and
+            // validates them, so a closed script routes without being opened first. Let that settle so
+            // the assertions below measure only the work done by reselecting the same executable.
+            await waitForCondition(
+                () => restartRoutingRegistry.hasValidatedAssociation(uri),
+                'Expected startup validation to make the persisted association routeable',
+            );
+            resolveVenvStub.resetHistory();
+            workspaceState.update.resetHistory();
             const listener = sinon.spy();
             restarted.onDidChangeEnvironment(listener);
 

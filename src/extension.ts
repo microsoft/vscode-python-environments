@@ -44,9 +44,9 @@ import { NewScriptProject } from './features/creators/newScriptProject';
 import { ProjectCreatorsImpl } from './features/creators/projectCreators';
 import {
     addPythonProjectCommand,
-    copyPathToClipboard,
     clearEnvironmentCachesCommand,
     clearScriptEnvironmentCacheCommand,
+    copyPathToClipboard,
     createAnyEnvironmentCommand,
     createEnvironmentCommand,
     createTerminalCommand,
@@ -191,6 +191,8 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
     if (inlineScriptRouting) {
         context.subscriptions.push(inlineScriptRouting);
     }
+
+    void commands.executeCommand('setContext', 'pythonEnvsInlineScriptsEnabled', inlineScriptFeatureActivation.enabled);
 
     const envVarManager: EnvVarManager = new PythonEnvVariableManager(projectManager);
     context.subscriptions.push(envVarManager);
