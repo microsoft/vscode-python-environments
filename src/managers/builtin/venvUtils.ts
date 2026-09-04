@@ -366,6 +366,43 @@ export interface CreateWithProgressOptions {
     readonly nameStyle?: VenvNameStyle;
 }
 
+/**
+ * The interpreter to build a venv from. Usually the environment's own executable, but a discovered
+ * base can point at a launcher/shim outside its prefix (e.g. uv's `.local/bin/pythonX.Y`), which uv
+ * cannot inspect for older Pythons (`uv venv --python <shim>` fails to initialize). When the
+ * executable is not inside its own prefix, use the interpreter inside the prefix instead.
+ */
+export async function getBaseInterpreterForVenv(basePython: PythonEnvironment): Promise<string | undefined> {
+    const executable = basePython.execInfo?.run.executable;
+    const sysPrefix = basePython.sysPrefix;
+    if (!executable || !sysPrefix || !path.isAbsolute(executable) || !path.isAbsolute(sysPrefix)) {
+        return executable;
+    }
+    if (isInterpreterInsidePrefix(executable, sysPrefix)) {
+        return executable;
+    }
+    for (const candidate of [
+        path.join(sysPrefix, 'python.exe'),
+        path.join(sysPrefix, 'bin', 'python'),
+        path.join(sysPrefix, 'bin', 'python3'),
+    ]) {
+        if (await fsapi.pathExists(candidate)) {
+            return candidate;
+        }
+    }
+    return executable;
+}
+
+function isInterpreterInsidePrefix(executable: string, prefix: string): boolean {
+    const relative = path.relative(prefix, executable);
+    return (
+        relative.length > 0 &&
+        relative !== '..' &&
+        !relative.startsWith(`..${path.sep}`) &&
+        !path.isAbsolute(relative)
+    );
+}
+
 export async function createWithProgress(
     nativeFinder: NativePythonFinder,
     api: PythonEnvironmentApi,
@@ -396,20 +433,16 @@ export async function createWithProgress(
             try {
                 const useUv = await shouldUseUv(log, basePython.environmentPath.fsPath);
                 // env creation
-                if (basePython.execInfo?.run.executable) {
+                const baseExecutable = await getBaseInterpreterForVenv(basePython);
+                if (baseExecutable) {
                     if (useUv) {
                         await runUV(
-                            ['venv', '--verbose', '--seed', '--python', basePython.execInfo?.run.executable, envPath],
+                            ['venv', '--verbose', '--seed', '--python', baseExecutable, envPath],
                             venvRoot.fsPath,
                             log,
                         );
                     } else {
-                        await runPython(
-                            basePython.execInfo.run.executable,
-                            ['-m', 'venv', envPath],
-                            venvRoot.fsPath,
-                            manager.log,
-                        );
+                        await runPython(baseExecutable, ['-m', 'venv', envPath], venvRoot.fsPath, manager.log);
                     }
                     if (!(await fsapi.pathExists(pythonPath))) {
                         throw new Error('no python executable found in virtual environment');
