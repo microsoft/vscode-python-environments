@@ -296,7 +296,8 @@ function describeTomlError(err: unknown): string {
     return condensed.length > 0 ? condensed : 'could not be parsed';
 }
 
-function sourceOffsetForNormalizedOffset(sourceText: string, normalizedOffset: number): number {    let sourceOffset = 0;
+function sourceOffsetForNormalizedOffset(sourceText: string, normalizedOffset: number): number {
+    let sourceOffset = 0;
     let currentNormalizedOffset = 0;
     while (currentNormalizedOffset < normalizedOffset && sourceOffset < sourceText.length) {
         if (sourceText.charCodeAt(sourceOffset) === 0x0d) {
