@@ -204,6 +204,59 @@ suite('inlineScriptMetadata', () => {
             assert.ok(traceWarnStub.called, 'expected a traceWarn for malformed TOML');
         });
 
+        test('malformed TOML warning names the source, the script line, and carries no stack', () => {
+            // `# /// script` is line 1, so its first content line is line 2.
+            const text = script(['# /// script', '# requires-python = ">=3.11', '# ///']);
+
+            assert.strictEqual(readInlineScriptMetadata(text, '/tmp/broken.py'), undefined);
+
+            const warning = String(traceWarnStub.firstCall.args[0]);
+            assert.ok(
+                warning.includes('/tmp/broken.py'),
+                `expected the warning to name the source, got: ${warning}`,
+            );
+            assert.ok(warning.includes('(line 2)'), `expected a script line number, got: ${warning}`);
+            assert.ok(
+                !/at row \d+, col \d+/.test(warning),
+                `expected the TOML payload coordinates to be dropped, got: ${warning}`,
+            );
+            assert.strictEqual(
+                traceWarnStub.firstCall.args.length,
+                1,
+                'the warning must not pass the raw error, which would print a stack',
+            );
+            assert.ok(
+                traceVerboseStub.getCalls().some((call) => String(call.args[0]).includes('TOML parse error detail')),
+                'expected the full error to be logged at the debug level',
+            );
+        });
+
+        test('the reported line is relative to the script, not the metadata block', () => {
+            // Push the block down; the bad content line is file line 5.
+            const text = script([
+                '#!/usr/bin/env python3',
+                '# leading commentary',
+                '',
+                '# /// script',
+                '# requires-python = ">=3.11',
+                '# ///',
+            ]);
+
+            assert.strictEqual(readInlineScriptMetadata(text, '/tmp/offset.py'), undefined);
+
+            const warning = String(traceWarnStub.firstCall.args[0]);
+            assert.ok(warning.includes('(line 5)'), `expected line 5, got: ${warning}`);
+        });
+
+        test('omitting the source keeps the warning free of a dangling separator', () => {
+            const text = script(['# /// script', '# requires-python = ">=3.11', '# ///']);
+
+            assert.strictEqual(readInlineScriptMetadata(text), undefined);
+
+            const warning = String(traceWarnStub.firstCall.args[0]);
+            assert.ok(warning.startsWith('inline script metadata:'), `unexpected prefix: ${warning}`);
+        });
+
         test('dependencies is not a list returns undefined', () => {
             const text = script(['# /// script', '# dependencies = "not a list"', '# ///']);
             assert.strictEqual(readInlineScriptMetadata(text), undefined);
