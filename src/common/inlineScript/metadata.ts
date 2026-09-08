@@ -79,8 +79,13 @@ const BLOCK_RE = /^# \/\/\/ (?<type>[a-zA-Z0-9-]+)$\s(?<content>(^#(| .*)$\s)+)^
  *
  * Encoding: input is processed as UTF-8 text. The `# -*- coding: ... -*-`
  * declaration is not honored (the spec permits but does not require it).
+ *
+ * `source` is a human-readable label (normally the script's path) used
+ * only to make the diagnostic log lines actionable. Parsing behaviour is
+ * identical whether or not it is supplied.
  */
-export function readInlineScriptMetadata(scriptText: string): InlineScriptMetadata | undefined {
+export function readInlineScriptMetadata(scriptText: string, source?: string): InlineScriptMetadata | undefined {
+    const where = source ? ` in ${source}` : '';
     if (!scriptText) {
         return undefined;
     }
@@ -116,12 +121,12 @@ export function readInlineScriptMetadata(scriptText: string): InlineScriptMetada
     }
 
     if (scriptMatches.length === 0) {
-        traceVerbose('inline script metadata: no `# /// script` block found');
+        traceVerbose(`inline script metadata${where}: no \`# /// script\` block found`);
         return undefined;
     }
     if (scriptMatches.length > 1) {
         traceWarn(
-            `inline script metadata: ${scriptMatches.length} \`# /// script\` blocks found; per PEP 723 multiple blocks of the same type MUST be an error.`,
+            `inline script metadata${where}: ${scriptMatches.length} \`# /// script\` blocks found; per PEP 723 multiple blocks of the same type MUST be an error.`,
         );
         return undefined;
     }
@@ -142,14 +147,20 @@ export function readInlineScriptMetadata(scriptText: string): InlineScriptMetada
     // reconstruction logic obvious.
     const reconstructed: string[] = [];
     const contentLines = rawContent.split('\n');
-    for (const line of contentLines) {
+    // 1-based file line of the `# /// script` marker. Content lines start on
+    // the next line, so content index `i` sits on `blockStartLine + 1 + i`.
+    const blockStartLine = countLines(text, matchStart);
+    for (const [index, line] of contentLines.entries()) {
         if (line.length === 0) {
             // Final element after splitting on the trailing '\n' that
             // belongs to the last content line. Not a real line.
             continue;
         }
         if (line[0] !== '#') {
-            traceWarn(`inline script metadata: invalid content line (must start with '#'): ${JSON.stringify(line)}`);
+            traceWarn(
+                `inline script metadata${where}: invalid content line ${blockStartLine + 1 + index} ` +
+                    `(must start with '#'): ${JSON.stringify(line)}`,
+            );
             return undefined;
         }
         if (line.length === 1) {
@@ -160,7 +171,10 @@ export function readInlineScriptMetadata(scriptText: string): InlineScriptMetada
         if (line[1] !== ' ') {
             // Per spec, content lines are exactly '#' or '# <text>'.
             // '##foo', '#\tfoo', '#foo' are not valid.
-            traceWarn(`inline script metadata: invalid content line (expected '#' or '# '): ${JSON.stringify(line)}`);
+            traceWarn(
+                `inline script metadata${where}: invalid content line ${blockStartLine + 1 + index} ` +
+                    `(expected '#' or '# '): ${JSON.stringify(line)}`,
+            );
             return undefined;
         }
         reconstructed.push(line.slice(2));
@@ -170,7 +184,17 @@ export function readInlineScriptMetadata(scriptText: string): InlineScriptMetada
     try {
         parsed = tomljs.parse(reconstructed.join('\n'));
     } catch (err) {
-        traceWarn('inline script metadata: failed to parse TOML in `# /// script` block:', err);
+        // One actionable line: which file, which line of that file, and what is
+        // wrong. The raw error's own "row N" is an index into the reconstructed
+        // TOML, not the script, so it is translated here rather than shown. The
+        // full error (with stack and excerpt) goes to the debug level for anyone
+        // diagnosing the parser itself.
+        const tomlRow = getTomlErrorRow(err);
+        const at = tomlRow === undefined ? '' : ` (line ${blockStartLine + 1 + tomlRow})`;
+        traceWarn(
+            `inline script metadata${where}: invalid TOML in the \`# /// script\` block${at}: ${describeTomlError(err)}`,
+        );
+        traceVerbose(`inline script metadata${where}: TOML parse error detail:`, err);
         return undefined;
     }
 
@@ -181,7 +205,7 @@ export function readInlineScriptMetadata(scriptText: string): InlineScriptMetada
     if (parsed['requires-python'] !== undefined) {
         if (typeof parsed['requires-python'] !== 'string') {
             traceWarn(
-                `inline script metadata: 'requires-python' must be a string, got ${typeof parsed['requires-python']}`,
+                `inline script metadata${where}: 'requires-python' must be a string, got ${typeof parsed['requires-python']}`,
             );
             return undefined;
         }
@@ -191,12 +215,12 @@ export function readInlineScriptMetadata(scriptText: string): InlineScriptMetada
     let dependencies: readonly string[] | undefined;
     if (parsed.dependencies !== undefined) {
         if (!Array.isArray(parsed.dependencies)) {
-            traceWarn('inline script metadata: `dependencies` must be an array of strings');
+            traceWarn(`inline script metadata${where}: \`dependencies\` must be an array of strings`);
             return undefined;
         }
         for (const dep of parsed.dependencies) {
             if (typeof dep !== 'string') {
-                traceWarn('inline script metadata: each entry in `dependencies` must be a string');
+                traceWarn(`inline script metadata${where}: each entry in \`dependencies\` must be a string`);
                 return undefined;
             }
         }
@@ -208,7 +232,7 @@ export function readInlineScriptMetadata(scriptText: string): InlineScriptMetada
     let tool: tomljs.JsonMap | undefined;
     if (parsed.tool !== undefined) {
         if (typeof parsed.tool !== 'object' || Array.isArray(parsed.tool) || parsed.tool === null) {
-            traceWarn('inline script metadata: `tool` must be a table');
+            traceWarn(`inline script metadata${where}: \`tool\` must be a table`);
             return undefined;
         }
         tool = parsed.tool as tomljs.JsonMap;
@@ -232,6 +256,44 @@ export function readInlineScriptMetadata(scriptText: string): InlineScriptMetada
             end: bomOffset + sourceOffsetForNormalizedOffset(sourceText, end),
         },
     };
+}
+
+/** 1-based line number of `offset` within LF-normalized `text`. */
+function countLines(text: string, offset: number): number {
+    let line = 1;
+    for (let i = 0; i < offset && i < text.length; i += 1) {
+        if (text.charCodeAt(i) === 0x0a) {
+            line += 1;
+        }
+    }
+    return line;
+}
+
+/**
+ * Zero-based row reported by `@iarna/toml`, relative to the reconstructed TOML
+ * payload. Returns `undefined` when the thrown value does not carry one.
+ */
+function getTomlErrorRow(err: unknown): number | undefined {
+    if (typeof err !== 'object' || err === null) {
+        return undefined;
+    }
+    const row = (err as { line?: unknown }).line;
+    return typeof row === 'number' && Number.isInteger(row) && row >= 0 ? row : undefined;
+}
+
+/**
+ * Condense a TOML parse failure to a single clause. `@iarna/toml` messages are
+ * multi-line ("Unterminated string at row 1, col 27, pos 26:" followed by an
+ * excerpt and a caret) and their row/col index the reconstructed payload rather
+ * than the script, so both the excerpt and the coordinates are dropped here; the
+ * caller reports a real script line instead.
+ */
+function describeTomlError(err: unknown): string {
+    const message = err instanceof Error ? err.message : String(err);
+    const firstLine = message.split('\n')[0].trim();
+    const withoutCoordinates = firstLine.replace(/\s*at row \d+, col \d+, pos \d+:?$/, '');
+    const condensed = (withoutCoordinates || firstLine).replace(/:$/, '').trim();
+    return condensed.length > 0 ? condensed : 'could not be parsed';
 }
 
 function sourceOffsetForNormalizedOffset(sourceText: string, normalizedOffset: number): number {
@@ -282,7 +344,7 @@ export async function readInlineScriptMetadataFromFile(uri: Uri): Promise<Inline
         return undefined;
     }
 
-    return readInlineScriptMetadata(text);
+    return readInlineScriptMetadata(text, uri.fsPath);
 }
 
 /**
