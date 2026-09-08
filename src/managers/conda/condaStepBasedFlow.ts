@@ -1,4 +1,3 @@
-import { compare as pep440Compare, valid as pep440Valid } from '@renovatebot/pep440';
 import * as fse from 'fs-extra';
 import * as path from 'path';
 import { l10n, LogOutputChannel, QuickInputButtons, QuickPickItem, Uri } from 'vscode';
@@ -8,9 +7,9 @@ import { showInputBoxWithButtons, showQuickPickWithButtons } from '../../common/
 import {
     createNamedCondaEnvironment,
     createPrefixCondaEnvironment,
+    getPythonVersionsForCreation,
     getLocation,
     getName,
-    trimVersionToMajorMinor,
 } from './condaUtils';
 
 // Recommended Python version for Conda environments
@@ -105,22 +104,7 @@ async function selectPythonVersion(state: CondaCreationState): Promise<StepFunct
         }
 
         const envs = await api.getEnvironments('global');
-        let versions = Array.from(
-            new Set(
-                envs
-                    .map((env: PythonEnvironment) => env.version)
-                    .filter(Boolean)
-                    .map((v: string) => trimVersionToMajorMinor(v)), // cut to 3 digits
-            ),
-        );
-
-        // Sort versions descending using PEP 440 comparison
-        versions = versions.sort((a, b) => {
-            if (!pep440Valid(a as string) || !pep440Valid(b as string)) {
-                return 0;
-            }
-            return pep440Compare(b as string, a as string); // descending
-        });
+        let versions = getPythonVersionsForCreation(envs);
 
         if (!versions || versions.length === 0) {
             versions = ['3.13', '3.12', '3.11', '3.10', '3.9'];

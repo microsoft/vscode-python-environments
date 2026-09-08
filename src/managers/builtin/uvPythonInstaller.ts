@@ -12,6 +12,7 @@ import { spawnProcess } from '../../common/childProcess.apis';
 import { Common, UvInstallStrings } from '../../common/localize';
 import { traceError, traceInfo, traceLog, traceWarn } from '../../common/logging';
 import { getGlobalPersistentState } from '../../common/persistentState';
+import { PythonVersion } from '../../common/pythonVersion';
 import { executeTask, onDidEndTaskProcess } from '../../common/tasks.apis';
 import { EventNames } from '../../common/telemetry/constants';
 import { sendTelemetryEvent } from '../../common/telemetry/sender';
@@ -258,9 +259,14 @@ export async function getUvPythonPath(version?: string): Promise<string | undefi
                     // If version specified, find an exact or release-segment match
                     // (e.g., "3.12" matches "3.12.11", but not "3.120.1").
                     if (version) {
-                        const match = versions.find(
-                            (v) => (v.version === version || v.version.startsWith(`${version}.`)) && v.path,
-                        );
+                        const requested = PythonVersion.tryParse(version);
+                        const match = requested
+                            ? versions.find(
+                                  (candidate) =>
+                                      candidate.path &&
+                                      PythonVersion.tryParse(candidate.version)?.matchesSelector(requested),
+                              )
+                            : undefined;
                         resolve(match?.path ?? undefined);
                     } else {
                         // Return the first (latest) installed Python

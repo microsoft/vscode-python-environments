@@ -1,9 +1,9 @@
-import { major, minor, patch, compare as pep440Compare, valid as pep440Valid } from '@renovatebot/pep440';
 import * as fs from 'fs-extra';
 import path from 'path';
 import { commands, ConfigurationTarget, l10n, window, workspace } from 'vscode';
 import { PythonCommandRunConfiguration, PythonEnvironment, PythonEnvironmentApi } from '../../api';
 import { traceLog, traceVerbose } from '../../common/logging';
+import { PythonVersion } from '../../common/pythonVersion';
 import { isWindows } from '../../common/utils/platformUtils';
 import { ShellConstants } from '../../features/common/shellConstants';
 import { getDefaultEnvManagerSetting, setDefaultEnvManagerBroken } from '../../features/settings/settingHelpers';
@@ -24,16 +24,14 @@ export function isNumber(obj: unknown): obj is number {
 
 /**
  * Returns a short display string: "X.Y.Z" if micro is present, otherwise "X.Y.x".
- * Returns `input` unchanged if it is not a valid PEP 440 version.
+ * Returns `input` unchanged if it is not a valid Python interpreter version.
  */
 export function shortenVersionString(input: string): string {
-    if (!pep440Valid(input)) {
+    const version = PythonVersion.tryParse(input);
+    if (!version) {
         return input;
     }
-    const p = patch(input);
-    return p !== 0 || input.split('.').length >= 3
-        ? `${major(input)}.${minor(input)}.${p}`
-        : `${major(input)}.${minor(input)}.x`;
+    return version.precision >= 3 ? version.toReleaseString(3) : `${version.toReleaseString(2)}.x`;
 }
 
 export function sortEnvironments(collection: PythonEnvironment[]): PythonEnvironment[] {
@@ -46,10 +44,18 @@ export function sortEnvironments(collection: PythonEnvironment[]): PythonEnviron
             return -1;
         }
         if (a.version !== b.version) {
-            if (pep440Valid(a.version) && pep440Valid(b.version)) {
-                return pep440Compare(b.version, a.version); // descending
+            const aVersion = PythonVersion.tryParse(a.version);
+            const bVersion = PythonVersion.tryParse(b.version);
+            if (aVersion && bVersion) {
+                const comparison = bVersion.compareTo(aVersion);
+                if (comparison !== 0) {
+                    return comparison;
+                }
+            } else if (aVersion) {
+                return -1;
+            } else if (bVersion) {
+                return 1;
             }
-            return a.version ? 1 : -1;
         }
         const value = a.name.localeCompare(b.name);
         if (value !== 0) {
@@ -68,9 +74,12 @@ export function getLatest(collection: PythonEnvironment[]): PythonEnvironment | 
     const candidates = nonErroredEnvs.length > 0 ? nonErroredEnvs : collection;
 
     let latest = candidates[0];
+    let latestVersion: PythonVersion | undefined;
     for (const env of candidates) {
-        if (pep440Valid(env.version) && pep440Valid(latest.version) && pep440Compare(env.version, latest.version) > 0) {
+        const version = PythonVersion.tryParse(env.version);
+        if (version && (!latestVersion || version.compareTo(latestVersion) > 0)) {
             latest = env;
+            latestVersion = version;
         }
     }
     return latest;

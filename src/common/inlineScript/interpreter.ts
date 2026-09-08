@@ -3,7 +3,8 @@
 
 import { PythonEnvironment } from '../../api';
 import { traceWarn } from '../logging';
-import { compareReleaseSegments, parseReleaseSegments } from '../utils/pep440Release';
+import { PythonVersion } from '../pythonVersion';
+import { splitClause } from '../pythonVersionSpecifier';
 import { matchesPythonVersion } from './metadata';
 
 /**
@@ -26,12 +27,14 @@ export function pickCompatibleInterpreter(
 ): PythonEnvironment | undefined {
     const trimmedConstraint = requiresPython?.trim();
     const constraint = trimmedConstraint ? trimmedConstraint : undefined;
-    const candidates = installed.filter((env) => isUsableBaseInterpreter(env, constraint));
+    const candidates = installed.flatMap((env) => {
+        const version = isUsableBaseInterpreter(env, constraint) ? PythonVersion.tryParse(env.version) : undefined;
+        return version ? [{ env, version }] : [];
+    });
     if (candidates.length === 0) {
         return undefined;
     }
-    const sorted = [...candidates].sort((a, b) => compareVersionsDescending(a.version, b.version));
-    return sorted[0];
+    return candidates.sort((a, b) => b.version.compareTo(a.version))[0].env;
 }
 
 /**
@@ -62,15 +65,15 @@ export function extractLowerBoundVersion(requiresPython: string | undefined): st
         return undefined;
     }
 
-    let best: number[] | undefined;
+    let best: PythonVersion | undefined;
     let bestStr: string | undefined;
     for (const clause of clauses) {
         const lb = lowerBoundForClause(clause);
         if (lb === undefined) {
             continue;
         }
-        if (best === undefined || compareReleaseSegments(lb.segments, best) > 0) {
-            best = lb.segments;
+        if (best === undefined || lb.version.compareTo(best) > 0) {
+            best = lb.version;
             bestStr = lb.display;
         }
     }
@@ -84,7 +87,7 @@ function isUsableBaseInterpreter(env: PythonEnvironment, requiresPython: string 
     if (typeof env.version !== 'string' || env.version.length === 0) {
         return false;
     }
-    if (parseLeadingMajor(env.version) !== 3) {
+    if (PythonVersion.tryParse(env.version)?.major !== 3) {
         return false;
     }
     if (requiresPython !== undefined && !matchesPythonVersion(requiresPython, env.version)) {
@@ -93,105 +96,45 @@ function isUsableBaseInterpreter(env: PythonEnvironment, requiresPython: string 
     return true;
 }
 
-function parseLeadingMajor(version: string): number | undefined {
-    const m = version.match(/^\s*(\d+)/);
-    if (!m) {
-        return undefined;
-    }
-    const n = Number.parseInt(m[1], 10);
-    return Number.isNaN(n) ? undefined : n;
-}
-
-function compareVersionsDescending(a: string, b: string): number {
-    const aSeg = parseReleaseSegments(a);
-    const bSeg = parseReleaseSegments(b);
-    if (aSeg === undefined && bSeg === undefined) {
-        return 0;
-    }
-    if (aSeg === undefined) {
-        return 1;
-    }
-    if (bSeg === undefined) {
-        return -1;
-    }
-    return compareReleaseSegments(bSeg, aSeg);
-}
-
-const CLAUSE_RE = /^(===|~=|==|!=|>=|<=|>|<)\s*(.+)$/;
-
 interface LowerBound {
-    readonly segments: number[];
+    readonly version: PythonVersion;
     readonly display: string;
 }
 
 function lowerBoundForClause(clause: string): LowerBound | undefined {
-    const m = clause.match(CLAUSE_RE);
-    if (!m) {
+    const parts = splitClause(clause);
+    if (!parts) {
         traceWarn(`inline-script interpreter: unrecognized requires-python clause: ${JSON.stringify(clause)}`);
         return undefined;
     }
-    const op = m[1];
-    const raw = m[2].trim();
+    const { operator, literal } = parts;
 
-    switch (op) {
-        case '>=': {
-            // Per PEP 440 wildcards are only legal with `==` / `!=`. Stay
-            // consistent with matchesPythonVersion (which rejects `>=X.*`)
-            // so we never hand uv a value the picker will then reject.
-            if (raw.endsWith('.*')) {
-                traceWarn(
-                    `inline-script interpreter: wildcards are only valid with '==' / '!=': ${JSON.stringify(clause)}`,
-                );
-                return undefined;
-            }
-            const segments = parseReleaseSegments(raw);
-            if (segments === undefined) {
-                return undefined;
-            }
-            return { segments, display: segmentsToString(segments) };
-        }
-        case '==': {
-            const literal = raw.endsWith('.*') ? raw.slice(0, -2) : raw;
-            const segments = parseReleaseSegments(literal);
-            if (segments === undefined) {
-                return undefined;
-            }
-            return { segments, display: segmentsToString(segments) };
-        }
-        case '~=': {
-            // PEP 440 requires at least two release segments and disallows
-            // wildcards for `~=`. Both rejections mirror matchesPythonVersion.
-            if (raw.endsWith('.*')) {
-                traceWarn(
-                    `inline-script interpreter: wildcards are only valid with '==' / '!=': ${JSON.stringify(clause)}`,
-                );
-                return undefined;
-            }
-            const segments = parseReleaseSegments(raw);
-            if (segments === undefined) {
-                return undefined;
-            }
-            if (segments.length < 2) {
-                traceWarn(
-                    `inline-script interpreter: '~=' requires at least two release segments: ${JSON.stringify(clause)}`,
-                );
-                return undefined;
-            }
-            return { segments, display: segmentsToString(segments) };
-        }
-        case '>':
-        case '<':
-        case '<=':
-        case '!=':
-        case '===':
-            // No clean integer floor we can hand to `uv python install`.
-            // Caller falls back to uv default and re-verifies post-install.
-            return undefined;
-        default:
-            return undefined;
+    // Only the operators that establish a floor yield an install target. The
+    // rest leave no clean integer floor for `uv python install`, so the caller
+    // falls back to the uv default and re-verifies after installing.
+    if (operator !== '>=' && operator !== '==' && operator !== '~=') {
+        return undefined;
     }
-}
 
-function segmentsToString(segments: ReadonlyArray<number>): string {
-    return segments.join('.');
+    // Per PEP 440 wildcards are only legal with `==` / `!=`. Stay consistent
+    // with matchesPythonVersion (which rejects `>=X.*`) so we never hand uv a
+    // value the picker will then reject.
+    if (literal.endsWith('.*') && operator !== '==') {
+        traceWarn(`inline-script interpreter: wildcards are only valid with '==' / '!=': ${JSON.stringify(clause)}`);
+        return undefined;
+    }
+
+    const version = PythonVersion.tryParse(literal.endsWith('.*') ? literal.slice(0, -2) : literal);
+    if (!version) {
+        return undefined;
+    }
+
+    // PEP 440 requires at least two release segments for `~=`, mirroring
+    // matchesPythonVersion.
+    if (operator === '~=' && version.precision < 2) {
+        traceWarn(`inline-script interpreter: '~=' requires at least two release segments: ${JSON.stringify(clause)}`);
+        return undefined;
+    }
+
+    return { version, display: version.toReleaseString() };
 }

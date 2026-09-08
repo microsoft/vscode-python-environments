@@ -631,6 +631,32 @@ suite('uvPythonInstaller - getUvPythonPath', () => {
         assert.strictEqual(result, '/usr/bin/python3.1', 'Should not mistake Python 3.13 for Python 3.1');
     });
 
+    test('should require an exact match for a prerelease version', async () => {
+        const versions: UvPythonVersion[] = [
+            makeUvPythonVersion({ version: '3.14.0', path: '/usr/bin/python3.14' }),
+            makeUvPythonVersion({ version: '3.14.0rc1', path: '/usr/bin/python3.14-rc1' }),
+        ];
+
+        const mockProcess = new MockChildProcess('uv', [
+            'python',
+            'list',
+            '--only-installed',
+            '--managed-python',
+            '--output-format',
+            'json',
+        ]);
+        spawnStub.returns(mockProcess);
+
+        const resultPromise = getUvPythonPath('3.14.0rc1');
+
+        setTimeout(() => {
+            mockProcess.stdout?.emit('data', JSON.stringify(versions));
+            mockProcess.emit('exit', 0, null);
+        }, 10);
+
+        assert.strictEqual(await resultPromise, '/usr/bin/python3.14-rc1');
+    });
+
     test('should return undefined when specified version is not found', async () => {
         const versions: UvPythonVersion[] = [makeUvPythonVersion({ version: '3.13.1', path: '/usr/bin/python3.13' })];
 

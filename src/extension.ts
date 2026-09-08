@@ -44,9 +44,9 @@ import { NewScriptProject } from './features/creators/newScriptProject';
 import { ProjectCreatorsImpl } from './features/creators/projectCreators';
 import {
     addPythonProjectCommand,
-    copyPathToClipboard,
     clearEnvironmentCachesCommand,
     clearScriptEnvironmentCacheCommand,
+    copyPathToClipboard,
     createAnyEnvironmentCommand,
     createEnvironmentCommand,
     createTerminalCommand,
@@ -69,6 +69,7 @@ import { PythonEnvironmentManagers } from './features/envManagers';
 import { EnvVarManager, PythonEnvVariableManager } from './features/execution/envVariableManager';
 import { latchInlineScriptFeatureActivation } from './features/inlineScript/activation';
 import { InlineScriptLazyDetector } from './features/inlineScript/lazyDetector';
+import { registerInlineScriptUx } from './features/inlineScript/setupEnvironment';
 import {
     applyInitialEnvironmentSelection,
     registerInterpreterSettingsChangeListener,
@@ -190,6 +191,8 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
     if (inlineScriptRouting) {
         context.subscriptions.push(inlineScriptRouting);
     }
+
+    void commands.executeCommand('setContext', 'pythonEnvsInlineScriptsEnabled', inlineScriptFeatureActivation.enabled);
 
     const envVarManager: EnvVarManager = new PythonEnvVariableManager(projectManager);
     context.subscriptions.push(envVarManager);
@@ -407,10 +410,11 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
         ...(isInlineScriptsFeatureEnabled()
             ? [
                   commands.registerCommand('python-envs.clearScriptEnvCache', async () => {
-                      await clearScriptEnvironmentCacheCommand(envManagers, projectManager);
+                      await clearScriptEnvironmentCacheCommand(envManagers);
                   }),
               ]
             : []),
+        ...(inlineScriptRouting ? registerInlineScriptUx(envManagers, inlineScriptRouting) : []),
         commands.registerCommand('python-envs.runInTerminal', (item) => {
             return runInTerminalCommand(item, api, terminalManager);
         }),
