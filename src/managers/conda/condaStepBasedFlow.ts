@@ -60,7 +60,7 @@ async function selectEnvironmentType(state: CondaCreationState): Promise<StepFun
     try {
         // Skip this step if we have multiple URIs (force named environment)
         if (state.uris && state.uris.length > 1) {
-            state.envType = 'Named';
+            state.envType = CondaStrings.condaNamed;
             return selectPythonVersion;
         }
 
@@ -129,7 +129,7 @@ async function selectPythonVersion(state: CondaCreationState): Promise<StepFunct
         state.pythonVersion = (selection as QuickPickItem).description;
 
         // Next step depends on environment type
-        return state.envType === 'Named' ? enterEnvironmentName : selectLocation;
+        return state.envType === CondaStrings.condaNamed ? enterEnvironmentName : selectLocation;
     } catch (ex) {
         if (ex === QuickInputButtons.Back) {
             // Go back to environment type selection
