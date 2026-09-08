@@ -101,6 +101,8 @@ extends:
         jobs:
           - job: PublishPackage
             displayName: Publish npm package
+            templateContext:
+              isReleaseJob: true
             steps:
               - download: current
                 artifact: npm-package
@@ -113,5 +115,5 @@ extends:
                   contentSource: 'Folder'
                   folderLocation: '$(Pipeline.Workspace)/npm-package'
                   waitForReleaseCompletion: true
-                  owners: 'grwheele@microsoft.com'
+                  owners: 'brcan@microsoft.com'
                   approvers: 'eduardovil@microsoft.com'
