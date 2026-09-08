@@ -76,6 +76,7 @@ import {
 } from './features/interpreterSelection';
 import { PythonProjectManagerImpl } from './features/projectManager';
 import { getPythonApi, setPythonApi } from './features/pythonApi';
+import { reportIssue } from './features/reportIssue';
 import { registerCompletionProvider } from './features/settings/settingCompletions';
 import { migrateGlobalDefaultEnvManagerSetting } from './features/settings/settingHelpers';
 import { setActivateMenuButtonContext } from './features/terminal/activateMenuButton';
@@ -95,7 +96,6 @@ import { updateViewsAndStatus } from './features/views/revealHandler';
 import { TemporaryStateManager } from './features/views/temporaryStateManager';
 import { PythonEnvTreeItem } from './features/views/treeViewItems';
 import {
-    collectEnvironmentInfo,
     getEnvManagerAndPackageManagerConfigLevels,
     isInlineScriptsFeatureEnabled,
     runPetInTerminalImpl,
@@ -507,47 +507,7 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
                 });
             },
         ),
-        commands.registerCommand('python-envs.reportIssue', async () => {
-            try {
-                // Prompt for issue title
-                const rawTitle = await window.showInputBox({
-                    title: l10n.t('Report Issue - Title'),
-                    prompt: l10n.t('Enter a brief title for the issue'),
-                    placeHolder: l10n.t('e.g., Environment not detected, activation fails, etc.'),
-                    ignoreFocusOut: true,
-                });
-                const title = rawTitle?.trim();
-
-                if (!title) {
-                    // User cancelled or provided empty title
-                    return;
-                }
-
-                // Prompt for issue description
-                const rawDescription = await window.showInputBox({
-                    title: l10n.t('Report Issue - Description'),
-                    prompt: l10n.t('Describe the issue in more detail'),
-                    placeHolder: l10n.t('Provide additional context about what happened...'),
-                    ignoreFocusOut: true,
-                });
-                const description = rawDescription?.trim();
-
-                if (!description) {
-                    // User cancelled or provided empty description
-                    return;
-                }
-
-                const issueData = await collectEnvironmentInfo(context, envManagers, projectManager);
-
-                await commands.executeCommand('workbench.action.openIssueReporter', {
-                    extensionId: 'ms-python.vscode-python-envs',
-                    issueTitle: `[Python Environments] ${title}`,
-                    issueBody: `## Description\n${description}\n\n## Steps to Reproduce\n1. \n2. \n3. \n\n## Expected Behavior\n\n\n## Actual Behavior\n\n\n<!-- The following information was automatically generated -->\n\n<details>\n<summary>Environment Information</summary>\n\n\`\`\`\n${issueData}\n\`\`\`\n\n</details>`,
-                });
-            } catch (error) {
-                window.showErrorMessage(`Failed to open issue reporter: ${error}`);
-            }
-        }),
+        commands.registerCommand('python-envs.reportIssue', () => reportIssue(context, envManagers, projectManager)),
         commands.registerCommand('python-envs.runPetInTerminal', async () => {
             try {
                 await runPetInTerminalImpl();
