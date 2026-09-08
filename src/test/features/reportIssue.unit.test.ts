@@ -1,112 +1,120 @@
-/* eslint-disable @typescript-eslint/no-explicit-any */
 import * as assert from 'assert';
-import * as typeMoq from 'typemoq';
-import * as vscode from 'vscode';
-import { PythonEnvironment, PythonEnvironmentId } from '../../api';
+import * as sinon from 'sinon';
+import { ExtensionContext, InputBoxOptions, l10n } from 'vscode';
+import * as commandApi from '../../common/command.api';
+import * as windowApis from '../../common/window.apis';
+import { reportIssue } from '../../features/reportIssue';
+import * as helpers from '../../helpers';
 import { EnvironmentManagers, PythonProjectManager } from '../../internal.api';
-import { PythonProject } from '../../api';
-
-// We need to mock the extension's activate function to test the collectEnvironmentInfo function
-// Since it's a local function, we'll test the command registration instead
 
 suite('Report Issue Command Tests', () => {
-    let mockEnvManagers: typeMoq.IMock<EnvironmentManagers>;
-    let mockProjectManager: typeMoq.IMock<PythonProjectManager>;
+    const context = {} as ExtensionContext;
+    const envManagers = {} as EnvironmentManagers;
+    const projectManager = {} as PythonProjectManager;
 
-    setup(() => {
-        mockEnvManagers = typeMoq.Mock.ofType<EnvironmentManagers>();
-        mockProjectManager = typeMoq.Mock.ofType<PythonProjectManager>();
+    teardown(() => {
+        sinon.restore();
     });
 
-    test('should handle environment collection with empty data', () => {
-        mockEnvManagers.setup((em) => em.managers).returns(() => []);
-        mockProjectManager.setup((pm) => pm.getProjects(typeMoq.It.isAny())).returns(() => []);
-        
-        // Test that empty collections are handled gracefully
-        const managers = mockEnvManagers.object.managers;
-        const projects = mockProjectManager.object.getProjects();
-        
-        assert.strictEqual(managers.length, 0);
-        assert.strictEqual(projects.length, 0);
+    test('stops when the title input is cancelled', async () => {
+        sinon.stub(windowApis, 'showInputBox').resolves(undefined);
+        const collectEnvironmentInfo = sinon.stub(helpers, 'collectEnvironmentInfo');
+        const executeCommand = sinon.stub(commandApi, 'executeCommand');
+
+        await reportIssue(context, envManagers, projectManager);
+
+        sinon.assert.notCalled(collectEnvironmentInfo);
+        sinon.assert.notCalled(executeCommand);
     });
 
-    test('should handle environment collection with mock data', async () => {
-        // Create mock environment
-        const mockEnvId: PythonEnvironmentId = {
-            id: 'test-env-id',
-            managerId: 'test-manager'
-        };
+    test('stops when the description input is cancelled', async () => {
+        sinon.stub(windowApis, 'showInputBox').onFirstCall().resolves('Issue title').onSecondCall().resolves(undefined);
+        const collectEnvironmentInfo = sinon.stub(helpers, 'collectEnvironmentInfo');
+        const executeCommand = sinon.stub(commandApi, 'executeCommand');
 
-        const mockEnv: PythonEnvironment = {
-            envId: mockEnvId,
-            name: 'Test Environment',
-            displayName: 'Test Environment 3.9',
-            displayPath: '/path/to/python',
-            version: '3.9.0',
-            environmentPath: vscode.Uri.file('/path/to/env'),
-            execInfo: {
-                run: {
-                    executable: '/path/to/python',
-                    args: []
-                }
-            },
-            sysPrefix: '/path/to/env'
-        };
+        await reportIssue(context, envManagers, projectManager);
 
-        const mockManager = {
-            id: 'test-manager',
-            displayName: 'Test Manager',
-            getEnvironments: async () => [mockEnv]
-        } as any;
-
-        // Create mock project
-        const mockProject: PythonProject = {
-            uri: vscode.Uri.file('/path/to/project'),
-            name: 'Test Project'
-        };
-
-        mockEnvManagers.setup((em) => em.managers).returns(() => [mockManager]);
-        mockProjectManager.setup((pm) => pm.getProjects(typeMoq.It.isAny())).returns(() => [mockProject]);
-        mockEnvManagers.setup((em) => em.getEnvironment(typeMoq.It.isAny())).returns(() => Promise.resolve(mockEnv));
-
-        // Verify mocks are set up correctly
-        const managers = mockEnvManagers.object.managers;
-        const projects = mockProjectManager.object.getProjects();
-
-        assert.strictEqual(managers.length, 1);
-        assert.strictEqual(projects.length, 1);
-        assert.strictEqual(managers[0].id, 'test-manager');
-        assert.strictEqual(projects[0].name, 'Test Project');
+        sinon.assert.notCalled(collectEnvironmentInfo);
+        sinon.assert.notCalled(executeCommand);
     });
 
-    test('should handle errors gracefully during environment collection', async () => {
-        const mockManager = {
-            id: 'error-manager',
-            displayName: 'Error Manager',
-            getEnvironments: async () => {
-                throw new Error('Test error');
-            }
-        } as any;
+    test('validates the minimum description length in the input box', async () => {
+        const showInputBox = sinon
+            .stub(windowApis, 'showInputBox')
+            .onFirstCall()
+            .resolves('Issue title')
+            .onSecondCall()
+            .resolves(undefined);
 
-        mockEnvManagers.setup((em) => em.managers).returns(() => [mockManager]);
-        mockProjectManager.setup((pm) => pm.getProjects(typeMoq.It.isAny())).returns(() => []);
+        await reportIssue(context, envManagers, projectManager);
 
-        // Verify that error conditions don't break the test setup
-        const managers = mockEnvManagers.object.managers;
-        assert.strictEqual(managers.length, 1);
-        assert.strictEqual(managers[0].id, 'error-manager');
+        const options = showInputBox.secondCall.args[0] as InputBoxOptions;
+        assert.ok(options.validateInput);
+        assert.strictEqual(await options.validateInput('ab'), l10n.t('Enter at least {0} characters.', 3));
+        assert.strictEqual(await options.validateInput('abc'), undefined);
     });
 
-    test('should register report issue command', () => {
-        // Basic test to ensure command registration structure would work
-        // The actual command registration happens during extension activation
-        // This tests the mock setup and basic functionality
-        
-        mockEnvManagers.setup((em) => em.managers).returns(() => []);
-        mockProjectManager.setup((pm) => pm.getProjects(typeMoq.It.isAny())).returns(() => []);
+    test('does not collect environment information when confirmation is dismissed', async () => {
+        sinon.stub(windowApis, 'showInputBox').onFirstCall().resolves('Issue title').onSecondCall().resolves('Details');
+        sinon.stub(windowApis, 'showInformationMessage').resolves(undefined);
+        const collectEnvironmentInfo = sinon.stub(helpers, 'collectEnvironmentInfo');
+        const executeCommand = sinon.stub(commandApi, 'executeCommand');
 
-        // Verify basic setup works
-        assert.notStrictEqual(mockEnvManagers.object, undefined);
-        assert.notStrictEqual(mockProjectManager.object, undefined);
+        await reportIssue(context, envManagers, projectManager);
+
+        sinon.assert.notCalled(collectEnvironmentInfo);
+        sinon.assert.notCalled(executeCommand);
+    });
+
+    test('opens a prefilled issue reporter after confirmation', async () => {
+        sinon
+            .stub(windowApis, 'showInputBox')
+            .onFirstCall()
+            .resolves('  Issue title  ')
+            .onSecondCall()
+            .resolves('  Issue details  ');
+        const showInformationMessage = sinon
+            .stub(windowApis, 'showInformationMessage')
+            .resolves(l10n.t('Continue to Issue Reporter'));
+        const collectEnvironmentInfo = sinon.stub(helpers, 'collectEnvironmentInfo').resolves('Environment details');
+        const executeCommand = sinon.stub(commandApi, 'executeCommand').resolves();
+
+        await reportIssue(context, envManagers, projectManager);
+
+        sinon.assert.calledOnce(showInformationMessage);
+        assert.deepStrictEqual(showInformationMessage.firstCall.args, [
+            l10n.t(
+                'To help the Python Environments team investigate, VS Code will collect details about your Python environments and projects and open a prefilled GitHub issue. You can review and edit it before submitting.',
+            ),
+            { modal: true },
+            l10n.t('Continue to Issue Reporter'),
+        ]);
+        sinon.assert.calledOnceWithExactly(collectEnvironmentInfo, context, envManagers, projectManager);
+        sinon.assert.calledOnce(executeCommand);
+        assert.strictEqual(executeCommand.firstCall.args[0], 'workbench.action.openIssueReporter');
+        assert.deepStrictEqual(executeCommand.firstCall.args[1], {
+            extensionId: 'ms-python.vscode-python-envs',
+            issueTitle: '[Python Environments] Issue title',
+            issueBody:
+                '## Description\nIssue details\n\n## Steps to Reproduce\n1. \n2. \n3. \n\n## Expected Behavior\n\n\n' +
+                '## Actual Behavior\n\n\n<!-- The following information was automatically generated -->\n\n<details>\n' +
+                '<summary>Environment Information</summary>\n\n```\nEnvironment details\n```\n\n</details>',
+        });
+    });
+
+    test('shows a localized error when opening the issue reporter fails', async () => {
+        sinon.stub(windowApis, 'showInputBox').onFirstCall().resolves('Issue title').onSecondCall().resolves('Details');
+        sinon.stub(windowApis, 'showInformationMessage').resolves(l10n.t('Continue to Issue Reporter'));
+        sinon.stub(helpers, 'collectEnvironmentInfo').resolves('Environment details');
+        sinon.stub(commandApi, 'executeCommand').rejects(new Error('Reporter failed'));
+        const showErrorMessage = sinon.stub(windowApis, 'showErrorMessage').resolves(undefined);
+
+        await reportIssue(context, envManagers, projectManager);
+
+        sinon.assert.calledOnce(showErrorMessage);
+        assert.strictEqual(
+            showErrorMessage.firstCall.args[0],
+            l10n.t('Failed to open the issue reporter. Please try again.'),
+        );
     });
 });
