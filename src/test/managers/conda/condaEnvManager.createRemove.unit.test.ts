@@ -89,6 +89,33 @@ suite('CondaEnvManager.create - step-based flow', () => {
         assert.ok(createNamedStub.calledOnceWithExactly(api, sinon.match.any, sinon.match.any, 'localized-env', '3.12'));
         assert.ok(createPrefixStub.notCalled);
     });
+
+    test('falls back to English Named when the localized label is unavailable', async () => {
+        Object.defineProperty(CondaStrings, 'condaNamed', { value: undefined, configurable: true });
+        const createdEnvironment = {} as PythonEnvironment;
+        const showQuickPickStub = sinon.stub(windowApis, 'showQuickPickWithButtons');
+        showQuickPickStub.resolves({ label: 'Python', description: '3.12' } as QuickPickItem);
+        const showInputBoxStub = sinon.stub(windowApis, 'showInputBoxWithButtons').resolves('fallback-env');
+        const createNamedStub = sinon.stub(condaUtils, 'createNamedCondaEnvironment').resolves(createdEnvironment);
+        const createPrefixStub = sinon.stub(condaUtils, 'createPrefixCondaEnvironment');
+        const api = {
+            getEnvironments: sinon.stub().resolves([]),
+            getPythonProject: sinon.stub().returns(undefined),
+        } as unknown as PythonEnvironmentApi;
+
+        const result = await createStepBasedCondaFlow(
+            api,
+            createMockLogOutputChannel(),
+            {} as EnvironmentManager,
+            [Uri.file(testPath('workspace', 'one')), Uri.file(testPath('workspace', 'two'))],
+        );
+
+        assert.strictEqual(result, createdEnvironment);
+        assert.ok(showQuickPickStub.calledOnce);
+        assert.ok(showInputBoxStub.calledOnce);
+        assert.ok(createNamedStub.calledOnceWithExactly(api, sinon.match.any, sinon.match.any, 'fallback-env', '3.12'));
+        assert.ok(createPrefixStub.notCalled);
+    });
 });
 
 suite('CondaEnvManager.create - orchestration', () => {
