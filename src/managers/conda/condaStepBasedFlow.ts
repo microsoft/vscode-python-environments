@@ -14,6 +14,11 @@ import {
 
 // Recommended Python version for Conda environments
 const RECOMMENDED_CONDA_PYTHON = '3.11.11';
+const DEFAULT_CONDA_NAMED_LABEL = 'Named';
+
+function getCondaNamedLabel(): string {
+    return CondaStrings.condaNamed || DEFAULT_CONDA_NAMED_LABEL;
+}
 
 /**
  * State interface for the Conda environment creation flow.
@@ -60,13 +65,13 @@ async function selectEnvironmentType(state: CondaCreationState): Promise<StepFun
     try {
         // Skip this step if we have multiple URIs (force named environment)
         if (state.uris && state.uris.length > 1) {
-            state.envType = 'Named';
+            state.envType = getCondaNamedLabel();
             return selectPythonVersion;
         }
 
         const selection = (await showQuickPickWithButtons(
             [
-                { label: CondaStrings.condaNamed, description: CondaStrings.condaNamedDescription },
+                { label: getCondaNamedLabel(), description: CondaStrings.condaNamedDescription },
                 { label: CondaStrings.condaPrefix, description: CondaStrings.condaPrefixDescription },
             ],
             {
@@ -129,7 +134,7 @@ async function selectPythonVersion(state: CondaCreationState): Promise<StepFunct
         state.pythonVersion = (selection as QuickPickItem).description;
 
         // Next step depends on environment type
-        return state.envType === 'Named' ? enterEnvironmentName : selectLocation;
+        return state.envType === getCondaNamedLabel() ? enterEnvironmentName : selectLocation;
     } catch (ex) {
         if (ex === QuickInputButtons.Back) {
             // Go back to environment type selection
@@ -292,7 +297,7 @@ export async function createStepBasedCondaFlow(
         }
 
         // If we have all required data, create the environment
-        if (state.envType === CondaStrings.condaNamed && state.envName) {
+        if (state.envType === getCondaNamedLabel() && state.envName) {
             return await createNamedCondaEnvironment(api, log, manager, state.envName, state.pythonVersion);
         } else if (state.envType === CondaStrings.condaPrefix && state.prefix) {
             // For prefix environments, we need to pass the fsPath where the environment will be created
