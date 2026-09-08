@@ -101,6 +101,8 @@ extends:
         jobs:
           - job: PublishPackage
             displayName: Publish npm package
+            templateContext:
+              isReleaseJob: true
             steps:
               - download: current
                 artifact: npm-package
