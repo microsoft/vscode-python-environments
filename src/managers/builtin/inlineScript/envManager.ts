@@ -20,6 +20,7 @@ import {
     CreateEnvironmentScope,
     DidChangeEnvironmentEventArgs,
     DidChangeEnvironmentsEventArgs,
+    DidChangePackagesEventArgs,
     EnvironmentChangeKind,
     EnvironmentManager,
     GetEnvironmentScope,
@@ -79,7 +80,7 @@ import { sendTelemetryEvent } from '../../../common/telemetry/sender';
 import { timeout } from '../../../common/utils/asyncUtils';
 import { createDeferred, Deferred } from '../../../common/utils/deferred';
 import { isFileNotFoundError } from '../../../common/utils/filesystem';
-import { normalizePath } from '../../../common/utils/pathUtils';
+import { isSameOrParentPath, normalizePath } from '../../../common/utils/pathUtils';
 import { PythonVersion } from '../../../common/pythonVersion';
 import { PythonVersionSpecifier, splitClause } from '../../../common/pythonVersionSpecifier';
 import { getVenvPythonPath } from '../../../common/utils/virtualEnvironment';
@@ -273,6 +274,13 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
                 void this.handleRenamedScripts(event.files).catch((error) => {
                     this.log.warn(
                         `Failed to update inline-script associations for renamed files: ${getErrorMessage(error)}`,
+                    );
+                });
+            }),
+            this.api.onDidChangePackages((event) => {
+                void this.handlePackagesChanged(event).catch((error) => {
+                    this.log.warn(
+                        `Failed to record an inline-script package change: ${getErrorMessage(error)}`,
                     );
                 });
             }),
@@ -2286,6 +2294,79 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
      * content-derived, so if the file at the new path no longer matches, ordinary validation clears
      * the association and the setup CodeLens returns.
      */
+    /**
+     * Editing packages outside setup silently affects every script sharing the entry, so mark the
+     * entry non-reusable and un-route each of them; the next setup rebuilds from declared metadata.
+     */
+    private async handlePackagesChanged(event: DidChangePackagesEventArgs): Promise<void> {
+        if (this.disposed || event.environment.envId.managerId !== INLINE_SCRIPT_MANAGER_ID) {
+            return;
+        }
+        if (event.changes.length === 0) {
+            return;
+        }
+        const envDirPath = event.environment.sysPrefix;
+        // Setup installs through `managePackages`, which fires this event too. The emitter is
+        // synchronous, so a build still registered here owns this change and must not self-mark.
+        if (this.isBuildInFlightFor(envDirPath)) {
+            return;
+        }
+        const cacheRoot = getScriptEnvCacheRoot(this.globalStorageUri);
+        const envDir = Uri.file(envDirPath);
+        if ((await inspectOwnedCacheEntry(event.environment, cacheRoot, envDir)) !== 'expected') {
+            return;
+        }
+        if (!(await this.markCacheEntryManuallyModified(envDir))) {
+            return;
+        }
+        this.unrouteScriptsUsingEnvironment(envDirPath);
+    }
+
+    private isBuildInFlightFor(envDirPath: string): boolean {
+        return this.pendingCreations.has(path.basename(envDirPath));
+    }
+
+    /** Mark under the entry lock so it cannot race a concurrent build. */
+    private async markCacheEntryManuallyModified(envDir: Uri): Promise<boolean> {
+        try {
+            return await this.withCacheEntryLock(envDir, async () => {
+                // Re-check now that the build, if any, has released the lock.
+                if (this.isBuildInFlightFor(envDir.fsPath)) {
+                    return false;
+                }
+                const sidecar = await inspectMetaJson(envDir);
+                if (sidecar.kind !== 'valid' || sidecar.metadata.manuallyModified) {
+                    return false;
+                }
+                await writeMetaJson(envDir, { ...sidecar.metadata, manuallyModified: true });
+                this.cacheMutationRevision += 1;
+                this.log.info(
+                    `Inline-script environment packages were modified outside setup; it will be rebuilt on next setup: ${envDir.fsPath}`,
+                );
+                return true;
+            });
+        } catch (error) {
+            // A build holding the lock rewrites the sidecar anyway.
+            this.log.warn(
+                `Failed to record an inline-script package modification for ${envDir.fsPath}: ${getErrorMessage(error)}`,
+            );
+            return false;
+        }
+    }
+
+    /** Un-route every script associated with the given cache entry. */
+    private unrouteScriptsUsingEnvironment(envDirPath: string): void {
+        for (const [scriptPath, association] of this.fsPathToPersistedAssociation.entries()) {
+            if (!isSameOrParentPath(envDirPath, association.environmentPath)) {
+                continue;
+            }
+            this.invalidateCachedAssociationValidation(scriptPath);
+            const uri = this.routingRegistry.getUri(scriptPath) ?? Uri.file(scriptPath);
+            this.routingRegistry.setValidatedAssociation(uri, false);
+            this.log.info(`Inline-script association for ${scriptPath} needs setup again after a package change.`);
+        }
+    }
+
     private async handleRenamedScripts(
         files: readonly { readonly oldUri: Uri; readonly newUri: Uri }[],
     ): Promise<void> {
@@ -2920,6 +3001,13 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
             };
         }
         const sidecar = sidecarResult.metadata;
+        if (sidecar.manuallyModified) {
+            // Packages changed outside setup, so the entry no longer matches its dependencies.
+            this.log.info(
+                `Rebuilding an inline-script cache entry whose packages were modified outside setup: ${envDir.fsPath}`,
+            );
+            return { kind: 'stale' };
+        }
         if (!this.matchesSelectedBase(sidecar, selectedBase)) {
             return { kind: 'stale' };
         }

@@ -9,6 +9,7 @@ import * as path from 'path';
 import * as sinon from 'sinon';
 import { Disposable, LogOutputChannel, Memento, TextDocument, Uri } from 'vscode';
 import {
+    DidChangePackagesEventArgs,
     EnvironmentChangeKind,
     EnvironmentManager,
     PythonEnvironment,
@@ -101,6 +102,7 @@ suite('InlineScriptEnvManager', () => {
     let api: PythonEnvironmentApi;
     let apiGetEnvironmentsStub: sinon.SinonStub;
     let apiRefreshEnvironmentsStub: sinon.SinonStub;
+    let packagesChangedListener: ((e: DidChangePackagesEventArgs) => unknown) | undefined;
     let baseEnvironment: PythonEnvironment;
     let baseExecutable: string;
     let baseManager: EnvironmentManager;
@@ -150,6 +152,10 @@ suite('InlineScriptEnvManager', () => {
         api = {
             getEnvironments: apiGetEnvironmentsStub,
             refreshEnvironments: apiRefreshEnvironmentsStub,
+            onDidChangePackages: (listener: (e: DidChangePackagesEventArgs) => unknown) => {
+                packagesChangedListener = listener;
+                return new Disposable(() => undefined);
+            },
         } as unknown as PythonEnvironmentApi;
         nativeFinder = {} as NativePythonFinder;
         routingRegistry = new InlineScriptRoutingRegistry();
@@ -2297,6 +2303,112 @@ suite('InlineScriptEnvManager', () => {
             );
             assert.strictEqual(writeMetaStub.callCount, 0);
             assert.strictEqual(createWithProgressStub.callCount, 0);
+        });
+    });
+
+    suite('package drift', () => {
+        // The listener is fire-and-forget, so wait for its async work rather than the call.
+        function firePackagesChanged(environment: PythonEnvironment): void {
+            assert.ok(packagesChangedListener, 'expected the manager to subscribe to package changes');
+            packagesChangedListener!({
+                environment,
+                manager: {} as never,
+                changes: [{ kind: 0 as never, pkg: {} as never }],
+            });
+        }
+
+        function sidecarFor(environment: PythonEnvironment): cacheLayout.InlineScriptEnvMeta | undefined {
+            const entry = sidecarsByEnvDir.get(normalizePath(environment.sysPrefix));
+            return typeof entry === 'string' ? undefined : entry;
+        }
+
+        test('marks an owned entry manually modified and un-routes every script using it', async () => {
+            const first = scriptUri('shared_one.py');
+            const second = scriptUri('shared_two.py');
+            const environment = await createOwnedEnvironment();
+            await manager.set(first, environment);
+            await manager.set(second, environment);
+            routingRegistry.setValidatedAssociation(first, true);
+            routingRegistry.setValidatedAssociation(second, true);
+
+            firePackagesChanged(environment);
+            await waitForCondition(
+                () => sidecarFor(environment)?.manuallyModified === true,
+                'the modified cache entry should be marked in its sidecar',
+            );
+
+            // Both scripts sharing the entry lose routing, not just the edited one.
+            assert.strictEqual(routingRegistry.hasValidatedAssociation(first), false);
+            assert.strictEqual(routingRegistry.hasValidatedAssociation(second), false);
+        });
+
+        test('rebuilds instead of reusing an entry whose packages were modified', async () => {
+            const uri = scriptUri();
+            const environment = await createOwnedEnvironment();
+            await manager.set(uri, environment);
+            firePackagesChanged(environment);
+            await waitForCondition(
+                () => sidecarFor(environment)?.manuallyModified === true,
+                'the modified cache entry should be marked in its sidecar',
+            );
+            createWithProgressStub.resetHistory();
+
+            await manager.create(uri);
+
+            assert.strictEqual(
+                createWithProgressStub.callCount,
+                1,
+                'a drifted entry must be rebuilt, not reused',
+            );
+        });
+
+        test('ignores package changes for environments it does not own', async () => {
+            const uri = scriptUri();
+            const environment = await createOwnedEnvironment();
+            await manager.set(uri, environment);
+            routingRegistry.setValidatedAssociation(uri, true);
+
+            firePackagesChanged({
+                ...environment,
+                envId: { managerId: 'ms-python.python:venv', id: 'some-venv' },
+            });
+            await nextTurn();
+            await nextTurn();
+            await nextTurn();
+
+            assert.strictEqual(sidecarFor(environment)?.manuallyModified, undefined);
+            assert.strictEqual(routingRegistry.hasValidatedAssociation(uri), true);
+        });
+        test('does not mark an entry while its own build is in flight', async () => {
+            // The real createWithProgress installs through managePackages, which fires this same
+            // event while the build still holds the cache-entry lock, so setup must not mark the
+            // entry it is building. Two entries are used so the outcomes are distinguishable: the
+            // unguarded entry settling proves the guarded one had at least as long to settle.
+            const building = await createOwnedEnvironment();
+            const edited = await createOwnedEnvironment('bbbbbbbbbbbbbbbb');
+            const buildingScript = scriptUri('building.py');
+            await manager.set(buildingScript, building);
+            routingRegistry.setValidatedAssociation(buildingScript, true);
+            const pendingCreations = (
+                manager as unknown as { pendingCreations: Map<string, unknown> }
+            ).pendingCreations;
+            pendingCreations.set(CACHE_KEY, {});
+
+            firePackagesChanged(building);
+            firePackagesChanged(edited);
+            await waitForCondition(
+                () => sidecarFor(edited)?.manuallyModified === true,
+                'a package change outside a build should be recorded',
+            );
+            await nextTurn();
+            await nextTurn();
+
+            assert.strictEqual(
+                sidecarFor(building)?.manuallyModified,
+                undefined,
+                'setup must not mark the entry it is building',
+            );
+            assert.strictEqual(routingRegistry.hasValidatedAssociation(buildingScript), true);
         });
     });
 
