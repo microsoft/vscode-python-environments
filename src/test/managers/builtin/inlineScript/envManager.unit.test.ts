@@ -5230,9 +5230,27 @@ suite('InlineScriptEnvManager', () => {
             assert.strictEqual(routingRegistry.hasValidatedAssociation(uri), false);
         });
 
-        test('clears persisted association state for the old path when a script is renamed', async () => {
+        test('moves the persisted association to the new path when a script is renamed', async () => {
             const oldUri = scriptUri('old.py');
             const newUri = scriptUri('new.py');
+            const environment = await createOwnedEnvironment();
+            await manager.set(oldUri, environment);
+
+            fireRename(oldUri, newUri);
+            await nextTurn();
+            await nextTurn();
+
+            // The cache entry is keyed by dependencies + interpreter, not by path, so the
+            // environment survives the rename and follows the file.
+            assert.deepStrictEqual(Object.keys(persistedAssociations ?? {}), [normalizePath(newUri.fsPath)]);
+            assert.strictEqual(await manager.get(oldUri), undefined);
+            assert.strictEqual(routingRegistry.hasValidatedAssociation(oldUri), false);
+            assert.strictEqual(await manager.get(newUri), environment);
+        });
+
+        test('drops the association when a script is renamed to a non-python file', async () => {
+            const oldUri = scriptUri('old.py');
+            const newUri = scriptUri('old.txt');
             const environment = await createOwnedEnvironment();
             await manager.set(oldUri, environment);
 
@@ -5243,6 +5261,28 @@ suite('InlineScriptEnvManager', () => {
             assert.deepStrictEqual(persistedAssociations, {});
             assert.strictEqual(await manager.get(oldUri), undefined);
             assert.strictEqual(routingRegistry.hasValidatedAssociation(oldUri), false);
+        });
+
+        test('replaces an existing association when a script is renamed onto it', async () => {
+            const oldUri = scriptUri('old.py');
+            const targetUri = scriptUri('target.py');
+            const movedEnvironment = await createOwnedEnvironment();
+            const replacedEnvironment = await createOwnedEnvironment('bbbbbbbbbbbbbbbb');
+            await manager.set(targetUri, replacedEnvironment);
+            await manager.set(oldUri, movedEnvironment);
+
+            fireRename(oldUri, targetUri);
+            await nextTurn();
+            await nextTurn();
+
+            assert.deepStrictEqual(Object.keys(persistedAssociations ?? {}), [normalizePath(targetUri.fsPath)]);
+            const moved = (persistedAssociations as Record<string, { environmentPath: string }>)[
+                normalizePath(targetUri.fsPath)
+            ];
+            assert.strictEqual(
+                normalizePath(moved.environmentPath),
+                normalizePath(movedEnvironment.environmentPath.fsPath),
+            );
         });
 
         test('removes and notifies for a warm association whose executable was deleted', async () => {

@@ -62,6 +62,7 @@ import { extractLowerBoundVersion, pickCompatibleInterpreter } from '../../../co
 import { InlineScriptMetadata, readInlineScriptMetadataFromFile } from '../../../common/inlineScript/metadata';
 import {
     getInlineScriptMetadataRoutingIdentity,
+    getInlineScriptRoutingKey,
     InlineScriptMetadataChangeEvent,
     InlineScriptRoutingRegistry,
 } from '../../../common/inlineScript/routingRegistry';
@@ -260,9 +261,9 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
                 });
             }),
             onDidRenameFiles((event) => {
-                void this.clearAssociationsForScripts(event.files.map((file) => file.oldUri)).catch((error) => {
+                void this.handleRenamedScripts(event.files).catch((error) => {
                     this.log.warn(
-                        `Failed to clear inline-script associations for renamed files: ${getErrorMessage(error)}`,
+                        `Failed to update inline-script associations for renamed files: ${getErrorMessage(error)}`,
                     );
                 });
             }),
@@ -2232,6 +2233,121 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
         return run;
     }
 
+    /**
+     * Follow a rename instead of dropping the association.
+     *
+     * A cache entry is keyed by the script's dependencies and base interpreter, never by its path,
+     * so renaming a script does not invalidate its environment. `PythonProjectManagerImpl` already
+     * rewrites the matching `python-envs.pythonProjects` entry to the new path, so clearing the
+     * association here would leave a managed inline-script project entry with no environment behind
+     * it.
+     *
+     * The moved record is re-validated afterwards rather than trusted: its metadata binding is
+     * content-derived, so if the file at the new path no longer matches, ordinary validation clears
+     * the association and the setup CodeLens returns.
+     */
+    private async handleRenamedScripts(
+        files: readonly { readonly oldUri: Uri; readonly newUri: Uri }[],
+    ): Promise<void> {
+        const transfers = await this.enqueueSelection(async () => {
+            await this.persistedAssociationsLoaded;
+
+            const moves: RenamedScriptTransfer[] = [];
+            const clears: ScriptReference[] = [];
+            const seen = new Set<string>();
+            for (const { oldUri, newUri } of files) {
+                if (oldUri.scheme !== 'file') {
+                    continue;
+                }
+                const oldPath = normalizePath(oldUri.fsPath);
+                if (seen.has(oldPath)) {
+                    continue;
+                }
+                seen.add(oldPath);
+                if (!this.fsPathToEnv.has(oldPath) && !this.fsPathToPersistedAssociation.has(oldPath)) {
+                    continue;
+                }
+                const record = this.fsPathToPersistedAssociation.get(oldPath);
+                // Only follow the rename when the destination is still a routable local `.py` file;
+                // renaming to another extension (or off the local filesystem) drops the association.
+                const newPath = getInlineScriptRoutingKey(newUri);
+                if (!record || newPath === undefined || newPath === oldPath) {
+                    clears.push({ uri: oldUri, scriptPath: oldPath });
+                    continue;
+                }
+                moves.push({
+                    oldUri,
+                    oldPath,
+                    newUri,
+                    newPath,
+                    record,
+                    environment: this.fsPathToEnv.get(oldPath),
+                });
+            }
+
+            if (moves.length === 0 && clears.length === 0) {
+                return [];
+            }
+
+            await this.updatePersistedAssociations([
+                ...clears.map(({ scriptPath }) => ({ scriptPath })),
+                // Remove the old key and write the new one in the same transaction. Writing the new
+                // key unconditionally means a rename onto an already-associated script replaces it.
+                ...moves.flatMap((move) => [
+                    { scriptPath: move.oldPath, expectedPersistedAssociation: move.record },
+                    { scriptPath: move.newPath, persistedAssociation: move.record },
+                ]),
+            ]);
+
+            for (const clear of clears) {
+                this.forgetScriptAssociationState(clear.scriptPath);
+                this.clearValidatedRouteableState(clear.uri);
+            }
+            for (const move of moves) {
+                this.forgetScriptAssociationState(move.oldPath);
+                this.clearValidatedRouteableState(move.oldUri);
+                // Reset validation bookkeeping for the destination without discarding the record
+                // `updatePersistedAssociations` just wrote for it.
+                this.bumpAssociationRevision(move.newPath);
+                this.pendingRehydrations.delete(move.newPath);
+                this.pendingMetadataRefreshes.delete(move.newPath);
+                if (move.environment) {
+                    this.fsPathToEnv.set(move.newPath, move.environment);
+                } else {
+                    this.fsPathToEnv.delete(move.newPath);
+                }
+                this.clearValidatedRouteableState(move.newUri);
+                this.log.info(`Moved inline-script association from ${move.oldPath} to ${move.newPath}.`);
+            }
+            return moves;
+        });
+
+        // Re-validate outside the selection queue, mirroring how activation primes associations.
+        for (const move of transfers) {
+            await this.seedRoutingMetadataFromSavedFile(move.newUri, move.newPath);
+            const metadata = this.routingRegistry.getMetadata(move.newPath);
+            const metadataIdentity = metadata ? getInlineScriptMetadataRoutingIdentity(metadata) : undefined;
+            if (!metadata || !metadataIdentity) {
+                continue;
+            }
+            const uri = this.routingRegistry.getUri(move.newPath) ?? move.newUri;
+            await this.refreshValidatedAssociationForMetadata(
+                uri,
+                metadata,
+                metadataIdentity,
+                this.routingRegistry.getMetadataRevision(uri),
+            );
+        }
+    }
+
+    private forgetScriptAssociationState(scriptPath: string): void {
+        this.bumpAssociationRevision(scriptPath);
+        this.pendingRehydrations.delete(scriptPath);
+        this.pendingMetadataRefreshes.delete(scriptPath);
+        this.fsPathToEnv.delete(scriptPath);
+        this.fsPathToPersistedAssociation.delete(scriptPath);
+    }
+
     private clearAssociationsForScripts(scripts: readonly Uri[]): Promise<void> {
         return this.enqueueSelection(async () => {
             await this.persistedAssociationsLoaded;
@@ -3638,6 +3754,15 @@ interface PersistedAssociationChange {
 interface ScriptReference {
     readonly uri: Uri;
     readonly scriptPath: string;
+}
+
+interface RenamedScriptTransfer {
+    readonly oldUri: Uri;
+    readonly oldPath: string;
+    readonly newUri: Uri;
+    readonly newPath: string;
+    readonly record: PersistedAssociationRecord;
+    readonly environment: PythonEnvironment | undefined;
 }
 
 interface PendingScriptUpdate extends ScriptReference {
