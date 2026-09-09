@@ -2282,19 +2282,6 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
     }
 
     /**
-     * Follow a rename instead of dropping the association.
-     *
-     * A cache entry is keyed by the script's dependencies and base interpreter, never by its path,
-     * so renaming a script does not invalidate its environment. `PythonProjectManagerImpl` already
-     * rewrites the matching `python-envs.pythonProjects` entry to the new path, so clearing the
-     * association here would leave a managed inline-script project entry with no environment behind
-     * it.
-     *
-     * The moved record is re-validated afterwards rather than trusted: its metadata binding is
-     * content-derived, so if the file at the new path no longer matches, ordinary validation clears
-     * the association and the setup CodeLens returns.
-     */
-    /**
      * Editing packages outside setup silently affects every script sharing the entry, so mark the
      * entry non-reusable and un-route each of them; the next setup rebuilds from declared metadata.
      */
@@ -2367,6 +2354,19 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
         }
     }
 
+    /**
+     * Follow a rename instead of dropping the association.
+     *
+     * A cache entry is keyed by the script's dependencies and base interpreter, never by its path,
+     * so renaming a script does not invalidate its environment. `PythonProjectManagerImpl` already
+     * rewrites the matching `python-envs.pythonProjects` entry to the new path, so clearing the
+     * association here would leave a managed inline-script project entry with no environment behind
+     * it.
+     *
+     * The moved record is re-validated afterwards rather than trusted: its metadata binding is
+     * content-derived, so if the file at the new path no longer matches, ordinary validation clears
+     * the association and the setup CodeLens returns.
+     */
     private async handleRenamedScripts(
         files: readonly { readonly oldUri: Uri; readonly newUri: Uri }[],
     ): Promise<void> {

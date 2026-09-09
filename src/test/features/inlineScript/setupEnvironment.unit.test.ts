@@ -92,6 +92,20 @@ suite('setUpInlineScriptEnvironment', () => {
         em.verify((m) => m.setEnvironment(scriptUri, env), typemoq.Times.once());
     });
 
+    test('retires a previous cancellation once setup succeeds', async () => {
+        // Outcomes are read non-consumingly, so a stale cancellation must not survive a later
+        // successful setup and be reported against it.
+        const env = makeEnv();
+        routing.noteSetupOutcome(scriptUri, { kind: 'cancelled' });
+        manager.setup((m) => m.create(scriptUri, undefined)).returns(() => Promise.resolve(env));
+        em.setup((m) => m.setEnvironment(scriptUri, env)).returns(() => Promise.resolve());
+
+        const result = await setUpInlineScriptEnvironment(scriptUri, em.object, routing);
+
+        assert.strictEqual(result, env);
+        assert.strictEqual(routing.getSetupOutcome(scriptUri), undefined);
+    });
+
     test('publishes saved metadata for a closed script so its project can route', async () => {
         // The lazy detector only observes open documents, so bulk setup of a closed script would
         // otherwise leave the registry with no metadata and the script permanently non-routeable.
@@ -230,7 +244,10 @@ suite('setUpInlineScriptEnvironmentsInWorkspace', () => {
 
         manager.verify((m) => m.create(first, undefined), typemoq.Times.once());
         manager.verify((m) => m.create(second, undefined), typemoq.Times.never());
-        assert.match(warningStub.firstCall.args[0], /canceled/i);
+        assert.strictEqual(
+            warningStub.firstCall.args[0],
+            'Environment setup was canceled. Set up 0 of 2 selected inline script environment(s); the remaining 1 were not started.',
+        );
         sinon.assert.notCalled(infoStub);
     });
 
@@ -248,7 +265,10 @@ suite('setUpInlineScriptEnvironmentsInWorkspace', () => {
 
         await setUpInlineScriptEnvironmentsInWorkspace(em.object, routing);
 
-        assert.match(warningStub.firstCall.args[0], /failed/i);
+        assert.strictEqual(
+            warningStub.firstCall.args[0],
+            'Set up 0 of 1 selected inline script environment(s). 1 failed — see the Python Environments output for details.',
+        );
         sinon.assert.notCalled(infoStub);
     });
 });
@@ -266,7 +286,7 @@ suite('notifyInlineScriptSetupOutcome', () => {
         sinon.restore();
     });
 
-    test('reports cancellation as information, not a failure', () => {
+    test('reports cancellation as an information message with nothing to clean up', () => {
         const infoStub = sinon.stub(winapi, 'showInformationMessage').resolves(undefined);
         const errorStub = sinon.stub(winapi, 'showErrorMessage').resolves(undefined);
         const warningStub = sinon.stub(winapi, 'showWarningMessage').resolves(undefined);
@@ -274,18 +294,11 @@ suite('notifyInlineScriptSetupOutcome', () => {
 
         notifyInlineScriptSetupOutcome(scriptUri, routing);
 
-        assert.match(infoStub.firstCall.args[0], /setup was canceled/i);
+        // The exact message matters: cancelling must not ask the user to clean up, retry, or
+        // mention quarantined state, because the incomplete environment is already discarded.
+        assert.strictEqual(infoStub.firstCall.args[0], 'Environment setup was canceled.');
         sinon.assert.notCalled(errorStub);
         sinon.assert.notCalled(warningStub);
-    });
-
-    test('never asks the user to clean anything up after a cancellation', () => {
-        const infoStub = sinon.stub(winapi, 'showInformationMessage').resolves(undefined);
-        routing.noteSetupOutcome(scriptUri, { kind: 'cancelled' });
-
-        notifyInlineScriptSetupOutcome(scriptUri, routing);
-
-        assert.doesNotMatch(infoStub.firstCall.args[0], /clean up|quarantin|retry|lock/i);
     });
 
     test('lets coalesced setup callers observe the same outcome', () => {

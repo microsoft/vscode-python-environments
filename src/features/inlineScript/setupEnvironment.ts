@@ -75,6 +75,9 @@ export async function setUpInlineScriptEnvironment(
         return undefined;
     }
     await em.setEnvironment(scriptUri, environment);
+    // Outcomes are read non-consumingly, so a success must retire the previous attempt's outcome
+    // rather than relying on the next `create` to clear it on entry.
+    routing.clearSetupOutcome(scriptUri);
     return environment;
 }
 
