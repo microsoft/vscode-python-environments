@@ -147,6 +147,15 @@ interface PendingCreationContext {
     sourceMetadataIdentityHashes?: readonly string[];
     hasStartedRecordingSourceMetadataIdentityHashes: boolean;
     recordedSourceMetadataIdentityHashes?: readonly string[];
+    /**
+     * Outcome of the shared build, recorded once and read by every caller joined to it. Cancelling
+     * a build that several scripts joined must report cancellation to all of them, not just to the
+     * script that happened to start it.
+     */
+    failure?: {
+        readonly category: InlineScriptEnvErrorCategory;
+        readonly cancelled?: boolean;
+    };
 }
 
 interface MergeCacheEntrySourceMetadataIdentityHashResult {
@@ -367,6 +376,9 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
                 pending.hasStartedRecordingSourceMetadataIdentityHashes;
             this.addPendingCreationSourceMetadataIdentityHash(pending, sourceMetadataIdentityHash);
             const environment = await pending.promise;
+            if (!environment) {
+                this.notePendingCreationFailure(scriptUri, metadata, pending);
+            }
             return await this.finalizeCreateForScript(
                 cacheKey,
                 environment,
@@ -392,6 +404,9 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
         this.pendingCreations.set(cacheKey, pendingCreation);
         try {
             const environment = await creation;
+            if (!environment) {
+                this.notePendingCreationFailure(scriptUri, metadata, pendingCreation);
+            }
             return await this.finalizeCreateForScript(
                 cacheKey,
                 environment,
@@ -404,6 +419,31 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
                 this.pendingCreations.delete(cacheKey);
             }
         }
+    }
+
+    /**
+     * Translate the shared build's recorded failure into a routing outcome for one caller. Called
+     * for every script joined to the build so a cancellation is reported as a cancellation to all
+     * of them rather than surfacing as a generic failure for the joiners.
+     */
+    private notePendingCreationFailure(
+        scriptUri: Uri,
+        metadata: InlineScriptMetadata,
+        pendingCreation: PendingCreationContext,
+    ): void {
+        const failure = pendingCreation.failure;
+        if (!failure) {
+            return;
+        }
+        if (failure.cancelled) {
+            this.routingRegistry.noteSetupOutcome(scriptUri, { kind: 'cancelled' });
+            return;
+        }
+        this.routingRegistry.noteSetupOutcome(scriptUri, {
+            kind: 'failed',
+            category: failure.category,
+            requiresPython: metadata.requiresPython,
+        });
     }
 
     private getPendingSetupKey(
@@ -2788,6 +2828,7 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
                     this.log.warn(
                         `Preserving an inline-script cache entry that could not be safely inspected: ${envDir.fsPath}`,
                     );
+                    pendingCreation.failure = { category: 'setup-failure' };
                     this.sendInlineScriptEnvErrorTelemetry('setup-failure');
                     return undefined;
                 }
@@ -2795,6 +2836,7 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
                     if (!(await this.discardCacheEntry(envDir))) {
                         // The sidecar is gone, so the entry is inert; a later attempt retries the
                         // deletion once the files are released.
+                        pendingCreation.failure = { category: 'setup-failure' };
                         this.sendInlineScriptEnvErrorTelemetry('setup-failure');
                         return undefined;
                     }
@@ -2814,12 +2856,18 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
                     return build.environment;
                 }
                 if (build.errorCategory) {
+                    pendingCreation.failure = {
+                        category: build.errorCategory,
+                        ...(build.errorCategory === 'package-install-cancelled' ? { cancelled: true } : {}),
+                    };
                     this.sendInlineScriptEnvErrorTelemetry(build.errorCategory);
                 }
                 return undefined;
             });
         } catch (error) {
-            this.sendInlineScriptEnvErrorTelemetry(this.getCreateOrReuseErrorCategory(error));
+            const category = this.getCreateOrReuseErrorCategory(error);
+            pendingCreation.failure = { category };
+            this.sendInlineScriptEnvErrorTelemetry(category);
             this.log.error(`Failed to create or reuse inline-script cache entry: ${getErrorMessage(error)}`);
             return undefined;
         }
@@ -2964,7 +3012,6 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
                 'Inline-script package installation was cancelled; discarding the incomplete environment.',
             );
             await this.discardCacheEntry(envDir);
-            this.routingRegistry.noteSetupOutcome(scriptUri, { kind: 'cancelled' });
             return { errorCategory: 'package-install-cancelled' };
         }
         if (!result?.environment || result.envCreationErr || result.pkgInstallationErr) {

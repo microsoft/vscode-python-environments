@@ -2362,6 +2362,52 @@ suite('InlineScriptEnvManager', () => {
             assert.deepStrictEqual(routingRegistry.takeSetupOutcome(uri), { kind: 'cancelled' });
         });
 
+        test('reports cancellation to every script joined to the same build', async () => {
+            // Two scripts with identical dependencies resolve to one cache entry and therefore join
+            // a single in-flight build. Cancelling it must be reported as a cancellation to both,
+            // not just to the script that started it.
+            const starter = scriptUri('shared_starter.py');
+            const joiner = scriptUri('shared_joiner.py');
+            let notifyBuildStarted: () => void = () => undefined;
+            let releaseBuild: () => void = () => undefined;
+            const buildStarted = new Promise<void>((resolve) => {
+                notifyBuildStarted = resolve;
+            });
+            const buildGate = new Promise<void>((resolve) => {
+                releaseBuild = resolve;
+            });
+            createWithProgressStub.callsFake(async (...args: unknown[]) => {
+                const target = args[6] as string;
+                notifyBuildStarted();
+                await buildGate;
+                await fs.outputFile(venvPythonPath(target), '');
+                return {
+                    environment: makeEnvironment(
+                        'ms-python.python:inline-script',
+                        '3.12.4',
+                        venvPythonPath(target),
+                        target,
+                    ),
+                    pkgInstallationErr: 'Canceled',
+                    pkgInstallationCancelled: true,
+                };
+            });
+
+            const starterCreate = manager.create(starter);
+            await buildStarted;
+            const joinerCreate = manager.create(joiner);
+            // Let the second request reach the shared pending creation before the build settles.
+            await nextTurn();
+            await nextTurn();
+            releaseBuild();
+
+            assert.strictEqual(await starterCreate, undefined);
+            assert.strictEqual(await joinerCreate, undefined);
+            assert.strictEqual(createWithProgressStub.callCount, 1, 'both scripts should share one build');
+            assert.deepStrictEqual(routingRegistry.takeSetupOutcome(starter), { kind: 'cancelled' });
+            assert.deepStrictEqual(routingRegistry.takeSetupOutcome(joiner), { kind: 'cancelled' });
+        });
+
         test('removes the partial environment when package installation fails', async () => {
             createWithProgressStub.callsFake(async (...args: unknown[]) => {
                 const target = args[6] as string;
