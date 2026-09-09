@@ -67,6 +67,7 @@ suite('registerInlineScriptFeatures (feature-flag gate)', () => {
             .returns(new Disposable(() => undefined));
         getPythonApiStub = sinon.stub(pythonApi, 'getPythonApi').resolves({
             registerEnvironmentManager: registerEnvironmentManagerStub,
+            onDidChangePackages: () => new Disposable(() => undefined),
         } as unknown as PythonEnvironmentApi);
     });
 

@@ -3,10 +3,10 @@
 
 import * as path from 'path';
 import { Disposable, Event, EventEmitter, Uri } from 'vscode';
+import type { InlineScriptEnvErrorCategory } from '../telemetry/constants';
+import { normalizePath } from '../utils/pathUtils';
 import { normalizeDependency } from './cacheKey';
 import { InlineScriptMetadata } from './metadata';
-import { normalizePath } from '../utils/pathUtils';
-import type { InlineScriptEnvErrorCategory } from '../telemetry/constants';
 
 export interface InlineScriptRouteabilityChangeEvent {
     readonly uri: Uri;
@@ -32,6 +32,7 @@ export type InlineScriptSetupOutcome =
           readonly category: InlineScriptEnvErrorCategory;
           readonly requiresPython?: string;
       }
+    | { readonly kind: 'cancelled' }
     | { readonly kind: 'skipped' };
 
 interface ScriptRoutingState {
@@ -148,6 +149,11 @@ export class InlineScriptRoutingRegistry implements Disposable {
         if (scriptPath) {
             this.setupOutcomes.delete(scriptPath);
         }
+    }
+
+    public getSetupOutcome(script: Uri | string): InlineScriptSetupOutcome | undefined {
+        const scriptPath = getInlineScriptRoutingKey(script);
+        return scriptPath ? this.setupOutcomes.get(scriptPath) : undefined;
     }
 
     public takeSetupOutcome(script: Uri | string): InlineScriptSetupOutcome | undefined {

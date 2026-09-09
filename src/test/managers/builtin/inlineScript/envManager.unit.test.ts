@@ -9,6 +9,7 @@ import * as path from 'path';
 import * as sinon from 'sinon';
 import { Disposable, LogOutputChannel, Memento, TextDocument, Uri } from 'vscode';
 import {
+    DidChangePackagesEventArgs,
     EnvironmentChangeKind,
     EnvironmentManager,
     PythonEnvironment,
@@ -101,6 +102,7 @@ suite('InlineScriptEnvManager', () => {
     let api: PythonEnvironmentApi;
     let apiGetEnvironmentsStub: sinon.SinonStub;
     let apiRefreshEnvironmentsStub: sinon.SinonStub;
+    let packagesChangedListener: ((e: DidChangePackagesEventArgs) => unknown) | undefined;
     let baseEnvironment: PythonEnvironment;
     let baseExecutable: string;
     let baseManager: EnvironmentManager;
@@ -150,6 +152,10 @@ suite('InlineScriptEnvManager', () => {
         api = {
             getEnvironments: apiGetEnvironmentsStub,
             refreshEnvironments: apiRefreshEnvironmentsStub,
+            onDidChangePackages: (listener: (e: DidChangePackagesEventArgs) => unknown) => {
+                packagesChangedListener = listener;
+                return new Disposable(() => undefined);
+            },
         } as unknown as PythonEnvironmentApi;
         nativeFinder = {} as NativePythonFinder;
         routingRegistry = new InlineScriptRoutingRegistry();
@@ -2300,8 +2306,115 @@ suite('InlineScriptEnvManager', () => {
         });
     });
 
+    suite('package drift', () => {
+        // The listener is fire-and-forget, so wait for its async work rather than the call.
+        function firePackagesChanged(environment: PythonEnvironment): void {
+            assert.ok(packagesChangedListener, 'expected the manager to subscribe to package changes');
+            packagesChangedListener!({
+                environment,
+                manager: {} as never,
+                changes: [{ kind: 0 as never, pkg: {} as never }],
+            });
+        }
+
+        function sidecarFor(environment: PythonEnvironment): cacheLayout.InlineScriptEnvMeta | undefined {
+            const entry = sidecarsByEnvDir.get(normalizePath(environment.sysPrefix));
+            return typeof entry === 'string' ? undefined : entry;
+        }
+
+        test('marks an owned entry manually modified and un-routes every script using it', async () => {
+            const first = scriptUri('shared_one.py');
+            const second = scriptUri('shared_two.py');
+            const environment = await createOwnedEnvironment();
+            await manager.set(first, environment);
+            await manager.set(second, environment);
+            routingRegistry.setValidatedAssociation(first, true);
+            routingRegistry.setValidatedAssociation(second, true);
+
+            firePackagesChanged(environment);
+            await waitForCondition(
+                () => sidecarFor(environment)?.manuallyModified === true,
+                'the modified cache entry should be marked in its sidecar',
+            );
+
+            // Both scripts sharing the entry lose routing, not just the edited one.
+            assert.strictEqual(routingRegistry.hasValidatedAssociation(first), false);
+            assert.strictEqual(routingRegistry.hasValidatedAssociation(second), false);
+        });
+
+        test('rebuilds instead of reusing an entry whose packages were modified', async () => {
+            const uri = scriptUri();
+            const environment = await createOwnedEnvironment();
+            await manager.set(uri, environment);
+            firePackagesChanged(environment);
+            await waitForCondition(
+                () => sidecarFor(environment)?.manuallyModified === true,
+                'the modified cache entry should be marked in its sidecar',
+            );
+            createWithProgressStub.resetHistory();
+
+            await manager.create(uri);
+
+            assert.strictEqual(
+                createWithProgressStub.callCount,
+                1,
+                'a drifted entry must be rebuilt, not reused',
+            );
+        });
+
+        test('ignores package changes for environments it does not own', async () => {
+            const uri = scriptUri();
+            const environment = await createOwnedEnvironment();
+            await manager.set(uri, environment);
+            routingRegistry.setValidatedAssociation(uri, true);
+
+            firePackagesChanged({
+                ...environment,
+                envId: { managerId: 'ms-python.python:venv', id: 'some-venv' },
+            });
+            await nextTurn();
+            await nextTurn();
+            await nextTurn();
+
+            assert.strictEqual(sidecarFor(environment)?.manuallyModified, undefined);
+            assert.strictEqual(routingRegistry.hasValidatedAssociation(uri), true);
+        });
+        test('does not mark an entry while its own build is in flight', async () => {
+            // The real createWithProgress installs through managePackages, which fires this same
+            // event while the build still holds the cache-entry lock, so setup must not mark the
+            // entry it is building. Two entries are used so the outcomes are distinguishable: the
+            // unguarded entry settling proves the guarded one had at least as long to settle.
+            const building = await createOwnedEnvironment();
+            const edited = await createOwnedEnvironment('bbbbbbbbbbbbbbbb');
+            const buildingScript = scriptUri('building.py');
+            await manager.set(buildingScript, building);
+            routingRegistry.setValidatedAssociation(buildingScript, true);
+            const pendingCreations = (
+                manager as unknown as { pendingCreations: Map<string, unknown> }
+            ).pendingCreations;
+            pendingCreations.set(CACHE_KEY, {});
+
+            firePackagesChanged(building);
+            firePackagesChanged(edited);
+            await waitForCondition(
+                () => sidecarFor(edited)?.manuallyModified === true,
+                'a package change outside a build should be recorded',
+            );
+            await nextTurn();
+            await nextTurn();
+
+            assert.strictEqual(
+                sidecarFor(building)?.manuallyModified,
+                undefined,
+                'setup must not mark the entry it is building',
+            );
+            assert.strictEqual(routingRegistry.hasValidatedAssociation(buildingScript), true);
+        });
+    });
+
     suite('transaction rollback', () => {
-        test('retains the partial environment and lock when package installation is cancelled', async () => {
+        test('discards the partial environment when package installation is cancelled', async () => {
+            const uri = scriptUri();
             createWithProgressStub.callsFake(async (...args: unknown[]) => {
                 const target = args[6] as string;
                 await fs.outputFile(venvPythonPath(target), '');
@@ -2317,29 +2430,94 @@ suite('InlineScriptEnvManager', () => {
                 };
             });
 
-            assert.strictEqual(await manager.create(scriptUri()), undefined);
-            assert.strictEqual(await fs.pathExists(envDir().fsPath), true);
+            assert.strictEqual(await manager.create(uri), undefined);
+            assert.strictEqual(await fs.pathExists(envDir().fsPath), false);
             assert.strictEqual(writeMetaStub.callCount, 0);
-            assert.ok(retainLockStub.calledOnce);
+            sinon.assert.notCalled(retainLockStub);
             assert.ok(releaseLockStub.calledOnce);
+            assert.deepStrictEqual(routingRegistry.takeSetupOutcome(uri), { kind: 'cancelled' });
         });
 
-        test('keeps a failed lock-retain transition fail-closed', async () => {
-            createWithProgressStub.resolves({
-                environment: makeEnvironment(
-                    'ms-python.python:inline-script',
-                    '3.12.4',
-                    venvPythonPath(envDir().fsPath),
-                    envDir().fsPath,
-                ),
-                pkgInstallationErr: 'Canceled',
-                pkgInstallationCancelled: true,
+        test('leaves a cancelled entry unreusable when its directory cannot be removed', async () => {
+            const uri = scriptUri();
+            createWithProgressStub.callsFake(async (...args: unknown[]) => {
+                const target = args[6] as string;
+                await fs.outputFile(venvPythonPath(target), '');
+                await fs.outputFile(path.join(target, '.meta.json'), '{}');
+                await fs.outputFile(path.join(target, '.meta.json.backup-0123456789ab'), '{}');
+                return {
+                    environment: makeEnvironment(
+                        'ms-python.python:inline-script',
+                        '3.12.4',
+                        venvPythonPath(target),
+                        target,
+                    ),
+                    pkgInstallationErr: 'Canceled',
+                    pkgInstallationCancelled: true,
+                };
             });
-            retainLockStub.rejects(Object.assign(new Error('retention failed'), { code: 'EACCES' }));
+            const internalManager = manager as unknown as {
+                removeCacheEntry(candidate: Uri): Promise<boolean>;
+            };
+            sinon.stub(internalManager, 'removeCacheEntry').resolves(false);
 
-            assert.strictEqual(await manager.create(scriptUri()), undefined);
-            assert.ok(retainLockStub.calledOnce);
-            assert.ok(releaseLockStub.calledOnce);
+            assert.strictEqual(await manager.create(uri), undefined);
+
+            // The directory survives, but every sidecar is gone so it can never be revalidated.
+            assert.strictEqual(await fs.pathExists(envDir().fsPath), true);
+            assert.strictEqual(await fs.pathExists(path.join(envDir().fsPath, '.meta.json')), false);
+            assert.strictEqual(
+                await fs.pathExists(path.join(envDir().fsPath, '.meta.json.backup-0123456789ab')),
+                false,
+            );
+            sinon.assert.notCalled(retainLockStub);
+            assert.deepStrictEqual(routingRegistry.takeSetupOutcome(uri), { kind: 'cancelled' });
+        });
+
+        test('reports cancellation to every script joined to the same build', async () => {
+            // Two scripts with identical dependencies resolve to one cache entry and therefore join
+            // a single in-flight build. Cancelling it must be reported as a cancellation to both,
+            // not just to the script that started it.
+            const starter = scriptUri('shared_starter.py');
+            const joiner = scriptUri('shared_joiner.py');
+            let notifyBuildStarted: () => void = () => undefined;
+            let releaseBuild: () => void = () => undefined;
+            const buildStarted = new Promise<void>((resolve) => {
+                notifyBuildStarted = resolve;
+            });
+            const buildGate = new Promise<void>((resolve) => {
+                releaseBuild = resolve;
+            });
+            createWithProgressStub.callsFake(async (...args: unknown[]) => {
+                const target = args[6] as string;
+                notifyBuildStarted();
+                await buildGate;
+                await fs.outputFile(venvPythonPath(target), '');
+                return {
+                    environment: makeEnvironment(
+                        'ms-python.python:inline-script',
+                        '3.12.4',
+                        venvPythonPath(target),
+                        target,
+                    ),
+                    pkgInstallationErr: 'Canceled',
+                    pkgInstallationCancelled: true,
+                };
+            });
+
+            const starterCreate = manager.create(starter);
+            await buildStarted;
+            const joinerCreate = manager.create(joiner);
+            // Let the second request reach the shared pending creation before the build settles.
+            await nextTurn();
+            await nextTurn();
+            releaseBuild();
+
+            assert.strictEqual(await starterCreate, undefined);
+            assert.strictEqual(await joinerCreate, undefined);
+            assert.strictEqual(createWithProgressStub.callCount, 1, 'both scripts should share one build');
+            assert.deepStrictEqual(routingRegistry.takeSetupOutcome(starter), { kind: 'cancelled' });
+            assert.deepStrictEqual(routingRegistry.takeSetupOutcome(joiner), { kind: 'cancelled' });
         });
 
         test('removes the partial environment when package installation fails', async () => {
@@ -5210,9 +5388,27 @@ suite('InlineScriptEnvManager', () => {
             assert.strictEqual(routingRegistry.hasValidatedAssociation(uri), false);
         });
 
-        test('clears persisted association state for the old path when a script is renamed', async () => {
+        test('moves the persisted association to the new path when a script is renamed', async () => {
             const oldUri = scriptUri('old.py');
             const newUri = scriptUri('new.py');
+            const environment = await createOwnedEnvironment();
+            await manager.set(oldUri, environment);
+
+            fireRename(oldUri, newUri);
+            await nextTurn();
+            await nextTurn();
+
+            // The cache entry is keyed by dependencies + interpreter, not by path, so the
+            // environment survives the rename and follows the file.
+            assert.deepStrictEqual(Object.keys(persistedAssociations ?? {}), [normalizePath(newUri.fsPath)]);
+            assert.strictEqual(await manager.get(oldUri), undefined);
+            assert.strictEqual(routingRegistry.hasValidatedAssociation(oldUri), false);
+            assert.strictEqual(await manager.get(newUri), environment);
+        });
+
+        test('drops the association when a script is renamed to a non-python file', async () => {
+            const oldUri = scriptUri('old.py');
+            const newUri = scriptUri('old.txt');
             const environment = await createOwnedEnvironment();
             await manager.set(oldUri, environment);
 
@@ -5223,6 +5419,28 @@ suite('InlineScriptEnvManager', () => {
             assert.deepStrictEqual(persistedAssociations, {});
             assert.strictEqual(await manager.get(oldUri), undefined);
             assert.strictEqual(routingRegistry.hasValidatedAssociation(oldUri), false);
+        });
+
+        test('replaces an existing association when a script is renamed onto it', async () => {
+            const oldUri = scriptUri('old.py');
+            const targetUri = scriptUri('target.py');
+            const movedEnvironment = await createOwnedEnvironment();
+            const replacedEnvironment = await createOwnedEnvironment('bbbbbbbbbbbbbbbb');
+            await manager.set(targetUri, replacedEnvironment);
+            await manager.set(oldUri, movedEnvironment);
+
+            fireRename(oldUri, targetUri);
+            await nextTurn();
+            await nextTurn();
+
+            assert.deepStrictEqual(Object.keys(persistedAssociations ?? {}), [normalizePath(targetUri.fsPath)]);
+            const moved = (persistedAssociations as Record<string, { environmentPath: string }>)[
+                normalizePath(targetUri.fsPath)
+            ];
+            assert.strictEqual(
+                normalizePath(moved.environmentPath),
+                normalizePath(movedEnvironment.environmentPath.fsPath),
+            );
         });
 
         test('removes and notifies for a warm association whose executable was deleted', async () => {

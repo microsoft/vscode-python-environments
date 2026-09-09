@@ -13,6 +13,7 @@ import { InlineScriptRoutingRegistry } from '../../../common/inlineScript/routin
 import * as winapi from '../../../common/window.apis';
 import * as wapi from '../../../common/workspace.apis';
 import {
+    notifyInlineScriptSetupOutcome,
     setUpInlineScriptEnvironment,
     setUpInlineScriptEnvironmentsInWorkspace,
 } from '../../../features/inlineScript/setupEnvironment';
@@ -89,6 +90,20 @@ suite('setUpInlineScriptEnvironment', () => {
 
         assert.strictEqual(result, env);
         em.verify((m) => m.setEnvironment(scriptUri, env), typemoq.Times.once());
+    });
+
+    test('retires a previous cancellation once setup succeeds', async () => {
+        // Outcomes are read non-consumingly, so a stale cancellation must not survive a later
+        // successful setup and be reported against it.
+        const env = makeEnv();
+        routing.noteSetupOutcome(scriptUri, { kind: 'cancelled' });
+        manager.setup((m) => m.create(scriptUri, undefined)).returns(() => Promise.resolve(env));
+        em.setup((m) => m.setEnvironment(scriptUri, env)).returns(() => Promise.resolve());
+
+        const result = await setUpInlineScriptEnvironment(scriptUri, em.object, routing);
+
+        assert.strictEqual(result, env);
+        assert.strictEqual(routing.getSetupOutcome(scriptUri), undefined);
     });
 
     test('publishes saved metadata for a closed script so its project can route', async () => {
@@ -208,5 +223,93 @@ suite('setUpInlineScriptEnvironmentsInWorkspace', () => {
         manager.verify((m) => m.create(withMeta, undefined), typemoq.Times.once());
         manager.verify((m) => m.create(withoutMeta, undefined), typemoq.Times.never());
         em.verify((m) => m.setEnvironment(withMeta, env), typemoq.Times.once());
+    });
+
+    test('stops the whole run and reports when a script setup is cancelled', async () => {
+        const warningStub = sinon.stub(winapi, 'showWarningMessage').resolves(undefined);
+        // The picker sorts by label, so `a_` runs before `z_`.
+        const first = Uri.file('/workspace/a_first.py');
+        const second = Uri.file('/workspace/z_second.py');
+        findFilesStub.resolves([first, second]);
+        readMetadataStub.resolves(makeMetadata(['requests']));
+        quickPickStub.callsFake((items) => items);
+        manager
+            .setup((m) => m.create(first, undefined))
+            .returns(async () => {
+                routing.noteSetupOutcome(first, { kind: 'cancelled' });
+                return undefined;
+            });
+
+        await setUpInlineScriptEnvironmentsInWorkspace(em.object, routing);
+
+        manager.verify((m) => m.create(first, undefined), typemoq.Times.once());
+        manager.verify((m) => m.create(second, undefined), typemoq.Times.never());
+        assert.strictEqual(
+            warningStub.firstCall.args[0],
+            'Environment setup was canceled. Set up 0 of 2 selected inline script environment(s); the remaining 1 were not started.',
+        );
+        sinon.assert.notCalled(infoStub);
+    });
+
+    test('reports failures instead of silently counting them as successes', async () => {
+        const warningStub = sinon.stub(winapi, 'showWarningMessage').resolves(undefined);
+        findFilesStub.resolves([withMeta]);
+        readMetadataStub.resolves(makeMetadata(['requests']));
+        quickPickStub.callsFake((items) => items);
+        manager
+            .setup((m) => m.create(withMeta, undefined))
+            .returns(async () => {
+                routing.noteSetupOutcome(withMeta, { kind: 'failed', category: 'install-failure' });
+                return undefined;
+            });
+
+        await setUpInlineScriptEnvironmentsInWorkspace(em.object, routing);
+
+        assert.strictEqual(
+            warningStub.firstCall.args[0],
+            'Set up 0 of 1 selected inline script environment(s). 1 failed — see the Python Environments output for details.',
+        );
+        sinon.assert.notCalled(infoStub);
+    });
+});
+
+suite('notifyInlineScriptSetupOutcome', () => {
+    const scriptUri = Uri.file('/workspace/script.py');
+    let routing: InlineScriptRoutingRegistry;
+
+    setup(() => {
+        routing = new InlineScriptRoutingRegistry();
+    });
+
+    teardown(() => {
+        routing.dispose();
+        sinon.restore();
+    });
+
+    test('reports cancellation as an information message with nothing to clean up', () => {
+        const infoStub = sinon.stub(winapi, 'showInformationMessage').resolves(undefined);
+        const errorStub = sinon.stub(winapi, 'showErrorMessage').resolves(undefined);
+        const warningStub = sinon.stub(winapi, 'showWarningMessage').resolves(undefined);
+        routing.noteSetupOutcome(scriptUri, { kind: 'cancelled' });
+
+        notifyInlineScriptSetupOutcome(scriptUri, routing);
+
+        // The exact message matters: cancelling must not ask the user to clean up, retry, or
+        // mention quarantined state, because the incomplete environment is already discarded.
+        assert.strictEqual(infoStub.firstCall.args[0], 'Environment setup was canceled.');
+        sinon.assert.notCalled(errorStub);
+        sinon.assert.notCalled(warningStub);
+    });
+
+    test('lets coalesced setup callers observe the same outcome', () => {
+        const infoStub = sinon.stub(winapi, 'showInformationMessage').resolves(undefined);
+        const errorStub = sinon.stub(winapi, 'showErrorMessage').resolves(undefined);
+        routing.noteSetupOutcome(scriptUri, { kind: 'cancelled' });
+
+        notifyInlineScriptSetupOutcome(scriptUri, routing);
+        notifyInlineScriptSetupOutcome(scriptUri, routing);
+
+        sinon.assert.calledTwice(infoStub);
+        sinon.assert.notCalled(errorStub);
     });
 });
