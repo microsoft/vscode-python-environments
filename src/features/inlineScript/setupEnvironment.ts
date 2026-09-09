@@ -124,10 +124,14 @@ function setupInlineScriptEnvironmentHandler(
     };
 }
 
-function notifyInlineScriptSetupOutcome(uri: Uri, routing: InlineScriptRoutingRegistry): void {
-    const outcome = routing.takeSetupOutcome(uri);
+export function notifyInlineScriptSetupOutcome(uri: Uri, routing: InlineScriptRoutingRegistry): void {
+    const outcome = routing.getSetupOutcome(uri);
     if (outcome?.kind === 'skipped') {
         // Env built but intentionally not associated (metadata changed mid-setup); stay silent.
+        return;
+    }
+    if (outcome?.kind === 'cancelled') {
+        showInformationMessage(l10n.t('Environment setup was canceled.'));
         return;
     }
     if (outcome?.kind === 'failed') {
@@ -223,16 +227,57 @@ export async function setUpInlineScriptEnvironmentsInWorkspace(
         return;
     }
     let succeeded = 0;
+    let attempted = 0;
+    let failed = 0;
+    let cancelled = false;
     for (const pick of picks) {
+        attempted += 1;
         try {
             if (await setUpInlineScriptEnvironment(pick.uri, em, routing)) {
                 succeeded += 1;
+                continue;
+            }
+            const outcome = routing.getSetupOutcome(pick.uri);
+            if (outcome?.kind === 'cancelled') {
+                // Cancelling one script's installer stops the whole run rather than immediately
+                // starting the next script's install.
+                cancelled = true;
+                break;
+            }
+            if (outcome?.kind !== 'skipped') {
+                failed += 1;
             }
         } catch (error) {
+            failed += 1;
             traceError(`Failed to set up the inline-script environment for ${pick.uri.fsPath}:`, error);
         }
     }
-    traceInfo(`Inline-script bulk setup: created or reused ${succeeded} of ${picks.length} environment(s).`);
+    traceInfo(
+        `Inline-script bulk setup: created or reused ${succeeded} of ${picks.length} environment(s)` +
+            `${cancelled ? ' (canceled)' : ''}.`,
+    );
+    if (cancelled) {
+        showWarningMessage(
+            l10n.t(
+                'Environment setup was canceled. Set up {0} of {1} selected inline script environment(s); the remaining {2} were not started.',
+                succeeded,
+                picks.length,
+                picks.length - attempted,
+            ),
+        );
+        return;
+    }
+    if (failed > 0) {
+        showWarningMessage(
+            l10n.t(
+                'Set up {0} of {1} selected inline script environment(s). {2} failed — see the Python Environments output for details.',
+                succeeded,
+                picks.length,
+                failed,
+            ),
+        );
+        return;
+    }
     showInformationMessage(l10n.t('Set up {0} of {1} selected inline script environment(s).', succeeded, picks.length));
 }
 

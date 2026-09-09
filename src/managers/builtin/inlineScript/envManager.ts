@@ -51,6 +51,7 @@ import {
     inspectMetaJson,
     inspectOwnedCacheEntry,
     mergeSourceMetadataIdentityHashes,
+    META_JSON_FILENAME,
     META_SCHEMA_VERSION,
     resolveCacheEntryPath,
     restoreMetaJsonBackupUnderLock,
@@ -74,6 +75,7 @@ import {
 } from '../../../common/lockfile.apis';
 import { EventNames, InlineScriptEnvErrorCategory } from '../../../common/telemetry/constants';
 import { sendTelemetryEvent } from '../../../common/telemetry/sender';
+import { timeout } from '../../../common/utils/asyncUtils';
 import { createDeferred, Deferred } from '../../../common/utils/deferred';
 import { isFileNotFoundError } from '../../../common/utils/filesystem';
 import { normalizePath } from '../../../common/utils/pathUtils';
@@ -96,6 +98,9 @@ const CACHE_TTL_MS = 14 * 24 * 60 * 60 * 1000;
 const CACHED_ASSOCIATION_VALIDATION_INTERVAL_MS = 5_000;
 const DISCOVERY_RETRY_DELAYS_MS = [1_000, 5_000, 30_000] as const;
 const PERSISTED_ASSOCIATION_SCHEMA_VERSION = 1 as const;
+/** Bounded retry for deleting a cache entry whose files may still be briefly held by a stopped installer. */
+const CACHE_ENTRY_REMOVAL_ATTEMPTS = 4;
+const CACHE_ENTRY_REMOVAL_RETRY_MS = 150;
 
 interface SelectedBaseInterpreter {
     readonly environment: PythonEnvironment;
@@ -113,7 +118,6 @@ interface CreateOrReuseEnvironmentOptions {
 
 interface BuildCacheEntryResult {
     readonly environment?: PythonEnvironment;
-    readonly retainLock?: boolean;
     readonly errorCategory?: InlineScriptEnvErrorCategory;
 }
 
@@ -2658,7 +2662,7 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
 
         try {
             await fs.ensureDir(cacheRoot.fsPath);
-            return await this.withCacheEntryLock(envDir, async (lock) => {
+            return await this.withCacheEntryLock(envDir, async () => {
                 const cached = await this.inspectCacheEntry(cacheRoot, envDir, metadata, selectedBase, pendingCreation);
                 if (cached.kind === 'reusable') {
                     this.sendInlineScriptEnvReuseHitTelemetry(dependencyCount);
@@ -2672,7 +2676,9 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
                     return undefined;
                 }
                 if (cached.kind === 'stale') {
-                    if (!(await this.removeCacheEntry(envDir))) {
+                    if (!(await this.discardCacheEntry(envDir))) {
+                        // The sidecar is gone, so the entry is inert; a later attempt retries the
+                        // deletion once the files are released.
                         this.sendInlineScriptEnvErrorTelemetry('setup-failure');
                         return undefined;
                     }
@@ -2687,15 +2693,6 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
                     pendingCreation,
                     scriptUri,
                 );
-                if (build.retainLock) {
-                    try {
-                        await lock.retain();
-                    } catch (error) {
-                        this.log.error(
-                            `Failed to mark the inline-script cache lock as retained: ${getErrorMessage(error)}`,
-                        );
-                    }
-                }
                 if (build.environment) {
                     this.sendInlineScriptEnvCreatedTelemetry(buildStartAtMs, dependencyCount);
                     return build.environment;
@@ -2847,10 +2844,12 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
         }
 
         if (result?.pkgInstallationCancelled) {
-            this.log.warn(
-                'Inline-script package installation was cancelled; retaining the cache lock until explicit cleanup.',
+            this.log.info(
+                'Inline-script package installation was cancelled; discarding the incomplete environment.',
             );
-            return { retainLock: true, errorCategory: 'package-install-cancelled' };
+            await this.discardCacheEntry(envDir);
+            this.routingRegistry.noteSetupOutcome(scriptUri, { kind: 'cancelled' });
+            return { errorCategory: 'package-install-cancelled' };
         }
         if (!result?.environment || result.envCreationErr || result.pkgInstallationErr) {
             const error =
@@ -3484,14 +3483,58 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
         return new Map(Array.from(scriptPaths, (scriptPath) => [scriptPath, this.fsPathToEnv.get(scriptPath)]));
     }
 
-    private async removeCacheEntry(envDir: Uri): Promise<boolean> {
+    /**
+     * Make a cache entry permanently unreusable, then best-effort delete it.
+     *
+     * The sidecar is removed first and is the correctness guarantee: `inspectCacheEntry` treats a
+     * missing/invalid `.meta.json` as `stale`, so an entry whose directory survives is inert and
+     * gets rebuilt (or swept by TTL eviction) rather than reused. Directory removal is retried
+     * briefly because a just-stopped installer can hold file handles for a short while,
+     * especially on Windows.
+     */
+    private async discardCacheEntry(envDir: Uri): Promise<boolean> {
+        await this.removeCacheEntrySidecars(envDir);
+        return this.removeCacheEntry(envDir);
+    }
+
+    /** Delete `.meta.json` and any backup sidecars so a surviving directory cannot be revalidated. */
+    private async removeCacheEntrySidecars(envDir: Uri): Promise<void> {
+        let entries: string[];
         try {
-            await fs.remove(envDir.fsPath);
-            return true;
+            entries = await fs.readdir(envDir.fsPath);
         } catch (error) {
-            this.log.error(`Failed to remove incomplete inline-script environment: ${getErrorMessage(error)}`);
-            return false;
+            if (!isFileNotFoundError(error)) {
+                this.log.warn(`Failed to scan inline-script cache sidecars: ${getErrorMessage(error)}`);
+            }
+            return;
         }
+        const sidecars = entries.filter(
+            (entry) => entry === META_JSON_FILENAME || entry.startsWith(`${META_JSON_FILENAME}.backup-`),
+        );
+        for (const sidecar of sidecars) {
+            try {
+                await fs.remove(path.join(envDir.fsPath, sidecar));
+            } catch (error) {
+                this.log.warn(`Failed to remove inline-script cache sidecar ${sidecar}: ${getErrorMessage(error)}`);
+            }
+        }
+    }
+
+    private async removeCacheEntry(envDir: Uri): Promise<boolean> {
+        let lastError: unknown;
+        for (let attempt = 0; attempt < CACHE_ENTRY_REMOVAL_ATTEMPTS; attempt += 1) {
+            try {
+                await fs.remove(envDir.fsPath);
+                return true;
+            } catch (error) {
+                lastError = error;
+                if (attempt < CACHE_ENTRY_REMOVAL_ATTEMPTS - 1) {
+                    await timeout(CACHE_ENTRY_REMOVAL_RETRY_MS * (attempt + 1));
+                }
+            }
+        }
+        this.log.error(`Failed to remove incomplete inline-script environment: ${getErrorMessage(lastError)}`);
+        return false;
     }
 
     private isDefinitivelyStalePathError(error: unknown): boolean {

@@ -13,6 +13,7 @@ import { InlineScriptRoutingRegistry } from '../../../common/inlineScript/routin
 import * as winapi from '../../../common/window.apis';
 import * as wapi from '../../../common/workspace.apis';
 import {
+    notifyInlineScriptSetupOutcome,
     setUpInlineScriptEnvironment,
     setUpInlineScriptEnvironmentsInWorkspace,
 } from '../../../features/inlineScript/setupEnvironment';
@@ -208,5 +209,94 @@ suite('setUpInlineScriptEnvironmentsInWorkspace', () => {
         manager.verify((m) => m.create(withMeta, undefined), typemoq.Times.once());
         manager.verify((m) => m.create(withoutMeta, undefined), typemoq.Times.never());
         em.verify((m) => m.setEnvironment(withMeta, env), typemoq.Times.once());
+    });
+
+    test('stops the whole run and reports when a script setup is cancelled', async () => {
+        const warningStub = sinon.stub(winapi, 'showWarningMessage').resolves(undefined);
+        // The picker sorts by label, so `a_` runs before `z_`.
+        const first = Uri.file('/workspace/a_first.py');
+        const second = Uri.file('/workspace/z_second.py');
+        findFilesStub.resolves([first, second]);
+        readMetadataStub.resolves(makeMetadata(['requests']));
+        quickPickStub.callsFake((items) => items);
+        manager
+            .setup((m) => m.create(first, undefined))
+            .returns(async () => {
+                routing.noteSetupOutcome(first, { kind: 'cancelled' });
+                return undefined;
+            });
+
+        await setUpInlineScriptEnvironmentsInWorkspace(em.object, routing);
+
+        manager.verify((m) => m.create(first, undefined), typemoq.Times.once());
+        manager.verify((m) => m.create(second, undefined), typemoq.Times.never());
+        assert.match(warningStub.firstCall.args[0], /canceled/i);
+        sinon.assert.notCalled(infoStub);
+    });
+
+    test('reports failures instead of silently counting them as successes', async () => {
+        const warningStub = sinon.stub(winapi, 'showWarningMessage').resolves(undefined);
+        findFilesStub.resolves([withMeta]);
+        readMetadataStub.resolves(makeMetadata(['requests']));
+        quickPickStub.callsFake((items) => items);
+        manager
+            .setup((m) => m.create(withMeta, undefined))
+            .returns(async () => {
+                routing.noteSetupOutcome(withMeta, { kind: 'failed', category: 'install-failure' });
+                return undefined;
+            });
+
+        await setUpInlineScriptEnvironmentsInWorkspace(em.object, routing);
+
+        assert.match(warningStub.firstCall.args[0], /failed/i);
+        sinon.assert.notCalled(infoStub);
+    });
+});
+
+suite('notifyInlineScriptSetupOutcome', () => {
+    const scriptUri = Uri.file('/workspace/script.py');
+    let routing: InlineScriptRoutingRegistry;
+
+    setup(() => {
+        routing = new InlineScriptRoutingRegistry();
+    });
+
+    teardown(() => {
+        routing.dispose();
+        sinon.restore();
+    });
+
+    test('reports cancellation as information, not a failure', () => {
+        const infoStub = sinon.stub(winapi, 'showInformationMessage').resolves(undefined);
+        const errorStub = sinon.stub(winapi, 'showErrorMessage').resolves(undefined);
+        const warningStub = sinon.stub(winapi, 'showWarningMessage').resolves(undefined);
+        routing.noteSetupOutcome(scriptUri, { kind: 'cancelled' });
+
+        notifyInlineScriptSetupOutcome(scriptUri, routing);
+
+        assert.match(infoStub.firstCall.args[0], /setup was canceled/i);
+        sinon.assert.notCalled(errorStub);
+        sinon.assert.notCalled(warningStub);
+    });
+
+    test('never asks the user to clean anything up after a cancellation', () => {
+        const infoStub = sinon.stub(winapi, 'showInformationMessage').resolves(undefined);
+        routing.noteSetupOutcome(scriptUri, { kind: 'cancelled' });
+
+        notifyInlineScriptSetupOutcome(scriptUri, routing);
+
+        assert.doesNotMatch(infoStub.firstCall.args[0], /clean up|quarantin|retry|lock/i);
+    });
+
+    test('lets coalesced setup callers observe the same outcome', () => {
+        const infoStub = sinon.stub(winapi, 'showInformationMessage').resolves(undefined);
+        const errorStub = sinon.stub(winapi, 'showErrorMessage').resolves(undefined);
+        routing.noteSetupOutcome(scriptUri, { kind: 'cancelled' });
+
+        notifyInlineScriptSetupOutcome(scriptUri, routing);
+        notifyInlineScriptSetupOutcome(scriptUri, routing);
+
+        sinon.assert.calledTwice(infoStub);
+        sinon.assert.notCalled(errorStub);
     });
 });

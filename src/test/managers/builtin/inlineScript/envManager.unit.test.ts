@@ -2301,7 +2301,8 @@ suite('InlineScriptEnvManager', () => {
     });
 
     suite('transaction rollback', () => {
-        test('retains the partial environment and lock when package installation is cancelled', async () => {
+        test('discards the partial environment when package installation is cancelled', async () => {
+            const uri = scriptUri();
             createWithProgressStub.callsFake(async (...args: unknown[]) => {
                 const target = args[6] as string;
                 await fs.outputFile(venvPythonPath(target), '');
@@ -2317,29 +2318,48 @@ suite('InlineScriptEnvManager', () => {
                 };
             });
 
-            assert.strictEqual(await manager.create(scriptUri()), undefined);
-            assert.strictEqual(await fs.pathExists(envDir().fsPath), true);
+            assert.strictEqual(await manager.create(uri), undefined);
+            assert.strictEqual(await fs.pathExists(envDir().fsPath), false);
             assert.strictEqual(writeMetaStub.callCount, 0);
-            assert.ok(retainLockStub.calledOnce);
+            sinon.assert.notCalled(retainLockStub);
             assert.ok(releaseLockStub.calledOnce);
+            assert.deepStrictEqual(routingRegistry.takeSetupOutcome(uri), { kind: 'cancelled' });
         });
 
-        test('keeps a failed lock-retain transition fail-closed', async () => {
-            createWithProgressStub.resolves({
-                environment: makeEnvironment(
-                    'ms-python.python:inline-script',
-                    '3.12.4',
-                    venvPythonPath(envDir().fsPath),
-                    envDir().fsPath,
-                ),
-                pkgInstallationErr: 'Canceled',
-                pkgInstallationCancelled: true,
+        test('leaves a cancelled entry unreusable when its directory cannot be removed', async () => {
+            const uri = scriptUri();
+            createWithProgressStub.callsFake(async (...args: unknown[]) => {
+                const target = args[6] as string;
+                await fs.outputFile(venvPythonPath(target), '');
+                await fs.outputFile(path.join(target, '.meta.json'), '{}');
+                await fs.outputFile(path.join(target, '.meta.json.backup-0123456789ab'), '{}');
+                return {
+                    environment: makeEnvironment(
+                        'ms-python.python:inline-script',
+                        '3.12.4',
+                        venvPythonPath(target),
+                        target,
+                    ),
+                    pkgInstallationErr: 'Canceled',
+                    pkgInstallationCancelled: true,
+                };
             });
-            retainLockStub.rejects(Object.assign(new Error('retention failed'), { code: 'EACCES' }));
+            const internalManager = manager as unknown as {
+                removeCacheEntry(candidate: Uri): Promise<boolean>;
+            };
+            sinon.stub(internalManager, 'removeCacheEntry').resolves(false);
 
-            assert.strictEqual(await manager.create(scriptUri()), undefined);
-            assert.ok(retainLockStub.calledOnce);
-            assert.ok(releaseLockStub.calledOnce);
+            assert.strictEqual(await manager.create(uri), undefined);
+
+            // The directory survives, but every sidecar is gone so it can never be revalidated.
+            assert.strictEqual(await fs.pathExists(envDir().fsPath), true);
+            assert.strictEqual(await fs.pathExists(path.join(envDir().fsPath, '.meta.json')), false);
+            assert.strictEqual(
+                await fs.pathExists(path.join(envDir().fsPath, '.meta.json.backup-0123456789ab')),
+                false,
+            );
+            sinon.assert.notCalled(retainLockStub);
+            assert.deepStrictEqual(routingRegistry.takeSetupOutcome(uri), { kind: 'cancelled' });
         });
 
         test('removes the partial environment when package installation fails', async () => {
