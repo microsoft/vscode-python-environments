@@ -2,6 +2,7 @@ import * as path from 'path';
 
 export const ENVS_EXTENSION_ID = 'ms-python.vscode-python-envs';
 export const PYTHON_EXTENSION_ID = 'ms-python.python';
+export const PYLANCE_EXTENSION_ID = 'ms-python.vscode-pylance';
 export const CONDA_MANAGER_ID = `${PYTHON_EXTENSION_ID}:conda`;
 export const INLINE_SCRIPT_MANAGER_ID = `${PYTHON_EXTENSION_ID}:inline-script`;
 export const INLINE_SCRIPT_ENVS_KEY = `${ENVS_EXTENSION_ID}:inline-script:SCRIPT_ENVIRONMENTS`;

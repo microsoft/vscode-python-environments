@@ -17,6 +17,7 @@ import {
 import { asRelativePath, findFiles, getOpenTextDocuments } from '../../common/workspace.apis';
 import { EnvironmentManagers } from '../../internal.api';
 import { registerInlineScriptCodeLens } from './codeLens';
+import { promptUpdateExtensionsForInlineScripts } from './extensionVersionCheck';
 
 /**
  * Hidden command invoked by the inline-script CodeLens to set up the environment for one script.
@@ -115,7 +116,9 @@ function setupInlineScriptEnvironmentHandler(
             const environment = await setUpInlineScriptEnvironment(uri, em, routing);
             if (!environment) {
                 notifyInlineScriptSetupOutcome(uri, routing);
+                return;
             }
+            await promptUpdateExtensionsForInlineScripts();
         } catch (error) {
             traceError(`Failed to set up the inline-script environment for ${uri.fsPath}:`, error);
             showErrorMessage(
@@ -259,6 +262,12 @@ export async function setUpInlineScriptEnvironmentsInWorkspace(
         `Inline-script bulk setup: created or reused ${succeeded} of ${picks.length} environment(s)` +
             `${cancelled ? ' (canceled)' : ''}.`,
     );
+    if (succeeded > 0) {
+        // Not awaited so the run summary below is not held behind this notification.
+        void promptUpdateExtensionsForInlineScripts().catch((error) =>
+            traceError('Failed to check companion extension versions for inline scripts:', error),
+        );
+    }
     if (cancelled) {
         showWarningMessage(
             l10n.t(
