@@ -22,6 +22,7 @@ import {
     isPackageVersionLookupNotSupportedError,
 } from '../api';
 import { traceError, traceInfo, traceVerbose } from '../common/logging';
+import { InlineScriptEnvironmentModifiedError, InlineScriptPackagesNotManagedError } from '../common/inlineScript/errors';
 import * as persistentState from '../common/persistentState';
 import {
     EnvironmentManagers,
@@ -311,7 +312,13 @@ export async function removeEnvironmentCommand(context: unknown, managers: Envir
         }
     } else if (context instanceof ProjectEnvironment) {
         const view = context as ProjectEnvironment;
-        const manager = managers.getEnvironmentManager(view.parent.project.uri);
+        const inlineScript = view.environment.envId.managerId === INLINE_SCRIPT_MANAGER_ID;
+        const manager = managers.getEnvironmentManager(
+            inlineScript ? view.environment : view.parent.project.uri,
+        );
+        if (inlineScript && !manager) {
+            throw new Error(l10n.t('The inline-script environment manager is not available to delete this environment.'));
+        }
         await manager?.remove(view.environment);
     } else {
         traceError(`Invalid context for remove command: ${context}`);
@@ -435,6 +442,22 @@ export async function managePackageVersion(context: unknown, em: EnvironmentMana
 }
 
 export async function setEnvironmentCommand(
+    context: unknown,
+    em: EnvironmentManagers,
+    wm: PythonProjectManager,
+): Promise<void> {
+    try {
+        await setEnvironmentCommandInternal(context, em, wm);
+    } catch (error) {
+        if (!(error instanceof InlineScriptEnvironmentModifiedError)) {
+            throw error;
+        }
+        traceError('Cannot select a modified inline-script environment:', error);
+        await showErrorMessage(error.message);
+    }
+}
+
+async function setEnvironmentCommandInternal(
     context: unknown,
     em: EnvironmentManagers,
     wm: PythonProjectManager,
@@ -734,10 +757,27 @@ export async function getPackageCommandOptions(
     packageManager: InternalPackageManager;
     environment: PythonEnvironment;
 }> {
+    const options = await resolvePackageCommandOptions(e, em, pm);
+    // The tree view hides package actions for inline-script environments, but the command palette
+    // can still resolve one from the active script. Refuse here so every entry point agrees.
+    if (options.environment.envId.managerId === INLINE_SCRIPT_MANAGER_ID) {
+        throw new InlineScriptPackagesNotManagedError();
+    }
+    return options;
+}
+
+async function resolvePackageCommandOptions(
+    e: unknown,
+    em: EnvironmentManagers,
+    pm: PythonProjectManager,
+): Promise<{
+    packageManager: InternalPackageManager;
+    environment: PythonEnvironment;
+}> {
     if (e === undefined) {
         const project = await pickProject(pm.getProjects());
         if (project) {
-            return getPackageCommandOptions(project.uri, em, pm);
+            return resolvePackageCommandOptions(project.uri, em, pm);
         }
     }
 

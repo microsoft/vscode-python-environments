@@ -12,6 +12,7 @@ import {
 import { PythonEnvironment, PythonEnvironmentApi, PythonProjectCreator } from './api';
 import { ENVS_EXTENSION_ID } from './common/constants';
 import { ensureCorrectVersion } from './common/extVersion';
+import { InlineScriptPackagesNotManagedError } from './common/inlineScript/errors';
 import { registerLogger, traceError, traceInfo, traceWarn } from './common/logging';
 import { setPersistentState } from './common/persistentState';
 import { newProjectSelection } from './common/pickers/managers';
@@ -346,13 +347,20 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
             await removeEnvironmentCommand(item, envManagers);
         }),
         commands.registerCommand('python-envs.packages', async (options: unknown) => {
-            const { environment, packageManager } = await getPackageCommandOptions(
-                options,
-                envManagers,
-                projectManager,
-            );
+            let resolved;
             try {
-                packageManager.manage(environment, { install: [] });
+                resolved = await getPackageCommandOptions(options, envManagers, projectManager);
+            } catch (err) {
+                if (!(err instanceof InlineScriptPackagesNotManagedError)) {
+                    // Preserve the existing contract: other resolution failures still surface.
+                    throw err;
+                }
+                traceError('Rejected a package command for an inline-script environment:', err);
+                await window.showErrorMessage(err.message);
+                return;
+            }
+            try {
+                resolved.packageManager.manage(resolved.environment, { install: [] });
             } catch (err) {
                 traceError('Error when running command python-envs.packages', err);
             }

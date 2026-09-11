@@ -97,6 +97,20 @@ my_package_project/
 
 When you create a script, the extension generates a single `.py` file with PEP 723 inline script metadata, which allows you to specify dependencies directly in the file.
 
+An inline-script environment is built from the script's `# /// script` block and stored in the extension's cache, where it is shared by every script with the same dependencies and base interpreter. Because editing one would silently change the others, these environments are not user-managed: the Python Environments views do not offer install, uninstall, or version-change actions for them. Their package list remains visible.
+
+Setup records which distributions it installed. If that record and the environment's contents later disagree — for example after installing a package into it from a terminal — every script sharing the environment needs setup again. Saving or reopening a script does not repair it; use the script's setup action to rebuild from its declared dependencies.
+
+Once a mismatch is confirmed during an environment lookup, the affected scripts' setup actions return without requiring a save.
+
+An environment whose recorded inventory is unknown, or cannot be read, is left alone rather than treated as modified.
+
+**Delete Environment** on an inline-script environment deletes that single cached environment without a confirmation dialog and clears its known associations in the current workspace. All scripts sharing it will need setup again. Python files, project entries and settings, the base Python installation, and other cached environments are kept. Other windows discover the missing environment when they revalidate it.
+
+Stop runs or debug sessions using the environment before deleting it. The extension refuses deletion while script environments are being created; files held open by other processes may also prevent deletion. Failures are reported rather than treated as successful removal. If deletion begins but cannot finish, affected scripts need setup again; remaining files can be removed by retrying Delete.
+
+On Windows, changing only the letter casing of a script's filename keeps its existing environment association. A rename does not validate unsaved dependency edits or install packages.
+
 ## Assigning Environments to Projects
 
 Each project can have its own Python environment. This is the core benefit of project management.

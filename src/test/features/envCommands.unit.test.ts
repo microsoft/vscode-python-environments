@@ -1,4 +1,5 @@
 import * as assert from 'assert';
+import * as path from 'path';
 import * as sinon from 'sinon';
 import * as typeMoq from 'typemoq';
 import { Memento, Terminal, Uri } from 'vscode';
@@ -13,6 +14,7 @@ import {
     clearEnvironmentCachesCommand,
     clearScriptEnvironmentCacheCommand,
     createAnyEnvironmentCommand,
+    removeEnvironmentCommand,
     removePythonProject,
     revealEnvInManagerView,
     runInDedicatedTerminalCommand,
@@ -28,6 +30,67 @@ import { ProjectEnvironment, ProjectItem } from '../../features/views/treeViewIt
 import { EnvironmentManagers, InternalEnvironmentManager, PythonProjectManager } from '../../internal.api';
 import { setupNonThenable } from '../mocks/helper';
 import { createMockPythonEnvironment } from '../mocks/pythonEnvironment';
+
+suite('Environment removal command ownership', () => {
+    for (const managerId of [INLINE_SCRIPT_MANAGER_ID, 'ms-python.python:venv']) {
+        test(`routes a ${managerId} project environment without changing ordinary removal`, async () => {
+            const project: PythonProject = {
+                name: 'script',
+                uri: Uri.file(path.join(process.cwd(), 'removal-script.py')),
+            };
+            const environment = createMockPythonEnvironment({
+                managerId,
+                envPath: path.join(process.cwd(), 'removal-env'),
+            });
+            const remove = sinon.stub().resolves();
+            const owner = new InternalEnvironmentManager(managerId, {
+                name: 'test',
+                preferredPackageManagerId: 'ms-python.python:pip',
+                get: async () => environment,
+                set: async () => undefined,
+                getEnvironments: async () => [environment],
+                refresh: async () => undefined,
+                resolve: async () => environment,
+                remove,
+            });
+            const expectedContext = managerId === INLINE_SCRIPT_MANAGER_ID ? environment : project.uri;
+            const getEnvironmentManager = sinon.stub().callsFake((context) =>
+                context === expectedContext ? owner : undefined,
+            );
+            const managers: Partial<EnvironmentManagers> = { getEnvironmentManager };
+
+            await removeEnvironmentCommand(
+                new ProjectEnvironment(new ProjectItem(project), environment),
+                managers as EnvironmentManagers,
+            );
+
+            assert.ok(getEnvironmentManager.calledOnceWithExactly(expectedContext));
+            assert.ok(remove.calledOnceWithExactly(environment, undefined));
+        });
+    }
+
+    test('reports an unavailable inline owner instead of removing through a fallback manager', async () => {
+        const project: PythonProject = {
+            name: 'script',
+            uri: Uri.file(path.join(process.cwd(), 'removal-script.py')),
+        };
+        const environment = createMockPythonEnvironment({
+            managerId: INLINE_SCRIPT_MANAGER_ID,
+            envPath: path.join(process.cwd(), 'removal-env'),
+        });
+        const getEnvironmentManager = sinon.stub().returns(undefined);
+        const managers: Partial<EnvironmentManagers> = { getEnvironmentManager };
+
+        await assert.rejects(
+            removeEnvironmentCommand(
+                new ProjectEnvironment(new ProjectItem(project), environment),
+                managers as EnvironmentManagers,
+            ),
+            /not available to delete/,
+        );
+        assert.ok(getEnvironmentManager.calledOnceWithExactly(environment));
+    });
+});
 
 suite('Create Any Environment Command Tests', () => {
     let em: typeMoq.IMock<EnvironmentManagers>;
