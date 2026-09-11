@@ -12,7 +12,18 @@ export function resolveVariables(value: string, project?: Uri, env?: { [key: str
         substitutions.set('${pythonProject}', project.fsPath);
     }
 
-    const workspace = project ? getWorkspaceFolder(project) : undefined;
+    // Resolve ${workspaceFolder} for a project (workspace) scope. Prefer the workspace folder
+    // that owns the project URI, but fall back to the single open workspace folder when the
+    // owning folder can't be determined (e.g. drive-letter casing differences on Windows can
+    // cause workspace.getWorkspaceFolder() to return undefined). Without this fallback the
+    // ${workspaceFolder} token would be left unexpanded and downstream path resolution fails.
+    let workspace = project ? getWorkspaceFolder(project) : undefined;
+    if (!workspace && project) {
+        const folders = getWorkspaceFolders();
+        if (folders && folders.length === 1) {
+            workspace = folders[0];
+        }
+    }
     if (workspace) {
         substitutions.set('${workspaceFolder}', workspace.uri.fsPath);
     }
