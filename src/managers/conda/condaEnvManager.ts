@@ -44,6 +44,7 @@ import {
     getCondaForWorkspace,
     getCondaPathSetting,
     getDefaultCondaPrefix,
+    isCondaEnvWithoutPython,
     quickCreateConda,
     refreshCondaEnvs,
     resolveCondaPath,
@@ -510,7 +511,7 @@ export class CondaEnvManager implements EnvironmentManager, Disposable {
         // If a global environment is still not set, try using the 'base'
         if (!this.globalEnv) {
             const base = this.findEnvironmentByName('base');
-            if (base?.version !== 'no-python') {
+            if (!base || !isCondaEnvWithoutPython(base)) {
                 this.globalEnv = base;
             }
         }

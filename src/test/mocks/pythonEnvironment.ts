@@ -79,3 +79,26 @@ export function createMockPythonEnvironment(options: MockPythonEnvironmentOption
 export function makeMockCondaEnvironment(name: string, envPath: string, version: string = '3.12.0'): PythonEnvironment {
     return createMockPythonEnvironment({ name, envPath, version });
 }
+
+/**
+ * Creates a mock conda environment that has no Python interpreter, shaped like the item
+ * `getCondaWithoutPython` produces: an empty version and the conda launcher as the runner.
+ */
+export function makeMockCondaEnvironmentWithoutPython(
+    name: string,
+    envPath: string,
+    conda: string = '/miniconda3/bin/conda',
+): PythonEnvironment {
+    return new PythonEnvironmentImpl(
+        { id: `${name}-test`, managerId: 'ms-python.python:conda' },
+        {
+            name,
+            displayName: `${name} (no-python)`,
+            displayPath: envPath,
+            version: '',
+            environmentPath: Uri.file(envPath),
+            sysPrefix: envPath,
+            execInfo: { run: { executable: conda } },
+        },
+    );
+}
