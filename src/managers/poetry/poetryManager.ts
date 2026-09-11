@@ -1,6 +1,19 @@
 import * as path from 'path';
-import { Disposable, EventEmitter, MarkdownString, ProgressLocation, Uri, workspace } from 'vscode';
+import * as fs from 'fs-extra';
 import {
+    CancellationError,
+    CancellationToken,
+    Disposable,
+    EventEmitter,
+    LogOutputChannel,
+    MarkdownString,
+    ProgressLocation,
+    Uri,
+    workspace,
+} from 'vscode';
+import {
+    CreateEnvironmentOptions,
+    CreateEnvironmentScope,
     DidChangeEnvironmentEventArgs,
     DidChangeEnvironmentsEventArgs,
     EnvironmentChangeKind,
@@ -11,6 +24,7 @@ import {
     PythonEnvironment,
     PythonEnvironmentApi,
     PythonProject,
+    QuickCreateConfig,
     RefreshEnvironmentsScope,
     ResolveEnvironmentContext,
     SetEnvironmentScope,
@@ -24,9 +38,11 @@ import { sendTelemetryEvent } from '../../common/telemetry/sender';
 import { createDeferred, Deferred } from '../../common/utils/deferred';
 import { normalizePath } from '../../common/utils/pathUtils';
 import { withProgress } from '../../common/window.apis';
+import { findParentIfFile } from '../../features/envCommands';
 import { PythonProjectManager } from '../../internal.api';
 import { NativePythonFinder } from '../common/nativePythonFinder';
 import { getLatest, notifyMissingManagerIfDefault } from '../common/utils';
+import { runPoetry } from './commands/runPoetry';
 import {
     clearPoetryCache,
     getPoetry,
@@ -54,6 +70,7 @@ export class PoetryManager implements EnvironmentManager, Disposable {
     constructor(
         private readonly nativeFinder: NativePythonFinder,
         private readonly api: PythonEnvironmentApi,
+        public readonly log: LogOutputChannel,
         private readonly projectManager?: PythonProjectManager,
     ) {
         this.name = 'poetry';
@@ -68,6 +85,145 @@ export class PoetryManager implements EnvironmentManager, Disposable {
     description?: string;
     tooltip: string | MarkdownString;
     iconPath?: IconPath;
+
+    /**
+     * Returns the configuration used to offer Poetry as a quick-create option.
+     */
+    public quickCreateConfig(): QuickCreateConfig {
+        return {
+            description: PoetryStrings.create.description,
+        };
+    }
+
+    /**
+     * Creates and selects a Poetry environment for a single existing Python project.
+     */
+    public async create(
+        scope: CreateEnvironmentScope,
+        options: CreateEnvironmentOptions = {},
+    ): Promise<PythonEnvironment | undefined> {
+        await this.initialize();
+        const projectRoot = await this.getCreateProjectRoot(scope);
+        const pyprojectPath = path.join(projectRoot.fsPath, 'pyproject.toml');
+        if (!(await fs.pathExists(pyprojectPath))) {
+            throw new Error(PoetryStrings.create.noPyproject(projectRoot.fsPath));
+        }
+
+        const baseEnvironment = await this.getBaseEnvironment();
+        const pythonExecutable = baseEnvironment.execInfo?.run?.executable;
+        if (!pythonExecutable) {
+            throw new Error(PoetryStrings.create.noPython);
+        }
+
+        return withProgress(
+            {
+                location: ProgressLocation.Notification,
+                title: PoetryStrings.create.progress(projectRoot.fsPath),
+            },
+            async (_, token) => {
+                await runPoetry(['--no-ansi', 'env', 'use', pythonExecutable], projectRoot.fsPath, this.log, token);
+                const result = await runPoetry(
+                    ['--no-ansi', 'env', 'info', '--path'],
+                    projectRoot.fsPath,
+                    this.log,
+                    token,
+                );
+                const environmentPath = this.parseEnvironmentPath(result);
+                const resolvedEnvironment = await resolvePoetryPath(environmentPath, this.nativeFinder, this.api, this);
+                if (!resolvedEnvironment) {
+                    throw new Error(PoetryStrings.create.resolveFailed(environmentPath));
+                }
+
+                const existingEnvironment = this.collection.find((item) =>
+                    this.sameEnvironment(item, resolvedEnvironment),
+                );
+                const environment = existingEnvironment ?? resolvedEnvironment;
+                const previousEnvironment = this.fsPathToEnv.get(normalizePath(projectRoot.fsPath));
+                await setPoetryForWorkspace(projectRoot.fsPath, environment.environmentPath.fsPath);
+                if (!existingEnvironment) {
+                    this.collection.push(environment);
+                }
+                this.fsPathToEnv.set(normalizePath(projectRoot.fsPath), environment);
+
+                if (!existingEnvironment) {
+                    this._onDidChangeEnvironments.fire([{ kind: EnvironmentChangeKind.add, environment }]);
+                }
+                this._onDidChangeEnvironment.fire({
+                    uri: projectRoot,
+                    old: previousEnvironment,
+                    new: environment,
+                });
+
+                if (options.additionalPackages?.length) {
+                    await runPoetry(
+                        ['--no-ansi', 'add', ...options.additionalPackages],
+                        projectRoot.fsPath,
+                        this.log,
+                        token,
+                    );
+                }
+
+                return environment;
+            },
+        );
+    }
+
+    /**
+     * Removes a Poetry environment from its associated project and clears the cached selection.
+     */
+    public async remove(environment: PythonEnvironment): Promise<void> {
+        await this.initialize();
+        const projectRoots = this.getAssociatedProjectRoots(environment);
+        if (projectRoots.length === 0) {
+            throw new Error(PoetryStrings.remove.noProject(environment.environmentPath.fsPath));
+        }
+
+        const pythonExecutable = environment.execInfo?.run?.executable;
+        if (!pythonExecutable) {
+            throw new Error(PoetryStrings.remove.noExecutable(environment.environmentPath.fsPath));
+        }
+
+        await withProgress(
+            {
+                location: ProgressLocation.Notification,
+                title: PoetryStrings.remove.progress(environment.environmentPath.fsPath),
+            },
+            async (_, token) => {
+                const projectRoot = await this.findOwningProjectRoot(environment, projectRoots, token);
+                await runPoetry(
+                    ['--no-ansi', 'env', 'remove', pythonExecutable],
+                    projectRoot.fsPath,
+                    this.log,
+                    token,
+                );
+
+                this.collection = this.collection.filter((item) => !this.sameEnvironment(item, environment));
+                for (const root of projectRoots) {
+                    const previousEnvironment = this.fsPathToEnv.get(normalizePath(root.fsPath));
+                    this.fsPathToEnv.delete(normalizePath(root.fsPath));
+                    await setPoetryForWorkspace(root.fsPath, undefined);
+                    this._onDidChangeEnvironment.fire({
+                        uri: root,
+                        old: previousEnvironment ?? environment,
+                        new: undefined,
+                    });
+                }
+
+                if (this.globalEnv && this.sameEnvironment(this.globalEnv, environment)) {
+                    const previousEnvironment = this.globalEnv;
+                    this.globalEnv = undefined;
+                    await setPoetryForGlobal(undefined);
+                    this._onDidChangeEnvironment.fire({
+                        uri: undefined,
+                        old: previousEnvironment,
+                        new: undefined,
+                    });
+                }
+
+                this._onDidChangeEnvironments.fire([{ kind: EnvironmentChangeKind.remove, environment }]);
+            },
+        );
+    }
 
     public dispose() {
         this.collection = [];
@@ -208,7 +364,12 @@ export class PoetryManager implements EnvironmentManager, Disposable {
 
     async set(scope: SetEnvironmentScope, environment?: PythonEnvironment | undefined): Promise<void> {
         if (scope === undefined) {
+            const previousEnvironment = this.globalEnv;
             await setPoetryForGlobal(environment?.environmentPath?.fsPath);
+            this.globalEnv = environment;
+            if (previousEnvironment?.envId.id !== environment?.envId.id) {
+                this._onDidChangeEnvironment.fire({ uri: undefined, old: previousEnvironment, new: environment });
+            }
         } else if (scope instanceof Uri) {
             const folder = this.api.getPythonProject(scope);
             const fsPath = folder?.uri?.fsPath ?? scope.fsPath;
@@ -387,5 +548,95 @@ export class PoetryManager implements EnvironmentManager, Disposable {
                 normalizePath(path.dirname(path.dirname(e.environmentPath.fsPath))) === normalized
             );
         });
+    }
+
+    private async getCreateProjectRoot(scope: CreateEnvironmentScope): Promise<Uri> {
+        if (scope === 'global' || (Array.isArray(scope) && scope.length !== 1)) {
+            throw new Error(PoetryStrings.create.singleProject);
+        }
+        const projectScope = Array.isArray(scope) ? scope[0] : scope;
+        const project = this.api.getPythonProject(projectScope);
+        return project?.uri ?? Uri.file(await findParentIfFile(projectScope.fsPath));
+    }
+
+    private async getBaseEnvironment(): Promise<PythonEnvironment> {
+        const environments = await this.api.getEnvironments('global');
+        const baseEnvironment = getLatest(
+            environments.filter(
+                (environment) =>
+                    environment.version?.startsWith('3.') &&
+                    !!environment.execInfo?.run?.executable &&
+                    environment.envId.managerId !== this.preferredPackageManagerId,
+            ),
+        );
+        if (!baseEnvironment) {
+            throw new Error(PoetryStrings.create.noPython);
+        }
+        return baseEnvironment;
+    }
+
+    private parseEnvironmentPath(output: string): string {
+        const environmentPath = output
+            .split(/\r?\n/)
+            .map((line) => line.trim())
+            .reverse()
+            .find((line) => path.isAbsolute(line));
+        if (!environmentPath) {
+            throw new Error(PoetryStrings.create.missingPath);
+        }
+        return environmentPath;
+    }
+
+    private getAssociatedProjectRoots(environment: PythonEnvironment): Uri[] {
+        const projects = this.api.getPythonProjects();
+        const mappedRoots = Array.from(this.fsPathToEnv.entries())
+            .filter(([, item]) => this.sameEnvironment(item, environment))
+            .map(([projectPath]) => {
+                const project = projects.find((item) => normalizePath(item.uri.fsPath) === projectPath);
+                return project?.uri ?? Uri.file(projectPath);
+            });
+        const owningProject = this.api.getPythonProject(environment.environmentPath);
+        if (owningProject) {
+            const owningProjectKey = normalizePath(owningProject.uri.fsPath);
+            const mappedEnvironment = this.fsPathToEnv.get(owningProjectKey);
+            if (
+                (!mappedEnvironment || this.sameEnvironment(mappedEnvironment, environment)) &&
+                !mappedRoots.some((root) => normalizePath(root.fsPath) === owningProjectKey)
+            ) {
+                mappedRoots.push(owningProject.uri);
+            }
+        }
+        return mappedRoots;
+    }
+
+    private async findOwningProjectRoot(
+        environment: PythonEnvironment,
+        projectRoots: Uri[],
+        token: CancellationToken,
+    ): Promise<Uri> {
+        for (const projectRoot of projectRoots) {
+            try {
+                const output = await runPoetry(
+                    ['--no-ansi', 'env', 'info', '--path'],
+                    projectRoot.fsPath,
+                    this.log,
+                    token,
+                );
+                const environmentPath = this.parseEnvironmentPath(output);
+                if (normalizePath(environmentPath) === normalizePath(environment.environmentPath.fsPath)) {
+                    return projectRoot;
+                }
+            } catch (error) {
+                if (error instanceof CancellationError) {
+                    throw error;
+                }
+                traceInfo(`Poetry project at ${projectRoot.fsPath} does not own the environment being removed`);
+            }
+        }
+        throw new Error(PoetryStrings.remove.noProject(environment.environmentPath.fsPath));
+    }
+
+    private sameEnvironment(left: PythonEnvironment, right: PythonEnvironment): boolean {
+        return normalizePath(left.environmentPath.fsPath) === normalizePath(right.environmentPath.fsPath);
     }
 }
