@@ -213,10 +213,7 @@ suite('Test TreeView Items', () => {
             const item = new PythonEnvTreeItem(env, managerWithRemove);
 
             // Assert
-            assert.ok(
-                !item.treeItem.contextValue?.includes('managePackages'),
-                'Inline-script environments are built from script metadata and must not offer package edits',
-            );
+            assert.strictEqual(item.treeItem.contextValue, 'pythonEnvironment;remove;activatable;');
         });
 
         test('Packages of an inline-script environment use the read-only context value', () => {
