@@ -23,6 +23,20 @@ export namespace WorkbenchStrings {
     export const installExtension = l10n.t('Install Extension');
 }
 
+export namespace InlineScriptStrings {
+    export const updateExtension = l10n.t('Update Extension');
+
+    export const updatePythonExtension = l10n.t(
+        'The environment for this script was created. Update the Python extension for the full inline script experience.',
+    );
+    export const updatePylanceExtension = l10n.t(
+        'The environment for this script was created. Update Pylance for the full inline script experience.',
+    );
+    export const updatePythonAndPylanceExtensions = l10n.t(
+        'The environment for this script was created. Update the Python and Pylance extensions for the full inline script experience.',
+    );
+}
+
 export namespace Interpreter {
     export const statusBarSelect = l10n.t('Select Interpreter');
     export const browsePath = l10n.t('Browse...');
@@ -249,7 +263,7 @@ export namespace UvInstallStrings {
     export function inlineScriptInstallPythonPrompt(requiresPython?: string, version?: string): string {
         if (requiresPython && version) {
             return l10n.t(
-                'No installed Python satisfies this script\'s requirement ({0}). Would you like to install Python {1} using uv?',
+                "No installed Python satisfies this script's requirement ({0}). Would you like to install Python {1} using uv?",
                 requiresPython,
                 version,
             );
@@ -267,7 +281,7 @@ export namespace UvInstallStrings {
     export function inlineScriptInstallPythonAndUvPrompt(requiresPython?: string, version?: string): string {
         if (requiresPython && version) {
             return l10n.t(
-                'No installed Python satisfies this script\'s requirement ({0}). Would you like to install uv and use it to install Python {1}? This will download and run an installer from https://astral.sh.',
+                "No installed Python satisfies this script's requirement ({0}). Would you like to install uv and use it to install Python {1}? This will download and run an installer from https://astral.sh.",
                 requiresPython,
                 version,
             );
@@ -284,7 +298,7 @@ export namespace UvInstallStrings {
     }
     export function inlineScriptInstallUvForVersionLookupPrompt(requiresPython: string): string {
         return l10n.t(
-            'No installed Python satisfies this script\'s requirement ({0}). Install uv to find a compatible Python version? This will download and run an installer from https://astral.sh.',
+            "No installed Python satisfies this script's requirement ({0}). Install uv to find a compatible Python version? This will download and run an installer from https://astral.sh.",
             requiresPython,
         );
     }
