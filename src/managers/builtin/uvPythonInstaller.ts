@@ -12,6 +12,7 @@ import { spawnProcess } from '../../common/childProcess.apis';
 import { Common, UvInstallStrings } from '../../common/localize';
 import { traceError, traceInfo, traceLog, traceWarn } from '../../common/logging';
 import { getGlobalPersistentState } from '../../common/persistentState';
+import { PythonVersion } from '../../common/pythonVersion';
 import { executeTask, onDidEndTaskProcess } from '../../common/tasks.apis';
 import { EventNames } from '../../common/telemetry/constants';
 import { sendTelemetryEvent } from '../../common/telemetry/sender';
@@ -74,6 +75,10 @@ export interface UvPythonVersion {
     variant: string;
     implementation: string;
     arch: string;
+}
+
+export interface GetAvailablePythonVersionsOptions {
+    readonly allVersions?: boolean;
 }
 
 /**
@@ -254,9 +259,14 @@ export async function getUvPythonPath(version?: string): Promise<string | undefi
                     // If version specified, find an exact or release-segment match
                     // (e.g., "3.12" matches "3.12.11", but not "3.120.1").
                     if (version) {
-                        const match = versions.find(
-                            (v) => (v.version === version || v.version.startsWith(`${version}.`)) && v.path,
-                        );
+                        const requested = PythonVersion.tryParse(version);
+                        const match = requested
+                            ? versions.find(
+                                  (candidate) =>
+                                      candidate.path &&
+                                      PythonVersion.tryParse(candidate.version)?.matchesSelector(requested),
+                              )
+                            : undefined;
                         resolve(match?.path ?? undefined);
                     } else {
                         // Return the first (latest) installed Python
@@ -276,12 +286,20 @@ export async function getUvPythonPath(version?: string): Promise<string | undefi
 
 /**
  * Gets available Python versions from uv.
+ * @param options Set `allVersions` only when older patch releases are needed.
  * @returns Promise that resolves to an array of Python versions
  */
-export async function getAvailablePythonVersions(): Promise<UvPythonVersion[]> {
+export async function getAvailablePythonVersions(
+    options?: GetAvailablePythonVersionsOptions,
+): Promise<UvPythonVersion[]> {
     return new Promise((resolve) => {
         const chunks: string[] = [];
-        const proc = spawnProcess('uv', ['python', 'list', '--output-format', 'json']);
+        const args = ['python', 'list'];
+        if (options?.allVersions) {
+            args.push('--all-versions');
+        }
+        args.push('--output-format', 'json');
+        const proc = spawnProcess('uv', args);
         proc.stdout?.on('data', (data) => chunks.push(data.toString()));
         proc.on('error', () => resolve([]));
         proc.on('exit', (code) => {

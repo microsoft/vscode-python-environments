@@ -50,6 +50,10 @@ export function findFiles(
     return workspace.findFiles(include, exclude, maxResults, token);
 }
 
+export function asRelativePath(pathOrUri: string | Uri, includeWorkspaceFolder?: boolean): string {
+    return workspace.asRelativePath(pathOrUri, includeWorkspaceFolder);
+}
+
 export function createFileSystemWatcher(
     globPattern: GlobPattern,
     ignoreCreateEvents?: boolean,

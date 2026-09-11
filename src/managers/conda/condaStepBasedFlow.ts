@@ -1,4 +1,3 @@
-import { compare as pep440Compare, valid as pep440Valid } from '@renovatebot/pep440';
 import * as fse from 'fs-extra';
 import * as path from 'path';
 import { l10n, LogOutputChannel, QuickInputButtons, QuickPickItem, Uri } from 'vscode';
@@ -8,13 +7,18 @@ import { showInputBoxWithButtons, showQuickPickWithButtons } from '../../common/
 import {
     createNamedCondaEnvironment,
     createPrefixCondaEnvironment,
+    getPythonVersionsForCreation,
     getLocation,
     getName,
-    trimVersionToMajorMinor,
 } from './condaUtils';
 
 // Recommended Python version for Conda environments
 const RECOMMENDED_CONDA_PYTHON = '3.11.11';
+const DEFAULT_CONDA_NAMED_LABEL = 'Named';
+
+function getCondaNamedLabel(): string {
+    return CondaStrings.condaNamed || DEFAULT_CONDA_NAMED_LABEL;
+}
 
 /**
  * State interface for the Conda environment creation flow.
@@ -61,13 +65,13 @@ async function selectEnvironmentType(state: CondaCreationState): Promise<StepFun
     try {
         // Skip this step if we have multiple URIs (force named environment)
         if (state.uris && state.uris.length > 1) {
-            state.envType = 'Named';
+            state.envType = getCondaNamedLabel();
             return selectPythonVersion;
         }
 
         const selection = (await showQuickPickWithButtons(
             [
-                { label: CondaStrings.condaNamed, description: CondaStrings.condaNamedDescription },
+                { label: getCondaNamedLabel(), description: CondaStrings.condaNamedDescription },
                 { label: CondaStrings.condaPrefix, description: CondaStrings.condaPrefixDescription },
             ],
             {
@@ -105,22 +109,7 @@ async function selectPythonVersion(state: CondaCreationState): Promise<StepFunct
         }
 
         const envs = await api.getEnvironments('global');
-        let versions = Array.from(
-            new Set(
-                envs
-                    .map((env: PythonEnvironment) => env.version)
-                    .filter(Boolean)
-                    .map((v: string) => trimVersionToMajorMinor(v)), // cut to 3 digits
-            ),
-        );
-
-        // Sort versions descending using PEP 440 comparison
-        versions = versions.sort((a, b) => {
-            if (!pep440Valid(a as string) || !pep440Valid(b as string)) {
-                return 0;
-            }
-            return pep440Compare(b as string, a as string); // descending
-        });
+        let versions = getPythonVersionsForCreation(envs);
 
         if (!versions || versions.length === 0) {
             versions = ['3.13', '3.12', '3.11', '3.10', '3.9'];
@@ -145,7 +134,7 @@ async function selectPythonVersion(state: CondaCreationState): Promise<StepFunct
         state.pythonVersion = (selection as QuickPickItem).description;
 
         // Next step depends on environment type
-        return state.envType === 'Named' ? enterEnvironmentName : selectLocation;
+        return state.envType === getCondaNamedLabel() ? enterEnvironmentName : selectLocation;
     } catch (ex) {
         if (ex === QuickInputButtons.Back) {
             // Go back to environment type selection
@@ -308,7 +297,7 @@ export async function createStepBasedCondaFlow(
         }
 
         // If we have all required data, create the environment
-        if (state.envType === CondaStrings.condaNamed && state.envName) {
+        if (state.envType === getCondaNamedLabel() && state.envName) {
             return await createNamedCondaEnvironment(api, log, manager, state.envName, state.pythonVersion);
         } else if (state.envType === CondaStrings.condaPrefix && state.prefix) {
             // For prefix environments, we need to pass the fsPath where the environment will be created

@@ -13,9 +13,13 @@ import {
     PipAvailableVersionsTextCommand,
     UvAvailableVersionsCommand,
 } from '../../../managers/builtin/commands/availableVersions';
+import { createPipOrUvCommand } from '../../../managers/builtin/commands/factory';
 import { PipInstallCommand, UvInstallCommand } from '../../../managers/builtin/commands/install';
 import { PipListCommand, UvListCommand } from '../../../managers/builtin/commands/list';
-import { PipListDirectNamesCommand, UvListDirectNamesCommand } from '../../../managers/builtin/commands/listDirectNames';
+import {
+    PipListDirectNamesCommand,
+    UvListDirectNamesCommand,
+} from '../../../managers/builtin/commands/listDirectNames';
 import { PipUninstallCommand, UvUninstallCommand } from '../../../managers/builtin/commands/uninstall';
 import { PipVersionCommand, UvVersionCommand } from '../../../managers/builtin/commands/version';
 import * as helpers from '../../../managers/builtin/helpers';
@@ -28,6 +32,7 @@ suite('Pip and UV command parsing', () => {
     let mockLog: LogOutputChannel;
     let runPythonStub: sinon.SinonStub;
     let runUvStub: sinon.SinonStub;
+    let shouldUseUvStub: sinon.SinonStub;
 
     setup(() => {
         log = createMockLogOutputChannel();
@@ -37,6 +42,7 @@ suite('Pip and UV command parsing', () => {
         } as unknown as ReturnType<typeof workspaceApis.getConfiguration>);
         runPythonStub = sinon.stub(helpers, 'runPython').resolves('');
         runUvStub = sinon.stub(helpers, 'runUV').resolves('');
+        shouldUseUvStub = sinon.stub(helpers, 'shouldUseUv').resolves(false);
     });
 
     teardown(() => {
@@ -259,7 +265,10 @@ suite('Pip and UV command parsing', () => {
             '--python-version',
             '3.13.1',
         ]);
-        assert.deepStrictEqual(result.map((version) => version.public), ['1.0.0']);
+        assert.deepStrictEqual(
+            result.map((version) => version.public),
+            ['1.0.0'],
+        );
     });
 
     test('PipAvailableVersionsTextCommand parses text output for Pip 21.2 through 25.0', async () => {
@@ -282,7 +291,10 @@ suite('Pip and UV command parsing', () => {
             '--python-version',
             '3.13.1',
         ]);
-        assert.deepStrictEqual(result.map((version) => version.public), ['1.0.0']);
+        assert.deepStrictEqual(
+            result.map((version) => version.public),
+            ['1.0.0'],
+        );
     });
 
     test('UvAvailableVersionsCommand rejects output surrounding JSON', async () => {
@@ -319,7 +331,10 @@ suite('Pip and UV command parsing', () => {
         const result = await command.execute();
 
         assert.deepStrictEqual(runUvStub.firstCall.args[0], ['pip', 'list', '--format=json', '--python', 'python']);
-        assert.deepStrictEqual(result.map((pkg) => pkg.name), ['package']);
+        assert.deepStrictEqual(
+            result.map((pkg) => pkg.name),
+            ['package'],
+        );
     });
 
     test('direct-package commands normalize names and ignore UV dependencies', async () => {
@@ -348,5 +363,73 @@ suite('Pip and UV command parsing', () => {
 
         assert.strictEqual(pipVersion?.public, '24.0');
         assert.strictEqual(uvVersion?.public, '0.4.20');
+    });
+
+    test('UV package commands target the environment directory rather than the resolved interpreter', async () => {
+        const baseInterpreter = path.join(path.sep, 'uv', 'python', 'cpython-3.13', 'bin', 'python');
+        const environmentPath = path.join(path.sep, 'virtualenvs', 'pipenv-project');
+        shouldUseUvStub.resolves(true);
+        const options = { pythonExecutable: baseInterpreter, log: mockLog };
+
+        const install: PipInstallCommand | UvInstallCommand = await createPipOrUvCommand(
+            options,
+            environmentPath,
+            PipInstallCommand,
+            UvInstallCommand,
+        );
+        await install.execute({ packages: [{ packageName: 'requests' }] });
+
+        const uninstall: PipUninstallCommand | UvUninstallCommand = await createPipOrUvCommand(
+            options,
+            environmentPath,
+            PipUninstallCommand,
+            UvUninstallCommand,
+        );
+        await uninstall.execute({ packages: [{ packageName: 'requests' }] });
+
+        const list: PipListCommand | UvListCommand = await createPipOrUvCommand(
+            options,
+            environmentPath,
+            PipListCommand,
+            UvListCommand,
+        );
+        runUvStub.resolves('[]');
+        await list.execute();
+
+        const directNames: PipListDirectNamesCommand | UvListDirectNamesCommand = await createPipOrUvCommand(
+            options,
+            environmentPath,
+            PipListDirectNamesCommand,
+            UvListDirectNamesCommand,
+        );
+        runUvStub.resolves('');
+        await directNames.execute();
+
+        assert.strictEqual(runPythonStub.callCount, 0);
+        assert.strictEqual(runUvStub.callCount, 4);
+        for (const call of runUvStub.getCalls()) {
+            const args = call.args[0] as string[];
+            const pythonIndex = args.indexOf('--python');
+            assert.notStrictEqual(pythonIndex, -1);
+            assert.strictEqual(args[pythonIndex + 1], environmentPath);
+            assert.ok(!args.includes(baseInterpreter));
+        }
+    });
+
+    test('Pip package commands continue using the environment interpreter', async () => {
+        const pythonExecutable = path.join(path.sep, 'virtualenvs', 'project', 'bin', 'python');
+        const environmentPath = path.join(path.sep, 'virtualenvs', 'project');
+        shouldUseUvStub.resolves(false);
+
+        const install: PipInstallCommand | UvInstallCommand = await createPipOrUvCommand(
+            { pythonExecutable, log: mockLog },
+            environmentPath,
+            PipInstallCommand,
+            UvInstallCommand,
+        );
+        await install.execute({ packages: [{ packageName: 'requests' }] });
+
+        assert.strictEqual(runPythonStub.firstCall.args[0], pythonExecutable);
+        assert.ok(runUvStub.notCalled);
     });
 });

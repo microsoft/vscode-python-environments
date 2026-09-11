@@ -1,8 +1,7 @@
 # /// script
-# requires-python = ">=X.XX" TODO: Update this to the minimum Python version you want to support
-# dependencies = [
-#   TODO: Add any dependencies your script requires
-# ]
+# requires-python = ">=3.9"
+# dependencies = []
+# # Add dependency requirement strings to the array above as needed.
 # ///
 
 # TODO: Update the main function to your needs or remove it.

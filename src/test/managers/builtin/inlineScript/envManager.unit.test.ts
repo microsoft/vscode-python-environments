@@ -7,8 +7,9 @@ import * as fs from 'fs-extra';
 import * as os from 'os';
 import * as path from 'path';
 import * as sinon from 'sinon';
-import { Disposable, LogOutputChannel, TextDocument, Uri } from 'vscode';
+import { Disposable, LogOutputChannel, Memento, TextDocument, Uri } from 'vscode';
 import {
+    DidChangePackagesEventArgs,
     EnvironmentChangeKind,
     EnvironmentManager,
     PythonEnvironment,
@@ -19,17 +20,14 @@ import * as cacheLayout from '../../../../common/inlineScript/cacheLayout';
 import * as metadataReader from '../../../../common/inlineScript/metadata';
 import { InlineScriptRoutingRegistry } from '../../../../common/inlineScript/routingRegistry';
 import * as lockfileApis from '../../../../common/lockfile.apis';
-import * as persistentState from '../../../../common/persistentState';
+import { INLINE_SCRIPT_ENVS_KEY } from '../../../../common/constants';
 import { EventNames } from '../../../../common/telemetry/constants';
 import * as telemetrySender from '../../../../common/telemetry/sender';
 import { isWindows } from '../../../../common/utils/platformUtils';
 import { normalizePath } from '../../../../common/utils/pathUtils';
 import { getVenvPythonPath } from '../../../../common/utils/virtualEnvironment';
 import * as workspaceApis from '../../../../common/workspace.apis';
-import {
-    InlineScriptEnvManager,
-    INLINE_SCRIPT_ENVS_KEY,
-} from '../../../../managers/builtin/inlineScript/envManager';
+import { InlineScriptEnvManager } from '../../../../managers/builtin/inlineScript/envManager';
 import * as builtinUtils from '../../../../managers/builtin/utils';
 import * as uvPythonInstaller from '../../../../managers/builtin/uvPythonInstaller';
 import * as venvUtils from '../../../../managers/builtin/venvUtils';
@@ -104,6 +102,7 @@ suite('InlineScriptEnvManager', () => {
     let api: PythonEnvironmentApi;
     let apiGetEnvironmentsStub: sinon.SinonStub;
     let apiRefreshEnvironmentsStub: sinon.SinonStub;
+    let packagesChangedListener: ((e: DidChangePackagesEventArgs) => unknown) | undefined;
     let baseEnvironment: PythonEnvironment;
     let baseExecutable: string;
     let baseManager: EnvironmentManager;
@@ -135,9 +134,10 @@ suite('InlineScriptEnvManager', () => {
     let renameFilesListener: ((e: { files: readonly { oldUri: Uri; newUri: Uri }[] }) => unknown) | undefined;
     let workspaceState: {
         get: sinon.SinonStub;
-        set: sinon.SinonStub;
-        clear: sinon.SinonStub;
+        update: sinon.SinonStub;
+        keys: sinon.SinonStub;
     };
+    let workspaceMemento: Memento;
     let persistedAssociations: unknown;
 
     setup(async () => {
@@ -152,6 +152,10 @@ suite('InlineScriptEnvManager', () => {
         api = {
             getEnvironments: apiGetEnvironmentsStub,
             refreshEnvironments: apiRefreshEnvironmentsStub,
+            onDidChangePackages: (listener: (e: DidChangePackagesEventArgs) => unknown) => {
+                packagesChangedListener = listener;
+                return new Disposable(() => undefined);
+            },
         } as unknown as PythonEnvironmentApi;
         nativeFinder = {} as NativePythonFinder;
         routingRegistry = new InlineScriptRoutingRegistry();
@@ -166,18 +170,16 @@ suite('InlineScriptEnvManager', () => {
             get: sinon.stub().callsFake(async (key: string) => {
                 return key === INLINE_SCRIPT_ENVS_KEY ? persistedAssociations : undefined;
             }),
-            set: sinon.stub().callsFake(async (key: string, value: unknown) => {
+            update: sinon.stub().callsFake(async (key: string, value: unknown) => {
                 if (key === INLINE_SCRIPT_ENVS_KEY) {
                     persistedAssociations = value;
                 }
             }),
-            clear: sinon.stub().callsFake(async (keys?: string[]) => {
-                if (!keys || keys.includes(INLINE_SCRIPT_ENVS_KEY)) {
-                    persistedAssociations = undefined;
-                }
-            }),
+            keys: sinon.stub().callsFake(() =>
+                persistedAssociations === undefined ? [] : [INLINE_SCRIPT_ENVS_KEY],
+            ),
         };
-        sinon.stub(persistentState, 'getWorkspacePersistentState').resolves(workspaceState);
+        workspaceMemento = workspaceState as unknown as Memento;
 
         readMetadataStub = sinon.stub(metadataReader, 'readInlineScriptMetadataFromFile').resolves(VALID_METADATA);
         computeCacheKeyStub = sinon.stub(cacheKey, 'computeCacheKey').callsFake((inputs) => {
@@ -250,6 +252,7 @@ suite('InlineScriptEnvManager', () => {
             baseManager,
             globalStorageUri,
             makeFakeLog(),
+            workspaceMemento,
             routingRegistry,
         );
     });
@@ -381,7 +384,7 @@ suite('InlineScriptEnvManager', () => {
     }
 
     function workspaceStateSetCalls(key: string): readonly sinon.SinonSpyCall[] {
-        return workspaceState.set.getCalls().filter((call) => call.args[0] === key);
+        return workspaceState.update.getCalls().filter((call) => call.args[0] === key);
     }
 
     function matchedAssociationRecord(environmentPath: string, metadataIdentity: string = VALID_METADATA_IDENTITY): unknown {
@@ -554,6 +557,29 @@ suite('InlineScriptEnvManager', () => {
 
             assert.strictEqual(createWithProgressStub.firstCall.args[4], finalRelease);
             assert.strictEqual(promptInstallPythonViaUvStub.callCount, 0);
+        });
+
+        test('creates an environment when the resolved base reports a CPython sys.version_info version', async () => {
+            // `pet` reports interpreter versions as `major.minor.micro.releaselevel.serial`
+            // (e.g. "3.14.3.final.0"), which is not valid PEP 440. This must still satisfy
+            // requires-python (matchesInstallConstraint) and pass the post-create
+            // release-equality check (areEqualPythonReleases) instead of being discarded.
+            const versionInfoBase = makeEnvironment('ms-python.python:system', '3.14.3.final.0', baseExecutable);
+            apiGetEnvironmentsStub.resolves([versionInfoBase]);
+
+            assert.ok(await manager.create(scriptUri()));
+
+            assert.strictEqual(createWithProgressStub.firstCall.args[4], versionInfoBase);
+        });
+
+        test('creates an environment with a sys.version_info version when requires-python is absent', async () => {
+            readMetadataStub.resolves({ ...VALID_METADATA, requiresPython: undefined });
+            const versionInfoBase = makeEnvironment('ms-python.python:system', '3.14.3.final.0', baseExecutable);
+            apiGetEnvironmentsStub.resolves([versionInfoBase]);
+
+            assert.ok(await manager.create(scriptUri()));
+
+            assert.strictEqual(createWithProgressStub.firstCall.args[4], versionInfoBase);
         });
 
         test('excludes named conda environments even when they are newer than conda base', async () => {
@@ -744,6 +770,25 @@ suite('InlineScriptEnvManager', () => {
             assert.strictEqual(createWithProgressStub.callCount, 1);
         });
 
+        test('uses strict PEP 440 matching for a directly resolved final release', async () => {
+            const uvExecutable = path.join(tempRoot, 'uv-python', isWindows() ? 'python.exe' : 'python');
+            await fs.outputFile(uvExecutable, '');
+            const uvBase = makeEnvironment('ms-python.python:system', '3.15.0', uvExecutable);
+            readMetadataStub.resolves({ ...VALID_METADATA, requiresPython: '!=3.15.0rc2' });
+            apiGetEnvironmentsStub.resolves([]);
+            getAvailablePythonVersionsStub.resolves([makeUvPythonVersion('3.15.0')]);
+            promptInstallPythonViaUvStub.resolves({ kind: 'installed', pythonPath: uvExecutable });
+            resolveSystemPythonStub.resolves(uvBase);
+
+            assert.ok(await manager.create(scriptUri()));
+
+            sinon.assert.calledOnceWithExactly(promptInstallPythonViaUvStub, 'inlineScript', manager.log, {
+                requiresPython: '!=3.15.0rc2',
+                version: '3.15.0',
+            });
+            assert.strictEqual(createWithProgressStub.firstCall.args[4], uvBase);
+        });
+
         test('selects an available uv release that satisfies exclusion clauses', async () => {
             const uvExecutable = path.join(tempRoot, 'uv-python', isWindows() ? 'python.exe' : 'python');
             await fs.outputFile(uvExecutable, '');
@@ -834,6 +879,46 @@ suite('InlineScriptEnvManager', () => {
                 requiresPython: '>=3.11,<3.12',
                 version: '3.11.14',
             });
+            sinon.assert.calledOnceWithExactly(getAvailablePythonVersionsStub);
+        });
+
+        test('resolves a short exact requirement to an advertised concrete release', async () => {
+            const uvExecutable = path.join(tempRoot, 'uv-python', isWindows() ? 'python.exe' : 'python');
+            await fs.outputFile(uvExecutable, '');
+            const uvBase = makeEnvironment('ms-python.python:system', '3.13.0', uvExecutable);
+            readMetadataStub.resolves({ ...VALID_METADATA, requiresPython: '==3.13' });
+            apiGetEnvironmentsStub.onFirstCall().resolves([baseEnvironment]);
+            apiGetEnvironmentsStub.onSecondCall().resolves([baseEnvironment]);
+            apiGetEnvironmentsStub.onThirdCall().resolves([uvBase]);
+            const defaultCatalog = [makeUvPythonVersion('3.13.2')];
+            const completeCatalog = [...defaultCatalog, makeUvPythonVersion('3.13.0')];
+            getAvailablePythonVersionsStub.callsFake(async (options?: { allVersions?: boolean }) =>
+                options?.allVersions ? completeCatalog : defaultCatalog,
+            );
+            promptInstallPythonViaUvStub.resolves({ kind: 'installed', pythonPath: uvExecutable });
+
+            assert.ok(await manager.create(scriptUri()));
+
+            sinon.assert.calledOnceWithExactly(ensureUvForVersionLookupStub, '==3.13', manager.log);
+            sinon.assert.calledOnceWithExactly(getAvailablePythonVersionsStub, { allVersions: true });
+            sinon.assert.calledOnceWithExactly(promptInstallPythonViaUvStub, 'inlineScript', manager.log, {
+                requiresPython: '==3.13',
+                version: '3.13.0',
+            });
+        });
+
+        test('does not install a short exact requirement without an exact catalog candidate', async () => {
+            readMetadataStub.resolves({ ...VALID_METADATA, requiresPython: '==3.13' });
+            apiGetEnvironmentsStub.resolves([baseEnvironment]);
+            getAvailablePythonVersionsStub.resolves([makeUvPythonVersion('3.13.2')]);
+
+            assert.strictEqual(await manager.create(scriptUri()), undefined);
+
+            sinon.assert.calledOnceWithExactly(ensureUvForVersionLookupStub, '==3.13', manager.log);
+            sinon.assert.calledOnceWithExactly(getAvailablePythonVersionsStub, { allVersions: true });
+            assert.strictEqual(promptInstallPythonViaUvStub.callCount, 0);
+            assert.strictEqual(apiRefreshEnvironmentsStub.callCount, 0);
+            assert.strictEqual(createWithProgressStub.callCount, 0);
         });
 
         test('uses an exact requirement without needing an existing uv catalog', async () => {
@@ -1436,6 +1521,7 @@ suite('InlineScriptEnvManager', () => {
                 baseManager,
                 globalStorageUri,
                 makeFakeLog(),
+                workspaceMemento,
                 restartRoutingRegistry,
             );
 
@@ -1829,7 +1915,7 @@ suite('InlineScriptEnvManager', () => {
                 schemaVersion: cacheLayout.META_SCHEMA_VERSION,
                 baseInterpreterPath: baseExecutable,
                 baseInterpreterVersion: baseEnvironment.version,
-                lastUsedAt: '2026-07-01T00:00:00.000Z',
+                lastUsedAt: '2026-07-20T00:00:00.000Z',
             };
             const cached = makeEnvironment(
                 'ms-python.python:inline-script',
@@ -1865,7 +1951,7 @@ suite('InlineScriptEnvManager', () => {
                 schemaVersion: cacheLayout.META_SCHEMA_VERSION,
                 baseInterpreterPath: baseExecutable,
                 baseInterpreterVersion: baseEnvironment.version,
-                lastUsedAt: '2026-07-01T00:00:00.000Z',
+                lastUsedAt: '2026-07-20T00:00:00.000Z',
                 sourceMetadataIdentityHashes: [cacheLayout.hashSourceMetadataIdentity('{"requiresPython":">=3.12","dependencies":["rich"]}')],
             });
             const cached = makeEnvironment(
@@ -1904,7 +1990,7 @@ suite('InlineScriptEnvManager', () => {
                 schemaVersion: cacheLayout.META_SCHEMA_VERSION,
                 baseInterpreterPath: baseExecutable,
                 baseInterpreterVersion: baseEnvironment.version,
-                lastUsedAt: '2026-07-01T00:00:00.000Z',
+                lastUsedAt: '2026-07-20T00:00:00.000Z',
                 sourceMetadataIdentityHashes: hashes,
             });
             const cached = makeEnvironment(
@@ -1939,7 +2025,7 @@ suite('InlineScriptEnvManager', () => {
                 schemaVersion: cacheLayout.META_SCHEMA_VERSION,
                 baseInterpreterPath: baseExecutable,
                 baseInterpreterVersion: baseEnvironment.version,
-                lastUsedAt: '2026-07-01T00:00:00.000Z',
+                lastUsedAt: '2026-07-20T00:00:00.000Z',
             });
             const cached = makeEnvironment(
                 'ms-python.python:inline-script',
@@ -2180,7 +2266,12 @@ suite('InlineScriptEnvManager', () => {
             assert.strictEqual(await manager.create(scriptUri()), undefined);
             assert.strictEqual(await fs.readFile(markerPath, 'utf8'), 'keep');
             assert.strictEqual((await fs.lstat(envDir().fsPath)).isSymbolicLink(), true);
-            assert.strictEqual(inspectMetaStub.callCount, 0);
+            assert.strictEqual(
+                inspectMetaStub
+                    .getCalls()
+                    .some((call) => normalizePath(call.args[0].fsPath) === normalizePath(envDir().fsPath)),
+                false,
+            );
             assert.strictEqual(writeMetaStub.callCount, 0);
             assert.strictEqual(createWithProgressStub.callCount, 0);
         });
@@ -2204,14 +2295,126 @@ suite('InlineScriptEnvManager', () => {
             assert.strictEqual(await manager.create(scriptUri()), undefined);
             assert.strictEqual(await fs.readFile(markerPath, 'utf8'), 'keep');
             assert.strictEqual((await fs.lstat(envDir().fsPath)).isSymbolicLink(), true);
-            assert.strictEqual(inspectMetaStub.callCount, 0);
+            assert.strictEqual(
+                inspectMetaStub
+                    .getCalls()
+                    .some((call) => normalizePath(call.args[0].fsPath) === normalizePath(envDir().fsPath)),
+                false,
+            );
             assert.strictEqual(writeMetaStub.callCount, 0);
             assert.strictEqual(createWithProgressStub.callCount, 0);
         });
     });
 
+    suite('package drift', () => {
+        // The listener is fire-and-forget, so wait for its async work rather than the call.
+        function firePackagesChanged(environment: PythonEnvironment): void {
+            assert.ok(packagesChangedListener, 'expected the manager to subscribe to package changes');
+            packagesChangedListener!({
+                environment,
+                manager: {} as never,
+                changes: [{ kind: 0 as never, pkg: {} as never }],
+            });
+        }
+
+        function sidecarFor(environment: PythonEnvironment): cacheLayout.InlineScriptEnvMeta | undefined {
+            const entry = sidecarsByEnvDir.get(normalizePath(environment.sysPrefix));
+            return typeof entry === 'string' ? undefined : entry;
+        }
+
+        test('marks an owned entry manually modified and un-routes every script using it', async () => {
+            const first = scriptUri('shared_one.py');
+            const second = scriptUri('shared_two.py');
+            const environment = await createOwnedEnvironment();
+            await manager.set(first, environment);
+            await manager.set(second, environment);
+            routingRegistry.setValidatedAssociation(first, true);
+            routingRegistry.setValidatedAssociation(second, true);
+
+            firePackagesChanged(environment);
+            await waitForCondition(
+                () => sidecarFor(environment)?.manuallyModified === true,
+                'the modified cache entry should be marked in its sidecar',
+            );
+
+            // Both scripts sharing the entry lose routing, not just the edited one.
+            assert.strictEqual(routingRegistry.hasValidatedAssociation(first), false);
+            assert.strictEqual(routingRegistry.hasValidatedAssociation(second), false);
+        });
+
+        test('rebuilds instead of reusing an entry whose packages were modified', async () => {
+            const uri = scriptUri();
+            const environment = await createOwnedEnvironment();
+            await manager.set(uri, environment);
+            firePackagesChanged(environment);
+            await waitForCondition(
+                () => sidecarFor(environment)?.manuallyModified === true,
+                'the modified cache entry should be marked in its sidecar',
+            );
+            createWithProgressStub.resetHistory();
+
+            await manager.create(uri);
+
+            assert.strictEqual(
+                createWithProgressStub.callCount,
+                1,
+                'a drifted entry must be rebuilt, not reused',
+            );
+        });
+
+        test('ignores package changes for environments it does not own', async () => {
+            const uri = scriptUri();
+            const environment = await createOwnedEnvironment();
+            await manager.set(uri, environment);
+            routingRegistry.setValidatedAssociation(uri, true);
+
+            firePackagesChanged({
+                ...environment,
+                envId: { managerId: 'ms-python.python:venv', id: 'some-venv' },
+            });
+            await nextTurn();
+            await nextTurn();
+            await nextTurn();
+
+            assert.strictEqual(sidecarFor(environment)?.manuallyModified, undefined);
+            assert.strictEqual(routingRegistry.hasValidatedAssociation(uri), true);
+        });
+        test('does not mark an entry while its own build is in flight', async () => {
+            // The real createWithProgress installs through managePackages, which fires this same
+            // event while the build still holds the cache-entry lock, so setup must not mark the
+            // entry it is building. Two entries are used so the outcomes are distinguishable: the
+            // unguarded entry settling proves the guarded one had at least as long to settle.
+            const building = await createOwnedEnvironment();
+            const edited = await createOwnedEnvironment('bbbbbbbbbbbbbbbb');
+            const buildingScript = scriptUri('building.py');
+            await manager.set(buildingScript, building);
+            routingRegistry.setValidatedAssociation(buildingScript, true);
+            const pendingCreations = (
+                manager as unknown as { pendingCreations: Map<string, unknown> }
+            ).pendingCreations;
+            pendingCreations.set(CACHE_KEY, {});
+
+            firePackagesChanged(building);
+            firePackagesChanged(edited);
+            await waitForCondition(
+                () => sidecarFor(edited)?.manuallyModified === true,
+                'a package change outside a build should be recorded',
+            );
+            await nextTurn();
+            await nextTurn();
+
+            assert.strictEqual(
+                sidecarFor(building)?.manuallyModified,
+                undefined,
+                'setup must not mark the entry it is building',
+            );
+            assert.strictEqual(routingRegistry.hasValidatedAssociation(buildingScript), true);
+        });
+    });
+
     suite('transaction rollback', () => {
-        test('retains the partial environment and lock when package installation is cancelled', async () => {
+        test('discards the partial environment when package installation is cancelled', async () => {
+            const uri = scriptUri();
             createWithProgressStub.callsFake(async (...args: unknown[]) => {
                 const target = args[6] as string;
                 await fs.outputFile(venvPythonPath(target), '');
@@ -2227,29 +2430,94 @@ suite('InlineScriptEnvManager', () => {
                 };
             });
 
-            assert.strictEqual(await manager.create(scriptUri()), undefined);
-            assert.strictEqual(await fs.pathExists(envDir().fsPath), true);
+            assert.strictEqual(await manager.create(uri), undefined);
+            assert.strictEqual(await fs.pathExists(envDir().fsPath), false);
             assert.strictEqual(writeMetaStub.callCount, 0);
-            assert.ok(retainLockStub.calledOnce);
+            sinon.assert.notCalled(retainLockStub);
             assert.ok(releaseLockStub.calledOnce);
+            assert.deepStrictEqual(routingRegistry.takeSetupOutcome(uri), { kind: 'cancelled' });
         });
 
-        test('keeps a failed lock-retain transition fail-closed', async () => {
-            createWithProgressStub.resolves({
-                environment: makeEnvironment(
-                    'ms-python.python:inline-script',
-                    '3.12.4',
-                    venvPythonPath(envDir().fsPath),
-                    envDir().fsPath,
-                ),
-                pkgInstallationErr: 'Canceled',
-                pkgInstallationCancelled: true,
+        test('leaves a cancelled entry unreusable when its directory cannot be removed', async () => {
+            const uri = scriptUri();
+            createWithProgressStub.callsFake(async (...args: unknown[]) => {
+                const target = args[6] as string;
+                await fs.outputFile(venvPythonPath(target), '');
+                await fs.outputFile(path.join(target, '.meta.json'), '{}');
+                await fs.outputFile(path.join(target, '.meta.json.backup-0123456789ab'), '{}');
+                return {
+                    environment: makeEnvironment(
+                        'ms-python.python:inline-script',
+                        '3.12.4',
+                        venvPythonPath(target),
+                        target,
+                    ),
+                    pkgInstallationErr: 'Canceled',
+                    pkgInstallationCancelled: true,
+                };
             });
-            retainLockStub.rejects(Object.assign(new Error('retention failed'), { code: 'EACCES' }));
+            const internalManager = manager as unknown as {
+                removeCacheEntry(candidate: Uri): Promise<boolean>;
+            };
+            sinon.stub(internalManager, 'removeCacheEntry').resolves(false);
 
-            assert.strictEqual(await manager.create(scriptUri()), undefined);
-            assert.ok(retainLockStub.calledOnce);
-            assert.ok(releaseLockStub.calledOnce);
+            assert.strictEqual(await manager.create(uri), undefined);
+
+            // The directory survives, but every sidecar is gone so it can never be revalidated.
+            assert.strictEqual(await fs.pathExists(envDir().fsPath), true);
+            assert.strictEqual(await fs.pathExists(path.join(envDir().fsPath, '.meta.json')), false);
+            assert.strictEqual(
+                await fs.pathExists(path.join(envDir().fsPath, '.meta.json.backup-0123456789ab')),
+                false,
+            );
+            sinon.assert.notCalled(retainLockStub);
+            assert.deepStrictEqual(routingRegistry.takeSetupOutcome(uri), { kind: 'cancelled' });
+        });
+
+        test('reports cancellation to every script joined to the same build', async () => {
+            // Two scripts with identical dependencies resolve to one cache entry and therefore join
+            // a single in-flight build. Cancelling it must be reported as a cancellation to both,
+            // not just to the script that started it.
+            const starter = scriptUri('shared_starter.py');
+            const joiner = scriptUri('shared_joiner.py');
+            let notifyBuildStarted: () => void = () => undefined;
+            let releaseBuild: () => void = () => undefined;
+            const buildStarted = new Promise<void>((resolve) => {
+                notifyBuildStarted = resolve;
+            });
+            const buildGate = new Promise<void>((resolve) => {
+                releaseBuild = resolve;
+            });
+            createWithProgressStub.callsFake(async (...args: unknown[]) => {
+                const target = args[6] as string;
+                notifyBuildStarted();
+                await buildGate;
+                await fs.outputFile(venvPythonPath(target), '');
+                return {
+                    environment: makeEnvironment(
+                        'ms-python.python:inline-script',
+                        '3.12.4',
+                        venvPythonPath(target),
+                        target,
+                    ),
+                    pkgInstallationErr: 'Canceled',
+                    pkgInstallationCancelled: true,
+                };
+            });
+
+            const starterCreate = manager.create(starter);
+            await buildStarted;
+            const joinerCreate = manager.create(joiner);
+            // Let the second request reach the shared pending creation before the build settles.
+            await nextTurn();
+            await nextTurn();
+            releaseBuild();
+
+            assert.strictEqual(await starterCreate, undefined);
+            assert.strictEqual(await joinerCreate, undefined);
+            assert.strictEqual(createWithProgressStub.callCount, 1, 'both scripts should share one build');
+            assert.deepStrictEqual(routingRegistry.takeSetupOutcome(starter), { kind: 'cancelled' });
+            assert.deepStrictEqual(routingRegistry.takeSetupOutcome(joiner), { kind: 'cancelled' });
         });
 
         test('removes the partial environment when package installation fails', async () => {
@@ -3351,7 +3619,7 @@ suite('InlineScriptEnvManager', () => {
             assert.deepStrictEqual(persistedAssociations, {
                 [normalizePath(uri.fsPath)]: matchedAssociationRecord(environment.environmentPath.fsPath),
             });
-            assert.strictEqual(workspaceState.set.firstCall.args[0], INLINE_SCRIPT_ENVS_KEY);
+            assert.strictEqual(workspaceState.update.firstCall.args[0], INLINE_SCRIPT_ENVS_KEY);
             assert.strictEqual(listener.callCount, 1);
             assert.deepStrictEqual(listener.firstCall.args[0], { uri, old: undefined, new: environment });
 
@@ -3416,6 +3684,7 @@ suite('InlineScriptEnvManager', () => {
                 baseManager,
                 globalStorageUri,
                 makeFakeLog(),
+                workspaceMemento,
                 restartRoutingRegistry,
             );
 
@@ -3441,6 +3710,7 @@ suite('InlineScriptEnvManager', () => {
                 baseManager,
                 globalStorageUri,
                 makeFakeLog(),
+                workspaceMemento,
                 restartRoutingRegistry,
             );
 
@@ -3557,6 +3827,7 @@ suite('InlineScriptEnvManager', () => {
                 baseManager,
                 globalStorageUri,
                 makeFakeLog(),
+                workspaceMemento,
                 restartRoutingRegistry,
             );
 
@@ -3591,6 +3862,7 @@ suite('InlineScriptEnvManager', () => {
                 baseManager,
                 globalStorageUri,
                 makeFakeLog(),
+                workspaceMemento,
                 restartRoutingRegistry,
             );
 
@@ -3640,6 +3912,7 @@ suite('InlineScriptEnvManager', () => {
                 baseManager,
                 globalStorageUri,
                 makeFakeLog(),
+                workspaceMemento,
                 restartRoutingRegistry,
             );
 
@@ -3693,11 +3966,12 @@ suite('InlineScriptEnvManager', () => {
                 baseManager,
                 globalStorageUri,
                 makeFakeLog(),
+                workspaceMemento,
                 restartRoutingRegistry,
             );
             await nextTurn();
 
-            workspaceState.set.onFirstCall().rejects(new Error('Memento unavailable'));
+            workspaceState.update.onFirstCall().rejects(new Error('Memento unavailable'));
             await triggerSavedMetadataChange(restartRoutingRegistry, restarted, uri);
             await fs.remove(environment.environmentPath.fsPath);
             clock.tick(5_000 - 1);
@@ -3930,6 +4204,7 @@ suite('InlineScriptEnvManager', () => {
                 baseManager,
                 globalStorageUri,
                 makeFakeLog(),
+                workspaceMemento,
                 restartRoutingRegistry,
             );
             await nextTurn();
@@ -3967,6 +4242,7 @@ suite('InlineScriptEnvManager', () => {
                 baseManager,
                 globalStorageUri,
                 makeFakeLog(),
+                workspaceMemento,
                 restartRoutingRegistry,
             );
             await nextTurn();
@@ -4015,13 +4291,14 @@ suite('InlineScriptEnvManager', () => {
                 baseManager,
                 globalStorageUri,
                 makeFakeLog(),
+                workspaceMemento,
                 restartRoutingRegistry,
             );
             await nextTurn();
 
             ((restarted as unknown as { subscriptions: Disposable[] }).subscriptions[0]).dispose();
-            workspaceState.set.onFirstCall().rejects(new Error('Memento unavailable'));
-            workspaceState.set.onSecondCall().rejects(new Error('Memento unavailable'));
+            workspaceState.update.onFirstCall().rejects(new Error('Memento unavailable'));
+            workspaceState.update.onSecondCall().rejects(new Error('Memento unavailable'));
             await triggerSavedMetadataChange(restartRoutingRegistry, restarted, uri);
 
             assert.deepStrictEqual(persistedAssociations, {
@@ -4043,6 +4320,7 @@ suite('InlineScriptEnvManager', () => {
                 baseManager,
                 globalStorageUri,
                 makeFakeLog(),
+                workspaceMemento,
                 restartRoutingRegistry,
             );
             await nextTurn();
@@ -4064,6 +4342,7 @@ suite('InlineScriptEnvManager', () => {
                 baseManager,
                 globalStorageUri,
                 makeFakeLog(),
+                workspaceMemento,
                 restartRoutingRegistry,
             );
             await nextTurn();
@@ -4092,6 +4371,7 @@ suite('InlineScriptEnvManager', () => {
                 baseManager,
                 globalStorageUri,
                 makeFakeLog(),
+                workspaceMemento,
                 restartRoutingRegistry,
             );
             await nextTurn();
@@ -4140,6 +4420,7 @@ suite('InlineScriptEnvManager', () => {
                 baseManager,
                 globalStorageUri,
                 makeFakeLog(),
+                workspaceMemento,
                 restartRoutingRegistry,
             );
             await nextTurn();
@@ -4184,6 +4465,7 @@ suite('InlineScriptEnvManager', () => {
                 baseManager,
                 globalStorageUri,
                 makeFakeLog(),
+                workspaceMemento,
                 restartRoutingRegistry,
             );
             await nextTurn();
@@ -4218,6 +4500,7 @@ suite('InlineScriptEnvManager', () => {
                 baseManager,
                 globalStorageUri,
                 makeFakeLog(),
+                workspaceMemento,
                 restartRoutingRegistry,
             );
             await nextTurn();
@@ -4259,6 +4542,7 @@ suite('InlineScriptEnvManager', () => {
                 baseManager,
                 globalStorageUri,
                 makeFakeLog(),
+                workspaceMemento,
                 restartRoutingRegistry,
             );
             await nextTurn();
@@ -4285,6 +4569,7 @@ suite('InlineScriptEnvManager', () => {
                 baseManager,
                 globalStorageUri,
                 makeFakeLog(),
+                workspaceMemento,
                 restartRoutingRegistry,
             );
             await nextTurn();
@@ -4311,6 +4596,7 @@ suite('InlineScriptEnvManager', () => {
                 baseManager,
                 globalStorageUri,
                 makeFakeLog(),
+                workspaceMemento,
                 restartRoutingRegistry,
             );
             await nextTurn();
@@ -4352,6 +4638,7 @@ suite('InlineScriptEnvManager', () => {
                 baseManager,
                 globalStorageUri,
                 makeFakeLog(),
+                workspaceMemento,
                 restartRoutingRegistry,
             );
             await nextTurn();
@@ -4402,6 +4689,7 @@ suite('InlineScriptEnvManager', () => {
                 baseManager,
                 globalStorageUri,
                 makeFakeLog(),
+                workspaceMemento,
                 restartRoutingRegistry,
             );
             await nextTurn();
@@ -4433,6 +4721,7 @@ suite('InlineScriptEnvManager', () => {
                 baseManager,
                 globalStorageUri,
                 makeFakeLog(),
+                workspaceMemento,
                 restartRoutingRegistry,
             );
             await nextTurn();
@@ -4633,6 +4922,7 @@ suite('InlineScriptEnvManager', () => {
                 baseManager,
                 globalStorageUri,
                 makeFakeLog(),
+                workspaceMemento,
                 restartRoutingRegistry,
             );
             await nextTurn();
@@ -4664,6 +4954,7 @@ suite('InlineScriptEnvManager', () => {
                 baseManager,
                 globalStorageUri,
                 makeFakeLog(),
+                workspaceMemento,
                 restartRoutingRegistry,
             );
             await nextTurn();
@@ -4690,6 +4981,7 @@ suite('InlineScriptEnvManager', () => {
                 baseManager,
                 globalStorageUri,
                 makeFakeLog(),
+                workspaceMemento,
                 restartRoutingRegistry,
             );
 
@@ -4782,6 +5074,7 @@ suite('InlineScriptEnvManager', () => {
                 baseManager,
                 globalStorageUri,
                 makeFakeLog(),
+                workspaceMemento,
                 restartRoutingRegistry,
             );
             const listener = sinon.spy();
@@ -4801,6 +5094,91 @@ suite('InlineScriptEnvManager', () => {
             restarted.dispose();
         });
 
+        test('routes a persisted association after restart without opening the script', async () => {
+            // Regression: the lazy detector only publishes metadata for open documents, so a script
+            // set up in an earlier session stayed non-routeable after a reload and its project
+            // resolved through the default manager (wrong environment in the project view).
+            const uri = scriptUri();
+            const environment = await createOwnedEnvironment();
+            persistedAssociations = {
+                [normalizePath(uri.fsPath)]: matchedAssociationRecord(environment.environmentPath.fsPath),
+            };
+            const restartRoutingRegistry = new InlineScriptRoutingRegistry();
+
+            const restarted = new InlineScriptEnvManager(
+                nativeFinder,
+                api,
+                baseManager,
+                globalStorageUri,
+                makeFakeLog(),
+                workspaceMemento,
+                restartRoutingRegistry,
+            );
+
+            await waitForCondition(
+                () => restartRoutingRegistry.shouldRoute(uri),
+                'Expected the persisted association to route without the script being opened',
+            );
+            assert.strictEqual(await restarted.get(uri), environment);
+            restarted.dispose();
+        });
+
+        test('does not seed routing metadata for a persisted script that is open', async () => {
+            // Open documents belong to the detector, which withholds metadata while the block is
+            // being edited; seeding from disk would publish content the user has already changed.
+            const uri = scriptUri();
+            const environment = await createOwnedEnvironment();
+            persistedAssociations = {
+                [normalizePath(uri.fsPath)]: matchedAssociationRecord(environment.environmentPath.fsPath),
+            };
+            (workspaceApis.getOpenTextDocuments as sinon.SinonStub).returns([
+                { uri, isDirty: true } as unknown as TextDocument,
+            ]);
+            const restartRoutingRegistry = new InlineScriptRoutingRegistry();
+
+            const restarted = new InlineScriptEnvManager(
+                nativeFinder,
+                api,
+                baseManager,
+                globalStorageUri,
+                makeFakeLog(),
+                workspaceMemento,
+                restartRoutingRegistry,
+            );
+            await nextTurn();
+            await nextTurn();
+
+            assert.strictEqual(restartRoutingRegistry.getMetadata(uri), undefined);
+            assert.strictEqual(restartRoutingRegistry.shouldRoute(uri), false);
+            restarted.dispose();
+        });
+
+        test('does not seed routing metadata when the saved script no longer declares metadata', async () => {
+            const uri = scriptUri();
+            const environment = await createOwnedEnvironment();
+            persistedAssociations = {
+                [normalizePath(uri.fsPath)]: matchedAssociationRecord(environment.environmentPath.fsPath),
+            };
+            readMetadataStub.resolves(undefined);
+            const restartRoutingRegistry = new InlineScriptRoutingRegistry();
+
+            const restarted = new InlineScriptEnvManager(
+                nativeFinder,
+                api,
+                baseManager,
+                globalStorageUri,
+                makeFakeLog(),
+                workspaceMemento,
+                restartRoutingRegistry,
+            );
+            await nextTurn();
+            await nextTurn();
+
+            assert.strictEqual(restartRoutingRegistry.getMetadata(uri), undefined);
+            assert.strictEqual(restartRoutingRegistry.shouldRoute(uri), false);
+            restarted.dispose();
+        });
+
         test('does not rewrite or notify when a restart reselects the same persisted executable', async () => {
             const uri = scriptUri();
             const environment = await createOwnedEnvironment();
@@ -4812,8 +5190,18 @@ suite('InlineScriptEnvManager', () => {
                 baseManager,
                 globalStorageUri,
                 makeFakeLog(),
+                workspaceMemento,
                 restartRoutingRegistry,
             );
+            // Startup now seeds routing metadata for persisted associations from the saved file and
+            // validates them, so a closed script routes without being opened first. Let that settle so
+            // the assertions below measure only the work done by reselecting the same executable.
+            await waitForCondition(
+                () => restartRoutingRegistry.hasValidatedAssociation(uri),
+                'Expected startup validation to make the persisted association routeable',
+            );
+            resolveVenvStub.resetHistory();
+            workspaceState.update.resetHistory();
             const listener = sinon.spy();
             restarted.onDidChangeEnvironment(listener);
 
@@ -4822,7 +5210,7 @@ suite('InlineScriptEnvManager', () => {
             assert.deepStrictEqual(persistedAssociations, {
                 [normalizePath(uri.fsPath)]: matchedAssociationRecord(environment.environmentPath.fsPath),
             });
-            assert.strictEqual(workspaceState.set.callCount, 0);
+            assert.strictEqual(workspaceState.update.callCount, 0);
             assert.strictEqual(listener.callCount, 0);
             assert.strictEqual(resolveVenvStub.callCount, 0);
 
@@ -4901,7 +5289,7 @@ suite('InlineScriptEnvManager', () => {
             assert.deepStrictEqual(persistedAssociations, {
                 [normalizePath(uri.fsPath)]: environment.environmentPath.fsPath,
             });
-            assert.strictEqual(workspaceState.set.callCount, 0);
+            assert.strictEqual(workspaceState.update.callCount, 0);
             assert.strictEqual(resolveVenvStub.callCount, 0);
         });
 
@@ -4918,6 +5306,7 @@ suite('InlineScriptEnvManager', () => {
                 baseManager,
                 globalStorageUri,
                 makeFakeLog(),
+                workspaceMemento,
                 restartRoutingRegistry,
             );
             await nextTurn();
@@ -4974,13 +5363,14 @@ suite('InlineScriptEnvManager', () => {
                 }
                 return persistedAssociations;
             });
-            workspaceState.set.resetHistory();
+            workspaceState.update.resetHistory();
             manager = new InlineScriptEnvManager(
                 nativeFinder,
                 api,
                 baseManager,
                 globalStorageUri,
                 makeFakeLog(),
+                workspaceMemento,
                 routingRegistry,
             );
             await initialReadStarted;
@@ -4998,9 +5388,27 @@ suite('InlineScriptEnvManager', () => {
             assert.strictEqual(routingRegistry.hasValidatedAssociation(uri), false);
         });
 
-        test('clears persisted association state for the old path when a script is renamed', async () => {
+        test('moves the persisted association to the new path when a script is renamed', async () => {
             const oldUri = scriptUri('old.py');
             const newUri = scriptUri('new.py');
+            const environment = await createOwnedEnvironment();
+            await manager.set(oldUri, environment);
+
+            fireRename(oldUri, newUri);
+            await nextTurn();
+            await nextTurn();
+
+            // The cache entry is keyed by dependencies + interpreter, not by path, so the
+            // environment survives the rename and follows the file.
+            assert.deepStrictEqual(Object.keys(persistedAssociations ?? {}), [normalizePath(newUri.fsPath)]);
+            assert.strictEqual(await manager.get(oldUri), undefined);
+            assert.strictEqual(routingRegistry.hasValidatedAssociation(oldUri), false);
+            assert.strictEqual(await manager.get(newUri), environment);
+        });
+
+        test('drops the association when a script is renamed to a non-python file', async () => {
+            const oldUri = scriptUri('old.py');
+            const newUri = scriptUri('old.txt');
             const environment = await createOwnedEnvironment();
             await manager.set(oldUri, environment);
 
@@ -5011,6 +5419,28 @@ suite('InlineScriptEnvManager', () => {
             assert.deepStrictEqual(persistedAssociations, {});
             assert.strictEqual(await manager.get(oldUri), undefined);
             assert.strictEqual(routingRegistry.hasValidatedAssociation(oldUri), false);
+        });
+
+        test('replaces an existing association when a script is renamed onto it', async () => {
+            const oldUri = scriptUri('old.py');
+            const targetUri = scriptUri('target.py');
+            const movedEnvironment = await createOwnedEnvironment();
+            const replacedEnvironment = await createOwnedEnvironment('bbbbbbbbbbbbbbbb');
+            await manager.set(targetUri, replacedEnvironment);
+            await manager.set(oldUri, movedEnvironment);
+
+            fireRename(oldUri, targetUri);
+            await nextTurn();
+            await nextTurn();
+
+            assert.deepStrictEqual(Object.keys(persistedAssociations ?? {}), [normalizePath(targetUri.fsPath)]);
+            const moved = (persistedAssociations as Record<string, { environmentPath: string }>)[
+                normalizePath(targetUri.fsPath)
+            ];
+            assert.strictEqual(
+                normalizePath(moved.environmentPath),
+                normalizePath(movedEnvironment.environmentPath.fsPath),
+            );
         });
 
         test('removes and notifies for a warm association whose executable was deleted', async () => {
@@ -5368,7 +5798,7 @@ suite('InlineScriptEnvManager', () => {
             assert.deepStrictEqual(persistedAssociations, {
                 [scriptPath]: matchedAssociationRecord(environment.environmentPath.fsPath),
             });
-            assert.strictEqual(workspaceState.set.callCount, 0);
+            assert.strictEqual(workspaceState.update.callCount, 0);
         });
 
         test('preserves an association when fallback resolution reports another manager', async () => {
@@ -5384,7 +5814,7 @@ suite('InlineScriptEnvManager', () => {
             assert.deepStrictEqual(persistedAssociations, {
                 [normalizePath(uri.fsPath)]: environment.environmentPath.fsPath,
             });
-            assert.strictEqual(workspaceState.set.callCount, 0);
+            assert.strictEqual(workspaceState.update.callCount, 0);
         });
 
         test('rejects resolved and selected environments that are outside the owned cache', async () => {
@@ -5406,11 +5836,11 @@ suite('InlineScriptEnvManager', () => {
 
             assert.strictEqual(await manager.get(uri), undefined);
             assert.deepStrictEqual(persistedAssociations, {});
-            workspaceState.set.resetHistory();
+            workspaceState.update.resetHistory();
 
             await assert.rejects(manager.set(uri, unowned), /not an owned cache entry/);
             assert.deepStrictEqual(persistedAssociations, {});
-            assert.strictEqual(workspaceState.set.callCount, 0);
+            assert.strictEqual(workspaceState.update.callCount, 0);
             assert.strictEqual(listener.callCount, 0);
         });
 
@@ -5444,7 +5874,7 @@ suite('InlineScriptEnvManager', () => {
             manager.onDidChangeEnvironment(listener);
 
             await manager.set(uri, first);
-            workspaceState.set.onSecondCall().rejects(new Error('Memento unavailable'));
+            workspaceState.update.onSecondCall().rejects(new Error('Memento unavailable'));
             await assert.rejects(manager.set(uri, second), /Memento unavailable/);
 
             assert.strictEqual(await manager.get(uri), first);
@@ -5461,7 +5891,7 @@ suite('InlineScriptEnvManager', () => {
             manager.onDidChangeEnvironment(listener);
 
             await manager.set(uri, environment);
-            workspaceState.set.onSecondCall().rejects(new Error('Memento unavailable'));
+            workspaceState.update.onSecondCall().rejects(new Error('Memento unavailable'));
 
             await assert.rejects(manager.set(uri, undefined), /Memento unavailable/);
             assert.strictEqual(await manager.get(uri), environment);
@@ -5571,7 +6001,7 @@ suite('InlineScriptEnvManager', () => {
             const pendingGet = manager.get(uri);
             await waitForStubCall(resolveVenvStub);
 
-            workspaceState.set.onFirstCall().rejects(new Error('Memento unavailable'));
+            workspaceState.update.onFirstCall().rejects(new Error('Memento unavailable'));
             await assert.rejects(manager.set(uri, newEnvironment), /Memento unavailable/);
 
             resolvePending!(oldEnvironment);
@@ -5594,10 +6024,248 @@ suite('InlineScriptEnvManager', () => {
                 /one or more local file URIs/,
             );
 
-            assert.strictEqual(workspaceState.set.callCount, 0);
+            assert.strictEqual(workspaceState.update.callCount, 0);
             assert.strictEqual(await manager.get(valid), undefined);
             assert.strictEqual(await manager.get(undefined), undefined);
             assert.strictEqual(await manager.get(Uri.parse('untitled:script.py')), undefined);
+        });
+    });
+
+    suite('TTL eviction', () => {
+        const TTL_MS = 14 * 24 * 60 * 60 * 1000;
+
+        async function setLastUsedAt(environment: PythonEnvironment, lastUsedAt: Date): Promise<void> {
+            setSidecar(
+                await makeSidecar({ lastUsedAt: lastUsedAt.toISOString() }),
+                Uri.file(environment.sysPrefix),
+            );
+        }
+
+        test('evicts only entries older than 14 days before the first create', async () => {
+            const stale = await createOwnedEnvironment('aaaaaaaaaaaaaaaa');
+            const recent = await createOwnedEnvironment('bbbbbbbbbbbbbbbb');
+            const exactCutoff = await createOwnedEnvironment('cccccccccccccccc');
+            await setLastUsedAt(stale, new Date(NOW.getTime() - TTL_MS - 1));
+            await setLastUsedAt(recent, new Date(NOW.getTime() - TTL_MS + 1));
+            await setLastUsedAt(exactCutoff, new Date(NOW.getTime() - TTL_MS));
+
+            const created = await manager.create(scriptUri());
+
+            assert.ok(created);
+            assert.strictEqual(await fs.pathExists(stale.sysPrefix), false);
+            assert.strictEqual(await fs.pathExists(recent.sysPrefix), true);
+            assert.strictEqual(await fs.pathExists(exactCutoff.sysPrefix), true);
+        });
+
+        test('attempts the eviction sweep once and does not block creation when it fails', async () => {
+            const internalManager = manager as unknown as {
+                evictStaleCacheEntries(): Promise<void>;
+            };
+            const eviction = sinon
+                .stub(internalManager, 'evictStaleCacheEntries')
+                .rejects(new Error('cache scan unavailable'));
+
+            assert.ok(await manager.create(scriptUri('first.py')));
+            assert.ok(await manager.create(scriptUri('second.py')));
+
+            sinon.assert.calledOnce(eviction);
+        });
+
+        test('rechecks lastUsedAt under the entry lock before deleting', async () => {
+            const stale = await createOwnedEnvironment('aaaaaaaaaaaaaaaa');
+            await setLastUsedAt(stale, new Date(NOW.getTime() - TTL_MS - 1));
+            lockStub.callsFake(async (entryPath: string) => {
+                if (normalizePath(entryPath) === normalizePath(stale.sysPrefix)) {
+                    await setLastUsedAt(stale, NOW);
+                }
+                return { release: releaseLockStub, retain: retainLockStub };
+            });
+
+            assert.ok(await manager.create(scriptUri()));
+
+            assert.strictEqual(await fs.pathExists(stale.sysPrefix), true);
+        });
+
+        test('preserves a locked stale entry without failing the triggering create', async () => {
+            const stale = await createOwnedEnvironment('aaaaaaaaaaaaaaaa');
+            await setLastUsedAt(stale, new Date(NOW.getTime() - TTL_MS - 1));
+            lockStub.callsFake(async (entryPath: string) => {
+                if (normalizePath(entryPath) === normalizePath(stale.sysPrefix)) {
+                    throw Object.assign(new Error('cache entry is locked'), { code: 'ELOCKED' });
+                }
+                return { release: releaseLockStub, retain: retainLockStub };
+            });
+
+            const created = await manager.create(scriptUri());
+
+            assert.ok(created);
+            assert.strictEqual(await fs.pathExists(stale.sysPrefix), true);
+        });
+
+        test('does not reclaim a retained lock during silent eviction', async () => {
+            lockStub.restore();
+            const stale = await createOwnedEnvironment('aaaaaaaaaaaaaaaa');
+            await setLastUsedAt(stale, new Date(NOW.getTime() - TTL_MS - 1));
+            const lock = await lockfileApis.acquireFileLock(stale.sysPrefix, {
+                timeoutMs: 0,
+                retryIntervalMs: 1,
+            });
+            await lock.retain();
+
+            assert.ok(await manager.create(scriptUri()));
+
+            assert.strictEqual(await fs.pathExists(stale.sysPrefix), true);
+            assert.strictEqual(await fs.pathExists(lockfileApis.getFileLockPath(stale.sysPrefix)), true);
+        });
+
+        test('preserves a stale entry when deletion fails without failing creation', async () => {
+            const stale = await createOwnedEnvironment('aaaaaaaaaaaaaaaa');
+            await setLastUsedAt(stale, new Date(NOW.getTime() - TTL_MS - 1));
+            const internalManager = manager as unknown as {
+                deleteCacheEntryForClear(entryPath: string): Promise<void>;
+            };
+            const originalDelete = internalManager.deleteCacheEntryForClear.bind(manager);
+            sinon.stub(internalManager, 'deleteCacheEntryForClear').callsFake(async (entryPath) => {
+                if (normalizePath(entryPath) === normalizePath(stale.sysPrefix)) {
+                    throw new Error('deletion unavailable');
+                }
+                return originalDelete(entryPath);
+            });
+
+            const created = await manager.create(scriptUri());
+
+            assert.ok(created);
+            assert.strictEqual(await fs.pathExists(stale.sysPrefix), true);
+        });
+
+        test('removes discovered environments for evicted orphaned entries', async () => {
+            const stale = await createOwnedEnvironment('aaaaaaaaaaaaaaaa');
+            await setLastUsedAt(stale, new Date(NOW.getTime() - TTL_MS - 1));
+            (manager as unknown as { collection: PythonEnvironment[] }).collection = [stale];
+            const collectionListener = sinon.spy();
+            manager.onDidChangeEnvironments(collectionListener);
+
+            assert.ok(await manager.create(scriptUri('trigger.py')));
+
+            assert.strictEqual(await fs.pathExists(stale.sysPrefix), false);
+            assert.deepStrictEqual(await manager.getEnvironments('all'), []);
+            sinon.assert.calledOnceWithExactly(collectionListener, [
+                { kind: EnvironmentChangeKind.remove, environment: stale },
+            ]);
+        });
+
+        test('preserves a stale entry and its association while a script still references it', async () => {
+            const uri = scriptUri('associated.py');
+            const stale = await createOwnedEnvironment('aaaaaaaaaaaaaaaa');
+            await setLastUsedAt(stale, new Date(NOW.getTime() - TTL_MS - 1));
+            await manager.set(uri, stale);
+            (manager as unknown as { collection: PythonEnvironment[] }).collection = [stale];
+            const selectionListener = sinon.spy();
+            manager.onDidChangeEnvironment(selectionListener);
+
+            assert.ok(await manager.create(scriptUri('trigger.py')));
+
+            assert.strictEqual(await fs.pathExists(stale.sysPrefix), true);
+            assert.strictEqual(await manager.get(uri), stale);
+            assert.notStrictEqual(persistedAssociations, undefined);
+            assert.ok((await manager.getEnvironments('all')).some((env) => env === stale));
+            sinon.assert.notCalled(selectionListener);
+        });
+
+        test('does not attempt to remove a stale entry that a script still references', async () => {
+            const uri = scriptUri('associated.py');
+            const stale = await createOwnedEnvironment('aaaaaaaaaaaaaaaa');
+            await setLastUsedAt(stale, new Date(NOW.getTime() - TTL_MS - 1));
+            await manager.set(uri, stale);
+            const internalManager = manager as unknown as {
+                removeCacheEntryForClear(
+                    cacheRoot: Uri,
+                    physicalCacheRootPath: string,
+                    entryName: string,
+                    options?: {
+                        shouldRemove?: (entryPath: string) => Promise<boolean>;
+                        reclaimRetainedLock?: boolean;
+                    },
+                ): Promise<string | undefined>;
+            };
+            const removeSpy = sinon.spy(internalManager, 'removeCacheEntryForClear');
+
+            assert.ok(await manager.create(scriptUri('trigger.py')));
+
+            sinon.assert.notCalled(removeSpy);
+            assert.strictEqual(await fs.pathExists(stale.sysPrefix), true);
+            assert.strictEqual(await manager.get(uri), stale);
+            assert.notStrictEqual(persistedAssociations, undefined);
+        });
+
+        test('does not let an in-flight refresh re-add an evicted environment', async () => {
+            const stale = await createOwnedEnvironment('aaaaaaaaaaaaaaaa');
+            await setLastUsedAt(stale, new Date(NOW.getTime() - TTL_MS - 1));
+            let releaseRefresh: (() => void) | undefined;
+            let signalRefreshStarted: (() => void) | undefined;
+            const refreshStarted = new Promise<void>((resolve) => {
+                signalRefreshStarted = resolve;
+            });
+            const refreshGate = new Promise<void>((resolve) => {
+                releaseRefresh = resolve;
+            });
+            const internalManager = manager as unknown as {
+                inspectDiscoveredCacheEntry(
+                    cacheRoot: Uri,
+                    envDir: Uri,
+                ): Promise<{
+                    kind: 'resolved';
+                    environment: PythonEnvironment;
+                    fingerprint: string;
+                }>;
+            };
+            sinon.stub(internalManager, 'inspectDiscoveredCacheEntry').callsFake(async () => {
+                signalRefreshStarted!();
+                await refreshGate;
+                return { kind: 'resolved', environment: stale, fingerprint: 'stale-snapshot' };
+            });
+
+            const refresh = manager.refresh(undefined);
+            await refreshStarted;
+            const create = manager.create(scriptUri('trigger.py'));
+            await waitForCondition(
+                async () => !(await fs.pathExists(stale.sysPrefix)),
+                'Expected TTL eviction to delete the stale entry',
+            );
+            releaseRefresh!();
+            await Promise.all([refresh, create]);
+
+            assert.strictEqual(await fs.pathExists(stale.sysPrefix), false);
+            assert.deepStrictEqual(await manager.getEnvironments('all'), []);
+        });
+
+        test('does not treat transient access errors as confirmed cross-host deletion', async () => {
+            const entryPath = path.join(tempRoot, 'unavailable-entry');
+            const internalManager = manager as unknown as {
+                isCacheEntryDefinitelyMissing(candidate: string): Promise<boolean>;
+            };
+            sinon
+                .stub(fsExtra, 'lstat')
+                .withArgs(entryPath)
+                .rejects(Object.assign(new Error('access unavailable'), { code: 'EACCES' }));
+
+            assert.strictEqual(await internalManager.isCacheEntryDefinitelyMissing(entryPath), false);
+        });
+
+        test('does not fail creation when association cleanup cannot be persisted', async () => {
+            const orphan = await createOwnedEnvironment('aaaaaaaaaaaaaaaa');
+            await setLastUsedAt(orphan, new Date(NOW.getTime() - TTL_MS - 1));
+            // A separate association whose environment was deleted out from under us. Evicting the
+            // orphaned entry above drives the association cleanup pass, and persisting that cleanup is
+            // what fails here.
+            const missingUri = scriptUri('missing.py');
+            const missing = await createOwnedEnvironment('bbbbbbbbbbbbbbbb');
+            await manager.set(missingUri, missing);
+            await fs.remove(missing.sysPrefix);
+            workspaceState.update.onSecondCall().rejects(new Error('Memento unavailable'));
+
+            assert.ok(await manager.create(scriptUri('trigger.py')));
+            assert.strictEqual(await fs.pathExists(orphan.sysPrefix), false);
         });
     });
 
@@ -5666,6 +6334,7 @@ suite('InlineScriptEnvManager', () => {
                 baseManager,
                 Uri.file(process.platform === 'win32' ? `${process.env.SystemDrive ?? 'C:'}\\` : '/'),
                 makeFakeLog(),
+                workspaceMemento,
             );
 
             await assert.rejects(
@@ -5684,6 +6353,7 @@ suite('InlineScriptEnvManager', () => {
                 baseManager,
                 symlinkStorageUri,
                 makeFakeLog(),
+                workspaceMemento,
             );
             const realCacheRoot = cacheLayout.getScriptEnvCacheRoot(symlinkStorageUri).fsPath;
             const externalCacheRoot = path.join(tempRoot, 'external-cache-root');
@@ -5718,6 +6388,7 @@ suite('InlineScriptEnvManager', () => {
                 baseManager,
                 Uri.file(redirectedStoragePath),
                 makeFakeLog(),
+                workspaceMemento,
             );
             try {
                 await fs.remove(redirectedStoragePath);
@@ -5885,7 +6556,7 @@ suite('InlineScriptEnvManager', () => {
             await manager.set(uri, environment);
             const listener = sinon.spy();
             manager.onDidChangeEnvironment(listener);
-            workspaceState.clear.onFirstCall().rejects(new Error('Memento unavailable'));
+            workspaceState.update.withArgs(INLINE_SCRIPT_ENVS_KEY, undefined).rejects(new Error('Memento unavailable'));
 
             await assert.rejects(manager.clearCache(), /Memento unavailable/);
 
@@ -5997,14 +6668,12 @@ suite('InlineScriptEnvManager', () => {
             const clearStarted = new Promise<void>((resolve) => {
                 signalClearStarted = resolve;
             });
-            workspaceState.clear.callsFake(
-                async (keys?: string[]) =>
+            workspaceState.update.withArgs(INLINE_SCRIPT_ENVS_KEY, undefined).callsFake(
+                async () =>
                     new Promise<void>((resolve) => {
                         signalClearStarted!();
                         releaseClear = () => {
-                            if (!keys || keys.includes(INLINE_SCRIPT_ENVS_KEY)) {
-                                persistedAssociations = undefined;
-                            }
+                            persistedAssociations = undefined;
                             resolve();
                         };
                     }),
@@ -6020,6 +6689,61 @@ suite('InlineScriptEnvManager', () => {
 
             assert.ok(await createPromise);
             assert.ok(readMetadataStub.calledOnce);
+        });
+
+        test('serializes a dedicated clear-cache deletion after an in-flight association write so the write cannot resurrect it', async () => {
+            const uri = scriptUri();
+            const environment = await createOwnedEnvironment();
+
+            let releaseWrite: (() => void) | undefined;
+            let signalWriteStarted: (() => void) | undefined;
+            const writeStarted = new Promise<void>((resolve) => {
+                signalWriteStarted = resolve;
+            });
+            workspaceState.update
+                .withArgs(INLINE_SCRIPT_ENVS_KEY, sinon.match((value: unknown) => value !== undefined))
+                .callsFake(
+                    (_key: string, value: unknown) =>
+                        new Promise<void>((resolve) => {
+                            persistedAssociations = value;
+                            signalWriteStarted!();
+                            releaseWrite = resolve;
+                        }),
+                );
+
+            const writePromise = manager.set(uri, environment);
+            await writeStarted;
+
+            // Request the dedicated clear while the association write is still in flight.
+            const clearPromise = manager.clearCache();
+            releaseWrite!();
+            await Promise.all([writePromise, clearPromise]);
+
+            assert.strictEqual(persistedAssociations, undefined);
+            assert.strictEqual(await manager.get(uri), undefined);
+        });
+
+        test('keeps the inline persistence queue usable after a failed dedicated deletion', async () => {
+            const firstUri = scriptUri('first.py');
+            const environment = await createOwnedEnvironment();
+            await manager.set(firstUri, environment);
+            workspaceState.update
+                .withArgs(INLINE_SCRIPT_ENVS_KEY, undefined)
+                .onFirstCall()
+                .rejects(new Error('Memento unavailable'));
+
+            await assert.rejects(manager.clearCache(), /Memento unavailable/);
+
+            // The inline-owned queue recovers: a later association write still persists.
+            const secondUri = scriptUri('second.py');
+            const secondEnvironment = await createOwnedEnvironment('fedcba9876543210');
+            await manager.set(secondUri, secondEnvironment);
+
+            assert.strictEqual(await manager.get(secondUri), secondEnvironment);
+            assert.deepStrictEqual(
+                (persistedAssociations as Record<string, unknown> | undefined)?.[normalizePath(secondUri.fsPath)],
+                matchedAssociationRecord(secondEnvironment.environmentPath.fsPath),
+            );
         });
     });
 });

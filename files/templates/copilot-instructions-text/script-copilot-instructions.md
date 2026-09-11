@@ -1,7 +1,7 @@
 # Copilot Instructions for <script_name>
 
--   The script `<script_name>` is a Python python project within the workspace.
--   It has inline script metadata (as proposed by PEP 723) that defines the script name, required python version, and dependencies.
+-   The script `<script_name>` is a Python project within the workspace.
+-   It has inline script metadata (as proposed by PEP 723) that defines the required Python version and dependencies.
 -   If imports which require a specific Python version or dependencies are added, keep the inline script metadata up to date.
 -   You need to call the `Get Python Environment Information` tool on the `<script_name>` path to get the Python executable details.
 -   Substitute the Python executable you get from the `Get Python Environment Information` tool anywhere you see `<python>` in these instructions.

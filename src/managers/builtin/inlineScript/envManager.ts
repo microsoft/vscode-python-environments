@@ -1,18 +1,28 @@
 // Copyright (c) Microsoft Corporation. All rights reserved.
 // Licensed under the MIT License.
 
+import type { Stats } from 'fs';
 import * as fs from 'fs-extra';
 import * as path from 'path';
-import type { Stats } from 'fs';
-import { clean as cleanPep440, satisfies as satisfiesPep440 } from '@renovatebot/pep440';
-import { Disposable, Event, EventEmitter, l10n, LogOutputChannel, MarkdownString, ThemeIcon, Uri } from 'vscode';
+import {
+    Disposable,
+    Event,
+    EventEmitter,
+    l10n,
+    LogOutputChannel,
+    MarkdownString,
+    Memento,
+    ThemeIcon,
+    Uri,
+} from 'vscode';
 import {
     CreateEnvironmentOptions,
     CreateEnvironmentScope,
     DidChangeEnvironmentEventArgs,
     DidChangeEnvironmentsEventArgs,
-    EnvironmentManager,
+    DidChangePackagesEventArgs,
     EnvironmentChangeKind,
+    EnvironmentManager,
     GetEnvironmentScope,
     GetEnvironmentsScope,
     IconPath,
@@ -22,79 +32,77 @@ import {
     ResolveEnvironmentContext,
     SetEnvironmentScope,
 } from '../../../api';
+import {
+    CONDA_MANAGER_ID,
+    INLINE_SCRIPT_MANAGER_ID,
+    PYENV_MANAGER_ID,
+    SYSTEM_MANAGER_ID,
+} from '../../../common/constants';
 import { getErrorMessage } from '../../../common/errors/utils';
 import { computeCacheKey, normalizeDependency } from '../../../common/inlineScript/cacheKey';
 import {
+    CacheEntrySummary,
     CacheEnvironmentInspection,
-    INLINE_SCRIPT_CACHE_DIR_NAME,
-    InlineScriptEnvMeta,
-    hashSourceMetadataIdentity,
-    mergeSourceMetadataIdentityHashes,
-    META_SCHEMA_VERSION,
     getBaseInterpreterStatus,
     getScriptEnvCacheRoot,
     getScriptEnvDir,
-    inspectOwnedCacheEntry,
+    hashSourceMetadataIdentity,
+    INLINE_SCRIPT_CACHE_DIR_NAME,
+    InlineScriptEnvMeta,
     inspectMetaJson,
-    restoreMetaJsonBackupUnderLock,
+    inspectOwnedCacheEntry,
+    mergeSourceMetadataIdentityHashes,
+    META_JSON_FILENAME,
+    META_SCHEMA_VERSION,
     resolveCacheEntryPath,
+    restoreMetaJsonBackupUnderLock,
+    selectStaleEntries,
     writeMetaJson,
 } from '../../../common/inlineScript/cacheLayout';
 import { extractLowerBoundVersion, pickCompatibleInterpreter } from '../../../common/inlineScript/interpreter';
 import { InlineScriptMetadata, readInlineScriptMetadataFromFile } from '../../../common/inlineScript/metadata';
 import {
     getInlineScriptMetadataRoutingIdentity,
+    getInlineScriptRoutingKey,
     InlineScriptMetadataChangeEvent,
     InlineScriptRoutingRegistry,
 } from '../../../common/inlineScript/routingRegistry';
 import {
-    CONDA_MANAGER_ID,
-    ENVS_EXTENSION_ID,
-    INLINE_SCRIPT_MANAGER_ID,
-    PYENV_MANAGER_ID,
-    SYSTEM_MANAGER_ID,
-} from '../../../common/constants';
-import {
-    acquireFileLock,
     AcquiredFileLock,
+    acquireFileLock,
     FILE_LOCK_DIR_SUFFIX,
     getFileLockPath,
     inspectFileLock,
     reclaimFileLock,
 } from '../../../common/lockfile.apis';
-import { getWorkspacePersistentState, PersistentState } from '../../../common/persistentState';
 import { EventNames, InlineScriptEnvErrorCategory } from '../../../common/telemetry/constants';
 import { sendTelemetryEvent } from '../../../common/telemetry/sender';
+import { timeout } from '../../../common/utils/asyncUtils';
 import { createDeferred, Deferred } from '../../../common/utils/deferred';
 import { isFileNotFoundError } from '../../../common/utils/filesystem';
-import { normalizePath } from '../../../common/utils/pathUtils';
-import { compareReleaseSegments, parseReleaseSegments } from '../../../common/utils/pep440Release';
+import { isSameOrParentPath, normalizePath } from '../../../common/utils/pathUtils';
+import { PythonVersion } from '../../../common/pythonVersion';
+import { PythonVersionSpecifier, splitClause } from '../../../common/pythonVersionSpecifier';
 import { getVenvPythonPath } from '../../../common/utils/virtualEnvironment';
 import { getOpenTextDocuments, onDidDeleteFiles, onDidRenameFiles } from '../../../common/workspace.apis';
 import { NativePythonFinder } from '../../common/nativePythonFinder';
 import { sortEnvironments } from '../../common/utils';
 import { resolveSystemPythonEnvironmentPath } from '../utils';
 import * as uvPythonInstaller from '../uvPythonInstaller';
-import {
-    createWithProgress,
-    hasMinimumPathDepth,
-    isDriveRoot,
-    resolveVenvPythonEnvironmentPath,
-} from '../venvUtils';
+import { createWithProgress, hasMinimumPathDepth, isDriveRoot, resolveVenvPythonEnvironmentPath } from '../venvUtils';
+import { InlineAssociationAccessor, InlineScriptAssociationStore } from './associationStore';
 
-const BASE_INTERPRETER_MANAGER_IDS = new Set([
-    SYSTEM_MANAGER_ID,
-    CONDA_MANAGER_ID,
-    PYENV_MANAGER_ID,
-]);
+const BASE_INTERPRETER_MANAGER_IDS = new Set([SYSTEM_MANAGER_ID, CONDA_MANAGER_ID, PYENV_MANAGER_ID]);
 
 const CACHE_LOCK_TIMEOUT_MS = 5 * 60 * 1000;
 const CACHE_LOCK_RETRY_MS = 500;
+const CACHE_TTL_MS = 14 * 24 * 60 * 60 * 1000;
 const CACHED_ASSOCIATION_VALIDATION_INTERVAL_MS = 5_000;
 const DISCOVERY_RETRY_DELAYS_MS = [1_000, 5_000, 30_000] as const;
-/** Workspace-state key for PEP 723 script path to environment executable associations. */
-export const INLINE_SCRIPT_ENVS_KEY = `${ENVS_EXTENSION_ID}:inline-script:SCRIPT_ENVIRONMENTS`;
 const PERSISTED_ASSOCIATION_SCHEMA_VERSION = 1 as const;
+/** Bounded retry for deleting a cache entry whose files may still be briefly held by a stopped installer. */
+const CACHE_ENTRY_REMOVAL_ATTEMPTS = 4;
+const CACHE_ENTRY_REMOVAL_RETRY_MS = 150;
 
 interface SelectedBaseInterpreter {
     readonly environment: PythonEnvironment;
@@ -107,11 +115,11 @@ interface CreateOrReuseEnvironmentOptions {
     readonly metadata: InlineScriptMetadata;
     readonly selectedBase: SelectedBaseInterpreter;
     readonly pendingCreation: PendingCreationContext;
+    readonly scriptUri: Uri;
 }
 
 interface BuildCacheEntryResult {
     readonly environment?: PythonEnvironment;
-    readonly retainLock?: boolean;
     readonly errorCategory?: InlineScriptEnvErrorCategory;
 }
 
@@ -140,11 +148,26 @@ interface PendingCreationContext {
     sourceMetadataIdentityHashes?: readonly string[];
     hasStartedRecordingSourceMetadataIdentityHashes: boolean;
     recordedSourceMetadataIdentityHashes?: readonly string[];
+    /**
+     * Outcome of the shared build, recorded once and read by every caller joined to it. Cancelling
+     * a build that several scripts joined must report cancellation to all of them, not just to the
+     * script that happened to start it.
+     */
+    failure?: {
+        readonly category: InlineScriptEnvErrorCategory;
+        readonly cancelled?: boolean;
+    };
 }
 
 interface MergeCacheEntrySourceMetadataIdentityHashResult {
     readonly success: boolean;
     readonly sourceMetadataIdentityHashes?: readonly string[];
+}
+
+interface CacheEntryRemovalOptions {
+    readonly shouldRemove?: (entryPath: string) => Promise<boolean>;
+    readonly afterRemove?: () => void;
+    readonly reclaimRetainedLock?: boolean;
 }
 
 type CacheEntryInspection =
@@ -196,13 +219,15 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
     private discoveryRetryAttempt = 0;
     private discoveryRetryTimer: ReturnType<typeof setTimeout> | undefined;
     private readonly subscriptions: Disposable[] = [];
-    private persistenceQueue: Promise<void> = Promise.resolve();
+    private readonly associationStore: InlineScriptAssociationStore;
     private readonly persistedAssociationsLoaded: Promise<void>;
     private selectionQueue: Promise<void> = Promise.resolve();
     private cacheMaintenanceQueue: Promise<void> = Promise.resolve();
     private cacheMaintenanceBarrier: Deferred<void> | undefined;
     private pendingCacheMaintenances = 0;
     private activeCreateOperations = 0;
+    private ttlEviction: Promise<void> | undefined;
+    private cacheMutationRevision = 0;
     private disposed = false;
 
     private readonly _onDidChangeEnvironments = new EventEmitter<DidChangeEnvironmentsEventArgs>();
@@ -213,7 +238,7 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
     public readonly onDidChangeEnvironment: Event<DidChangeEnvironmentEventArgs> = this._onDidChangeEnvironment.event;
 
     public readonly name = 'inline-script';
-    public readonly displayName = l10n.t('Inline script environments');
+    public readonly displayName = l10n.t('Inline scripts');
     public readonly preferredPackageManagerId = 'ms-python.python:pip';
     public readonly description: string | undefined = undefined;
     public readonly tooltip: string | MarkdownString = new MarkdownString(
@@ -228,8 +253,10 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
         private readonly baseManager: EnvironmentManager,
         private readonly globalStorageUri: Uri,
         public readonly log: LogOutputChannel,
+        workspaceState: Memento,
         private readonly routingRegistry: InlineScriptRoutingRegistry = new InlineScriptRoutingRegistry(),
     ) {
+        this.associationStore = new InlineScriptAssociationStore(workspaceState);
         this.subscriptions.push(
             this.routingRegistry.onDidChangeMetadata((event) => {
                 void this.handleSavedMetadataChange(event).catch((error) => {
@@ -238,20 +265,29 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
             }),
             onDidDeleteFiles((event) => {
                 void this.clearAssociationsForScripts(event.files).catch((error) => {
-                    this.log.warn(`Failed to clear inline-script associations for deleted files: ${getErrorMessage(error)}`);
+                    this.log.warn(
+                        `Failed to clear inline-script associations for deleted files: ${getErrorMessage(error)}`,
+                    );
                 });
             }),
             onDidRenameFiles((event) => {
-                void this.clearAssociationsForScripts(event.files.map((file) => file.oldUri)).catch((error) => {
-                    this.log.warn(`Failed to clear inline-script associations for renamed files: ${getErrorMessage(error)}`);
+                void this.handleRenamedScripts(event.files).catch((error) => {
+                    this.log.warn(
+                        `Failed to update inline-script associations for renamed files: ${getErrorMessage(error)}`,
+                    );
+                });
+            }),
+            this.api.onDidChangePackages((event) => {
+                void this.handlePackagesChanged(event).catch((error) => {
+                    this.log.warn(
+                        `Failed to record an inline-script package change: ${getErrorMessage(error)}`,
+                    );
                 });
             }),
         );
         this.persistedAssociationsLoaded = this.loadPersistedAssociations();
         void this.initializePersistedAssociations().catch((error) => {
-            this.log.warn(
-                `Failed to prime inline-script environment associations: ${getErrorMessage(error)}`,
-            );
+            this.log.warn(`Failed to prime inline-script environment associations: ${getErrorMessage(error)}`);
         });
     }
 
@@ -261,6 +297,7 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
     ): Promise<PythonEnvironment | undefined> {
         this.activeCreateOperations += 1;
         try {
+            await this.runTtlEvictionOnce();
             return await this.waitForCacheMaintenance(async () => {
                 try {
                     const scriptUri = this.getScriptUri(scope);
@@ -268,6 +305,7 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
                         this.log.warn('Inline-script environment creation requires exactly one local file URI.');
                         return undefined;
                     }
+                    this.routingRegistry.clearSetupOutcome(scriptUri);
 
                     const metadata = await readInlineScriptMetadataFromFile(scriptUri);
                     if (!metadata) {
@@ -275,12 +313,13 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
                         return undefined;
                     }
 
-                    const packages = [
-                        ...(metadata.dependencies ?? []),
-                        ...(options?.additionalPackages ?? []),
-                    ].map((value) => value.trim());
+                    const packages = [...(metadata.dependencies ?? []), ...(options?.additionalPackages ?? [])].map(
+                        (value) => value.trim(),
+                    );
                     if (packages.some((value) => value.length === 0)) {
-                        this.log.warn(`Inline-script dependencies must not contain empty entries: ${scriptUri.fsPath}.`);
+                        this.log.warn(
+                            `Inline-script dependencies must not contain empty entries: ${scriptUri.fsPath}.`,
+                        );
                         return undefined;
                     }
 
@@ -321,7 +360,14 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
             if (baseSelection.errorCategory) {
                 this.sendInlineScriptEnvErrorTelemetry(baseSelection.errorCategory);
             }
-            this.log.warn(`No compatible Python is available for inline-script environment creation: ${scriptUri.fsPath}.`);
+            this.routingRegistry.noteSetupOutcome(scriptUri, {
+                kind: 'failed',
+                category: baseSelection.errorCategory ?? 'setup-failure',
+                requiresPython: metadata.requiresPython,
+            });
+            this.log.warn(
+                `No compatible Python is available for inline-script environment creation: ${scriptUri.fsPath}.`,
+            );
             return undefined;
         }
         const selectedBase = baseSelection.selectedBase;
@@ -338,6 +384,9 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
                 pending.hasStartedRecordingSourceMetadataIdentityHashes;
             this.addPendingCreationSourceMetadataIdentityHash(pending, sourceMetadataIdentityHash);
             const environment = await pending.promise;
+            if (!environment) {
+                this.notePendingCreationFailure(scriptUri, metadata, pending);
+            }
             return await this.finalizeCreateForScript(
                 cacheKey,
                 environment,
@@ -357,11 +406,15 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
             metadata,
             selectedBase,
             pendingCreation,
+            scriptUri,
         });
         pendingCreation.promise = creation;
         this.pendingCreations.set(cacheKey, pendingCreation);
         try {
             const environment = await creation;
+            if (!environment) {
+                this.notePendingCreationFailure(scriptUri, metadata, pendingCreation);
+            }
             return await this.finalizeCreateForScript(
                 cacheKey,
                 environment,
@@ -374,6 +427,31 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
                 this.pendingCreations.delete(cacheKey);
             }
         }
+    }
+
+    /**
+     * Translate the shared build's recorded failure into a routing outcome for one caller. Called
+     * for every script joined to the build so a cancellation is reported as a cancellation to all
+     * of them rather than surfacing as a generic failure for the joiners.
+     */
+    private notePendingCreationFailure(
+        scriptUri: Uri,
+        metadata: InlineScriptMetadata,
+        pendingCreation: PendingCreationContext,
+    ): void {
+        const failure = pendingCreation.failure;
+        if (!failure) {
+            return;
+        }
+        if (failure.cancelled) {
+            this.routingRegistry.noteSetupOutcome(scriptUri, { kind: 'cancelled' });
+            return;
+        }
+        this.routingRegistry.noteSetupOutcome(scriptUri, {
+            kind: 'failed',
+            category: failure.category,
+            requiresPython: metadata.requiresPython,
+        });
     }
 
     private getPendingSetupKey(
@@ -551,9 +629,7 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
         }
         const pending = this.pendingRefresh;
         if (pending && pending !== sharedPass) {
-            return pending.checksForSnapshotChanges
-                ? pending.promise
-                : this.startSnapshotRefreshAfter(pending);
+            return pending.checksForSnapshotChanges ? pending.promise : this.startSnapshotRefreshAfter(pending);
         }
         return this.startRefreshPass(true);
     }
@@ -584,6 +660,11 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
     }
 
     private async refreshDiscoveredEnvironments(checkForSnapshotChanges: boolean): Promise<boolean> {
+        const cacheMaintenance = this.cacheMaintenanceBarrier;
+        if (cacheMaintenance) {
+            await cacheMaintenance.promise;
+        }
+        const cacheMutationRevision = this.cacheMutationRevision;
         const cacheRoot = getScriptEnvCacheRoot(this.globalStorageUri);
         const previousByKey = new Map(
             this.collection.map((environment) => [this.getDiscoveredEnvironmentKey(environment), environment]),
@@ -700,6 +781,9 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
         if (this.disposed) {
             return false;
         }
+        if (cacheMutationRevision !== this.cacheMutationRevision) {
+            return true;
+        }
 
         // Preserve previously known entries when a refresh cannot safely classify
         // them because a build is in progress or the filesystem is transiently unavailable.
@@ -707,10 +791,7 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
         return shouldRetry;
     }
 
-    private async inspectDiscoveredCacheEntry(
-        cacheRoot: Uri,
-        envDir: Uri,
-    ): Promise<DiscoveredCacheEntryResult> {
+    private async inspectDiscoveredCacheEntry(cacheRoot: Uri, envDir: Uri): Promise<DiscoveredCacheEntryResult> {
         let fingerprint: string | undefined;
         try {
             const stat = await fs.lstat(envDir.fsPath);
@@ -719,9 +800,7 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
                 return { kind: 'skip', fingerprint };
             }
         } catch (error) {
-            return this.isDefinitivelyStalePathError(error)
-                ? { kind: 'skip' }
-                : { kind: 'preserve' };
+            return this.isDefinitivelyStalePathError(error) ? { kind: 'skip' } : { kind: 'preserve' };
         }
 
         if (await this.isCacheEntryBusy(envDir.fsPath)) {
@@ -762,11 +841,10 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
                 this.api,
                 this,
                 this.baseManager,
+                'inlineScript',
             );
         } catch (error) {
-            this.log.warn(
-                `Unable to resolve inline-script cache entry ${envDir.fsPath}: ${getErrorMessage(error)}`,
-            );
+            this.log.warn(`Unable to resolve inline-script cache entry ${envDir.fsPath}: ${getErrorMessage(error)}`);
             return { kind: 'preserve', fingerprint };
         }
         if (!environment) {
@@ -791,7 +869,9 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
         const previousByKey = new Map(
             this.collection.map((environment) => [this.getDiscoveredEnvironmentKey(environment), environment]),
         );
-        const nextByKey = new Map(next.map((environment) => [this.getDiscoveredEnvironmentKey(environment), environment]));
+        const nextByKey = new Map(
+            next.map((environment) => [this.getDiscoveredEnvironmentKey(environment), environment]),
+        );
         const changes: DidChangeEnvironmentsEventArgs = [];
 
         for (const [key, previous] of previousByKey) {
@@ -899,7 +979,11 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
                     ? await this.resolveVerifiedSourceMetadataIdentity(script, environment, savedMetadata)
                     : undefined;
             const nextPersistedAssociation = environmentPath
-                ? this.createPersistedAssociationRecord(environmentPath, sourceMetadataIdentity, savedMetadata?.identity)
+                ? this.createPersistedAssociationRecord(
+                      environmentPath,
+                      sourceMetadataIdentity,
+                      savedMetadata?.identity,
+                  )
                 : undefined;
             const needsPersistence = nextPersistedAssociation
                 ? !this.isSamePersistedAssociation(persistedAssociation, nextPersistedAssociation)
@@ -985,11 +1069,7 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
             return undefined;
         }
 
-        return this.getAssociationForMetadata(
-            normalizePath(scope.fsPath),
-            scope,
-            metadata,
-        );
+        return this.getAssociationForMetadata(normalizePath(scope.fsPath), scope, metadata);
     }
 
     private getScriptUris(scope: SetEnvironmentScope): ScriptReference[] {
@@ -1025,11 +1105,7 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
         const metadataIdentity = getInlineScriptMetadataRoutingIdentity(metadata)!;
         const forceFreshValidation =
             this.fsPathToPersistedAssociation.get(scriptPath)?.metadataBinding.kind === 'pending';
-        if (
-            pending &&
-            pending.metadataIdentity === metadataIdentity &&
-            pending.associationRevision === revision
-        ) {
+        if (pending && pending.metadataIdentity === metadataIdentity && pending.associationRevision === revision) {
             return pending.promise;
         }
         if (cached) {
@@ -1064,13 +1140,7 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
             }
         }
 
-        const rehydration = this.rehydrateAssociation(
-            scriptPath,
-            scriptUri,
-            revision,
-            metadataIdentity,
-            metadata,
-        );
+        const rehydration = this.rehydrateAssociation(scriptPath, scriptUri, revision, metadataIdentity, metadata);
         this.pendingRehydrations.set(scriptPath, {
             metadataIdentity,
             associationRevision: revision,
@@ -1124,6 +1194,7 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
                     this.api,
                     this,
                     this.baseManager,
+                    'inlineScript',
                 );
                 if (!this.isCurrentAssociationRevision(scriptPath, revision)) {
                     return this.fsPathToEnv.get(scriptPath);
@@ -1160,7 +1231,8 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
                     return undefined;
                 }
                 const metadataIdentityProven =
-                    !!sidecar && this.cacheEntryProvesSourceMetadataIdentity(sidecar, resolved, metadataIdentity, metadata);
+                    !!sidecar &&
+                    this.cacheEntryProvesSourceMetadataIdentity(sidecar, resolved, metadataIdentity, metadata);
                 if (!this.isCurrentAssociationRevision(scriptPath, revision)) {
                     return this.fsPathToEnv.get(scriptPath);
                 }
@@ -1295,6 +1367,7 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
                 this.api,
                 this,
                 this.baseManager,
+                'inlineScript',
             );
         } catch (error) {
             this.log.warn(
@@ -1394,11 +1467,7 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
         } catch {
             return 'uncertain';
         }
-        return inspectOwnedCacheEntry(
-            environment,
-            cacheRoot,
-            envDir,
-        );
+        return inspectOwnedCacheEntry(environment, cacheRoot, envDir);
     }
 
     private async handleSavedMetadataChange(event: InlineScriptMetadataChangeEvent): Promise<void> {
@@ -1463,7 +1532,9 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
         associationRevision: number,
     ): Promise<void> {
         const environment = await this.getAssociationForMetadata(scriptPath, uri, metadata);
-        if (!this.isCurrentMetadataRefreshTask(uri, metadataIdentity, metadataRevision, scriptPath, associationRevision)) {
+        if (
+            !this.isCurrentMetadataRefreshTask(uri, metadataIdentity, metadataRevision, scriptPath, associationRevision)
+        ) {
             return;
         }
         if (!environment) {
@@ -1512,10 +1583,7 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
             if (!this.isCurrentRoutingMetadata(uri, metadataIdentity, metadataRevision)) {
                 return;
             }
-            if (
-                bindResult === 'stale' &&
-                !this.isCurrentAssociationRevision(scriptPath, associationRevision)
-            ) {
+            if (bindResult === 'stale' && !this.isCurrentAssociationRevision(scriptPath, associationRevision)) {
                 const currentAssociation = this.fsPathToPersistedAssociation.get(scriptPath);
                 const currentAssociationRevision = this.associationRevisions.get(scriptPath) ?? 0;
                 if (
@@ -1607,10 +1675,14 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
         metadata: InlineScriptMetadata,
     ): Promise<boolean> {
         const sidecar = await this.readCurrentCacheEntrySidecar(environment);
-        return !!sidecar && this.cacheEntryProvesSourceMetadataIdentity(sidecar, environment, metadataIdentity, metadata);
+        return (
+            !!sidecar && this.cacheEntryProvesSourceMetadataIdentity(sidecar, environment, metadataIdentity, metadata)
+        );
     }
 
-    private async readCurrentCacheEntrySidecar(environment: PythonEnvironment): Promise<InlineScriptEnvMeta | undefined> {
+    private async readCurrentCacheEntrySidecar(
+        environment: PythonEnvironment,
+    ): Promise<InlineScriptEnvMeta | undefined> {
         let sidecarResult;
         try {
             sidecarResult = await inspectMetaJson(Uri.file(environment.sysPrefix));
@@ -1687,10 +1759,7 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
             : undefined;
     }
 
-    private sidecarProvesSourceMetadataIdentity(
-        sidecar: InlineScriptEnvMeta,
-        metadataIdentity: string,
-    ): boolean {
+    private sidecarProvesSourceMetadataIdentity(sidecar: InlineScriptEnvMeta, metadataIdentity: string): boolean {
         if (sidecar.sourceMetadataIdentityHashes === undefined) {
             return false;
         }
@@ -1753,7 +1822,9 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
                 environmentPath,
                 metadataBinding: { kind: 'matched', sourceIdentity: metadataIdentity },
             };
-            if (!this.isSamePersistedAssociation(this.fsPathToPersistedAssociation.get(scriptPath), expectedAssociation)) {
+            if (
+                !this.isSamePersistedAssociation(this.fsPathToPersistedAssociation.get(scriptPath), expectedAssociation)
+            ) {
                 return 'stale';
             }
             try {
@@ -1774,7 +1845,10 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
             ) {
                 return 'stale';
             }
-            return this.isSamePersistedAssociation(this.fsPathToPersistedAssociation.get(scriptPath), matchedAssociation)
+            return this.isSamePersistedAssociation(
+                this.fsPathToPersistedAssociation.get(scriptPath),
+                matchedAssociation,
+            )
                 ? 'bound'
                 : 'stale';
         });
@@ -1814,16 +1888,33 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
 
     private loadPersistedAssociations(): Promise<void> {
         return this.enqueuePersistence(async (state) => {
-            const rawAssociations = await state.get<unknown>(INLINE_SCRIPT_ENVS_KEY);
+            const rawAssociations = await state.get<unknown>();
             const parsed = this.parsePersistedAssociations(rawAssociations);
             this.applyPersistedAssociations(parsed?.records ?? {});
         });
+    }
+
+    private async seedRoutingMetadataFromSavedFile(uri: Uri, scriptPath: string): Promise<void> {
+        if (this.routingRegistry.getMetadata(scriptPath) || this.isDocumentOpen(scriptPath)) {
+            return;
+        }
+        const metadata = await readInlineScriptMetadataFromFile(uri);
+        if (metadata && !this.routingRegistry.getMetadata(scriptPath)) {
+            this.routingRegistry.setMetadata(uri, metadata);
+        }
+    }
+
+    private isDocumentOpen(scriptPath: string): boolean {
+        return getOpenTextDocuments().some(
+            (document) => document.uri.scheme === 'file' && normalizePath(document.uri.fsPath) === scriptPath,
+        );
     }
 
     private initializePersistedAssociations(): Promise<void> {
         return this.persistedAssociationsLoaded.then(async () => {
             await Promise.all(
                 [...this.fsPathToPersistedAssociation.keys()].map(async (scriptPath) => {
+                    await this.seedRoutingMetadataFromSavedFile(Uri.file(scriptPath), scriptPath);
                     const uri = this.routingRegistry.getUri(scriptPath);
                     const metadata = this.routingRegistry.getMetadata(scriptPath);
                     if (uri && metadata) {
@@ -1840,9 +1931,7 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
     }
 
     private async getPersistedAssociation(scriptPath: string): Promise<PersistedAssociationRecord | undefined> {
-        await this.persistenceQueue;
-        const state = await getWorkspacePersistentState();
-        const rawAssociations = await state.get<unknown>(INLINE_SCRIPT_ENVS_KEY);
+        const rawAssociations = await this.associationStore.read<unknown>();
         if (rawAssociations === undefined) {
             this.applyPersistedAssociations({});
             return undefined;
@@ -1905,14 +1994,14 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
 
     private removeInvalidPersistedAssociation(scriptPath: string): Promise<void> {
         return this.enqueuePersistence(async (state) => {
-            const rawAssociations = await state.get<unknown>(INLINE_SCRIPT_ENVS_KEY);
+            const rawAssociations = await state.get<unknown>();
             if (rawAssociations === undefined) {
                 this.applyPersistedAssociations({});
                 return;
             }
             const parsed = this.parsePersistedAssociations(rawAssociations);
             if (!parsed) {
-                await state.set(INLINE_SCRIPT_ENVS_KEY, {});
+                await state.update({});
                 this.applyPersistedAssociations({});
                 return;
             }
@@ -1920,7 +2009,7 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
                 delete parsed.rawEntries[scriptPath];
                 delete parsed.records[scriptPath];
                 parsed.invalidKeys.delete(scriptPath);
-                await state.set(INLINE_SCRIPT_ENVS_KEY, parsed.rawEntries);
+                await state.update(parsed.rawEntries);
             }
             this.applyPersistedAssociations(parsed.records);
         });
@@ -1928,7 +2017,7 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
 
     private updatePersistedAssociations(changes: readonly PersistedAssociationChange[]): Promise<void> {
         return this.enqueuePersistence(async (state) => {
-            const rawAssociations = await state.get<unknown>(INLINE_SCRIPT_ENVS_KEY);
+            const rawAssociations = await state.get<unknown>();
             const parsed = this.parsePersistedAssociations(rawAssociations);
             const rawEntries = { ...(parsed?.rawEntries ?? {}) };
             const associations = { ...(parsed?.records ?? {}) };
@@ -1949,13 +2038,14 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
                     (change.expectedPersistedAssociation === undefined &&
                         (change.expectedEnvironmentPath === undefined ||
                             (current !== undefined &&
-                                normalizePath(current.environmentPath) === normalizePath(change.expectedEnvironmentPath))))
+                                normalizePath(current.environmentPath) ===
+                                    normalizePath(change.expectedEnvironmentPath))))
                 ) {
                     delete associations[change.scriptPath];
                     delete rawEntries[change.scriptPath];
                 }
             }
-            await state.set(INLINE_SCRIPT_ENVS_KEY, rawEntries);
+            await state.update(rawEntries);
             this.applyPersistedAssociations(associations);
         });
     }
@@ -2036,7 +2126,9 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
         return true;
     }
 
-    private parsePersistedAssociationValue(value: unknown):
+    private parsePersistedAssociationValue(
+        value: unknown,
+    ):
         | { readonly kind: 'valid'; readonly record: PersistedAssociationRecord }
         | { readonly kind: 'future' }
         | { readonly kind: 'invalid' } {
@@ -2124,10 +2216,33 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
         };
     }
 
-    private enqueuePersistence(operation: (state: PersistentState) => Promise<void>): Promise<void> {
-        const run = this.persistenceQueue.then(async () => operation(await getWorkspacePersistentState()));
-        this.persistenceQueue = run.catch(() => undefined);
-        return run;
+    private enqueuePersistence(operation: (state: InlineAssociationAccessor) => Promise<void>): Promise<void> {
+        return this.associationStore.runExclusive(operation);
+    }
+
+    /**
+     * Deletes the entire inline-script association record through the inline-owned association
+     * store's failure-isolated queue.
+     *
+     * The store issues a direct key update to `undefined` on the inline-owned queue rather than a
+     * shared `PersistentState.clear`. A generic "Clear Cache" preserves this key and never mutates
+     * it, so the two operations are key-disjoint; and because this deletion is an ordinary queued
+     * write (never coalesced onto an in-flight shared clear) it cannot be silently dropped or
+     * resurrected.
+     */
+    private clearPersistedAssociations(): Promise<void> {
+        return this.associationStore.clear();
+    }
+
+    private runTtlEvictionOnce(): Promise<void> {
+        if (!this.ttlEviction) {
+            this.ttlEviction = this.enqueueCacheMaintenance(() =>
+                this.enqueueSelection(() => this.evictStaleCacheEntries()),
+            ).catch((error) => {
+                this.log.warn(`Unable to evict stale inline-script environments: ${getErrorMessage(error)}`);
+            });
+        }
+        return this.ttlEviction;
     }
 
     private async waitForCacheMaintenance<T>(operation: () => Promise<T>): Promise<T> {
@@ -2166,6 +2281,194 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
         return run;
     }
 
+    /**
+     * Editing packages outside setup silently affects every script sharing the entry, so mark the
+     * entry non-reusable and un-route each of them; the next setup rebuilds from declared metadata.
+     */
+    private async handlePackagesChanged(event: DidChangePackagesEventArgs): Promise<void> {
+        if (this.disposed || event.environment.envId.managerId !== INLINE_SCRIPT_MANAGER_ID) {
+            return;
+        }
+        if (event.changes.length === 0) {
+            return;
+        }
+        const envDirPath = event.environment.sysPrefix;
+        // Setup installs through `managePackages`, which fires this event too. The emitter is
+        // synchronous, so a build still registered here owns this change and must not self-mark.
+        if (this.isBuildInFlightFor(envDirPath)) {
+            return;
+        }
+        const cacheRoot = getScriptEnvCacheRoot(this.globalStorageUri);
+        const envDir = Uri.file(envDirPath);
+        if ((await inspectOwnedCacheEntry(event.environment, cacheRoot, envDir)) !== 'expected') {
+            return;
+        }
+        if (!(await this.markCacheEntryManuallyModified(envDir))) {
+            return;
+        }
+        this.unrouteScriptsUsingEnvironment(envDirPath);
+    }
+
+    private isBuildInFlightFor(envDirPath: string): boolean {
+        return this.pendingCreations.has(path.basename(envDirPath));
+    }
+
+    /** Mark under the entry lock so it cannot race a concurrent build. */
+    private async markCacheEntryManuallyModified(envDir: Uri): Promise<boolean> {
+        try {
+            return await this.withCacheEntryLock(envDir, async () => {
+                // Re-check now that the build, if any, has released the lock.
+                if (this.isBuildInFlightFor(envDir.fsPath)) {
+                    return false;
+                }
+                const sidecar = await inspectMetaJson(envDir);
+                if (sidecar.kind !== 'valid' || sidecar.metadata.manuallyModified) {
+                    return false;
+                }
+                await writeMetaJson(envDir, { ...sidecar.metadata, manuallyModified: true });
+                this.cacheMutationRevision += 1;
+                this.log.info(
+                    `Inline-script environment packages were modified outside setup; it will be rebuilt on next setup: ${envDir.fsPath}`,
+                );
+                return true;
+            });
+        } catch (error) {
+            // A build holding the lock rewrites the sidecar anyway.
+            this.log.warn(
+                `Failed to record an inline-script package modification for ${envDir.fsPath}: ${getErrorMessage(error)}`,
+            );
+            return false;
+        }
+    }
+
+    /** Un-route every script associated with the given cache entry. */
+    private unrouteScriptsUsingEnvironment(envDirPath: string): void {
+        for (const [scriptPath, association] of this.fsPathToPersistedAssociation.entries()) {
+            if (!isSameOrParentPath(envDirPath, association.environmentPath)) {
+                continue;
+            }
+            this.invalidateCachedAssociationValidation(scriptPath);
+            const uri = this.routingRegistry.getUri(scriptPath) ?? Uri.file(scriptPath);
+            this.routingRegistry.setValidatedAssociation(uri, false);
+            this.log.info(`Inline-script association for ${scriptPath} needs setup again after a package change.`);
+        }
+    }
+
+    /**
+     * Follow a rename instead of dropping the association.
+     *
+     * A cache entry is keyed by the script's dependencies and base interpreter, never by its path,
+     * so renaming a script does not invalidate its environment. `PythonProjectManagerImpl` already
+     * rewrites the matching `python-envs.pythonProjects` entry to the new path, so clearing the
+     * association here would leave a managed inline-script project entry with no environment behind
+     * it.
+     *
+     * The moved record is re-validated afterwards rather than trusted: its metadata binding is
+     * content-derived, so if the file at the new path no longer matches, ordinary validation clears
+     * the association and the setup CodeLens returns.
+     */
+    private async handleRenamedScripts(
+        files: readonly { readonly oldUri: Uri; readonly newUri: Uri }[],
+    ): Promise<void> {
+        const transfers = await this.enqueueSelection(async () => {
+            await this.persistedAssociationsLoaded;
+
+            const moves: RenamedScriptTransfer[] = [];
+            const clears: ScriptReference[] = [];
+            const seen = new Set<string>();
+            for (const { oldUri, newUri } of files) {
+                if (oldUri.scheme !== 'file') {
+                    continue;
+                }
+                const oldPath = normalizePath(oldUri.fsPath);
+                if (seen.has(oldPath)) {
+                    continue;
+                }
+                seen.add(oldPath);
+                if (!this.fsPathToEnv.has(oldPath) && !this.fsPathToPersistedAssociation.has(oldPath)) {
+                    continue;
+                }
+                const record = this.fsPathToPersistedAssociation.get(oldPath);
+                // Only follow the rename when the destination is still a routable local `.py` file;
+                // renaming to another extension (or off the local filesystem) drops the association.
+                const newPath = getInlineScriptRoutingKey(newUri);
+                if (!record || newPath === undefined || newPath === oldPath) {
+                    clears.push({ uri: oldUri, scriptPath: oldPath });
+                    continue;
+                }
+                moves.push({
+                    oldUri,
+                    oldPath,
+                    newUri,
+                    newPath,
+                    record,
+                    environment: this.fsPathToEnv.get(oldPath),
+                });
+            }
+
+            if (moves.length === 0 && clears.length === 0) {
+                return [];
+            }
+
+            await this.updatePersistedAssociations([
+                ...clears.map(({ scriptPath }) => ({ scriptPath })),
+                // Remove the old key and write the new one in the same transaction. Writing the new
+                // key unconditionally means a rename onto an already-associated script replaces it.
+                ...moves.flatMap((move) => [
+                    { scriptPath: move.oldPath, expectedPersistedAssociation: move.record },
+                    { scriptPath: move.newPath, persistedAssociation: move.record },
+                ]),
+            ]);
+
+            for (const clear of clears) {
+                this.forgetScriptAssociationState(clear.scriptPath);
+                this.clearValidatedRouteableState(clear.uri);
+            }
+            for (const move of moves) {
+                this.forgetScriptAssociationState(move.oldPath);
+                this.clearValidatedRouteableState(move.oldUri);
+                // Reset validation bookkeeping for the destination without discarding the record
+                // `updatePersistedAssociations` just wrote for it.
+                this.bumpAssociationRevision(move.newPath);
+                this.pendingRehydrations.delete(move.newPath);
+                this.pendingMetadataRefreshes.delete(move.newPath);
+                if (move.environment) {
+                    this.fsPathToEnv.set(move.newPath, move.environment);
+                } else {
+                    this.fsPathToEnv.delete(move.newPath);
+                }
+                this.clearValidatedRouteableState(move.newUri);
+                this.log.info(`Moved inline-script association from ${move.oldPath} to ${move.newPath}.`);
+            }
+            return moves;
+        });
+
+        // Re-validate outside the selection queue, mirroring how activation primes associations.
+        for (const move of transfers) {
+            await this.seedRoutingMetadataFromSavedFile(move.newUri, move.newPath);
+            const metadata = this.routingRegistry.getMetadata(move.newPath);
+            const metadataIdentity = metadata ? getInlineScriptMetadataRoutingIdentity(metadata) : undefined;
+            if (!metadata || !metadataIdentity) {
+                continue;
+            }
+            const uri = this.routingRegistry.getUri(move.newPath) ?? move.newUri;
+            await this.refreshValidatedAssociationForMetadata(
+                uri,
+                metadata,
+                metadataIdentity,
+                this.routingRegistry.getMetadataRevision(uri),
+            );
+        }
+    }
+
+    private forgetScriptAssociationState(scriptPath: string): void {
+        this.bumpAssociationRevision(scriptPath);
+        this.pendingRehydrations.delete(scriptPath);
+        this.pendingMetadataRefreshes.delete(scriptPath);
+        this.fsPathToEnv.delete(scriptPath);
+        this.fsPathToPersistedAssociation.delete(scriptPath);
+    }
+
     private clearAssociationsForScripts(scripts: readonly Uri[]): Promise<void> {
         return this.enqueueSelection(async () => {
             await this.persistedAssociationsLoaded;
@@ -2175,7 +2478,10 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
                     uri,
                     scriptPath: normalizePath(uri.fsPath),
                 }))
-                .filter((script, index, all) => all.findIndex((candidate) => candidate.scriptPath === script.scriptPath) === index)
+                .filter(
+                    (script, index, all) =>
+                        all.findIndex((candidate) => candidate.scriptPath === script.scriptPath) === index,
+                )
                 .filter(
                     (script) =>
                         this.fsPathToEnv.has(script.scriptPath) ||
@@ -2218,10 +2524,7 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
         return (this.associationRevisions.get(scriptPath) ?? 0) === revision;
     }
 
-    private isSameEnvironment(
-        first: PythonEnvironment | undefined,
-        second: PythonEnvironment | undefined,
-    ): boolean {
+    private isSameEnvironment(first: PythonEnvironment | undefined, second: PythonEnvironment | undefined): boolean {
         if (first === second) {
             return true;
         }
@@ -2346,8 +2649,7 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
         const installResult = await this.installPythonAndRefresh(requiresPython, versionSelection.version);
         if (installResult.kind !== 'installed') {
             return {
-                errorCategory:
-                    installResult.kind === 'declined' ? 'compatible-python-declined' : 'install-failure',
+                errorCategory: installResult.kind === 'declined' ? 'compatible-python-declined' : 'install-failure',
             };
         }
         const installedPath = installResult.installedPath;
@@ -2363,16 +2665,19 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
                 this.baseManager,
             );
             const executable = resolved?.execInfo?.run.executable;
-            if (resolved && executable && pickCompatibleInterpreter([resolved], metadata.requiresPython)) {
+            if (
+                resolved &&
+                executable &&
+                pickCompatibleInterpreter([resolved], undefined) &&
+                (!requiresPython || this.matchesInstallConstraint(requiresPython, resolved.version))
+            ) {
                 try {
                     const canonicalPath = await fs.realpath(executable);
-                    if (!requiresPython || this.matchesInstallConstraint(requiresPython, resolved.version)) {
-                        this.directlyResolvedBaseInterpreters.set(canonicalPath, resolved);
-                        selected = {
-                            environment: resolved,
-                            canonicalPath,
-                        };
-                    }
+                    this.directlyResolvedBaseInterpreters.set(canonicalPath, resolved);
+                    selected = {
+                        environment: resolved,
+                        canonicalPath,
+                    };
                 } catch (error) {
                     this.log.warn(
                         `Unable to resolve the Python installed for an inline script at ${executable}: ${getErrorMessage(error)}`,
@@ -2402,13 +2707,18 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
         if (prereleaseLowerBound) {
             return { version: prereleaseLowerBound };
         }
-        const lowerBoundRelease = lowerBound ? parseReleaseSegments(lowerBound) : undefined;
-        if (lowerBound && lowerBoundRelease?.[0] === 3) {
+        const lowerBoundRelease = PythonVersion.tryParse(lowerBound);
+        let needsCompleteCatalog = false;
+        if (lowerBound && lowerBoundRelease?.major === 3) {
             if (/^>=\s*[^,]+$/.test(requiresPython) && this.matchesInstallConstraint(requiresPython, lowerBound)) {
                 return { version: lowerBound };
             }
+            // PEP 440 `==3.13` is exact, while uv treats `3.13` as a broad minor selector.
             if (/^==\s*[^,*]+$/.test(requiresPython) && this.matchesInstallConstraint(requiresPython, lowerBound)) {
-                return { version: lowerBound };
+                if (lowerBoundRelease.precision >= 3) {
+                    return { version: lowerBound };
+                }
+                needsCompleteCatalog = true;
             }
         }
 
@@ -2420,11 +2730,12 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
             );
             if (uvLookupResult !== 'available') {
                 return {
-                    errorCategory:
-                        uvLookupResult === 'declined' ? 'compatible-python-declined' : 'install-failure',
+                    errorCategory: uvLookupResult === 'declined' ? 'compatible-python-declined' : 'install-failure',
                 };
             }
-            available = await uvPythonInstaller.getAvailablePythonVersions();
+            available = needsCompleteCatalog
+                ? await uvPythonInstaller.getAvailablePythonVersions({ allVersions: true })
+                : await uvPythonInstaller.getAvailablePythonVersions();
         } catch (error) {
             this.log.warn(`Unable to query Python versions available from uv: ${getErrorMessage(error)}`);
             return { errorCategory: 'install-failure' };
@@ -2433,50 +2744,41 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
             return { errorCategory: 'install-failure' };
         }
         const version = available
-            .filter(
-                (candidate) =>
+            .flatMap((candidate) => {
+                const parsed = PythonVersion.tryParse(candidate.version);
+                return parsed &&
                     candidate.implementation === 'cpython' &&
                     candidate.variant === 'default' &&
                     candidate.version_parts.major === 3 &&
-                    this.matchesInstallConstraint(requiresPython, candidate.version),
-            )
-            .sort((left, right) => {
-                const leftRelease = parseReleaseSegments(left.version);
-                const rightRelease = parseReleaseSegments(right.version);
-                if (!leftRelease || !rightRelease) {
-                    return 0;
-                }
-                return compareReleaseSegments(rightRelease, leftRelease);
-            })[0]?.version;
+                    this.matchesInstallConstraint(requiresPython, candidate.version)
+                    ? [{ parsed, raw: candidate.version }]
+                    : [];
+            })
+            .sort((left, right) => right.parsed.compareTo(left.parsed))[0]?.raw;
         return version ? { version } : { errorCategory: 'no-compatible-python' };
     }
 
     private matchesInstallConstraint(requiresPython: string, version: string): boolean {
-        try {
-            return satisfiesPep440(version, requiresPython, {
-                prereleases: /(?:(?:a|alpha|b|beta|c|rc|pre|preview)[._-]?\d+|dev[._-]?\d+)/i.test(
-                    requiresPython,
-                ),
-            });
-        } catch (error) {
-            this.log.warn(`Unable to evaluate requires-python '${requiresPython}': ${getErrorMessage(error)}`);
+        const candidate = PythonVersion.tryParse(version);
+        const specifier = PythonVersionSpecifier.tryParse(requiresPython);
+        if (!candidate || !specifier) {
+            this.log.warn(`Unable to evaluate requires-python '${requiresPython}' against version '${version}'.`);
             return false;
         }
+        return specifier.matches(candidate);
     }
 
     private extractPrereleaseLowerBound(requiresPython: string): string | undefined {
         return requiresPython
             .split(',')
-            .map((clause) =>
-                clause
-                    .trim()
-                    .match(
-                        /^(?:>=|==|~=)\s*(\d+(?:\.\d+)*(?:(?:a|alpha|b|beta|c|rc|pre|preview)[._-]?\d+|[._-]?dev[._-]?\d+))$/i,
-                    )?.[1],
+            .map((clause) => splitClause(clause))
+            .filter(
+                (clause) =>
+                    clause && (clause.operator === '>=' || clause.operator === '==' || clause.operator === '~='),
             )
-            .map((version) => (version ? cleanPep440(version) : undefined))
-            .filter((version): version is string => !!version)
-            .find((version) => this.matchesInstallConstraint(requiresPython, version));
+            .map((clause) => PythonVersion.tryParse(clause?.literal))
+            .find((version): version is PythonVersion => !!version && version.releaseLevel !== 'final')
+            ?.toString();
     }
 
     private async installPythonAndRefresh(
@@ -2520,10 +2822,7 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
      * this callback or reachable only through `createOrReuseEnvironment`,
      * which invokes it under this lock.
      */
-    private async withCacheEntryLock<T>(
-        envDir: Uri,
-        action: (lock: AcquiredFileLock) => Promise<T>,
-    ): Promise<T> {
+    private async withCacheEntryLock<T>(envDir: Uri, action: (lock: AcquiredFileLock) => Promise<T>): Promise<T> {
         const lock = await acquireFileLock(envDir.fsPath, {
             timeoutMs: CACHE_LOCK_TIMEOUT_MS,
             retryIntervalMs: CACHE_LOCK_RETRY_MS,
@@ -2592,6 +2891,7 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
         metadata,
         selectedBase,
         pendingCreation,
+        scriptUri,
     }: CreateOrReuseEnvironmentOptions): Promise<PythonEnvironment | undefined> {
         const dependencyCount = this.getTelemetryDependencyCount(packages);
         const cacheRoot = getScriptEnvCacheRoot(this.globalStorageUri);
@@ -2599,14 +2899,8 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
 
         try {
             await fs.ensureDir(cacheRoot.fsPath);
-            return await this.withCacheEntryLock(envDir, async (lock) => {
-                const cached = await this.inspectCacheEntry(
-                    cacheRoot,
-                    envDir,
-                    metadata,
-                    selectedBase,
-                    pendingCreation,
-                );
+            return await this.withCacheEntryLock(envDir, async () => {
+                const cached = await this.inspectCacheEntry(cacheRoot, envDir, metadata, selectedBase, pendingCreation);
                 if (cached.kind === 'reusable') {
                     this.sendInlineScriptEnvReuseHitTelemetry(dependencyCount);
                     return cached.environment;
@@ -2615,11 +2909,15 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
                     this.log.warn(
                         `Preserving an inline-script cache entry that could not be safely inspected: ${envDir.fsPath}`,
                     );
+                    pendingCreation.failure = { category: 'setup-failure' };
                     this.sendInlineScriptEnvErrorTelemetry('setup-failure');
                     return undefined;
                 }
                 if (cached.kind === 'stale') {
-                    if (!(await this.removeCacheEntry(envDir))) {
+                    if (!(await this.discardCacheEntry(envDir))) {
+                        // The sidecar is gone, so the entry is inert; a later attempt retries the
+                        // deletion once the files are released.
+                        pendingCreation.failure = { category: 'setup-failure' };
                         this.sendInlineScriptEnvErrorTelemetry('setup-failure');
                         return undefined;
                     }
@@ -2632,27 +2930,25 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
                     packages,
                     selectedBase,
                     pendingCreation,
+                    scriptUri,
                 );
-                if (build.retainLock) {
-                    try {
-                        await lock.retain();
-                    } catch (error) {
-                        this.log.error(
-                            `Failed to mark the inline-script cache lock as retained: ${getErrorMessage(error)}`,
-                        );
-                    }
-                }
                 if (build.environment) {
                     this.sendInlineScriptEnvCreatedTelemetry(buildStartAtMs, dependencyCount);
                     return build.environment;
                 }
                 if (build.errorCategory) {
+                    pendingCreation.failure = {
+                        category: build.errorCategory,
+                        ...(build.errorCategory === 'package-install-cancelled' ? { cancelled: true } : {}),
+                    };
                     this.sendInlineScriptEnvErrorTelemetry(build.errorCategory);
                 }
                 return undefined;
             });
         } catch (error) {
-            this.sendInlineScriptEnvErrorTelemetry(this.getCreateOrReuseErrorCategory(error));
+            const category = this.getCreateOrReuseErrorCategory(error);
+            pendingCreation.failure = { category };
+            this.sendInlineScriptEnvErrorTelemetry(category);
             this.log.error(`Failed to create or reuse inline-script cache entry: ${getErrorMessage(error)}`);
             return undefined;
         }
@@ -2705,6 +3001,13 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
             };
         }
         const sidecar = sidecarResult.metadata;
+        if (sidecar.manuallyModified) {
+            // Packages changed outside setup, so the entry no longer matches its dependencies.
+            this.log.info(
+                `Rebuilding an inline-script cache entry whose packages were modified outside setup: ${envDir.fsPath}`,
+            );
+            return { kind: 'stale' };
+        }
         if (!this.matchesSelectedBase(sidecar, selectedBase)) {
             return { kind: 'stale' };
         }
@@ -2720,6 +3023,7 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
             this.api,
             this,
             this.baseManager,
+            'inlineScript',
         );
         if (!environment) {
             return { kind: 'uncertain' };
@@ -2756,7 +3060,7 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
     private matchesSelectedBase(sidecar: InlineScriptEnvMeta, selectedBase: SelectedBaseInterpreter): boolean {
         return (
             normalizePath(sidecar.baseInterpreterPath) === normalizePath(selectedBase.canonicalPath) &&
-            sidecar.baseInterpreterVersion === selectedBase.environment.version
+            this.areEqualPythonReleases(sidecar.baseInterpreterVersion, selectedBase.environment.version)
         );
     }
 
@@ -2766,6 +3070,7 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
         packages: ReadonlyArray<string>,
         selectedBase: SelectedBaseInterpreter,
         pendingCreation: PendingCreationContext,
+        scriptUri: Uri,
     ): Promise<BuildCacheEntryResult> {
         let result;
         try {
@@ -2779,6 +3084,10 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
                 envDir.fsPath,
                 { install: [...packages], uninstall: [] },
                 false, // trackUvEnvironment
+                {
+                    progressTitle: l10n.t('Setting up environment for {0}', path.basename(scriptUri.fsPath)),
+                    nameStyle: 'inlineScript',
+                },
             );
         } catch (error) {
             this.log.error(`Failed to build inline-script environment: ${getErrorMessage(error)}`);
@@ -2787,10 +3096,11 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
         }
 
         if (result?.pkgInstallationCancelled) {
-            this.log.warn(
-                'Inline-script package installation was cancelled; retaining the cache lock until explicit cleanup.',
+            this.log.info(
+                'Inline-script package installation was cancelled; discarding the incomplete environment.',
             );
-            return { retainLock: true, errorCategory: 'package-install-cancelled' };
+            await this.discardCacheEntry(envDir);
+            return { errorCategory: 'package-install-cancelled' };
         }
         if (!result?.environment || result.envCreationErr || result.pkgInstallationErr) {
             const error =
@@ -2830,6 +3140,145 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
         return { environment: result.environment };
     }
 
+    private async evictStaleCacheEntries(): Promise<void> {
+        const cacheRoot = getScriptEnvCacheRoot(this.globalStorageUri);
+        const physicalCacheRootPath = await this.getPhysicalOwnedCacheRootPath(cacheRoot);
+        if (!physicalCacheRootPath) {
+            return;
+        }
+
+        let entryNames: string[];
+        try {
+            entryNames = await fs.readdir(physicalCacheRootPath);
+        } catch (error) {
+            if (isFileNotFoundError(error)) {
+                return;
+            }
+            throw error;
+        }
+
+        const now = new Date();
+        const entries: CacheEntrySummary[] = [];
+        for (const entryName of entryNames.sort()) {
+            if (entryName.endsWith(FILE_LOCK_DIR_SUFFIX)) {
+                continue;
+            }
+            const entryPath = path.join(physicalCacheRootPath, entryName);
+            try {
+                const stat = await fs.lstat(entryPath);
+                if (!stat.isDirectory() || stat.isSymbolicLink()) {
+                    continue;
+                }
+                const sidecar = await inspectMetaJson(Uri.file(entryPath));
+                if (sidecar.kind === 'valid') {
+                    entries.push({
+                        envDirPath: entryPath,
+                        lastUsedAt: new Date(sidecar.metadata.lastUsedAt),
+                    });
+                }
+            } catch (error) {
+                if (!isFileNotFoundError(error)) {
+                    this.log.warn(
+                        `Unable to inspect inline-script cache entry for TTL eviction ${entryPath}: ${getErrorMessage(error)}`,
+                    );
+                }
+            }
+        }
+
+        const staleEntries = selectStaleEntries(entries, now, CACHE_TTL_MS);
+        if (staleEntries.length === 0) {
+            return;
+        }
+
+        const persistedAssociations = await this.getPersistedAssociationSnapshot();
+        const scriptPaths = this.getTrackedScriptPaths(persistedAssociations);
+        const priorSelections = this.getPriorSelections(scriptPaths);
+        // Never evict an environment that a script association still points to. `lastUsedAt` is only
+        // refreshed when an environment is created or reused (never when it is resolved for run, debug,
+        // or Pylance), so an actively-used environment can look stale here. Reclaim only orphaned entries
+        // (e.g. superseded by a dependency change, or left behind by a deleted or deselected script).
+        const referencedEnvDirs = this.getReferencedCacheEntryDirs(persistedAssociations, scriptPaths);
+        const evictableStaleEntries = staleEntries.filter(
+            (staleEntry) => !referencedEnvDirs.has(normalizePath(staleEntry)),
+        );
+        if (evictableStaleEntries.length === 0) {
+            return;
+        }
+        const removedCacheEntries = new Set<string>();
+        for (const staleEntry of evictableStaleEntries) {
+            try {
+                const removed = await this.removeCacheEntryForClear(
+                    cacheRoot,
+                    physicalCacheRootPath,
+                    path.basename(staleEntry),
+                    {
+                        reclaimRetainedLock: false,
+                        afterRemove: () => {
+                            this.cacheMutationRevision += 1;
+                        },
+                        shouldRemove: async (entryPath) => {
+                            const sidecar = await inspectMetaJson(Uri.file(entryPath));
+                            return (
+                                sidecar.kind === 'valid' &&
+                                selectStaleEntries(
+                                    [
+                                        {
+                                            envDirPath: entryPath,
+                                            lastUsedAt: new Date(sidecar.metadata.lastUsedAt),
+                                        },
+                                    ],
+                                    now,
+                                    CACHE_TTL_MS,
+                                ).length === 1
+                            );
+                        },
+                    },
+                );
+                if (removed) {
+                    removedCacheEntries.add(normalizePath(removed));
+                } else if (await this.isCacheEntryDefinitelyMissing(staleEntry)) {
+                    this.cacheMutationRevision += 1;
+                    removedCacheEntries.add(normalizePath(staleEntry));
+                }
+            } catch (error) {
+                this.log.warn(
+                    `Unable to evict stale inline-script cache entry ${staleEntry}: ${getErrorMessage(error)}`,
+                );
+                if (await this.isCacheEntryDefinitelyMissing(staleEntry)) {
+                    this.cacheMutationRevision += 1;
+                    removedCacheEntries.add(normalizePath(staleEntry));
+                }
+            }
+        }
+
+        if (removedCacheEntries.size === 0) {
+            return;
+        }
+
+        this.replaceDiscoveredEnvironments(
+            this.collection.filter((environment) => !removedCacheEntries.has(normalizePath(environment.sysPrefix))),
+        );
+        const invalidatedScriptPaths = await this.getInvalidatedAssociationPaths(
+            scriptPaths,
+            persistedAssociations,
+            removedCacheEntries,
+        );
+        await this.clearInvalidatedAssociations(invalidatedScriptPaths, persistedAssociations, priorSelections);
+    }
+
+    private async isCacheEntryDefinitelyMissing(entryPath: string): Promise<boolean> {
+        try {
+            await fs.lstat(entryPath);
+            return false;
+        } catch (error) {
+            if (isFileNotFoundError(error)) {
+                return true;
+            }
+            this.log.warn(`Unable to verify stale inline-script cache entry ${entryPath}: ${getErrorMessage(error)}`);
+            return false;
+        }
+    }
+
     private async clearCacheInternal(activeCreatesAtStart: number): Promise<void> {
         if (activeCreatesAtStart > 0) {
             const message = l10n.t(
@@ -2842,21 +3291,8 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
         const cacheRoot = getScriptEnvCacheRoot(this.globalStorageUri);
         const physicalCacheRootPath = await this.getPhysicalOwnedCacheRootPath(cacheRoot);
         const persistedAssociations = await this.getPersistedAssociationSnapshot();
-        const scriptPaths = new Set<string>([
-            ...Object.keys(persistedAssociations),
-            ...this.associationRevisions.keys(),
-            ...this.cachedAssociationValidatedAt.keys(),
-            ...this.lastValidatedMetadataIdentities.keys(),
-            ...this.lastValidatedMetadataIdentityProofs.keys(),
-            ...this.fsPathToEnv.keys(),
-            ...this.fsPathToPersistedAssociation.keys(),
-            ...this.pendingRehydrations.keys(),
-            ...this.pendingMetadataRefreshes.keys(),
-        ]);
-        const priorSelections = new Map<string, PythonEnvironment | undefined>();
-        scriptPaths.forEach((scriptPath) => {
-            priorSelections.set(scriptPath, this.fsPathToEnv.get(scriptPath));
-        });
+        const scriptPaths = this.getTrackedScriptPaths(persistedAssociations);
+        const priorSelections = this.getPriorSelections(scriptPaths);
 
         const removedCacheEntries = new Set<string>();
         const deletionErrors: unknown[] = [];
@@ -2891,11 +3327,7 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
 
             for (const entryName of cacheEntryNames) {
                 try {
-                    const removed = await this.removeCacheEntryForClear(
-                        cacheRoot,
-                        physicalCacheRootPath,
-                        entryName,
-                    );
+                    const removed = await this.removeCacheEntryForClear(cacheRoot, physicalCacheRootPath, entryName);
                     if (removed) {
                         removedCacheEntries.add(normalizePath(removed));
                     }
@@ -2934,24 +3366,21 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
         cacheRoot: Uri,
         originalPhysicalCacheRootPath: string,
         entryName: string,
+        options: CacheEntryRemovalOptions = {},
     ): Promise<string | undefined> {
         const envDirPath = path.join(originalPhysicalCacheRootPath, entryName);
         let lock: AcquiredFileLock | undefined;
         try {
-            lock = await this.acquireCacheEntryLockForClear(envDirPath);
+            lock = await this.acquireCacheEntryLockForClear(envDirPath, options.reclaimRetainedLock !== false);
             const currentPhysicalCacheRootPath = await this.getPhysicalOwnedCacheRootPath(cacheRoot);
             if (!currentPhysicalCacheRootPath) {
                 return undefined;
             }
-            if (
-                normalizePath(currentPhysicalCacheRootPath) !== normalizePath(originalPhysicalCacheRootPath)
-            ) {
+            if (normalizePath(currentPhysicalCacheRootPath) !== normalizePath(originalPhysicalCacheRootPath)) {
                 const message = l10n.t(
                     'Refusing to clear the script environment cache because its physical root changed during cleanup.',
                 );
-                this.log.error(
-                    `${message} (${originalPhysicalCacheRootPath} -> ${currentPhysicalCacheRootPath})`,
-                );
+                this.log.error(`${message} (${originalPhysicalCacheRootPath} -> ${currentPhysicalCacheRootPath})`);
                 throw new Error(message);
             }
 
@@ -2962,7 +3391,11 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
             if (!entryPath) {
                 return undefined;
             }
+            if (options.shouldRemove && !(await options.shouldRemove(entryPath))) {
+                return undefined;
+            }
             await this.deleteCacheEntryForClear(entryPath);
+            options.afterRemove?.();
             return entryPath;
         } finally {
             if (lock) {
@@ -2971,7 +3404,10 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
         }
     }
 
-    private async acquireCacheEntryLockForClear(envDirPath: string): Promise<AcquiredFileLock> {
+    private async acquireCacheEntryLockForClear(
+        envDirPath: string,
+        reclaimRetainedLock: boolean = true,
+    ): Promise<AcquiredFileLock> {
         for (let attempt = 0; attempt < 3; attempt += 1) {
             try {
                 return await acquireFileLock(envDirPath, { timeoutMs: 0, retryIntervalMs: CACHE_LOCK_RETRY_MS });
@@ -2980,9 +3416,12 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
                     throw error;
                 }
                 const lockState = await inspectFileLock(envDirPath);
-                if (lockState === 'stale' || lockState === 'retained') {
+                if (lockState === 'stale' || (lockState === 'retained' && reclaimRetainedLock)) {
                     await reclaimFileLock(envDirPath);
                     continue;
+                }
+                if (lockState === 'retained') {
+                    throw error;
                 }
                 if (lockState === 'missing') {
                     continue;
@@ -2996,9 +3435,10 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
     }
 
     private isLockContentionError(error: unknown): boolean {
-        const code = typeof error === 'object' && error !== null && 'code' in error
-            ? (error as NodeJS.ErrnoException).code
-            : undefined;
+        const code =
+            typeof error === 'object' && error !== null && 'code' in error
+                ? (error as NodeJS.ErrnoException).code
+                : undefined;
         return code === 'ELOCKED' || code === 'ELOCKRETAINED';
     }
 
@@ -3028,7 +3468,10 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
     private async getPhysicalOwnedCacheRootPath(cacheRoot: Uri): Promise<string | undefined> {
         const globalStoragePath = path.resolve(this.globalStorageUri.fsPath);
         const cacheRootPath = path.resolve(cacheRoot.fsPath);
-        if (path.basename(cacheRootPath) !== INLINE_SCRIPT_CACHE_DIR_NAME || normalizePath(path.dirname(cacheRootPath)) !== normalizePath(globalStoragePath)) {
+        if (
+            path.basename(cacheRootPath) !== INLINE_SCRIPT_CACHE_DIR_NAME ||
+            normalizePath(path.dirname(cacheRootPath)) !== normalizePath(globalStoragePath)
+        ) {
             this.log.error(`Refusing to clear inline-script cache from unsafe root: ${cacheRootPath}`);
             throw new Error(l10n.t('Refusing to clear the script environment cache from an unsafe cache root.'));
         }
@@ -3048,9 +3491,13 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
         }
 
         if (!globalStorageStat.isDirectory() || globalStorageStat.isSymbolicLink()) {
-            this.log.error(`Refusing to clear inline-script cache from redirected globalStorage root: ${globalStoragePath}`);
+            this.log.error(
+                `Refusing to clear inline-script cache from redirected globalStorage root: ${globalStoragePath}`,
+            );
             throw new Error(
-                l10n.t('Refusing to clear the script environment cache because the global storage root is not a normal directory.'),
+                l10n.t(
+                    'Refusing to clear the script environment cache because the global storage root is not a normal directory.',
+                ),
             );
         }
 
@@ -3067,7 +3514,9 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
         if (!cacheRootStat.isDirectory() || cacheRootStat.isSymbolicLink()) {
             this.log.error(`Refusing to clear inline-script cache from redirected cache root: ${cacheRootPath}`);
             throw new Error(
-                l10n.t('Refusing to clear the script environment cache because the cache root is not a normal directory.'),
+                l10n.t(
+                    'Refusing to clear the script environment cache because the cache root is not a normal directory.',
+                ),
             );
         }
 
@@ -3084,7 +3533,9 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
             }
             this.log.error(`Failed to resolve inline-script cache root physically: ${getErrorMessage(error)}`);
             throw new Error(
-                l10n.t('Refusing to clear the script environment cache because its physical location could not be verified.'),
+                l10n.t(
+                    'Refusing to clear the script environment cache because its physical location could not be verified.',
+                ),
             );
         }
 
@@ -3117,7 +3568,9 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
         if (!stat.isDirectory() || stat.isSymbolicLink()) {
             this.log.error(`Refusing to clear inline-script cache entry from unsafe path: ${entryPath}`);
             throw new Error(
-                l10n.t('Refusing to clear the script environment cache because a cache entry is not a normal directory.'),
+                l10n.t(
+                    'Refusing to clear the script environment cache because a cache entry is not a normal directory.',
+                ),
             );
         }
 
@@ -3125,7 +3578,9 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
         if (!resolvedEntryPath) {
             this.log.error(`Refusing to clear inline-script cache entry outside the expected root: ${entryPath}`);
             throw new Error(
-                l10n.t('Refusing to clear the script environment cache because a cache entry is outside the expected root.'),
+                l10n.t(
+                    'Refusing to clear the script environment cache because a cache entry is outside the expected root.',
+                ),
             );
         }
 
@@ -3134,6 +3589,26 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
 
     private deleteCacheEntryForClear(entryPath: string): Promise<void> {
         return fs.remove(entryPath);
+    }
+
+    private getReferencedCacheEntryDirs(
+        persistedAssociations: PersistedInlineScriptEnvironments,
+        scriptPaths: ReadonlySet<string>,
+    ): Set<string> {
+        const referenced = new Set<string>();
+        for (const scriptPath of scriptPaths) {
+            const environmentPaths = [
+                persistedAssociations[scriptPath]?.environmentPath,
+                this.fsPathToPersistedAssociation.get(scriptPath)?.environmentPath,
+                this.fsPathToEnv.get(scriptPath)?.environmentPath.fsPath,
+            ].filter((value): value is string => value !== undefined);
+            for (const environmentPath of environmentPaths) {
+                // Mirror isRemovedOrMissingCacheAssociation: the cache-entry dir is two levels above the
+                // interpreter executable (e.g. <envDir>/bin/python -> <envDir>).
+                referenced.add(normalizePath(path.dirname(path.dirname(environmentPath))));
+            }
+        }
+        return referenced;
     }
 
     private async getInvalidatedAssociationPaths(
@@ -3188,7 +3663,7 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
                 return undefined;
             }
             try {
-                await this.enqueuePersistence(async (state) => state.clear([INLINE_SCRIPT_ENVS_KEY]));
+                await this.clearPersistedAssociations();
                 return undefined;
             } catch (error) {
                 this.log.error(`Failed to clear inline-script environment associations: ${getErrorMessage(error)}`);
@@ -3202,7 +3677,7 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
         );
         try {
             if (persistedPathsToClear.length === Object.keys(persistedAssociations).length) {
-                await this.enqueuePersistence(async (state) => state.clear([INLINE_SCRIPT_ENVS_KEY]));
+                await this.clearPersistedAssociations();
             } else if (persistedPathsToClear.length > 0) {
                 await this.updatePersistedAssociations(
                     persistedPathsToClear.map((scriptPath) => ({
@@ -3238,19 +3713,79 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
     }
 
     private async getPersistedAssociationSnapshot(): Promise<PersistedInlineScriptEnvironments> {
-        await this.persistenceQueue;
-        const state = await getWorkspacePersistentState();
-        return this.parsePersistedAssociations(await state.get<unknown>(INLINE_SCRIPT_ENVS_KEY))?.records ?? {};
+        return this.parsePersistedAssociations(await this.associationStore.read<unknown>())?.records ?? {};
+    }
+
+    private getTrackedScriptPaths(persistedAssociations: PersistedInlineScriptEnvironments): Set<string> {
+        return new Set([
+            ...Object.keys(persistedAssociations),
+            ...this.associationRevisions.keys(),
+            ...this.cachedAssociationValidatedAt.keys(),
+            ...this.lastValidatedMetadataIdentities.keys(),
+            ...this.lastValidatedMetadataIdentityProofs.keys(),
+            ...this.fsPathToEnv.keys(),
+            ...this.fsPathToPersistedAssociation.keys(),
+            ...this.pendingRehydrations.keys(),
+            ...this.pendingMetadataRefreshes.keys(),
+        ]);
+    }
+
+    private getPriorSelections(scriptPaths: ReadonlySet<string>): Map<string, PythonEnvironment | undefined> {
+        return new Map(Array.from(scriptPaths, (scriptPath) => [scriptPath, this.fsPathToEnv.get(scriptPath)]));
+    }
+
+    /**
+     * Make a cache entry permanently unreusable, then best-effort delete it.
+     *
+     * The sidecar is removed first and is the correctness guarantee: `inspectCacheEntry` treats a
+     * missing/invalid `.meta.json` as `stale`, so an entry whose directory survives is inert and
+     * gets rebuilt (or swept by TTL eviction) rather than reused. Directory removal is retried
+     * briefly because a just-stopped installer can hold file handles for a short while,
+     * especially on Windows.
+     */
+    private async discardCacheEntry(envDir: Uri): Promise<boolean> {
+        await this.removeCacheEntrySidecars(envDir);
+        return this.removeCacheEntry(envDir);
+    }
+
+    /** Delete `.meta.json` and any backup sidecars so a surviving directory cannot be revalidated. */
+    private async removeCacheEntrySidecars(envDir: Uri): Promise<void> {
+        let entries: string[];
+        try {
+            entries = await fs.readdir(envDir.fsPath);
+        } catch (error) {
+            if (!isFileNotFoundError(error)) {
+                this.log.warn(`Failed to scan inline-script cache sidecars: ${getErrorMessage(error)}`);
+            }
+            return;
+        }
+        const sidecars = entries.filter(
+            (entry) => entry === META_JSON_FILENAME || entry.startsWith(`${META_JSON_FILENAME}.backup-`),
+        );
+        for (const sidecar of sidecars) {
+            try {
+                await fs.remove(path.join(envDir.fsPath, sidecar));
+            } catch (error) {
+                this.log.warn(`Failed to remove inline-script cache sidecar ${sidecar}: ${getErrorMessage(error)}`);
+            }
+        }
     }
 
     private async removeCacheEntry(envDir: Uri): Promise<boolean> {
-        try {
-            await fs.remove(envDir.fsPath);
-            return true;
-        } catch (error) {
-            this.log.error(`Failed to remove incomplete inline-script environment: ${getErrorMessage(error)}`);
-            return false;
+        let lastError: unknown;
+        for (let attempt = 0; attempt < CACHE_ENTRY_REMOVAL_ATTEMPTS; attempt += 1) {
+            try {
+                await fs.remove(envDir.fsPath);
+                return true;
+            } catch (error) {
+                lastError = error;
+                if (attempt < CACHE_ENTRY_REMOVAL_ATTEMPTS - 1) {
+                    await timeout(CACHE_ENTRY_REMOVAL_RETRY_MS * (attempt + 1));
+                }
+            }
         }
+        this.log.error(`Failed to remove incomplete inline-script environment: ${getErrorMessage(lastError)}`);
+        return false;
     }
 
     private isDefinitivelyStalePathError(error: unknown): boolean {
@@ -3266,12 +3801,9 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
     }
 
     private areEqualPythonReleases(actual: string, expected: string): boolean {
-        const actualRelease = parseReleaseSegments(actual);
-        const expectedRelease = parseReleaseSegments(expected);
-        if (actualRelease === undefined || expectedRelease === undefined) {
-            return false;
-        }
-        return compareReleaseSegments(actualRelease, expectedRelease) === 0;
+        const actualVersion = PythonVersion.tryParse(actual);
+        const expectedVersion = PythonVersion.tryParse(expected);
+        return !!actualVersion && !!expectedVersion && actualVersion.compareTo(expectedVersion) === 0;
     }
 
     private getTelemetryDependencyCount(packages: ReadonlyArray<string>): number {
@@ -3357,6 +3889,15 @@ interface PersistedAssociationChange {
 interface ScriptReference {
     readonly uri: Uri;
     readonly scriptPath: string;
+}
+
+interface RenamedScriptTransfer {
+    readonly oldUri: Uri;
+    readonly oldPath: string;
+    readonly newUri: Uri;
+    readonly newPath: string;
+    readonly record: PersistedAssociationRecord;
+    readonly environment: PythonEnvironment | undefined;
 }
 
 interface PendingScriptUpdate extends ScriptReference {

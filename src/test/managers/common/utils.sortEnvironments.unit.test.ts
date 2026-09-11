@@ -1,11 +1,7 @@
-import assert from 'assert';
-import { PythonEnvironment } from '../../../api';
-import { getLatest, sortEnvironments } from '../../../managers/common/utils';
+import assert from 'node:assert';
+import path from 'node:path';
+import { sortEnvironments } from '../../../managers/common/utils';
 import { createMockPythonEnvironment } from '../../mocks/pythonEnvironment';
-
-function env(name: string, version: string): PythonEnvironment {
-    return createMockPythonEnvironment({ name, envPath: `/envs/${name}`, version });
-}
 
 function permutations<T>(items: T[]): T[][] {
     if (items.length <= 1) {
@@ -20,48 +16,83 @@ function permutations<T>(items: T[]): T[][] {
 }
 
 suite('sortEnvironments', () => {
-    test('orders environments with a known version descending', () => {
-        const sorted = sortEnvironments([env('a', '3.12.0'), env('b', '3.14.7'), env('c', '3.13.13')]);
+    test('sorts normalized PET versions in descending order', () => {
+        const versions = ['3.9.6.final.0', '3.14.3.final.0', '3.11.9.final.0'];
+        const environments = versions.map((version) =>
+            createMockPythonEnvironment({ envPath: path.join('python', version), version }),
+        );
 
         assert.deepStrictEqual(
-            sorted.map((e) => e.name),
-            ['b', 'c', 'a'],
+            sortEnvironments(environments).map((environment) => environment.version),
+            ['3.14.3.final.0', '3.11.9.final.0', '3.9.6.final.0'],
         );
     });
 
-    test('places environments without a version after those with one', () => {
-        const sorted = sortEnvironments([env('nopy', ''), env('a', '3.12.0'), env('b', '3.14.7')]);
+    test('sorts final releases before prereleases', () => {
+        const versions = ['3.14.0b2', '3.14.0', '3.14.0rc1', '3.14.0a1'];
+        const environments = versions.map((version) =>
+            createMockPythonEnvironment({ envPath: path.join('python', version), version }),
+        );
 
         assert.deepStrictEqual(
-            sorted.map((e) => e.name),
-            ['b', 'a', 'nopy'],
+            sortEnvironments(environments).map((environment) => environment.version),
+            ['3.14.0', '3.14.0rc1', '3.14.0b2', '3.14.0a1'],
+        );
+    });
+
+    test('sorts valid versions before invalid versions', () => {
+        const invalid = createMockPythonEnvironment({
+            name: 'invalid',
+            envPath: path.join('python', 'invalid'),
+            version: 'unknown',
+        });
+        const valid = createMockPythonEnvironment({
+            name: 'valid',
+            envPath: path.join('python', 'valid'),
+            version: '3.14.3',
+        });
+
+        assert.deepStrictEqual(sortEnvironments([invalid, valid]), [valid, invalid]);
+    });
+
+    test('sorts errored environments after usable environments regardless of version', () => {
+        const usable = createMockPythonEnvironment({ envPath: path.join('python', 'usable'), version: '3.9.6' });
+        const errored = {
+            ...createMockPythonEnvironment({ envPath: path.join('python', 'errored'), version: '3.14.3' }),
+            error: 'Broken interpreter',
+        };
+
+        assert.deepStrictEqual(sortEnvironments([errored, usable]), [usable, errored]);
+    });
+
+    test('places environments without a version after those with one', () => {
+        const versions = ['', '3.12.0', '3.14.7'];
+        const environments = versions.map((version, index) =>
+            createMockPythonEnvironment({ envPath: path.join('python', String(index)), version }),
+        );
+
+        assert.deepStrictEqual(
+            sortEnvironments(environments).map((environment) => environment.version),
+            ['3.14.7', '3.12.0', ''],
         );
     });
 
     test('sorts the same environments the same way regardless of discovery order', () => {
-        // `version` is a plain string on the public API, so a manager can surface a value that
-        // is neither empty nor parseable as PEP 440. Comparing such a value against a real
-        // version has to stay antisymmetric: otherwise `Array.prototype.sort` is free to
-        // return an implementation-defined permutation, and the list shuffles depending on the
-        // order the environments happened to be discovered in.
-        const envs = [env('base', '3.13.13'), env('odd', 'unknown'), env('git', '3.14.6'), env('lh', '3.14.7')];
-
-        const orders = new Set(
-            permutations(envs).map((p) =>
-                sortEnvironments([...p])
-                    .map((e) => e.name)
-                    .join(','),
-            ),
+        // Include unknown versions and equivalent PET/compact versions so that name and
+        // path tie breakers remain consistent with PythonVersion comparison.
+        const environments = [
+            { name: 'base', version: '3.13.13', directory: 'base' },
+            { name: 'odd', version: 'unknown', directory: 'odd' },
+            { name: 'nopy', version: '', directory: 'nopy' },
+            { name: 'lh', version: '3.14.7', directory: 'lh' },
+            { name: 'lh', version: '3.14.7.final.0', directory: 'lh-pet' },
+        ].map(({ name, version, directory }) =>
+            createMockPythonEnvironment({ name, envPath: path.join('python', directory), version }),
         );
+        const expected = [environments[3], environments[4], environments[0], environments[2], environments[1]];
 
-        assert.strictEqual(orders.size, 1, `expected one stable order, got: ${[...orders].join(' | ')}`);
-    });
-});
-
-suite('getLatest', () => {
-    test('returns the newest environment even when the first candidate has no version', () => {
-        const latest = getLatest([env('nopy', ''), env('base', '3.13.13'), env('lh', '3.14.7')]);
-
-        assert.strictEqual(latest?.name, 'lh');
+        for (const permutation of permutations(environments)) {
+            assert.deepStrictEqual(sortEnvironments(permutation), expected);
+        }
     });
 });

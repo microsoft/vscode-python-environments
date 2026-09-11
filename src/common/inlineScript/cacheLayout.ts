@@ -42,6 +42,8 @@ export interface InlineScriptEnvMeta {
     readonly baseInterpreterVersion: string;
     /** Last successful use as a canonical UTC string produced by `Date.toISOString()`. */
     readonly lastUsedAt: string;
+    /** Set when packages changed outside setup; the entry no longer matches its declared dependencies. */
+    readonly manuallyModified?: boolean;
     /** Bounded SHA-256 hashes of metadata identities proven for this cache entry. */
     readonly sourceMetadataIdentityHashes?: readonly string[];
 }
@@ -447,11 +449,7 @@ function validateMeta(value: unknown): InlineScriptEnvMeta | 'unsupported' | und
         return undefined;
     }
     const obj = value as Record<string, unknown>;
-    if (
-        typeof obj.schemaVersion !== 'number' ||
-        !Number.isSafeInteger(obj.schemaVersion) ||
-        obj.schemaVersion <= 0
-    ) {
+    if (typeof obj.schemaVersion !== 'number' || !Number.isSafeInteger(obj.schemaVersion) || obj.schemaVersion <= 0) {
         return undefined;
     }
     if (obj.schemaVersion > META_SCHEMA_VERSION) {
@@ -469,6 +467,9 @@ function validateMeta(value: unknown): InlineScriptEnvMeta | 'unsupported' | und
     if (!isCanonicalIsoTimestamp(obj.lastUsedAt)) {
         return undefined;
     }
+    if (obj.manuallyModified !== undefined && typeof obj.manuallyModified !== 'boolean') {
+        return undefined;
+    }
     const sourceMetadataIdentityHashes = validateSourceMetadataIdentityHashes(obj.sourceMetadataIdentityHashes);
     if (obj.sourceMetadataIdentityHashes !== undefined && sourceMetadataIdentityHashes === undefined) {
         return undefined;
@@ -479,6 +480,7 @@ function validateMeta(value: unknown): InlineScriptEnvMeta | 'unsupported' | und
         baseInterpreterPath: obj.baseInterpreterPath,
         baseInterpreterVersion: obj.baseInterpreterVersion,
         lastUsedAt: obj.lastUsedAt,
+        ...(obj.manuallyModified === true ? { manuallyModified: true } : {}),
         ...(sourceMetadataIdentityHashes ? { sourceMetadataIdentityHashes } : {}),
     };
 }

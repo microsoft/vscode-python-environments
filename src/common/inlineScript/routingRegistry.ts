@@ -3,9 +3,10 @@
 
 import * as path from 'path';
 import { Disposable, Event, EventEmitter, Uri } from 'vscode';
+import type { InlineScriptEnvErrorCategory } from '../telemetry/constants';
+import { normalizePath } from '../utils/pathUtils';
 import { normalizeDependency } from './cacheKey';
 import { InlineScriptMetadata } from './metadata';
-import { normalizePath } from '../utils/pathUtils';
 
 export interface InlineScriptRouteabilityChangeEvent {
     readonly uri: Uri;
@@ -20,6 +21,20 @@ export interface InlineScriptMetadataChangeEvent {
     readonly metadataRevision: number;
 }
 
+/**
+ * Outcome of the last inline-script setup attempt for a script: a `failed` reason, or a benign
+ * `skipped` (an environment was built but intentionally not associated). Diagnostic side-channel —
+ * not routing state — recorded by the env manager and read once by the interactive setup command.
+ */
+export type InlineScriptSetupOutcome =
+    | {
+          readonly kind: 'failed';
+          readonly category: InlineScriptEnvErrorCategory;
+          readonly requiresPython?: string;
+      }
+    | { readonly kind: 'cancelled' }
+    | { readonly kind: 'skipped' };
+
 interface ScriptRoutingState {
     readonly uri?: Uri;
     readonly metadata?: InlineScriptMetadata;
@@ -31,6 +46,7 @@ interface ScriptRoutingState {
 export class InlineScriptRoutingRegistry implements Disposable {
     private readonly states = new Map<string, ScriptRoutingState>();
     private readonly metadataRevisions = new Map<string, number>();
+    private readonly setupOutcomes = new Map<string, InlineScriptSetupOutcome>();
     private readonly _onDidChangeRouteability = new EventEmitter<InlineScriptRouteabilityChangeEvent>();
     private readonly _onDidChangeMetadata = new EventEmitter<InlineScriptMetadataChangeEvent>();
 
@@ -121,6 +137,35 @@ export class InlineScriptRoutingRegistry implements Disposable {
         return scriptPath ? this.states.get(scriptPath)?.validatedAssociation === true : false;
     }
 
+    public noteSetupOutcome(script: Uri | string, outcome: InlineScriptSetupOutcome): void {
+        const scriptPath = getInlineScriptRoutingKey(script);
+        if (scriptPath) {
+            this.setupOutcomes.set(scriptPath, outcome);
+        }
+    }
+
+    public clearSetupOutcome(script: Uri | string): void {
+        const scriptPath = getInlineScriptRoutingKey(script);
+        if (scriptPath) {
+            this.setupOutcomes.delete(scriptPath);
+        }
+    }
+
+    public getSetupOutcome(script: Uri | string): InlineScriptSetupOutcome | undefined {
+        const scriptPath = getInlineScriptRoutingKey(script);
+        return scriptPath ? this.setupOutcomes.get(scriptPath) : undefined;
+    }
+
+    public takeSetupOutcome(script: Uri | string): InlineScriptSetupOutcome | undefined {
+        const scriptPath = getInlineScriptRoutingKey(script);
+        if (!scriptPath) {
+            return undefined;
+        }
+        const outcome = this.setupOutcomes.get(scriptPath);
+        this.setupOutcomes.delete(scriptPath);
+        return outcome;
+    }
+
     public shouldRoute(uri: Uri): boolean {
         const scriptPath = getInlineScriptRoutingKey(uri);
         return scriptPath ? this.isRouteable(this.states.get(scriptPath)) : false;
@@ -129,6 +174,7 @@ export class InlineScriptRoutingRegistry implements Disposable {
     public dispose(): void {
         this.states.clear();
         this.metadataRevisions.clear();
+        this.setupOutcomes.clear();
         this._onDidChangeMetadata.dispose();
         this._onDidChangeRouteability.dispose();
     }

@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation. All rights reserved.
 // Licensed under the MIT License.
 
-import { Disposable, LogOutputChannel, Uri } from 'vscode';
+import { Disposable, LogOutputChannel, Memento, Uri } from 'vscode';
 import { EnvironmentManager, PythonEnvironmentApi } from '../../../api';
 import { traceInfo, traceVerbose } from '../../../common/logging';
 import { InlineScriptFeatureActivation } from '../../../features/inlineScript/activation';
@@ -20,6 +20,7 @@ export async function registerInlineScriptFeatures(
     baseManager: EnvironmentManager,
     globalStorageUri: Uri,
     activation: InlineScriptFeatureActivation,
+    workspaceState: Memento,
 ): Promise<void> {
     if (!activation.enabled) {
         traceVerbose('Inline-script env manager: skipping registration (internal flag is off)');
@@ -31,7 +32,15 @@ export async function registerInlineScriptFeatures(
     }
 
     const api: PythonEnvironmentApi = await getPythonApi();
-    const mgr = new InlineScriptEnvManager(nativeFinder, api, baseManager, globalStorageUri, log, routingRegistry);
+    const mgr = new InlineScriptEnvManager(
+        nativeFinder,
+        api,
+        baseManager,
+        globalStorageUri,
+        log,
+        workspaceState,
+        routingRegistry,
+    );
     disposables.push(mgr, api.registerEnvironmentManager(mgr));
     setImmediate(() => mgr.startActivationDiscovery());
     traceInfo('Inline-script env manager: registered (internal flag is on)');
