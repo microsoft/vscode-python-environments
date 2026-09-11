@@ -312,7 +312,13 @@ export async function removeEnvironmentCommand(context: unknown, managers: Envir
         }
     } else if (context instanceof ProjectEnvironment) {
         const view = context as ProjectEnvironment;
-        const manager = managers.getEnvironmentManager(view.parent.project.uri);
+        const inlineScript = view.environment.envId.managerId === INLINE_SCRIPT_MANAGER_ID;
+        const manager = managers.getEnvironmentManager(
+            inlineScript ? view.environment : view.parent.project.uri,
+        );
+        if (inlineScript && !manager) {
+            throw new Error(l10n.t('The inline-script environment manager is not available to delete this environment.'));
+        }
         await manager?.remove(view.environment);
     } else {
         traceError(`Invalid context for remove command: ${context}`);

@@ -105,6 +105,10 @@ Once a mismatch is confirmed during an environment lookup, the affected scripts'
 
 An environment whose recorded inventory is unknown, or cannot be read, is left alone rather than treated as modified.
 
+**Delete Environment** on an inline-script environment deletes that single cached environment without a confirmation dialog and clears its known associations in the current workspace. All scripts sharing it will need setup again. Python files, project entries and settings, the base Python installation, and other cached environments are kept. Other windows discover the missing environment when they revalidate it.
+
+Stop runs or debug sessions using the environment before deleting it. The extension refuses deletion while script environments are being created; files held open by other processes may also prevent deletion. Failures are reported rather than treated as successful removal. If deletion begins but cannot finish, affected scripts need setup again; remaining files can be removed by retrying Delete.
+
 On Windows, changing only the letter casing of a script's filename keeps its existing environment association. A rename does not validate unsaved dependency edits or install packages.
 
 ## Assigning Environments to Projects

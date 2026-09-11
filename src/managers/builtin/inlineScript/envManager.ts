@@ -28,6 +28,7 @@ import {
     PythonEnvironment,
     PythonEnvironmentApi,
     RefreshEnvironmentsScope,
+    RemoveEnvironmentOptions,
     ResolveEnvironmentContext,
     SetEnvironmentScope,
 } from '../../../api';
@@ -169,6 +170,7 @@ interface MergeCacheEntrySourceMetadataIdentityHashResult {
 
 interface CacheEntryRemovalOptions {
     readonly shouldRemove?: (entryPath: string) => Promise<boolean>;
+    readonly beforeRemove?: (entryPath: string) => Promise<void>;
     readonly afterRemove?: () => void;
     readonly reclaimRetainedLock?: boolean;
 }
@@ -551,6 +553,17 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
         const activeCreatesAtStart = this.activeCreateOperations;
         return this.enqueueCacheMaintenance(() =>
             this.enqueueSelection(() => this.clearCacheInternal(activeCreatesAtStart)),
+        );
+    }
+
+    /** Delete one cached environment and its associations without a confirmation prompt. */
+    async remove(environment: PythonEnvironment, _options?: RemoveEnvironmentOptions): Promise<void> {
+        if (!environment) {
+            throw new Error(l10n.t('An inline-script environment is required for deletion.'));
+        }
+        const activeCreatesAtStart = this.activeCreateOperations;
+        return this.enqueueCacheMaintenance(() =>
+            this.enqueueSelection(() => this.clearCacheInternal(activeCreatesAtStart, environment)),
         );
     }
 
@@ -3384,7 +3397,36 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
         }
     }
 
-    private async clearCacheInternal(activeCreatesAtStart: number): Promise<void> {
+    private getRemovalEntryName(
+        environment: PythonEnvironment,
+        cacheRoot: Uri,
+        physicalCacheRootPath: string | undefined,
+    ): string {
+        const prefix = environment.sysPrefix;
+        const parent = path.dirname(path.resolve(prefix));
+        const entryName = path.basename(path.resolve(prefix));
+        const insideCache = [cacheRoot.fsPath, physicalCacheRootPath].some(
+            (root) => root !== undefined && normalizePath(parent) === normalizePath(path.resolve(root)),
+        );
+        if (
+            environment.envId.managerId !== INLINE_SCRIPT_MANAGER_ID ||
+            !path.isAbsolute(prefix) ||
+            !insideCache ||
+            entryName.toLowerCase().endsWith(FILE_LOCK_DIR_SUFFIX) ||
+            environment.environmentPath.scheme !== 'file' ||
+            !isSameOrParentPath(prefix, environment.environmentPath.fsPath)
+        ) {
+            const message = l10n.t('Refusing to delete an environment that is not an owned inline-script cache entry.');
+            this.log.error(`${message} ${prefix}`);
+            throw new Error(message);
+        }
+        return entryName;
+    }
+
+    private async clearCacheInternal(
+        activeCreatesAtStart: number,
+        environment?: PythonEnvironment,
+    ): Promise<void> {
         if (activeCreatesAtStart > 0) {
             const message = l10n.t(
                 'Cannot clear the script environment cache while script environments are being created.',
@@ -3395,16 +3437,34 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
 
         const cacheRoot = getScriptEnvCacheRoot(this.globalStorageUri);
         const physicalCacheRootPath = await this.getPhysicalOwnedCacheRootPath(cacheRoot);
+        const selectedEntry = environment
+            ? this.getRemovalEntryName(environment, cacheRoot, physicalCacheRootPath)
+            : undefined;
+        const selectedEntryPath = selectedEntry === undefined ? undefined : Uri.joinPath(cacheRoot, selectedEntry).fsPath;
+        const selectedEntryKeys = new Set<string>();
+        if (selectedEntry !== undefined && selectedEntryPath !== undefined) {
+            selectedEntryKeys.add(normalizePath(selectedEntryPath));
+            if (physicalCacheRootPath) {
+                selectedEntryKeys.add(normalizePath(path.join(physicalCacheRootPath, selectedEntry)));
+            }
+        }
         const persistedAssociations = await this.getPersistedAssociationSnapshot();
-        const scriptPaths = this.getTrackedScriptPaths(persistedAssociations);
+        const trackedScriptPaths = this.getTrackedScriptPaths(persistedAssociations);
+        const scriptPaths = selectedEntry === undefined ? trackedScriptPaths : new Set(
+            [...trackedScriptPaths].filter((scriptPath) =>
+                [...this.getReferencedCacheEntryDirs(persistedAssociations, new Set([scriptPath]))]
+                    .some((entryPath) => selectedEntryKeys.has(entryPath)),
+            ),
+        );
         const priorSelections = this.getPriorSelections(scriptPaths);
 
         const removedCacheEntries = new Set<string>();
         const deletionErrors: unknown[] = [];
+        let selectedDeletionStarted = false;
         if (physicalCacheRootPath) {
             let entryNames: string[];
             try {
-                entryNames = await fs.readdir(physicalCacheRootPath);
+                entryNames = selectedEntry === undefined ? await fs.readdir(physicalCacheRootPath) : [selectedEntry];
             } catch (error) {
                 if (isFileNotFoundError(error)) {
                     entryNames = [];
@@ -3432,7 +3492,27 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
 
             for (const entryName of cacheEntryNames) {
                 try {
-                    const removed = await this.removeCacheEntryForClear(cacheRoot, physicalCacheRootPath, entryName);
+                    const removed = await this.removeCacheEntryForClear(
+                        cacheRoot,
+                        physicalCacheRootPath,
+                        entryName,
+                        selectedEntry === undefined ? undefined : {
+                            beforeRemove: async (entryPath) => {
+                                const sidecar = await inspectMetaJson(Uri.file(entryPath));
+                                if (sidecar.kind === 'unavailable') {
+                                    throw new Error(l10n.t('Cannot delete the cached environment because its metadata is unreadable.'));
+                                }
+                                // If removal stops partway through, never reuse the remaining
+                                // files as a healthy environment. Explicit setup can rebuild it.
+                                if (sidecar.kind === 'valid') {
+                                    await writeMetaJson(Uri.file(entryPath), { ...sidecar.metadata, manuallyModified: true });
+                                }
+                                selectedDeletionStarted = true;
+                                this.cacheMutationRevision += 1;
+                            },
+                            afterRemove: () => { this.cacheMutationRevision += 1; },
+                        },
+                    );
                     if (removed) {
                         removedCacheEntries.add(normalizePath(removed));
                     }
@@ -3445,6 +3525,15 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
             }
         }
 
+        if (selectedEntryPath !== undefined &&
+            (removedCacheEntries.size > 0 || await this.isCacheEntryDefinitelyMissing(selectedEntryPath))) {
+            this.cacheMutationRevision += 1;
+            selectedEntryKeys.forEach((entryPath) => removedCacheEntries.add(entryPath));
+            this.replaceDiscoveredEnvironments(
+                this.collection.filter((entry) => !selectedEntryKeys.has(normalizePath(entry.sysPrefix))),
+            );
+        }
+
         const invalidatedScriptPaths = await this.getInvalidatedAssociationPaths(
             scriptPaths,
             persistedAssociations,
@@ -3454,11 +3543,21 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
             invalidatedScriptPaths,
             persistedAssociations,
             priorSelections,
+            selectedEntry === undefined,
         );
         if (persistenceError) {
             deletionErrors.push(persistenceError);
         }
+        if (selectedDeletionStarted && deletionErrors.length > 0 && environment) {
+            this.unrouteScriptsUsingEnvironment(environment.sysPrefix);
+        }
         if (deletionErrors.length > 0) {
+            if (selectedEntry !== undefined) {
+                throw new Error(l10n.t(
+                    'Failed to delete the cached script environment: {0}',
+                    deletionErrors.map(getErrorMessage).join('; '),
+                ));
+            }
             throw new Error(
                 `Failed to completely clear the inline-script environment cache: ${deletionErrors
                     .map((error) => getErrorMessage(error))
@@ -3499,6 +3598,7 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
             if (options.shouldRemove && !(await options.shouldRemove(entryPath))) {
                 return undefined;
             }
+            await options.beforeRemove?.(entryPath);
             await this.deleteCacheEntryForClear(entryPath);
             options.afterRemove?.();
             return entryPath;
@@ -3762,9 +3862,10 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
         invalidatedScriptPaths: ReadonlySet<string>,
         persistedAssociations: PersistedInlineScriptEnvironments,
         priorSelections: ReadonlyMap<string, PythonEnvironment | undefined>,
+        allowClearingStore = true,
     ): Promise<unknown | undefined> {
         if (invalidatedScriptPaths.size === 0) {
-            if (Object.keys(persistedAssociations).length > 0) {
+            if (!allowClearingStore || Object.keys(persistedAssociations).length > 0) {
                 return undefined;
             }
             try {
@@ -3781,7 +3882,8 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
             (scriptPath) => persistedAssociations[scriptPath] !== undefined,
         );
         try {
-            if (persistedPathsToClear.length === Object.keys(persistedAssociations).length) {
+            // A single-entry deletion must preserve unrecognized records belonging to other entries.
+            if (allowClearingStore && persistedPathsToClear.length === Object.keys(persistedAssociations).length) {
                 await this.clearPersistedAssociations();
             } else if (persistedPathsToClear.length > 0) {
                 await this.updatePersistedAssociations(
