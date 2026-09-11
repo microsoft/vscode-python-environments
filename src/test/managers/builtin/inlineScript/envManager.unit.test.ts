@@ -7,8 +7,9 @@ import * as fs from 'fs-extra';
 import * as os from 'os';
 import * as path from 'path';
 import * as sinon from 'sinon';
-import { Disposable, LogOutputChannel, Memento, TextDocument, Uri } from 'vscode';
+import { CancellationTokenSource, Disposable, LogOutputChannel, Memento, TextDocument, Uri } from 'vscode';
 import {
+    DidChangeEnvironmentEventArgs,
     EnvironmentChangeKind,
     EnvironmentManager,
     PythonEnvironment,
@@ -24,13 +25,16 @@ import { EventNames } from '../../../../common/telemetry/constants';
 import * as telemetrySender from '../../../../common/telemetry/sender';
 import { isWindows } from '../../../../common/utils/platformUtils';
 import { normalizePath } from '../../../../common/utils/pathUtils';
+import { createDeferred } from '../../../../common/utils/deferred';
 import { getVenvPythonPath } from '../../../../common/utils/virtualEnvironment';
 import * as workspaceApis from '../../../../common/workspace.apis';
+import { InlineScriptCodeLensProvider } from '../../../../features/inlineScript/codeLens';
 import { InlineScriptEnvManager } from '../../../../managers/builtin/inlineScript/envManager';
 import * as builtinUtils from '../../../../managers/builtin/utils';
 import * as uvPythonInstaller from '../../../../managers/builtin/uvPythonInstaller';
 import * as venvUtils from '../../../../managers/builtin/venvUtils';
 import { NativePythonFinder } from '../../../../managers/common/nativePythonFinder';
+import { MockDocument } from '../../../mocks/mockDocument';
 
 const CACHE_KEY = '0123456789abcdef';
 const NOW = new Date('2026-07-21T12:00:00.000Z');
@@ -2363,7 +2367,7 @@ suite('InlineScriptEnvManager', () => {
             assert.strictEqual(routingRegistry.shouldRoute(uri), true);
         });
 
-        test('an external change to site-packages is detected on the next validation', async () => {
+        test('a lookup invalidates drift and restores the setup CodeLens without a save', async () => {
             const uri = scriptUri();
             const environment = await manager.create(uri);
             assert.ok(environment);
@@ -2375,10 +2379,189 @@ suite('InlineScriptEnvManager', () => {
             // Validation results are cached briefly, so drift is observed by the next validation
             // after that window rather than instantly.
             clock.tick(6_000);
+            assert.strictEqual(await manager.get(uri), undefined);
+            assert.strictEqual(routingRegistry.shouldRoute(uri), false);
+            const provider = new InlineScriptCodeLensProvider(routingRegistry, 'setup');
+            const tokenSource = new CancellationTokenSource();
+            try {
+                const document = new MockDocument(
+                    '# /// script\n# dependencies = ["requests"]\n# ///\n', uri.fsPath, async () => true,
+                );
+                assert.strictEqual(provider.provideCodeLenses(document, tokenSource.token).length, 1);
+            } finally {
+                tokenSource.dispose();
+                provider.dispose();
+            }
+        });
+
+        test('drift invalidates and notifies all sharing scripts but leaves another entry alone', async () => {
+            const first = scriptUri('first.py');
+            const second = scriptUri('second.py');
+            const unrelated = scriptUri('unrelated.py');
+            const environment = await manager.create(first);
+            assert.ok(environment);
+            const otherEnvironment = await createOwnedEnvironment('other-entry');
+            for (const [uri, selected] of [
+                [first, environment], [second, environment], [unrelated, otherEnvironment],
+            ] as const) {
+                await manager.set(uri, selected);
+                await triggerSavedMetadataChange(routingRegistry, manager, uri);
+            }
+            const events: DidChangeEnvironmentEventArgs[] = [];
+            manager.onDidChangeEnvironment((event) => events.push(event));
+            await setInstalledDistributions(environment.sysPrefix, ['added-1.0.0.dist-info']);
+            clock.tick(6_000);
+
+            assert.strictEqual(await manager.get(first), undefined);
+
+            assert.strictEqual(routingRegistry.shouldRoute(first), false);
+            assert.strictEqual(routingRegistry.shouldRoute(second), false);
+            assert.strictEqual(routingRegistry.shouldRoute(unrelated), true);
+            assert.strictEqual(await manager.get(unrelated), otherEnvironment);
+            assert.deepStrictEqual(
+                events.map((event) => ({ uri: event.uri?.toString(), old: event.old, new: event.new })),
+                [first, second].map((uri) => ({ uri: uri.toString(), old: environment, new: undefined })),
+            );
+            assert.ok(persistedAssociations, 'invalidation must preserve associations for explicit repair');
+        });
+
+        test('cold rehydration invalidates previously advertised routing after drift', async () => {
+            const uri = scriptUri();
+            const environment = await manager.create(uri);
+            assert.ok(environment);
+            await manager.set(uri, environment);
             await triggerSavedMetadataChange(routingRegistry, manager, uri);
+            await setInstalledDistributions(environment.sysPrefix, ['added-1.0.0.dist-info']);
+            manager.dispose();
+            manager = new InlineScriptEnvManager(
+                nativeFinder, api, baseManager, globalStorageUri, makeFakeLog(), workspaceMemento, routingRegistry,
+            );
+
+            assert.strictEqual(await manager.get(uri), undefined);
+            await waitForCondition(() => !routingRegistry.shouldRoute(uri), 'rehydration must clear stale routing');
+        });
+
+        test('a stale drift observation cannot invalidate a newer repair of the same entry', async () => {
+            const first = scriptUri('first.py');
+            const second = scriptUri('second.py');
+            const environment = await manager.create(first);
+            assert.ok(environment);
+            for (const uri of [first, second]) {
+                await manager.set(uri, environment);
+                await triggerSavedMetadataChange(routingRegistry, manager, uri);
+            }
+            await setInstalledDistributions(environment.sysPrefix, ['added-1.0.0.dist-info']);
+            const oldHash = await cacheLayout.readInstalledPackagesHash(Uri.file(environment.sysPrefix));
+            const readHash = cacheLayout.readInstalledPackagesHash;
+            const delayedRead = createDeferred<string | undefined>();
+            const hashReadStub = sinon.stub(cacheLayout, 'readInstalledPackagesHash').callsFake(readHash);
+            hashReadStub.onFirstCall().returns(delayedRead.promise);
+            clock.tick(6_000);
+            const lookup = manager.get(first);
+            try {
+                await waitForStubCall(hashReadStub);
+                const repaired = await manager.create(second);
+                assert.ok(repaired);
+                await manager.set(second, repaired);
+            } finally {
+                delayedRead.resolve(oldHash);
+            }
+            await lookup;
+
+            assert.strictEqual(routingRegistry.shouldRoute(first), true);
+            assert.strictEqual(routingRegistry.shouldRoute(second), true);
+            assert.ok(await manager.get(first));
+        });
+
+        test('a newer selection wins when an old drift lookup finishes later', async () => {
+            const uri = scriptUri();
+            const environment = await manager.create(uri);
+            assert.ok(environment);
+            await manager.set(uri, environment);
+            await triggerSavedMetadataChange(routingRegistry, manager, uri);
+            const otherEnvironment = await createOwnedEnvironment('other-entry');
+            await setInstalledDistributions(environment.sysPrefix, ['added-1.0.0.dist-info']);
+            const oldHash = await cacheLayout.readInstalledPackagesHash(Uri.file(environment.sysPrefix));
+            const delayedRead = createDeferred<string | undefined>();
+            const hashReadStub = sinon.stub(cacheLayout, 'readInstalledPackagesHash').returns(delayedRead.promise);
+            clock.tick(6_000);
+            const lookup = manager.get(uri);
+            try {
+                await waitForStubCall(hashReadStub);
+                await manager.set(uri, otherEnvironment);
+            } finally {
+                delayedRead.resolve(oldHash);
+            }
+
+            assert.strictEqual(await lookup, otherEnvironment);
+            assert.strictEqual(routingRegistry.shouldRoute(uri), true);
+        });
+
+        test('a contended confirmation lock preserves routing and does not wait for an installer', async () => {
+            const uri = scriptUri();
+            const environment = await manager.create(uri);
+            assert.ok(environment);
+            await manager.set(uri, environment);
+            await triggerSavedMetadataChange(routingRegistry, manager, uri);
+            await setInstalledDistributions(environment.sysPrefix, ['added-1.0.0.dist-info']);
+            clock.tick(6_000);
+            lockStub.resetHistory();
+            lockStub.rejects(Object.assign(new Error('Entry is being rebuilt'), { code: 'ELOCKED' }));
+
+            assert.strictEqual(await manager.get(uri), undefined);
+
+            assert.ok(lockStub.calledOnce);
+            assert.strictEqual(lockStub.firstCall.args[1].timeoutMs, 0);
+            assert.strictEqual(routingRegistry.shouldRoute(uri), true);
+        });
+
+        test('unavailable inventory does not invalidate an otherwise usable environment', async () => {
+            const uri = scriptUri();
+            const environment = await manager.create(uri);
+            assert.ok(environment);
+            await manager.set(uri, environment);
+            await triggerSavedMetadataChange(routingRegistry, manager, uri);
+            sinon.stub(cacheLayout, 'readInstalledPackagesHash').resolves(undefined);
+            clock.tick(6_000);
+
+            assert.strictEqual(await manager.get(uri), environment);
+            assert.strictEqual(routingRegistry.shouldRoute(uri), true);
+        });
+
+        test('an unavailable confirmation read does not publish an old drift observation', async () => {
+            const uri = scriptUri();
+            const environment = await manager.create(uri);
+            assert.ok(environment);
+            await manager.set(uri, environment);
+            await triggerSavedMetadataChange(routingRegistry, manager, uri);
+            await setInstalledDistributions(environment.sysPrefix, ['added-1.0.0.dist-info']);
+            const oldHash = await cacheLayout.readInstalledPackagesHash(Uri.file(environment.sysPrefix));
+            const hashReadStub = sinon.stub(cacheLayout, 'readInstalledPackagesHash').resolves(undefined);
+            hashReadStub.onFirstCall().resolves(oldHash);
+            clock.tick(6_000);
+            const events: DidChangeEnvironmentEventArgs[] = [];
+            manager.onDidChangeEnvironment((event) => events.push(event));
+
+            assert.strictEqual(await manager.get(uri), undefined);
+            assert.ok(hashReadStub.calledTwice);
+            assert.strictEqual(routingRegistry.shouldRoute(uri), true);
+            assert.deepStrictEqual(events, []);
+        });
+
+        test('confirmed drift invalidation also works with the real cache-entry lock', async () => {
+            const uri = scriptUri();
+            const environment = await manager.create(uri);
+            assert.ok(environment);
+            await manager.set(uri, environment);
+            await triggerSavedMetadataChange(routingRegistry, manager, uri);
+            await setInstalledDistributions(environment.sysPrefix, ['added-1.0.0.dist-info']);
+            clock.tick(6_000);
+            lockStub.resetBehavior();
+            lockStub.callThrough();
 
             assert.strictEqual(await manager.get(uri), undefined);
             assert.strictEqual(routingRegistry.shouldRoute(uri), false);
+            assert.strictEqual(await fs.pathExists(lockfileApis.getFileLockPath(environment.sysPrefix)), false);
         });
 
         test('rebuilds instead of reusing an entry whose packages changed outside setup', async () => {

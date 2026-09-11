@@ -101,6 +101,8 @@ An inline-script environment is built from the script's `# /// script` block and
 
 Setup records which distributions it installed. If that record and the environment's contents later disagree — for example after installing a package into it from a terminal — every script sharing the environment needs setup again. Saving or reopening a script does not repair it; use the script's setup action to rebuild from its declared dependencies.
 
+Once a mismatch is confirmed during an environment lookup, the affected scripts' setup actions return without requiring a save.
+
 An environment whose recorded inventory is unknown, or cannot be read, is left alone rather than treated as modified.
 
 On Windows, changing only the letter casing of a script's filename keeps its existing environment association. A rename does not validate unsaved dependency edits or install packages.

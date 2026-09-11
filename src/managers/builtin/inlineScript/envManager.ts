@@ -1240,7 +1240,10 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
                     return undefined;
                 }
                 if (sidecar && (await this.hasInstalledPackagesChanged(sidecar, resolved))) {
-                    return undefined;
+                    await this.invalidateCurrentPackageDrift(resolved);
+                    return this.isCurrentAssociationRevision(scriptPath, revision)
+                        ? undefined
+                        : this.fsPathToEnv.get(scriptPath);
                 }
                 const metadataIdentityProven =
                     !!sidecar &&
@@ -1432,7 +1435,10 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
             return undefined;
         }
         if (sidecar && (await this.hasInstalledPackagesChanged(sidecar, resolved))) {
-            return undefined;
+            await this.invalidateCurrentPackageDrift(resolved);
+            return this.isCurrentAssociationRevision(scriptPath, revision)
+                ? undefined
+                : this.fsPathToEnv.get(scriptPath);
         }
         const metadataIdentityProven =
             !!sidecar && this.cacheEntryProvesSourceMetadataIdentity(sidecar, resolved, metadataIdentity, metadata);
@@ -1739,7 +1745,11 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
         metadata: InlineScriptMetadata,
     ): Promise<boolean> {
         const sidecar = await this.readCurrentCacheEntrySidecar(environment);
-        if (!sidecar || (await this.hasInstalledPackagesChanged(sidecar, environment))) {
+        if (!sidecar) {
+            return false;
+        }
+        if (await this.hasInstalledPackagesChanged(sidecar, environment)) {
+            await this.invalidateCurrentPackageDrift(environment);
             return false;
         }
         return this.cacheEntryProvesSourceMetadataIdentity(sidecar, environment, metadataIdentity, metadata);
@@ -1769,6 +1779,34 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
         }
         const actualHash = await readInstalledPackagesHash(Uri.file(environment.sysPrefix));
         return compareInstalledPackages(sidecar.installedPackagesHash, actualHash) === 'changed';
+    }
+
+    private async invalidateCurrentPackageDrift(environment: PythonEnvironment): Promise<void> {
+        const envDir = Uri.file(environment.sysPrefix);
+        if (this.disposed || this.pendingCreations.has(path.basename(envDir.fsPath))) {
+            return;
+        }
+        try {
+            // The first observation may predate a repair. Confirm against the current sidecar
+            // under the build lock, without waiting for another installer on a read path.
+            await this.withCacheEntryLock(envDir, async () => {
+                const current = await this.inspectCurrentCacheEntrySidecar(environment);
+                if (current.kind !== 'valid') {
+                    return;
+                }
+                const changed = current.metadata.manuallyModified ||
+                    await this.hasInstalledPackagesChanged(current.metadata, environment);
+                if (changed && !this.disposed) {
+                    this.unrouteScriptsUsingEnvironment(envDir.fsPath);
+                }
+            }, 0);
+        } catch (error) {
+            if (this.isLockContentionError(error)) {
+                this.log.debug(`Deferred inline-script drift invalidation for busy entry ${envDir.fsPath}.`);
+            } else {
+                this.log.warn(`Unable to confirm inline-script package drift: ${getErrorMessage(error)}`);
+            }
+        }
     }
 
     private async inspectCurrentCacheEntrySidecar(
@@ -2373,18 +2411,24 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
 
     /** Un-route every script associated with the given cache entry. */
     private unrouteScriptsUsingEnvironment(envDirPath: string): void {
+        const changes: DidChangeEnvironmentEventArgs[] = [];
         for (const [scriptPath, association] of this.fsPathToPersistedAssociation.entries()) {
             if (!isSameOrParentPath(envDirPath, association.environmentPath)) {
                 continue;
             }
+            const old = this.fsPathToEnv.get(scriptPath);
             this.bumpAssociationRevision(scriptPath);
             this.pendingRehydrations.delete(scriptPath);
             this.pendingMetadataRefreshes.delete(scriptPath);
             this.fsPathToEnv.delete(scriptPath);
             const uri = this.routingRegistry.getUri(scriptPath) ?? Uri.file(scriptPath);
             this.clearValidatedRouteableState(uri);
+            if (old) {
+                changes.push({ uri, old, new: undefined });
+            }
             this.log.info(`Inline-script association for ${scriptPath} needs setup again after a package change.`);
         }
+        changes.forEach((change) => this._onDidChangeEnvironment.fire(change));
     }
 
     /**
@@ -2859,9 +2903,13 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
      * this callback or reachable only through `createOrReuseEnvironment`,
      * which invokes it under this lock.
      */
-    private async withCacheEntryLock<T>(envDir: Uri, action: (lock: AcquiredFileLock) => Promise<T>): Promise<T> {
+    private async withCacheEntryLock<T>(
+        envDir: Uri,
+        action: (lock: AcquiredFileLock) => Promise<T>,
+        timeoutMs = CACHE_LOCK_TIMEOUT_MS,
+    ): Promise<T> {
         const lock = await acquireFileLock(envDir.fsPath, {
-            timeoutMs: CACHE_LOCK_TIMEOUT_MS,
+            timeoutMs,
             retryIntervalMs: CACHE_LOCK_RETRY_MS,
         });
         try {
