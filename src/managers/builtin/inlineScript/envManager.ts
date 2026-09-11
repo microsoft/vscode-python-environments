@@ -20,7 +20,6 @@ import {
     CreateEnvironmentScope,
     DidChangeEnvironmentEventArgs,
     DidChangeEnvironmentsEventArgs,
-    DidChangePackagesEventArgs,
     EnvironmentChangeKind,
     EnvironmentManager,
     GetEnvironmentScope,
@@ -40,20 +39,24 @@ import {
 } from '../../../common/constants';
 import { getErrorMessage } from '../../../common/errors/utils';
 import { computeCacheKey, normalizeDependency } from '../../../common/inlineScript/cacheKey';
+import { InlineScriptEnvironmentModifiedError } from '../../../common/inlineScript/errors';
 import {
     CacheEntrySummary,
     CacheEnvironmentInspection,
+    compareInstalledPackages,
     getBaseInterpreterStatus,
     getScriptEnvCacheRoot,
     getScriptEnvDir,
     hashSourceMetadataIdentity,
     INLINE_SCRIPT_CACHE_DIR_NAME,
     InlineScriptEnvMeta,
+    InlineScriptMetaReadResult,
     inspectMetaJson,
     inspectOwnedCacheEntry,
     mergeSourceMetadataIdentityHashes,
     META_JSON_FILENAME,
     META_SCHEMA_VERSION,
+    readInstalledPackagesHash,
     resolveCacheEntryPath,
     restoreMetaJsonBackupUnderLock,
     selectStaleEntries,
@@ -271,16 +274,9 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
                 });
             }),
             onDidRenameFiles((event) => {
-                void this.handleRenamedScripts(event.files).catch((error) => {
+                return this.handleRenamedScripts(event.files).catch((error) => {
                     this.log.warn(
                         `Failed to update inline-script associations for renamed files: ${getErrorMessage(error)}`,
-                    );
-                });
-            }),
-            this.api.onDidChangePackages((event) => {
-                void this.handlePackagesChanged(event).catch((error) => {
-                    this.log.warn(
-                        `Failed to record an inline-script package change: ${getErrorMessage(error)}`,
                     );
                 });
             }),
@@ -966,6 +962,13 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
                 this.log.warn(message);
                 throw new Error(message);
             }
+            const sidecar = await this.readCurrentCacheEntrySidecar(environment);
+            if (sidecar?.manuallyModified || (sidecar && (await this.hasInstalledPackagesChanged(sidecar, environment)))) {
+                this.unrouteScriptsUsingEnvironment(environment.sysPrefix);
+                const error = new InlineScriptEnvironmentModifiedError();
+                this.log.warn(`${error.message} ${environment.environmentPath.fsPath}`);
+                throw error;
+            }
             environmentPath = environment.environmentPath.fsPath;
         }
 
@@ -1226,8 +1229,17 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
                 if (metadataMatch === 'mismatched') {
                     return undefined;
                 }
-                const sidecar = await this.readCurrentCacheEntrySidecar(resolved);
+                const sidecarResult = await this.inspectCurrentCacheEntrySidecar(resolved);
+                if (sidecarResult.kind === 'unavailable') {
+                    return undefined;
+                }
+                const sidecar = sidecarResult.kind === 'valid' ? sidecarResult.metadata : undefined;
+                // Legacy/future metadata can retain an API candidate, but cannot prove routing.
+                // A transient read failure above must not bypass the modification check.
                 if (sidecar && !this.cacheEntryMatchesRuntimeAndMetadata(sidecar, resolved, metadata)) {
+                    return undefined;
+                }
+                if (sidecar && (await this.hasInstalledPackagesChanged(sidecar, resolved))) {
                     return undefined;
                 }
                 const metadataIdentityProven =
@@ -1409,8 +1421,17 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
         if (metadataMatch === 'mismatched') {
             return undefined;
         }
-        const sidecar = await this.readCurrentCacheEntrySidecar(resolved);
+        const sidecarResult = await this.inspectCurrentCacheEntrySidecar(resolved);
+        if (sidecarResult.kind === 'unavailable') {
+            return undefined;
+        }
+        const sidecar = sidecarResult.kind === 'valid' ? sidecarResult.metadata : undefined;
+        // Retain compatibility candidates without proof, not unreadable entries.
+        // Routing still requires metadataIdentityProven even when this API returns a candidate.
         if (sidecar && !this.cacheEntryMatchesRuntimeAndMetadata(sidecar, resolved, metadata)) {
+            return undefined;
+        }
+        if (sidecar && (await this.hasInstalledPackagesChanged(sidecar, resolved))) {
             return undefined;
         }
         const metadataIdentityProven =
@@ -1592,6 +1613,30 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
                     normalizePath(currentAssociation.environmentPath) ===
                         normalizePath(environment.environmentPath.fsPath)
                 ) {
+                    // The revision may have changed because packages were edited, not just
+                    // because another selection won the queue. Never carry its old proof forward.
+                    const currentEnvironment = await this.getAssociationForMetadata(scriptPath, uri, metadata);
+                    if (!this.isCurrentMetadataRefreshTask(
+                        uri, metadataIdentity, metadataRevision, scriptPath, currentAssociationRevision,
+                    )) {
+                        return;
+                    }
+                    if (!currentEnvironment) {
+                        this.clearValidatedRouteableState(uri);
+                        return;
+                    }
+                    const currentProof = await this.currentCacheEntryProvesSourceMetadataIdentity(
+                        currentEnvironment, metadataIdentity, metadata,
+                    );
+                    if (!this.isCurrentMetadataRefreshTask(
+                        uri, metadataIdentity, metadataRevision, scriptPath, currentAssociationRevision,
+                    )) {
+                        return;
+                    }
+                    if (!currentProof) {
+                        this.clearValidatedRouteableState(uri);
+                        return;
+                    }
                     bindResult = await this.bindPendingMetadataIdentity(
                         scriptPath,
                         environment.environmentPath.fsPath,
@@ -1635,12 +1680,29 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
     }
 
     private async updateValidatedStateForSelection(script: ScriptReference): Promise<void> {
+        const revision = this.associationRevisions.get(script.scriptPath) ?? 0;
+        const environment = this.fsPathToEnv.get(script.scriptPath);
         const savedMetadata = await this.getSavedMetadataForPersistence(script.uri);
-        if (!savedMetadata.identity) {
+        if (!this.isCurrentAssociationRevision(script.scriptPath, revision)) {
+            return;
+        }
+        if (!environment || !savedMetadata.identity || !savedMetadata.metadata) {
             this.clearValidatedRouteableState(script.uri);
             return;
         }
         if (this.inspectAssociationMetadata(script.scriptPath, savedMetadata.identity, false) !== 'matched') {
+            this.clearValidatedRouteableState(script.uri);
+            return;
+        }
+        const proven = await this.currentCacheEntryProvesSourceMetadataIdentity(
+            environment,
+            savedMetadata.identity,
+            savedMetadata.metadata,
+        );
+        if (!this.isCurrentAssociationRevision(script.scriptPath, revision)) {
+            return;
+        }
+        if (!proven) {
             this.clearValidatedRouteableState(script.uri);
             return;
         }
@@ -1653,8 +1715,10 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
     }
 
     private async getSavedMetadataForPersistence(uri: Uri): Promise<SavedMetadataSnapshot> {
+        const scriptPath = normalizePath(uri.fsPath);
         for (const document of getOpenTextDocuments()) {
-            if (document.uri.toString() === uri.toString() && document.isDirty) {
+            if (document.uri.scheme === 'file' &&
+                normalizePath(document.uri.fsPath) === scriptPath && document.isDirty) {
                 return {};
             }
         }
@@ -1675,21 +1739,47 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
         metadata: InlineScriptMetadata,
     ): Promise<boolean> {
         const sidecar = await this.readCurrentCacheEntrySidecar(environment);
-        return (
-            !!sidecar && this.cacheEntryProvesSourceMetadataIdentity(sidecar, environment, metadataIdentity, metadata)
-        );
+        if (!sidecar || (await this.hasInstalledPackagesChanged(sidecar, environment))) {
+            return false;
+        }
+        return this.cacheEntryProvesSourceMetadataIdentity(sidecar, environment, metadataIdentity, metadata);
     }
 
     private async readCurrentCacheEntrySidecar(
         environment: PythonEnvironment,
     ): Promise<InlineScriptEnvMeta | undefined> {
-        let sidecarResult;
-        try {
-            sidecarResult = await inspectMetaJson(Uri.file(environment.sysPrefix));
-        } catch {
-            return undefined;
-        }
+        const sidecarResult = await this.inspectCurrentCacheEntrySidecar(environment);
         return sidecarResult.kind === 'valid' ? sidecarResult.metadata : undefined;
+    }
+
+    /**
+     * Whether an entry's packages no longer match what setup recorded for it.
+     *
+     * Only a definite mismatch returns `true`. An entry with no recorded inventory, or one whose
+     * inventory cannot be read, is unknown — and unknown must never invalidate a working
+     * environment. Treating "no record" as "everything was added" is precisely what once let
+     * merely listing an environment's packages force it through setup again.
+     */
+    private async hasInstalledPackagesChanged(
+        sidecar: InlineScriptEnvMeta,
+        environment: PythonEnvironment,
+    ): Promise<boolean> {
+        if (sidecar.installedPackagesHash === undefined) {
+            return false;
+        }
+        const actualHash = await readInstalledPackagesHash(Uri.file(environment.sysPrefix));
+        return compareInstalledPackages(sidecar.installedPackagesHash, actualHash) === 'changed';
+    }
+
+    private async inspectCurrentCacheEntrySidecar(
+        environment: PythonEnvironment,
+    ): Promise<InlineScriptMetaReadResult> {
+        try {
+            return await inspectMetaJson(Uri.file(environment.sysPrefix));
+        } catch (error) {
+            this.log.warn(`Unable to read inline-script cache metadata: ${getErrorMessage(error)}`);
+            return { kind: 'unavailable' };
+        }
     }
 
     private cacheEntryProvesSourceMetadataIdentity(
@@ -1712,7 +1802,7 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
         environment: PythonEnvironment,
         metadata: InlineScriptMetadata,
     ): boolean {
-        if (!this.areEqualPythonReleases(environment.version, sidecar.baseInterpreterVersion)) {
+        if (sidecar.manuallyModified || !this.areEqualPythonReleases(environment.version, sidecar.baseInterpreterVersion)) {
             return false;
         }
         const requiresPython = metadata.requiresPython?.trim();
@@ -1760,7 +1850,7 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
     }
 
     private sidecarProvesSourceMetadataIdentity(sidecar: InlineScriptEnvMeta, metadataIdentity: string): boolean {
-        if (sidecar.sourceMetadataIdentityHashes === undefined) {
+        if (sidecar.manuallyModified || sidecar.sourceMetadataIdentityHashes === undefined) {
             return false;
         }
         const expectedHash = hashSourceMetadataIdentity(metadataIdentity);
@@ -2281,75 +2371,18 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
         return run;
     }
 
-    /**
-     * Editing packages outside setup silently affects every script sharing the entry, so mark the
-     * entry non-reusable and un-route each of them; the next setup rebuilds from declared metadata.
-     */
-    private async handlePackagesChanged(event: DidChangePackagesEventArgs): Promise<void> {
-        if (this.disposed || event.environment.envId.managerId !== INLINE_SCRIPT_MANAGER_ID) {
-            return;
-        }
-        if (event.changes.length === 0) {
-            return;
-        }
-        const envDirPath = event.environment.sysPrefix;
-        // Setup installs through `managePackages`, which fires this event too. The emitter is
-        // synchronous, so a build still registered here owns this change and must not self-mark.
-        if (this.isBuildInFlightFor(envDirPath)) {
-            return;
-        }
-        const cacheRoot = getScriptEnvCacheRoot(this.globalStorageUri);
-        const envDir = Uri.file(envDirPath);
-        if ((await inspectOwnedCacheEntry(event.environment, cacheRoot, envDir)) !== 'expected') {
-            return;
-        }
-        if (!(await this.markCacheEntryManuallyModified(envDir))) {
-            return;
-        }
-        this.unrouteScriptsUsingEnvironment(envDirPath);
-    }
-
-    private isBuildInFlightFor(envDirPath: string): boolean {
-        return this.pendingCreations.has(path.basename(envDirPath));
-    }
-
-    /** Mark under the entry lock so it cannot race a concurrent build. */
-    private async markCacheEntryManuallyModified(envDir: Uri): Promise<boolean> {
-        try {
-            return await this.withCacheEntryLock(envDir, async () => {
-                // Re-check now that the build, if any, has released the lock.
-                if (this.isBuildInFlightFor(envDir.fsPath)) {
-                    return false;
-                }
-                const sidecar = await inspectMetaJson(envDir);
-                if (sidecar.kind !== 'valid' || sidecar.metadata.manuallyModified) {
-                    return false;
-                }
-                await writeMetaJson(envDir, { ...sidecar.metadata, manuallyModified: true });
-                this.cacheMutationRevision += 1;
-                this.log.info(
-                    `Inline-script environment packages were modified outside setup; it will be rebuilt on next setup: ${envDir.fsPath}`,
-                );
-                return true;
-            });
-        } catch (error) {
-            // A build holding the lock rewrites the sidecar anyway.
-            this.log.warn(
-                `Failed to record an inline-script package modification for ${envDir.fsPath}: ${getErrorMessage(error)}`,
-            );
-            return false;
-        }
-    }
-
     /** Un-route every script associated with the given cache entry. */
     private unrouteScriptsUsingEnvironment(envDirPath: string): void {
         for (const [scriptPath, association] of this.fsPathToPersistedAssociation.entries()) {
             if (!isSameOrParentPath(envDirPath, association.environmentPath)) {
                 continue;
             }
-            this.invalidateCachedAssociationValidation(scriptPath);
+            this.bumpAssociationRevision(scriptPath);
+            this.pendingRehydrations.delete(scriptPath);
+            this.pendingMetadataRefreshes.delete(scriptPath);
+            this.fsPathToEnv.delete(scriptPath);
             const uri = this.routingRegistry.getUri(scriptPath) ?? Uri.file(scriptPath);
-            this.routingRegistry.setValidatedAssociation(uri, false);
+            this.clearValidatedRouteableState(uri);
             this.log.info(`Inline-script association for ${scriptPath} needs setup again after a package change.`);
         }
     }
@@ -2392,7 +2425,11 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
                 // Only follow the rename when the destination is still a routable local `.py` file;
                 // renaming to another extension (or off the local filesystem) drops the association.
                 const newPath = getInlineScriptRoutingKey(newUri);
-                if (!record || newPath === undefined || newPath === oldPath) {
+                if (record && newPath === oldPath) {
+                    // The association key is unchanged; the detector updates the URI and saved metadata.
+                    continue;
+                }
+                if (!record || newPath === undefined) {
                     clears.push({ uri: oldUri, scriptPath: oldPath });
                     continue;
                 }
@@ -3039,15 +3076,30 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
         if (requiresPython && !this.matchesInstallConstraint(requiresPython, environment.version)) {
             return { kind: 'stale' };
         }
+        // Packages are compared here, under the entry lock, so a rebuild is chosen deliberately
+        // rather than reusing an entry whose contents no longer match what setup installed.
+        const actualPackagesHash = await readInstalledPackagesHash(envDir);
+        const packagesComparison = compareInstalledPackages(sidecar.installedPackagesHash, actualPackagesHash);
+        if (packagesComparison === 'changed') {
+            this.log.info(
+                `Rebuilding an inline-script cache entry whose packages changed outside setup: ${envDir.fsPath}`,
+            );
+            return { kind: 'stale' };
+        }
         try {
             pendingCreation.hasStartedRecordingSourceMetadataIdentityHashes = true;
             const sourceMetadataIdentityHashes = this.mergePendingCreationSourceMetadataIdentityHashes(
                 sidecar.sourceMetadataIdentityHashes,
                 pendingCreation,
             );
+            // An entry with no recorded inventory is unknown, not modified. Record it now so later
+            // comparisons have a baseline, and never treat the absent record as evidence of a change.
+            const installedPackagesHash =
+                packagesComparison === 'unknown' ? actualPackagesHash : sidecar.installedPackagesHash;
             await writeMetaJson(envDir, {
                 ...sidecar,
                 lastUsedAt: new Date().toISOString(),
+                ...(installedPackagesHash ? { installedPackagesHash } : {}),
                 ...(sourceMetadataIdentityHashes ? { sourceMetadataIdentityHashes } : {}),
             });
             pendingCreation.recordedSourceMetadataIdentityHashes = sourceMetadataIdentityHashes;
@@ -3123,11 +3175,16 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
                 undefined,
                 pendingCreation,
             );
+            // Recorded inside the cache-entry lock, alongside the build that produced it. Keeping
+            // this write in the same locked section is what makes it impossible for the extension
+            // to later mistake its own installation for an edit made outside setup.
+            const installedPackagesHash = await readInstalledPackagesHash(envDir);
             await writeMetaJson(envDir, {
                 schemaVersion: META_SCHEMA_VERSION,
                 baseInterpreterPath: selectedBase.canonicalPath,
                 baseInterpreterVersion: selectedBase.environment.version,
                 lastUsedAt: new Date().toISOString(),
+                ...(installedPackagesHash ? { installedPackagesHash } : {}),
                 ...(sourceMetadataIdentityHashes ? { sourceMetadataIdentityHashes } : {}),
             });
             pendingCreation.recordedSourceMetadataIdentityHashes = sourceMetadataIdentityHashes;

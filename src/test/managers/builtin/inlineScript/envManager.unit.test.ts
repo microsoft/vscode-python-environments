@@ -9,7 +9,6 @@ import * as path from 'path';
 import * as sinon from 'sinon';
 import { Disposable, LogOutputChannel, Memento, TextDocument, Uri } from 'vscode';
 import {
-    DidChangePackagesEventArgs,
     EnvironmentChangeKind,
     EnvironmentManager,
     PythonEnvironment,
@@ -102,7 +101,6 @@ suite('InlineScriptEnvManager', () => {
     let api: PythonEnvironmentApi;
     let apiGetEnvironmentsStub: sinon.SinonStub;
     let apiRefreshEnvironmentsStub: sinon.SinonStub;
-    let packagesChangedListener: ((e: DidChangePackagesEventArgs) => unknown) | undefined;
     let baseEnvironment: PythonEnvironment;
     let baseExecutable: string;
     let baseManager: EnvironmentManager;
@@ -130,6 +128,7 @@ suite('InlineScriptEnvManager', () => {
     let tempRoot: string;
     let baseInterpreterStatusStub: sinon.SinonStub;
     let writeMetaStub: sinon.SinonStub;
+    let openDocumentsStub: sinon.SinonStub;
     let deleteFilesListener: ((e: { files: readonly Uri[] }) => unknown) | undefined;
     let renameFilesListener: ((e: { files: readonly { oldUri: Uri; newUri: Uri }[] }) => unknown) | undefined;
     let workspaceState: {
@@ -152,8 +151,7 @@ suite('InlineScriptEnvManager', () => {
         api = {
             getEnvironments: apiGetEnvironmentsStub,
             refreshEnvironments: apiRefreshEnvironmentsStub,
-            onDidChangePackages: (listener: (e: DidChangePackagesEventArgs) => unknown) => {
-                packagesChangedListener = listener;
+            onDidChangePackages: () => {
                 return new Disposable(() => undefined);
             },
         } as unknown as PythonEnvironmentApi;
@@ -228,11 +226,18 @@ suite('InlineScriptEnvManager', () => {
                     renameFilesListener = undefined;
                 });
             });
-        sinon.stub(workspaceApis, 'getOpenTextDocuments').returns([]);
+        openDocumentsStub = sinon.stub(workspaceApis, 'getOpenTextDocuments').returns([]);
         createWithProgressStub = sinon.stub(venvUtils, 'createWithProgress').callsFake(async (...args: unknown[]) => {
             const envDir = args[6] as string;
             const selectedBase = args[4] as PythonEnvironment;
             await fs.outputFile(getVenvPythonPath(envDir), '');
+            // A real build produces a site-packages directory; the manager records its contents
+            // as the entry's baseline inventory.
+            await fs.ensureDir(
+                isWindows()
+                    ? path.join(envDir, 'Lib', 'site-packages')
+                    : path.join(envDir, 'lib', 'python3.12', 'site-packages'),
+            );
             const environment = makeEnvironment(
                 'ms-python.python:inline-script',
                 selectedBase.version,
@@ -378,9 +383,9 @@ suite('InlineScriptEnvManager', () => {
         deleteFilesListener!({ files });
     }
 
-    function fireRename(oldUri: Uri, newUri: Uri): void {
+    async function fireRename(oldUri: Uri, newUri: Uri): Promise<void> {
         assert.ok(renameFilesListener, 'rename listener should be registered');
-        renameFilesListener!({ files: [{ oldUri, newUri }] });
+        await renameFilesListener!({ files: [{ oldUri, newUri }] });
     }
 
     function workspaceStateSetCalls(key: string): readonly sinon.SinonSpyCall[] {
@@ -1301,6 +1306,7 @@ suite('InlineScriptEnvManager', () => {
                     baseInterpreterPath: baseExecutable,
                     baseInterpreterVersion: baseEnvironment.version,
                     lastUsedAt: NOW.toISOString(),
+                    installedPackagesHash: cacheLayout.hashInstalledDistributions([]),
                     sourceMetadataIdentityHashes: [
                         cacheLayout.hashSourceMetadataIdentity(VALID_METADATA_IDENTITY),
                     ],
@@ -2307,14 +2313,19 @@ suite('InlineScriptEnvManager', () => {
     });
 
     suite('package drift', () => {
-        // The listener is fire-and-forget, so wait for its async work rather than the call.
-        function firePackagesChanged(environment: PythonEnvironment): void {
-            assert.ok(packagesChangedListener, 'expected the manager to subscribe to package changes');
-            packagesChangedListener!({
-                environment,
-                manager: {} as never,
-                changes: [{ kind: 0 as never, pkg: {} as never }],
-            });
+        function sitePackagesDir(envPath: string): string {
+            return isWindows()
+                ? path.join(envPath, 'Lib', 'site-packages')
+                : path.join(envPath, 'lib', 'python3.12', 'site-packages');
+        }
+
+        async function setInstalledDistributions(envPath: string, distributions: readonly string[]): Promise<void> {
+            const dir = sitePackagesDir(envPath);
+            await fs.remove(dir);
+            await fs.ensureDir(dir);
+            for (const distribution of distributions) {
+                await fs.ensureDir(path.join(dir, distribution));
+            }
         }
 
         function sidecarFor(environment: PythonEnvironment): cacheLayout.InlineScriptEnvMeta | undefined {
@@ -2322,93 +2333,67 @@ suite('InlineScriptEnvManager', () => {
             return typeof entry === 'string' ? undefined : entry;
         }
 
-        test('marks an owned entry manually modified and un-routes every script using it', async () => {
-            const first = scriptUri('shared_one.py');
-            const second = scriptUri('shared_two.py');
-            const environment = await createOwnedEnvironment();
-            await manager.set(first, environment);
-            await manager.set(second, environment);
-            routingRegistry.setValidatedAssociation(first, true);
-            routingRegistry.setValidatedAssociation(second, true);
-
-            firePackagesChanged(environment);
-            await waitForCondition(
-                () => sidecarFor(environment)?.manuallyModified === true,
-                'the modified cache entry should be marked in its sidecar',
-            );
-
-            // Both scripts sharing the entry lose routing, not just the edited one.
-            assert.strictEqual(routingRegistry.hasValidatedAssociation(first), false);
-            assert.strictEqual(routingRegistry.hasValidatedAssociation(second), false);
-        });
-
-        test('rebuilds instead of reusing an entry whose packages were modified', async () => {
+        // Named for the defect it prevents: an entry with no recorded inventory once compared
+        // against an empty list, so simply listing its packages looked like a user installation
+        // and forced a working environment through setup again.
+        test('bug 1: an entry with no recorded inventory is never treated as modified', async () => {
             const uri = scriptUri();
             const environment = await createOwnedEnvironment();
+            await setInstalledDistributions(environment.sysPrefix, ['requests-2.32.0.dist-info']);
             await manager.set(uri, environment);
-            firePackagesChanged(environment);
-            await waitForCondition(
-                () => sidecarFor(environment)?.manuallyModified === true,
-                'the modified cache entry should be marked in its sidecar',
-            );
-            createWithProgressStub.resetHistory();
+            await triggerSavedMetadataChange(routingRegistry, manager, uri);
 
-            await manager.create(uri);
-
-            assert.strictEqual(
-                createWithProgressStub.callCount,
-                1,
-                'a drifted entry must be rebuilt, not reused',
-            );
+            assert.strictEqual(sidecarFor(environment)?.installedPackagesHash, undefined);
+            assert.strictEqual(await manager.get(uri), environment);
+            assert.strictEqual(routingRegistry.shouldRoute(uri), true);
         });
 
-        test('ignores package changes for environments it does not own', async () => {
+        // The record is written inside the cache-entry lock that already guards the build, so the
+        // extension cannot observe its own installation as an edit made outside setup.
+        test('bug 2: setup records its own installation, so a later check reports no drift', async () => {
             const uri = scriptUri();
-            const environment = await createOwnedEnvironment();
+
+            const environment = await manager.create(uri);
+            assert.ok(environment);
             await manager.set(uri, environment);
-            routingRegistry.setValidatedAssociation(uri, true);
+            await triggerSavedMetadataChange(routingRegistry, manager, uri);
 
-            firePackagesChanged({
-                ...environment,
-                envId: { managerId: 'ms-python.python:venv', id: 'some-venv' },
-            });
-            await nextTurn();
-            await nextTurn();
-            await nextTurn();
-
-            assert.strictEqual(sidecarFor(environment)?.manuallyModified, undefined);
-            assert.strictEqual(routingRegistry.hasValidatedAssociation(uri), true);
+            assert.ok(sidecarFor(environment)?.installedPackagesHash, 'setup must record what it installed');
+            assert.strictEqual(await manager.get(uri), environment);
+            assert.strictEqual(routingRegistry.shouldRoute(uri), true);
         });
-        test('does not mark an entry while its own build is in flight', async () => {
-            // The real createWithProgress installs through managePackages, which fires this same
-            // event while the build still holds the cache-entry lock, so setup must not mark the
-            // entry it is building. Two entries are used so the outcomes are distinguishable: the
-            // unguarded entry settling proves the guarded one had at least as long to settle.
-            const building = await createOwnedEnvironment();
-            const edited = await createOwnedEnvironment('bbbbbbbbbbbbbbbb');
-            const buildingScript = scriptUri('building.py');
-            await manager.set(buildingScript, building);
-            routingRegistry.setValidatedAssociation(buildingScript, true);
-            const pendingCreations = (
-                manager as unknown as { pendingCreations: Map<string, unknown> }
-            ).pendingCreations;
-            pendingCreations.set(CACHE_KEY, {});
 
-            firePackagesChanged(building);
-            firePackagesChanged(edited);
-            await waitForCondition(
-                () => sidecarFor(edited)?.manuallyModified === true,
-                'a package change outside a build should be recorded',
-            );
-            await nextTurn();
-            await nextTurn();
+        test('an external change to site-packages is detected on the next validation', async () => {
+            const uri = scriptUri();
+            const environment = await manager.create(uri);
+            assert.ok(environment);
+            await manager.set(uri, environment);
+            await triggerSavedMetadataChange(routingRegistry, manager, uri);
+            assert.strictEqual(routingRegistry.shouldRoute(uri), true);
 
-            assert.strictEqual(
-                sidecarFor(building)?.manuallyModified,
-                undefined,
-                'setup must not mark the entry it is building',
+            await setInstalledDistributions(environment.sysPrefix, ['left-pad-1.0.0.dist-info']);
+            // Validation results are cached briefly, so drift is observed by the next validation
+            // after that window rather than instantly.
+            clock.tick(6_000);
+            await triggerSavedMetadataChange(routingRegistry, manager, uri);
+
+            assert.strictEqual(await manager.get(uri), undefined);
+            assert.strictEqual(routingRegistry.shouldRoute(uri), false);
+        });
+
+        test('rebuilds instead of reusing an entry whose packages changed outside setup', async () => {
+            const uri = scriptUri();
+            const environment = await manager.create(uri);
+            assert.ok(environment);
+            const buildsAfterFirstCreate = createWithProgressStub.callCount;
+
+            await setInstalledDistributions(environment.sysPrefix, ['tampered-9.9.9.dist-info']);
+            assert.ok(await manager.create(uri));
+
+            assert.ok(
+                createWithProgressStub.callCount > buildsAfterFirstCreate,
+                'a drifted entry must be rebuilt rather than reused',
             );
-            assert.strictEqual(routingRegistry.hasValidatedAssociation(buildingScript), true);
         });
     });
 
@@ -4516,6 +4501,50 @@ suite('InlineScriptEnvManager', () => {
             restarted.dispose();
         });
 
+        test('retains a warm association but does not return it when its sidecar is temporarily unreadable', async () => {
+            const uri = scriptUri();
+            const environment = await createOwnedEnvironment();
+            await manager.set(uri, environment);
+            await triggerSavedMetadataChange(routingRegistry, manager, uri);
+            const savedAssociations = structuredClone(persistedAssociations);
+            clock.tick(5_001);
+            const nextRead = inspectMetaStub.callCount;
+            inspectMetaStub.onCall(nextRead).resolves({ kind: 'unavailable' });
+
+            assert.strictEqual(await manager.get(uri), undefined);
+            assert.deepStrictEqual(persistedAssociations, savedAssociations);
+            assert.strictEqual(await manager.get(uri), environment, 'a later successful read should recover without setup');
+            assert.ok(createWithProgressStub.notCalled);
+        });
+
+        test('does not bypass modification checks after an unreadable sidecar during restart', async () => {
+            const uri = scriptUri();
+            const environment = await createOwnedEnvironment();
+            await manager.set(uri, environment);
+            setSidecar(await makeSidecar({ manuallyModified: true }));
+            const savedAssociations = structuredClone(persistedAssociations);
+            inspectMetaStub.resolves({ kind: 'unavailable' });
+            const registry = new InlineScriptRoutingRegistry();
+            const restarted = new InlineScriptEnvManager(
+                nativeFinder, api, baseManager, globalStorageUri, makeFakeLog(),
+                workspaceMemento, registry,
+            );
+            try {
+                await triggerSavedMetadataChange(registry, restarted, uri);
+                assert.strictEqual(await restarted.get(uri), undefined);
+                assert.strictEqual(registry.shouldRoute(uri), false);
+                assert.deepStrictEqual(persistedAssociations, savedAssociations);
+
+                inspectMetaStub.resolves({ kind: 'valid', metadata: await makeSidecar({ manuallyModified: true }) });
+                await triggerSavedMetadataChange(registry, restarted, uri);
+                assert.strictEqual(await restarted.get(uri), undefined);
+                assert.strictEqual(registry.shouldRoute(uri), false);
+            } finally {
+                restarted.dispose();
+                registry.dispose();
+            }
+        });
+
         test('keeps a persisted matched additional-packages association non-routeable on restart when only an old sidecar remains', async () => {
             const uri = scriptUri();
             routingRegistry.setMetadata(uri, VALID_METADATA);
@@ -5394,7 +5423,7 @@ suite('InlineScriptEnvManager', () => {
             const environment = await createOwnedEnvironment();
             await manager.set(oldUri, environment);
 
-            fireRename(oldUri, newUri);
+            await fireRename(oldUri, newUri);
             await nextTurn();
             await nextTurn();
 
@@ -5406,13 +5435,83 @@ suite('InlineScriptEnvManager', () => {
             assert.strictEqual(await manager.get(newUri), environment);
         });
 
+        test('preserves a Windows case-only rename without rewriting the association or creating an environment', async function () {
+            if (!isWindows()) {
+                this.skip();
+                return;
+            }
+            const oldUri = scriptUri('script.py');
+            const newUri = scriptUri('Script.py');
+            const environment = await createOwnedEnvironment();
+            await manager.set(oldUri, environment);
+            await triggerSavedMetadataChange(routingRegistry, manager, oldUri);
+            const savedAssociations = structuredClone(persistedAssociations);
+            workspaceState.update.resetHistory();
+
+            await fireRename(oldUri, newUri);
+
+            assert.strictEqual(await manager.get(newUri), environment);
+            assert.deepStrictEqual(persistedAssociations, savedAssociations);
+            assert.ok(workspaceState.update.notCalled);
+            assert.ok(createWithProgressStub.notCalled);
+        });
+
+        test('rehydrates a case-renamed Windows script from the unchanged association key', async function () {
+            if (!isWindows()) {
+                this.skip();
+                return;
+            }
+            const oldUri = scriptUri('script.py');
+            const newUri = scriptUri('Script.py');
+            const environment = await createOwnedEnvironment();
+            await manager.set(oldUri, environment);
+            await fireRename(oldUri, newUri);
+            const restartedRegistry = new InlineScriptRoutingRegistry();
+            const restarted = new InlineScriptEnvManager(
+                nativeFinder, api, baseManager, globalStorageUri, makeFakeLog(),
+                workspaceMemento, restartedRegistry,
+            );
+            try {
+                await triggerSavedMetadataChange(restartedRegistry, restarted, newUri);
+
+                assert.strictEqual(await restarted.get(newUri), environment);
+                assert.strictEqual(restartedRegistry.shouldRoute(newUri), true);
+                assert.ok(createWithProgressStub.notCalled);
+            } finally {
+                restarted.dispose();
+                restartedRegistry.dispose();
+            }
+        });
+
+        test('does not validate a dirty Windows document through its new filename casing', async function () {
+            if (!isWindows()) {
+                this.skip();
+                return;
+            }
+            const oldUri = scriptUri('script.py');
+            const newUri = scriptUri('Script.py');
+            const environment = await createOwnedEnvironment();
+            await manager.set(oldUri, environment);
+            await triggerSavedMetadataChange(routingRegistry, manager, oldUri);
+            openDocumentsStub.returns([{ uri: oldUri, isDirty: true } as TextDocument]);
+
+            await fireRename(oldUri, newUri);
+            await manager.set(newUri, environment);
+
+            assert.strictEqual(routingRegistry.shouldRoute(newUri), false);
+            assert.deepStrictEqual(persistedAssociations, {
+                [normalizePath(newUri.fsPath)]: pendingAssociationRecord(environment.environmentPath.fsPath),
+            });
+            assert.ok(createWithProgressStub.notCalled);
+        });
+
         test('drops the association when a script is renamed to a non-python file', async () => {
             const oldUri = scriptUri('old.py');
             const newUri = scriptUri('old.txt');
             const environment = await createOwnedEnvironment();
             await manager.set(oldUri, environment);
 
-            fireRename(oldUri, newUri);
+            await fireRename(oldUri, newUri);
             await nextTurn();
             await nextTurn();
 
@@ -5429,7 +5528,7 @@ suite('InlineScriptEnvManager', () => {
             await manager.set(targetUri, replacedEnvironment);
             await manager.set(oldUri, movedEnvironment);
 
-            fireRename(oldUri, targetUri);
+            await fireRename(oldUri, targetUri);
             await nextTurn();
             await nextTurn();
 
@@ -5575,19 +5674,19 @@ suite('InlineScriptEnvManager', () => {
             const environment = await createOwnedEnvironment();
             await manager.set(uri, environment);
             const validationManager = manager as unknown as {
-                readCurrentCacheEntrySidecar(
+                inspectCurrentCacheEntrySidecar(
                     candidate: PythonEnvironment,
-                ): Promise<cacheLayout.InlineScriptEnvMeta | undefined>;
+                ): Promise<cacheLayout.InlineScriptMetaReadResult>;
             };
             const sidecar = await makeSidecar({
                 sourceMetadataIdentityHashes: [
                     cacheLayout.hashSourceMetadataIdentity(VALID_METADATA_IDENTITY),
                 ],
             });
-            let resolveSidecar: ((value: cacheLayout.InlineScriptEnvMeta) => void) | undefined;
-            const sidecarStub = sinon.stub(validationManager, 'readCurrentCacheEntrySidecar').callThrough();
+            let resolveSidecar: ((value: cacheLayout.InlineScriptMetaReadResult) => void) | undefined;
+            const sidecarStub = sinon.stub(validationManager, 'inspectCurrentCacheEntrySidecar').callThrough();
             sidecarStub.onFirstCall().returns(
-                new Promise<cacheLayout.InlineScriptEnvMeta>((resolve) => {
+                new Promise<cacheLayout.InlineScriptMetaReadResult>((resolve) => {
                     resolveSidecar = resolve;
                 }),
             );
@@ -5598,7 +5697,7 @@ suite('InlineScriptEnvManager', () => {
             const pendingGet = manager.get(uri);
             await waitForStubCall(sidecarStub);
             await manager.set(uri, undefined);
-            resolveSidecar!(sidecar);
+            resolveSidecar!({ kind: 'valid', metadata: sidecar });
 
             assert.strictEqual(await pendingGet, undefined);
             assert.strictEqual(await manager.get(uri), undefined);
@@ -5611,19 +5710,19 @@ suite('InlineScriptEnvManager', () => {
             const replacementEnvironment = await createOwnedEnvironment('fedcba9876543210');
             await manager.set(uri, oldEnvironment);
             const validationManager = manager as unknown as {
-                readCurrentCacheEntrySidecar(
+                inspectCurrentCacheEntrySidecar(
                     candidate: PythonEnvironment,
-                ): Promise<cacheLayout.InlineScriptEnvMeta | undefined>;
+                ): Promise<cacheLayout.InlineScriptMetaReadResult>;
             };
             const sidecar = await makeSidecar({
                 sourceMetadataIdentityHashes: [
                     cacheLayout.hashSourceMetadataIdentity(VALID_METADATA_IDENTITY),
                 ],
             });
-            let resolveSidecar: ((value: cacheLayout.InlineScriptEnvMeta) => void) | undefined;
-            const sidecarStub = sinon.stub(validationManager, 'readCurrentCacheEntrySidecar').callThrough();
+            let resolveSidecar: ((value: cacheLayout.InlineScriptMetaReadResult) => void) | undefined;
+            const sidecarStub = sinon.stub(validationManager, 'inspectCurrentCacheEntrySidecar').callThrough();
             sidecarStub.onFirstCall().returns(
-                new Promise<cacheLayout.InlineScriptEnvMeta>((resolve) => {
+                new Promise<cacheLayout.InlineScriptMetaReadResult>((resolve) => {
                     resolveSidecar = resolve;
                 }),
             );
@@ -5634,7 +5733,7 @@ suite('InlineScriptEnvManager', () => {
             const pendingGet = manager.get(uri);
             await waitForStubCall(sidecarStub);
             await manager.set(uri, replacementEnvironment);
-            resolveSidecar!(sidecar);
+            resolveSidecar!({ kind: 'valid', metadata: sidecar });
 
             assert.strictEqual(await pendingGet, replacementEnvironment);
             assert.strictEqual(await manager.get(uri), replacementEnvironment);

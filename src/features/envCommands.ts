@@ -22,6 +22,7 @@ import {
     isPackageVersionLookupNotSupportedError,
 } from '../api';
 import { traceError, traceInfo, traceVerbose } from '../common/logging';
+import { InlineScriptEnvironmentModifiedError, InlineScriptPackagesNotManagedError } from '../common/inlineScript/errors';
 import * as persistentState from '../common/persistentState';
 import {
     EnvironmentManagers,
@@ -439,6 +440,22 @@ export async function setEnvironmentCommand(
     em: EnvironmentManagers,
     wm: PythonProjectManager,
 ): Promise<void> {
+    try {
+        await setEnvironmentCommandInternal(context, em, wm);
+    } catch (error) {
+        if (!(error instanceof InlineScriptEnvironmentModifiedError)) {
+            throw error;
+        }
+        traceError('Cannot select a modified inline-script environment:', error);
+        await showErrorMessage(error.message);
+    }
+}
+
+async function setEnvironmentCommandInternal(
+    context: unknown,
+    em: EnvironmentManagers,
+    wm: PythonProjectManager,
+): Promise<void> {
     if (context instanceof PythonEnvTreeItem) {
         try {
             const view = context as PythonEnvTreeItem;
@@ -734,10 +751,27 @@ export async function getPackageCommandOptions(
     packageManager: InternalPackageManager;
     environment: PythonEnvironment;
 }> {
+    const options = await resolvePackageCommandOptions(e, em, pm);
+    // The tree view hides package actions for inline-script environments, but the command palette
+    // can still resolve one from the active script. Refuse here so every entry point agrees.
+    if (options.environment.envId.managerId === INLINE_SCRIPT_MANAGER_ID) {
+        throw new InlineScriptPackagesNotManagedError();
+    }
+    return options;
+}
+
+async function resolvePackageCommandOptions(
+    e: unknown,
+    em: EnvironmentManagers,
+    pm: PythonProjectManager,
+): Promise<{
+    packageManager: InternalPackageManager;
+    environment: PythonEnvironment;
+}> {
     if (e === undefined) {
         const project = await pickProject(pm.getProjects());
         if (project) {
-            return getPackageCommandOptions(project.uri, em, pm);
+            return resolvePackageCommandOptions(project.uri, em, pm);
         }
     }
 

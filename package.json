@@ -523,7 +523,7 @@
                 {
                     "command": "python-envs.packages",
                     "group": "inline",
-                    "when": "view == env-managers && viewItem =~ /.*pythonEnvironment.*/"
+                    "when": "view == env-managers && viewItem =~ /;managePackages;/"
                 },
                 {
                     "command": "python-envs.copyEnvPath",

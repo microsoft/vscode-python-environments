@@ -1,9 +1,31 @@
 import { Command, MarkdownString, ThemeIcon, TreeItem, TreeItemCollapsibleState, l10n } from 'vscode';
 import { EnvironmentGroupInfo, IconPath, Package, PythonEnvironment, PythonProject } from '../../api';
+import { INLINE_SCRIPT_MANAGER_ID } from '../../common/constants';
 import { EnvViewStrings, UvInstallStrings, VenvManagerStrings } from '../../common/localize';
 import { InternalEnvironmentManager, InternalPackageManager } from '../../internal.api';
 import { isActivatableEnvironment } from '../common/activation';
 import { removable } from './utils';
+
+/**
+ * Inline-script environments are built from a script's `# /// script` block and live in the
+ * extension's cache, shared by every script with the same dependencies and base interpreter.
+ * Editing their packages by hand would silently change other scripts' environments, so the
+ * package management actions are not offered for them.
+ */
+function supportsPackageManagement(environment: PythonEnvironment | undefined): boolean {
+    return environment?.envId?.managerId !== INLINE_SCRIPT_MANAGER_ID;
+}
+
+/**
+ * Context value for a package node. Read-only packages use a distinct value so the existing
+ * `viewItem == python-package` menu clauses simply do not match them.
+ */
+function getPackageContextValue(pkg: Package, environment: PythonEnvironment | undefined): string {
+    if (pkg.isTransitive) {
+        return 'python-package-transitive';
+    }
+    return supportsPackageManagement(environment) ? 'python-package' : 'python-package-readonly';
+}
 
 /**
  * Extracts the parent folder name from an environment path for disambiguation.
@@ -162,7 +184,9 @@ export class PythonEnvTreeItem implements EnvTreeItem {
         }
         // Use different base context for broken environments so normal actions don't show
         const baseContext = isBroken ? 'pythonBrokenEnvironment' : 'pythonEnvironment';
-        const parts = [baseContext, remove, activatable].filter(Boolean);
+        // Positive marker so the install-packages menu matches only environments a user may edit.
+        const managePackages = !isBroken && supportsPackageManagement(this.environment) ? 'managePackages' : '';
+        const parts = [baseContext, remove, activatable, managePackages].filter(Boolean);
         return parts.join(';') + ';';
     }
 }
@@ -212,7 +236,7 @@ export class PackageTreeItem implements EnvTreeItem {
         const item = new TreeItem(pkg.displayName);
         const defaultIcon = pkg.isTransitive ? new ThemeIcon('list-tree') : new ThemeIcon('package');
         item.iconPath = pkg.iconPath ?? defaultIcon;
-        item.contextValue = pkg.isTransitive ? 'python-package-transitive' : 'python-package';
+        item.contextValue = getPackageContextValue(pkg, parent.environment);
         item.description = (pkg.isTransitive ? l10n.t('(transitive) ') : '') + (pkg.description ?? pkg.version ?? '');
         item.tooltip = pkg.isTransitive
             ? l10n.t('This package is a dependency of another installed package. It may also have been explicitly installed.')
@@ -435,7 +459,7 @@ export class ProjectPackage implements ProjectTreeItem {
         const item = new TreeItem(this.pkg.displayName, TreeItemCollapsibleState.None);
         const defaultIcon = this.pkg.isTransitive ? new ThemeIcon('list-tree') : new ThemeIcon('package');
         item.iconPath = this.pkg.iconPath ?? defaultIcon;
-        item.contextValue = this.pkg.isTransitive ? 'python-package-transitive' : 'python-package';
+        item.contextValue = getPackageContextValue(this.pkg, parent.environment);
         item.description =
             (this.pkg.isTransitive ? l10n.t('(transitive) ') : '') + (this.pkg.description ?? this.pkg.version ?? '');
         item.tooltip = this.pkg.isTransitive
