@@ -14,6 +14,7 @@ import {
     Uri,
 } from 'vscode';
 import * as logging from '../../../common/logging';
+import { InlineScriptStrings } from '../../../common/localize';
 import * as wapi from '../../../common/workspace.apis';
 import { InlineScriptDiagnosticsPublisher, shouldValidateUri } from '../../../features/inlineScript/diagnostics';
 
@@ -123,7 +124,27 @@ suite('InlineScriptDiagnosticsPublisher', () => {
             assert.strictEqual(published!.length, 1);
             assert.strictEqual(published![0].code, 'unterminated-block');
             assert.strictEqual(published![0].severity, DiagnosticSeverity.Warning);
-            assert.ok(published![0].message.length > 0, 'expected a localized message');
+            assert.strictEqual(published![0].message, InlineScriptStrings.unterminatedBlock);
+            assert.strictEqual(published![0].source, InlineScriptStrings.diagnosticSource);
+        });
+
+        test('each problem code maps to its own message', () => {
+            const cases: [string, string, string][] = [
+                [['# /// script', '#bad', '# ///'].join('\n'), 'invalid-content-line', '#bad'],
+                [['# /// script ', '# x = 1', '# ///'].join('\n'), 'invalid-block-marker', '# /// script '],
+            ];
+            for (const [text, code, detail] of cases) {
+                const uri = Uri.file(`/workspace/${code}.py`);
+                openListener?.(makeDoc(uri, text));
+                const published = sink.for(uri);
+                assert.strictEqual(published![0].code, code);
+                assert.strictEqual(
+                    published![0].message,
+                    code === 'invalid-content-line'
+                        ? InlineScriptStrings.invalidContentLine(detail)
+                        : InlineScriptStrings.invalidBlockMarker(detail),
+                );
+            }
         });
 
         test('spec violations are published as errors', () => {
@@ -248,6 +269,26 @@ suite('InlineScriptDiagnosticsPublisher', () => {
 
             deleteListener?.({ files: [Uri.file('/workspace/pkg')] });
             assert.strictEqual(sink.for(nested), undefined);
+        });
+
+        test('deleting a folder cancels a queued validation for a file inside it', () => {
+            const nested = Uri.file('/workspace/pkg/app.py');
+            change(makeDoc(nested, BROKEN_SCRIPT));
+
+            deleteListener?.({ files: [Uri.file('/workspace/pkg')] });
+            clock.tick(DEBOUNCE_MS * 2);
+
+            assert.strictEqual(sink.for(nested), undefined, 'a deleted file must not gain a squiggle');
+        });
+
+        test('renaming a folder cancels a queued validation for a file inside it', () => {
+            const nested = Uri.file('/workspace/pkg/app.py');
+            change(makeDoc(nested, BROKEN_SCRIPT));
+
+            renameListener?.({ files: [{ oldUri: Uri.file('/workspace/pkg'), newUri: Uri.file('/workspace/pkg2') }] });
+            clock.tick(DEBOUNCE_MS * 2);
+
+            assert.strictEqual(sink.for(nested), undefined, 'a renamed-away file must not gain a squiggle');
         });
 
         test('renaming clears the old path and re-validates the new one', () => {

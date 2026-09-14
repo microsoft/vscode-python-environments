@@ -45,9 +45,15 @@ export namespace InlineScriptStrings {
         "A script may contain only one '# /// script' block. Remove this block or merge it into the first one.",
     );
     export function invalidContentLine(line: string): string {
+        const found = line.trim();
+        if (found.length === 0) {
+            return l10n.t(
+                "Lines inside a '# /// script' block must be exactly '#' or start with '# '. This line is blank; use '#' for a blank metadata line.",
+            );
+        }
         return l10n.t(
             "Lines inside a '# /// script' block must be exactly '#' or start with '# '. Found: {0}",
-            line.trim(),
+            found,
         );
     }
     export function invalidBlockMarker(marker: string): string {

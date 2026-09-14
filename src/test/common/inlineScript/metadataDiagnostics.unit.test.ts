@@ -88,7 +88,7 @@ suite('inlineScriptMetadata diagnostics', () => {
         test('a well-formed block is valid with no problems', () => {
             const text = ['# /// script', '# dependencies = ["requests"]', '# ///', 'print("hi")'].join('\n');
             const result = parseInlineScriptMetadata(text);
-            assert.strictEqual(result.kind, 'valid');
+            assert.strictEqual(result.kind, 'parsed');
             assert.deepStrictEqual(problems(result), []);
         });
 
@@ -125,7 +125,7 @@ suite('inlineScriptMetadata diagnostics', () => {
             for (const variant of VARIANTS) {
                 const source = variant.build(['# /// script', '# ///', 'print("hi")']);
                 const result = parseInlineScriptMetadata(source);
-                assert.strictEqual(result.kind, 'valid', `[${variant.name}] expected a valid result`);
+                assert.strictEqual(result.kind, 'parsed', `[${variant.name}] expected a valid result`);
                 assert.deepStrictEqual(problems(result), [], `[${variant.name}] expected no problems`);
             }
         });
@@ -226,11 +226,59 @@ suite('inlineScriptMetadata diagnostics', () => {
         test('detail carries the raw parser message without coordinates', () => {
             const source = ['# /// script', '# dependencies = ["requests', '# ///'].join('\n');
             const problem = onlyProblem(parseInlineScriptMetadata(source));
-            assert.ok(problem.detail && problem.detail.length > 0, 'expected a detail message');
+            assert.strictEqual(problem.detail, 'Unterminated string');
             assert.ok(
                 !/row \d+, col \d+/.test(problem.detail!),
                 `detail should not leak payload coordinates: ${problem.detail}`,
             );
+        });
+
+        test('a non-comment line before an existing closer is bad content, not a missing marker', () => {
+            assertProblemAcrossVariants(
+                ['# /// script', '# requires-python = ">=3.11"', 'not_a_comment = 1', '# ///'],
+                'invalid-content-line',
+                'not_a_comment = 1',
+            );
+        });
+
+        test('a blank line before an existing closer is bad content, not a missing marker', () => {
+            for (const variant of VARIANTS) {
+                const source = variant.build([
+                    '# /// script',
+                    '# requires-python = ">=3.11"',
+                    '',
+                    '# dependencies = []',
+                    '# ///',
+                ]);
+                const problem = onlyProblem(parseInlineScriptMetadata(source));
+                assert.strictEqual(problem.code, 'invalid-content-line', `[${variant.name}] wrong problem code`);
+                assert.strictEqual(problem.severity, 'error', `[${variant.name}] wrong severity`);
+                assert.strictEqual(problem.detail, '', `[${variant.name}] expected the blank line as detail`);
+            }
+        });
+
+        test('a non-comment line with no closer ahead stays a missing-marker warning', () => {
+            assertProblemAcrossVariants(
+                ['# /// script', '# requires-python = ">=3.11"', 'not_a_comment = 1'],
+                'unterminated-block',
+                '# /// script',
+            );
+        });
+
+        test('a closer belonging to a later block does not absolve an unclosed one', () => {
+            for (const variant of VARIANTS) {
+                const source = variant.build([
+                    '# /// script',
+                    '# x = 1',
+                    'code = 1',
+                    '# /// script',
+                    '# y = 2',
+                    '# ///',
+                ]);
+                const problem = onlyProblem(parseInlineScriptMetadata(source));
+                assert.strictEqual(problem.code, 'unterminated-block', `[${variant.name}] wrong problem code`);
+                assert.strictEqual(underlined(source, problem), '# /// script', `[${variant.name}] wrong range`);
+            }
         });
     });
 
@@ -284,12 +332,31 @@ suite('inlineScriptMetadata diagnostics', () => {
                 '# dependencies = ["oops"]',
             ].join('\n');
             const result = parseInlineScriptMetadata(source);
-            assert.strictEqual(result.kind, 'valid');
-            assert.deepStrictEqual(result.kind === 'valid' ? result.metadata.dependencies : undefined, ['requests']);
+            assert.strictEqual(result.kind, 'parsed');
+            assert.deepStrictEqual(result.kind === 'parsed' ? result.metadata.dependencies : undefined, ['requests']);
             const problem = onlyProblem(result);
             assert.strictEqual(problem.code, 'unterminated-block');
             assert.strictEqual(problem.severity, 'warning');
             assert.ok(readInlineScriptMetadata(source), 'wrapper should still return the valid metadata');
+        });
+
+        test('parsed metadata can still carry error-severity problems', () => {
+            const source = ['# /// script', '# x = 1', '# ///', '', '# /// script', '#bad'].join('\n');
+            const result = parseInlineScriptMetadata(source);
+            assert.strictEqual(result.kind, 'parsed', 'metadata is usable even though the file has an error');
+            const problem = onlyProblem(result);
+            assert.strictEqual(problem.code, 'invalid-content-line');
+            assert.strictEqual(problem.severity, 'error');
+            assert.ok(readInlineScriptMetadata(source), 'the wrapper still yields metadata');
+        });
+
+        test('a malformed example below real code stays silent, closer or not', () => {
+            const source = ['print("x")', '"""', '# /// script', '# deps = []', 'prose line', '# ///', '"""'].join(
+                '\n',
+            );
+            const result = parseInlineScriptMetadata(source);
+            assert.strictEqual(result.kind, 'none');
+            assert.deepStrictEqual(problems(result), []);
         });
 
         test('an unclosed block below real code is ignored, as the spec requires', () => {
@@ -302,7 +369,7 @@ suite('inlineScriptMetadata diagnostics', () => {
         test('a marker quoted inside a valid block is not a second block', () => {
             const source = ['# /// script', '# # /// script', '# dependencies = []', '# ///'].join('\n');
             const result = parseInlineScriptMetadata(source);
-            assert.strictEqual(result.kind, 'valid');
+            assert.strictEqual(result.kind, 'parsed');
             assert.deepStrictEqual(problems(result), []);
         });
     });

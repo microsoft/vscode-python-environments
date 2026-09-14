@@ -158,9 +158,15 @@ export class InlineScriptDiagnosticsPublisher implements Disposable {
         if (uri.scheme !== 'file') {
             return;
         }
-        for (const published of Array.from(this.published.values())) {
-            if (published.scheme === 'file' && isSameOrParentPath(uri.fsPath, published.fsPath)) {
-                this.clear(published);
+        // Pending entries have never published, so `published` alone would leave a
+        // debounced validation to fire for a file that no longer exists.
+        const tracked = [
+            ...this.published.values(),
+            ...Array.from(this.pending.values(), (entry) => entry.document.uri),
+        ];
+        for (const candidate of tracked) {
+            if (candidate.scheme === 'file' && isSameOrParentPath(uri.fsPath, candidate.fsPath)) {
+                this.clear(candidate);
             }
         }
     }

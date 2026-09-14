@@ -55,9 +55,15 @@ export interface InlineScriptMetadataProblem {
     readonly detail?: string;
 }
 
+/**
+ * The discriminant reports whether usable metadata was produced, NOT whether the
+ * input was problem-free: `parsed` still carries `problems`, and those may include
+ * `error` severities raised by a second, malformed block elsewhere in the file.
+ * Consumers that care about correctness must inspect `problems` in every case.
+ */
 export type InlineScriptMetadataParseResult =
     | {
-          readonly kind: 'valid';
+          readonly kind: 'parsed';
           readonly metadata: InlineScriptMetadata;
           readonly problems: readonly InlineScriptMetadataProblem[];
       }
@@ -109,7 +115,7 @@ const CLOSER_LINE = '# ///';
  */
 export function readInlineScriptMetadata(scriptText: string, source?: string): InlineScriptMetadata | undefined {
     const result = parseInlineScriptMetadata(scriptText, source);
-    return result.kind === 'valid' ? result.metadata : undefined;
+    return result.kind === 'parsed' ? result.metadata : undefined;
 }
 
 const NO_METADATA: InlineScriptMetadataParseResult = { kind: 'none' };
@@ -164,10 +170,10 @@ export function parseInlineScriptMetadata(scriptText: string, source?: string): 
         if (matchedRanges.some((r) => opener.offset >= r.start && opener.offset < r.end)) {
             continue;
         }
-        const problem = diagnoseMalformedBlock(text, opener, toSourceRange, where);
-        // Unclosed blocks are ignored per spec; only flag one in the leading
-        // comment region, where it is a header being typed rather than an example.
-        if (problem.code === 'unterminated-block' && opener.offset >= headerEnd) {
+        const { problem, ignorableBelowHeader } = diagnoseMalformedBlock(text, opener, toSourceRange, where);
+        // Blocks the spec tells us to ignore are only worth flagging in the leading comment
+        // region, where they are a header being typed rather than a documentation example.
+        if (ignorableBelowHeader && opener.offset >= headerEnd) {
             continue;
         }
         problems.push(problem);
@@ -363,7 +369,7 @@ export function parseInlineScriptMetadata(scriptText: string, source?: string): 
     }
 
     return {
-        kind: 'valid',
+        kind: 'parsed',
         problems,
         metadata: {
             requiresPython,
@@ -430,12 +436,18 @@ function findScriptOpeners(text: string): ScriptOpener[] {
     return openers;
 }
 
+interface MalformedBlockDiagnosis {
+    readonly problem: InlineScriptMetadataProblem;
+    /** True when the spec lets us ignore the block entirely, so it need not be flagged outside the header region. */
+    readonly ignorableBelowHeader: boolean;
+}
+
 function diagnoseMalformedBlock(
     text: string,
     opener: ScriptOpener,
     toSourceRange: (start: number, end: number) => { start: number; end: number },
     where: string,
-): InlineScriptMetadataProblem {
+): MalformedBlockDiagnosis {
     const openerRange = toSourceRange(opener.offset, opener.lineEnd);
 
     if (opener.trailing.length > 0) {
@@ -443,10 +455,13 @@ function diagnoseMalformedBlock(
             `inline script metadata${where}: the \`# /// script\` marker on line ${countLines(text, opener.offset)} has trailing whitespace`,
         );
         return {
-            code: 'invalid-block-marker',
-            severity: 'error',
-            sourceRange: openerRange,
-            detail: `${OPENER_PREFIX}script${opener.trailing}`,
+            ignorableBelowHeader: false,
+            problem: {
+                code: 'invalid-block-marker',
+                severity: 'error',
+                sourceRange: openerRange,
+                detail: `${OPENER_PREFIX}script${opener.trailing}`,
+            },
         };
     }
 
@@ -464,24 +479,36 @@ function diagnoseMalformedBlock(
                 `inline script metadata${where}: the closing \`# ///\` marker on line ${countLines(text, offset)} has trailing whitespace`,
             );
             return {
-                code: 'invalid-block-marker',
-                severity: 'error',
-                sourceRange: toSourceRange(offset, lineEnd),
-                detail: line,
+                ignorableBelowHeader: false,
+                problem: {
+                    code: 'invalid-block-marker',
+                    severity: 'error',
+                    sourceRange: toSourceRange(offset, lineEnd),
+                    detail: line,
+                },
             };
         }
 
         if (!isValidContentLine(line)) {
-            if (line.startsWith('#')) {
+            // A non-comment line usually just means the block ended unclosed, but when the
+            // closing marker is still ahead the author wrote a real block around a bad line.
+            const isComment = line.startsWith('#');
+            if (isComment || hasCloserAhead(text, lineEnd)) {
                 traceWarn(
                     `inline script metadata${where}: invalid content line ${countLines(text, offset)} ` +
                         `(expected '#' or '# '): ${JSON.stringify(line)}`,
                 );
                 return {
-                    code: 'invalid-content-line',
-                    severity: 'error',
-                    sourceRange: toSourceRange(offset, lineEnd),
-                    detail: line,
+                    ignorableBelowHeader: !isComment,
+                    problem: {
+                        code: 'invalid-content-line',
+                        severity: 'error',
+                        sourceRange: toSourceRange(
+                            offset,
+                            line.length > 0 ? lineEnd : Math.min(lineEnd + 1, text.length),
+                        ),
+                        detail: line,
+                    },
                 };
             }
             break;
@@ -496,7 +523,10 @@ function diagnoseMalformedBlock(
     traceWarn(
         `inline script metadata${where}: the \`# /// script\` block on line ${countLines(text, opener.offset)} is missing its closing \`# ///\` marker`,
     );
-    return { code: 'unterminated-block', severity: 'warning', sourceRange: openerRange };
+    return {
+        ignorableBelowHeader: true,
+        problem: { code: 'unterminated-block', severity: 'warning', sourceRange: openerRange },
+    };
 }
 
 function isValidContentLine(line: string): boolean {
@@ -504,6 +534,23 @@ function isValidContentLine(line: string): boolean {
         return false;
     }
     return line.length === 1 || line[1] === ' ';
+}
+
+/** Whether a closing `# ///` marker follows `from`, stopping at the next block opener. */
+function hasCloserAhead(text: string, from: number): boolean {
+    let offset = from + 1;
+    while (offset <= text.length) {
+        const lineEnd = lineEndOffset(text, offset);
+        const line = text.slice(offset, lineEnd);
+        if (line === CLOSER_LINE) {
+            return true;
+        }
+        if (line.startsWith(OPENER_PREFIX) || lineEnd >= text.length) {
+            return false;
+        }
+        offset = lineEnd + 1;
+    }
+    return false;
 }
 
 function getTomlErrorPosition(err: unknown): { row: number; column: number } | undefined {
