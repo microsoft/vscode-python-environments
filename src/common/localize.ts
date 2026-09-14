@@ -202,6 +202,9 @@ export namespace PoetryStrings {
         export const description = l10n.t('Create a Poetry environment for the current project');
         export const progress = (path: string) => l10n.t('Creating Poetry environment for {0}', path);
         export const singleProject = l10n.t('Poetry environments can only be created for one project at a time.');
+        export const globalNotSupported = l10n.t(
+            'Poetry environments cannot be created without a project. Open a folder with a pyproject.toml first.',
+        );
         export const noPyproject = (path: string) => l10n.t('No pyproject.toml was found in {0}.', path);
         export const noPython = l10n.t('No usable global Python 3 environment was found.');
         export const missingPath = l10n.t('Poetry did not report the path of the created environment.');

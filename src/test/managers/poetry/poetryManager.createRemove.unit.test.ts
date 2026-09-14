@@ -33,6 +33,7 @@ function createManager(apiOverrides: Partial<PythonEnvironmentApi> = {}): Poetry
         getPythonProject: sinon.stub().returns(undefined),
         getPythonProjects: sinon.stub().returns([]),
         getEnvironments: sinon.stub().resolves([]),
+        getEnvironment: sinon.stub().resolves(undefined),
         ...apiOverrides,
     } as unknown as PythonEnvironmentApi;
     const manager = new PoetryManager(
@@ -83,6 +84,7 @@ suite('PoetryManager environment lifecycle', () => {
             const manager = createManager({
                 getPythonProject: sinon.stub().returns(project),
                 getEnvironments: sinon.stub().resolves([baseEnvironment]),
+                getEnvironment: sinon.stub().resolves(baseEnvironment),
             });
             runPoetryStub.onFirstCall().resolves('');
             runPoetryStub.onSecondCall().resolves(`Poetry diagnostic output${os.EOL}${environmentPath}${os.EOL}`);
@@ -155,6 +157,7 @@ suite('PoetryManager environment lifecycle', () => {
             const manager = createManager({
                 getPythonProject: sinon.stub().returns(project),
                 getEnvironments: sinon.stub().resolves([python2]),
+                getEnvironment: sinon.stub().resolves(python2),
             });
 
             await assert.rejects(manager.create(projectUri), /Python 3/i);
@@ -175,6 +178,7 @@ suite('PoetryManager environment lifecycle', () => {
             const manager = createManager({
                 getPythonProject: sinon.stub().returns(project),
                 getEnvironments: sinon.stub().resolves([baseEnvironment]),
+                getEnvironment: sinon.stub().resolves(baseEnvironment),
             });
 
             runPoetryStub.rejects(new Error('creation failed'));
@@ -207,6 +211,7 @@ suite('PoetryManager environment lifecycle', () => {
             const manager = createManager({
                 getPythonProject: sinon.stub().returns(project),
                 getEnvironments: sinon.stub().resolves([baseEnvironment]),
+                getEnvironment: sinon.stub().resolves(baseEnvironment),
             });
             runPoetryStub.onFirstCall().resolves('');
             runPoetryStub.onSecondCall().resolves(environmentPath);
@@ -255,6 +260,7 @@ suite('PoetryManager environment lifecycle', () => {
             const manager = createManager({
                 getPythonProject: sinon.stub().returns(project),
                 getEnvironments: sinon.stub().resolves([baseEnvironment]),
+                getEnvironment: sinon.stub().resolves(baseEnvironment),
             });
             (manager as unknown as { collection: PythonEnvironment[] }).collection = [cachedEnvironment];
             runPoetryStub.onFirstCall().resolves('');

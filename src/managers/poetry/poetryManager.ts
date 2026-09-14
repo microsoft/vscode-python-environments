@@ -148,11 +148,13 @@ export class PoetryManager implements EnvironmentManager, Disposable {
                 if (!existingEnvironment) {
                     this._onDidChangeEnvironments.fire([{ kind: EnvironmentChangeKind.add, environment }]);
                 }
-                this._onDidChangeEnvironment.fire({
-                    uri: projectRoot,
-                    old: previousEnvironment,
-                    new: environment,
-                });
+                if (previousEnvironment?.envId.id !== environment.envId.id) {
+                    this._onDidChangeEnvironment.fire({
+                        uri: projectRoot,
+                        old: previousEnvironment,
+                        new: environment,
+                    });
+                }
 
                 if (options.additionalPackages?.length) {
                     await runPoetry(
@@ -202,11 +204,13 @@ export class PoetryManager implements EnvironmentManager, Disposable {
                     const previousEnvironment = this.fsPathToEnv.get(normalizePath(root.fsPath));
                     this.fsPathToEnv.delete(normalizePath(root.fsPath));
                     await setPoetryForWorkspace(root.fsPath, undefined);
-                    this._onDidChangeEnvironment.fire({
-                        uri: root,
-                        old: previousEnvironment ?? environment,
-                        new: undefined,
-                    });
+                    if (previousEnvironment !== undefined) {
+                        this._onDidChangeEnvironment.fire({
+                            uri: root,
+                            old: previousEnvironment,
+                            new: undefined,
+                        });
+                    }
                 }
 
                 if (this.globalEnv && this.sameEnvironment(this.globalEnv, environment)) {
@@ -551,7 +555,10 @@ export class PoetryManager implements EnvironmentManager, Disposable {
     }
 
     private async getCreateProjectRoot(scope: CreateEnvironmentScope): Promise<Uri> {
-        if (scope === 'global' || (Array.isArray(scope) && scope.length !== 1)) {
+        if (scope === 'global' || (Array.isArray(scope) && scope.length === 0)) {
+            throw new Error(PoetryStrings.create.globalNotSupported);
+        }
+        if (Array.isArray(scope) && scope.length !== 1) {
             throw new Error(PoetryStrings.create.singleProject);
         }
         const projectScope = Array.isArray(scope) ? scope[0] : scope;
@@ -560,19 +567,16 @@ export class PoetryManager implements EnvironmentManager, Disposable {
     }
 
     private async getBaseEnvironment(): Promise<PythonEnvironment> {
-        const environments = await this.api.getEnvironments('global');
-        const baseEnvironment = getLatest(
-            environments.filter(
-                (environment) =>
-                    environment.version?.startsWith('3.') &&
-                    !!environment.execInfo?.run?.executable &&
-                    environment.envId.managerId !== this.preferredPackageManagerId,
-            ),
-        );
-        if (!baseEnvironment) {
-            throw new Error(PoetryStrings.create.noPython);
+        const selected = await this.api.getEnvironment(undefined);
+        if (
+            selected &&
+            selected.version?.startsWith('3.') &&
+            !!selected.execInfo?.run?.executable &&
+            selected.envId.managerId !== this.preferredPackageManagerId
+        ) {
+            return selected;
         }
-        return baseEnvironment;
+        throw new Error(PoetryStrings.create.noPython);
     }
 
     private parseEnvironmentPath(output: string): string {
