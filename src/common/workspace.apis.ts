@@ -95,6 +95,14 @@ export function onDidSaveTextDocument(
     return workspace.onDidSaveTextDocument(listener, thisArgs, disposables);
 }
 
+export function onDidCloseTextDocument(
+    listener: (e: TextDocument) => any,
+    thisArgs?: any,
+    disposables?: Disposable[],
+): Disposable {
+    return workspace.onDidCloseTextDocument(listener, thisArgs, disposables);
+}
+
 export function onDidChangeTextDocument(
     listener: (e: TextDocumentChangeEvent) => any,
     thisArgs?: any,

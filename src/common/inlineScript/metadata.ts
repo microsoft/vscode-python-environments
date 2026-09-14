@@ -28,14 +28,6 @@ export interface InlineScriptMetadata {
      * newline (or end of string if there is no trailing newline).
      */
     readonly range: { readonly start: number; readonly end: number };
-    /**
-     * Character offsets of the same metadata block in the original source
-     * text. Unlike {@link range}, these include a leading BOM and preserve
-     * CRLF, so they can be compared with TextDocument change offsets.
-     *
-     * Optional to keep manually constructed metadata compatible; parser
-     * results always supply it.
-     */
     readonly sourceRange?: { readonly start: number; readonly end: number };
 }
 
@@ -47,6 +39,30 @@ export interface InlineScriptMetadata {
  * anything past this byte boundary is invisible to the detector.
  */
 export const MAX_HEADER_BYTES = 8 * 1024;
+
+export type InlineScriptMetadataProblemCode =
+    | 'unterminated-block'
+    | 'multiple-blocks'
+    | 'invalid-content-line'
+    | 'invalid-block-marker'
+    | 'invalid-toml'
+    | 'invalid-field-type';
+
+export interface InlineScriptMetadataProblem {
+    readonly code: InlineScriptMetadataProblemCode;
+    readonly severity: 'error' | 'warning';
+    readonly sourceRange: { readonly start: number; readonly end: number };
+    readonly detail?: string;
+}
+
+export type InlineScriptMetadataParseResult =
+    | {
+          readonly kind: 'valid';
+          readonly metadata: InlineScriptMetadata;
+          readonly problems: readonly InlineScriptMetadataProblem[];
+      }
+    | { readonly kind: 'none' }
+    | { readonly kind: 'invalid'; readonly problems: readonly InlineScriptMetadataProblem[] };
 
 /**
  * Canonical block regex from the PEP 723 spec, translated to JavaScript
@@ -64,8 +80,15 @@ export const MAX_HEADER_BYTES = 8 * 1024;
  * which constructs a fresh iterator each call and does NOT mutate the
  * regex's `lastIndex`. Do not call `BLOCK_RE.exec` directly — that
  * would reintroduce the stateful-lastIndex footgun.
+ *
+ * Deviation from the spec regex: `*` not `+`, because the prose spec
+ * permits an empty block and takes precedence over the regex.
  */
-const BLOCK_RE = /^# \/\/\/ (?<type>[a-zA-Z0-9-]+)$\s(?<content>(^#(| .*)$\s)+)^# \/\/\/$/gm;
+const BLOCK_RE = /^# \/\/\/ (?<type>[a-zA-Z0-9-]+)$\s(?<content>(^#(| .*)$\s)*)^# \/\/\/$/gm;
+
+const OPENER_SCAN_RE = /^# \/\/\/ (?<type>[a-zA-Z0-9-]+)(?<trailing>[ \t]*)$/gm;
+
+const CLOSER_LINE = '# ///';
 
 /**
  * Parse PEP 723 `script` metadata from script source text.
@@ -85,9 +108,19 @@ const BLOCK_RE = /^# \/\/\/ (?<type>[a-zA-Z0-9-]+)$\s(?<content>(^#(| .*)$\s)+)^
  * identical whether or not it is supplied.
  */
 export function readInlineScriptMetadata(scriptText: string, source?: string): InlineScriptMetadata | undefined {
+    const result = parseInlineScriptMetadata(scriptText, source);
+    return result.kind === 'valid' ? result.metadata : undefined;
+}
+
+const NO_METADATA: InlineScriptMetadataParseResult = { kind: 'none' };
+
+const OPENER_PREFIX = '# /// ';
+
+/** As `readInlineScriptMetadata`, but reports why and where parsing failed. Offsets index the original `scriptText`. */
+export function parseInlineScriptMetadata(scriptText: string, source?: string): InlineScriptMetadataParseResult {
     const where = source ? ` in ${source}` : '';
     if (!scriptText) {
-        return undefined;
+        return NO_METADATA;
     }
 
     // Strip a single leading UTF-8 BOM (\uFEFF). Files saved as
@@ -96,13 +129,17 @@ export function readInlineScriptMetadata(scriptText: string, source?: string): I
     // match.
     const bomOffset = scriptText.charCodeAt(0) === 0xfeff ? 1 : 0;
     const sourceText = scriptText.slice(bomOffset);
-    let text = sourceText;
 
     // Normalize CRLF and lone CR to LF so the canonical regex (which
     // was authored assuming `.` matches `\r`, true in Python's re but
     // not in JavaScript) behaves consistently. The offsets in `range`
     // refer to this normalized text.
-    text = text.replace(/\r\n?/g, '\n');
+    const text = sourceText.replace(/\r\n?/g, '\n');
+
+    const toSourceRange = (start: number, end: number): { start: number; end: number } => ({
+        start: bomOffset + sourceOffsetForNormalizedOffset(sourceText, start),
+        end: bomOffset + sourceOffsetForNormalizedOffset(sourceText, end),
+    });
 
     // Collect ALL matches first so we can detect the "multiple script
     // blocks" error case the spec requires us to surface.
@@ -120,15 +157,43 @@ export function readInlineScriptMetadata(scriptText: string, source?: string): I
         }
     }
 
+    const matchedRanges = scriptMatches.map((m) => ({ start: m.index!, end: m.index! + m[0].length }));
+    const problems: InlineScriptMetadataProblem[] = [];
+    const headerEnd = headerRegionEnd(text);
+    for (const opener of findScriptOpeners(text)) {
+        if (matchedRanges.some((r) => opener.offset >= r.start && opener.offset < r.end)) {
+            continue;
+        }
+        const problem = diagnoseMalformedBlock(text, opener, toSourceRange, where);
+        // Unclosed blocks are ignored per spec; only flag one in the leading
+        // comment region, where it is a header being typed rather than an example.
+        if (problem.code === 'unterminated-block' && opener.offset >= headerEnd) {
+            continue;
+        }
+        problems.push(problem);
+    }
+
     if (scriptMatches.length === 0) {
-        traceVerbose(`inline script metadata${where}: no \`# /// script\` block found`);
-        return undefined;
+        if (problems.length === 0) {
+            traceVerbose(`inline script metadata${where}: no \`# /// script\` block found`);
+            return NO_METADATA;
+        }
+        return { kind: 'invalid', problems };
     }
     if (scriptMatches.length > 1) {
         traceWarn(
             `inline script metadata${where}: ${scriptMatches.length} \`# /// script\` blocks found; per PEP 723 multiple blocks of the same type MUST be an error.`,
         );
-        return undefined;
+        for (const extra of scriptMatches.slice(1)) {
+            const start = extra.index!;
+            problems.push({
+                code: 'multiple-blocks',
+                severity: 'error',
+                sourceRange: toSourceRange(start, lineEndOffset(text, start)),
+                detail: String(scriptMatches.length),
+            });
+        }
+        return { kind: 'invalid', problems };
     }
 
     const match = scriptMatches[0];
@@ -146,11 +211,15 @@ export function readInlineScriptMetadata(scriptText: string, source?: string): I
     // safety against regex-engine quirks and to keep the
     // reconstruction logic obvious.
     const reconstructed: string[] = [];
+    const reconstructedOrigins: number[] = [];
     const contentLines = rawContent.split('\n');
     // 1-based file line of the `# /// script` marker. Content lines start on
     // the next line, so content index `i` sits on `blockStartLine + 1 + i`.
     const blockStartLine = countLines(text, matchStart);
+    let lineOffset = matchStart + OPENER_PREFIX.length + match.groups!.type.length + 1;
     for (const [index, line] of contentLines.entries()) {
+        const lineStart = lineOffset;
+        lineOffset += line.length + 1; // step over the '\n' that terminated this line
         if (line.length === 0) {
             // Final element after splitting on the trailing '\n' that
             // belongs to the last content line. Not a real line.
@@ -161,11 +230,18 @@ export function readInlineScriptMetadata(scriptText: string, source?: string): I
                 `inline script metadata${where}: invalid content line ${blockStartLine + 1 + index} ` +
                     `(must start with '#'): ${JSON.stringify(line)}`,
             );
-            return undefined;
+            problems.push({
+                code: 'invalid-content-line',
+                severity: 'error',
+                sourceRange: toSourceRange(lineStart, lineStart + line.length),
+                detail: line,
+            });
+            return { kind: 'invalid', problems };
         }
         if (line.length === 1) {
             // Bare '#': a blank content line within the block.
             reconstructed.push('');
+            reconstructedOrigins.push(lineStart + 1);
             continue;
         }
         if (line[1] !== ' ') {
@@ -175,9 +251,16 @@ export function readInlineScriptMetadata(scriptText: string, source?: string): I
                 `inline script metadata${where}: invalid content line ${blockStartLine + 1 + index} ` +
                     `(expected '#' or '# '): ${JSON.stringify(line)}`,
             );
-            return undefined;
+            problems.push({
+                code: 'invalid-content-line',
+                severity: 'error',
+                sourceRange: toSourceRange(lineStart, lineStart + line.length),
+                detail: line,
+            });
+            return { kind: 'invalid', problems };
         }
         reconstructed.push(line.slice(2));
+        reconstructedOrigins.push(lineStart + 2);
     }
 
     let parsed: tomljs.JsonMap;
@@ -189,25 +272,40 @@ export function readInlineScriptMetadata(scriptText: string, source?: string): I
         // TOML, not the script, so it is translated here rather than shown. The
         // full error (with stack and excerpt) goes to the debug level for anyone
         // diagnosing the parser itself.
-        const tomlRow = getTomlErrorRow(err);
-        const at = tomlRow === undefined ? '' : ` (line ${blockStartLine + 1 + tomlRow})`;
-        traceWarn(
-            `inline script metadata${where}: invalid TOML in the \`# /// script\` block${at}: ${describeTomlError(err)}`,
-        );
+        const position = getTomlErrorPosition(err);
+        const detail = describeTomlError(err);
+        const at = position === undefined ? '' : ` (line ${blockStartLine + 1 + position.row})`;
+        traceWarn(`inline script metadata${where}: invalid TOML in the \`# /// script\` block${at}: ${detail}`);
         traceVerbose(`inline script metadata${where}: TOML parse error detail:`, err);
-        return undefined;
+        problems.push({
+            code: 'invalid-toml',
+            severity: 'error',
+            sourceRange: tomlErrorSourceRange(text, reconstructedOrigins, position, matchStart, toSourceRange),
+            detail,
+        });
+        return { kind: 'invalid', problems };
     }
 
     // Validate the small set of known fields. Unknown top-level keys
     // are tolerated — the spec reserves room for future tool tables
     // and we don't want to be brittle.
+    const fieldRange = (key: string) =>
+        findKeyRange(reconstructed, reconstructedOrigins, key, toSourceRange) ??
+        toSourceRange(matchStart, lineEndOffset(text, matchStart));
+
     let requiresPython: string | undefined;
     if (parsed['requires-python'] !== undefined) {
         if (typeof parsed['requires-python'] !== 'string') {
             traceWarn(
                 `inline script metadata${where}: 'requires-python' must be a string, got ${typeof parsed['requires-python']}`,
             );
-            return undefined;
+            problems.push({
+                code: 'invalid-field-type',
+                severity: 'error',
+                sourceRange: fieldRange('requires-python'),
+                detail: 'requires-python',
+            });
+            return { kind: 'invalid', problems };
         }
         requiresPython = parsed['requires-python'];
     }
@@ -216,12 +314,24 @@ export function readInlineScriptMetadata(scriptText: string, source?: string): I
     if (parsed.dependencies !== undefined) {
         if (!Array.isArray(parsed.dependencies)) {
             traceWarn(`inline script metadata${where}: \`dependencies\` must be an array of strings`);
-            return undefined;
+            problems.push({
+                code: 'invalid-field-type',
+                severity: 'error',
+                sourceRange: fieldRange('dependencies'),
+                detail: 'dependencies',
+            });
+            return { kind: 'invalid', problems };
         }
         for (const dep of parsed.dependencies) {
             if (typeof dep !== 'string') {
                 traceWarn(`inline script metadata${where}: each entry in \`dependencies\` must be a string`);
-                return undefined;
+                problems.push({
+                    code: 'invalid-field-type',
+                    severity: 'error',
+                    sourceRange: fieldRange('dependencies'),
+                    detail: 'dependencies',
+                });
+                return { kind: 'invalid', problems };
             }
         }
         // Defensive copy + freeze so consumers can't mutate the cached
@@ -233,7 +343,13 @@ export function readInlineScriptMetadata(scriptText: string, source?: string): I
     if (parsed.tool !== undefined) {
         if (typeof parsed.tool !== 'object' || Array.isArray(parsed.tool) || parsed.tool === null) {
             traceWarn(`inline script metadata${where}: \`tool\` must be a table`);
-            return undefined;
+            problems.push({
+                code: 'invalid-field-type',
+                severity: 'error',
+                sourceRange: fieldRange('tool'),
+                detail: 'tool',
+            });
+            return { kind: 'invalid', problems };
         }
         tool = parsed.tool as tomljs.JsonMap;
     }
@@ -247,13 +363,14 @@ export function readInlineScriptMetadata(scriptText: string, source?: string): I
     }
 
     return {
-        requiresPython,
-        dependencies,
-        tool,
-        range: { start: matchStart, end },
-        sourceRange: {
-            start: bomOffset + sourceOffsetForNormalizedOffset(sourceText, matchStart),
-            end: bomOffset + sourceOffsetForNormalizedOffset(sourceText, end),
+        kind: 'valid',
+        problems,
+        metadata: {
+            requiresPython,
+            dependencies,
+            tool,
+            range: { start: matchStart, end },
+            sourceRange: toSourceRange(matchStart, end),
         },
     };
 }
@@ -269,16 +386,176 @@ function countLines(text: string, offset: number): number {
     return line;
 }
 
-/**
- * Zero-based row reported by `@iarna/toml`, relative to the reconstructed TOML
- * payload. Returns `undefined` when the thrown value does not carry one.
- */
-function getTomlErrorRow(err: unknown): number | undefined {
+function lineEndOffset(text: string, offset: number): number {
+    const eol = text.indexOf('\n', offset);
+    return eol === -1 ? text.length : eol;
+}
+
+/** Offset at which the file's leading blank/comment region ends, i.e. where real code starts. */
+function headerRegionEnd(text: string): number {
+    let offset = 0;
+    while (offset < text.length) {
+        const lineEnd = lineEndOffset(text, offset);
+        const trimmed = text.slice(offset, lineEnd).trim();
+        if (trimmed.length > 0 && !trimmed.startsWith('#')) {
+            return offset;
+        }
+        if (lineEnd >= text.length) {
+            break;
+        }
+        offset = lineEnd + 1;
+    }
+    return text.length;
+}
+
+interface ScriptOpener {
+    readonly offset: number;
+    readonly lineEnd: number;
+    readonly trailing: string;
+}
+
+function findScriptOpeners(text: string): ScriptOpener[] {
+    const openers: ScriptOpener[] = [];
+    for (const m of text.matchAll(OPENER_SCAN_RE)) {
+        if (m.groups?.type !== 'script') {
+            continue;
+        }
+        const offset = m.index!;
+        openers.push({
+            offset,
+            lineEnd: offset + m[0].length,
+            trailing: m.groups.trailing ?? '',
+        });
+    }
+    return openers;
+}
+
+function diagnoseMalformedBlock(
+    text: string,
+    opener: ScriptOpener,
+    toSourceRange: (start: number, end: number) => { start: number; end: number },
+    where: string,
+): InlineScriptMetadataProblem {
+    const openerRange = toSourceRange(opener.offset, opener.lineEnd);
+
+    if (opener.trailing.length > 0) {
+        traceWarn(
+            `inline script metadata${where}: the \`# /// script\` marker on line ${countLines(text, opener.offset)} has trailing whitespace`,
+        );
+        return {
+            code: 'invalid-block-marker',
+            severity: 'error',
+            sourceRange: openerRange,
+            detail: `${OPENER_PREFIX}script${opener.trailing}`,
+        };
+    }
+
+    let offset = opener.lineEnd + 1; // first character of the line after the opener
+    while (offset <= text.length) {
+        const lineEnd = lineEndOffset(text, offset);
+        const line = text.slice(offset, lineEnd);
+
+        if (line === CLOSER_LINE) {
+            break;
+        }
+
+        if (line !== line.trimEnd() && line.trimEnd() === CLOSER_LINE) {
+            traceWarn(
+                `inline script metadata${where}: the closing \`# ///\` marker on line ${countLines(text, offset)} has trailing whitespace`,
+            );
+            return {
+                code: 'invalid-block-marker',
+                severity: 'error',
+                sourceRange: toSourceRange(offset, lineEnd),
+                detail: line,
+            };
+        }
+
+        if (!isValidContentLine(line)) {
+            if (line.startsWith('#')) {
+                traceWarn(
+                    `inline script metadata${where}: invalid content line ${countLines(text, offset)} ` +
+                        `(expected '#' or '# '): ${JSON.stringify(line)}`,
+                );
+                return {
+                    code: 'invalid-content-line',
+                    severity: 'error',
+                    sourceRange: toSourceRange(offset, lineEnd),
+                    detail: line,
+                };
+            }
+            break;
+        }
+
+        if (lineEnd >= text.length) {
+            break;
+        }
+        offset = lineEnd + 1;
+    }
+
+    traceWarn(
+        `inline script metadata${where}: the \`# /// script\` block on line ${countLines(text, opener.offset)} is missing its closing \`# ///\` marker`,
+    );
+    return { code: 'unterminated-block', severity: 'warning', sourceRange: openerRange };
+}
+
+function isValidContentLine(line: string): boolean {
+    if (line.length === 0 || line[0] !== '#') {
+        return false;
+    }
+    return line.length === 1 || line[1] === ' ';
+}
+
+function getTomlErrorPosition(err: unknown): { row: number; column: number } | undefined {
     if (typeof err !== 'object' || err === null) {
         return undefined;
     }
-    const row = (err as { line?: unknown }).line;
-    return typeof row === 'number' && Number.isInteger(row) && row >= 0 ? row : undefined;
+    const { line, col } = err as { line?: unknown; col?: unknown };
+    if (typeof line !== 'number' || !Number.isInteger(line) || line < 0) {
+        return undefined;
+    }
+    const column = typeof col === 'number' && Number.isInteger(col) && col >= 0 ? col : 0;
+    return { row: line, column };
+}
+
+/** `@iarna/toml` reports `col` one past the offending character, and overshoots the line end entirely on end-of-line failures. */
+function tomlErrorSourceRange(
+    text: string,
+    reconstructedOrigins: readonly number[],
+    position: { row: number; column: number } | undefined,
+    matchStart: number,
+    toSourceRange: (start: number, end: number) => { start: number; end: number },
+): { start: number; end: number } {
+    if (position === undefined || position.row >= reconstructedOrigins.length) {
+        return toSourceRange(matchStart, lineEndOffset(text, matchStart));
+    }
+    const origin = reconstructedOrigins[position.row];
+    const lineEnd = lineEndOffset(text, origin);
+    const offending = origin + Math.max(0, position.column - 1);
+    const start = offending < lineEnd ? offending : origin;
+    return toSourceRange(Math.min(start, lineEnd), lineEnd);
+}
+
+function findKeyRange(
+    reconstructed: readonly string[],
+    reconstructedOrigins: readonly number[],
+    key: string,
+    toSourceRange: (start: number, end: number) => { start: number; end: number },
+): { start: number; end: number } | undefined {
+    for (const [index, line] of reconstructed.entries()) {
+        const leadingWhitespace = line.length - line.trimStart().length;
+        const trimmed = line.slice(leadingWhitespace);
+        if (!trimmed.startsWith(key)) {
+            continue;
+        }
+        const after = trimmed.slice(key.length).trimStart();
+        if (!after.startsWith('=')) {
+            continue;
+        }
+        const origin = reconstructedOrigins[index];
+        return toSourceRange(origin + leadingWhitespace, origin + line.length);
+    }
+    return undefined;
 }
 
 /**
@@ -310,6 +587,14 @@ function sourceOffsetForNormalizedOffset(sourceText: string, normalizedOffset: n
     return sourceOffset;
 }
 
+export function sliceHeaderBytes(text: string): string {
+    const buffer = Buffer.from(text, 'utf-8');
+    if (buffer.byteLength <= MAX_HEADER_BYTES) {
+        return text;
+    }
+    return buffer.subarray(0, MAX_HEADER_BYTES).toString('utf-8');
+}
+
 /**
  * Read PEP 723 metadata from a file. Reads only the first
  * `MAX_HEADER_BYTES` bytes of the file — PEP 723 blocks live at the
@@ -328,7 +613,6 @@ export async function readInlineScriptMetadataFromFile(uri: Uri): Promise<Inline
         traceVerbose(`inline script metadata: skipping non-file URI scheme '${uri.scheme}'`);
         return undefined;
     }
-
     let text: string;
     try {
         const handle = await fs.open(uri.fsPath, 'r');
