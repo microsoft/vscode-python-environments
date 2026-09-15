@@ -42,4 +42,48 @@ suite('Internal Variable substitution', () => {
             assert.equal(result, `Some ${item.substitution} text ${item.substitution}`);
         });
     });
+
+    test('Resolve ${workspaceFolder} via single-folder fallback when owning folder is undefined', () => {
+        // Simulates the Windows scenario where workspace.getWorkspaceFolder() fails to find the
+        // owning folder (e.g. drive-letter casing). With a single open folder, the token should
+        // still resolve instead of being left as a literal ${workspaceFolder}.
+        getWorkspaceFolderStub.returns(undefined);
+        getWorkspaceFoldersStub.returns([workspaceFolder]);
+
+        const result = resolveVariables('${workspaceFolder}/.venv/Scripts/python.exe', project.uri as unknown as Uri);
+
+        assert.equal(result, `${workspaceFolder.uri.fsPath}/.venv/Scripts/python.exe`);
+        assert.ok(!result.includes('${workspaceFolder}'), 'token should be expanded');
+    });
+
+    test('Leaves ${workspaceFolder} unresolved when no project scope is provided', () => {
+        // Global scope (no project) must not resolve workspace-specific variables.
+        getWorkspaceFolderStub.returns(undefined);
+        getWorkspaceFoldersStub.returns([workspaceFolder]);
+
+        const result = resolveVariables('${workspaceFolder}/.venv/Scripts/python.exe');
+
+        assert.equal(result, '${workspaceFolder}/.venv/Scripts/python.exe');
+    });
+
+    test('Does not use single-folder fallback for ${workspaceFolder} with multiple folders', () => {
+        const otherFolder = { name: 'workspace2', uri: { fsPath: path.join(home, 'workspace2') } };
+        getWorkspaceFolderStub.returns(undefined);
+        getWorkspaceFoldersStub.returns([workspaceFolder, otherFolder]);
+
+        const result = resolveVariables('${workspaceFolder}/.venv/Scripts/python.exe', project.uri as unknown as Uri);
+
+        assert.equal(result, '${workspaceFolder}/.venv/Scripts/python.exe');
+    });
+
+    test('Leaves ${workspaceFolder} unresolved when no folders are open', () => {
+        // No owning folder and no open folders at all (getWorkspaceFolders returns undefined):
+        // the single-folder fallback must not crash and the token stays literal.
+        getWorkspaceFolderStub.returns(undefined);
+        getWorkspaceFoldersStub.returns(undefined);
+
+        const result = resolveVariables('${workspaceFolder}/.venv/Scripts/python.exe', project.uri as unknown as Uri);
+
+        assert.equal(result, '${workspaceFolder}/.venv/Scripts/python.exe');
+    });
 });
