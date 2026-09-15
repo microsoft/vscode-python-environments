@@ -291,7 +291,7 @@ export class PackageRootInfoTreeItem implements EnvTreeItem {
 
 export enum ProjectTreeItemKind {
     project = 'project',
-    setupFile = 'project-setup-file',
+    dependencyFile = 'project-dependency-file',
     environment = 'project-environment',
     none = 'project-no-environment',
     environmentInfo = 'environment-info',
@@ -326,8 +326,8 @@ export class ProjectItem implements ProjectTreeItem {
     }
 }
 
-export class ProjectSetupFile implements ProjectTreeItem {
-    public readonly kind = ProjectTreeItemKind.setupFile;
+export class ProjectDependencyFile implements ProjectTreeItem {
+    public readonly kind = ProjectTreeItemKind.dependencyFile;
     public readonly id: string;
     public readonly treeItem: TreeItem;
 
@@ -335,12 +335,12 @@ export class ProjectSetupFile implements ProjectTreeItem {
         public readonly parent: ProjectItem,
         public readonly uri: Uri,
     ) {
-        this.id = `${parent.id}>>>setup-file`;
+        this.id = `${parent.id}>>>dependency-file`;
         const item = new TreeItem(uri, TreeItemCollapsibleState.None);
-        item.contextValue = 'project-setup-file';
+        item.contextValue = 'project-dependency-file';
         item.command = {
             command: 'vscode.open',
-            title: l10n.t('Open Setup File'),
+            title: l10n.t('Open Dependency File'),
             arguments: [uri],
         };
         this.treeItem = item;

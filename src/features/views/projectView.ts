@@ -18,11 +18,11 @@ import { ITemporaryStateManager } from './temporaryStateManager';
 import {
     GlobalProjectItem,
     NoProjectEnvironment,
+    ProjectDependencyFile,
     ProjectEnvironment,
     ProjectEnvironmentInfo,
     ProjectItem,
     ProjectPackage,
-    ProjectSetupFile,
     ProjectTreeItem,
     ProjectTreeItemKind,
 } from './treeViewItems';
@@ -193,9 +193,9 @@ export class ProjectView implements TreeDataProvider<ProjectTreeItem> {
             const projectItem = element as ProjectItem;
             const views: ProjectTreeItem[] = [];
             if (projectItem instanceof ProjectItem) {
-                const setupFileUri = await projectItem.project.discoverProjectSetupFile?.();
-                if (setupFileUri) {
-                    views.push(new ProjectSetupFile(projectItem, setupFileUri));
+                const dependencyFileUri = await projectItem.project.discoverDependencyFiles?.();
+                if (dependencyFileUri) {
+                    views.push(new ProjectDependencyFile(projectItem, dependencyFileUri));
                 }
             }
 

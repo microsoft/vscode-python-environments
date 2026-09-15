@@ -7,10 +7,10 @@ import {
     getEnvironmentParentDirName,
     NoPythonEnvTreeItem,
     PackageTreeItem,
+    ProjectDependencyFile,
     ProjectEnvironment,
     ProjectItem,
     ProjectPackage,
-    ProjectSetupFile,
     PythonEnvTreeItem,
     PythonGroupEnvTreeItem,
 } from '../../../features/views/treeViewItems';
@@ -81,17 +81,17 @@ function createMockManager(
 }
 
 suite('Test TreeView Items', () => {
-    suite('ProjectSetupFile', () => {
-        test('opens the setup file', () => {
+    suite('ProjectDependencyFile', () => {
+        test('opens the dependency file', () => {
             const parent = new ProjectItem({ name: 'project', uri: Uri.file('.') });
-            const setupFileUri = Uri.file('pyproject.toml');
+            const dependencyFileUri = Uri.file('pyproject.toml');
 
-            const item = new ProjectSetupFile(parent, setupFileUri);
+            const item = new ProjectDependencyFile(parent, dependencyFileUri);
 
             assert.strictEqual(item.parent, parent);
-            assert.strictEqual(item.treeItem.resourceUri, setupFileUri);
+            assert.strictEqual(item.treeItem.resourceUri, dependencyFileUri);
             assert.strictEqual(item.treeItem.command?.command, 'vscode.open');
-            assert.deepStrictEqual(item.treeItem.command?.arguments, [setupFileUri]);
+            assert.deepStrictEqual(item.treeItem.command?.arguments, [dependencyFileUri]);
         });
     });
 

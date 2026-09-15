@@ -555,7 +555,12 @@ export class PythonPackageImpl implements Package {
 }
 
 export class PythonProjectsImpl implements PythonProject {
-    private static readonly setupFileNames = ['pyproject.toml', 'setup.py', 'requirements.txt'] as const;
+    private static readonly dependencyFileNames = [
+        'requirements.txt',
+        'pyproject.toml',
+        'requirements.in',
+        'environment.yml',
+    ] as const;
 
     name: string;
     uri: Uri;
@@ -576,10 +581,10 @@ export class PythonProjectsImpl implements PythonProject {
     }
 
     /**
-     * Finds the preferred setup file at the project root.
-     * @returns The setup file URI, or `undefined` when no supported setup file exists.
+     * Finds the preferred dependency file at the project root.
+     * @returns The dependency file URI, or `undefined` when no supported dependency file exists.
      */
-    async discoverProjectSetupFile(): Promise<Uri | undefined> {
+    async discoverDependencyFiles(): Promise<Uri | undefined> {
         let projectType: FileType;
         try {
             projectType = (await stat(this.uri)).type;
@@ -587,17 +592,17 @@ export class PythonProjectsImpl implements PythonProject {
             return undefined;
         }
 
-        // A project URI may point directly to a setup file instead of its parent directory.
+        // A project URI may point directly to a dependency file instead of its parent directory.
         if (projectType !== FileType.Directory) {
             const fileName = path.posix.basename(this.uri.path);
             return projectType === FileType.File &&
-                PythonProjectsImpl.setupFileNames.some((candidate) => candidate === fileName)
+                PythonProjectsImpl.dependencyFileNames.some((candidate) => candidate === fileName)
                 ? this.uri
                 : undefined;
         }
 
-        // Search directory candidates in setup-file priority order.
-        for (const fileName of PythonProjectsImpl.setupFileNames) {
+        // Search directory candidates in dependency-file priority order.
+        for (const fileName of PythonProjectsImpl.dependencyFileNames) {
             const candidate = this.uri.with({ path: path.posix.join(this.uri.path, fileName) });
             try {
                 const candidateType = (await stat(candidate)).type;
@@ -605,7 +610,7 @@ export class PythonProjectsImpl implements PythonProject {
                     return candidate;
                 }
             } catch {
-                // Try the next supported setup file.
+                // Try the next supported dependency file.
             }
         }
 

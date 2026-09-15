@@ -807,10 +807,11 @@ export interface PythonProject {
     readonly tooltip?: string | MarkdownString;
 
     /**
-     * Finds the preferred project setup file, such as `pyproject.toml`, `setup.py`, or `requirements.txt`.
-     * @returns The setup file URI, or `undefined` when no supported setup file exists.
+     * Finds the preferred dependency file, such as `requirements.txt`, `pyproject.toml`,
+     * `requirements.in`, or `environment.yml`.
+     * @returns The dependency file URI, or `undefined` when no supported dependency file exists.
      */
-    discoverProjectSetupFile?(): Promise<Uri | undefined>;
+    discoverDependencyFiles?(): Promise<Uri | undefined>;
 }
 
 /**
