@@ -41,7 +41,7 @@ import type {
  * defined in `../../types`.
  */
 
-export class RegisteredEnvironmentManager implements EnvironmentManager {
+export class InternalEnvironmentManager implements EnvironmentManager {
     public constructor(
         public readonly id: string,
         private readonly manager: EnvironmentManager,
@@ -209,7 +209,7 @@ function inferPackageManagementTrigger(
     return 'package';
 }
 
-export class RegisteredPackageManager implements PackageManager {
+export class InternalPackageManager implements PackageManager {
     public constructor(
         public readonly id: string,
         private readonly manager: PackageManager,

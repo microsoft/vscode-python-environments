@@ -23,8 +23,8 @@ import type {
 } from '../../../features/envManagers';
 import type { PythonProjectManager } from '../../../features/projectManager';
 import type {
-    RegisteredEnvironmentManager,
-    RegisteredPackageManager,
+    InternalEnvironmentManager,
+    InternalPackageManager,
 } from '../../../managers/common/registeredManagers';
 
 suite('withManagerTimeout', () => {
@@ -188,7 +188,7 @@ suite('ManagerReady - race condition handling', () => {
         // Manager registers before timeout
         envManagerEmitter.fire({
             kind: 'registered',
-            manager: { id: 'ms-python.python:venv' } as unknown as RegisteredEnvironmentManager,
+            manager: { id: 'ms-python.python:venv' } as unknown as InternalEnvironmentManager,
         });
 
         await clock.tickAsync(0);
@@ -246,7 +246,7 @@ suite('ManagerReady - race condition handling', () => {
     test('manager registered before wait resolves immediately without prompt', async () => {
         envManagerEmitter.fire({
             kind: 'registered',
-            manager: { id: 'ms-python.python:venv' } as unknown as RegisteredEnvironmentManager,
+            manager: { id: 'ms-python.python:venv' } as unknown as InternalEnvironmentManager,
         });
 
         await clock.tickAsync(0);
@@ -265,7 +265,7 @@ suite('ManagerReady - race condition handling', () => {
 
         pkgManagerEmitter.fire({
             kind: 'registered',
-            manager: { id: 'ms-python.python:pip' } as unknown as RegisteredPackageManager,
+            manager: { id: 'ms-python.python:pip' } as unknown as InternalPackageManager,
         });
 
         await clock.tickAsync(0);

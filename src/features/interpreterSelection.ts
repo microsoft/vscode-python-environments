@@ -24,7 +24,7 @@ import type {
     PythonProjectManager,
     PythonProjectSettings,
 } from './projectManager';
-import type { RegisteredEnvironmentManager } from '../managers/common/registeredManagers';
+import type { InternalEnvironmentManager } from '../managers/common/registeredManagers';
 import { NativeEnvInfo, NativePythonFinder } from '../managers/common/nativePythonFinder';
 
 /**
@@ -32,7 +32,7 @@ import { NativeEnvInfo, NativePythonFinder } from '../managers/common/nativePyth
  */
 export interface PriorityChainResult {
     /** The environment manager to use */
-    manager: RegisteredEnvironmentManager;
+    manager: InternalEnvironmentManager;
     /** Optional specific environment - if undefined, let the manager decide via get() */
     environment?: PythonEnvironment;
     /** Which priority level matched */

@@ -14,7 +14,7 @@ import * as childProcessApis from '../../../common/childProcess.apis';
 import * as errorUtils from '../../../common/errors/utils';
 import * as windowApis from '../../../common/window.apis';
 import * as workspaceApis from '../../../common/workspace.apis';
-import { RegisteredPackageManager } from '../../../managers/common/registeredManagers';
+import { InternalPackageManager } from '../../../managers/common/registeredManagers';
 import { PipInstallCommand } from '../../../managers/builtin/commands/install';
 import { PipListCommand } from '../../../managers/builtin/commands/list';
 import * as helpers from '../../../managers/builtin/helpers';
@@ -154,7 +154,7 @@ suite('Package manager headless conformance', () => {
     });
 
     test('reports missing version lookup implementations as unsupported', async () => {
-        const manager = new RegisteredPackageManager('test:unsupported', {
+        const manager = new InternalPackageManager('test:unsupported', {
             name: 'unsupported',
             manage: sinon.stub().resolves(),
             refresh: sinon.stub().resolves(),

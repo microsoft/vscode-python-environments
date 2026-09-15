@@ -18,7 +18,7 @@ import {
 import * as helpers from '../../helpers';
 import type { EnvironmentManagers } from '../../features/envManagers';
 import type { PythonProjectManager } from '../../features/projectManager';
-import type { RegisteredEnvironmentManager } from '../../managers/common/registeredManagers';
+import type { InternalEnvironmentManager } from '../../managers/common/registeredManagers';
 import { NativePythonFinder } from '../../managers/common/nativePythonFinder';
 
 /**
@@ -41,8 +41,8 @@ suite('Interpreter Selection - Priority Chain', () => {
     let mockProjectManager: sinon.SinonStubbedInstance<PythonProjectManager>;
     let mockNativeFinder: sinon.SinonStubbedInstance<NativePythonFinder>;
     let mockApi: sinon.SinonStubbedInstance<PythonEnvironmentApi>;
-    let mockVenvManager: sinon.SinonStubbedInstance<RegisteredEnvironmentManager>;
-    let mockSystemManager: sinon.SinonStubbedInstance<RegisteredEnvironmentManager>;
+    let mockVenvManager: sinon.SinonStubbedInstance<InternalEnvironmentManager>;
+    let mockSystemManager: sinon.SinonStubbedInstance<InternalEnvironmentManager>;
 
     const testUri = Uri.file('/test/workspace');
     const mockVenvEnv: PythonEnvironment = {
@@ -76,7 +76,7 @@ suite('Interpreter Selection - Priority Chain', () => {
             displayName: 'Venv',
             get: sandbox.stub(),
             set: sandbox.stub(),
-        } as unknown as sinon.SinonStubbedInstance<RegisteredEnvironmentManager>;
+        } as unknown as sinon.SinonStubbedInstance<InternalEnvironmentManager>;
 
         mockSystemManager = {
             id: 'ms-python.python:system',
@@ -84,7 +84,7 @@ suite('Interpreter Selection - Priority Chain', () => {
             displayName: 'System',
             get: sandbox.stub(),
             set: sandbox.stub(),
-        } as unknown as sinon.SinonStubbedInstance<RegisteredEnvironmentManager>;
+        } as unknown as sinon.SinonStubbedInstance<InternalEnvironmentManager>;
 
         mockEnvManagers = {
             getEnvironmentManager: sandbox.stub(),
@@ -509,7 +509,7 @@ suite('Interpreter Selection - Priority Chain', () => {
                 displayName: 'Conda',
                 get: sandbox.stub().resolves(undefined),
                 set: sandbox.stub(),
-            } as unknown as sinon.SinonStubbedInstance<RegisteredEnvironmentManager>;
+            } as unknown as sinon.SinonStubbedInstance<InternalEnvironmentManager>;
 
             // Only conda manager available, no venv or system
             const condaOnlyEnvManagers = {
@@ -538,8 +538,8 @@ suite('Interpreter Selection - applyInitialEnvironmentSelection', () => {
     let mockProjectManager: sinon.SinonStubbedInstance<PythonProjectManager>;
     let mockNativeFinder: sinon.SinonStubbedInstance<NativePythonFinder>;
     let mockApi: sinon.SinonStubbedInstance<PythonEnvironmentApi>;
-    let mockVenvManager: sinon.SinonStubbedInstance<RegisteredEnvironmentManager>;
-    let mockSystemManager: sinon.SinonStubbedInstance<RegisteredEnvironmentManager>;
+    let mockVenvManager: sinon.SinonStubbedInstance<InternalEnvironmentManager>;
+    let mockSystemManager: sinon.SinonStubbedInstance<InternalEnvironmentManager>;
 
     const testUri = Uri.file('/test/workspace');
     const mockVenvEnv: PythonEnvironment = {
@@ -563,7 +563,7 @@ suite('Interpreter Selection - applyInitialEnvironmentSelection', () => {
             displayName: 'Venv',
             get: sandbox.stub().resolves(mockVenvEnv),
             set: sandbox.stub().resolves(),
-        } as unknown as sinon.SinonStubbedInstance<RegisteredEnvironmentManager>;
+        } as unknown as sinon.SinonStubbedInstance<InternalEnvironmentManager>;
 
         mockSystemManager = {
             id: 'ms-python.python:system',
@@ -571,7 +571,7 @@ suite('Interpreter Selection - applyInitialEnvironmentSelection', () => {
             displayName: 'System',
             get: sandbox.stub(),
             set: sandbox.stub(),
-        } as unknown as sinon.SinonStubbedInstance<RegisteredEnvironmentManager>;
+        } as unknown as sinon.SinonStubbedInstance<InternalEnvironmentManager>;
 
         mockEnvManagers = {
             getEnvironmentManager: sandbox.stub(),
@@ -995,7 +995,7 @@ suite('Interpreter Selection - applyInitialEnvironmentSelection', () => {
             displayName: 'Hatch',
             get: sandbox.stub().resolves(undefined),
             set: sandbox.stub().resolves(),
-        } as unknown as sinon.SinonStubbedInstance<RegisteredEnvironmentManager>;
+        } as unknown as sinon.SinonStubbedInstance<InternalEnvironmentManager>;
 
         let hatchRegistered = false;
         // Override getEnvironmentManager: returns undefined until hatchRegistered is set, then returns the manager
@@ -1068,8 +1068,8 @@ suite('Interpreter Selection - resolveGlobalEnvironmentByPriority', () => {
     let mockEnvManagers: sinon.SinonStubbedInstance<EnvironmentManagers>;
     let mockNativeFinder: sinon.SinonStubbedInstance<NativePythonFinder>;
     let mockApi: sinon.SinonStubbedInstance<PythonEnvironmentApi>;
-    let mockVenvManager: sinon.SinonStubbedInstance<RegisteredEnvironmentManager>;
-    let mockSystemManager: sinon.SinonStubbedInstance<RegisteredEnvironmentManager>;
+    let mockVenvManager: sinon.SinonStubbedInstance<InternalEnvironmentManager>;
+    let mockSystemManager: sinon.SinonStubbedInstance<InternalEnvironmentManager>;
 
     const mockSystemEnv: PythonEnvironment = {
         envId: { id: 'system-env-1', managerId: 'ms-python.python:system' },
@@ -1091,7 +1091,7 @@ suite('Interpreter Selection - resolveGlobalEnvironmentByPriority', () => {
             displayName: 'Venv',
             get: sandbox.stub(),
             set: sandbox.stub(),
-        } as unknown as sinon.SinonStubbedInstance<RegisteredEnvironmentManager>;
+        } as unknown as sinon.SinonStubbedInstance<InternalEnvironmentManager>;
 
         mockSystemManager = {
             id: 'ms-python.python:system',
@@ -1099,7 +1099,7 @@ suite('Interpreter Selection - resolveGlobalEnvironmentByPriority', () => {
             displayName: 'System',
             get: sandbox.stub(),
             set: sandbox.stub(),
-        } as unknown as sinon.SinonStubbedInstance<RegisteredEnvironmentManager>;
+        } as unknown as sinon.SinonStubbedInstance<InternalEnvironmentManager>;
 
         mockEnvManagers = {
             getEnvironmentManager: sandbox.stub(),
@@ -1286,8 +1286,8 @@ suite('Interpreter Selection - registerInterpreterSettingsChangeListener', () =>
     let mockProjectManager: sinon.SinonStubbedInstance<PythonProjectManager>;
     let mockNativeFinder: sinon.SinonStubbedInstance<NativePythonFinder>;
     let mockApi: sinon.SinonStubbedInstance<PythonEnvironmentApi>;
-    let mockVenvManager: sinon.SinonStubbedInstance<RegisteredEnvironmentManager>;
-    let mockSystemManager: sinon.SinonStubbedInstance<RegisteredEnvironmentManager>;
+    let mockVenvManager: sinon.SinonStubbedInstance<InternalEnvironmentManager>;
+    let mockSystemManager: sinon.SinonStubbedInstance<InternalEnvironmentManager>;
 
     const testUri = Uri.file('/test/workspace');
     const mockVenvEnv: PythonEnvironment = {
@@ -1310,7 +1310,7 @@ suite('Interpreter Selection - registerInterpreterSettingsChangeListener', () =>
             displayName: 'Venv',
             get: sandbox.stub().resolves(mockVenvEnv),
             set: sandbox.stub().resolves(),
-        } as unknown as sinon.SinonStubbedInstance<RegisteredEnvironmentManager>;
+        } as unknown as sinon.SinonStubbedInstance<InternalEnvironmentManager>;
 
         mockSystemManager = {
             id: 'ms-python.python:system',
@@ -1318,7 +1318,7 @@ suite('Interpreter Selection - registerInterpreterSettingsChangeListener', () =>
             displayName: 'System',
             get: sandbox.stub(),
             set: sandbox.stub(),
-        } as unknown as sinon.SinonStubbedInstance<RegisteredEnvironmentManager>;
+        } as unknown as sinon.SinonStubbedInstance<InternalEnvironmentManager>;
 
         mockEnvManagers = {
             getEnvironmentManager: sandbox.stub(),
@@ -1517,9 +1517,9 @@ suite('Interpreter Selection - Settings over Cache Priority', () => {
     let mockProjectManager: sinon.SinonStubbedInstance<PythonProjectManager>;
     let mockNativeFinder: sinon.SinonStubbedInstance<NativePythonFinder>;
     let mockApi: sinon.SinonStubbedInstance<PythonEnvironmentApi>;
-    let mockVenvManager: sinon.SinonStubbedInstance<RegisteredEnvironmentManager>;
-    let mockSystemManager: sinon.SinonStubbedInstance<RegisteredEnvironmentManager>;
-    let mockCondaManager: sinon.SinonStubbedInstance<RegisteredEnvironmentManager>;
+    let mockVenvManager: sinon.SinonStubbedInstance<InternalEnvironmentManager>;
+    let mockSystemManager: sinon.SinonStubbedInstance<InternalEnvironmentManager>;
+    let mockCondaManager: sinon.SinonStubbedInstance<InternalEnvironmentManager>;
 
     const testUri = Uri.file('/test/workspace');
     const mockVenvEnv: PythonEnvironment = {
@@ -1542,7 +1542,7 @@ suite('Interpreter Selection - Settings over Cache Priority', () => {
             displayName: 'Venv',
             get: sandbox.stub().resolves(mockVenvEnv),
             set: sandbox.stub().resolves(),
-        } as unknown as sinon.SinonStubbedInstance<RegisteredEnvironmentManager>;
+        } as unknown as sinon.SinonStubbedInstance<InternalEnvironmentManager>;
 
         mockSystemManager = {
             id: 'ms-python.python:system',
@@ -1550,7 +1550,7 @@ suite('Interpreter Selection - Settings over Cache Priority', () => {
             displayName: 'System',
             get: sandbox.stub(),
             set: sandbox.stub(),
-        } as unknown as sinon.SinonStubbedInstance<RegisteredEnvironmentManager>;
+        } as unknown as sinon.SinonStubbedInstance<InternalEnvironmentManager>;
 
         mockCondaManager = {
             id: 'ms-python.python:conda',
@@ -1558,7 +1558,7 @@ suite('Interpreter Selection - Settings over Cache Priority', () => {
             displayName: 'Conda',
             get: sandbox.stub(),
             set: sandbox.stub(),
-        } as unknown as sinon.SinonStubbedInstance<RegisteredEnvironmentManager>;
+        } as unknown as sinon.SinonStubbedInstance<InternalEnvironmentManager>;
 
         mockEnvManagers = {
             getEnvironmentManager: sandbox.stub(),
@@ -1684,8 +1684,8 @@ suite('Interpreter Selection - Multi-Root Workspace', () => {
     let mockProjectManager: sinon.SinonStubbedInstance<PythonProjectManager>;
     let mockNativeFinder: sinon.SinonStubbedInstance<NativePythonFinder>;
     let mockApi: sinon.SinonStubbedInstance<PythonEnvironmentApi>;
-    let mockVenvManager: sinon.SinonStubbedInstance<RegisteredEnvironmentManager>;
-    let mockSystemManager: sinon.SinonStubbedInstance<RegisteredEnvironmentManager>;
+    let mockVenvManager: sinon.SinonStubbedInstance<InternalEnvironmentManager>;
+    let mockSystemManager: sinon.SinonStubbedInstance<InternalEnvironmentManager>;
 
     const folder1Uri = Uri.file('/workspace/folder1');
     const folder2Uri = Uri.file('/workspace/folder2');
@@ -1721,7 +1721,7 @@ suite('Interpreter Selection - Multi-Root Workspace', () => {
             displayName: 'Venv',
             get: sandbox.stub(),
             set: sandbox.stub().resolves(),
-        } as unknown as sinon.SinonStubbedInstance<RegisteredEnvironmentManager>;
+        } as unknown as sinon.SinonStubbedInstance<InternalEnvironmentManager>;
 
         mockSystemManager = {
             id: 'ms-python.python:system',
@@ -1729,7 +1729,7 @@ suite('Interpreter Selection - Multi-Root Workspace', () => {
             displayName: 'System',
             get: sandbox.stub(),
             set: sandbox.stub(),
-        } as unknown as sinon.SinonStubbedInstance<RegisteredEnvironmentManager>;
+        } as unknown as sinon.SinonStubbedInstance<InternalEnvironmentManager>;
 
         mockEnvManagers = {
             getEnvironmentManager: sandbox.stub(),

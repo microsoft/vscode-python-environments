@@ -44,7 +44,7 @@ import { handlePythonPath } from './common/utils/pythonPath';
 import type { EnvironmentManagers } from './features/envManagers';
 import type { ProjectCreators } from './features/creators/projectCreators';
 import type { PythonProjectManager } from './features/projectManager';
-import type { RegisteredEnvironmentManager } from './managers/common/registeredManagers';
+import type { InternalEnvironmentManager } from './managers/common/registeredManagers';
 import { PythonEnvironmentImpl, PythonPackageImpl } from './managers/common/models';
 import { waitForAllEnvManagers, waitForEnvManager, waitForEnvManagerId } from './features/common/managerReady';
 import { EnvVarManager } from './features/execution/envVariableManager';
@@ -169,7 +169,7 @@ export class PythonEnvironmentApiImpl implements PythonEnvironmentApi {
             return this.createEnvironment(scope[0], options);
         } else if (Array.isArray(scope) && scope.length > 0 && scope.every((s) => s instanceof Uri)) {
             await waitForEnvManager(scope);
-            const managers: RegisteredEnvironmentManager[] = [];
+            const managers: InternalEnvironmentManager[] = [];
             scope.forEach((s) => {
                 const manager = this.envManagers.getEnvironmentManager(s);
                 if (manager && !managers.includes(manager) && manager.supportsCreate) {
@@ -275,7 +275,7 @@ export class PythonEnvironmentApiImpl implements PythonEnvironmentApi {
     async resolveEnvironment(context: ResolveEnvironmentContext): Promise<PythonEnvironment | undefined> {
         await waitForAllEnvManagers();
         const projects = this.projectManager.getProjects();
-        const projectEnvManagers: RegisteredEnvironmentManager[] = [];
+        const projectEnvManagers: InternalEnvironmentManager[] = [];
         projects.forEach((p) => {
             const manager = this.envManagers.getEnvironmentManager(p.uri);
             if (manager && !projectEnvManagers.includes(manager)) {

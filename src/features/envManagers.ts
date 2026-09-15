@@ -29,7 +29,7 @@ import { EventNames } from '../common/telemetry/constants';
 import { sendTelemetryEvent } from '../common/telemetry/sender';
 import { getCallingExtension } from '../common/utils/frameUtils';
 import { normalizePath } from '../common/utils/pathUtils';
-import { RegisteredEnvironmentManager, RegisteredPackageManager } from '../managers/common/registeredManagers';
+import { InternalEnvironmentManager, InternalPackageManager } from '../managers/common/registeredManagers';
 import type { PythonProjectManager, PythonProjectSettings } from './projectManager';
 import {
     EditAllManagerSettings,
@@ -51,7 +51,7 @@ export type PackageManagerScope = undefined | string | Uri | PythonEnvironment |
 
 export interface PackageEventArg {
     package: Package;
-    manager: RegisteredPackageManager;
+    manager: InternalPackageManager;
     environment: PythonEnvironment;
 }
 export type PackageCommandOptions =
@@ -67,22 +67,22 @@ export type PackageCommandOptions =
 
 export interface DidChangeEnvironmentManagerEventArgs {
     kind: 'registered' | 'unregistered';
-    manager: RegisteredEnvironmentManager;
+    manager: InternalEnvironmentManager;
 }
 
 export interface DidChangePackageManagerEventArgs {
     kind: 'registered' | 'unregistered';
-    manager: RegisteredPackageManager;
+    manager: InternalPackageManager;
 }
 
 export interface InternalDidChangePackagesEventArgs {
     environment: PythonEnvironment;
-    manager: RegisteredPackageManager;
+    manager: InternalPackageManager;
     changes: { kind: PackageChangeKind; pkg: Package }[];
 }
 
 export interface InternalDidChangeEnvironmentsEventArgs {
-    manager: RegisteredEnvironmentManager;
+    manager: InternalEnvironmentManager;
     changes: DidChangeEnvironmentsEventArgs;
 }
 
@@ -115,11 +115,11 @@ export interface EnvironmentManagers extends Disposable {
     onDidChangeEnvironmentManager: Event<DidChangeEnvironmentManagerEventArgs>;
     onDidChangePackageManager: Event<DidChangePackageManagerEventArgs>;
 
-    getEnvironmentManager(scope: EnvironmentManagerScope): RegisteredEnvironmentManager | undefined;
-    getPackageManager(scope: PackageManagerScope): RegisteredPackageManager | undefined;
+    getEnvironmentManager(scope: EnvironmentManagerScope): InternalEnvironmentManager | undefined;
+    getPackageManager(scope: PackageManagerScope): InternalPackageManager | undefined;
 
-    managers: RegisteredEnvironmentManager[];
-    packageManagers: RegisteredPackageManager[];
+    managers: InternalEnvironmentManager[];
+    packageManagers: InternalPackageManager[];
 
     clearCache(scope: EnvironmentManagerScope): Promise<void>;
     clearInlineScriptCache(): Promise<void>;
@@ -157,7 +157,7 @@ export interface EnvironmentManagers extends Disposable {
      */
     getLastKnownEnvironment(scope: GetEnvironmentScope): PythonEnvironment | undefined;
 
-    getProjectEnvManagers(uris: Uri[]): RegisteredEnvironmentManager[];
+    getProjectEnvManagers(uris: Uri[]): InternalEnvironmentManager[];
 }
 
 function generateId(name: string, extensionId?: string): string {
@@ -169,8 +169,8 @@ function generateId(name: string, extensionId?: string): string {
 }
 
 export class PythonEnvironmentManagers implements EnvironmentManagers {
-    private _environmentManagers: Map<string, RegisteredEnvironmentManager> = new Map();
-    private _packageManagers: Map<string, RegisteredPackageManager> = new Map();
+    private _environmentManagers: Map<string, InternalEnvironmentManager> = new Map();
+    private _packageManagers: Map<string, InternalPackageManager> = new Map();
     private readonly subscriptions: Disposable[] = [];
 
     /**
@@ -249,7 +249,7 @@ export class PythonEnvironmentManagers implements EnvironmentManagers {
         }
 
         const disposables: Disposable[] = [];
-        const mgr = new RegisteredEnvironmentManager(managerId, manager);
+        const mgr = new InternalEnvironmentManager(managerId, manager);
 
         disposables.push(
             mgr.onDidChangeEnvironments((e: DidChangeEnvironmentsEventArgs) => {
@@ -295,7 +295,7 @@ export class PythonEnvironmentManagers implements EnvironmentManagers {
             throw ex;
         }
         const disposables: Disposable[] = [];
-        const mgr = new RegisteredPackageManager(managerId, manager);
+        const mgr = new InternalPackageManager(managerId, manager);
 
         disposables.push(
             mgr.onDidChangePackages((e: DidChangePackagesEventArgs) => {
@@ -349,7 +349,7 @@ export class PythonEnvironmentManagers implements EnvironmentManagers {
      * 5. Fall back to the cached project/global environment's manager.
      * 6. If context is a string or PythonEnvironment, return its manager directly.
      */
-    public getEnvironmentManager(context: EnvironmentManagerScope): RegisteredEnvironmentManager | undefined {
+    public getEnvironmentManager(context: EnvironmentManagerScope): InternalEnvironmentManager | undefined {
         if (this._environmentManagers.size === 0) {
             traceError('No environment managers registered');
             return undefined;
@@ -393,7 +393,7 @@ export class PythonEnvironmentManagers implements EnvironmentManagers {
         return this._environmentManagers.get(context.envId.managerId);
     }
 
-    public getPackageManager(context: PackageManagerScope): RegisteredPackageManager | undefined {
+    public getPackageManager(context: PackageManagerScope): InternalPackageManager | undefined {
         if (this._packageManagers.size === 0) {
             traceError('No package managers registered');
             return undefined;
@@ -432,14 +432,14 @@ export class PythonEnvironmentManagers implements EnvironmentManagers {
         return undefined;
     }
 
-    public get managers(): RegisteredEnvironmentManager[] {
+    public get managers(): InternalEnvironmentManager[] {
         return Array.from(this._environmentManagers.values());
     }
-    public get packageManagers(): RegisteredPackageManager[] {
+    public get packageManagers(): InternalPackageManager[] {
         return Array.from(this._packageManagers.values());
     }
 
-    public setPythonProject(pw: PythonProject, manager: RegisteredEnvironmentManager): void {
+    public setPythonProject(pw: PythonProject, manager: InternalEnvironmentManager): void {
         const config = workspace.getConfiguration('python-envs', pw.uri);
         const settings = config.get<PythonProjectSettings[]>('pythonProjects', []);
         settings.push({
@@ -779,7 +779,7 @@ export class PythonEnvironmentManagers implements EnvironmentManagers {
             }
         } else {
             if (Array.isArray(scope) && scope.every((s) => s instanceof Uri)) {
-                const groupedScopes = new Map<RegisteredEnvironmentManager, Uri[]>();
+                const groupedScopes = new Map<InternalEnvironmentManager, Uri[]>();
                 scope.forEach((uri) => {
                     const manager = this.getEnvironmentManager(uri);
                     if (manager) {
@@ -940,7 +940,7 @@ export class PythonEnvironmentManagers implements EnvironmentManagers {
 
     private getActiveSelectionKey(
         scope: GetEnvironmentScope,
-        manager: RegisteredEnvironmentManager | undefined,
+        manager: InternalEnvironmentManager | undefined,
         project: PythonProject | undefined,
     ): string {
         return scope instanceof Uri && manager?.id === INLINE_SCRIPT_MANAGER_ID
@@ -952,7 +952,7 @@ export class PythonEnvironmentManagers implements EnvironmentManagers {
 
     private getActiveSelectionUri(
         scope: GetEnvironmentScope,
-        manager: RegisteredEnvironmentManager,
+        manager: InternalEnvironmentManager,
         project: PythonProject | undefined,
     ): Uri | undefined {
         return scope instanceof Uri && manager.id === INLINE_SCRIPT_MANAGER_ID ? scope : project?.uri;
@@ -965,7 +965,7 @@ export class PythonEnvironmentManagers implements EnvironmentManagers {
     private getExactProjectEnvironmentManager(
         scope: Uri,
         project: PythonProject | undefined,
-    ): RegisteredEnvironmentManager | undefined {
+    ): InternalEnvironmentManager | undefined {
         if (!project || normalizePath(project.uri.fsPath) !== normalizePath(scope.fsPath)) {
             return undefined;
         }
@@ -980,7 +980,7 @@ export class PythonEnvironmentManagers implements EnvironmentManagers {
     private getConfiguredOrCachedEnvironmentManager(
         context: Uri | undefined,
         project: PythonProject | undefined,
-    ): RegisteredEnvironmentManager | undefined {
+    ): InternalEnvironmentManager | undefined {
         const defaultEnvManagerId = getDefaultEnvManagerSetting(this.pm, context);
         if (defaultEnvManagerId !== undefined) {
             const settingsManager = this._environmentManagers.get(defaultEnvManagerId);
@@ -1004,14 +1004,14 @@ export class PythonEnvironmentManagers implements EnvironmentManagers {
         return project ? project.uri.toString() : 'global';
     }
 
-    private getInlineRoutingOverrideManager(scope: Uri): RegisteredEnvironmentManager | undefined {
+    private getInlineRoutingOverrideManager(scope: Uri): InternalEnvironmentManager | undefined {
         const managerId = this._inlineRoutingOverrides.get(this.getInlineScriptSelectionKey(scope));
         return managerId ? this._environmentManagers.get(managerId) : undefined;
     }
 
     private updateInlineRoutingOverride(
         scope: Uri,
-        manager: RegisteredEnvironmentManager,
+        manager: InternalEnvironmentManager,
         environment: PythonEnvironment | undefined,
     ): void {
         if (!this.inlineScriptRouting) {
@@ -1027,7 +1027,7 @@ export class PythonEnvironmentManagers implements EnvironmentManagers {
 
     private async publishEffectiveEnvironmentAfterOverrideClear(
         scope: Uri,
-        previousManager: RegisteredEnvironmentManager,
+        previousManager: InternalEnvironmentManager,
         previousKey: string,
         previousOperation: number,
         reservedInlineOperation: number | undefined,
@@ -1127,7 +1127,7 @@ export class PythonEnvironmentManagers implements EnvironmentManagers {
         }
     }
 
-    private beginPendingSelection(scope: Uri, manager: RegisteredEnvironmentManager): PendingEnvironmentSelection {
+    private beginPendingSelection(scope: Uri, manager: InternalEnvironmentManager): PendingEnvironmentSelection {
         const project = this.pm.get(scope);
         const key = this.getActiveSelectionKey(scope, manager, project);
         return {
@@ -1143,13 +1143,13 @@ export class PythonEnvironmentManagers implements EnvironmentManagers {
         };
     }
 
-    private shouldPublishInlineSelectionImmediately(scope: Uri, manager: RegisteredEnvironmentManager): boolean {
+    private shouldPublishInlineSelectionImmediately(scope: Uri, manager: InternalEnvironmentManager): boolean {
         return !this.inlineScriptRouting || manager.id !== INLINE_SCRIPT_MANAGER_ID || this.inlineScriptRouting.shouldRoute(scope);
     }
 
     private clearInlineActiveSelection(
         scope: Uri,
-        manager: RegisteredEnvironmentManager,
+        manager: InternalEnvironmentManager,
         operation: number | undefined,
     ): void {
         if (manager.id === INLINE_SCRIPT_MANAGER_ID || operation === undefined) {
@@ -1163,7 +1163,7 @@ export class PythonEnvironmentManagers implements EnvironmentManagers {
 
     private commitInlineRoutingOperation(
         scope: Uri,
-        manager: RegisteredEnvironmentManager,
+        manager: InternalEnvironmentManager,
         selectionOperation: number,
         inlineClearOperation?: number,
         inlineOverrideHandoffOperation?: number,
@@ -1270,7 +1270,7 @@ export class PythonEnvironmentManagers implements EnvironmentManagers {
 
     private canPersistManagerSettingForScope(
         _scope: Uri,
-        manager: RegisteredEnvironmentManager,
+        manager: InternalEnvironmentManager,
         _project: PythonProject | undefined,
     ): boolean {
         // Inline associations are persisted by the inline manager. The managed exact-project entry
@@ -1324,8 +1324,8 @@ export class PythonEnvironmentManagers implements EnvironmentManagers {
         });
     }
 
-    getProjectEnvManagers(uris: Uri[]): RegisteredEnvironmentManager[] {
-        const projectEnvManagers: RegisteredEnvironmentManager[] = [];
+    getProjectEnvManagers(uris: Uri[]): InternalEnvironmentManager[] {
+        const projectEnvManagers: InternalEnvironmentManager[] = [];
         uris.forEach((uri) => {
             const manager = this.getEnvironmentManager(uri);
             if (manager && !projectEnvManagers.includes(manager)) {

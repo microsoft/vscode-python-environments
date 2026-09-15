@@ -13,13 +13,13 @@ import type {
     InternalDidChangeEnvironmentsEventArgs,
     InternalDidChangePackagesEventArgs,
 } from '../../../features/envManagers';
-import type { RegisteredEnvironmentManager } from '../../../managers/common/registeredManagers';
+import type { InternalEnvironmentManager } from '../../../managers/common/registeredManagers';
 import { setupNonThenable } from '../../mocks/helper';
 
 suite('EnvManagerView.reveal Tests', () => {
     let envManagers: typeMoq.IMock<EnvironmentManagers>;
     let stateManager: typeMoq.IMock<ITemporaryStateManager>;
-    let manager: typeMoq.IMock<RegisteredEnvironmentManager>;
+    let manager: typeMoq.IMock<InternalEnvironmentManager>;
     let treeView: typeMoq.IMock<TreeView<EnvTreeItem>>;
     let createTreeViewStub: sinon.SinonStub;
 
@@ -39,7 +39,7 @@ suite('EnvManagerView.reveal Tests', () => {
         onDidChangeStateEmitter = new EventEmitter();
 
         // Mock manager
-        manager = typeMoq.Mock.ofType<RegisteredEnvironmentManager>();
+        manager = typeMoq.Mock.ofType<InternalEnvironmentManager>();
         manager.setup((m) => m.id).returns(() => 'test-manager');
         manager.setup((m) => m.displayName).returns(() => 'Test Manager');
         setupNonThenable(manager);

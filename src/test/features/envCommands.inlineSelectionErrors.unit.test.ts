@@ -20,8 +20,8 @@ import { EnvManagerTreeItem, ProjectItem, PythonEnvTreeItem } from '../../featur
 import type { EnvironmentManagers } from '../../features/envManagers';
 import type { PythonProjectManager } from '../../features/projectManager';
 import {
-    RegisteredEnvironmentManager,
-    RegisteredPackageManager,
+    InternalEnvironmentManager,
+    InternalPackageManager,
 } from '../../managers/common/registeredManagers';
 import { createMockPythonEnvironment } from '../mocks/pythonEnvironment';
 
@@ -76,7 +76,7 @@ suite('Inline environment selection error feedback', () => {
                     resolve: async () => undefined,
                 };
                 const parent = new EnvManagerTreeItem(
-                    new RegisteredEnvironmentManager(INLINE_SCRIPT_MANAGER_ID, provider),
+                    new InternalEnvironmentManager(INLINE_SCRIPT_MANAGER_ID, provider),
                 );
                 context = new PythonEnvTreeItem(environment, parent);
             }
@@ -120,14 +120,14 @@ suite('Inline environment selection error feedback', () => {
 suite('Inline environment package command guard', () => {
     const uri = Uri.file(path.join(process.cwd(), 'guarded-script.py'));
     const project: PythonProject = { uri, name: 'script' };
-    const packageManager = {} as RegisteredPackageManager;
+    const packageManager = {} as InternalPackageManager;
 
     teardown(() => sinon.restore());
 
     function createManagers(environment: PythonEnvironment): EnvironmentManagers {
         const managerMock: Partial<EnvironmentManagers> = {
             getEnvironmentManager: () =>
-                ({ get: async () => environment } as unknown as RegisteredEnvironmentManager),
+                ({ get: async () => environment } as unknown as InternalEnvironmentManager),
             getPackageManager: () => packageManager,
         };
         return managerMock as EnvironmentManagers;

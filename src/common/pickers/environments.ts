@@ -1,6 +1,6 @@
 import { ProgressLocation, QuickInputButtons, QuickPickItem, QuickPickItemKind, ThemeIcon, Uri, l10n } from 'vscode';
 import { CreateEnvironmentOptions, IconPath, PythonEnvironment, PythonProject } from '../../api';
-import type { RegisteredEnvironmentManager } from '../../managers/common/registeredManagers';
+import type { InternalEnvironmentManager } from '../../managers/common/registeredManagers';
 import { Common, Interpreter, Pickers } from '../localize';
 import { traceError } from '../logging';
 import { EventNames } from '../telemetry/constants';
@@ -46,8 +46,8 @@ interface EnvironmentPickOptions {
     projects: PythonProject[];
 }
 async function browseForPython(
-    managers: RegisteredEnvironmentManager[],
-    projectEnvManagers: RegisteredEnvironmentManager[],
+    managers: InternalEnvironmentManager[],
+    projectEnvManagers: InternalEnvironmentManager[],
 ): Promise<PythonEnvironment | undefined> {
     const filters = isWindows() ? { python: ['exe'] } : undefined;
     const uris = await showOpenDialog({
@@ -81,8 +81,8 @@ async function browseForPython(
 }
 
 async function createEnvironment(
-    managers: RegisteredEnvironmentManager[],
-    projectEnvManagers: RegisteredEnvironmentManager[],
+    managers: InternalEnvironmentManager[],
+    projectEnvManagers: InternalEnvironmentManager[],
     options: EnvironmentPickOptions,
 ): Promise<PythonEnvironment | undefined> {
     const managerId = await pickEnvironmentManager(
@@ -90,7 +90,7 @@ async function createEnvironment(
         projectEnvManagers.filter((m) => m.supportsCreate),
     );
 
-    let manager: RegisteredEnvironmentManager | undefined;
+    let manager: InternalEnvironmentManager | undefined;
     let createOptions: CreateEnvironmentOptions | undefined = undefined;
     if (managerId?.includes(`QuickCreate#`)) {
         manager = managers.find((m) => m.id === managerId.split('#')[1]);
@@ -122,8 +122,8 @@ async function createEnvironment(
 
 async function pickEnvironmentImpl(
     items: (QuickPickItem | (QuickPickItem & { result: PythonEnvironment }))[],
-    managers: RegisteredEnvironmentManager[],
-    projectEnvManagers: RegisteredEnvironmentManager[],
+    managers: InternalEnvironmentManager[],
+    projectEnvManagers: InternalEnvironmentManager[],
     options: EnvironmentPickOptions,
 ): Promise<PythonEnvironment | undefined> {
     const selected = await showQuickPickWithButtons(items, {
@@ -148,8 +148,8 @@ async function pickEnvironmentImpl(
 }
 
 export async function pickEnvironment(
-    managers: RegisteredEnvironmentManager[],
-    projectEnvManagers: RegisteredEnvironmentManager[],
+    managers: InternalEnvironmentManager[],
+    projectEnvManagers: InternalEnvironmentManager[],
     options: EnvironmentPickOptions,
 ): Promise<PythonEnvironment | undefined> {
     const items: (QuickPickItem | (QuickPickItem & { result: PythonEnvironment }))[] = [

@@ -9,15 +9,15 @@ import {
 } from 'vscode';
 import { PythonProjectCreator } from '../../api';
 import type {
-    RegisteredEnvironmentManager,
-    RegisteredPackageManager,
+    InternalEnvironmentManager,
+    InternalPackageManager,
 } from '../../managers/common/registeredManagers';
 import { Common, Interpreter, Pickers } from '../localize';
 import { showQuickPickWithButtons } from '../window.apis';
 
 export const ENTER_INTERPRETER_PATH_ID = 'EnterInterpreterPath';
 
-function getDescription(mgr: RegisteredEnvironmentManager | RegisteredPackageManager): string | undefined {
+function getDescription(mgr: InternalEnvironmentManager | InternalPackageManager): string | undefined {
     if (mgr.description) {
         return mgr.description;
     }
@@ -32,8 +32,8 @@ function getDescription(mgr: RegisteredEnvironmentManager | RegisteredPackageMan
 }
 
 export async function pickEnvironmentManager(
-    managers: RegisteredEnvironmentManager[],
-    defaultManagers?: RegisteredEnvironmentManager[],
+    managers: InternalEnvironmentManager[],
+    defaultManagers?: InternalEnvironmentManager[],
     showBackButton?: boolean,
     showEnterInterpreterPath?: boolean,
 ): Promise<string | undefined> {
@@ -112,8 +112,8 @@ export async function pickEnvironmentManager(
 }
 
 export async function pickPackageManager(
-    managers: RegisteredPackageManager[],
-    defaultManagers?: RegisteredPackageManager[],
+    managers: InternalPackageManager[],
+    defaultManagers?: InternalPackageManager[],
 ): Promise<string | undefined> {
     if (managers.length === 0) {
         return;

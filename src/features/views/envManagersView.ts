@@ -11,8 +11,8 @@ import type {
     InternalDidChangePackagesEventArgs,
 } from '../envManagers';
 import type {
-    RegisteredEnvironmentManager,
-    RegisteredPackageManager,
+    InternalEnvironmentManager,
+    InternalPackageManager,
 } from '../../managers/common/registeredManagers';
 import { ITemporaryStateManager } from './temporaryStateManager';
 import {
@@ -321,7 +321,7 @@ export class EnvManagerView implements TreeDataProvider<EnvTreeItem>, Disposable
         }
     }
 
-    private getSupportedPackageManager(manager: RegisteredEnvironmentManager): RegisteredPackageManager | undefined {
+    private getSupportedPackageManager(manager: InternalEnvironmentManager): InternalPackageManager | undefined {
         return this.providers.getPackageManager(manager.preferredPackageManagerId);
     }
 

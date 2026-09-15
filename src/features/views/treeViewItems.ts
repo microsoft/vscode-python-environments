@@ -3,8 +3,8 @@ import { EnvironmentGroupInfo, IconPath, Package, PythonEnvironment, PythonProje
 import { INLINE_SCRIPT_MANAGER_ID } from '../../common/constants';
 import { EnvViewStrings, UvInstallStrings, VenvManagerStrings } from '../../common/localize';
 import type {
-    RegisteredEnvironmentManager,
-    RegisteredPackageManager,
+    InternalEnvironmentManager,
+    InternalPackageManager,
 } from '../../managers/common/registeredManagers';
 import { isActivatableEnvironment } from '../common/activation';
 import { removable } from './utils';
@@ -88,7 +88,7 @@ export class EnvManagerTreeItem implements EnvTreeItem {
     public readonly kind = EnvTreeItemKind.manager;
     public readonly treeItem: TreeItem;
     public readonly parent: undefined;
-    constructor(public readonly manager: RegisteredEnvironmentManager) {
+    constructor(public readonly manager: InternalEnvironmentManager) {
         const item = new TreeItem(manager.displayName, TreeItemCollapsibleState.Collapsed);
         item.id = manager.id;
         item.contextValue = this.getContextValue();
@@ -234,7 +234,7 @@ export class PackageTreeItem implements EnvTreeItem {
     constructor(
         public readonly pkg: Package,
         public readonly parent: PythonEnvTreeItem,
-        public readonly manager: RegisteredPackageManager,
+        public readonly manager: InternalPackageManager,
     ) {
         const item = new TreeItem(pkg.displayName);
         const defaultIcon = pkg.isTransitive ? new ThemeIcon('list-tree') : new ThemeIcon('package');
@@ -456,7 +456,7 @@ export class ProjectPackage implements ProjectTreeItem {
     constructor(
         public readonly parent: ProjectEnvironment,
         public readonly pkg: Package,
-        public readonly manager: RegisteredPackageManager,
+        public readonly manager: InternalPackageManager,
     ) {
         this.id = ProjectPackage.getId(parent, pkg);
         const item = new TreeItem(this.pkg.displayName, TreeItemCollapsibleState.None);

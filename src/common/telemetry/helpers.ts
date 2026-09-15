@@ -174,7 +174,7 @@ export async function logDiscoverySummary(envManagers: EnvironmentManagers): Pro
                 managerSummaries.push(`${manager.displayName}: ${envs.length}`);
             }
         } catch {
-            // Discovery errors are already logged by RegisteredEnvironmentManager.refresh()
+            // Discovery errors are already logged by InternalEnvironmentManager.refresh()
         }
     }
 

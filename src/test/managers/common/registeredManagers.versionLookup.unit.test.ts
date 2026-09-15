@@ -4,18 +4,18 @@
 import * as assert from 'assert';
 import { isPackageVersionLookupNotSupportedError } from '../../../publicErrors';
 import type { PackageManager, PythonEnvironment } from '../../../types';
-import { RegisteredPackageManager } from '../../../managers/common/registeredManagers';
+import { InternalPackageManager } from '../../../managers/common/registeredManagers';
 
-suite('RegisteredPackageManager.getPackageAvailableVersions', () => {
+suite('InternalPackageManager.getPackageAvailableVersions', () => {
     const environment = { envId: { id: 'env', managerId: 'mgr' } } as PythonEnvironment;
 
     test('resolves undefined when errorMode is omitted', async () => {
-        const manager = new RegisteredPackageManager('test:manager', {} as unknown as PackageManager);
+        const manager = new InternalPackageManager('test:manager', {} as unknown as PackageManager);
         assert.strictEqual(await manager.getPackageAvailableVersions(environment, 'requests'), undefined);
     });
 
     test('rejects when errorMode is throw', async () => {
-        const manager = new RegisteredPackageManager('test:manager', {} as unknown as PackageManager);
+        const manager = new InternalPackageManager('test:manager', {} as unknown as PackageManager);
         await assert.rejects(
             () => manager.getPackageAvailableVersions(environment, 'requests', { errorMode: 'throw' }),
             (error: unknown) => isPackageVersionLookupNotSupportedError(error),

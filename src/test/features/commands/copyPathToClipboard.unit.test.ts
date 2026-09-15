@@ -9,7 +9,7 @@ import {
     ProjectItem,
     PythonEnvTreeItem,
 } from '../../../features/views/treeViewItems';
-import type { RegisteredEnvironmentManager } from '../../../managers/common/registeredManagers';
+import type { InternalEnvironmentManager } from '../../../managers/common/registeredManagers';
 
 suite('Copy Path To Clipboard', () => {
     let clipboardWriteTextStub: sinon.SinonStub;
@@ -57,7 +57,7 @@ suite('Copy Path To Clipboard', () => {
                 displayPath: '/test-env',
                 execInfo: { run: { executable: '/test-env/bin/test', args: ['-m', 'env'] } },
             } as PythonEnvironment,
-            new EnvManagerTreeItem({ name: 'test-manager', id: 'test-manager' } as RegisteredEnvironmentManager),
+            new EnvManagerTreeItem({ name: 'test-manager', id: 'test-manager' } as InternalEnvironmentManager),
         );
 
         await copyPathToClipboard(item);
@@ -81,7 +81,7 @@ suite('Copy Path To Clipboard', () => {
                     },
                 },
             } as PythonEnvironment,
-            new EnvManagerTreeItem({ name: 'conda', id: 'conda' } as RegisteredEnvironmentManager),
+            new EnvManagerTreeItem({ name: 'conda', id: 'conda' } as InternalEnvironmentManager),
         );
 
         await copyPathToClipboard(item);
@@ -106,7 +106,7 @@ suite('Copy Path To Clipboard', () => {
                     },
                 },
             } as PythonEnvironment,
-            new EnvManagerTreeItem({ name: 'conda', id: 'conda' } as RegisteredEnvironmentManager),
+            new EnvManagerTreeItem({ name: 'conda', id: 'conda' } as InternalEnvironmentManager),
         );
 
         await copyPathToClipboard(item);
