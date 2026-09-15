@@ -4,7 +4,8 @@ import { extensions, l10n, QuickInputButtons, Uri, window } from 'vscode';
 import { CreateEnvironmentOptions } from '../../api';
 import { traceError, traceVerbose } from '../../common/logging';
 import { showQuickPickWithButtons } from '../../common/window.apis';
-import { EnvironmentManagers, InternalEnvironmentManager } from '../../internal.api';
+import type { EnvironmentManagers } from '../envManagers';
+import type { RegisteredEnvironmentManager } from '../../managers/common/registeredManagers';
 
 /**
  * Prompts the user to choose whether to create a new virtual environment (venv) for a project, with a clearer return and early exit.
@@ -72,7 +73,7 @@ export async function promptForCopilotInstructions(): Promise<boolean | undefine
  */
 export async function quickCreateNewVenv(envManagers: EnvironmentManagers, destFolder: string) {
     // get the environment manager for venv, should always exist
-    const envManager: InternalEnvironmentManager | undefined = envManagers.managers.find(
+    const envManager: RegisteredEnvironmentManager | undefined = envManagers.managers.find(
         (m) => m.id === 'ms-python.python:venv',
     );
     const destinationUri = Uri.parse(destFolder);

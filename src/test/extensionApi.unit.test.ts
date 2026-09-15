@@ -1,10 +1,10 @@
 import * as assert from 'assert';
 import * as sinon from 'sinon';
 import { EventEmitter, Uri } from 'vscode';
-import { PythonEnvironment, PythonProject } from '../../api';
-import * as managerReady from '../../features/common/managerReady';
-import { PythonEnvironmentApiImpl } from '../../features/pythonApi';
-import { PythonProjectManager } from '../../internal.api';
+import { PythonEnvironment, PythonProject } from '../api';
+import * as managerReady from '../features/common/managerReady';
+import { PythonEnvironmentApiImpl } from '../extensionApi';
+import type { PythonProjectManager } from '../features/projectManager';
 
 suite('PythonEnvironmentApiImpl - onDidChangePythonProjects', () => {
     test('fires event with correct added and removed projects', () => {

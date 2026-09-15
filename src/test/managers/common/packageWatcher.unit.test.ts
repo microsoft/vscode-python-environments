@@ -7,7 +7,8 @@ import { Disposable, EventEmitter, LogOutputChannel, RelativePattern, Terminal, 
 import { DidChangeEnvironmentEventArgs, PackageManager, PythonEnvironment, PythonEnvironmentId } from '../../../api';
 import * as windowApis from '../../../common/window.apis';
 import * as workspaceApis from '../../../common/workspace.apis';
-import { EnvironmentManagers, InternalPackageManager } from '../../../internal.api';
+import type { EnvironmentManagers } from '../../../features/envManagers';
+import { RegisteredPackageManager } from '../../../managers/common/registeredManagers';
 import {
     PackageWatcherTerminalActivation,
     registerPackageWatchers,
@@ -360,7 +361,7 @@ suite('Package Watcher', () => {
             const environmentChanges = new EventEmitter<DidChangeEnvironmentEventArgs>();
             const packageManager = createMockPackageManager();
             packageManager.getPackageWatchTargets = () => [new RelativePattern('/path/to/env/conda-meta', '**/*.json')];
-            const internalPackageManager = new InternalPackageManager('conda', packageManager as PackageManager);
+            const internalPackageManager = new RegisteredPackageManager('conda', packageManager as PackageManager);
             const scope = Uri.file('.');
             const envManagers = {
                 onDidChangeActiveEnvironment: environmentChanges.event,
@@ -383,7 +384,7 @@ suite('Package Watcher', () => {
             const mockWatcher = createMockWatcher();
             createFileSystemWatcherStub.returns(mockWatcher);
             const environmentChanges = new EventEmitter<DidChangeEnvironmentEventArgs>();
-            const packageManager = new InternalPackageManager('pip', createMockPackageManager() as PackageManager);
+            const packageManager = new RegisteredPackageManager('pip', createMockPackageManager() as PackageManager);
             const envManagers = {
                 onDidChangeActiveEnvironment: environmentChanges.event,
                 getPackageManager: sandbox.stub().returns(packageManager),
@@ -411,7 +412,7 @@ suite('Package Watcher', () => {
             createFileSystemWatcherStub.onFirstCall().returns(firstWatcher);
             createFileSystemWatcherStub.onSecondCall().returns(secondWatcher);
             const environmentChanges = new EventEmitter<DidChangeEnvironmentEventArgs>();
-            const packageManager = new InternalPackageManager('pip', createMockPackageManager() as PackageManager);
+            const packageManager = new RegisteredPackageManager('pip', createMockPackageManager() as PackageManager);
             const envManagers = {
                 onDidChangeActiveEnvironment: environmentChanges.event,
                 getPackageManager: sandbox.stub().returns(packageManager),
@@ -440,8 +441,8 @@ suite('Package Watcher', () => {
             const environmentChanges = new EventEmitter<DidChangeEnvironmentEventArgs>();
             const firstScope = Uri.file('workspace-one');
             const secondScope = Uri.file('workspace-two');
-            const firstPackageManager = new InternalPackageManager('pip', createMockPackageManager() as PackageManager);
-            const secondPackageManager = new InternalPackageManager(
+            const firstPackageManager = new RegisteredPackageManager('pip', createMockPackageManager() as PackageManager);
+            const secondPackageManager = new RegisteredPackageManager(
                 'conda',
                 createMockPackageManager() as PackageManager,
             );
@@ -466,7 +467,7 @@ suite('Package Watcher', () => {
             createFileSystemWatcherStub.returns(mockWatcher);
             const environmentChanges = new EventEmitter<DidChangeEnvironmentEventArgs>();
             const packageManager = createMockPackageManager();
-            const internalPackageManager = new InternalPackageManager('pip', packageManager as PackageManager);
+            const internalPackageManager = new RegisteredPackageManager('pip', packageManager as PackageManager);
             const envManagers = {
                 onDidChangeActiveEnvironment: environmentChanges.event,
                 getPackageManager: sandbox.stub().returns(internalPackageManager),
@@ -486,7 +487,7 @@ suite('Package Watcher', () => {
             const mockWatcher = createMockWatcher();
             createFileSystemWatcherStub.returns(mockWatcher);
             const environmentChanges = new EventEmitter<DidChangeEnvironmentEventArgs>();
-            const packageManager = new InternalPackageManager('pip', createMockPackageManager() as PackageManager);
+            const packageManager = new RegisteredPackageManager('pip', createMockPackageManager() as PackageManager);
             const env = createMockEnvironment({ envId: { id: 'terminal-env', managerId: 'terminal-manager' } });
             const terminal = { name: 'terminal' } as Terminal;
             const envManagers = {
@@ -507,7 +508,7 @@ suite('Package Watcher', () => {
             const terminalClose = new EventEmitter<Terminal>();
             (windowApis.onDidCloseTerminal as sinon.SinonStub).callsFake((listener) => terminalClose.event(listener));
             const environmentChanges = new EventEmitter<DidChangeEnvironmentEventArgs>();
-            const packageManager = new InternalPackageManager('pip', createMockPackageManager() as PackageManager);
+            const packageManager = new RegisteredPackageManager('pip', createMockPackageManager() as PackageManager);
             const env = createMockEnvironment();
             const terminal = { name: 'terminal' } as Terminal;
             const envManagers = {
@@ -527,7 +528,7 @@ suite('Package Watcher', () => {
             const terminalClose = new EventEmitter<Terminal>();
             (windowApis.onDidCloseTerminal as sinon.SinonStub).callsFake((listener) => terminalClose.event(listener));
             const environmentChanges = new EventEmitter<DidChangeEnvironmentEventArgs>();
-            const packageManager = new InternalPackageManager('pip', createMockPackageManager() as PackageManager);
+            const packageManager = new RegisteredPackageManager('pip', createMockPackageManager() as PackageManager);
             const env = createMockEnvironment();
             const terminal = { name: 'terminal' } as Terminal;
             const envManagers = {
@@ -547,7 +548,7 @@ suite('Package Watcher', () => {
             const mockWatcher = createMockWatcher();
             createFileSystemWatcherStub.returns(mockWatcher);
             const environmentChanges = new EventEmitter<DidChangeEnvironmentEventArgs>();
-            const packageManager = new InternalPackageManager('pip', createMockPackageManager() as PackageManager);
+            const packageManager = new RegisteredPackageManager('pip', createMockPackageManager() as PackageManager);
             const envManagers = {
                 onDidChangeActiveEnvironment: environmentChanges.event,
                 getPackageManager: sandbox.stub().returns(packageManager),
@@ -572,8 +573,8 @@ suite('Package Watcher', () => {
                 configurationChanges.event(listener),
             );
             const environmentChanges = new EventEmitter<DidChangeEnvironmentEventArgs>();
-            const firstPackageManager = new InternalPackageManager('pip', createMockPackageManager() as PackageManager);
-            const secondPackageManager = new InternalPackageManager(
+            const firstPackageManager = new RegisteredPackageManager('pip', createMockPackageManager() as PackageManager);
+            const secondPackageManager = new RegisteredPackageManager(
                 'conda',
                 createMockPackageManager() as PackageManager,
             );

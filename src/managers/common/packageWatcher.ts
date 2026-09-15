@@ -4,7 +4,7 @@ import { PackageManager, PythonEnvironment } from '../../api';
 import { createSimpleDebounce } from '../../common/utils/debounce';
 import { onDidCloseTerminal } from '../../common/window.apis';
 import { createFileSystemWatcher, getConfiguration, onDidChangeConfiguration } from '../../common/workspace.apis';
-import { EnvironmentManagers } from '../../internal.api';
+import type { EnvironmentManagers } from '../../features/envManagers';
 
 export interface PackageWatcherTerminalActivation {
     onDidChangeTerminalActivationState: Event<{

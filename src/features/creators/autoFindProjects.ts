@@ -5,7 +5,10 @@ import { ProjectCreatorString } from '../../common/localize';
 import { traceInfo } from '../../common/logging';
 import { showErrorMessage, showQuickPickWithButtons, showWarningMessage } from '../../common/window.apis';
 import { findFiles } from '../../common/workspace.apis';
-import { PythonProjectManager, PythonProjectsImpl } from '../../internal.api';
+import {
+    PythonProjectManager,
+    PythonProjectsImpl,
+} from '../projectManager';
 import { normalizePath } from '../../common/utils/pathUtils';
 
 function getUniqueUri(uris: Uri[]): {

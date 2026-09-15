@@ -7,7 +7,7 @@ import * as workspaceApis from '../../common/workspace.apis';
 import { normalizePath } from '../../common/utils/pathUtils';
 import { PythonProjectManagerImpl } from '../../features/projectManager';
 import * as settingHelpers from '../../features/settings/settingHelpers';
-import { PythonProjectSettings } from '../../internal.api';
+import type { PythonProjectSettings } from '../../features/projectManager';
 import { MockWorkspaceConfiguration } from '../mocks/mockWorkspaceConfig';
 
 /**

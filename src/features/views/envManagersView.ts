@@ -3,15 +3,17 @@ import { DidChangeEnvironmentEventArgs, EnvironmentGroupInfo, PythonEnvironment 
 import { ProjectViews } from '../../common/localize';
 import { createSimpleDebounce } from '../../common/utils/debounce';
 import { createTreeView } from '../../common/window.apis';
-import {
+import type {
     DidChangeEnvironmentManagerEventArgs,
     DidChangePackageManagerEventArgs,
     EnvironmentManagers,
     InternalDidChangeEnvironmentsEventArgs,
     InternalDidChangePackagesEventArgs,
-    InternalEnvironmentManager,
-    InternalPackageManager,
-} from '../../internal.api';
+} from '../envManagers';
+import type {
+    RegisteredEnvironmentManager,
+    RegisteredPackageManager,
+} from '../../managers/common/registeredManagers';
 import { ITemporaryStateManager } from './temporaryStateManager';
 import {
     EnvInfoTreeItem,
@@ -319,7 +321,7 @@ export class EnvManagerView implements TreeDataProvider<EnvTreeItem>, Disposable
         }
     }
 
-    private getSupportedPackageManager(manager: InternalEnvironmentManager): InternalPackageManager | undefined {
+    private getSupportedPackageManager(manager: RegisteredEnvironmentManager): RegisteredPackageManager | undefined {
         return this.providers.getPackageManager(manager.preferredPackageManagerId);
     }
 

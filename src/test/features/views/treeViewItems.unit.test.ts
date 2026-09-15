@@ -12,7 +12,9 @@ import {
     PythonEnvTreeItem,
     PythonGroupEnvTreeItem,
 } from '../../../features/views/treeViewItems';
-import { InternalEnvironmentManager, InternalPackageManager, PythonEnvironmentImpl } from '../../../internal.api';
+import { PythonEnvironmentImpl } from '../../../managers/common/models';
+import { RegisteredEnvironmentManager } from '../../../managers/common/registeredManagers';
+import type { RegisteredPackageManager } from '../../../managers/common/registeredManagers';
 
 /**
  * Helper to create a mock PythonEnvironmentImpl with minimal required fields.
@@ -52,7 +54,7 @@ function createMockEnvironment(options: {
 }
 
 /**
- * Helper to create a mock InternalEnvironmentManager.
+ * Helper to create a mock RegisteredEnvironmentManager.
  */
 function createMockManager(
     options: {
@@ -62,8 +64,8 @@ function createMockManager(
         supportsCreate?: boolean;
         supportsRemove?: boolean;
     } = {},
-): InternalEnvironmentManager {
-    return new InternalEnvironmentManager(options.id ?? 'ms-python.python:test-manager', {
+): RegisteredEnvironmentManager {
+    return new RegisteredEnvironmentManager(options.id ?? 'ms-python.python:test-manager', {
         name: options.name ?? 'test',
         displayName: options.displayName,
         description: 'test',
@@ -226,7 +228,7 @@ suite('Test TreeView Items', () => {
             const pkg = { name: 'requests', displayName: 'requests', version: '2.32.0' } as Package;
 
             // Act
-            const item = new PackageTreeItem(pkg, parent, {} as InternalPackageManager);
+            const item = new PackageTreeItem(pkg, parent, {} as RegisteredPackageManager);
 
             // Assert
             assert.strictEqual(item.treeItem.contextValue, 'python-package-readonly');
@@ -239,7 +241,7 @@ suite('Test TreeView Items', () => {
             const pkg = { name: 'requests', displayName: 'requests', version: '2.32.0' } as Package;
 
             // Act
-            const item = new PackageTreeItem(pkg, parent, {} as InternalPackageManager);
+            const item = new PackageTreeItem(pkg, parent, {} as RegisteredPackageManager);
 
             // Assert
             assert.strictEqual(item.treeItem.contextValue, 'python-package');
@@ -454,7 +456,7 @@ suite('Test TreeView Items', () => {
 
     suite('NoPythonEnvTreeItem', () => {
         test('System manager with create: shows install Python label', () => {
-            const manager = new InternalEnvironmentManager('ms-python.python:test-manager', {
+            const manager = new RegisteredEnvironmentManager('ms-python.python:test-manager', {
                 name: 'system',
                 displayName: 'Global',
                 description: 'test',
@@ -476,7 +478,7 @@ suite('Test TreeView Items', () => {
         });
 
         test('Non-system manager with create: shows create environment label', () => {
-            const manager = new InternalEnvironmentManager('ms-python.python:test-manager', {
+            const manager = new RegisteredEnvironmentManager('ms-python.python:test-manager', {
                 name: 'venv',
                 displayName: 'Venv',
                 description: 'test',
@@ -498,7 +500,7 @@ suite('Test TreeView Items', () => {
         });
 
         test('Manager without create: shows no env found label', () => {
-            const manager = new InternalEnvironmentManager('ms-python.python:test-manager', {
+            const manager = new RegisteredEnvironmentManager('ms-python.python:test-manager', {
                 name: 'test',
                 displayName: 'Test',
                 description: 'test',
@@ -517,7 +519,7 @@ suite('Test TreeView Items', () => {
         });
 
         test('System manager without create: shows no env found label', () => {
-            const manager = new InternalEnvironmentManager('ms-python.python:test-manager', {
+            const manager = new RegisteredEnvironmentManager('ms-python.python:test-manager', {
                 name: 'system',
                 displayName: 'Global',
                 description: 'test',
@@ -540,7 +542,7 @@ suite('Test TreeView Items', () => {
         // ProjectPackage only reads parent.id and does not call any manager methods,
         // so minimal cast mocks are sufficient for exercising the tree item rendering.
         const parent = { id: 'project>>>env' } as ProjectEnvironment;
-        const manager = {} as InternalPackageManager;
+        const manager = {} as RegisteredPackageManager;
 
         function createMockPackage(options: Partial<Package> = {}): Package {
             return {

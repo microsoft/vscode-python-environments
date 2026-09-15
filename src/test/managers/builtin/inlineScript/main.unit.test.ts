@@ -11,7 +11,7 @@ import * as persistentState from '../../../../common/persistentState';
 import * as workspaceApis from '../../../../common/workspace.apis';
 import { latchInlineScriptFeatureActivation } from '../../../../features/inlineScript/activation';
 import { InlineScriptLazyDetector } from '../../../../features/inlineScript/lazyDetector';
-import * as pythonApi from '../../../../features/pythonApi';
+import * as pythonApi from '../../../../extensionApi';
 import * as helpers from '../../../../helpers';
 import { InlineScriptEnvManager } from '../../../../managers/builtin/inlineScript/envManager';
 import { registerInlineScriptFeatures } from '../../../../managers/builtin/inlineScript/main';

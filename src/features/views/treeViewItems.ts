@@ -2,7 +2,10 @@ import { Command, MarkdownString, ThemeIcon, TreeItem, TreeItemCollapsibleState,
 import { EnvironmentGroupInfo, IconPath, Package, PythonEnvironment, PythonProject } from '../../api';
 import { INLINE_SCRIPT_MANAGER_ID } from '../../common/constants';
 import { EnvViewStrings, UvInstallStrings, VenvManagerStrings } from '../../common/localize';
-import { InternalEnvironmentManager, InternalPackageManager } from '../../internal.api';
+import type {
+    RegisteredEnvironmentManager,
+    RegisteredPackageManager,
+} from '../../managers/common/registeredManagers';
 import { isActivatableEnvironment } from '../common/activation';
 import { removable } from './utils';
 
@@ -85,7 +88,7 @@ export class EnvManagerTreeItem implements EnvTreeItem {
     public readonly kind = EnvTreeItemKind.manager;
     public readonly treeItem: TreeItem;
     public readonly parent: undefined;
-    constructor(public readonly manager: InternalEnvironmentManager) {
+    constructor(public readonly manager: RegisteredEnvironmentManager) {
         const item = new TreeItem(manager.displayName, TreeItemCollapsibleState.Collapsed);
         item.id = manager.id;
         item.contextValue = this.getContextValue();
@@ -231,7 +234,7 @@ export class PackageTreeItem implements EnvTreeItem {
     constructor(
         public readonly pkg: Package,
         public readonly parent: PythonEnvTreeItem,
-        public readonly manager: InternalPackageManager,
+        public readonly manager: RegisteredPackageManager,
     ) {
         const item = new TreeItem(pkg.displayName);
         const defaultIcon = pkg.isTransitive ? new ThemeIcon('list-tree') : new ThemeIcon('package');
@@ -453,7 +456,7 @@ export class ProjectPackage implements ProjectTreeItem {
     constructor(
         public readonly parent: ProjectEnvironment,
         public readonly pkg: Package,
-        public readonly manager: InternalPackageManager,
+        public readonly manager: RegisteredPackageManager,
     ) {
         this.id = ProjectPackage.getId(parent, pkg);
         const item = new TreeItem(this.pkg.displayName, TreeItemCollapsibleState.None);

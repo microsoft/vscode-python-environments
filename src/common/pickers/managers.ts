@@ -8,13 +8,16 @@ import {
     WorkspaceFolder,
 } from 'vscode';
 import { PythonProjectCreator } from '../../api';
-import { InternalEnvironmentManager, InternalPackageManager } from '../../internal.api';
+import type {
+    RegisteredEnvironmentManager,
+    RegisteredPackageManager,
+} from '../../managers/common/registeredManagers';
 import { Common, Interpreter, Pickers } from '../localize';
 import { showQuickPickWithButtons } from '../window.apis';
 
 export const ENTER_INTERPRETER_PATH_ID = 'EnterInterpreterPath';
 
-function getDescription(mgr: InternalEnvironmentManager | InternalPackageManager): string | undefined {
+function getDescription(mgr: RegisteredEnvironmentManager | RegisteredPackageManager): string | undefined {
     if (mgr.description) {
         return mgr.description;
     }
@@ -29,8 +32,8 @@ function getDescription(mgr: InternalEnvironmentManager | InternalPackageManager
 }
 
 export async function pickEnvironmentManager(
-    managers: InternalEnvironmentManager[],
-    defaultManagers?: InternalEnvironmentManager[],
+    managers: RegisteredEnvironmentManager[],
+    defaultManagers?: RegisteredEnvironmentManager[],
     showBackButton?: boolean,
     showEnterInterpreterPath?: boolean,
 ): Promise<string | undefined> {
@@ -109,8 +112,8 @@ export async function pickEnvironmentManager(
 }
 
 export async function pickPackageManager(
-    managers: InternalPackageManager[],
-    defaultManagers?: InternalPackageManager[],
+    managers: RegisteredPackageManager[],
+    defaultManagers?: RegisteredPackageManager[],
 ): Promise<string | undefined> {
     if (managers.length === 0) {
         return;

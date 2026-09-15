@@ -15,7 +15,7 @@ import {
     showWarningMessage,
 } from '../../common/window.apis';
 import { asRelativePath, findFiles, getOpenTextDocuments } from '../../common/workspace.apis';
-import { EnvironmentManagers } from '../../internal.api';
+import type { EnvironmentManagers } from '../envManagers';
 import { registerInlineScriptCodeLens } from './codeLens';
 import { promptUpdateExtensionsForInlineScripts } from './extensionVersionCheck';
 

@@ -19,12 +19,12 @@ import {
     onDidChangeConfiguration,
 } from '../common/workspace.apis';
 import { getUserConfiguredSetting } from '../helpers';
-import {
-    EnvironmentManagers,
-    InternalEnvironmentManager,
+import type { EnvironmentManagers } from './envManagers';
+import type {
     PythonProjectManager,
     PythonProjectSettings,
-} from '../internal.api';
+} from './projectManager';
+import type { RegisteredEnvironmentManager } from '../managers/common/registeredManagers';
 import { NativeEnvInfo, NativePythonFinder } from '../managers/common/nativePythonFinder';
 
 /**
@@ -32,7 +32,7 @@ import { NativeEnvInfo, NativePythonFinder } from '../managers/common/nativePyth
  */
 export interface PriorityChainResult {
     /** The environment manager to use */
-    manager: InternalEnvironmentManager;
+    manager: RegisteredEnvironmentManager;
     /** Optional specific environment - if undefined, let the manager decide via get() */
     environment?: PythonEnvironment;
     /** Which priority level matched */

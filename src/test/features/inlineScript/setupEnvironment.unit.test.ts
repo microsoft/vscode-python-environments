@@ -17,7 +17,8 @@ import {
     setUpInlineScriptEnvironment,
     setUpInlineScriptEnvironmentsInWorkspace,
 } from '../../../features/inlineScript/setupEnvironment';
-import { EnvironmentManagers, InternalEnvironmentManager } from '../../../internal.api';
+import type { EnvironmentManagers } from '../../../features/envManagers';
+import { RegisteredEnvironmentManager } from '../../../managers/common/registeredManagers';
 
 function makeEnv(): PythonEnvironment {
     return {
@@ -43,14 +44,14 @@ function makeMetadata(dependencies: string[]): InlineScriptMetadata {
 suite('setUpInlineScriptEnvironment', () => {
     const scriptUri = Uri.file('/workspace/app.py');
     let em: typemoq.IMock<EnvironmentManagers>;
-    let manager: typemoq.IMock<InternalEnvironmentManager>;
+    let manager: typemoq.IMock<RegisteredEnvironmentManager>;
     let routing: InlineScriptRoutingRegistry;
     let readMetadataStub: sinon.SinonStub;
     let openDocumentsStub: sinon.SinonStub;
 
     setup(() => {
         em = typemoq.Mock.ofType<EnvironmentManagers>();
-        manager = typemoq.Mock.ofType<InternalEnvironmentManager>();
+        manager = typemoq.Mock.ofType<RegisteredEnvironmentManager>();
         routing = new InlineScriptRoutingRegistry();
         readMetadataStub = sinon.stub(metadataApi, 'readInlineScriptMetadataFromFile').resolves(undefined);
         openDocumentsStub = sinon.stub(wapi, 'getOpenTextDocuments').returns([]);
@@ -171,7 +172,7 @@ suite('setUpInlineScriptEnvironmentsInWorkspace', () => {
     const withMeta = Uri.file('/workspace/with_meta.py');
     const withoutMeta = Uri.file('/workspace/plain.py');
     let em: typemoq.IMock<EnvironmentManagers>;
-    let manager: typemoq.IMock<InternalEnvironmentManager>;
+    let manager: typemoq.IMock<RegisteredEnvironmentManager>;
     let routing: InlineScriptRoutingRegistry;
     let findFilesStub: sinon.SinonStub;
     let readMetadataStub: sinon.SinonStub;
@@ -180,7 +181,7 @@ suite('setUpInlineScriptEnvironmentsInWorkspace', () => {
 
     setup(() => {
         em = typemoq.Mock.ofType<EnvironmentManagers>();
-        manager = typemoq.Mock.ofType<InternalEnvironmentManager>();
+        manager = typemoq.Mock.ofType<RegisteredEnvironmentManager>();
         routing = new InlineScriptRoutingRegistry();
         em.setup((m) => m.getEnvironmentManager(INLINE_SCRIPT_MANAGER_ID)).returns(() => manager.object);
 

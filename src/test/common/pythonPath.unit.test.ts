@@ -6,18 +6,18 @@ import * as sinon from 'sinon';
 import { CancellationTokenSource, Uri } from 'vscode';
 import { PythonEnvironment } from '../../api';
 import { handlePythonPath } from '../../common/utils/pythonPath';
-import { InternalEnvironmentManager } from '../../internal.api';
+import type { RegisteredEnvironmentManager } from '../../managers/common/registeredManagers';
 
 function createMockManager(
     id: string,
     displayName: string,
     resolveResult: PythonEnvironment | undefined = undefined,
-): sinon.SinonStubbedInstance<InternalEnvironmentManager> {
+): sinon.SinonStubbedInstance<RegisteredEnvironmentManager> {
     return {
         id,
         displayName,
         resolve: sinon.stub().resolves(resolveResult),
-    } as unknown as sinon.SinonStubbedInstance<InternalEnvironmentManager>;
+    } as unknown as sinon.SinonStubbedInstance<RegisteredEnvironmentManager>;
 }
 
 function createMockEnv(managerId: string): PythonEnvironment {

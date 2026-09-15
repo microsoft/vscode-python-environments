@@ -77,8 +77,8 @@ import {
     registerInterpreterSettingsChangeListener,
 } from './features/interpreterSelection';
 import { PythonProjectManagerImpl } from './features/projectManager';
-import { getPythonApi, setPythonApi } from './features/pythonApi';
 import { reportIssue } from './features/reportIssue';
+import { getPythonApi, setPythonApi } from './extensionApi';
 import { registerCompletionProvider } from './features/settings/settingCompletions';
 import { migrateGlobalDefaultEnvManagerSetting } from './features/settings/settingHelpers';
 import { setActivateMenuButtonContext } from './features/terminal/activateMenuButton';
@@ -102,7 +102,9 @@ import {
     isInlineScriptsFeatureEnabled,
     runPetInTerminalImpl,
 } from './helpers';
-import { EnvironmentManagers, ProjectCreators, PythonProjectManager } from './internal.api';
+import type { ProjectCreators } from './features/creators/projectCreators';
+import type { EnvironmentManagers } from './features/envManagers';
+import type { PythonProjectManager } from './features/projectManager';
 import { registerInlineScriptFeatures } from './managers/builtin/inlineScript/main';
 import { registerSystemPythonFeatures } from './managers/builtin/main';
 import { SysPythonManager } from './managers/builtin/sysPythonManager';

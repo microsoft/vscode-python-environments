@@ -10,7 +10,7 @@ import { PythonEnvironment } from '../../api';
 import * as frameUtils from '../../common/utils/frameUtils';
 import * as workspaceApis from '../../common/workspace.apis';
 import { PythonEnvironmentManagers } from '../../features/envManagers';
-import { PythonProjectManager } from '../../internal.api';
+import type { PythonProjectManager } from '../../features/projectManager';
 
 suite('PythonEnvironmentManagers - getEnvironment', () => {
     let sandbox: sinon.SinonSandbox;

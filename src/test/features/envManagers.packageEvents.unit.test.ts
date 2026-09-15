@@ -16,8 +16,9 @@ import { InlineScriptRoutingRegistry } from '../../common/inlineScript/routingRe
 import * as telemetry from '../../common/telemetry/sender';
 import * as frameUtils from '../../common/utils/frameUtils';
 import { PythonEnvironmentManagers } from '../../features/envManagers';
-import { PythonEnvironmentApiImpl } from '../../features/pythonApi';
-import { InternalDidChangePackagesEventArgs, PythonProjectManager } from '../../internal.api';
+import { PythonEnvironmentApiImpl } from '../../extensionApi';
+import type { InternalDidChangePackagesEventArgs } from '../../features/envManagers';
+import type { PythonProjectManager } from '../../features/projectManager';
 import { createMockPythonEnvironment } from '../mocks/pythonEnvironment';
 
 for (const inlineEnabled of [false, true]) {

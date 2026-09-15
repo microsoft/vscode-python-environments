@@ -24,13 +24,13 @@ import {
 import { traceError, traceInfo, traceVerbose } from '../common/logging';
 import { InlineScriptEnvironmentModifiedError, InlineScriptPackagesNotManagedError } from '../common/inlineScript/errors';
 import * as persistentState from '../common/persistentState';
-import {
-    EnvironmentManagers,
-    InternalEnvironmentManager,
-    InternalPackageManager,
-    ProjectCreators,
-    PythonProjectManager,
-} from '../internal.api';
+import type { ProjectCreators } from './creators/projectCreators';
+import type { EnvironmentManagers } from './envManagers';
+import type { PythonProjectManager } from './projectManager';
+import type {
+    RegisteredEnvironmentManager,
+    RegisteredPackageManager,
+} from '../managers/common/registeredManagers';
 import {
     removePythonProjectSetting,
     setEnvironmentManager,
@@ -104,7 +104,7 @@ async function browseAndResolveInterpreter(
     const projectEnvManagers = projectUris
         ? projectUris
               .map((uri) => em.getEnvironmentManager(uri))
-              .filter((m): m is InternalEnvironmentManager => m !== undefined)
+              .filter((m): m is RegisteredEnvironmentManager => m !== undefined)
         : [];
 
     const environment = await withProgress(
@@ -241,7 +241,7 @@ export async function createAnyEnvironmentCommand(
         const selected = await pickProjectMany(projects, options?.showBackButton);
 
         if (selected && selected.length > 0) {
-            const defaultManagers: InternalEnvironmentManager[] = [];
+            const defaultManagers: RegisteredEnvironmentManager[] = [];
 
             selected.forEach((p) => {
                 const manager = em.getEnvironmentManager(p.uri);
@@ -251,7 +251,7 @@ export async function createAnyEnvironmentCommand(
             });
 
             let quickCreate = options?.quickCreate ?? false;
-            let manager: InternalEnvironmentManager | undefined;
+            let manager: RegisteredEnvironmentManager | undefined;
 
             if (quickCreate && defaultManagers.length === 1) {
                 manager = defaultManagers[0];
@@ -754,7 +754,7 @@ export async function getPackageCommandOptions(
     em: EnvironmentManagers,
     pm: PythonProjectManager,
 ): Promise<{
-    packageManager: InternalPackageManager;
+    packageManager: RegisteredPackageManager;
     environment: PythonEnvironment;
 }> {
     const options = await resolvePackageCommandOptions(e, em, pm);
@@ -771,7 +771,7 @@ async function resolvePackageCommandOptions(
     em: EnvironmentManagers,
     pm: PythonProjectManager,
 ): Promise<{
-    packageManager: InternalPackageManager;
+    packageManager: RegisteredPackageManager;
     environment: PythonEnvironment;
 }> {
     if (e === undefined) {

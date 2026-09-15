@@ -27,7 +27,8 @@ import { InlineScriptMetadata } from '../../common/inlineScript/metadata';
 import { InlineScriptRoutingRegistry } from '../../common/inlineScript/routingRegistry';
 import { PythonEnvironmentManagers } from '../../features/envManagers';
 import * as settingHelpers from '../../features/settings/settingHelpers';
-import { InternalPackageManager, PythonProjectManager } from '../../internal.api';
+import type { PythonProjectManager } from '../../features/projectManager';
+import type { RegisteredPackageManager } from '../../managers/common/registeredManagers';
 import { setupNonThenable } from '../mocks/helper';
 
 suite('PythonEnvironmentManagers getLastKnownEnvironment', () => {
@@ -120,7 +121,7 @@ suite('PythonEnvironmentManagers getLastKnownEnvironment', () => {
     }
 
     function stubPackageManager(id = 'ms-python.python:pip'): void {
-        const packageManager = typeMoq.Mock.ofType<InternalPackageManager>();
+        const packageManager = typeMoq.Mock.ofType<RegisteredPackageManager>();
         setupNonThenable(packageManager);
         packageManager.setup((manager) => manager.id).returns(() => id);
         sinon.stub(envManagers, 'getPackageManager').returns(packageManager.object);

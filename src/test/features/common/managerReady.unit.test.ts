@@ -16,14 +16,16 @@ import {
     withManagerTimeout,
 } from '../../../features/common/managerReady';
 import * as settingHelpers from '../../../features/settings/settingHelpers';
-import {
+import type {
     DidChangeEnvironmentManagerEventArgs,
     DidChangePackageManagerEventArgs,
     EnvironmentManagers,
-    InternalEnvironmentManager,
-    InternalPackageManager,
-    PythonProjectManager,
-} from '../../../internal.api';
+} from '../../../features/envManagers';
+import type { PythonProjectManager } from '../../../features/projectManager';
+import type {
+    RegisteredEnvironmentManager,
+    RegisteredPackageManager,
+} from '../../../managers/common/registeredManagers';
 
 suite('withManagerTimeout', () => {
     let clock: sinon.SinonFakeTimers;
@@ -186,7 +188,7 @@ suite('ManagerReady - race condition handling', () => {
         // Manager registers before timeout
         envManagerEmitter.fire({
             kind: 'registered',
-            manager: { id: 'ms-python.python:venv' } as unknown as InternalEnvironmentManager,
+            manager: { id: 'ms-python.python:venv' } as unknown as RegisteredEnvironmentManager,
         });
 
         await clock.tickAsync(0);
@@ -244,7 +246,7 @@ suite('ManagerReady - race condition handling', () => {
     test('manager registered before wait resolves immediately without prompt', async () => {
         envManagerEmitter.fire({
             kind: 'registered',
-            manager: { id: 'ms-python.python:venv' } as unknown as InternalEnvironmentManager,
+            manager: { id: 'ms-python.python:venv' } as unknown as RegisteredEnvironmentManager,
         });
 
         await clock.tickAsync(0);
@@ -263,7 +265,7 @@ suite('ManagerReady - race condition handling', () => {
 
         pkgManagerEmitter.fire({
             kind: 'registered',
-            manager: { id: 'ms-python.python:pip' } as unknown as InternalPackageManager,
+            manager: { id: 'ms-python.python:pip' } as unknown as RegisteredPackageManager,
         });
 
         await clock.tickAsync(0);

@@ -27,7 +27,9 @@ import { ShellStartupScriptProvider } from '../../features/terminal/shells/start
 import { TerminalManager } from '../../features/terminal/terminalManager';
 import { EnvManagerView } from '../../features/views/envManagersView';
 import { ProjectEnvironment, ProjectItem } from '../../features/views/treeViewItems';
-import { EnvironmentManagers, InternalEnvironmentManager, PythonProjectManager } from '../../internal.api';
+import type { EnvironmentManagers } from '../../features/envManagers';
+import type { PythonProjectManager } from '../../features/projectManager';
+import { RegisteredEnvironmentManager } from '../../managers/common/registeredManagers';
 import { setupNonThenable } from '../mocks/helper';
 import { createMockPythonEnvironment } from '../mocks/pythonEnvironment';
 
@@ -43,7 +45,7 @@ suite('Environment removal command ownership', () => {
                 envPath: path.join(process.cwd(), 'removal-env'),
             });
             const remove = sinon.stub().resolves();
-            const owner = new InternalEnvironmentManager(managerId, {
+            const owner =             new RegisteredEnvironmentManager(managerId, {
                 name: 'test',
                 preferredPackageManagerId: 'ms-python.python:pip',
                 get: async () => environment,
@@ -95,7 +97,7 @@ suite('Environment removal command ownership', () => {
 suite('Create Any Environment Command Tests', () => {
     let em: typeMoq.IMock<EnvironmentManagers>;
     let pm: typeMoq.IMock<PythonProjectManager>;
-    let manager: typeMoq.IMock<InternalEnvironmentManager>;
+    let manager: typeMoq.IMock<RegisteredEnvironmentManager>;
     let env: typeMoq.IMock<PythonEnvironment>;
     let pickProjectManyStub: sinon.SinonStub;
     let pickEnvironmentManagerStub: sinon.SinonStub;
@@ -113,7 +115,7 @@ suite('Create Any Environment Command Tests', () => {
     };
 
     setup(() => {
-        manager = typeMoq.Mock.ofType<InternalEnvironmentManager>();
+        manager = typeMoq.Mock.ofType<RegisteredEnvironmentManager>();
         manager.setup((m) => m.id).returns(() => 'test');
         manager.setup((m) => m.displayName).returns(() => 'Test Manager');
         manager.setup((m) => m.description).returns(() => 'Test Manager Description');

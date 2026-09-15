@@ -1,6 +1,6 @@
 import { CancellationToken, Progress, Uri } from 'vscode';
 import { PythonEnvironment } from '../../api';
-import { InternalEnvironmentManager } from '../../internal.api';
+import type { RegisteredEnvironmentManager } from '../../managers/common/registeredManagers';
 import { PYTHON_EXTENSION_ID } from '../constants';
 import { traceVerbose, traceWarn } from '../logging';
 
@@ -15,7 +15,7 @@ const priorityOrder = [
     `${PYTHON_EXTENSION_ID}:venv`,
     `${PYTHON_EXTENSION_ID}:system`,
 ];
-function sortManagersByPriority(managers: InternalEnvironmentManager[]): InternalEnvironmentManager[] {
+function sortManagersByPriority(managers: RegisteredEnvironmentManager[]): RegisteredEnvironmentManager[] {
     const systemId = priorityOrder[priorityOrder.length - 1];
     return managers.sort((a, b) => {
         const aIndex = priorityOrder.indexOf(a.id);
@@ -36,8 +36,8 @@ function sortManagersByPriority(managers: InternalEnvironmentManager[]): Interna
 
 export async function handlePythonPath(
     interpreterUri: Uri,
-    managers: InternalEnvironmentManager[],
-    projectEnvManagers: InternalEnvironmentManager[],
+    managers: RegisteredEnvironmentManager[],
+    projectEnvManagers: RegisteredEnvironmentManager[],
     reporter?: Progress<{ message?: string; increment?: number }>,
     token?: CancellationToken,
 ): Promise<PythonEnvironment | undefined> {
