@@ -4,27 +4,7 @@ import { EventEmitter, Uri } from 'vscode';
 import { PythonEnvironment, PythonProject } from '../../api';
 import * as managerReady from '../../features/common/managerReady';
 import { PythonEnvironmentApiImpl } from '../../features/pythonApi';
-import { PythonPackageImpl, PythonProjectManager } from '../../internal.api';
-
-suite('PythonPackageImpl', () => {
-    const packageId = { id: 'requests', managerId: 'test.packages:pip', environmentId: 'test-env' };
-
-    test('does not require installation by default', () => {
-        const pkg = new PythonPackageImpl(packageId, { name: 'requests', displayName: 'Requests' });
-
-        assert.strictEqual(pkg.needsInstallation, false);
-    });
-
-    test('preserves an explicit installation requirement', () => {
-        const pkg = new PythonPackageImpl(packageId, {
-            name: 'requests',
-            displayName: 'Requests',
-            needsInstallation: true,
-        });
-
-        assert.strictEqual(pkg.needsInstallation, true);
-    });
-});
+import { PythonProjectManager } from '../../internal.api';
 
 suite('PythonEnvironmentApiImpl - onDidChangePythonProjects', () => {
     test('fires event with correct added and removed projects', () => {

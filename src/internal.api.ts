@@ -538,7 +538,6 @@ export class PythonPackageImpl implements Package {
     public readonly uris?: readonly Uri[];
 
     public readonly isTransitive?: boolean;
-    public readonly needsInstallation: boolean;
 
     constructor(
         public readonly pkgId: PackageId,
@@ -552,7 +551,6 @@ export class PythonPackageImpl implements Package {
         this.iconPath = info.iconPath;
         this.uris = info.uris;
         this.isTransitive = info.isTransitive;
-        this.needsInstallation = info.needsInstallation ?? false;
     }
 }
 

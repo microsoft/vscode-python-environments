@@ -598,11 +598,6 @@ export interface PackageInfo {
      * Whether the package is a transitive dependency.
      */
     readonly isTransitive?: boolean;
-
-    /**
-     * Whether the package needs to be installed in the environment. Defaults to `false`.
-     */
-    readonly needsInstallation?: boolean;
 }
 
 /**
