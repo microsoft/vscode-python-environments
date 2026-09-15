@@ -97,7 +97,6 @@ async function seedRoutingMetadataForClosedScript(scriptUri: Uri, routing: Inlin
     }
 }
 
-/** The open text document backing `scriptUri`, if the user has it open. */
 function findOpenDocument(scriptUri: Uri): TextDocument | undefined {
     const scriptPath = normalizePath(scriptUri.fsPath);
     return getOpenTextDocuments().find(
@@ -105,11 +104,6 @@ function findOpenDocument(scriptUri: Uri): TextDocument | undefined {
     );
 }
 
-/**
- * Save `scriptUri` if it is open with unsaved changes, so setup reads what the user actually sees.
- *
- * Returns `false` when the document could not be saved; setup must not run in that case.
- */
 async function saveScriptBeforeSetup(scriptUri: Uri, routing: InlineScriptRoutingRegistry): Promise<boolean> {
     const document = findOpenDocument(scriptUri);
     if (!document?.isDirty) {
@@ -120,9 +114,8 @@ async function saveScriptBeforeSetup(scriptUri: Uri, routing: InlineScriptRoutin
         return false;
     }
     traceVerbose(`Saved ${scriptUri.fsPath} before setting up its inline-script environment.`);
-    // Seeding here is load-bearing: without it a just-typed block goes from no metadata to an
-    // identity while `create` runs, which `setUpInlineScriptEnvironment` reads as a concurrent edit
-    // and silently skips the association.
+    // Load-bearing: without it a just-typed block gains its identity mid-`create`, which reads as a
+    // concurrent edit and silently skips the association.
     const metadata = await readInlineScriptMetadataFromFile(scriptUri);
     if (metadata) {
         routing.setMetadata(scriptUri, metadata);
@@ -164,8 +157,7 @@ export function setupInlineScriptEnvironmentHandler(
             notifyInlineScriptSetupOutcome(uri, routing);
             return;
         }
-        // Kept out of the try: the environment is already set up, so a failure in this follow-up
-        // must not be reported to the user as a setup failure.
+        // Outside the try: the environment is already set up, so a failure here is not a setup failure.
         await promptUpdateExtensionsForInlineScripts().catch((error) =>
             traceError('Failed to check companion extension versions for inline scripts:', error),
         );

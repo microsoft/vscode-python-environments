@@ -18,17 +18,10 @@ import { getInlineScriptRoutingKey, InlineScriptRoutingRegistry } from '../../co
 import { InlineScriptStrings } from '../../common/localize';
 import { isInlineScriptsFeatureEnabled } from '../../helpers';
 
-/**
- * Diagnostic codes meaning "this import did not resolve", lowercased for comparison.
- *
- * `reportMissingModuleSource` is included deliberately, unlike in Pylance's own
- * `isMissingImportDiagnostic`: a stub without source means the package is not installed, which
- * setting the script's environment up fixes.
- */
 const UNRESOLVED_IMPORT_DIAGNOSTIC_CODES: ReadonlySet<string> = new Set([
     // Pyright / Pylance / basedpyright.
     'reportmissingimports',
-    'reportmissingmodulesource',
+    'reportmissingmodulesource', // Stub found but no source: the package is not installed.
     // Ty.
     'unresolved-import',
     'possibly-missing-import',
@@ -36,7 +29,7 @@ const UNRESOLVED_IMPORT_DIAGNOSTIC_CODES: ReadonlySet<string> = new Set([
     'missing-import',
     'missing-source',
     'missing-source-for-stubs',
-    // mypy, via ms-python.mypy-type-checker.
+    // mypy.
     'import-not-found',
     'import-untyped',
 ]);
@@ -49,25 +42,16 @@ function normalizeDiagnosticCode(code: Diagnostic['code']): string | undefined {
     return typeof value === 'string' || typeof value === 'number' ? String(value).toLowerCase() : undefined;
 }
 
-/**
- * Whether `diagnostic` reports an import that could not be resolved. Matches on `code`, never on
- * `source`: Pyrefly-backed Pylance reports its source as the literal string `pylance + pyrefly`.
- */
+/** Whether `diagnostic` reports an unresolved import. Matches on `code` only, never on `source`. */
 export function isUnresolvedImportDiagnostic(diagnostic: Diagnostic): boolean {
     const code = normalizeDiagnosticCode(diagnostic.code);
     return code !== undefined && UNRESOLVED_IMPORT_DIAGNOSTIC_CODES.has(code);
 }
 
 /**
- * Offers "Set up this script's Python environment" as a quick fix on an unresolved import in a `.py`
- * file that declares a PEP 723 `# /// script` block and has no inline-script environment yet.
- *
- * Complements the CodeLens, which is hidden while the document is dirty — the moment a user has just
- * typed the import that does not resolve. This provider parses the in-memory buffer instead.
- *
- * `diagnostics` and `isPreferred` are both left unset: setup installs the block's declared
- * dependencies verbatim and may not resolve the import at all, so the action must not claim to fix
- * the diagnostic or pre-empt a real import fix.
+ * Offers inline-script environment setup as a quick fix on an unresolved import, complementing the
+ * CodeLens that is hidden while the document is dirty. `diagnostics` and `isPreferred` stay unset:
+ * setup installs the block's declared dependencies verbatim and may not resolve the import at all.
  */
 export class InlineScriptSetupCodeActionProvider implements CodeActionProvider {
     constructor(
@@ -75,7 +59,6 @@ export class InlineScriptSetupCodeActionProvider implements CodeActionProvider {
         private readonly setupCommand: string,
     ) {}
 
-    /** Gates run cheapest-first, and before any parsing: VS Code may call this on every cursor move. */
     public provideCodeActions(
         document: TextDocument,
         _range: Range,
