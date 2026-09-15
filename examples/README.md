@@ -36,7 +36,7 @@ Add the following dependency to your extension `package.json` file:
 
 ### Set up the Python Envs API
 
-The Python environments API is available via the extension export. First, add the following file to your extension [api.ts](https://github.com/microsoft/vscode-python-environments/blob/main/src/api.ts). You can rename the file as you see fit for your extension.
+The Python environments API is available via the extension export. Copy [api.ts](https://github.com/microsoft/vscode-python-environments/blob/main/src/api.ts), [types.ts](https://github.com/microsoft/vscode-python-environments/blob/main/src/types.ts), and [publicErrors.ts](https://github.com/microsoft/vscode-python-environments/blob/main/src/publicErrors.ts) into your extension's `src` folder. Keep their relative paths unchanged, or update the imports in `api.ts` to match.
 
 Add a `pythonEnvsApi.ts` file to get the API and insert the following code:
 

@@ -2,7 +2,7 @@
 // Licensed under the MIT License.
 
 import { extensions } from 'vscode';
-import type { PythonEnvironmentApi } from './types';
+import type { PythonEnvironmentApi } from './types.js';
 
 /*
  * Do not introduce any breaking changes to this API.
@@ -13,8 +13,8 @@ import type { PythonEnvironmentApi } from './types';
  * (`EXTENSION_ID` and `PythonEnvironments.api()`).
  */
 
-export * from './types';
-export * from './publicErrors';
+export * from './types.js';
+export * from './publicErrors.js';
 
 export const EXTENSION_ID = 'ms-python.vscode-python-envs';
 

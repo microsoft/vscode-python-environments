@@ -78,6 +78,13 @@ try {
     }
 
     const installedPackageRoot = path.join(testRoot, 'node_modules', '@vscode', 'python-environments');
+    const vscodeStubRoot = path.join(testRoot, 'node_modules', 'vscode');
+    fs.mkdirSync(vscodeStubRoot, { recursive: true });
+    fs.writeFileSync(path.join(vscodeStubRoot, 'package.json'), JSON.stringify({ main: 'index.js' }));
+    fs.writeFileSync(
+        path.join(vscodeStubRoot, 'index.js'),
+        "exports.extensions = { getExtension: () => undefined };",
+    );
     const installedPackageJson = JSON.parse(fs.readFileSync(path.join(installedPackageRoot, 'package.json'), 'utf8'));
     assert.strictEqual(installedPackageJson.main, './out/cjs/main.cjs');
     assert.strictEqual(installedPackageJson.types, './out/cjs/main.d.ts');
@@ -104,24 +111,34 @@ try {
     }
 
     const requireFromConsumer = createRequire(path.join(testRoot, 'legacy', 'consumer.cjs'));
+    const commonJsModule = requireFromConsumer('@vscode/python-environments');
+    assert.strictEqual(
+        typeof commonJsModule.PythonEnvironments.api,
+        'function',
+        'CommonJS consumers should load the package runtime facade',
+    );
     assert.strictEqual(
         canonicalPath(requireFromConsumer.resolve('@vscode/python-environments')),
         canonicalPath(path.join(installedPackageRoot, installedPackageJson.exports.require.default)),
         'CommonJS consumers should resolve the packaged CommonJS entry point',
     );
 
-    const esmEntryPoint = execFileSync(
+    const esmModuleCheck = execFileSync(
         process.execPath,
-        ['--input-type=module', '--eval', "console.log(import.meta.resolve('@vscode/python-environments'))"],
+        [
+            '--input-type=module',
+            '--eval',
+            "const packageModule = await import('@vscode/python-environments'); if (typeof packageModule.PythonEnvironments.api !== 'function') process.exit(1); console.log(import.meta.resolve('@vscode/python-environments'));",
+        ],
         {
             cwd: path.join(testRoot, 'modern'),
             encoding: 'utf8',
         },
     ).trim();
     assert.strictEqual(
-        canonicalPath(fileURLToPath(esmEntryPoint)),
+        canonicalPath(fileURLToPath(esmModuleCheck)),
         canonicalPath(path.join(installedPackageRoot, installedPackageJson.exports.import.default)),
-        'ES module consumers should resolve the packaged ES module entry point',
+        'ES module consumers should load the packaged runtime facade',
     );
 } finally {
     fs.rmSync(testRoot, { recursive: true, force: true });
