@@ -1,12 +1,13 @@
 // Copyright (c) Microsoft Corporation. All rights reserved.
 // Licensed under the MIT License.
 
-import { commands, Disposable, l10n, QuickPickItem, Uri, window } from 'vscode';
+import { commands, Disposable, l10n, QuickPickItem, TextDocument, Uri, window } from 'vscode';
 import { PythonEnvironment } from '../../api';
 import { INLINE_SCRIPT_MANAGER_ID } from '../../common/constants';
 import { readInlineScriptMetadataFromFile } from '../../common/inlineScript/metadata';
 import { InlineScriptRoutingRegistry } from '../../common/inlineScript/routingRegistry';
-import { traceError, traceInfo } from '../../common/logging';
+import { InlineScriptStrings } from '../../common/localize';
+import { traceError, traceInfo, traceVerbose } from '../../common/logging';
 import { normalizePath } from '../../common/utils/pathUtils';
 import {
     showErrorMessage,
@@ -18,6 +19,7 @@ import { asRelativePath, findFiles, getOpenTextDocuments } from '../../common/wo
 import type { EnvironmentManagers } from '../envManagers';
 import { registerInlineScriptCodeLens } from './codeLens';
 import { promptUpdateExtensionsForInlineScripts } from './extensionVersionCheck';
+import { registerInlineScriptSetupCodeAction } from './setupCodeAction';
 
 /**
  * Hidden command invoked by the inline-script CodeLens to set up the environment for one script.
@@ -86,11 +88,7 @@ async function seedRoutingMetadataForClosedScript(scriptUri: Uri, routing: Inlin
     if (routing.getMetadata(scriptUri)) {
         return;
     }
-    const scriptPath = normalizePath(scriptUri.fsPath);
-    const isOpen = getOpenTextDocuments().some(
-        (document) => document.uri.scheme === 'file' && normalizePath(document.uri.fsPath) === scriptPath,
-    );
-    if (isOpen) {
+    if (findOpenDocument(scriptUri)) {
         return;
     }
     const metadata = await readInlineScriptMetadataFromFile(scriptUri);
@@ -99,7 +97,41 @@ async function seedRoutingMetadataForClosedScript(scriptUri: Uri, routing: Inlin
     }
 }
 
-function setupInlineScriptEnvironmentHandler(
+/** The open text document backing `scriptUri`, if the user has it open. */
+function findOpenDocument(scriptUri: Uri): TextDocument | undefined {
+    const scriptPath = normalizePath(scriptUri.fsPath);
+    return getOpenTextDocuments().find(
+        (document) => document.uri.scheme === 'file' && normalizePath(document.uri.fsPath) === scriptPath,
+    );
+}
+
+/**
+ * Save `scriptUri` if it is open with unsaved changes, so setup reads what the user actually sees.
+ *
+ * Returns `false` when the document could not be saved; setup must not run in that case.
+ */
+async function saveScriptBeforeSetup(scriptUri: Uri, routing: InlineScriptRoutingRegistry): Promise<boolean> {
+    const document = findOpenDocument(scriptUri);
+    if (!document?.isDirty) {
+        return true;
+    }
+    if (!(await document.save())) {
+        traceError(`Could not save ${scriptUri.fsPath} before setting up its inline-script environment.`);
+        return false;
+    }
+    traceVerbose(`Saved ${scriptUri.fsPath} before setting up its inline-script environment.`);
+    // Seeding here is load-bearing: without it a just-typed block goes from no metadata to an
+    // identity while `create` runs, which `setUpInlineScriptEnvironment` reads as a concurrent edit
+    // and silently skips the association.
+    const metadata = await readInlineScriptMetadataFromFile(scriptUri);
+    if (metadata) {
+        routing.setMetadata(scriptUri, metadata);
+    }
+    return true;
+}
+
+/** Handler for the single-file setup command, shared by the CodeLens and the quick fix. */
+export function setupInlineScriptEnvironmentHandler(
     em: EnvironmentManagers,
     routing: InlineScriptRoutingRegistry,
 ): (scriptUri?: Uri) => Promise<void> {
@@ -112,13 +144,13 @@ function setupInlineScriptEnvironmentHandler(
             showErrorMessage(l10n.t('The inline script environment manager is not available yet. Try again shortly.'));
             return;
         }
+        if (!(await saveScriptBeforeSetup(uri, routing))) {
+            showErrorMessage(InlineScriptStrings.saveFailedBeforeSetup);
+            return;
+        }
+        let environment: PythonEnvironment | undefined;
         try {
-            const environment = await setUpInlineScriptEnvironment(uri, em, routing);
-            if (!environment) {
-                notifyInlineScriptSetupOutcome(uri, routing);
-                return;
-            }
-            await promptUpdateExtensionsForInlineScripts();
+            environment = await setUpInlineScriptEnvironment(uri, em, routing);
         } catch (error) {
             traceError(`Failed to set up the inline-script environment for ${uri.fsPath}:`, error);
             showErrorMessage(
@@ -126,7 +158,17 @@ function setupInlineScriptEnvironmentHandler(
                     'Failed to set up the environment for this script. See the Python Environments output for details.',
                 ),
             );
+            return;
         }
+        if (!environment) {
+            notifyInlineScriptSetupOutcome(uri, routing);
+            return;
+        }
+        // Kept out of the try: the environment is already set up, so a failure in this follow-up
+        // must not be reported to the user as a setup failure.
+        await promptUpdateExtensionsForInlineScripts().catch((error) =>
+            traceError('Failed to check companion extension versions for inline scripts:', error),
+        );
     };
 }
 
@@ -314,13 +356,15 @@ async function filterInlineScriptFiles(files: readonly Uri[]): Promise<Uri[]> {
 }
 
 /**
- * Register the inline-script user-facing surfaces (the CodeLens and its setup commands). Only called
- * when the PEP 723 inline-script feature flag is enabled. The single-file setup command is invoked by
- * the CodeLens and stays out of `package.json`; the bulk command is palette-gated behind the flag.
+ * Register the inline-script user-facing surfaces (the CodeLens, the quick fix, and their setup
+ * commands). Only called when the PEP 723 inline-script feature flag is enabled. The single-file
+ * setup command is invoked by both surfaces and stays out of `package.json`; the bulk command is
+ * palette-gated behind the flag.
  */
 export function registerInlineScriptUx(em: EnvironmentManagers, routing: InlineScriptRoutingRegistry): Disposable[] {
     return [
         registerInlineScriptCodeLens(routing, SETUP_INLINE_SCRIPT_ENV_COMMAND),
+        registerInlineScriptSetupCodeAction(routing, SETUP_INLINE_SCRIPT_ENV_COMMAND),
         commands.registerCommand(SETUP_INLINE_SCRIPT_ENV_COMMAND, setupInlineScriptEnvironmentHandler(em, routing)),
         commands.registerCommand(SETUP_INLINE_SCRIPT_ENVS_COMMAND, () =>
             setUpInlineScriptEnvironmentsInWorkspace(em, routing),
