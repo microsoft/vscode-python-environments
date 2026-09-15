@@ -69,6 +69,7 @@ import {
 import { PythonEnvironmentManagers } from './features/envManagers';
 import { EnvVarManager, PythonEnvVariableManager } from './features/execution/envVariableManager';
 import { latchInlineScriptFeatureActivation } from './features/inlineScript/activation';
+import { registerInlineScriptDiagnostics } from './features/inlineScript/diagnostics';
 import { InlineScriptLazyDetector } from './features/inlineScript/lazyDetector';
 import { registerInlineScriptUx } from './features/inlineScript/setupEnvironment';
 import {
@@ -228,6 +229,10 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
     const inlineScriptLazyDetector = new InlineScriptLazyDetector(inlineScriptRouting);
     inlineScriptLazyDetector.activate();
     context.subscriptions.push(inlineScriptLazyDetector);
+
+    if (inlineScriptFeatureActivation.enabled) {
+        context.subscriptions.push(registerInlineScriptDiagnostics());
+    }
 
     setPythonApi(envManagers, projectManager, projectCreators, terminalManager, envVarManager);
     const api = await getPythonApi();

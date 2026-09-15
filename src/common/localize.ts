@@ -35,6 +35,50 @@ export namespace InlineScriptStrings {
     export const updatePythonAndPylanceExtensions = l10n.t(
         'The environment for this script was created. Update the Python and Pylance extensions for the full inline script experience.',
     );
+
+    export const diagnosticSource = l10n.t('Python Environments');
+
+    export const unterminatedBlock = l10n.t(
+        "This '# /// script' block is missing its closing '# ///' marker, so its inline script metadata is ignored.",
+    );
+    export const multipleBlocks = l10n.t(
+        "A script may contain only one '# /// script' block. Remove this block or merge it into the first one.",
+    );
+    export function invalidContentLine(line: string): string {
+        const found = line.trim();
+        if (found.length === 0) {
+            return l10n.t(
+                "Lines inside a '# /// script' block must be exactly '#' or start with '# '. This line is blank; use '#' for a blank metadata line.",
+            );
+        }
+        return l10n.t(
+            "Lines inside a '# /// script' block must be exactly '#' or start with '# '. Found: {0}",
+            found,
+        );
+    }
+    export function invalidBlockMarker(marker: string): string {
+        return l10n.t(
+            "'{0}' is not a valid inline script marker because of trailing whitespace. Markers must be exactly '# /// script' and '# ///'.",
+            marker,
+        );
+    }
+    export function invalidToml(detail: string): string {
+        return l10n.t('The inline script metadata is not valid TOML: {0}', detail);
+    }
+    export function invalidFieldType(field: string): string {
+        switch (field) {
+            case 'requires-python':
+                return l10n.t("Inline script metadata: 'requires-python' must be a string, for example '>=3.11'.");
+            case 'dependencies':
+                return l10n.t(
+                    "Inline script metadata: 'dependencies' must be an array of strings, for example ['requests'].",
+                );
+            case 'tool':
+                return l10n.t("Inline script metadata: 'tool' must be a table.");
+            default:
+                return l10n.t("Inline script metadata: '{0}' has the wrong type.", field);
+        }
+    }
 }
 
 export namespace Interpreter {
