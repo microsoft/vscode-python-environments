@@ -598,6 +598,11 @@ export interface PackageInfo {
      * Whether the package is a transitive dependency.
      */
     readonly isTransitive?: boolean;
+
+    /**
+     * Whether the package needs to be installed in the environment. Defaults to `false`.
+     */
+    readonly needsInstallation?: boolean;
 }
 
 /**
@@ -805,6 +810,12 @@ export interface PythonProject {
      * The tooltip for the Python project, which can be a string or a Markdown string.
      */
     readonly tooltip?: string | MarkdownString;
+
+    /**
+     * Finds the preferred project setup file, such as `pyproject.toml`, `setup.py`, or `requirements.txt`.
+     * @returns The setup file URI, or `undefined` when no supported setup file exists.
+     */
+    discoverProjectSetupFile?(): Promise<Uri | undefined>;
 }
 
 /**

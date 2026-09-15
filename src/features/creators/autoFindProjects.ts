@@ -3,10 +3,10 @@ import { Uri } from 'vscode';
 import { PythonProject, PythonProjectCreator, PythonProjectCreatorOptions } from '../../api';
 import { ProjectCreatorString } from '../../common/localize';
 import { traceInfo } from '../../common/logging';
+import { normalizePath } from '../../common/utils/pathUtils';
 import { showErrorMessage, showQuickPickWithButtons, showWarningMessage } from '../../common/window.apis';
 import { findFiles } from '../../common/workspace.apis';
 import { PythonProjectManager, PythonProjectsImpl } from '../../internal.api';
-import { normalizePath } from '../../common/utils/pathUtils';
 
 function getUniqueUri(uris: Uri[]): {
     label: string;

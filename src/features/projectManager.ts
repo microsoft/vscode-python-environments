@@ -3,6 +3,7 @@ import { Disposable, EventEmitter, MarkdownString, Uri, workspace } from 'vscode
 import { IconPath, PythonProject } from '../api';
 import { DEFAULT_ENV_MANAGER_ID, DEFAULT_PACKAGE_MANAGER_ID } from '../common/constants';
 import { createSimpleDebounce } from '../common/utils/debounce';
+import { normalizePath } from '../common/utils/pathUtils';
 import {
     getConfiguration,
     getWorkspaceFolders,
@@ -12,7 +13,6 @@ import {
     onDidRenameFiles,
 } from '../common/workspace.apis';
 import { PythonProjectManager, PythonProjectSettings, PythonProjectsImpl } from '../internal.api';
-import { normalizePath } from '../common/utils/pathUtils';
 import {
     addPythonProjectSetting,
     EditProjectSettings,
@@ -197,10 +197,7 @@ export class PythonProjectManagerImpl implements PythonProjectManager {
         return new PythonProjectsImpl(name, uri, options);
     }
 
-    async add(
-        projects: PythonProject | ProjectArray,
-        options?: { persistSettings?: boolean },
-    ): Promise<void> {
+    async add(projects: PythonProject | ProjectArray, options?: { persistSettings?: boolean }): Promise<void> {
         const _projects = Array.isArray(projects) ? projects : [projects];
         if (_projects.length === 0) {
             return;

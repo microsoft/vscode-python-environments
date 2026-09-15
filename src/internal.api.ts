@@ -1,5 +1,15 @@
 import type { Pep440Version } from '@renovatebot/pep440';
-import { CancellationError, Disposable, Event, LogOutputChannel, MarkdownString, RelativePattern, Uri } from 'vscode';
+import * as path from 'path';
+import {
+    CancellationError,
+    Disposable,
+    Event,
+    FileType,
+    LogOutputChannel,
+    MarkdownString,
+    RelativePattern,
+    Uri,
+} from 'vscode';
 import {
     CreateEnvironmentOptions,
     CreateEnvironmentScope,
@@ -39,6 +49,7 @@ import { StopWatch } from './common/stopWatch';
 import { EventNames } from './common/telemetry/constants';
 import { classifyError, isTimeoutErrorType } from './common/telemetry/errorClassifier';
 import { sendTelemetryEvent } from './common/telemetry/sender';
+import { stat } from './common/workspace.fs.apis';
 
 export type EnvironmentManagerScope = undefined | string | Uri | PythonEnvironment;
 export type PackageManagerScope = undefined | string | Uri | PythonEnvironment | Package;
@@ -461,10 +472,7 @@ export interface PythonProjectManager extends Disposable {
         uri: Uri,
         options?: { description?: string; tooltip?: string | MarkdownString; iconPath?: IconPath },
     ): PythonProject;
-    add(
-        pyWorkspace: PythonProject | PythonProject[],
-        options?: { persistSettings?: boolean },
-    ): Promise<void>;
+    add(pyWorkspace: PythonProject | PythonProject[], options?: { persistSettings?: boolean }): Promise<void>;
     remove(pyWorkspace: PythonProject | PythonProject[]): void;
     getProjects(uris?: Uri[]): ReadonlyArray<PythonProject>;
     get(uri: Uri): PythonProject | undefined;
@@ -530,6 +538,7 @@ export class PythonPackageImpl implements Package {
     public readonly uris?: readonly Uri[];
 
     public readonly isTransitive?: boolean;
+    public readonly needsInstallation: boolean;
 
     constructor(
         public readonly pkgId: PackageId,
@@ -543,10 +552,13 @@ export class PythonPackageImpl implements Package {
         this.iconPath = info.iconPath;
         this.uris = info.uris;
         this.isTransitive = info.isTransitive;
+        this.needsInstallation = info.needsInstallation ?? false;
     }
 }
 
 export class PythonProjectsImpl implements PythonProject {
+    private static readonly setupFileNames = ['pyproject.toml', 'setup.py', 'requirements.txt'] as const;
+
     name: string;
     uri: Uri;
     description?: string;
@@ -563,6 +575,43 @@ export class PythonProjectsImpl implements PythonProject {
         this.description = options?.description ?? uri.fsPath;
         this.tooltip = options?.tooltip ?? uri.fsPath;
         this.iconPath = options?.iconPath;
+    }
+
+    /**
+     * Finds the preferred setup file at the project root.
+     * @returns The setup file URI, or `undefined` when no supported setup file exists.
+     */
+    async discoverProjectSetupFile(): Promise<Uri | undefined> {
+        let projectType: FileType;
+        try {
+            projectType = (await stat(this.uri)).type;
+        } catch {
+            return undefined;
+        }
+
+        // A project URI may point directly to a setup file instead of its parent directory.
+        if (projectType !== FileType.Directory) {
+            const fileName = path.posix.basename(this.uri.path);
+            return projectType === FileType.File &&
+                PythonProjectsImpl.setupFileNames.some((candidate) => candidate === fileName)
+                ? this.uri
+                : undefined;
+        }
+
+        // Search directory candidates in setup-file priority order.
+        for (const fileName of PythonProjectsImpl.setupFileNames) {
+            const candidate = this.uri.with({ path: path.posix.join(this.uri.path, fileName) });
+            try {
+                const candidateType = (await stat(candidate)).type;
+                if (candidateType === FileType.File) {
+                    return candidate;
+                }
+            } catch {
+                // Try the next supported setup file.
+            }
+        }
+
+        return undefined;
     }
 }
 
