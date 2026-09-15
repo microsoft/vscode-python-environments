@@ -12,6 +12,9 @@
     "activationEvents": [],
     "main": "./dist/extension.js",
     "contributes": {},
+    "dependencies": {
+        "@renovatebot/pep440": "^4.2.4"
+    },
     "scripts": {
         "vscode:prepublish": "npm run package",
         "compile": "webpack",

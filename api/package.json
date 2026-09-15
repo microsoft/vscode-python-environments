@@ -39,7 +39,8 @@
     "scripts": {
         "prepublishOnly": "echo \"⛔ Can only publish from a secure pipeline ⛔\" && node -e \"process.exitCode = 1\"",
         "prepack": "npm run all:publish",
-        "all:publish": "git clean -xfd . && npm install && npm run compile",
+        "all:publish": "git clean -xfd . && npm install && npm run copy:sources && npm run compile",
+        "copy:sources": "node ./scripts/copy-sources.cjs",
         "compile": "npm run compile:esm && npm run compile:cjs",
         "compile:esm": "tsc -b ./tsconfig.esm.json && mve out/esm/main.js out/esm/main.mjs && node -e \"require('fs').writeFileSync('out/esm/package.json', '{\\\"type\\\":\\\"module\\\"}')\"",
         "compile:cjs": "tsc -b ./tsconfig.cjs.json && mve out/cjs/main.js out/cjs/main.cjs",
