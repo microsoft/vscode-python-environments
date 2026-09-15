@@ -8,7 +8,9 @@ import {
     NoPythonEnvTreeItem,
     PackageTreeItem,
     ProjectEnvironment,
+    ProjectItem,
     ProjectPackage,
+    ProjectSetupFile,
     PythonEnvTreeItem,
     PythonGroupEnvTreeItem,
 } from '../../../features/views/treeViewItems';
@@ -79,6 +81,20 @@ function createMockManager(
 }
 
 suite('Test TreeView Items', () => {
+    suite('ProjectSetupFile', () => {
+        test('opens the setup file', () => {
+            const parent = new ProjectItem({ name: 'project', uri: Uri.file('.') });
+            const setupFileUri = Uri.file('pyproject.toml');
+
+            const item = new ProjectSetupFile(parent, setupFileUri);
+
+            assert.strictEqual(item.parent, parent);
+            assert.strictEqual(item.treeItem.resourceUri, setupFileUri);
+            assert.strictEqual(item.treeItem.command?.command, 'vscode.open');
+            assert.deepStrictEqual(item.treeItem.command?.arguments, [setupFileUri]);
+        });
+    });
+
     suite('EnvManagerTreeItem', () => {
         test('Sets id to manager id for tree item identification', () => {
             // Arrange
@@ -587,7 +603,11 @@ suite('Test TreeView Items', () => {
 
         test('Prefers package-provided iconPath over default icon', () => {
             // Arrange
-            const pkg = createMockPackage({ name: 'numpy', isTransitive: true, iconPath: new ThemeIcon('symbol-numeric') });
+            const pkg = createMockPackage({
+                name: 'numpy',
+                isTransitive: true,
+                iconPath: new ThemeIcon('symbol-numeric'),
+            });
 
             // Act
             const item = new ProjectPackage(parent, pkg, manager);
