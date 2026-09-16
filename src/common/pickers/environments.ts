@@ -1,6 +1,6 @@
 import { ProgressLocation, QuickInputButtons, QuickPickItem, QuickPickItemKind, ThemeIcon, Uri, l10n } from 'vscode';
 import { CreateEnvironmentOptions, IconPath, PythonEnvironment, PythonProject } from '../../api';
-import { InternalEnvironmentManager } from '../../internal.api';
+import type { InternalEnvironmentManager } from '../../managers/common/registeredManagers';
 import { Common, Interpreter, Pickers } from '../localize';
 import { traceError } from '../logging';
 import { EventNames } from '../telemetry/constants';

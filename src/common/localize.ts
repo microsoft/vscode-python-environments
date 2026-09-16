@@ -26,6 +26,12 @@ export namespace WorkbenchStrings {
 export namespace InlineScriptStrings {
     export const updateExtension = l10n.t('Update Extension');
 
+    export const setUpScriptEnvironment = l10n.t("Set up this script's Python environment");
+
+    export const saveFailedBeforeSetup = l10n.t(
+        'Could not save this script, so its environment was not set up. Save the file and try again.',
+    );
+
     export const updatePythonExtension = l10n.t(
         'The environment for this script was created. Update the Python extension for the full inline script experience.',
     );
@@ -37,6 +43,13 @@ export namespace InlineScriptStrings {
     );
 
     export const diagnosticSource = l10n.t('Python Environments');
+
+    export function environmentReady(version: string | undefined): string {
+        const shown = version?.trim();
+        return shown
+            ? l10n.t('Script environment ready (Python {0})', shown)
+            : l10n.t('Script environment ready');
+    }
 
     export const unterminatedBlock = l10n.t(
         "This '# /// script' block is missing its closing '# ///' marker, so its inline script metadata is ignored.",

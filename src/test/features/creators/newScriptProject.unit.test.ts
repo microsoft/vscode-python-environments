@@ -12,7 +12,7 @@ import * as windowApis from '../../../common/window.apis';
 import * as workspaceApis from '../../../common/workspace.apis';
 import * as creationHelpers from '../../../features/creators/creationHelpers';
 import { NewScriptProject } from '../../../features/creators/newScriptProject';
-import { PythonProjectManager } from '../../../internal.api';
+import type { PythonProjectManager } from '../../../features/projectManager';
 
 // Path to the real script template, resolved from the compiled test location
 // (out/test/features/creators/ → workspaceRoot/files/templates/...). We do NOT

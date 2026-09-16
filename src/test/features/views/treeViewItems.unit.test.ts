@@ -14,7 +14,9 @@ import {
     PythonEnvTreeItem,
     PythonGroupEnvTreeItem,
 } from '../../../features/views/treeViewItems';
-import { InternalEnvironmentManager, InternalPackageManager, PythonEnvironmentImpl } from '../../../internal.api';
+import { PythonEnvironmentImpl } from '../../../managers/common/models';
+import { InternalEnvironmentManager } from '../../../managers/common/registeredManagers';
+import type { InternalPackageManager } from '../../../managers/common/registeredManagers';
 
 /**
  * Helper to create a mock PythonEnvironmentImpl with minimal required fields.

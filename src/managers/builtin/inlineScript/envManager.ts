@@ -42,7 +42,6 @@ import { getErrorMessage } from '../../../common/errors/utils';
 import { computeCacheKey, normalizeDependency } from '../../../common/inlineScript/cacheKey';
 import { InlineScriptEnvironmentModifiedError } from '../../../common/inlineScript/errors';
 import {
-    CacheEntrySummary,
     CacheEnvironmentInspection,
     compareInstalledPackages,
     getBaseInterpreterStatus,
@@ -103,6 +102,38 @@ const CACHE_LOCK_RETRY_MS = 500;
 const CACHE_TTL_MS = 14 * 24 * 60 * 60 * 1000;
 const CACHED_ASSOCIATION_VALIDATION_INTERVAL_MS = 5_000;
 const DISCOVERY_RETRY_DELAYS_MS = [1_000, 5_000, 30_000] as const;
+const DISCOVERY_RETRY_WINDOW_MS = DISCOVERY_RETRY_DELAYS_MS.reduce((total, delay) => total + delay, 0);
+/**
+ * Delay between activation and the opportunistic TTL sweep. Kept past
+ * {@link DISCOVERY_RETRY_WINDOW_MS} so it cannot exhaust the discovery retry ladder.
+ */
+const TTL_EVICTION_DELAY_MS = DISCOVERY_RETRY_WINDOW_MS + 60 * 1000;
+/**
+ * Random spread added to {@link TTL_EVICTION_DELAY_MS}. Windows restored together would otherwise
+ * sweep the shared cache at the same offset and contend for the same entry locks.
+ */
+const TTL_EVICTION_JITTER_MS = 30 * 1000;
+/**
+ * Age at which a retained entry's `lastUsedAt` is worth refreshing. Well short of the eviction-risk
+ * horizon so the refresh stays optional, and long enough that ordinary use rarely takes the entry
+ * lock at all.
+ */
+const LAST_USED_REFRESH_AFTER_MS = 7 * 24 * 60 * 60 * 1000;
+/** Backoff when a touch could not be recorded; a contended stamp must not be skipped for a day. */
+const LAST_USED_TOUCH_RETRY_MS = 5 * 60 * 1000;
+/**
+ * How long before {@link CACHE_TTL_MS} an unstamped entry is treated as at risk of another window's
+ * sweep. Being due a refresh is not the same as being evictable, so only entries inside this window
+ * have to prove protection before they can be handed out.
+ */
+const EVICTION_RISK_MARGIN_MS = 24 * 60 * 60 * 1000;
+/** Entries deleted per sweep; a seeded venv is thousands of unlinks on a shared threadpool. */
+const MAX_EVICTIONS_PER_SWEEP = 3;
+/**
+ * Grace before an entry with no usable sidecar is reclaimed. `buildCacheEntry` writes `.meta.json`
+ * last, so an interrupted install leaves a directory no `lastUsedAt` can ever age out.
+ */
+const INCOMPLETE_ENTRY_GRACE_MS = 24 * 60 * 60 * 1000;
 const PERSISTED_ASSOCIATION_SCHEMA_VERSION = 1 as const;
 /** Bounded retry for deleting a cache entry whose files may still be briefly held by a stopped installer. */
 const CACHE_ENTRY_REMOVAL_ATTEMPTS = 4;
@@ -175,6 +206,43 @@ interface CacheEntryRemovalOptions {
     readonly reclaimRetainedLock?: boolean;
 }
 
+interface StaleCacheEvictionPlan {
+    readonly cacheRoot: Uri;
+    readonly physicalCacheRootPath: string;
+    readonly evictableStaleEntries: readonly string[];
+    /** Planning clock, reused for the under-lock recheck so a reuse since then wins. */
+    readonly now: Date;
+}
+
+/** `unproven` means nothing currently shows the entry is protected, not that it is broken. */
+type UsageVerdict = 'usable' | 'unproven' | 'unusable';
+
+interface LastUsedTouchState {
+    /** Last stamp observed on disk. Both the refresh and eviction-risk horizons derive from it. */
+    readonly stampedAt?: number;
+    /** Earliest a new attempt may start after a failure; never permission to use the entry. */
+    readonly retryNotBefore?: number;
+    /** Shared so overlapping resolves join one operation instead of starting their own. */
+    readonly inFlight?: Promise<UsageVerdict>;
+    /** Identifies the operation that owns this state so an older completion cannot overwrite it. */
+    readonly generation?: number;
+    /** Bookkeeping-only refresh. Callers never await it; it exists to stop a second one starting. */
+    readonly refreshInFlight?: Promise<unknown>;
+    readonly refreshGeneration?: number;
+}
+
+interface LastUsedStampOutcome {
+    readonly verdict: UsageVerdict;
+    readonly stampedAt?: number;
+    readonly retryNotBefore?: number;
+}
+
+interface ObservedUsability {
+    readonly verdict: UsageVerdict;
+    readonly stampedAt?: number;
+    readonly stampDue: boolean;
+}
+
 type CacheEntryInspection =
     | { readonly kind: 'absent' | 'stale' | 'uncertain' }
     | { readonly kind: 'reusable'; readonly environment: PythonEnvironment };
@@ -190,6 +258,13 @@ interface PendingMetadataRefresh {
     readonly metadataRevision: number;
     readonly associationRevision: number;
     readonly promise: Promise<void>;
+}
+
+interface AssociationRetry {
+    readonly metadataIdentity: string;
+    readonly associationRevision: number;
+    attempt: number;
+    timer?: ReturnType<typeof setTimeout>;
 }
 
 interface ParsedPersistedAssociations {
@@ -212,6 +287,7 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
     private collection: PythonEnvironment[] = [];
     private readonly pendingRehydrations = new Map<string, PendingAssociationValidation>();
     private readonly pendingMetadataRefreshes = new Map<string, PendingMetadataRefresh>();
+    private readonly associationRetries = new Map<string, AssociationRetry>();
     private readonly fsPathToEnv = new Map<string, PythonEnvironment>();
     private readonly fsPathToPersistedAssociation = new Map<string, PersistedAssociationRecord>();
     private readonly cachedAssociationValidatedAt = new Map<string, number>();
@@ -223,6 +299,12 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
     private activationDiscoveryActive = false;
     private discoveryRetryAttempt = 0;
     private discoveryRetryTimer: ReturnType<typeof setTimeout> | undefined;
+    private ttlEvictionTimer: ReturnType<typeof setTimeout> | undefined;
+    private readonly lastUsedTouchState = new Map<string, LastUsedTouchState>();
+    /** Entry dirs whose lock this manager holds purely for an optional last-used refresh. */
+    private readonly bookkeepingLocks = new Set<string>();
+    private lastUsedTouchGeneration = 0;
+    private readonly pendingLastUsedTouches = new Set<Promise<unknown>>();
     private readonly subscriptions: Disposable[] = [];
     private readonly associationStore: InlineScriptAssociationStore;
     private readonly persistedAssociationsLoaded: Promise<void>;
@@ -295,7 +377,6 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
     ): Promise<PythonEnvironment | undefined> {
         this.activeCreateOperations += 1;
         try {
-            await this.runTtlEvictionOnce();
             return await this.waitForCacheMaintenance(async () => {
                 try {
                     const scriptUri = this.getScriptUri(scope);
@@ -568,12 +649,44 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
     }
 
     public startActivationDiscovery(): void {
-        if (this.disposed || this.activationDiscoveryActive) {
+        if (this.disposed) {
+            return;
+        }
+        this.scheduleTtlEviction();
+        if (this.activationDiscoveryActive) {
             return;
         }
         this.activationDiscoveryActive = true;
         this.discoveryRetryAttempt = 0;
         this.runActivationDiscoveryPass();
+    }
+
+    /**
+     * Arm the once-per-window TTL sweep. Eviction is deliberately not tied to `create`: a user who
+     * stops creating environments would otherwise never reclaim orphaned cache entries.
+     */
+    private scheduleTtlEviction(): void {
+        if (this.ttlEvictionTimer || this.ttlEviction) {
+            return;
+        }
+        this.ttlEvictionTimer = setTimeout(() => {
+            this.ttlEvictionTimer = undefined;
+            if (this.disposed) {
+                return;
+            }
+            void this.runTtlEvictionOnce();
+        }, this.getTtlEvictionDelayMs());
+    }
+
+    private getTtlEvictionDelayMs(): number {
+        return TTL_EVICTION_DELAY_MS + Math.floor(Math.random() * TTL_EVICTION_JITTER_MS);
+    }
+
+    private cancelTtlEviction(): void {
+        if (this.ttlEvictionTimer) {
+            clearTimeout(this.ttlEvictionTimer);
+            this.ttlEvictionTimer = undefined;
+        }
     }
 
     private getOrStartRefreshPass(checkForSnapshotChanges: boolean): Promise<boolean> {
@@ -1078,14 +1191,359 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
             return undefined;
         }
 
-        // An unreadable or invalid metadata block is indistinguishable from a transient
-        // read failure, so retain the association but do not return it.
-        const metadata = await readInlineScriptMetadataFromFile(scope);
-        if (!metadata) {
-            return undefined;
+        const scriptPath = normalizePath(scope.fsPath);
+        // A new selection or saved header may arrive while last-used protection is being written.
+        // Retry once with the current state, never hand out the superseded descriptor.
+        for (let attempt = 0; attempt < 2 && !this.disposed; attempt += 1) {
+            const revision = this.associationRevisions.get(scriptPath) ?? 0;
+            const metadataRevision = this.routingRegistry.getMetadataRevision(scope);
+            const isCurrent = () =>
+                !this.disposed &&
+                this.isCurrentAssociationRevision(scriptPath, revision) &&
+                this.routingRegistry.getMetadataRevision(scope) === metadataRevision;
+            const metadata = await readInlineScriptMetadataFromFile(scope);
+            if (!metadata) {
+                return undefined;
+            }
+
+            const environment = await this.getAssociationForMetadata(scriptPath, scope, metadata);
+            if (!isCurrent()) {
+                continue;
+            }
+            if (!environment) {
+                const busy = await this.isAssociatedEntryBusy(scriptPath);
+                if (!isCurrent()) {
+                    continue;
+                }
+                if (busy) {
+                    this.routingRegistry.setEnvironmentUnavailable(scope, true);
+                    this.scheduleAssociationRetry(scope);
+                } else {
+                    await this.reviewRoutingForMissingEnvironment(scope);
+                }
+                return undefined;
+            }
+            const usable = await this.noteEnvironmentUsed(environment);
+            if (!isCurrent()) {
+                continue;
+            }
+            if (!usable) {
+                // Offer retry without routing execution to an unrelated fallback interpreter.
+                this.routingRegistry.setEnvironmentUnavailable(scope, true);
+                this.scheduleAssociationRetry(scope);
+                return undefined;
+            }
+            this.routingRegistry.setEnvironmentUnavailable(scope, false);
+            return environment;
+        }
+        this.log.debug(
+            `Inline-script selection changed while resolving ${scope.fsPath}; withholding the old environment.`,
+        );
+        return undefined;
+    }
+
+    /**
+     * Routing is only re-evaluated on metadata changes, so an entry that becomes unusable on its own
+     * leaves the script with neither an environment nor the CodeLens to rebuild one. Only definitive
+     * verdicts act here; contention and unreadable metadata must not drop a working association.
+     */
+    private async reviewRoutingForMissingEnvironment(scriptUri: Uri): Promise<void> {
+        if (this.disposed || !this.routingRegistry.shouldRoute(scriptUri)) {
+            return;
+        }
+        const environmentPath = this.fsPathToPersistedAssociation.get(normalizePath(scriptUri.fsPath))?.environmentPath;
+        if (!environmentPath) {
+            return;
+        }
+        await this.invalidateUnusableEntry(path.dirname(path.dirname(environmentPath)));
+    }
+
+    /**
+     * Publish an unusable verdict, but only after re-confirming it. A same-key rebuild can replace
+     * the entry while a lookup is pending, and a newer successful setup must win over the older
+     * lookup's result.
+     */
+    private async invalidateUnusableEntry(envDirPath: string): Promise<void> {
+        if (this.disposed || this.pendingCreations.has(path.basename(envDirPath))) {
+            return;
+        }
+        const envDir = Uri.file(envDirPath);
+        // Lock-free first, so a lookup that has nothing to publish never pays for the entry lock.
+        if (this.classifyUsability(await inspectMetaJson(envDir), Date.now()).verdict !== 'unusable') {
+            return;
+        }
+        try {
+            // Then under the lock so a rebuild cannot land between the reconfirmation and the
+            // invalidation. A newer successful setup must win over an older lookup's verdict.
+            await this.withCacheEntryLock(
+                envDir,
+                async () => {
+                    if (this.disposed) {
+                        return;
+                    }
+                    const confirmed = this.classifyUsability(await inspectMetaJson(envDir), Date.now());
+                    if (confirmed.verdict === 'unusable') {
+                        this.unrouteScriptsUsingEnvironment(envDirPath);
+                    }
+                },
+                0,
+            );
+        } catch (error) {
+            if (!this.isLockContentionError(error)) {
+                this.log.warn(`Unable to confirm an unusable inline-script entry: ${getErrorMessage(error)}`);
+            }
+            // Someone owns the entry; let them finish rather than invalidating a moving target.
+        }
+    }
+
+    /**
+     * Stamp the entry as used, and report whether it is still safe to hand out. Awaited, not fired
+     * and forgotten: another window's sweep cannot see this workspace's associations, so returning
+     * before the stamp lands lets it delete an environment that is about to be executed.
+     */
+    private async noteEnvironmentUsed(environment: PythonEnvironment | undefined): Promise<boolean> {
+        if (this.disposed || environment?.envId.managerId !== INLINE_SCRIPT_MANAGER_ID) {
+            return true;
+        }
+        const envDirPath = environment.sysPrefix;
+        if (this.pendingCreations.has(path.basename(envDirPath))) {
+            return true;
+        }
+        const verdict = await this.proveEnvironmentUsable(envDirPath);
+        if (verdict === 'unusable') {
+            // Give the script its setup action back rather than leaving it with neither an
+            // environment nor a CodeLens.
+            await this.invalidateUnusableEntry(envDirPath);
+        }
+        return verdict === 'usable';
+    }
+
+    /**
+     * Synchronous up to the point the shared operation is registered, so two overlapping lookups
+     * cannot both miss it and start their own.
+     */
+    private proveEnvironmentUsable(envDirPath: string): Promise<UsageVerdict> {
+        const key = normalizePath(envDirPath);
+        const existing = this.lastUsedTouchState.get(key);
+        if (existing?.inFlight) {
+            return existing.inFlight;
+        }
+        const now = Date.now();
+        if (existing?.stampedAt !== undefined && now - existing.stampedAt < LAST_USED_REFRESH_AFTER_MS) {
+            return Promise.resolve('usable');
         }
 
-        return this.getAssociationForMetadata(normalizePath(scope.fsPath), scope, metadata);
+        // Backoff suppresses repeated write attempts, never the recognition of protection another
+        // window may have established since.
+        const mayStamp =
+            existing?.refreshInFlight === undefined &&
+            (existing?.retryNotBefore === undefined ||
+                now >= existing.retryNotBefore ||
+                this.verdictWithoutFreshStamp(existing.stampedAt, now) !== 'usable');
+        const generation = (this.lastUsedTouchGeneration += 1);
+        const inFlight = this.proveAndStamp(key, Uri.file(envDirPath), generation, {
+            mayStamp,
+            retryNotBefore: mayStamp ? undefined : existing?.retryNotBefore,
+        });
+        this.lastUsedTouchState.set(key, { ...existing, inFlight, generation });
+        this.pendingLastUsedTouches.add(inFlight);
+        void inFlight.finally(() => this.pendingLastUsedTouches.delete(inFlight));
+        return inFlight;
+    }
+
+    /** Records a stamp this manager just wrote, so later lookups need no proof of their own. */
+    private recordProvenStamp(envDirPath: string, stampedAt: number): void {
+        this.lastUsedTouchState.set(normalizePath(envDirPath), { stampedAt });
+    }
+
+    /**
+     * What a known stamp says when no fresh one could be taken. Being due a refresh is not the same
+     * as being evictable, so only entries close to the TTL are withheld.
+     */
+    private verdictWithoutFreshStamp(stampedAt: number | undefined, now: number): UsageVerdict {
+        return stampedAt !== undefined && now - stampedAt < CACHE_TTL_MS - EVICTION_RISK_MARGIN_MS
+            ? 'usable'
+            : 'unproven';
+    }
+
+    /** The single reading of what a sidecar says about using the entry right now. */
+    private classifyUsability(sidecar: InlineScriptMetaReadResult, now: number): ObservedUsability {
+        if (sidecar.kind === 'unsupported') {
+            // A newer extension owns this entry and manages its own lifecycle. We cannot stamp a
+            // schema we do not understand, and withholding would strand a downgraded window.
+            return { verdict: 'usable', stampDue: false };
+        }
+        if (sidecar.kind === 'unavailable') {
+            // Transient I/O: no verdict on the entry, but no proof of protection either.
+            return { verdict: 'unproven', stampDue: false };
+        }
+        if (sidecar.kind !== 'valid' || sidecar.metadata.manuallyModified) {
+            // Missing, invalid, or marked: the entry is being torn down or is already damaged.
+            return { verdict: 'unusable', stampDue: false };
+        }
+        const stampedAt = new Date(sidecar.metadata.lastUsedAt).getTime();
+        if (!Number.isFinite(stampedAt)) {
+            return { verdict: 'unproven', stampDue: true };
+        }
+        return {
+            verdict: this.verdictWithoutFreshStamp(stampedAt, now),
+            stampedAt,
+            stampDue: now - stampedAt >= LAST_USED_REFRESH_AFTER_MS,
+        };
+    }
+
+    private async proveAndStamp(
+        key: string,
+        envDir: Uri,
+        generation: number,
+        options: { readonly mayStamp: boolean; readonly retryNotBefore?: number },
+    ): Promise<UsageVerdict> {
+        let observed: ObservedUsability | undefined;
+        let outcome: LastUsedStampOutcome;
+        try {
+            observed = this.classifyUsability(await inspectMetaJson(envDir), Date.now());
+            if (!observed.stampDue || !options.mayStamp) {
+                outcome = {
+                    verdict: observed.verdict,
+                    stampedAt: observed.stampedAt,
+                    retryNotBefore: options.retryNotBefore,
+                };
+            } else if (observed.verdict === 'usable') {
+                // The recorded stamp already proves the entry is retained, so refreshing it is
+                // bookkeeping. Never make interpreter resolution wait for that write: `timeoutMs: 0`
+                // bounds only lock acquisition, and graceful-fs retries a Windows sharing violation
+                // on the rename for a full minute.
+                this.startBackgroundRefresh(key, envDir, observed);
+                outcome = { verdict: 'usable', stampedAt: observed.stampedAt };
+            } else {
+                // At risk or unproven: the stamp is the answer, so it has to be awaited.
+                outcome = await this.writeLastUsedUnderLock(envDir, observed);
+            }
+        } catch (error) {
+            this.log.warn(`Failed to refresh the inline-script last-used time: ${getErrorMessage(error)}`);
+            const known = observed?.stampedAt ?? this.lastUsedTouchState.get(key)?.stampedAt;
+            const verdict = this.verdictWithoutFreshStamp(known, Date.now());
+            outcome = {
+                verdict,
+                stampedAt: known,
+                retryNotBefore: verdict === 'usable' ? Date.now() + LAST_USED_TOUCH_RETRY_MS : undefined,
+            };
+        }
+        this.recordTouchOutcome(key, generation, outcome);
+        return outcome.verdict;
+    }
+
+    private recordTouchOutcome(key: string, generation: number, outcome: LastUsedStampOutcome): void {
+        const current = this.lastUsedTouchState.get(key);
+        if (current?.generation !== generation) {
+            // A newer operation owns this entry's state.
+            return;
+        }
+        this.lastUsedTouchState.set(key, {
+            stampedAt: outcome.stampedAt,
+            retryNotBefore: outcome.retryNotBefore,
+            refreshInFlight: current.refreshInFlight,
+            refreshGeneration: current.refreshGeneration,
+        });
+    }
+
+    /** Refreshes a stamp nobody is waiting on, while keeping its lock and lifecycle guarantees. */
+    private startBackgroundRefresh(key: string, envDir: Uri, observed: ObservedUsability): void {
+        const refreshGeneration = (this.lastUsedTouchGeneration += 1);
+        const refresh = (async () => {
+            let outcome: LastUsedStampOutcome;
+            try {
+                outcome = await this.writeLastUsedUnderLock(envDir, observed, true);
+            } catch (error) {
+                this.log.warn(`Failed to refresh the inline-script last-used time: ${getErrorMessage(error)}`);
+                outcome = { verdict: 'usable', retryNotBefore: Date.now() + LAST_USED_TOUCH_RETRY_MS };
+            }
+            const current = this.lastUsedTouchState.get(key);
+            if (current?.refreshGeneration !== refreshGeneration) {
+                return;
+            }
+            this.lastUsedTouchState.set(key, {
+                ...current,
+                refreshInFlight: undefined,
+                refreshGeneration: undefined,
+                stampedAt: outcome.stampedAt ?? current.stampedAt,
+                retryNotBefore: outcome.retryNotBefore,
+            });
+        })();
+        this.lastUsedTouchState.set(key, {
+            ...(this.lastUsedTouchState.get(key) ?? {}),
+            refreshInFlight: refresh,
+            refreshGeneration,
+        });
+        this.pendingLastUsedTouches.add(refresh);
+        void refresh.finally(() => this.pendingLastUsedTouches.delete(refresh));
+    }
+
+    private async writeLastUsedUnderLock(
+        envDir: Uri,
+        observed: ObservedUsability,
+        markBookkeeping = false,
+    ): Promise<LastUsedStampOutcome> {
+        const bookkeepingKey = normalizePath(envDir.fsPath);
+        try {
+            // Timeout 0: this runs off a read path and must never wait behind an installer.
+            return await this.withCacheEntryLock(
+                envDir,
+                async () => {
+                    // Claim the exemption only while the lock is genuinely held: a pending or
+                    // failed acquisition must never wave past another window's build or deletion.
+                    if (markBookkeeping) {
+                        this.bookkeepingLocks.add(bookkeepingKey);
+                    }
+                    try {
+                        if (this.disposed) {
+                            return { verdict: observed.verdict, stampedAt: observed.stampedAt };
+                        }
+                        const sidecar = await inspectMetaJson(envDir);
+                        const classified = this.classifyUsability(sidecar, Date.now());
+                        if (!classified.stampDue || sidecar.kind !== 'valid') {
+                            return { verdict: classified.verdict, stampedAt: classified.stampedAt };
+                        }
+                        const stampedAt = Date.now();
+                        await writeMetaJson(
+                            envDir,
+                            {
+                                ...sidecar.metadata,
+                                lastUsedAt: new Date(stampedAt).toISOString(),
+                            },
+                            { failFast: true },
+                        );
+                        return {
+                            verdict: 'usable' as const,
+                            stampedAt,
+                        };
+                    } finally {
+                        if (markBookkeeping) {
+                            this.bookkeepingLocks.delete(bookkeepingKey);
+                        }
+                    }
+                },
+                0,
+            );
+        } catch (error) {
+            if (!this.isLockContentionError(error)) {
+                throw error;
+            }
+            // The holder may be building this entry (which stamps it) or deleting it. Re-read
+            // without the lock and let the recorded stamp decide; a brief collision must not take a
+            // safely retained environment out of service.
+            const classified = this.classifyUsability(await inspectMetaJson(envDir), Date.now());
+            return {
+                verdict: classified.verdict,
+                stampedAt: classified.stampedAt,
+                retryNotBefore:
+                    classified.verdict === 'usable' ? Date.now() + LAST_USED_TOUCH_RETRY_MS : undefined,
+            };
+        }
+    }
+
+    private forgetLastUsedTouch(envDirPath: string): void {
+        this.lastUsedTouchState.delete(normalizePath(envDirPath));
     }
 
     private getScriptUris(scope: SetEnvironmentScope): ScriptReference[] {
@@ -1511,16 +1969,114 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
     }
 
     private async handleSavedMetadataChange(event: InlineScriptMetadataChangeEvent): Promise<void> {
+        const scriptPath = normalizePath(event.uri.fsPath);
         if (event.metadata === undefined) {
+            this.cancelAssociationRetry(scriptPath);
             this.clearValidatedRouteableState(event.uri);
             return;
+        }
+        const metadataIdentity = event.metadataIdentity ?? getInlineScriptMetadataRoutingIdentity(event.metadata)!;
+        // Body-only saves change the revision, not the requirements. Keep the retry's deadline and budget.
+        if (this.associationRetries.get(scriptPath)?.metadataIdentity !== metadataIdentity) {
+            this.cancelAssociationRetry(scriptPath);
         }
         await this.refreshValidatedAssociationForMetadata(
             event.uri,
             event.metadata,
-            event.metadataIdentity ?? getInlineScriptMetadataRoutingIdentity(event.metadata)!,
+            metadataIdentity,
             event.metadataRevision,
         );
+    }
+
+    private scheduleAssociationRetry(uri: Uri): void {
+        const scriptPath = normalizePath(uri.fsPath);
+        const metadataIdentity = this.routingRegistry.getMetadataIdentity(uri);
+        const associationRevision = this.associationRevisions.get(scriptPath) ?? 0;
+        if (
+            this.disposed ||
+            metadataIdentity === undefined ||
+            !this.fsPathToPersistedAssociation.has(scriptPath)
+        ) {
+            return;
+        }
+        let retry = this.associationRetries.get(scriptPath);
+        if (
+            retry &&
+            (retry.metadataIdentity !== metadataIdentity || retry.associationRevision !== associationRevision)
+        ) {
+            this.cancelAssociationRetry(scriptPath);
+            retry = undefined;
+        }
+        if (!retry) {
+            retry = { metadataIdentity, associationRevision, attempt: 0 };
+            this.associationRetries.set(scriptPath, retry);
+        }
+        if (retry.timer) {
+            return;
+        }
+        const delay = DISCOVERY_RETRY_DELAYS_MS[retry.attempt];
+        if (delay === undefined) {
+            this.routingRegistry.setEnvironmentUnavailable(uri, true);
+            if (retry.attempt === DISCOVERY_RETRY_DELAYS_MS.length) {
+                retry.attempt += 1;
+                this.log.warn(
+                    `Inline-script environment for ${uri.fsPath} is still unavailable; use the script's setup action to retry.`,
+                );
+            }
+            return;
+        }
+        retry.attempt += 1;
+        const scheduled = retry;
+        retry.timer = setTimeout(() => {
+            // Keep the timer recorded until the async work finishes so concurrent lookups coalesce.
+            void this.retryAssociation(uri, scheduled)
+                .catch((error) => this.log.warn(`Failed to retry inline-script environment: ${getErrorMessage(error)}`))
+                .finally(() => {
+                    if (this.associationRetries.get(scriptPath) === scheduled) {
+                        scheduled.timer = undefined;
+                        this.scheduleAssociationRetry(uri);
+                    }
+                });
+        }, delay);
+    }
+
+    private async retryAssociation(uri: Uri, retry: AssociationRetry): Promise<void> {
+        const scriptPath = normalizePath(uri.fsPath);
+        const currentUri = this.routingRegistry.getUri(scriptPath) ?? uri;
+        const isCurrent = () =>
+            !this.disposed &&
+            this.associationRetries.get(scriptPath) === retry &&
+            this.isCurrentAssociationRevision(scriptPath, retry.associationRevision) &&
+            this.routingRegistry.getMetadataIdentity(currentUri) === retry.metadataIdentity;
+        if (!isCurrent()) {
+            return;
+        }
+        const environment = await this.getInternal(currentUri);
+        const metadata = this.routingRegistry.getMetadata(currentUri);
+        if (!environment || !metadata || !isCurrent()) {
+            return;
+        }
+        await this.refreshValidatedAssociationForMetadata(
+            currentUri,
+            metadata,
+            retry.metadataIdentity,
+            this.routingRegistry.getMetadataRevision(currentUri),
+        );
+        if (
+            isCurrent() &&
+            this.routingRegistry.shouldRoute(currentUri) &&
+            !this.routingRegistry.isEnvironmentUnavailable(currentUri)
+        ) {
+            this.cancelAssociationRetry(scriptPath);
+        }
+    }
+
+    private cancelAssociationRetry(scriptPath: string): void {
+        const retry = this.associationRetries.get(scriptPath);
+        if (retry?.timer) {
+            clearTimeout(retry.timer);
+        }
+        this.associationRetries.delete(scriptPath);
     }
 
     private async refreshValidatedAssociationForMetadata(
@@ -1578,6 +2134,35 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
             return;
         }
         if (!environment) {
+            if (await this.isAssociatedEntryBusy(scriptPath)) {
+                // Transiently unavailable, not un-routeable. Clearing here would drop a good
+                // association and restore the setup CodeLens for an environment that still works,
+                // and nothing would restore it until the next save.
+                if (
+                    this.isCurrentMetadataRefreshTask(
+                        uri,
+                        metadataIdentity,
+                        metadataRevision,
+                        scriptPath,
+                        associationRevision,
+                    )
+                ) {
+                    this.scheduleAssociationRetry(uri);
+                }
+                return;
+            }
+            if (
+                !this.isCurrentMetadataRefreshTask(
+                    uri,
+                    metadataIdentity,
+                    metadataRevision,
+                    scriptPath,
+                    associationRevision,
+                )
+            ) {
+                // A newer setup or selection landed while the busy check was in flight.
+                return;
+            }
             this.clearValidatedRouteableState(uri);
             return;
         }
@@ -2003,6 +2588,7 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
         associationRevision: number,
     ): boolean {
         return (
+            !this.disposed &&
             this.isCurrentRoutingMetadata(uri, metadataIdentity, metadataRevision) &&
             this.isCurrentAssociationRevision(scriptPath, associationRevision)
         );
@@ -2377,9 +2963,7 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
 
     private runTtlEvictionOnce(): Promise<void> {
         if (!this.ttlEviction) {
-            this.ttlEviction = this.enqueueCacheMaintenance(() =>
-                this.enqueueSelection(() => this.evictStaleCacheEntries()),
-            ).catch((error) => {
+            this.ttlEviction = this.evictStaleCacheEntries().catch((error) => {
                 this.log.warn(`Unable to evict stale inline-script environments: ${getErrorMessage(error)}`);
             });
         }
@@ -2411,6 +2995,19 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
                 this.cacheMaintenanceBarrier = undefined;
             }
         });
+    }
+
+    /**
+     * Serialize against other cache maintenance without raising the barrier that `get`, `set`, and
+     * `create` wait on. Used for TTL deletion and publication, not explicit cache clearing.
+     */
+    private enqueueBackgroundCacheMaintenance<T>(operation: () => Promise<T>): Promise<T> {
+        const run = this.cacheMaintenanceQueue.then(operation);
+        this.cacheMaintenanceQueue = run.then(
+            () => undefined,
+            () => undefined,
+        );
+        return run;
     }
 
     private enqueueSelection<T>(operation: () => Promise<T>): Promise<T> {
@@ -2598,9 +3195,21 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
         });
     }
 
+    private async isAssociatedEntryBusy(scriptPath: string): Promise<boolean> {
+        const environmentPath = this.fsPathToPersistedAssociation.get(scriptPath)?.environmentPath;
+        return environmentPath !== undefined
+            ? this.isCacheEntryBusy(path.dirname(path.dirname(environmentPath)))
+            : false;
+    }
+
     private async isCacheEntryBusy(envDirPath: string): Promise<boolean> {
         if (this.pendingCreations.has(path.basename(envDirPath))) {
             return true;
+        }
+        if (this.bookkeepingLocks.has(normalizePath(envDirPath))) {
+            // Our own optional refresh holds the lock. It is not building or deleting anything, and
+            // the lock is exclusive, so nothing else can be either.
+            return false;
         }
         try {
             await fs.lstat(getFileLockPath(envDirPath));
@@ -2611,6 +3220,7 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
     }
 
     private bumpAssociationRevision(scriptPath: string): void {
+        this.cancelAssociationRetry(scriptPath);
         this.associationRevisions.set(scriptPath, (this.associationRevisions.get(scriptPath) ?? 0) + 1);
     }
 
@@ -2921,10 +3531,7 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
         action: (lock: AcquiredFileLock) => Promise<T>,
         timeoutMs = CACHE_LOCK_TIMEOUT_MS,
     ): Promise<T> {
-        const lock = await acquireFileLock(envDir.fsPath, {
-            timeoutMs,
-            retryIntervalMs: CACHE_LOCK_RETRY_MS,
-        });
+        const lock = await this.acquireCacheEntryLock(envDir.fsPath, timeoutMs);
         try {
             return await action(lock);
         } finally {
@@ -2934,6 +3541,30 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
                 this.log.warn(`Failed to release inline-script cache lock: ${getErrorMessage(error)}`);
             }
         }
+    }
+
+    /**
+     * Reclaims a lock whose owning process is gone. Doing this *before* waiting is the point:
+     * otherwise every later setup for the same cache key blocks for the whole timeout, then fails.
+     */
+    private async acquireCacheEntryLock(envDirPath: string, timeoutMs: number): Promise<AcquiredFileLock> {
+        try {
+            if ((await inspectFileLock(envDirPath)) === 'stale' && (await reclaimFileLock(envDirPath))) {
+                this.log.info(
+                    `Reclaimed an inline-script cache lock left behind by a stopped process: ${getFileLockPath(envDirPath)}`,
+                );
+            }
+        } catch (error) {
+            this.log.warn(`Unable to inspect an inline-script cache lock: ${getErrorMessage(error)}`);
+        }
+        if (this.disposed) {
+            // Disposal can land while the inspection above is in flight; creating a lock directory
+            // now would leave one behind with nobody left to release it.
+            throw Object.assign(new Error('Inline-script cache lock not acquired: the manager is disposed.'), {
+                code: 'ELOCKED',
+            });
+        }
+        return acquireFileLock(envDirPath, { timeoutMs, retryIntervalMs: CACHE_LOCK_RETRY_MS });
     }
 
     private mergePendingCreationSourceMetadataIdentityHashes(
@@ -3147,6 +3778,7 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
             );
             return { kind: 'stale' };
         }
+        const stampedAt = Date.now();
         try {
             pendingCreation.hasStartedRecordingSourceMetadataIdentityHashes = true;
             const sourceMetadataIdentityHashes = this.mergePendingCreationSourceMetadataIdentityHashes(
@@ -3159,13 +3791,29 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
                 packagesComparison === 'unknown' ? actualPackagesHash : sidecar.installedPackagesHash;
             await writeMetaJson(envDir, {
                 ...sidecar,
-                lastUsedAt: new Date().toISOString(),
+                lastUsedAt: new Date(stampedAt).toISOString(),
                 ...(installedPackagesHash ? { installedPackagesHash } : {}),
                 ...(sourceMetadataIdentityHashes ? { sourceMetadataIdentityHashes } : {}),
             });
             pendingCreation.recordedSourceMetadataIdentityHashes = sourceMetadataIdentityHashes;
+            this.recordProvenStamp(envDir.fsPath, stampedAt);
         } catch (error) {
             this.log.warn(`Failed to update inline-script cache metadata: ${getErrorMessage(error)}`);
+            this.forgetLastUsedTouch(envDir.fsPath);
+            const previousStamp = new Date(sidecar.lastUsedAt).getTime();
+            if (
+                this.verdictWithoutFreshStamp(
+                    Number.isFinite(previousStamp) ? previousStamp : undefined,
+                    stampedAt,
+                ) !== 'usable'
+            ) {
+                // Reporting success for an at-risk entry we could not stamp hands back an
+                // environment another window is still free to reclaim.
+                this.log.warn(
+                    `Refusing to reuse an inline-script cache entry whose last-used time could not be refreshed: ${envDir.fsPath}`,
+                );
+                return { kind: 'uncertain' };
+            }
         }
         return { kind: 'reusable', environment };
     }
@@ -3240,15 +3888,17 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
             // this write in the same locked section is what makes it impossible for the extension
             // to later mistake its own installation for an edit made outside setup.
             const installedPackagesHash = await readInstalledPackagesHash(envDir);
+            const stampedAt = Date.now();
             await writeMetaJson(envDir, {
                 schemaVersion: META_SCHEMA_VERSION,
                 baseInterpreterPath: selectedBase.canonicalPath,
                 baseInterpreterVersion: selectedBase.environment.version,
-                lastUsedAt: new Date().toISOString(),
+                lastUsedAt: new Date(stampedAt).toISOString(),
                 ...(installedPackagesHash ? { installedPackagesHash } : {}),
                 ...(sourceMetadataIdentityHashes ? { sourceMetadataIdentityHashes } : {}),
             });
             pendingCreation.recordedSourceMetadataIdentityHashes = sourceMetadataIdentityHashes;
+            this.recordProvenStamp(envDir.fsPath, stampedAt);
         } catch (error) {
             this.log.error(`Failed to record inline-script cache metadata: ${getErrorMessage(error)}`);
             await this.removeCacheEntry(envDir);
@@ -3258,11 +3908,33 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
         return { environment: result.environment };
     }
 
+    /**
+     * Background cleanup never raises the barrier that lookups wait on. Candidate scans are
+     * advisory; references, ownership, and age are rechecked under the entry lock before deletion.
+     */
     private async evictStaleCacheEntries(): Promise<void> {
+        const plan = await this.planStaleCacheEviction();
+        if (!plan || this.disposed) {
+            return;
+        }
+
+        const removedCacheEntries = await this.enqueueBackgroundCacheMaintenance(() =>
+            this.removeEvictableCacheEntries(plan),
+        );
+        if (removedCacheEntries.size === 0 || this.disposed) {
+            return;
+        }
+
+        await this.enqueueBackgroundCacheMaintenance(() =>
+            this.enqueueSelection(() => this.publishCacheEvictionResults(removedCacheEntries)),
+        );
+    }
+
+    private async planStaleCacheEviction(): Promise<StaleCacheEvictionPlan | undefined> {
         const cacheRoot = getScriptEnvCacheRoot(this.globalStorageUri);
         const physicalCacheRootPath = await this.getPhysicalOwnedCacheRootPath(cacheRoot);
         if (!physicalCacheRootPath) {
-            return;
+            return undefined;
         }
 
         let entryNames: string[];
@@ -3270,30 +3942,32 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
             entryNames = await fs.readdir(physicalCacheRootPath);
         } catch (error) {
             if (isFileNotFoundError(error)) {
-                return;
+                return undefined;
             }
             throw error;
         }
 
         const now = new Date();
-        const entries: CacheEntrySummary[] = [];
+        const evictableEntries: string[] = [];
         for (const entryName of entryNames.sort()) {
+            if (this.disposed) {
+                return undefined;
+            }
             if (entryName.endsWith(FILE_LOCK_DIR_SUFFIX)) {
                 continue;
             }
             const entryPath = path.join(physicalCacheRootPath, entryName);
             try {
-                const stat = await fs.lstat(entryPath);
-                if (!stat.isDirectory() || stat.isSymbolicLink()) {
+                const classification = await this.classifyCacheEntryForEviction(entryPath, now);
+                if (classification === 'keep') {
                     continue;
                 }
-                const sidecar = await inspectMetaJson(Uri.file(entryPath));
-                if (sidecar.kind === 'valid') {
-                    entries.push({
-                        envDirPath: entryPath,
-                        lastUsedAt: new Date(sidecar.metadata.lastUsedAt),
-                    });
+                if (classification === 'incomplete') {
+                    this.log.info(
+                        `Inline-script cache: found an environment left incomplete by an interrupted setup: ${entryPath}`,
+                    );
                 }
+                evictableEntries.push(entryPath);
             } catch (error) {
                 if (!isFileNotFoundError(error)) {
                     this.log.warn(
@@ -3303,56 +3977,116 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
             }
         }
 
-        const staleEntries = selectStaleEntries(entries, now, CACHE_TTL_MS);
-        if (staleEntries.length === 0) {
-            return;
+        if (evictableEntries.length === 0) {
+            return undefined;
         }
 
         const persistedAssociations = await this.getPersistedAssociationSnapshot();
         const scriptPaths = this.getTrackedScriptPaths(persistedAssociations);
-        const priorSelections = this.getPriorSelections(scriptPaths);
         // Never evict an environment that a script association still points to. `lastUsedAt` is only
-        // refreshed when an environment is created or reused (never when it is resolved for run, debug,
-        // or Pylance), so an actively-used environment can look stale here. Reclaim only orphaned entries
-        // (e.g. superseded by a dependency change, or left behind by a deleted or deselected script).
+        // refreshed by windows that are actually running, so an entry belonging to a workspace nobody
+        // has opened lately can still look stale here. Reclaim only orphaned entries (e.g. superseded
+        // by a dependency change, or left behind by a deleted or deselected script).
         const referencedEnvDirs = this.getReferencedCacheEntryDirs(persistedAssociations, scriptPaths);
-        const evictableStaleEntries = staleEntries.filter(
-            (staleEntry) => !referencedEnvDirs.has(normalizePath(staleEntry)),
+        const evictableStaleEntries = evictableEntries.filter(
+            (entryPath) => !referencedEnvDirs.has(normalizePath(entryPath)),
         );
-        if (evictableStaleEntries.length === 0) {
-            return;
+        return evictableStaleEntries.length === 0
+            ? undefined
+            : { cacheRoot, physicalCacheRootPath, evictableStaleEntries, now };
+    }
+
+    /**
+     * `keep` covers everything uncertain. Used for both planning and the under-lock recheck so the
+     * decision has one definition.
+     */
+    private async classifyCacheEntryForEviction(
+        entryPath: string,
+        now: Date,
+    ): Promise<'expired' | 'incomplete' | 'keep'> {
+        let stat: Stats;
+        try {
+            stat = await fs.lstat(entryPath);
+        } catch {
+            return 'keep';
         }
+        if (!stat.isDirectory() || stat.isSymbolicLink()) {
+            return 'keep';
+        }
+
+        const sidecar = await inspectMetaJson(Uri.file(entryPath));
+        if (sidecar.kind === 'valid') {
+            return selectStaleEntries(
+                [{ envDirPath: entryPath, lastUsedAt: new Date(sidecar.metadata.lastUsedAt) }],
+                now,
+                CACHE_TTL_MS,
+            ).length === 1
+                ? 'expired'
+                : 'keep';
+        }
+        // `unsupported` belongs to a newer extension and `unavailable` is a transient read failure;
+        // neither is evidence that the entry was abandoned.
+        if (sidecar.kind !== 'missing' && sidecar.kind !== 'invalid') {
+            return 'keep';
+        }
+
+        // `mtime` is when the directory's contents last changed, so for an abandoned build it is
+        // when the host died. Anything touching it later only delays reclamation.
+        return Number.isFinite(stat.mtimeMs) &&
+            stat.mtimeMs > 0 &&
+            now.getTime() - stat.mtimeMs > INCOMPLETE_ENTRY_GRACE_MS
+            ? 'incomplete'
+            : 'keep';
+    }
+
+    private async removeEvictableCacheEntries(plan: StaleCacheEvictionPlan): Promise<Set<string>> {
         const removedCacheEntries = new Set<string>();
-        for (const staleEntry of evictableStaleEntries) {
+        // Counts deletions performed, not entries considered: a contended or already-gone entry
+        // costs nothing, so it must not consume the budget.
+        let deletions = 0;
+        let deferred = 0;
+        for (const [index, staleEntry] of plan.evictableStaleEntries.entries()) {
+            if (this.disposed) {
+                break;
+            }
+            if (deletions >= MAX_EVICTIONS_PER_SWEEP) {
+                deferred = plan.evictableStaleEntries.length - index;
+                break;
+            }
             try {
-                const removed = await this.removeCacheEntryForClear(
-                    cacheRoot,
-                    physicalCacheRootPath,
-                    path.basename(staleEntry),
-                    {
-                        reclaimRetainedLock: false,
-                        afterRemove: () => {
-                            this.cacheMutationRevision += 1;
+                // Per entry, so it cannot interleave with `setInternal` while leaving `get` — which
+                // never touches this queue — unblocked.
+                const removed = await this.enqueueSelection(async () => {
+                    if (await this.isCacheEntryReferenced(staleEntry)) {
+                        // Selecting beats reclaiming.
+                        return undefined;
+                    }
+                    return this.removeCacheEntryForClear(
+                        plan.cacheRoot,
+                        plan.physicalCacheRootPath,
+                        path.basename(staleEntry),
+                        {
+                            reclaimRetainedLock: false,
+                            beforeRemove: async (entryPath) => {
+                                // A partial removal must not leave survivors looking healthy.
+                                const sidecar = await inspectMetaJson(Uri.file(entryPath));
+                                if (sidecar.kind === 'valid') {
+                                    await writeMetaJson(Uri.file(entryPath), {
+                                        ...sidecar.metadata,
+                                        manuallyModified: true,
+                                    });
+                                }
+                            },
+                            afterRemove: () => {
+                                this.cacheMutationRevision += 1;
+                            },
+                            shouldRemove: async (entryPath) =>
+                                (await this.classifyCacheEntryForEviction(entryPath, plan.now)) !== 'keep',
                         },
-                        shouldRemove: async (entryPath) => {
-                            const sidecar = await inspectMetaJson(Uri.file(entryPath));
-                            return (
-                                sidecar.kind === 'valid' &&
-                                selectStaleEntries(
-                                    [
-                                        {
-                                            envDirPath: entryPath,
-                                            lastUsedAt: new Date(sidecar.metadata.lastUsedAt),
-                                        },
-                                    ],
-                                    now,
-                                    CACHE_TTL_MS,
-                                ).length === 1
-                            );
-                        },
-                    },
-                );
+                    );
+                });
                 if (removed) {
+                    deletions += 1;
                     removedCacheEntries.add(normalizePath(removed));
                 } else if (await this.isCacheEntryDefinitelyMissing(staleEntry)) {
                     this.cacheMutationRevision += 1;
@@ -3368,20 +4102,70 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
                 }
             }
         }
-
-        if (removedCacheEntries.size === 0) {
-            return;
+        if (removedCacheEntries.size > 0 || deferred > 0) {
+            this.log.info(
+                `Inline-script cache: reclaimed ${removedCacheEntries.size} unused environment(s)` +
+                    (deferred > 0 ? `; ${deferred} left for a later session.` : '.'),
+            );
         }
+        return removedCacheEntries;
+    }
 
-        this.replaceDiscoveredEnvironments(
-            this.collection.filter((environment) => !removedCacheEntries.has(normalizePath(environment.sysPrefix))),
-        );
+    /** Call under the selection queue. */
+    private async isCacheEntryReferenced(entryPath: string): Promise<boolean> {
+        const persistedAssociations = await this.getPersistedAssociationSnapshot();
+        const scriptPaths = this.getTrackedScriptPaths(persistedAssociations);
+        return this.getReferencedCacheEntryDirs(persistedAssociations, scriptPaths).has(normalizePath(entryPath));
+    }
+
+    /**
+     * Association state is re-read rather than carried over from planning: the deletions ran off the
+     * selection queue, so a selection made in the meantime must be observed here.
+     */
+    private async publishCacheEvictionResults(removedCacheEntries: ReadonlySet<string>): Promise<void> {
+        await this.reconcileCollectionAfterRemoval(removedCacheEntries);
+        const persistedAssociations = await this.getPersistedAssociationSnapshot();
+        const scriptPaths = this.getTrackedScriptPaths(persistedAssociations);
+        const priorSelections = this.getPriorSelections(scriptPaths);
         const invalidatedScriptPaths = await this.getInvalidatedAssociationPaths(
             scriptPaths,
             persistedAssociations,
             removedCacheEntries,
         );
         await this.clearInvalidatedAssociations(invalidatedScriptPaths, persistedAssociations, priorSelections);
+    }
+
+    /**
+     * A removed pathname is not proof on its own: creation can rebuild the same cache key while a
+     * sweep is still working, and that replacement must survive publication. Passing no candidates
+     * reconciles the whole catalog, which a full clear needs because another window may already
+     * have removed entries this invocation never touched.
+     */
+    private async reconcileCollectionAfterRemoval(candidates?: ReadonlySet<string>): Promise<boolean> {
+        const stillRemoved = new Set<string>();
+        for (const environment of this.collection) {
+            const key = normalizePath(environment.sysPrefix);
+            if (candidates && !candidates.has(key)) {
+                continue;
+            }
+            try {
+                if (!(await fs.pathExists(environment.environmentPath.fsPath))) {
+                    stillRemoved.add(key);
+                }
+            } catch (error) {
+                // Uncertain, so keep it listed.
+                this.log.warn(
+                    `Unable to verify a removed inline-script cache entry ${environment.sysPrefix}: ${getErrorMessage(error)}`,
+                );
+            }
+        }
+        if (stillRemoved.size === 0) {
+            return false;
+        }
+        this.replaceDiscoveredEnvironments(
+            this.collection.filter((environment) => !stillRemoved.has(normalizePath(environment.sysPrefix))),
+        );
+        return true;
     }
 
     private async isCacheEntryDefinitelyMissing(entryPath: string): Promise<boolean> {
@@ -3525,13 +4309,22 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
             }
         }
 
-        if (selectedEntryPath !== undefined &&
-            (removedCacheEntries.size > 0 || await this.isCacheEntryDefinitelyMissing(selectedEntryPath))) {
-            this.cacheMutationRevision += 1;
-            selectedEntryKeys.forEach((entryPath) => removedCacheEntries.add(entryPath));
-            this.replaceDiscoveredEnvironments(
-                this.collection.filter((entry) => !selectedEntryKeys.has(normalizePath(entry.sysPrefix))),
-            );
+        if (selectedEntryPath !== undefined) {
+            if (removedCacheEntries.size > 0 || (await this.isCacheEntryDefinitelyMissing(selectedEntryPath))) {
+                this.cacheMutationRevision += 1;
+                selectedEntryKeys.forEach((entryPath) => removedCacheEntries.add(entryPath));
+                this.replaceDiscoveredEnvironments(
+                    this.collection.filter((entry) => !selectedEntryKeys.has(normalizePath(entry.sysPrefix))),
+                );
+            }
+        } else {
+            // Full clears reconcile the whole catalog, including entries another window already
+            // removed, so a clear that deleted nothing still drops dead rows. Entries whose removal
+            // failed or whose state is uncertain stay listed.
+            const reconciled = await this.reconcileCollectionAfterRemoval();
+            if (removedCacheEntries.size > 0 || reconciled) {
+                this.cacheMutationRevision += 1;
+            }
         }
 
         const invalidatedScriptPaths = await this.getInvalidatedAssociationPaths(
@@ -3793,6 +4586,7 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
     }
 
     private deleteCacheEntryForClear(entryPath: string): Promise<void> {
+        this.forgetLastUsedTouch(entryPath);
         return fs.remove(entryPath);
     }
 
@@ -3844,17 +4638,15 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
         environmentPath: string,
         removedCacheEntries: ReadonlySet<string>,
     ): Promise<boolean> {
-        const envDirPath = path.dirname(path.dirname(environmentPath));
-        if (removedCacheEntries.has(normalizePath(envDirPath))) {
-            return true;
-        }
         try {
+            // Existence is authoritative: a rebuild can reoccupy a path this sweep removed, so
+            // membership in `removedCacheEntries` is not on its own evidence the association is dead.
             return !(await fs.pathExists(environmentPath));
         } catch (error) {
             this.log.warn(
                 `Unable to verify inline-script environment association ${environmentPath}: ${getErrorMessage(error)}`,
             );
-            return false;
+            return removedCacheEntries.has(normalizePath(path.dirname(path.dirname(environmentPath))));
         }
     }
 
@@ -3979,6 +4771,7 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
     }
 
     private async removeCacheEntry(envDir: Uri): Promise<boolean> {
+        this.forgetLastUsedTouch(envDir.fsPath);
         let lastError: unknown;
         for (let attempt = 0; attempt < CACHE_ENTRY_REMOVAL_ATTEMPTS; attempt += 1) {
             try {
@@ -4047,6 +4840,10 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
     dispose(): void {
         this.disposed = true;
         this.stopActivationDiscovery();
+        this.cancelTtlEviction();
+        for (const scriptPath of this.associationRetries.keys()) {
+            this.cancelAssociationRetry(scriptPath);
+        }
         this.pendingMetadataRefreshes.clear();
         this.subscriptions.forEach((subscription) => subscription.dispose());
         this._onDidChangeEnvironments.dispose();

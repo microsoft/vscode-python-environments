@@ -7,7 +7,7 @@ import { PythonVersion } from '../../common/pythonVersion';
 import { isWindows } from '../../common/utils/platformUtils';
 import { ShellConstants } from '../../features/common/shellConstants';
 import { getDefaultEnvManagerSetting, setDefaultEnvManagerBroken } from '../../features/settings/settingHelpers';
-import { PythonProjectManager } from '../../internal.api';
+import type { PythonProjectManager } from '../../features/projectManager';
 import { Installable } from './types';
 
 export function noop() {

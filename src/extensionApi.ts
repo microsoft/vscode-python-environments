@@ -1,5 +1,5 @@
 import { Disposable, Event, EventEmitter, TaskExecution, Terminal, Uri } from 'vscode';
-import {
+import type {
     CreateEnvironmentOptions,
     CreateEnvironmentScope,
     DidChangeEnvironmentEventArgs,
@@ -17,7 +17,6 @@ import {
     PackageInfo,
     PackageManagementOptions,
     PackageManager,
-    PackageVersionLookupNotSupportedError,
     Pep440Version,
     PythonBackgroundRunOptions,
     PythonEnvironment,
@@ -34,27 +33,26 @@ import {
     RemoveEnvironmentOptions,
     ResolveEnvironmentContext,
     SetEnvironmentScope,
-} from '../api';
-import { traceError, traceInfo } from '../common/logging';
-import { pickEnvironmentManager } from '../common/pickers/managers';
-import { timeout } from '../common/utils/asyncUtils';
-import { createDeferred } from '../common/utils/deferred';
-import { checkUri } from '../common/utils/pathUtils';
-import { handlePythonPath } from '../common/utils/pythonPath';
-import {
-    EnvironmentManagers,
-    InternalEnvironmentManager,
-    ProjectCreators,
-    PythonEnvironmentImpl,
-    PythonPackageImpl,
-    PythonProjectManager,
-} from '../internal.api';
-import { waitForAllEnvManagers, waitForEnvManager, waitForEnvManagerId } from './common/managerReady';
-import { EnvVarManager } from './execution/envVariableManager';
-import { runAsTask } from './execution/runAsTask';
-import { runInBackground } from './execution/runInBackground';
-import { runInTerminal } from './terminal/runInTerminal';
-import { TerminalManager } from './terminal/terminalManager';
+} from './types';
+import { PackageVersionLookupNotSupportedError } from './publicErrors';
+import { INLINE_SCRIPT_MANAGER_ID } from './common/constants';
+import { traceError, traceInfo } from './common/logging';
+import { pickEnvironmentManager } from './common/pickers/managers';
+import { timeout } from './common/utils/asyncUtils';
+import { createDeferred } from './common/utils/deferred';
+import { checkUri } from './common/utils/pathUtils';
+import { handlePythonPath } from './common/utils/pythonPath';
+import type { EnvironmentManagers } from './features/envManagers';
+import type { ProjectCreators } from './features/creators/projectCreators';
+import type { PythonProjectManager } from './features/projectManager';
+import type { InternalEnvironmentManager } from './managers/common/registeredManagers';
+import { PythonEnvironmentImpl, PythonPackageImpl } from './managers/common/models';
+import { waitForAllEnvManagers, waitForEnvManager, waitForEnvManagerId } from './features/common/managerReady';
+import { EnvVarManager } from './features/execution/envVariableManager';
+import { runAsTask } from './features/execution/runAsTask';
+import { runInBackground } from './features/execution/runInBackground';
+import { runInTerminal } from './features/terminal/runInTerminal';
+import { TerminalManager } from './features/terminal/terminalManager';
 
 // Maximum time getEnvironment will block before serving the last-known environment while a
 // slow initial resolution/refresh continues in the background. Keeps consumers (e.g. Pylance's
@@ -272,6 +270,13 @@ export class PythonEnvironmentApiImpl implements PythonEnvironmentApi {
         // Keep the background resolution alive so the cache/last-known value gets populated and the
         // change event fires once it finishes.
         resolution.catch((ex) => traceError('Failed to resolve environment in background', ex));
+        // Inline-script environments are reclaimed from a shared cache, and the manager withholds
+        // one it cannot prove is still safe. Serving the last-known value here would hand back the
+        // descriptor that decision just rejected, so only the timeout is skipped for them; every
+        // other manager keeps the fast fallback.
+        if (this.envManagers.getEnvironmentManager(currentScope)?.id === INLINE_SCRIPT_MANAGER_ID) {
+            return resolution;
+        }
         return this.envManagers.getLastKnownEnvironment(currentScope);
     }
     onDidChangeEnvironment: Event<DidChangeEnvironmentEventArgs> = this._onDidChangeEnvironment.event;

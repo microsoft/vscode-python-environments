@@ -3,6 +3,7 @@
 
 import * as crypto from 'crypto';
 import * as fsapi from 'fs-extra';
+import { rename as renameWithoutRetry } from 'fs/promises';
 import * as path from 'path';
 import { Uri } from 'vscode';
 import type { PythonEnvironment } from '../../api';
@@ -258,11 +259,22 @@ async function inspectMetaJsonFile(metaPath: string): Promise<InlineScriptMetaRe
  * hold the cache-entry file lock, which serializes this operation across
  * extension-host processes.
  */
-export function writeMetaJson(envDir: Uri, meta: InlineScriptEnvMeta): Promise<void> {
+export interface WriteMetaJsonOptions {
+    /**
+     * Fail immediately instead of letting graceful-fs retry a Windows sharing violation on the
+     * rename for a full minute. Read-path bookkeeping must never hold the shared cache-entry lock
+     * that long: other windows cannot tell it apart from a build or a deletion.
+     */
+    readonly failFast?: boolean;
+}
+
+export function writeMetaJson(envDir: Uri, meta: InlineScriptEnvMeta, options?: WriteMetaJsonOptions): Promise<void> {
     const finalPath = getMetaJsonPath(envDir).fsPath;
     const key = normalizePath(path.resolve(finalPath));
     const previous = pendingMetaJsonWrites.get(key) ?? Promise.resolve();
-    const operation = previous.catch(() => undefined).then(() => writeMetaJsonOnce(envDir, meta, finalPath));
+    const operation = previous
+        .catch(() => undefined)
+        .then(() => writeMetaJsonOnce(envDir, meta, finalPath, options?.failFast === true));
     let queued: Promise<void>;
     queued = operation.finally(() => {
         if (pendingMetaJsonWrites.get(key) === queued) {
@@ -273,7 +285,13 @@ export function writeMetaJson(envDir: Uri, meta: InlineScriptEnvMeta): Promise<v
     return queued;
 }
 
-async function writeMetaJsonOnce(envDir: Uri, meta: InlineScriptEnvMeta, finalPath: string): Promise<void> {
+async function writeMetaJsonOnce(
+    envDir: Uri,
+    meta: InlineScriptEnvMeta,
+    finalPath: string,
+    failFast: boolean,
+): Promise<void> {
+    const rename = failFast ? renameWithoutRetry : fsapi.rename;
     await fsapi.ensureDir(envDir.fsPath);
     const tmpSuffix = crypto.randomBytes(6).toString('hex');
     const tmpPath = `${finalPath}.tmp-${tmpSuffix}`;
@@ -285,18 +303,20 @@ async function writeMetaJsonOnce(envDir: Uri, meta: InlineScriptEnvMeta, finalPa
     try {
         await fsapi.writeFile(tmpPath, payload, 'utf8');
         try {
-            await fsapi.rename(tmpPath, finalPath);
+            await rename(tmpPath, finalPath);
             finalKnownToExist = true;
             return;
         } catch (err) {
             const code = (err as NodeJS.ErrnoException | undefined)?.code;
-            if (!['EPERM', 'EEXIST', 'EBUSY'].includes(code ?? '')) {
+            // Read-path bookkeeping must leave the old sidecar in place rather than enter
+            // the backup/restore path, whose recovery may itself need a retrying rename.
+            if (failFast || !['EPERM', 'EEXIST', 'EBUSY'].includes(code ?? '')) {
                 throw err;
             }
         }
 
         try {
-            await fsapi.rename(finalPath, backupPath);
+            await rename(finalPath, backupPath);
             hasBackup = true;
         } catch (err) {
             if (!isFileNotFoundError(err)) {
@@ -305,7 +325,7 @@ async function writeMetaJsonOnce(envDir: Uri, meta: InlineScriptEnvMeta, finalPa
         }
 
         try {
-            await fsapi.rename(tmpPath, finalPath);
+            await rename(tmpPath, finalPath);
             finalKnownToExist = true;
         } catch (replaceError) {
             if (hasBackup) {

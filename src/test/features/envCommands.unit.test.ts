@@ -27,7 +27,9 @@ import { ShellStartupScriptProvider } from '../../features/terminal/shells/start
 import { TerminalManager } from '../../features/terminal/terminalManager';
 import { EnvManagerView } from '../../features/views/envManagersView';
 import { ProjectEnvironment, ProjectItem } from '../../features/views/treeViewItems';
-import { EnvironmentManagers, InternalEnvironmentManager, PythonProjectManager } from '../../internal.api';
+import type { EnvironmentManagers } from '../../features/envManagers';
+import type { PythonProjectManager } from '../../features/projectManager';
+import { InternalEnvironmentManager } from '../../managers/common/registeredManagers';
 import { setupNonThenable } from '../mocks/helper';
 import { createMockPythonEnvironment } from '../mocks/pythonEnvironment';
 

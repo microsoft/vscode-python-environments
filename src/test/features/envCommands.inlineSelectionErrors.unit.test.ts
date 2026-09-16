@@ -17,12 +17,12 @@ import * as projectPickers from '../../common/pickers/projects';
 import * as windowApis from '../../common/window.apis';
 import { getPackageCommandOptions, setEnvironmentCommand } from '../../features/envCommands';
 import { EnvManagerTreeItem, ProjectItem, PythonEnvTreeItem } from '../../features/views/treeViewItems';
+import type { EnvironmentManagers } from '../../features/envManagers';
+import type { PythonProjectManager } from '../../features/projectManager';
 import {
-    EnvironmentManagers,
     InternalEnvironmentManager,
     InternalPackageManager,
-    PythonProjectManager,
-} from '../../internal.api';
+} from '../../managers/common/registeredManagers';
 import { createMockPythonEnvironment } from '../mocks/pythonEnvironment';
 
 suite('Inline environment selection error feedback', () => {
@@ -75,7 +75,9 @@ suite('Inline environment selection error feedback', () => {
                     refresh: async () => undefined,
                     resolve: async () => undefined,
                 };
-                const parent = new EnvManagerTreeItem(new InternalEnvironmentManager(INLINE_SCRIPT_MANAGER_ID, provider));
+                const parent = new EnvManagerTreeItem(
+                    new InternalEnvironmentManager(INLINE_SCRIPT_MANAGER_ID, provider),
+                );
                 context = new PythonEnvTreeItem(environment, parent);
             }
 
@@ -124,7 +126,8 @@ suite('Inline environment package command guard', () => {
 
     function createManagers(environment: PythonEnvironment): EnvironmentManagers {
         const managerMock: Partial<EnvironmentManagers> = {
-            getEnvironmentManager: () => ({ get: async () => environment } as unknown as InternalEnvironmentManager),
+            getEnvironmentManager: () =>
+                ({ get: async () => environment } as unknown as InternalEnvironmentManager),
             getPackageManager: () => packageManager,
         };
         return managerMock as EnvironmentManagers;

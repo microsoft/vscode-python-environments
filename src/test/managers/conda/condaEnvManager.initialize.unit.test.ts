@@ -7,7 +7,7 @@ import * as logging from '../../../common/logging';
 import { EventNames } from '../../../common/telemetry/constants';
 import * as telemetrySender from '../../../common/telemetry/sender';
 import * as windowApis from '../../../common/window.apis';
-import { PythonProjectManager } from '../../../internal.api';
+import type { PythonProjectManager } from '../../../features/projectManager';
 import * as commonUtils from '../../../managers/common/utils';
 import { NativePythonFinder } from '../../../managers/common/nativePythonFinder';
 import { CondaEnvManager } from '../../../managers/conda/condaEnvManager';

@@ -24,13 +24,13 @@ import {
 import { traceError, traceInfo, traceVerbose } from '../common/logging';
 import { InlineScriptEnvironmentModifiedError, InlineScriptPackagesNotManagedError } from '../common/inlineScript/errors';
 import * as persistentState from '../common/persistentState';
-import {
-    EnvironmentManagers,
+import type { ProjectCreators } from './creators/projectCreators';
+import type { EnvironmentManagers } from './envManagers';
+import type { PythonProjectManager } from './projectManager';
+import type {
     InternalEnvironmentManager,
     InternalPackageManager,
-    ProjectCreators,
-    PythonProjectManager,
-} from '../internal.api';
+} from '../managers/common/registeredManagers';
 import {
     removePythonProjectSetting,
     setEnvironmentManager,

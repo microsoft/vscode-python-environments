@@ -2,8 +2,9 @@
 // Licensed under the MIT License.
 
 import * as assert from 'assert';
-import { isPackageVersionLookupNotSupportedError, PackageManager, PythonEnvironment } from '../api';
-import { InternalPackageManager } from '../internal.api';
+import { isPackageVersionLookupNotSupportedError } from '../../../publicErrors';
+import type { PackageManager, PythonEnvironment } from '../../../types';
+import { InternalPackageManager } from '../../../managers/common/registeredManagers';
 
 suite('InternalPackageManager.getPackageAvailableVersions', () => {
     const environment = { envId: { id: 'env', managerId: 'mgr' } } as PythonEnvironment;

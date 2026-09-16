@@ -1,6 +1,6 @@
 import { CancellationToken, Progress, Uri } from 'vscode';
 import { PythonEnvironment } from '../../api';
-import { InternalEnvironmentManager } from '../../internal.api';
+import type { InternalEnvironmentManager } from '../../managers/common/registeredManagers';
 import { PYTHON_EXTENSION_ID } from '../constants';
 import { traceVerbose, traceWarn } from '../logging';
 

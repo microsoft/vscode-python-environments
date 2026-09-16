@@ -1,7 +1,17 @@
 // Copyright (c) Microsoft Corporation. All rights reserved.
 // Licensed under the MIT License.
 
-import {
+/*
+ * Do not introduce any breaking changes to these public API contracts.
+ * This module is the canonical home for the TypeScript contracts (interfaces, types, enums)
+ * that make up the public API for other extensions to interact with the Python Environments
+ * extension. It intentionally contains no runtime helpers, concrete error classes, or
+ * implementation imports — see `./api.ts` (public runtime facade) and `./publicErrors.ts`
+ * (concrete error + guard) for those.
+ */
+
+import type { Pep440Version } from '@renovatebot/pep440';
+import type {
     Disposable,
     Event,
     FileChangeType,
@@ -14,6 +24,8 @@ import {
     ThemeIcon,
     Uri,
 } from 'vscode';
+
+export type { Pep440Version } from '@renovatebot/pep440';
 
 /**
  * The path to an icon, or a theme-specific configuration of icons.
@@ -218,6 +230,13 @@ export interface PythonEnvironmentInfo {
      * Optional `group` for this environment. This is used to group environments in the Environment Manager UI.
      */
     readonly group?: string | EnvironmentGroupInfo;
+
+    /**
+     * Error message if the environment is broken or invalid.
+     * When set, indicates this environment has issues (e.g., broken symlinks, missing Python executable).
+     * The UI should display a warning indicator and show this message to help users diagnose and fix the issue.
+     */
+    readonly error?: string;
 }
 
 /**
@@ -342,10 +361,18 @@ export interface RemoveEnvironmentOptions {
 
 /**
  * Interface representing an environment manager.
+ *
+ * @remarks
+ * Methods on this interface are invoked both by the Python Environments extension itself
+ * (in response to UI actions, startup, terminal activation, script execution, and so on)
+ * and directly by other extensions that consume the published API. Any "called when…"
+ * notes on individual methods list representative triggers only — they are not
+ * exhaustive, and the precise set of call sites may evolve over time. Implementations
+ * should focus on the documented contract rather than any specific caller.
  */
 export interface EnvironmentManager {
     /**
-     * The name of the environment manager.
+     * The name of the environment manager. Allowed characters (a-z, A-Z, 0-9, -, _).
      */
     readonly name: string;
 
@@ -386,15 +413,20 @@ export interface EnvironmentManager {
 
     /**
      * The quick create details for the environment manager. Having this method also enables the quick create feature
-     * for the environment manager.
+     * for the environment manager. Should Implement {@link EnvironmentManager.create} to support quick create.
      */
     quickCreateConfig?(): QuickCreateConfig | undefined;
 
     /**
-     * Creates a new Python environment within the specified scope.
+     * Creates a new Python environment within the specified scope. Create should support adding a .gitignore file if it creates a folder within the workspace. If a manager does not support environment creation, do not implement this method; the UI disables "create" options when `this.manager.create === undefined`.
      * @param scope - The scope within which to create the environment.
      * @param options - Optional parameters for creating the Python environment.
      * @returns A promise that resolves to the created Python environment, or undefined if creation failed.
+     *
+     * @remarks
+     * Invoked when an environment of this manager's type should be created for the given
+     * scope. Typical triggers include user-initiated environment-creation flows and
+     * programmatic creation via the API.
      */
     create?(scope: CreateEnvironmentScope, options?: CreateEnvironmentOptions): Promise<PythonEnvironment | undefined>;
 
@@ -402,6 +434,10 @@ export interface EnvironmentManager {
      * Removes the specified Python environment.
      * @param environment - The Python environment to remove.
      * @returns A promise that resolves when the environment is removed.
+     *
+     * @remarks
+     * Invoked to delete the given environment. Typical triggers include an explicit user
+     * action (such as a "Delete Environment" command) and programmatic removal via the API.
      */
     remove?(environment: PythonEnvironment, options?: RemoveEnvironmentOptions): Promise<void>;
 
@@ -409,6 +445,10 @@ export interface EnvironmentManager {
      * Refreshes the list of Python environments within the specified scope.
      * @param scope - The scope within which to refresh environments.
      * @returns A promise that resolves when the refresh is complete.
+     *
+     * @remarks
+     * Forces the manager to re-discover environments for the given scope. Typically
+     * triggered by an explicit user "refresh" action.
      */
     refresh(scope: RefreshEnvironmentsScope): Promise<void>;
 
@@ -416,6 +456,10 @@ export interface EnvironmentManager {
      * Retrieves a list of Python environments within the specified scope.
      * @param scope - The scope within which to retrieve environments.
      * @returns A promise that resolves to an array of Python environments.
+     *
+     * @remarks
+     * Returns the environments known to this manager for the given scope. Called
+     * frequently by UI surfaces (tree views, pickers) and by other consumers of the API.
      */
     getEnvironments(scope: GetEnvironmentsScope): Promise<PythonEnvironment[]>;
 
@@ -429,6 +473,14 @@ export interface EnvironmentManager {
      * @param scope - The scope within which to set the environment.
      * @param environment - The Python environment to set. If undefined, the environment is unset.
      * @returns A promise that resolves when the environment is set.
+     *
+     * @remarks
+     * Invoked when the active environment for the given scope should change — for example
+     * after the user selects an environment in a picker, after a newly created environment
+     * is auto-selected, or programmatically via the API.
+     *
+     * Also invoked at extension startup to rehydrate the active environment from
+     * persisted state.
      */
     set(scope: SetEnvironmentScope, environment?: PythonEnvironment): Promise<void>;
 
@@ -436,6 +488,12 @@ export interface EnvironmentManager {
      * Retrieves the current Python environment within the specified scope.
      * @param scope - The scope within which to retrieve the environment.
      * @returns A promise that resolves to the current Python environment, or undefined if none is set.
+     *
+     * @remarks
+     * Returns the currently active environment for the given scope, or `undefined` if
+     * none is selected. Called very frequently — at startup, after {@link set}, when a
+     * terminal is opened, before running Python, by UI surfaces that display the active
+     * interpreter, and by other extensions consuming the API.
      */
     get(scope: GetEnvironmentScope): Promise<PythonEnvironment | undefined>;
 
@@ -445,16 +503,21 @@ export interface EnvironmentManager {
     onDidChangeEnvironment?: Event<DidChangeEnvironmentEventArgs>;
 
     /**
-     * Resolves the specified Python environment. The environment can be either a {@link PythonEnvironment} or a {@link Uri} context.
+     * Resolves the Python environment associated with the specified URI context.
      *
-     * This method is used to obtain a fully detailed {@link PythonEnvironment} object. The input can be:
-     * - A {@link PythonEnvironment} object, which might be missing key details such as {@link PythonEnvironment.execInfo}.
-     * - A {@link Uri} object, which typically represents either:
-     *   - A folder that contains the Python environment.
-     *   - The path to a Python executable.
+     * This method is used to obtain a fully detailed {@link PythonEnvironment} object. The input
+     * URI typically represents either a folder that contains the Python environment or the path to
+     * a Python executable.
      *
-     * @param context - The context for resolving the environment, which can be a {@link PythonEnvironment} or a {@link Uri}.
+     * @param context - The URI context for resolving the environment.
      * @returns A promise that resolves to the fully detailed {@link PythonEnvironment}, or `undefined` if the environment cannot be resolved.
+     *
+     * @remarks
+     * Called to turn a {@link Uri} pointing at an interpreter or environment folder into a
+     * fully-populated {@link PythonEnvironment} with complete {@link PythonEnvironment.execInfo}.
+     * Typical triggers include the user manually selecting an interpreter path, resolving
+     * `python.defaultInterpreterPath` at startup, and populating execution details before launching
+     * Python.
      */
     resolve(context: ResolveEnvironmentContext): Promise<PythonEnvironment | undefined>;
 
@@ -462,6 +525,12 @@ export interface EnvironmentManager {
      * Clears the environment manager's cache.
      *
      * @returns A promise that resolves when the cache is cleared.
+     *
+     * @remarks
+     * Drops any cached environment data held by the manager so that subsequent calls to
+     * {@link EnvironmentManager.getEnvironments} or {@link EnvironmentManager.get}
+     * re-discover state from disk. Typically triggered by an explicit user "clear cache"
+     * action.
      */
     clearCache?(): Promise<void>;
 }
@@ -524,6 +593,11 @@ export interface PackageInfo {
      * The URIs associated with the package.
      */
     readonly uris?: readonly Uri[];
+
+    /**
+     * Whether the package is a transitive dependency.
+     */
+    readonly isTransitive?: boolean;
 }
 
 /**
@@ -576,7 +650,7 @@ export interface DidChangePackagesEventArgs {
  */
 export interface PackageManager {
     /**
-     * The name of the package manager.
+     * The name of the package manager. Allowed characters (a-z, A-Z, 0-9, -, _).
      */
     name: string;
 
@@ -608,7 +682,7 @@ export interface PackageManager {
     /**
      * Installs/Uninstall packages in the specified Python environment.
      * @param environment - The Python environment in which to install packages.
-     * @param packages - The packages to install.
+     * @param options - Options for managing packages.
      * @returns A promise that resolves when the installation is complete.
      */
     manage(environment: PythonEnvironment, options: PackageManagementOptions): Promise<void>;
@@ -645,10 +719,67 @@ export interface PackageManager {
     onDidChangePackages?: Event<DidChangePackagesEventArgs>;
 
     /**
+     * Fetches the names of direct (non-transitive) packages for the specified Python environment.
+     *
+     * **Caveat:** Most package managers cannot track user install intent. For pip, this uses
+     * `pip list --not-required` which returns packages with no installed dependents (leaf packages),
+     * not necessarily packages the user explicitly installed. For example, if a user runs
+     * `pip install flask werkzeug`, werkzeug will still be reported as transitive because flask
+     * depends on it. This is a best-effort approximation.
+     *
+     * @param environment - The Python environment for which to fetch direct package names.
+     * @returns A promise that resolves to a set of package name strings, or undefined if not supported.
+     */
+    getDirectPackageNames?(environment: PythonEnvironment): Promise<Set<string> | undefined>;
+
+    /**
      * Clears the package manager's cache.
      * @returns A promise that resolves when the cache is cleared.
      */
     clearCache?(): Promise<void>;
+
+    /**
+     * Returns the version of the underlying package management tool (e.g., pip, uv, conda).
+     * @param environment - The Python environment context.
+     * @returns A promise that resolves to a {@link Pep440Version} object, or `undefined` if not available.
+     */
+    getVersion?(environment: PythonEnvironment): Promise<Pep440Version | undefined>;
+
+    /**
+     * Retrieves the list of available versions for a given package, newest first.
+     *
+     * Implementations should:
+     * - resolve to an array of {@link Pep440Version} objects on success;
+     * - throw a {@link PackageVersionLookupNotSupportedError} when this manager cannot look up
+     *   versions at all (an unsupported capability);
+     * - let operational failures (command, network, or malformed/unparseable output) propagate
+     *   instead of swallowing them into `undefined`.
+     *
+     * Resolving to `undefined` is treated by callers as an unsupported capability, equivalent to
+     * throwing {@link PackageVersionLookupNotSupportedError}.
+     *
+     * @param environment - The Python environment context for the lookup.
+     * @param packageName - The name of the package to look up.
+     * @returns A promise that resolves to an array of {@link Pep440Version} objects (newest first).
+     * @throws {@link PackageVersionLookupNotSupportedError} when version lookup is unsupported.
+     */
+    getPackageAvailableVersions?(
+        environment: PythonEnvironment,
+        packageName: string,
+    ): Promise<Pep440Version[] | undefined>;
+
+    /**
+     * Formats a versioned install specification for this package manager.
+     *
+     * Different package managers use different syntax (e.g. pip uses `name==version`,
+     * conda uses `name=version`). Implement this method to return the correct format.
+     * When absent, callers should default to `name==version`.
+     *
+     * @param packageName - The name of the package.
+     * @param version - The version string.
+     * @returns The install specification string (e.g. `"requests==2.31.0"` or `"requests=2.31.0"`).
+     */
+    formatInstallSpec?(packageName: string, version: string): string;
 }
 
 /**
@@ -674,6 +805,13 @@ export interface PythonProject {
      * The tooltip for the Python project, which can be a string or a Markdown string.
      */
     readonly tooltip?: string | MarkdownString;
+
+    /**
+     * Finds the preferred dependency file, such as `requirements.txt`, `pyproject.toml`,
+     * `requirements.in`, or `environment.yml`.
+     * @returns The dependency file URI, or `undefined` when no supported dependency file exists.
+     */
+    discoverDependencyFiles?(): Promise<Uri | undefined>;
 }
 
 /**
@@ -686,9 +824,14 @@ export interface PythonProjectCreatorOptions {
     name: string;
 
     /**
-     * Optional path that may be provided as a root for the project.
+     * Path provided as the root for the project.
      */
-    uri?: Uri;
+    rootUri: Uri;
+
+    /**
+     * Boolean indicating whether the project should be created without any user input.
+     */
+    quickCreate?: boolean;
 }
 
 /**
@@ -716,11 +859,20 @@ export interface PythonProjectCreator {
     readonly tooltip?: string | MarkdownString;
 
     /**
-     * Creates a new Python project or projects.
-     * @param options - Optional parameters for creating the Python project.
-     * @returns A promise that resolves to a Python project, an array of Python projects, or undefined.
+     * Creates a new Python project(s) or, if files are not a project, returns Uri(s) to the created files.
+     * Anything that needs its own python environment constitutes a project.
+     * @param options Optional parameters for creating the Python project.
+     * @returns A promise that resolves to one of the following:
+     *   - PythonProject or PythonProject[]: when a single or multiple projects are created.
+     *   - Uri or Uri[]: when files are created that do not constitute a project.
+     *   - undefined: if project creation fails.
      */
-    create(options?: PythonProjectCreatorOptions): Promise<PythonProject | PythonProject[] | undefined>;
+    create(options?: PythonProjectCreatorOptions): Promise<PythonProject | PythonProject[] | Uri | Uri[] | undefined>;
+
+    /**
+     * A flag indicating whether the project creator supports quick create where no user input is required.
+     */
+    readonly supportsQuickCreate?: boolean;
 }
 
 /**
@@ -767,7 +919,7 @@ export type PackageManagementOptions = PackageManagementInteractionOptions &
     (
         | {
               /**
-               * Upgrade the packages if it is already installed.
+               * Upgrade the packages if they are already installed.
                */
               upgrade?: boolean;
 
@@ -787,7 +939,7 @@ export type PackageManagementOptions = PackageManagementInteractionOptions &
           }
         | {
               /**
-               * Upgrade the packages if it is already installed.
+               * Upgrade the packages if they are already installed.
                */
               upgrade?: boolean;
 
@@ -867,9 +1019,8 @@ export interface PythonEnvironmentManagerRegistrationApi {
      *
      * @param manager Environment Manager implementation to register.
      * @param options Optional registration options.
-     * @param options.extensionId The extension ID of the calling extension. This is used as a fallback when
-     * automatic extension detection fails, such as during F5 debugging where the extension's file path
-     * does not contain its marketplace ID. If automatic detection succeeds, this value is ignored.
+     * @param options.extensionId The extension ID of the calling extension. When this is not specified,
+     * or when the specified extension cannot be found, the extension ID will be automatically detected.
      * @returns A disposable that can be used to unregister the environment manager.
      * @see {@link EnvironmentManager}
      */
@@ -933,10 +1084,10 @@ export interface PythonEnvironmentsApi {
     onDidChangeEnvironments: Event<DidChangeEnvironmentsEventArgs>;
 
     /**
-     * This method is used to get the details missing from a PythonEnvironment. Like
-     * {@link PythonEnvironment.execInfo} and other details.
+     * This method is used to get the details for the Python environment associated with a URI
+     * context, such as an interpreter path or environment folder.
      *
-     * @param context : The PythonEnvironment or Uri for which details are required.
+     * @param context - The URI context for which environment details are required.
      */
     resolveEnvironment(context: ResolveEnvironmentContext): Promise<PythonEnvironment | undefined>;
 }
@@ -977,13 +1128,29 @@ export interface PythonPackageManagerRegistrationApi {
      *
      * @param manager Package Manager implementation to register.
      * @param options Optional registration options.
-     * @param options.extensionId The extension ID of the calling extension. This is used as a fallback when
-     * automatic extension detection fails, such as during F5 debugging where the extension's file path
-     * does not contain its marketplace ID. If automatic detection succeeds, this value is ignored.
+     * @param options.extensionId The extension ID of the calling extension. When this is not specified,
+     * or when the specified extension cannot be found, the extension ID will be automatically detected.
      * @returns A disposable that can be used to unregister the package manager.
      * @see {@link PackageManager}
      */
     registerPackageManager(manager: PackageManager, options?: { extensionId?: string }): Disposable;
+}
+
+
+/**
+ * Controls how package version lookup failures are reported.
+ */
+export interface GetPackageAvailableVersionsOptions {
+    /**
+     * Determines whether lookup failures preserve the legacy `undefined` result or reject.
+     *
+     * - `legacy` resolves to `undefined` for unsupported lookups and operational failures.
+     *   This remains the default for backward compatibility, but may be removed in a future
+     *   major API version.
+     * - `throw` rejects with {@link PackageVersionLookupNotSupportedError} for unsupported
+     *   lookups and propagates operational failures unchanged.
+     */
+    errorMode?: 'legacy' | 'throw';
 }
 
 export interface PythonPackageGetterApi {
@@ -1003,6 +1170,31 @@ export interface PythonPackageGetterApi {
      * @returns The list of packages in the Python Environment.
      */
     getPackages(environment: PythonEnvironment, options?: GetPackagesOptions): Promise<Package[] | undefined>;
+
+    /**
+     * Get the list of available versions for a package, newest first.
+     *
+     * By default, this preserves the legacy behavior of resolving to `undefined` for unsupported
+     * lookups and operational failures. Pass `{ errorMode: 'throw' }` to distinguish unsupported
+     * capabilities from operational failures: unsupported lookups reject with
+     * {@link PackageVersionLookupNotSupportedError}, while other failures propagate unchanged.
+     *
+     * @param environment The Python Environment context for the lookup.
+     * @param packageName The name of the package to look up.
+     * @param options Controls how lookup failures are reported.
+     * @returns A promise that resolves to an array of {@link Pep440Version} objects (newest first),
+     *          or `undefined` in legacy mode when lookup is unsupported or fails.
+     */
+    getPackageAvailableVersions(
+        environment: PythonEnvironment,
+        packageName: string,
+        options: GetPackageAvailableVersionsOptions & { errorMode: 'throw' },
+    ): Promise<Pep440Version[]>;
+    getPackageAvailableVersions(
+        environment: PythonEnvironment,
+        packageName: string,
+        options?: GetPackageAvailableVersionsOptions,
+    ): Promise<Pep440Version[] | undefined>;
 
     /**
      * Event raised when the list of packages in a Python Environment changes.
@@ -1269,7 +1461,7 @@ export interface DidChangeEnvironmentVariablesEventArgs {
     /**
      * The type of change that occurred.
      */
-    changeTye: FileChangeType;
+    changeType: FileChangeType;
 }
 
 export interface PythonEnvironmentVariablesApi {
@@ -1283,7 +1475,7 @@ export interface PythonEnvironmentVariablesApi {
      * 3. `.env` file at the root of the python project.
      * 4. `overrides` in the order provided.
      *
-     * @param uri The URI of the project, workspace or a file in a for which environment variables are required. If not provided,
+     * @param uri The URI of the project, workspace or a file in a for which environment variables are required.If not provided,
      * it fetches the environment variables for the global scope.
      * @param overrides Additional environment variables to override the defaults.
      * @param baseEnvVar The base environment variables that should be used as a starting point.
