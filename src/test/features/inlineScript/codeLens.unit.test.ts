@@ -102,7 +102,7 @@ suite('Inline script CodeLens provider', () => {
             const lenses = provider.provideCodeLenses(makeDocument(scriptUri), {} as never);
 
             assert.strictEqual(lenses.length, 1);
-            assert.ok(lenses[0].command?.title.includes('3.12.4'), lenses[0].command?.title);
+            assert.strictEqual(lenses[0].command?.title, 'Script environment ready (Python 3.12.4)');
             assert.strictEqual(lenses[0].command?.command, '', 'the confirmation must not be clickable');
         });
 
@@ -112,7 +112,7 @@ suite('Inline script CodeLens provider', () => {
             const lenses = provider.provideCodeLenses(makeDocument(scriptUri), {} as never);
 
             assert.strictEqual(lenses.length, 1);
-            assert.ok(!lenses[0].command?.title.includes('('), lenses[0].command?.title);
+            assert.strictEqual(lenses[0].command?.title, 'Script environment ready');
         });
 
         test('expires on its own and refreshes so the lens disappears', () => {
