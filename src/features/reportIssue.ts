@@ -3,7 +3,8 @@ import * as commandApi from '../common/command.api';
 import { traceError } from '../common/logging';
 import * as windowApis from '../common/window.apis';
 import { collectEnvironmentInfo } from '../helpers';
-import { EnvironmentManagers, PythonProjectManager } from '../internal.api';
+import type { EnvironmentManagers } from './envManagers';
+import type { PythonProjectManager } from './projectManager';
 
 const MINIMUM_DESCRIPTION_LENGTH = 3;
 

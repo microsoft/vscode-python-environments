@@ -2,7 +2,7 @@ import { Disposable, LogOutputChannel } from 'vscode';
 import { PythonEnvironmentApi } from '../../api';
 import { createSimpleDebounce } from '../../common/utils/debounce';
 import { createFileSystemWatcher, onDidDeleteFiles } from '../../common/workspace.apis';
-import { getPythonApi } from '../../features/pythonApi';
+import { getPythonApi } from '../../extensionApi';
 import { NativePythonFinder } from '../common/nativePythonFinder';
 import { PipPackageManager } from './pipPackageManager';
 import { SysPythonManager } from './sysPythonManager';

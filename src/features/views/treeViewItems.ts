@@ -2,7 +2,10 @@ import { Command, MarkdownString, ThemeIcon, TreeItem, TreeItemCollapsibleState,
 import { EnvironmentGroupInfo, IconPath, Package, PythonEnvironment, PythonProject } from '../../api';
 import { INLINE_SCRIPT_MANAGER_ID } from '../../common/constants';
 import { EnvViewStrings, UvInstallStrings, VenvManagerStrings } from '../../common/localize';
-import { InternalEnvironmentManager, InternalPackageManager } from '../../internal.api';
+import type {
+    InternalEnvironmentManager,
+    InternalPackageManager,
+} from '../../managers/common/registeredManagers';
 import { isActivatableEnvironment } from '../common/activation';
 import { removable } from './utils';
 

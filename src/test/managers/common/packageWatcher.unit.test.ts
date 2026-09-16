@@ -7,7 +7,8 @@ import { Disposable, EventEmitter, LogOutputChannel, RelativePattern, Terminal, 
 import { DidChangeEnvironmentEventArgs, PackageManager, PythonEnvironment, PythonEnvironmentId } from '../../../api';
 import * as windowApis from '../../../common/window.apis';
 import * as workspaceApis from '../../../common/workspace.apis';
-import { EnvironmentManagers, InternalPackageManager } from '../../../internal.api';
+import type { EnvironmentManagers } from '../../../features/envManagers';
+import { InternalPackageManager } from '../../../managers/common/registeredManagers';
 import {
     PackageWatcherTerminalActivation,
     registerPackageWatchers,

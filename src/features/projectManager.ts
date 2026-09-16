@@ -1,6 +1,6 @@
 import * as path from 'path';
-import { Disposable, EventEmitter, MarkdownString, Uri, workspace } from 'vscode';
-import { IconPath, PythonProject } from '../api';
+import { Disposable, Event, EventEmitter, MarkdownString, Uri } from 'vscode';
+import type { IconPath, PythonProject } from '../api';
 import { DEFAULT_ENV_MANAGER_ID, DEFAULT_PACKAGE_MANAGER_ID } from '../common/constants';
 import { createSimpleDebounce } from '../common/utils/debounce';
 import {
@@ -11,7 +11,6 @@ import {
     onDidDeleteFiles,
     onDidRenameFiles,
 } from '../common/workspace.apis';
-import { PythonProjectManager, PythonProjectSettings, PythonProjectsImpl } from '../internal.api';
 import { normalizePath } from '../common/utils/pathUtils';
 import {
     addPythonProjectSetting,
@@ -21,6 +20,54 @@ import {
     removePythonProjectSetting,
     updatePythonProjectSettingPath,
 } from './settings/settingHelpers';
+
+export interface PythonProjectManager extends Disposable {
+    initialize(): void;
+    create(
+        name: string,
+        uri: Uri,
+        options?: { description?: string; tooltip?: string | MarkdownString; iconPath?: IconPath },
+    ): PythonProject;
+    add(pyWorkspace: PythonProject | PythonProject[], options?: { persistSettings?: boolean }): Promise<void>;
+    remove(pyWorkspace: PythonProject | PythonProject[]): void;
+    getProjects(uris?: Uri[]): ReadonlyArray<PythonProject>;
+    get(uri: Uri): PythonProject | undefined;
+    onDidChangeProjects: Event<PythonProject[] | undefined>;
+}
+
+export interface PythonProjectSettings {
+    path: string;
+    envManager: string;
+    packageManager: string;
+    workspace?: string;
+    _inlineScriptRegistration?: InlineScriptProjectRegistrationMarker;
+}
+
+export type InlineScriptProjectRegistrationKind = 'created' | 'adopted';
+
+export interface InlineScriptProjectRegistrationMarker {
+    readonly kind: InlineScriptProjectRegistrationKind;
+}
+
+export class PythonProjectsImpl implements PythonProject {
+    readonly name: string;
+    readonly uri: Uri;
+    readonly description?: string;
+    readonly tooltip?: string | MarkdownString;
+    readonly iconPath?: IconPath;
+
+    constructor(
+        name: string,
+        uri: Uri,
+        options?: { description?: string; tooltip?: string | MarkdownString; iconPath?: IconPath },
+    ) {
+        this.name = name;
+        this.uri = uri;
+        this.description = options?.description ?? uri.fsPath;
+        this.tooltip = options?.tooltip ?? uri.fsPath;
+        this.iconPath = options?.iconPath;
+    }
+}
 
 type ProjectArray = PythonProject[];
 
@@ -210,7 +257,7 @@ export class PythonProjectManagerImpl implements PythonProjectManager {
         const envManagerId = getDefaultEnvManagerSetting(this);
         const pkgManagerId = getDefaultPkgManagerSetting(this);
 
-        const globalConfig = workspace.getConfiguration('python-envs', undefined);
+        const globalConfig = getConfiguration('python-envs', undefined);
         const defaultEnvManager = globalConfig.get<string>('defaultEnvManager', DEFAULT_ENV_MANAGER_ID);
         const defaultPkgManager = globalConfig.get<string>('defaultPackageManager', DEFAULT_PACKAGE_MANAGER_ID);
 

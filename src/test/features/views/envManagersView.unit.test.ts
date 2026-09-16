@@ -6,14 +6,14 @@ import * as windowApis from '../../../common/window.apis';
 import { EnvManagerView } from '../../../features/views/envManagersView';
 import { ITemporaryStateManager } from '../../../features/views/temporaryStateManager';
 import { EnvTreeItem } from '../../../features/views/treeViewItems';
-import {
+import type {
     DidChangeEnvironmentManagerEventArgs,
     DidChangePackageManagerEventArgs,
     EnvironmentManagers,
     InternalDidChangeEnvironmentsEventArgs,
     InternalDidChangePackagesEventArgs,
-    InternalEnvironmentManager,
-} from '../../../internal.api';
+} from '../../../features/envManagers';
+import type { InternalEnvironmentManager } from '../../../managers/common/registeredManagers';
 import { setupNonThenable } from '../../mocks/helper';
 
 suite('EnvManagerView.reveal Tests', () => {

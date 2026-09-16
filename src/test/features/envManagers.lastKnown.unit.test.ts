@@ -27,7 +27,8 @@ import { InlineScriptMetadata } from '../../common/inlineScript/metadata';
 import { InlineScriptRoutingRegistry } from '../../common/inlineScript/routingRegistry';
 import { PythonEnvironmentManagers } from '../../features/envManagers';
 import * as settingHelpers from '../../features/settings/settingHelpers';
-import { InternalPackageManager, PythonProjectManager } from '../../internal.api';
+import type { PythonProjectManager } from '../../features/projectManager';
+import type { InternalPackageManager } from '../../managers/common/registeredManagers';
 import { setupNonThenable } from '../mocks/helper';
 
 suite('PythonEnvironmentManagers getLastKnownEnvironment', () => {

@@ -29,7 +29,7 @@ import {
 } from '../../api';
 import * as extensionApis from '../../common/extension.apis';
 import { PythonEnvironmentManagers } from '../../features/envManagers';
-import { PythonProjectManager } from '../../internal.api';
+import type { PythonProjectManager } from '../../features/projectManager';
 import { setupNonThenable } from '../mocks/helper';
 
 /**

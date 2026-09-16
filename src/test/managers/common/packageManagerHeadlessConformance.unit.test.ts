@@ -14,7 +14,7 @@ import * as childProcessApis from '../../../common/childProcess.apis';
 import * as errorUtils from '../../../common/errors/utils';
 import * as windowApis from '../../../common/window.apis';
 import * as workspaceApis from '../../../common/workspace.apis';
-import { InternalPackageManager } from '../../../internal.api';
+import { InternalPackageManager } from '../../../managers/common/registeredManagers';
 import { PipInstallCommand } from '../../../managers/builtin/commands/install';
 import { PipListCommand } from '../../../managers/builtin/commands/list';
 import * as helpers from '../../../managers/builtin/helpers';

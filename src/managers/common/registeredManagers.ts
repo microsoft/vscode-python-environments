@@ -1,12 +1,22 @@
+// Copyright (c) Microsoft Corporation. All rights reserved.
+// Licensed under the MIT License.
+
 import type { Pep440Version } from '@renovatebot/pep440';
-import { CancellationError, Disposable, Event, LogOutputChannel, MarkdownString, RelativePattern, Uri } from 'vscode';
-import {
+import { CancellationError, Disposable, LogOutputChannel, MarkdownString, RelativePattern } from 'vscode';
+import { PackageVersionLookupNotSupportedError } from '../../publicErrors';
+import { ISSUES_URL } from '../../common/constants';
+import { CreateEnvironmentNotSupported, RemoveEnvironmentNotSupported } from '../../common/errors/NotSupportedError';
+import { traceWarn } from '../../common/logging';
+import { StopWatch } from '../../common/stopWatch';
+import { EventNames } from '../../common/telemetry/constants';
+import { classifyError, isTimeoutErrorType } from '../../common/telemetry/errorClassifier';
+import { sendTelemetryEvent } from '../../common/telemetry/sender';
+import type {
     CreateEnvironmentOptions,
     CreateEnvironmentScope,
     DidChangeEnvironmentEventArgs,
     DidChangeEnvironmentsEventArgs,
     DidChangePackagesEventArgs,
-    EnvironmentGroupInfo,
     EnvironmentManager,
     GetEnvironmentScope,
     GetEnvironmentsScope,
@@ -14,145 +24,22 @@ import {
     GetPackagesOptions,
     IconPath,
     Package,
-    PackageChangeKind,
-    PackageId,
-    PackageInfo,
     PackageManagementOptions,
     PackageManager,
-    PackageVersionLookupNotSupportedError,
     PythonEnvironment,
-    PythonEnvironmentExecutionInfo,
-    PythonEnvironmentId,
-    PythonEnvironmentInfo,
-    PythonProject,
-    PythonProjectCreator,
     QuickCreateConfig,
     RefreshEnvironmentsScope,
     RemoveEnvironmentOptions,
     ResolveEnvironmentContext,
     SetEnvironmentScope,
-} from './api';
-import { ISSUES_URL } from './common/constants';
-import { CreateEnvironmentNotSupported, RemoveEnvironmentNotSupported } from './common/errors/NotSupportedError';
-import { traceWarn } from './common/logging';
-import { StopWatch } from './common/stopWatch';
-import { EventNames } from './common/telemetry/constants';
-import { classifyError, isTimeoutErrorType } from './common/telemetry/errorClassifier';
-import { sendTelemetryEvent } from './common/telemetry/sender';
+} from '../../types';
 
-export type EnvironmentManagerScope = undefined | string | Uri | PythonEnvironment;
-export type PackageManagerScope = undefined | string | Uri | PythonEnvironment | Package;
-
-export interface PackageEventArg {
-    package: Package;
-    manager: InternalPackageManager;
-    environment: PythonEnvironment;
-}
-export type PackageCommandOptions =
-    | {
-          uri: Uri;
-          packages?: string[];
-      }
-    | {
-          packageManager: PackageManager;
-          environment: PythonEnvironment;
-          packages?: string[];
-      };
-
-export interface DidChangeEnvironmentManagerEventArgs {
-    kind: 'registered' | 'unregistered';
-    manager: InternalEnvironmentManager;
-}
-
-export interface DidChangePackageManagerEventArgs {
-    kind: 'registered' | 'unregistered';
-    manager: InternalPackageManager;
-}
-
-export interface InternalDidChangePackagesEventArgs {
-    environment: PythonEnvironment;
-    manager: InternalPackageManager;
-    changes: { kind: PackageChangeKind; pkg: Package }[];
-}
-
-export interface InternalDidChangeEnvironmentsEventArgs {
-    manager: InternalEnvironmentManager;
-    changes: DidChangeEnvironmentsEventArgs;
-}
-
-export interface EnvironmentManagers extends Disposable {
-    registerEnvironmentManager(manager: EnvironmentManager, options?: { extensionId?: string }): Disposable;
-    registerPackageManager(manager: PackageManager, options?: { extensionId?: string }): Disposable;
-
-    /**
-     * This event is fired when any environment manager changes its collection of environments.
-     * This can be any environment manager even if it is not the one selected by the user for the workspace.
-     */
-    onDidChangeEnvironments: Event<InternalDidChangeEnvironmentsEventArgs>;
-
-    /**
-     * Fires when ANY registered environment manager reports a selection change for a scope,
-     * regardless of whether that manager is the one currently selected by the user.
-     * Use this for UI refresh (e.g., status bar updates) that should react to all manager activity.
-     */
-    onDidChangeManagerEnvironment: Event<DidChangeEnvironmentEventArgs>;
-
-    /**
-     * Fires only when the *selected* (active) environment for a scope actually changes.
-     * This is the authoritative "the user's environment changed" event. Consumers that
-     * need to react to the effective interpreter (terminal activation, language server,
-     * Python API clients) should use this event.
-     */
-    onDidChangeActiveEnvironment: Event<DidChangeEnvironmentEventArgs>;
-    onDidChangePackages: Event<InternalDidChangePackagesEventArgs>;
-
-    onDidChangeEnvironmentManager: Event<DidChangeEnvironmentManagerEventArgs>;
-    onDidChangePackageManager: Event<DidChangePackageManagerEventArgs>;
-
-    getEnvironmentManager(scope: EnvironmentManagerScope): InternalEnvironmentManager | undefined;
-    getPackageManager(scope: PackageManagerScope): InternalPackageManager | undefined;
-
-    managers: InternalEnvironmentManager[];
-    packageManagers: InternalPackageManager[];
-
-    clearCache(scope: EnvironmentManagerScope): Promise<void>;
-    clearInlineScriptCache(): Promise<void>;
-
-    /**
-     * Sets the environment for a scope.
-     * @param scope - The scope to set the environment for
-     * @param environment - The environment to set (optional)
-     * @param shouldPersistSettings - Whether to persist to settings.json (default: true)
-     */
-    setEnvironment(
-        scope: SetEnvironmentScope,
-        environment?: PythonEnvironment,
-        shouldPersistSettings?: boolean,
-    ): Promise<void>;
-    /**
-     * Sets environments for multiple scopes.
-     * @param scope - Array of URIs or 'global'
-     * @param environment - The environment to set (optional)
-     * @param shouldPersistSettings - Whether to persist to settings.json (default: true)
-     */
-    setEnvironments(
-        scope: Uri[] | string,
-        environment?: PythonEnvironment,
-        shouldPersistSettings?: boolean,
-    ): Promise<void>;
-    setEnvironmentsIfUnset(scope: Uri[] | string, environment?: PythonEnvironment): Promise<void>;
-    getEnvironment(scope: GetEnvironmentScope): Promise<PythonEnvironment | undefined>;
-    refreshEnvironment(scope: GetEnvironmentScope): Promise<void>;
-
-    /**
-     * Synchronously returns the last-known environment for a scope without triggering a refresh.
-     * Used to serve a value promptly while a slow initial environment resolution runs in the
-     * background. Returns undefined if no environment has been resolved for the scope yet.
-     */
-    getLastKnownEnvironment(scope: GetEnvironmentScope): PythonEnvironment | undefined;
-
-    getProjectEnvManagers(uris: Uri[]): InternalEnvironmentManager[];
-}
+/*
+ * Runtime wrappers around registered {@link EnvironmentManager} and {@link PackageManager}
+ * implementations. These decorate the extension-supplied managers with telemetry, "not
+ * supported" fallbacks, and a stable internal `id`, without changing the public contracts
+ * defined in `../../types`.
+ */
 
 export class InternalEnvironmentManager implements EnvironmentManager {
     public constructor(
@@ -452,121 +339,4 @@ export class InternalPackageManager implements PackageManager {
             ? this.manager.formatInstallSpec(packageName, version)
             : `${packageName}==${version}`;
     }
-}
-
-export interface PythonProjectManager extends Disposable {
-    initialize(): void;
-    create(
-        name: string,
-        uri: Uri,
-        options?: { description?: string; tooltip?: string | MarkdownString; iconPath?: IconPath },
-    ): PythonProject;
-    add(
-        pyWorkspace: PythonProject | PythonProject[],
-        options?: { persistSettings?: boolean },
-    ): Promise<void>;
-    remove(pyWorkspace: PythonProject | PythonProject[]): void;
-    getProjects(uris?: Uri[]): ReadonlyArray<PythonProject>;
-    get(uri: Uri): PythonProject | undefined;
-    onDidChangeProjects: Event<PythonProject[] | undefined>;
-}
-
-export type InlineScriptProjectRegistrationKind = 'created' | 'adopted';
-
-export interface InlineScriptProjectRegistrationMarker {
-    readonly kind: InlineScriptProjectRegistrationKind;
-}
-
-export interface PythonProjectSettings {
-    path: string;
-    envManager: string;
-    packageManager: string;
-    workspace?: string;
-    _inlineScriptRegistration?: InlineScriptProjectRegistrationMarker;
-}
-
-export class PythonEnvironmentImpl implements PythonEnvironment {
-    public readonly name: string;
-    public readonly displayName: string;
-    public readonly shortDisplayName?: string;
-    public readonly displayPath: string;
-    public readonly version: string;
-    public readonly environmentPath: Uri;
-    public readonly description?: string;
-    public readonly tooltip?: string | MarkdownString;
-    public readonly iconPath?: IconPath;
-    public readonly execInfo: PythonEnvironmentExecutionInfo;
-    public readonly sysPrefix: string;
-    public readonly group?: string | EnvironmentGroupInfo;
-    public readonly error?: string;
-
-    constructor(
-        public readonly envId: PythonEnvironmentId,
-        info: PythonEnvironmentInfo,
-    ) {
-        this.name = info.name;
-        this.displayName = info.displayName ?? this.name;
-        this.shortDisplayName = info.shortDisplayName;
-        this.displayPath = info.displayPath;
-        this.version = info.version;
-        this.environmentPath = info.environmentPath;
-        this.description = info.description;
-        this.tooltip = info.tooltip;
-        this.iconPath = info.iconPath;
-        this.execInfo = info.execInfo;
-        this.sysPrefix = info.sysPrefix;
-        this.group = info.group;
-        this.error = info.error;
-    }
-}
-
-export class PythonPackageImpl implements Package {
-    public readonly name: string;
-    public readonly displayName: string;
-    public readonly version?: string;
-    public readonly description?: string;
-    public readonly tooltip?: string | MarkdownString;
-    public readonly iconPath?: IconPath;
-    public readonly uris?: readonly Uri[];
-
-    public readonly isTransitive?: boolean;
-
-    constructor(
-        public readonly pkgId: PackageId,
-        info: PackageInfo,
-    ) {
-        this.name = info.name;
-        this.displayName = info.displayName ?? this.name;
-        this.version = info.version;
-        this.description = info.description;
-        this.tooltip = info.tooltip;
-        this.iconPath = info.iconPath;
-        this.uris = info.uris;
-        this.isTransitive = info.isTransitive;
-    }
-}
-
-export class PythonProjectsImpl implements PythonProject {
-    name: string;
-    uri: Uri;
-    description?: string;
-    tooltip?: string | MarkdownString;
-    iconPath?: IconPath;
-
-    constructor(
-        name: string,
-        uri: Uri,
-        options?: { description?: string; tooltip?: string | MarkdownString; iconPath?: IconPath },
-    ) {
-        this.name = name;
-        this.uri = uri;
-        this.description = options?.description ?? uri.fsPath;
-        this.tooltip = options?.tooltip ?? uri.fsPath;
-        this.iconPath = options?.iconPath;
-    }
-}
-
-export interface ProjectCreators extends Disposable {
-    registerPythonProjectCreator(creator: PythonProjectCreator): Disposable;
-    getProjectCreators(): PythonProjectCreator[];
 }

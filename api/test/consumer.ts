@@ -2,11 +2,13 @@ import type {
     PackageManager,
     Pep440Version,
     PythonEnvironment,
+    PythonEnvironmentApi,
     PythonPackageGetterApi,
 } from '@vscode/python-environments';
 import {
     isPackageVersionLookupNotSupportedError,
     PackageVersionLookupNotSupportedError,
+    PythonEnvironments,
 } from '@vscode/python-environments';
 
 type Equal<Left, Right> =
@@ -32,6 +34,7 @@ const explicitLegacyAvailableVersions: Promise<Pep440Version[] | undefined> = ap
 const throwingAvailableVersions: Promise<Pep440Version[]> = api.getPackageAvailableVersions(environment, 'example', {
     errorMode: 'throw',
 });
+const runtimeApi: Promise<PythonEnvironmentApi> = PythonEnvironments.api();
 
 // The unsupported-capability error is part of the public contract: it is constructible, extends
 // Error, and exposes a stable string-literal `code` discriminator.
@@ -50,6 +53,7 @@ void refreshReturnIsExact;
 void legacyAvailableVersions;
 void explicitLegacyAvailableVersions;
 void throwingAvailableVersions;
+void runtimeApi;
 void lookupErrorIsError;
 void lookupErrorCodeIsExact;
 void guardNarrows;

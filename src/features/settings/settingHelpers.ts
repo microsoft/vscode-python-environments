@@ -13,12 +13,12 @@ import { normalizePath } from '../../common/utils/pathUtils';
 import { EventNames } from '../../common/telemetry/constants';
 import { sendTelemetryEvent } from '../../common/telemetry/sender';
 import * as workspaceApis from '../../common/workspace.apis';
-import {
+import type {
     InlineScriptProjectRegistrationKind,
     InlineScriptProjectRegistrationMarker,
     PythonProjectManager,
     PythonProjectSettings,
-} from '../../internal.api';
+} from '../projectManager';
 
 let inlineScriptProjectSettingsQueue: Promise<void> = Promise.resolve();
 

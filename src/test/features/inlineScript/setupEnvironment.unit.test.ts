@@ -20,7 +20,8 @@ import {
     setupInlineScriptEnvironmentHandler,
 } from '../../../features/inlineScript/setupEnvironment';
 import * as extensionVersionCheck from '../../../features/inlineScript/extensionVersionCheck';
-import { EnvironmentManagers, InternalEnvironmentManager } from '../../../internal.api';
+import type { EnvironmentManagers } from '../../../features/envManagers';
+import { InternalEnvironmentManager } from '../../../managers/common/registeredManagers';
 
 function makeEnv(): PythonEnvironment {
     return {

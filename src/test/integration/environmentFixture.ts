@@ -11,7 +11,7 @@ import { PythonEnvironment, PythonEnvironmentApi } from '../../api';
 import { spawnProcess } from '../../common/childProcess.apis';
 import { CONDA_MANAGER_ID, VENV_MANAGER_ID } from '../../common/constants';
 import { normalizePath } from '../../common/utils/pathUtils';
-import { PythonProjectSettings } from '../../internal.api';
+import type { PythonProjectSettings } from '../../features/projectManager';
 import { waitForCondition } from '../testUtils';
 
 const OWNERSHIP_FILE_NAME = '.python-envs-test-owner.json';

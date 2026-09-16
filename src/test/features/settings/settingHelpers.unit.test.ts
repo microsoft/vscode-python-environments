@@ -20,7 +20,11 @@ import {
     setEnvironmentManager,
     setPackageManager,
 } from '../../../features/settings/settingHelpers';
-import { PythonProjectManager, PythonProjectSettings, PythonProjectsImpl } from '../../../internal.api';
+import {
+    PythonProjectSettings,
+    PythonProjectsImpl,
+} from '../../../features/projectManager';
+import type { PythonProjectManager } from '../../../features/projectManager';
 import { MockWorkspaceConfiguration } from '../../mocks/mockWorkspaceConfig';
 
 /**

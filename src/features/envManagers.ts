@@ -1,11 +1,13 @@
 import * as path from 'path';
 import { ConfigurationTarget, Disposable, Event, EventEmitter, Uri, workspace } from 'vscode';
-import {
+import type {
     DidChangeEnvironmentEventArgs,
     DidChangeEnvironmentsEventArgs,
     DidChangePackagesEventArgs,
     EnvironmentManager,
     GetEnvironmentScope,
+    Package,
+    PackageChangeKind,
     PackageManager,
     PythonEnvironment,
     PythonProject,
@@ -27,19 +29,8 @@ import { EventNames } from '../common/telemetry/constants';
 import { sendTelemetryEvent } from '../common/telemetry/sender';
 import { getCallingExtension } from '../common/utils/frameUtils';
 import { normalizePath } from '../common/utils/pathUtils';
-import {
-    DidChangeEnvironmentManagerEventArgs,
-    DidChangePackageManagerEventArgs,
-    EnvironmentManagerScope,
-    EnvironmentManagers,
-    InternalDidChangeEnvironmentsEventArgs,
-    InternalDidChangePackagesEventArgs,
-    InternalEnvironmentManager,
-    InternalPackageManager,
-    PackageManagerScope,
-    PythonProjectManager,
-    PythonProjectSettings,
-} from '../internal.api';
+import { InternalEnvironmentManager, InternalPackageManager } from '../managers/common/registeredManagers';
+import type { PythonProjectManager, PythonProjectSettings } from './projectManager';
 import {
     EditAllManagerSettings,
     getDefaultEnvManagerSetting,
@@ -54,6 +45,120 @@ import {
     rollbackInlineScriptPythonProjectSetting,
     setAllManagerSettings,
 } from './settings/settingHelpers';
+
+export type EnvironmentManagerScope = undefined | string | Uri | PythonEnvironment;
+export type PackageManagerScope = undefined | string | Uri | PythonEnvironment | Package;
+
+export interface PackageEventArg {
+    package: Package;
+    manager: InternalPackageManager;
+    environment: PythonEnvironment;
+}
+export type PackageCommandOptions =
+    | {
+          uri: Uri;
+          packages?: string[];
+      }
+    | {
+          packageManager: PackageManager;
+          environment: PythonEnvironment;
+          packages?: string[];
+      };
+
+export interface DidChangeEnvironmentManagerEventArgs {
+    kind: 'registered' | 'unregistered';
+    manager: InternalEnvironmentManager;
+}
+
+export interface DidChangePackageManagerEventArgs {
+    kind: 'registered' | 'unregistered';
+    manager: InternalPackageManager;
+}
+
+export interface InternalDidChangePackagesEventArgs {
+    environment: PythonEnvironment;
+    manager: InternalPackageManager;
+    changes: { kind: PackageChangeKind; pkg: Package }[];
+}
+
+export interface InternalDidChangeEnvironmentsEventArgs {
+    manager: InternalEnvironmentManager;
+    changes: DidChangeEnvironmentsEventArgs;
+}
+
+export interface EnvironmentManagers extends Disposable {
+    registerEnvironmentManager(manager: EnvironmentManager, options?: { extensionId?: string }): Disposable;
+    registerPackageManager(manager: PackageManager, options?: { extensionId?: string }): Disposable;
+
+    /**
+     * This event is fired when any environment manager changes its collection of environments.
+     * This can be any environment manager even if it is not the one selected by the user for the workspace.
+     */
+    onDidChangeEnvironments: Event<InternalDidChangeEnvironmentsEventArgs>;
+
+    /**
+     * Fires when ANY registered environment manager reports a selection change for a scope,
+     * regardless of whether that manager is the one currently selected by the user.
+     * Use this for UI refresh (e.g., status bar updates) that should react to all manager activity.
+     */
+    onDidChangeManagerEnvironment: Event<DidChangeEnvironmentEventArgs>;
+
+    /**
+     * Fires only when the *selected* (active) environment for a scope actually changes.
+     * This is the authoritative "the user's environment changed" event. Consumers that
+     * need to react to the effective interpreter (terminal activation, language server,
+     * Python API clients) should use this event.
+     */
+    onDidChangeActiveEnvironment: Event<DidChangeEnvironmentEventArgs>;
+    onDidChangePackages: Event<InternalDidChangePackagesEventArgs>;
+
+    onDidChangeEnvironmentManager: Event<DidChangeEnvironmentManagerEventArgs>;
+    onDidChangePackageManager: Event<DidChangePackageManagerEventArgs>;
+
+    getEnvironmentManager(scope: EnvironmentManagerScope): InternalEnvironmentManager | undefined;
+    getPackageManager(scope: PackageManagerScope): InternalPackageManager | undefined;
+
+    managers: InternalEnvironmentManager[];
+    packageManagers: InternalPackageManager[];
+
+    clearCache(scope: EnvironmentManagerScope): Promise<void>;
+    clearInlineScriptCache(): Promise<void>;
+
+    /**
+     * Sets the environment for a scope.
+     * @param scope - The scope to set the environment for
+     * @param environment - The environment to set (optional)
+     * @param shouldPersistSettings - Whether to persist to settings.json (default: true)
+     */
+    setEnvironment(
+        scope: SetEnvironmentScope,
+        environment?: PythonEnvironment,
+        shouldPersistSettings?: boolean,
+    ): Promise<void>;
+    /**
+     * Sets environments for multiple scopes.
+     * @param scope - Array of URIs or 'global'
+     * @param environment - The environment to set (optional)
+     * @param shouldPersistSettings - Whether to persist to settings.json (default: true)
+     */
+    setEnvironments(
+        scope: Uri[] | string,
+        environment?: PythonEnvironment,
+        shouldPersistSettings?: boolean,
+    ): Promise<void>;
+    setEnvironmentsIfUnset(scope: Uri[] | string, environment?: PythonEnvironment): Promise<void>;
+    getEnvironment(scope: GetEnvironmentScope): Promise<PythonEnvironment | undefined>;
+    refreshEnvironment(scope: GetEnvironmentScope): Promise<void>;
+
+    /**
+     * Synchronously returns the last-known environment for a scope without triggering a refresh.
+     * Used to serve a value promptly while a slow initial environment resolution runs in the
+     * background. Returns undefined if no environment has been resolved for the scope yet.
+     */
+    getLastKnownEnvironment(scope: GetEnvironmentScope): PythonEnvironment | undefined;
+
+    getProjectEnvManagers(uris: Uri[]): InternalEnvironmentManager[];
+}
 
 function generateId(name: string, extensionId?: string): string {
     const newName = name.toLowerCase().replace(/[^a-zA-Z0-9-_]/g, '_');

@@ -75,9 +75,9 @@ extends:
                 workingDirectory: $(Build.SourcesDirectory)/api
                 displayName: Install package dependencies
 
-              - script: mkdir -p src && cp ../src/api.ts src/main.ts
+              - script: npm run copy:sources
                 workingDirectory: $(Build.SourcesDirectory)/api
-                displayName: Copy src/api.ts to API package entry point
+                displayName: Copy src/api.ts, src/types.ts, src/publicErrors.ts to API package sources
 
               - script: npm run compile
                 workingDirectory: $(Build.SourcesDirectory)/api
