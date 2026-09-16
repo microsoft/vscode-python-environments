@@ -1,4 +1,4 @@
-import { Command, MarkdownString, ThemeIcon, TreeItem, TreeItemCollapsibleState, l10n } from 'vscode';
+import { Command, MarkdownString, ThemeIcon, TreeItem, TreeItemCollapsibleState, Uri, l10n } from 'vscode';
 import { EnvironmentGroupInfo, IconPath, Package, PythonEnvironment, PythonProject } from '../../api';
 import { INLINE_SCRIPT_MANAGER_ID } from '../../common/constants';
 import { EnvViewStrings, UvInstallStrings, VenvManagerStrings } from '../../common/localize';
@@ -242,7 +242,9 @@ export class PackageTreeItem implements EnvTreeItem {
         item.contextValue = getPackageContextValue(pkg, parent.environment);
         item.description = (pkg.isTransitive ? l10n.t('(transitive) ') : '') + (pkg.description ?? pkg.version ?? '');
         item.tooltip = pkg.isTransitive
-            ? l10n.t('This package is a dependency of another installed package. It may also have been explicitly installed.')
+            ? l10n.t(
+                  'This package is a dependency of another installed package. It may also have been explicitly installed.',
+              )
             : pkg.tooltip;
         this.treeItem = item;
     }
@@ -292,6 +294,7 @@ export class PackageRootInfoTreeItem implements EnvTreeItem {
 
 export enum ProjectTreeItemKind {
     project = 'project',
+    dependencyFile = 'project-dependency-file',
     environment = 'project-environment',
     none = 'project-no-environment',
     environmentInfo = 'environment-info',
@@ -323,6 +326,27 @@ export class ProjectItem implements ProjectTreeItem {
 
     static getId(workspace: PythonProject): string {
         return workspace.uri.toString();
+    }
+}
+
+export class ProjectDependencyFile implements ProjectTreeItem {
+    public readonly kind = ProjectTreeItemKind.dependencyFile;
+    public readonly id: string;
+    public readonly treeItem: TreeItem;
+
+    constructor(
+        public readonly parent: ProjectItem,
+        public readonly uri: Uri,
+    ) {
+        this.id = `${parent.id}>>>dependency-file`;
+        const item = new TreeItem(uri, TreeItemCollapsibleState.None);
+        item.contextValue = 'project-dependency-file';
+        item.command = {
+            command: 'vscode.open',
+            title: l10n.t('Open Dependency File'),
+            arguments: [uri],
+        };
+        this.treeItem = item;
     }
 }
 

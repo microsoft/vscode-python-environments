@@ -805,6 +805,13 @@ export interface PythonProject {
      * The tooltip for the Python project, which can be a string or a Markdown string.
      */
     readonly tooltip?: string | MarkdownString;
+
+    /**
+     * Finds the preferred dependency file, such as `requirements.txt`, `pyproject.toml`,
+     * `requirements.in`, or `environment.yml`.
+     * @returns The dependency file URI, or `undefined` when no supported dependency file exists.
+     */
+    discoverDependencyFiles?(): Promise<Uri | undefined>;
 }
 
 /**

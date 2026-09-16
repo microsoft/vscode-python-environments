@@ -19,6 +19,7 @@ import { ITemporaryStateManager } from './temporaryStateManager';
 import {
     GlobalProjectItem,
     NoProjectEnvironment,
+    ProjectDependencyFile,
     ProjectEnvironment,
     ProjectEnvironmentInfo,
     ProjectItem,
@@ -191,8 +192,16 @@ export class ProjectView implements TreeDataProvider<ProjectTreeItem> {
 
         if (element.kind === ProjectTreeItemKind.project) {
             const projectItem = element as ProjectItem;
+            const views: ProjectTreeItem[] = [];
+            if (projectItem instanceof ProjectItem) {
+                const dependencyFileUri = await projectItem.project.discoverDependencyFiles?.();
+                if (dependencyFileUri) {
+                    views.push(new ProjectDependencyFile(projectItem, dependencyFileUri));
+                }
+            }
+
             if (this.envManagers.managers.length === 0) {
-                return [
+                views.push(
                     new NoProjectEnvironment(
                         projectItem.project,
                         projectItem,
@@ -201,35 +210,39 @@ export class ProjectView implements TreeDataProvider<ProjectTreeItem> {
                         undefined,
                         '$(loading~spin)',
                     ),
-                ];
+                );
+                return views;
             }
 
             const uri = projectItem.id === 'global' ? undefined : projectItem.project.uri;
             const manager = this.envManagers.getEnvironmentManager(uri);
             if (!manager) {
-                return [
+                views.push(
                     new NoProjectEnvironment(
                         projectItem.project,
                         projectItem,
                         ProjectViews.noEnvironmentManager,
                         ProjectViews.noEnvironmentManagerDescription,
                     ),
-                ];
+                );
+                return views;
             }
 
             const environment = await this.envManagers.getEnvironment(uri);
             if (!environment) {
-                return [
+                views.push(
                     new NoProjectEnvironment(
                         projectItem.project,
                         projectItem,
                         `${ProjectViews.noEnvironmentProvided} ${manager.displayName}`,
                     ),
-                ];
+                );
+                return views;
             }
             const view = new ProjectEnvironment(projectItem, environment);
             this.revealMap.set(uri ? uri.fsPath : 'global', view);
-            return [view];
+            views.push(view);
+            return views;
         }
 
         if (element.kind === ProjectTreeItemKind.environment) {
