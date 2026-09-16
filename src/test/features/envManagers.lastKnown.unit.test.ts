@@ -142,6 +142,50 @@ suite('PythonEnvironmentManagers getLastKnownEnvironment', () => {
         assert.strictEqual(envManagers.getLastKnownEnvironment(undefined), undefined);
     });
 
+    test('re-resolves the manager when an inline lookup finishes after a selection change', async () => {
+        const scope = Uri.joinPath(Uri.file(process.cwd()), 'script.py');
+        let finishInlineLookup: ((environment: PythonEnvironment) => void) | undefined;
+        const inlineLookup = new Promise<PythonEnvironment>((resolve) => {
+            finishInlineLookup = resolve;
+        });
+        const inlineId = registerManager(() => inlineLookup, undefined, 'inline-script');
+        const selected = makeEnv('selected');
+        const selectedId = registerManager(async () => selected, undefined, 'system');
+        defaultManagerId = inlineId;
+
+        const lookup = envManagers.getEnvironment(scope);
+        defaultManagerId = selectedId;
+        finishInlineLookup!(makeEnv('superseded'));
+
+        assert.strictEqual(await lookup, selected);
+    });
+
+    test('availability recovery republishes the inline environment even when the last-known descriptor matches', async () => {
+        const scope = Uri.joinPath(Uri.file(process.cwd()), 'script.py');
+        const environment = makeEnv('inline');
+        registerManager(async () => environment, undefined, 'inline-script');
+        markInlineScript(scope);
+        await envManagers.refreshEnvironment(scope);
+        await new Promise<void>((resolve) => setImmediate(resolve));
+        const events: DidChangeEnvironmentEventArgs[] = [];
+        const recovered = new Promise<void>((resolve) => {
+            envManagers.onDidChangeActiveEnvironment((event) => {
+                events.push(event);
+                if (!routingRegistry.isEnvironmentUnavailable(scope)) {
+                    resolve();
+                }
+            });
+        });
+
+        routingRegistry.setEnvironmentUnavailable(scope, true);
+        await new Promise<void>((resolve) => setImmediate(resolve));
+        routingRegistry.setEnvironmentUnavailable(scope, false);
+        await recovered;
+
+        assert.ok(events.some((event) => event.uri === scope && event.new === environment));
+        assert.strictEqual(envManagers.getEnvironmentManager(scope)?.id, 'ms-python.python:inline-script');
+    });
+
     test('returns the active environment after it has been resolved', async () => {
         const env = makeEnv('env1');
         registerManager(async () => env);

@@ -15,6 +15,40 @@ const METADATA = {
 };
 
 suite('InlineScriptRoutingRegistry', () => {
+    test('temporary unavailability preserves routing and notifies only on availability changes', () => {
+        const registry = new InlineScriptRoutingRegistry();
+        const uri = Uri.joinPath(Uri.file(process.cwd()), 'script.py');
+        registry.setMetadata(uri, METADATA);
+        registry.setValidatedAssociation(uri, true);
+        const availability: boolean[] = [];
+        const routeability: boolean[] = [];
+        registry.onDidChangeAvailability((changed) => availability.push(registry.isEnvironmentUnavailable(changed)));
+        registry.onDidChangeRouteability((event) => routeability.push(event.routeable));
+
+        registry.setEnvironmentUnavailable(uri, true);
+        registry.setEnvironmentUnavailable(uri, true);
+        assert.strictEqual(registry.shouldRoute(uri), true);
+        registry.setEnvironmentUnavailable(uri, false);
+
+        assert.deepStrictEqual(availability, [true, false]);
+        assert.deepStrictEqual(routeability, []);
+        registry.dispose();
+    });
+
+    test('a changed metadata identity drops the previous availability state', () => {
+        const registry = new InlineScriptRoutingRegistry();
+        const uri = Uri.joinPath(Uri.file(process.cwd()), 'script.py');
+        registry.setMetadata(uri, METADATA);
+        registry.setValidatedAssociation(uri, true);
+        registry.setEnvironmentUnavailable(uri, true);
+
+        registry.setMetadata(uri, { ...METADATA, dependencies: ['rich'] });
+        registry.setValidatedAssociation(uri, true);
+
+        assert.strictEqual(registry.isEnvironmentUnavailable(uri), false);
+        registry.dispose();
+    });
+
     test('invalidates a validated association synchronously when metadata identity changes', () => {
         const registry = new InlineScriptRoutingRegistry();
         const uri = Uri.file('/workspace/script.py');

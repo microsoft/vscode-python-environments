@@ -113,6 +113,10 @@ Stop runs or debug sessions using the environment before deleting it. The extens
 
 On Windows, changing only the letter casing of a script's filename keeps its existing environment association. A rename does not validate unsaved dependency edits or install packages.
 
+Unused cached script environments are cleaned up once per window, about two minutes after the extension activates, rather than being triggered by environment creation. Cleanup considers entries unused for more than 14 days and incomplete setups older than one day, removes at most three entries, and skips environments referenced by this workspace or entries it cannot safely inspect. There is no daily sweep.
+
+The background cache scan does not hold up interpreter lookups. If another window briefly locks an entry, or its last-used time cannot be updated safely, the extension retries the script association in the background with bounded delays. Saving without changing the inline requirements does not cancel, postpone, or reset those retries; changing the requirements or stored inline-environment association cancels outdated recovery work. A temporarily unavailable selected environment keeps its association instead of silently switching execution to another interpreter, and the setup action is available for an explicit retry. If automatic recovery does not succeed, use that action to retry. Cleanup never installs packages.
+
 ## Assigning Environments to Projects
 
 Each project can have its own Python environment. This is the core benefit of project management.
