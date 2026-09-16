@@ -233,6 +233,13 @@ export class PythonEnvironmentManagers implements EnvironmentManagers {
                         traceError('Failed to refresh inline-script routing:', error),
                     );
                 }),
+                this.inlineScriptRouting.onDidChangeAvailability((uri) => {
+                    if (this.getEnvironmentManager(uri)?.id === INLINE_SCRIPT_MANAGER_ID) {
+                        void this.refreshEnvironment(uri, true).catch((error) =>
+                            traceError('Failed to refresh inline-script availability:', error),
+                        );
+                    }
+                }),
             );
         }
     }
@@ -891,7 +898,11 @@ export class PythonEnvironmentManagers implements EnvironmentManagers {
             return undefined;
         }
 
-        return manager.get(scope);
+        const environment = await manager.get(scope);
+        if (manager.id === INLINE_SCRIPT_MANAGER_ID && this.getEnvironmentManager(scope) !== manager) {
+            return this.getEnvironment(scope);
+        }
+        return environment;
     }
 
     /**
@@ -902,8 +913,9 @@ export class PythonEnvironmentManagers implements EnvironmentManagers {
      *
      * Unlike getEnvironment(), this IS a mutation — it updates internal state.
      * Unlike setEnvironment(), it does NOT call manager.set() or persist to settings.
+     * Availability recovery may republish an unchanged descriptor so consumers retry a failed lookup.
      */
-    async refreshEnvironment(scope: GetEnvironmentScope): Promise<void> {
+    async refreshEnvironment(scope: GetEnvironmentScope, notifyIfUnchanged = false): Promise<void> {
         const manager = this.getEnvironmentManager(scope);
         if (!manager) {
             return;
@@ -918,7 +930,10 @@ export class PythonEnvironmentManagers implements EnvironmentManagers {
         }
 
         const oldEnv = this._activeSelection.get(key);
-        if (this.isSameEnvironment(oldEnv, newEnv) || !this.commitSelectionOperation(key, operation)) {
+        if (
+            (this.isSameEnvironment(oldEnv, newEnv) && !notifyIfUnchanged) ||
+            !this.commitSelectionOperation(key, operation)
+        ) {
             return;
         }
         this._activeSelection.set(key, newEnv);

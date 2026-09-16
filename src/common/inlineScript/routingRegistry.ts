@@ -41,6 +41,7 @@ interface ScriptRoutingState {
     readonly metadataIdentity?: string;
     readonly metadataRevision: number;
     readonly validatedAssociation: boolean;
+    readonly environmentUnavailable?: boolean;
 }
 
 export class InlineScriptRoutingRegistry implements Disposable {
@@ -49,6 +50,9 @@ export class InlineScriptRoutingRegistry implements Disposable {
     private readonly setupOutcomes = new Map<string, InlineScriptSetupOutcome>();
     private readonly _onDidChangeRouteability = new EventEmitter<InlineScriptRouteabilityChangeEvent>();
     private readonly _onDidChangeMetadata = new EventEmitter<InlineScriptMetadataChangeEvent>();
+    private readonly _onDidChangeAvailability = new EventEmitter<Uri>();
+
+    public readonly onDidChangeAvailability: Event<Uri> = this._onDidChangeAvailability.event;
 
     public readonly onDidChangeRouteability: Event<InlineScriptRouteabilityChangeEvent> =
         this._onDidChangeRouteability.event;
@@ -73,6 +77,8 @@ export class InlineScriptRoutingRegistry implements Disposable {
                     metadataRevision,
                     validatedAssociation:
                         state.metadataIdentity === metadataIdentity ? state.validatedAssociation : false,
+                    environmentUnavailable:
+                        state.metadataIdentity === metadataIdentity ? state.environmentUnavailable : false,
                 };
             },
             true,
@@ -129,7 +135,23 @@ export class InlineScriptRoutingRegistry implements Disposable {
             ...state,
             uri: script instanceof Uri ? script : state.uri,
             validatedAssociation,
+            environmentUnavailable: validatedAssociation ? state.environmentUnavailable : false,
         }));
+    }
+
+    /** Keep temporary I/O failure separate from interpreter selection, while allowing setup to be retried. */
+    public setEnvironmentUnavailable(uri: Uri, unavailable: boolean): void {
+        const scriptPath = getInlineScriptRoutingKey(uri);
+        if (scriptPath) {
+            this.update(scriptPath, (state) => ({ ...state, uri, environmentUnavailable: unavailable }));
+        }
+    }
+
+    /** Whether a selected inline environment is temporarily withheld by a lookup. */
+    public isEnvironmentUnavailable(uri: Uri): boolean {
+        const scriptPath = getInlineScriptRoutingKey(uri);
+        const state = scriptPath ? this.states.get(scriptPath) : undefined;
+        return this.isRouteable(state) && state?.environmentUnavailable === true;
     }
 
     public hasValidatedAssociation(script: Uri | string): boolean {
@@ -177,6 +199,7 @@ export class InlineScriptRoutingRegistry implements Disposable {
         this.setupOutcomes.clear();
         this._onDidChangeMetadata.dispose();
         this._onDidChangeRouteability.dispose();
+        this._onDidChangeAvailability.dispose();
     }
 
     private update(
@@ -189,6 +212,7 @@ export class InlineScriptRoutingRegistry implements Disposable {
             validatedAssociation: false,
         };
         const previousRouteable = this.isRouteable(previous);
+        const previouslyUnavailable = previousRouteable && previous.environmentUnavailable === true;
         const next = updater(previous);
 
         if (!next.metadata && !next.validatedAssociation) {
@@ -213,6 +237,9 @@ export class InlineScriptRoutingRegistry implements Disposable {
                 previousRouteable,
                 routeable,
             });
+        }
+        if (previouslyUnavailable !== (routeable && next.environmentUnavailable === true) && next.uri) {
+            this._onDidChangeAvailability.fire(next.uri);
         }
     }
 

@@ -192,6 +192,20 @@ suite('Inline script setup code action', () => {
             assert.strictEqual(actions.length, 0);
         });
 
+        test('offers an explicit retry without losing a temporarily unavailable selection', () => {
+            routing.setMetadata(scriptUri, makeMetadata());
+            routing.setValidatedAssociation(scriptUri, true);
+            routing.setEnvironmentUnavailable(scriptUri, true);
+
+            const actions = provide(makeDocument(scriptUri), [makeDiagnostic('reportMissingImports')]);
+
+            assert.strictEqual(actions.length, 1);
+            assert.strictEqual(actions[0].command?.command, SETUP_COMMAND);
+            assert.strictEqual(routing.shouldRoute(scriptUri), true);
+            routing.setEnvironmentUnavailable(scriptUri, false);
+            assert.strictEqual(provide(makeDocument(scriptUri), [makeDiagnostic('reportMissingImports')]).length, 0);
+        });
+
         test('offers nothing when the inline-scripts feature flag is off', () => {
             featureEnabledStub.returns(false);
 

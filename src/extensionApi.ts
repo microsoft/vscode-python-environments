@@ -35,6 +35,7 @@ import type {
     SetEnvironmentScope,
 } from './types';
 import { PackageVersionLookupNotSupportedError } from './publicErrors';
+import { INLINE_SCRIPT_MANAGER_ID } from './common/constants';
 import { traceError, traceInfo } from './common/logging';
 import { pickEnvironmentManager } from './common/pickers/managers';
 import { timeout } from './common/utils/asyncUtils';
@@ -269,6 +270,13 @@ export class PythonEnvironmentApiImpl implements PythonEnvironmentApi {
         // Keep the background resolution alive so the cache/last-known value gets populated and the
         // change event fires once it finishes.
         resolution.catch((ex) => traceError('Failed to resolve environment in background', ex));
+        // Inline-script environments are reclaimed from a shared cache, and the manager withholds
+        // one it cannot prove is still safe. Serving the last-known value here would hand back the
+        // descriptor that decision just rejected, so only the timeout is skipped for them; every
+        // other manager keeps the fast fallback.
+        if (this.envManagers.getEnvironmentManager(currentScope)?.id === INLINE_SCRIPT_MANAGER_ID) {
+            return resolution;
+        }
         return this.envManagers.getLastKnownEnvironment(currentScope);
     }
     onDidChangeEnvironment: Event<DidChangeEnvironmentEventArgs> = this._onDidChangeEnvironment.event;

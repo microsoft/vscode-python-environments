@@ -92,7 +92,7 @@ export class InlineScriptSetupCodeActionProvider implements CodeActionProvider {
         if (!getInlineScriptRoutingKey(uri)) {
             return [];
         }
-        if (this.routing.shouldRoute(uri)) {
+        if (this.routing.shouldRoute(uri) && !this.routing.isEnvironmentUnavailable(uri)) {
             return [];
         }
         if (!readInlineScriptMetadata(sliceHeaderBytes(document.getText()), uri.fsPath)) {

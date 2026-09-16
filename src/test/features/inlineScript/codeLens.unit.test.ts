@@ -74,6 +74,26 @@ suite('Inline script CodeLens provider', () => {
         assert.strictEqual(lenses.length, 0);
     });
 
+    test('offers setup while a selected environment is temporarily unavailable and hides it on recovery', () => {
+        routing.setMetadata(scriptUri, makeMetadata());
+        routing.setValidatedAssociation(scriptUri, true);
+        let refreshes = 0;
+        const subscription = provider.onDidChangeCodeLenses(() => {
+            refreshes += 1;
+        });
+
+        routing.setEnvironmentUnavailable(scriptUri, true);
+        const lenses = provider.provideCodeLenses(makeDocument(scriptUri), {} as never);
+        assert.strictEqual(lenses.length, 1);
+        assert.strictEqual(lenses[0].command?.command, SETUP_COMMAND);
+        assert.strictEqual(routing.shouldRoute(scriptUri), true);
+        routing.setEnvironmentUnavailable(scriptUri, false);
+
+        assert.strictEqual(provider.provideCodeLenses(makeDocument(scriptUri), {} as never).length, 0);
+        assert.strictEqual(refreshes, 2);
+        subscription.dispose();
+    });
+
     test('refreshes CodeLenses when routing state changes', () => {
         let fireCount = 0;
         const sub = provider.onDidChangeCodeLenses(() => (fireCount += 1));

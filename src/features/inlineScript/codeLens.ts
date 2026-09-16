@@ -46,6 +46,7 @@ export class InlineScriptCodeLensProvider implements CodeLensProvider, Disposabl
     ) {
         this.subscriptions.push(
             this.routing.onDidChangeRouteability(() => this._onDidChangeCodeLenses.fire()),
+            this.routing.onDidChangeAvailability(() => this._onDidChangeCodeLenses.fire()),
             // Only metadata arriving or changing can add/replace a lens; a scan that finds no metadata
             // (the common case for ordinary .py files) needs no refresh. Hiding a lens for an
             // edited/removed block is handled by VS Code re-querying on the document change itself.
@@ -89,7 +90,7 @@ export class InlineScriptCodeLensProvider implements CodeLensProvider, Disposabl
         const offset = metadata.sourceRange?.start ?? metadata.range.start;
         const position = document.positionAt(offset);
         const range = new Range(position, position);
-        if (this.routing.shouldRoute(uri)) {
+        if (this.routing.shouldRoute(uri) && !this.routing.isEnvironmentUnavailable(uri)) {
             // A validated inline-script environment matching the current metadata already exists.
             const key = getInlineScriptRoutingKey(uri);
             const confirmation = key ? this.readyConfirmations.get(key) : undefined;

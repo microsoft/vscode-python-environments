@@ -97,6 +97,7 @@ suite('PythonEnvironmentApiImpl - getEnvironment timeout fallback', () => {
                 }),
             ),
             getLastKnownEnvironment: sinon.stub().withArgs(scope).returns(lastKnown),
+            getEnvironmentManager: sinon.stub().returns({ id: 'ms-python.python:venv' }),
         } as unknown as ApiArgs[0];
         const mockProjectCreators = {} as unknown as ApiArgs[2];
         const mockTerminalManager = {} as unknown as ApiArgs[3];
@@ -115,5 +116,47 @@ suite('PythonEnvironmentApiImpl - getEnvironment timeout fallback', () => {
 
         assert.strictEqual(await pending, lastKnown);
         resolveEnvironment?.(undefined);
+    });
+
+    test('waits for the real resolution for inline-script scopes instead of serving last-known', async () => {
+        const scope = Uri.file('/w/script.py');
+        const lastKnown = {
+            name: 'stale',
+            displayName: 'stale',
+            displayPath: '/env/stale',
+            version: '3.12.0',
+            environmentPath: Uri.file('/env/stale'),
+            execInfo: { run: { executable: '/env/stale/python', args: [] } },
+            sysPrefix: '/env/stale',
+        } as unknown as PythonEnvironment;
+        let resolveEnvironment: ((value: PythonEnvironment | undefined) => void) | undefined;
+
+        type ApiArgs = ConstructorParameters<typeof PythonEnvironmentApiImpl>;
+        const mockEnvManagers = {
+            onDidChangeActiveEnvironment: new EventEmitter().event,
+            getEnvironment: sinon.stub().returns(
+                new Promise<PythonEnvironment | undefined>((resolve) => {
+                    resolveEnvironment = resolve;
+                }),
+            ),
+            getLastKnownEnvironment: sinon.stub().returns(lastKnown),
+            getEnvironmentManager: sinon.stub().returns({ id: 'ms-python.python:inline-script' }),
+        } as unknown as ApiArgs[0];
+
+        const api = new PythonEnvironmentApiImpl(
+            mockEnvManagers,
+            { getProjects: () => [], onDidChangeProjects: new EventEmitter<void>().event } as unknown as ApiArgs[1],
+            {} as unknown as ApiArgs[2],
+            {} as unknown as ApiArgs[3],
+            { onDidChangeEnvironmentVariables: new EventEmitter().event } as unknown as ApiArgs[4],
+        );
+
+        const pending = api.getEnvironment(scope);
+        await clock.tickAsync(2_000);
+        // The manager withheld the environment; serving last-known would hand back exactly the
+        // descriptor that decision rejected.
+        resolveEnvironment?.(undefined);
+
+        assert.strictEqual(await pending, undefined);
     });
 });
