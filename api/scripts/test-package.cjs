@@ -97,14 +97,14 @@ try {
     );
     const installedPackageJson = JSON.parse(fs.readFileSync(path.join(installedPackageRoot, 'package.json'), 'utf8'));
     assert.strictEqual(installedPackageJson.main, './out/cjs/main.cjs');
-    assert.strictEqual(installedPackageJson.types, './out/cjs/main.d.ts');
+    assert.strictEqual(installedPackageJson.types, './out/types/main.d.ts');
     assert.deepStrictEqual(installedPackageJson.exports, {
         import: {
-            types: './out/esm/main.d.ts',
+            types: './out/types/main.d.ts',
             default: './out/esm/main.mjs',
         },
         require: {
-            types: './out/cjs/main.d.ts',
+            types: './out/types/main.d.ts',
             default: './out/cjs/main.cjs',
         },
     });
@@ -118,6 +118,12 @@ try {
         installedPackageJson.exports.require.default,
     ]) {
         assert.ok(fs.statSync(path.resolve(installedPackageRoot, target)).isFile(), `${target} must be a file`);
+    }
+    for (const duplicateDeclaration of ['./out/esm/main.d.ts', './out/cjs/main.d.ts']) {
+        assert.ok(
+            !fs.existsSync(path.resolve(installedPackageRoot, duplicateDeclaration)),
+            `${duplicateDeclaration} must not duplicate the shared declaration entry point`,
+        );
     }
 
     const requireFromConsumer = createRequire(path.join(testRoot, 'legacy', 'consumer.cjs'));
