@@ -44,6 +44,13 @@ export namespace InlineScriptStrings {
 
     export const diagnosticSource = l10n.t('Python Environments');
 
+    export function environmentReady(version: string | undefined): string {
+        const shown = version?.trim();
+        return shown
+            ? l10n.t('Script environment ready (Python {0})', shown)
+            : l10n.t('Script environment ready');
+    }
+
     export const unterminatedBlock = l10n.t(
         "This '# /// script' block is missing its closing '# ///' marker, so its inline script metadata is ignored.",
     );

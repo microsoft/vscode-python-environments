@@ -17,6 +17,7 @@ import {
 } from '../../common/window.apis';
 import { asRelativePath, findFiles, getOpenTextDocuments } from '../../common/workspace.apis';
 import type { EnvironmentManagers } from '../envManagers';
+import { shortenVersionString } from '../../managers/common/utils';
 import { registerInlineScriptCodeLens } from './codeLens';
 import { promptUpdateExtensionsForInlineScripts } from './extensionVersionCheck';
 import { registerInlineScriptSetupCodeAction } from './setupCodeAction';
@@ -134,6 +135,7 @@ async function saveScriptBeforeSetup(scriptUri: Uri, routing: InlineScriptRoutin
 export function setupInlineScriptEnvironmentHandler(
     em: EnvironmentManagers,
     routing: InlineScriptRoutingRegistry,
+    onEnvironmentReady?: (scriptUri: Uri, version: string | undefined) => void,
 ): (scriptUri?: Uri) => Promise<void> {
     return async (scriptUri?: Uri): Promise<void> => {
         const uri = scriptUri ?? window.activeTextEditor?.document.uri;
@@ -164,6 +166,7 @@ export function setupInlineScriptEnvironmentHandler(
             notifyInlineScriptSetupOutcome(uri, routing);
             return;
         }
+        onEnvironmentReady?.(uri, shortenVersionString(environment.version));
         // Kept out of the try: the environment is already set up, so a failure in this follow-up
         // must not be reported to the user as a setup failure.
         await promptUpdateExtensionsForInlineScripts().catch((error) =>
@@ -362,10 +365,16 @@ async function filterInlineScriptFiles(files: readonly Uri[]): Promise<Uri[]> {
  * palette-gated behind the flag.
  */
 export function registerInlineScriptUx(em: EnvironmentManagers, routing: InlineScriptRoutingRegistry): Disposable[] {
+    const codeLens = registerInlineScriptCodeLens(routing, SETUP_INLINE_SCRIPT_ENV_COMMAND);
     return [
-        registerInlineScriptCodeLens(routing, SETUP_INLINE_SCRIPT_ENV_COMMAND),
+        codeLens.disposable,
         registerInlineScriptSetupCodeAction(routing, SETUP_INLINE_SCRIPT_ENV_COMMAND),
-        commands.registerCommand(SETUP_INLINE_SCRIPT_ENV_COMMAND, setupInlineScriptEnvironmentHandler(em, routing)),
+        commands.registerCommand(
+            SETUP_INLINE_SCRIPT_ENV_COMMAND,
+            setupInlineScriptEnvironmentHandler(em, routing, (uri, version) =>
+                codeLens.provider.noteEnvironmentReady(uri, version),
+            ),
+        ),
         commands.registerCommand(SETUP_INLINE_SCRIPT_ENVS_COMMAND, () =>
             setUpInlineScriptEnvironmentsInWorkspace(em, routing),
         ),
