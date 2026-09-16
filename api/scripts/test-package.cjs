@@ -97,14 +97,14 @@ try {
     );
     const installedPackageJson = JSON.parse(fs.readFileSync(path.join(installedPackageRoot, 'package.json'), 'utf8'));
     assert.strictEqual(installedPackageJson.main, './out/cjs/main.cjs');
-    assert.strictEqual(installedPackageJson.types, './out/cjs/main.d.ts');
+    assert.strictEqual(installedPackageJson.types, './out/types/main.d.ts');
     assert.deepStrictEqual(installedPackageJson.exports, {
         import: {
-            types: './out/esm/main.d.ts',
+            types: './out/types/main.d.ts',
             default: './out/esm/main.mjs',
         },
         require: {
-            types: './out/cjs/main.d.ts',
+            types: './out/types/main.d.ts',
             default: './out/cjs/main.cjs',
         },
     });
@@ -118,6 +118,17 @@ try {
         installedPackageJson.exports.require.default,
     ]) {
         assert.ok(fs.statSync(path.resolve(installedPackageRoot, target)).isFile(), `${target} must be a file`);
+    }
+    for (const runtimeOutput of ['esm', 'cjs']) {
+        const runtimeOutputRoot = path.join(installedPackageRoot, 'out', runtimeOutput);
+        const duplicateDeclarations = fs
+            .readdirSync(runtimeOutputRoot, { recursive: true })
+            .filter((entry) => entry.endsWith('.d.ts'));
+        assert.deepStrictEqual(
+            duplicateDeclarations,
+            [],
+            `${runtimeOutputRoot} must not contain declaration files: ${duplicateDeclarations.join(', ')}`,
+        );
     }
 
     const requireFromConsumer = createRequire(path.join(testRoot, 'legacy', 'consumer.cjs'));

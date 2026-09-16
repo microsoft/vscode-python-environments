@@ -12,14 +12,14 @@
         "Environments"
     ],
     "main": "./out/cjs/main.cjs",
-    "types": "./out/cjs/main.d.ts",
+    "types": "./out/types/main.d.ts",
     "exports": {
         "import": {
-            "types": "./out/esm/main.d.ts",
+            "types": "./out/types/main.d.ts",
             "default": "./out/esm/main.mjs"
         },
         "require": {
-            "types": "./out/cjs/main.d.ts",
+            "types": "./out/types/main.d.ts",
             "default": "./out/cjs/main.cjs"
         }
     },
@@ -41,7 +41,8 @@
         "prepack": "npm run all:publish",
         "all:publish": "git clean -xfd . && npm install && npm run copy:sources && npm run compile",
         "copy:sources": "node ./scripts/copy-sources.cjs",
-        "compile": "npm run compile:esm && npm run compile:cjs",
+        "compile": "npm run clean && npm run compile:types && npm run compile:esm && npm run compile:cjs",
+        "compile:types": "tsc -b ./tsconfig.types.json",
         "compile:esm": "tsc -b ./tsconfig.esm.json && mve out/esm/main.js out/esm/main.mjs && node -e \"require('fs').writeFileSync('out/esm/package.json', '{\\\"type\\\":\\\"module\\\"}')\"",
         "compile:cjs": "tsc -b ./tsconfig.cjs.json && mve out/cjs/main.js out/cjs/main.cjs",
         "clean": "node -e \"const fs = require('fs'); fs.rmSync('./out', { recursive: true, force: true });\"",
