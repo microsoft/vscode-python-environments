@@ -83,7 +83,17 @@ try {
     fs.writeFileSync(path.join(vscodeStubRoot, 'package.json'), JSON.stringify({ main: 'index.js' }));
     fs.writeFileSync(
         path.join(vscodeStubRoot, 'index.js'),
-        "exports.extensions = { getExtension: () => undefined };",
+        [
+            "const runtimeApi = { getEnvironments: async () => [] };",
+            "const extension = {",
+            "  isActive: false,",
+            "  exports: undefined,",
+            "  packageJSON: { version: '1.37.0' },",
+            "  activate: async () => { extension.isActive = true; extension.exports = runtimeApi; return runtimeApi; },",
+            "};",
+            'exports.__runtimeApi = runtimeApi;',
+            'exports.extensions = { getExtension: () => extension };',
+        ].join('\n'),
     );
     const installedPackageJson = JSON.parse(fs.readFileSync(path.join(installedPackageRoot, 'package.json'), 'utf8'));
     assert.strictEqual(installedPackageJson.main, './out/cjs/main.cjs');
@@ -117,6 +127,24 @@ try {
         'function',
         'CommonJS consumers should load the package runtime facade',
     );
+    execFileSync(
+        process.execPath,
+        [
+            '--eval',
+            [
+                "const packageModule = require('@vscode/python-environments');",
+                "const vscode = require('vscode');",
+                "(async () => {",
+                '  const api = await packageModule.PythonEnvironments.api();',
+                '  if (api !== vscode.__runtimeApi) process.exit(1);',
+                '})().catch(() => process.exit(1));',
+            ].join('\n'),
+        ],
+        {
+            cwd: path.join(testRoot, 'legacy'),
+            encoding: 'utf8',
+        },
+    );
     assert.strictEqual(
         canonicalPath(requireFromConsumer.resolve('@vscode/python-environments')),
         canonicalPath(path.join(installedPackageRoot, installedPackageJson.exports.require.default)),
@@ -128,7 +156,7 @@ try {
         [
             '--input-type=module',
             '--eval',
-            "const packageModule = await import('@vscode/python-environments'); if (typeof packageModule.PythonEnvironments.api !== 'function') process.exit(1); console.log(import.meta.resolve('@vscode/python-environments'));",
+            "const packageModule = await import('@vscode/python-environments'); const vscode = await import('vscode'); if (typeof packageModule.PythonEnvironments.api !== 'function') process.exit(1); const api = await packageModule.PythonEnvironments.api(); if (api !== vscode.default.__runtimeApi) process.exit(1); console.log(import.meta.resolve('@vscode/python-environments'));",
         ],
         {
             cwd: path.join(testRoot, 'modern'),

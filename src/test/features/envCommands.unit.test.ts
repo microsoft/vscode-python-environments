@@ -45,7 +45,7 @@ suite('Environment removal command ownership', () => {
                 envPath: path.join(process.cwd(), 'removal-env'),
             });
             const remove = sinon.stub().resolves();
-            const owner =             new InternalEnvironmentManager(managerId, {
+            const owner = new InternalEnvironmentManager(managerId, {
                 name: 'test',
                 preferredPackageManagerId: 'ms-python.python:pip',
                 get: async () => environment,

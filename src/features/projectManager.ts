@@ -1,5 +1,5 @@
 import * as path from 'path';
-import { Disposable, Event, EventEmitter, MarkdownString, Uri, workspace } from 'vscode';
+import { Disposable, Event, EventEmitter, MarkdownString, Uri } from 'vscode';
 import type { IconPath, PythonProject } from '../api';
 import { DEFAULT_ENV_MANAGER_ID, DEFAULT_PACKAGE_MANAGER_ID } from '../common/constants';
 import { createSimpleDebounce } from '../common/utils/debounce';
@@ -50,11 +50,11 @@ export interface InlineScriptProjectRegistrationMarker {
 }
 
 export class PythonProjectsImpl implements PythonProject {
-    name: string;
-    uri: Uri;
-    description?: string;
-    tooltip?: string | MarkdownString;
-    iconPath?: IconPath;
+    readonly name: string;
+    readonly uri: Uri;
+    readonly description?: string;
+    readonly tooltip?: string | MarkdownString;
+    readonly iconPath?: IconPath;
 
     constructor(
         name: string,
@@ -257,7 +257,7 @@ export class PythonProjectManagerImpl implements PythonProjectManager {
         const envManagerId = getDefaultEnvManagerSetting(this);
         const pkgManagerId = getDefaultPkgManagerSetting(this);
 
-        const globalConfig = workspace.getConfiguration('python-envs', undefined);
+        const globalConfig = getConfiguration('python-envs', undefined);
         const defaultEnvManager = globalConfig.get<string>('defaultEnvManager', DEFAULT_ENV_MANAGER_ID);
         const defaultPkgManager = globalConfig.get<string>('defaultPackageManager', DEFAULT_PACKAGE_MANAGER_ID);
 

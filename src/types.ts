@@ -503,24 +503,21 @@ export interface EnvironmentManager {
     onDidChangeEnvironment?: Event<DidChangeEnvironmentEventArgs>;
 
     /**
-     * Resolves the specified Python environment. The environment can be either a {@link PythonEnvironment} or a {@link Uri} context.
+     * Resolves the Python environment associated with the specified URI context.
      *
-     * This method is used to obtain a fully detailed {@link PythonEnvironment} object. The input can be:
-     * - A {@link PythonEnvironment} object, which might be missing key details such as {@link PythonEnvironment.execInfo}.
-     * - A {@link Uri} object, which typically represents either:
-     *   - A folder that contains the Python environment.
-     *   - The path to a Python executable.
+     * This method is used to obtain a fully detailed {@link PythonEnvironment} object. The input
+     * URI typically represents either a folder that contains the Python environment or the path to
+     * a Python executable.
      *
-     * @param context - The context for resolving the environment, which can be a {@link PythonEnvironment} or a {@link Uri}.
+     * @param context - The URI context for resolving the environment.
      * @returns A promise that resolves to the fully detailed {@link PythonEnvironment}, or `undefined` if the environment cannot be resolved.
      *
      * @remarks
-     * Called to turn a lightly-populated {@link PythonEnvironment} or a {@link Uri}
-     * pointing at an interpreter or environment folder into a fully-populated
-     * {@link PythonEnvironment} with complete {@link PythonEnvironment.execInfo}. Typical
-     * triggers include the user manually selecting an interpreter path, resolving
-     * `python.defaultInterpreterPath` at startup, and populating execution details before
-     * launching Python.
+     * Called to turn a {@link Uri} pointing at an interpreter or environment folder into a
+     * fully-populated {@link PythonEnvironment} with complete {@link PythonEnvironment.execInfo}.
+     * Typical triggers include the user manually selecting an interpreter path, resolving
+     * `python.defaultInterpreterPath` at startup, and populating execution details before launching
+     * Python.
      */
     resolve(context: ResolveEnvironmentContext): Promise<PythonEnvironment | undefined>;
 
@@ -1080,10 +1077,10 @@ export interface PythonEnvironmentsApi {
     onDidChangeEnvironments: Event<DidChangeEnvironmentsEventArgs>;
 
     /**
-     * This method is used to get the details missing from a PythonEnvironment. Like
-     * {@link PythonEnvironment.execInfo} and other details.
+     * This method is used to get the details for the Python environment associated with a URI
+     * context, such as an interpreter path or environment folder.
      *
-     * @param context : The PythonEnvironment or Uri for which details are required.
+     * @param context - The URI context for which environment details are required.
      */
     resolveEnvironment(context: ResolveEnvironmentContext): Promise<PythonEnvironment | undefined>;
 }
