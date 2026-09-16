@@ -99,6 +99,8 @@ When you create a script, the extension generates a single `.py` file with PEP 7
 
 An inline-script environment is built from the script's `# /// script` block and stored in the extension's cache, where it is shared by every script with the same dependencies and base interpreter. Because editing one would silently change the others, these environments are not user-managed: the Python Environments views do not offer install, uninstall, or version-change actions for them. Their package list remains visible.
 
+A CodeLens above the `# /// script` block offers **Set up environment for this script**, and the same action is available as a quick fix on an unresolved import. For a few seconds after setup succeeds it is replaced by a **Script environment ready (Python X.Y.Z)** confirmation naming the Python that was selected — useful when `requires-python` matches several installed versions, or when one was installed on demand. The confirmation is plain text rather than a clickable action, and it expires on its own; at every other time the setup CodeLens behaves exactly as before.
+
 Setup records which distributions it installed. If that record and the environment's contents later disagree — for example after installing a package into it from a terminal — every script sharing the environment needs setup again. Saving or reopening a script does not repair it; use the script's setup action to rebuild from its declared dependencies.
 
 Once a mismatch is confirmed during an environment lookup, the affected scripts' setup actions return without requiring a save.
