@@ -2,20 +2,6 @@
 // Licensed under the MIT License.
 
 import type { Pep440Version } from '@renovatebot/pep440';
-<<<<<<< HEAD:src/internal.api.ts
-import * as path from 'path';
-import {
-    CancellationError,
-    Disposable,
-    Event,
-    FileType,
-    LogOutputChannel,
-    MarkdownString,
-    RelativePattern,
-    Uri,
-} from 'vscode';
-import {
-=======
 import { CancellationError, Disposable, LogOutputChannel, MarkdownString, RelativePattern } from 'vscode';
 import { PackageVersionLookupNotSupportedError } from '../../publicErrors';
 import { ISSUES_URL } from '../../common/constants';
@@ -26,7 +12,6 @@ import { EventNames } from '../../common/telemetry/constants';
 import { classifyError, isTimeoutErrorType } from '../../common/telemetry/errorClassifier';
 import { sendTelemetryEvent } from '../../common/telemetry/sender';
 import type {
->>>>>>> origin/main:src/managers/common/registeredManagers.ts
     CreateEnvironmentOptions,
     CreateEnvironmentScope,
     DidChangeEnvironmentEventArgs,
@@ -47,19 +32,7 @@ import type {
     RemoveEnvironmentOptions,
     ResolveEnvironmentContext,
     SetEnvironmentScope,
-<<<<<<< HEAD:src/internal.api.ts
-} from './api';
-import { ISSUES_URL } from './common/constants';
-import { CreateEnvironmentNotSupported, RemoveEnvironmentNotSupported } from './common/errors/NotSupportedError';
-import { traceWarn } from './common/logging';
-import { StopWatch } from './common/stopWatch';
-import { EventNames } from './common/telemetry/constants';
-import { classifyError, isTimeoutErrorType } from './common/telemetry/errorClassifier';
-import { sendTelemetryEvent } from './common/telemetry/sender';
-import { stat } from './common/workspace.fs.apis';
-=======
 } from '../../types';
->>>>>>> origin/main:src/managers/common/registeredManagers.ts
 
 /*
  * Runtime wrappers around registered {@link EnvironmentManager} and {@link PackageManager}
@@ -367,164 +340,3 @@ export class InternalPackageManager implements PackageManager {
             : `${packageName}==${version}`;
     }
 }
-<<<<<<< HEAD:src/internal.api.ts
-
-export interface PythonProjectManager extends Disposable {
-    initialize(): void;
-    create(
-        name: string,
-        uri: Uri,
-        options?: { description?: string; tooltip?: string | MarkdownString; iconPath?: IconPath },
-    ): PythonProject;
-    add(pyWorkspace: PythonProject | PythonProject[], options?: { persistSettings?: boolean }): Promise<void>;
-    remove(pyWorkspace: PythonProject | PythonProject[]): void;
-    getProjects(uris?: Uri[]): ReadonlyArray<PythonProject>;
-    get(uri: Uri): PythonProject | undefined;
-    onDidChangeProjects: Event<PythonProject[] | undefined>;
-}
-
-export type InlineScriptProjectRegistrationKind = 'created' | 'adopted';
-
-export interface InlineScriptProjectRegistrationMarker {
-    readonly kind: InlineScriptProjectRegistrationKind;
-}
-
-export interface PythonProjectSettings {
-    path: string;
-    envManager: string;
-    packageManager: string;
-    workspace?: string;
-    _inlineScriptRegistration?: InlineScriptProjectRegistrationMarker;
-}
-
-export class PythonEnvironmentImpl implements PythonEnvironment {
-    public readonly name: string;
-    public readonly displayName: string;
-    public readonly shortDisplayName?: string;
-    public readonly displayPath: string;
-    public readonly version: string;
-    public readonly environmentPath: Uri;
-    public readonly description?: string;
-    public readonly tooltip?: string | MarkdownString;
-    public readonly iconPath?: IconPath;
-    public readonly execInfo: PythonEnvironmentExecutionInfo;
-    public readonly sysPrefix: string;
-    public readonly group?: string | EnvironmentGroupInfo;
-    public readonly error?: string;
-
-    constructor(
-        public readonly envId: PythonEnvironmentId,
-        info: PythonEnvironmentInfo,
-    ) {
-        this.name = info.name;
-        this.displayName = info.displayName ?? this.name;
-        this.shortDisplayName = info.shortDisplayName;
-        this.displayPath = info.displayPath;
-        this.version = info.version;
-        this.environmentPath = info.environmentPath;
-        this.description = info.description;
-        this.tooltip = info.tooltip;
-        this.iconPath = info.iconPath;
-        this.execInfo = info.execInfo;
-        this.sysPrefix = info.sysPrefix;
-        this.group = info.group;
-        this.error = info.error;
-    }
-}
-
-export class PythonPackageImpl implements Package {
-    public readonly name: string;
-    public readonly displayName: string;
-    public readonly version?: string;
-    public readonly description?: string;
-    public readonly tooltip?: string | MarkdownString;
-    public readonly iconPath?: IconPath;
-    public readonly uris?: readonly Uri[];
-
-    public readonly isTransitive?: boolean;
-
-    constructor(
-        public readonly pkgId: PackageId,
-        info: PackageInfo,
-    ) {
-        this.name = info.name;
-        this.displayName = info.displayName ?? this.name;
-        this.version = info.version;
-        this.description = info.description;
-        this.tooltip = info.tooltip;
-        this.iconPath = info.iconPath;
-        this.uris = info.uris;
-        this.isTransitive = info.isTransitive;
-    }
-}
-
-export class PythonProjectsImpl implements PythonProject {
-    private static readonly dependencyFileNames = [
-        'requirements.txt',
-        'pyproject.toml',
-        'requirements.in',
-        'environment.yml',
-    ] as const;
-
-    name: string;
-    uri: Uri;
-    description?: string;
-    tooltip?: string | MarkdownString;
-    iconPath?: IconPath;
-
-    constructor(
-        name: string,
-        uri: Uri,
-        options?: { description?: string; tooltip?: string | MarkdownString; iconPath?: IconPath },
-    ) {
-        this.name = name;
-        this.uri = uri;
-        this.description = options?.description ?? uri.fsPath;
-        this.tooltip = options?.tooltip ?? uri.fsPath;
-        this.iconPath = options?.iconPath;
-    }
-
-    /**
-     * Finds the preferred dependency file at the project root.
-     * @returns The dependency file URI, or `undefined` when no supported dependency file exists.
-     */
-    async discoverDependencyFiles(): Promise<Uri | undefined> {
-        let projectType: FileType;
-        try {
-            projectType = (await stat(this.uri)).type;
-        } catch {
-            return undefined;
-        }
-
-        // A project URI may point directly to a dependency file instead of its parent directory.
-        if (projectType !== FileType.Directory) {
-            const fileName = path.posix.basename(this.uri.path);
-            return projectType === FileType.File &&
-                PythonProjectsImpl.dependencyFileNames.some((candidate) => candidate === fileName)
-                ? this.uri
-                : undefined;
-        }
-
-        // Search directory candidates in dependency-file priority order.
-        for (const fileName of PythonProjectsImpl.dependencyFileNames) {
-            const candidate = this.uri.with({ path: path.posix.join(this.uri.path, fileName) });
-            try {
-                const candidateType = (await stat(candidate)).type;
-                if (candidateType === FileType.File) {
-                    return candidate;
-                }
-            } catch {
-                // Try the next supported dependency file.
-            }
-        }
-
-        return undefined;
-    }
-}
-
-export interface ProjectCreators extends Disposable {
-    registerPythonProjectCreator(creator: PythonProjectCreator): Disposable;
-    getProjectCreators(): PythonProjectCreator[];
-}
-=======
->>>>>>> origin/main:src/managers/common/registeredManagers.ts

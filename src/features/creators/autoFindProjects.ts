@@ -6,15 +6,7 @@ import { traceInfo } from '../../common/logging';
 import { normalizePath } from '../../common/utils/pathUtils';
 import { showErrorMessage, showQuickPickWithButtons, showWarningMessage } from '../../common/window.apis';
 import { findFiles } from '../../common/workspace.apis';
-<<<<<<< HEAD
-import { PythonProjectManager, PythonProjectsImpl } from '../../internal.api';
-=======
-import {
-    PythonProjectManager,
-    PythonProjectsImpl,
-} from '../projectManager';
-import { normalizePath } from '../../common/utils/pathUtils';
->>>>>>> origin/main
+import { PythonProjectManager, PythonProjectsImpl } from '../projectManager';
 
 function getUniqueUri(uris: Uri[]): {
     label: string;

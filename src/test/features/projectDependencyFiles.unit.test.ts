@@ -2,7 +2,7 @@ import assert from 'assert';
 import * as sinon from 'sinon';
 import { FileStat, FileType, Uri } from 'vscode';
 import * as workspaceFs from '../../common/workspace.fs.apis';
-import { PythonProjectsImpl } from '../../internal.api';
+import { PythonProjectsImpl } from '../../features/projectManager';
 
 function fileStat(type: FileType): FileStat {
     return { type, ctime: 0, mtime: 0, size: 0 };
