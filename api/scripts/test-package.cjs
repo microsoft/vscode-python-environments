@@ -119,10 +119,15 @@ try {
     ]) {
         assert.ok(fs.statSync(path.resolve(installedPackageRoot, target)).isFile(), `${target} must be a file`);
     }
-    for (const duplicateDeclaration of ['./out/esm/main.d.ts', './out/cjs/main.d.ts']) {
-        assert.ok(
-            !fs.existsSync(path.resolve(installedPackageRoot, duplicateDeclaration)),
-            `${duplicateDeclaration} must not duplicate the shared declaration entry point`,
+    for (const runtimeOutput of ['esm', 'cjs']) {
+        const runtimeOutputRoot = path.join(installedPackageRoot, 'out', runtimeOutput);
+        const duplicateDeclarations = fs
+            .readdirSync(runtimeOutputRoot, { recursive: true })
+            .filter((entry) => entry.endsWith('.d.ts'));
+        assert.deepStrictEqual(
+            duplicateDeclarations,
+            [],
+            `${runtimeOutputRoot} must not contain declaration files: ${duplicateDeclarations.join(', ')}`,
         );
     }
 
