@@ -3,6 +3,7 @@
 
 import * as crypto from 'crypto';
 import * as fsapi from 'fs-extra';
+import { rename as renameWithoutRetry } from 'fs/promises';
 import * as path from 'path';
 import { Uri } from 'vscode';
 import type { PythonEnvironment } from '../../api';
@@ -23,6 +24,7 @@ export const META_JSON_FILENAME = '.meta.json';
  */
 export const META_SCHEMA_VERSION = 1 as const;
 export const SOURCE_METADATA_IDENTITY_HASH_HEX_LENGTH = 64;
+export const INSTALLED_PACKAGES_HASH_HEX_LENGTH = 64;
 export const MAX_SOURCE_METADATA_IDENTITY_HASHES = 128;
 
 const MAX_META_JSON_BYTES = 1024 * 1024;
@@ -42,6 +44,13 @@ export interface InlineScriptEnvMeta {
     readonly baseInterpreterVersion: string;
     /** Last successful use as a canonical UTC string produced by `Date.toISOString()`. */
     readonly lastUsedAt: string;
+    /** Set when packages changed outside setup; the entry no longer matches its declared dependencies. */
+    readonly manuallyModified?: boolean;
+    /**
+     * SHA-256 of the distributions this extension installed into the entry, as recorded under the
+     * cache-entry lock. Absent when never recorded — which means "unknown", never "changed".
+     */
+    readonly installedPackagesHash?: string;
     /** Bounded SHA-256 hashes of metadata identities proven for this cache entry. */
     readonly sourceMetadataIdentityHashes?: readonly string[];
 }
@@ -250,11 +259,22 @@ async function inspectMetaJsonFile(metaPath: string): Promise<InlineScriptMetaRe
  * hold the cache-entry file lock, which serializes this operation across
  * extension-host processes.
  */
-export function writeMetaJson(envDir: Uri, meta: InlineScriptEnvMeta): Promise<void> {
+export interface WriteMetaJsonOptions {
+    /**
+     * Fail immediately instead of letting graceful-fs retry a Windows sharing violation on the
+     * rename for a full minute. Read-path bookkeeping must never hold the shared cache-entry lock
+     * that long: other windows cannot tell it apart from a build or a deletion.
+     */
+    readonly failFast?: boolean;
+}
+
+export function writeMetaJson(envDir: Uri, meta: InlineScriptEnvMeta, options?: WriteMetaJsonOptions): Promise<void> {
     const finalPath = getMetaJsonPath(envDir).fsPath;
     const key = normalizePath(path.resolve(finalPath));
     const previous = pendingMetaJsonWrites.get(key) ?? Promise.resolve();
-    const operation = previous.catch(() => undefined).then(() => writeMetaJsonOnce(envDir, meta, finalPath));
+    const operation = previous
+        .catch(() => undefined)
+        .then(() => writeMetaJsonOnce(envDir, meta, finalPath, options?.failFast === true));
     let queued: Promise<void>;
     queued = operation.finally(() => {
         if (pendingMetaJsonWrites.get(key) === queued) {
@@ -265,7 +285,13 @@ export function writeMetaJson(envDir: Uri, meta: InlineScriptEnvMeta): Promise<v
     return queued;
 }
 
-async function writeMetaJsonOnce(envDir: Uri, meta: InlineScriptEnvMeta, finalPath: string): Promise<void> {
+async function writeMetaJsonOnce(
+    envDir: Uri,
+    meta: InlineScriptEnvMeta,
+    finalPath: string,
+    failFast: boolean,
+): Promise<void> {
+    const rename = failFast ? renameWithoutRetry : fsapi.rename;
     await fsapi.ensureDir(envDir.fsPath);
     const tmpSuffix = crypto.randomBytes(6).toString('hex');
     const tmpPath = `${finalPath}.tmp-${tmpSuffix}`;
@@ -277,18 +303,20 @@ async function writeMetaJsonOnce(envDir: Uri, meta: InlineScriptEnvMeta, finalPa
     try {
         await fsapi.writeFile(tmpPath, payload, 'utf8');
         try {
-            await fsapi.rename(tmpPath, finalPath);
+            await rename(tmpPath, finalPath);
             finalKnownToExist = true;
             return;
         } catch (err) {
             const code = (err as NodeJS.ErrnoException | undefined)?.code;
-            if (!['EPERM', 'EEXIST', 'EBUSY'].includes(code ?? '')) {
+            // Read-path bookkeeping must leave the old sidecar in place rather than enter
+            // the backup/restore path, whose recovery may itself need a retrying rename.
+            if (failFast || !['EPERM', 'EEXIST', 'EBUSY'].includes(code ?? '')) {
                 throw err;
             }
         }
 
         try {
-            await fsapi.rename(finalPath, backupPath);
+            await rename(finalPath, backupPath);
             hasBackup = true;
         } catch (err) {
             if (!isFileNotFoundError(err)) {
@@ -297,7 +325,7 @@ async function writeMetaJsonOnce(envDir: Uri, meta: InlineScriptEnvMeta, finalPa
         }
 
         try {
-            await fsapi.rename(tmpPath, finalPath);
+            await rename(tmpPath, finalPath);
             finalKnownToExist = true;
         } catch (replaceError) {
             if (hasBackup) {
@@ -321,6 +349,90 @@ async function writeMetaJsonOnce(envDir: Uri, meta: InlineScriptEnvMeta, finalPa
 
 export function hashSourceMetadataIdentity(identity: string): string {
     return crypto.createHash('sha256').update(identity, 'utf8').digest('hex');
+}
+
+/**
+ * Outcome of comparing an entry's recorded distributions against what is on disk.
+ *
+ * `unknown` is deliberately distinct from `changed`. Treating "no record" as "everything was
+ * added" is exactly the mistake that made merely listing packages invalidate a working
+ * environment; callers must never invalidate on `unknown`.
+ */
+export type InstalledPackagesComparison = 'unknown' | 'unchanged' | 'changed';
+
+/**
+ * The only place this decision is made. Keep it that way.
+ */
+export function compareInstalledPackages(
+    recordedHash: string | undefined,
+    actualHash: string | undefined,
+): InstalledPackagesComparison {
+    if (recordedHash === undefined || actualHash === undefined) {
+        return 'unknown';
+    }
+    return recordedHash === actualHash ? 'unchanged' : 'changed';
+}
+
+export function hashInstalledDistributions(distributions: readonly string[]): string {
+    const normalized = Array.from(new Set(distributions.map((name) => name.toLowerCase()))).sort();
+    return crypto.createHash('sha256').update(normalized.join('\n'), 'utf8').digest('hex');
+}
+
+/**
+ * `site-packages` locations inside a cached environment. Windows keeps a single `Lib/site-packages`;
+ * POSIX nests it under a version directory (`lib/python3.12/site-packages`), so that level is
+ * enumerated rather than guessed.
+ */
+async function getSitePackagesDirs(envDir: Uri): Promise<string[]> {
+    if (isWindows()) {
+        return [path.join(envDir.fsPath, 'Lib', 'site-packages')];
+    }
+    const libPath = path.join(envDir.fsPath, 'lib');
+    let entries: string[];
+    try {
+        entries = await fsapi.readdir(libPath);
+    } catch {
+        return [];
+    }
+    return entries.filter((entry) => entry.startsWith('python')).map((entry) => path.join(libPath, entry, 'site-packages'));
+}
+
+/**
+ * Names of the installed distributions in a cached environment, derived from `*.dist-info`
+ * directory names (which carry both name and version). Returns `undefined` when the inventory
+ * cannot be read, so callers see `unknown` rather than a false `changed`.
+ *
+ * Distributions that only ship legacy `.egg-info` are not observed here, matching the scope the
+ * package watcher previously treated as authoritative.
+ */
+export async function readInstalledDistributions(envDir: Uri): Promise<string[] | undefined> {
+    const sitePackagesDirs = await getSitePackagesDirs(envDir);
+    if (sitePackagesDirs.length === 0) {
+        return undefined;
+    }
+    const distributions: string[] = [];
+    let readAny = false;
+    for (const sitePackages of sitePackagesDirs) {
+        let entries: string[];
+        try {
+            entries = await fsapi.readdir(sitePackages);
+        } catch (error) {
+            if (isFileNotFoundError(error)) {
+                continue;
+            }
+            traceWarn(`inline-script env: failed to list ${sitePackages}:`, error);
+            return undefined;
+        }
+        readAny = true;
+        distributions.push(...entries.filter((entry) => entry.endsWith('.dist-info')));
+    }
+    return readAny ? distributions : undefined;
+}
+
+/** Current inventory hash for an entry, or `undefined` when it cannot be determined. */
+export async function readInstalledPackagesHash(envDir: Uri): Promise<string | undefined> {
+    const distributions = await readInstalledDistributions(envDir);
+    return distributions === undefined ? undefined : hashInstalledDistributions(distributions);
 }
 
 export function mergeSourceMetadataIdentityHashes(
@@ -447,11 +559,7 @@ function validateMeta(value: unknown): InlineScriptEnvMeta | 'unsupported' | und
         return undefined;
     }
     const obj = value as Record<string, unknown>;
-    if (
-        typeof obj.schemaVersion !== 'number' ||
-        !Number.isSafeInteger(obj.schemaVersion) ||
-        obj.schemaVersion <= 0
-    ) {
+    if (typeof obj.schemaVersion !== 'number' || !Number.isSafeInteger(obj.schemaVersion) || obj.schemaVersion <= 0) {
         return undefined;
     }
     if (obj.schemaVersion > META_SCHEMA_VERSION) {
@@ -469,6 +577,12 @@ function validateMeta(value: unknown): InlineScriptEnvMeta | 'unsupported' | und
     if (!isCanonicalIsoTimestamp(obj.lastUsedAt)) {
         return undefined;
     }
+    if (obj.manuallyModified !== undefined && typeof obj.manuallyModified !== 'boolean') {
+        return undefined;
+    }
+    if (obj.installedPackagesHash !== undefined && !isInstalledPackagesHash(obj.installedPackagesHash)) {
+        return undefined;
+    }
     const sourceMetadataIdentityHashes = validateSourceMetadataIdentityHashes(obj.sourceMetadataIdentityHashes);
     if (obj.sourceMetadataIdentityHashes !== undefined && sourceMetadataIdentityHashes === undefined) {
         return undefined;
@@ -479,8 +593,20 @@ function validateMeta(value: unknown): InlineScriptEnvMeta | 'unsupported' | und
         baseInterpreterPath: obj.baseInterpreterPath,
         baseInterpreterVersion: obj.baseInterpreterVersion,
         lastUsedAt: obj.lastUsedAt,
+        ...(obj.manuallyModified === true ? { manuallyModified: true } : {}),
+        ...(isInstalledPackagesHash(obj.installedPackagesHash)
+            ? { installedPackagesHash: obj.installedPackagesHash }
+            : {}),
         ...(sourceMetadataIdentityHashes ? { sourceMetadataIdentityHashes } : {}),
     };
+}
+
+function isInstalledPackagesHash(value: unknown): value is string {
+    return (
+        typeof value === 'string' &&
+        value.length === INSTALLED_PACKAGES_HASH_HEX_LENGTH &&
+        /^[0-9a-f]+$/.test(value)
+    );
 }
 
 function validateSourceMetadataIdentityHashes(value: unknown): readonly string[] | undefined {

@@ -78,16 +78,33 @@ try {
     }
 
     const installedPackageRoot = path.join(testRoot, 'node_modules', '@vscode', 'python-environments');
+    const vscodeStubRoot = path.join(testRoot, 'node_modules', 'vscode');
+    fs.mkdirSync(vscodeStubRoot, { recursive: true });
+    fs.writeFileSync(path.join(vscodeStubRoot, 'package.json'), JSON.stringify({ main: 'index.js' }));
+    fs.writeFileSync(
+        path.join(vscodeStubRoot, 'index.js'),
+        [
+            "const runtimeApi = { getEnvironments: async () => [] };",
+            "const extension = {",
+            "  isActive: false,",
+            "  exports: undefined,",
+            "  packageJSON: { version: '1.37.0' },",
+            "  activate: async () => { extension.isActive = true; extension.exports = runtimeApi; return runtimeApi; },",
+            "};",
+            'exports.__runtimeApi = runtimeApi;',
+            'exports.extensions = { getExtension: () => extension };',
+        ].join('\n'),
+    );
     const installedPackageJson = JSON.parse(fs.readFileSync(path.join(installedPackageRoot, 'package.json'), 'utf8'));
     assert.strictEqual(installedPackageJson.main, './out/cjs/main.cjs');
-    assert.strictEqual(installedPackageJson.types, './out/cjs/main.d.ts');
+    assert.strictEqual(installedPackageJson.types, './out/types/main.d.ts');
     assert.deepStrictEqual(installedPackageJson.exports, {
         import: {
-            types: './out/esm/main.d.ts',
+            types: './out/types/main.d.ts',
             default: './out/esm/main.mjs',
         },
         require: {
-            types: './out/cjs/main.d.ts',
+            types: './out/types/main.d.ts',
             default: './out/cjs/main.cjs',
         },
     });
@@ -102,26 +119,65 @@ try {
     ]) {
         assert.ok(fs.statSync(path.resolve(installedPackageRoot, target)).isFile(), `${target} must be a file`);
     }
+    for (const runtimeOutput of ['esm', 'cjs']) {
+        const runtimeOutputRoot = path.join(installedPackageRoot, 'out', runtimeOutput);
+        const duplicateDeclarations = fs
+            .readdirSync(runtimeOutputRoot, { recursive: true })
+            .filter((entry) => entry.endsWith('.d.ts'));
+        assert.deepStrictEqual(
+            duplicateDeclarations,
+            [],
+            `${runtimeOutputRoot} must not contain declaration files: ${duplicateDeclarations.join(', ')}`,
+        );
+    }
 
     const requireFromConsumer = createRequire(path.join(testRoot, 'legacy', 'consumer.cjs'));
+    const commonJsModule = requireFromConsumer('@vscode/python-environments');
+    assert.strictEqual(
+        typeof commonJsModule.PythonEnvironments.api,
+        'function',
+        'CommonJS consumers should load the package runtime facade',
+    );
+    execFileSync(
+        process.execPath,
+        [
+            '--eval',
+            [
+                "const packageModule = require('@vscode/python-environments');",
+                "const vscode = require('vscode');",
+                "(async () => {",
+                '  const api = await packageModule.PythonEnvironments.api();',
+                '  if (api !== vscode.__runtimeApi) process.exit(1);',
+                '})().catch(() => process.exit(1));',
+            ].join('\n'),
+        ],
+        {
+            cwd: path.join(testRoot, 'legacy'),
+            encoding: 'utf8',
+        },
+    );
     assert.strictEqual(
         canonicalPath(requireFromConsumer.resolve('@vscode/python-environments')),
         canonicalPath(path.join(installedPackageRoot, installedPackageJson.exports.require.default)),
         'CommonJS consumers should resolve the packaged CommonJS entry point',
     );
 
-    const esmEntryPoint = execFileSync(
+    const esmModuleCheck = execFileSync(
         process.execPath,
-        ['--input-type=module', '--eval', "console.log(import.meta.resolve('@vscode/python-environments'))"],
+        [
+            '--input-type=module',
+            '--eval',
+            "const packageModule = await import('@vscode/python-environments'); const vscode = await import('vscode'); if (typeof packageModule.PythonEnvironments.api !== 'function') process.exit(1); const api = await packageModule.PythonEnvironments.api(); if (api !== vscode.default.__runtimeApi) process.exit(1); console.log(import.meta.resolve('@vscode/python-environments'));",
+        ],
         {
             cwd: path.join(testRoot, 'modern'),
             encoding: 'utf8',
         },
     ).trim();
     assert.strictEqual(
-        canonicalPath(fileURLToPath(esmEntryPoint)),
+        canonicalPath(fileURLToPath(esmModuleCheck)),
         canonicalPath(path.join(installedPackageRoot, installedPackageJson.exports.import.default)),
-        'ES module consumers should resolve the packaged ES module entry point',
+        'ES module consumers should load the packaged runtime facade',
     );
 } finally {
     fs.rmSync(testRoot, { recursive: true, force: true });

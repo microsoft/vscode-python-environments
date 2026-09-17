@@ -16,7 +16,9 @@ import {
     resolveGlobalEnvironmentByPriority,
 } from '../../features/interpreterSelection';
 import * as helpers from '../../helpers';
-import { EnvironmentManagers, InternalEnvironmentManager, PythonProjectManager } from '../../internal.api';
+import type { EnvironmentManagers } from '../../features/envManagers';
+import type { PythonProjectManager } from '../../features/projectManager';
+import type { InternalEnvironmentManager } from '../../managers/common/registeredManagers';
 import { NativePythonFinder } from '../../managers/common/nativePythonFinder';
 
 /**

@@ -1,10 +1,13 @@
+import * as path from 'path';
 import { ConfigurationTarget, Disposable, Event, EventEmitter, Uri, workspace } from 'vscode';
-import {
+import type {
     DidChangeEnvironmentEventArgs,
     DidChangeEnvironmentsEventArgs,
     DidChangePackagesEventArgs,
     EnvironmentManager,
     GetEnvironmentScope,
+    Package,
+    PackageChangeKind,
     PackageManager,
     PythonEnvironment,
     PythonProject,
@@ -26,26 +29,136 @@ import { EventNames } from '../common/telemetry/constants';
 import { sendTelemetryEvent } from '../common/telemetry/sender';
 import { getCallingExtension } from '../common/utils/frameUtils';
 import { normalizePath } from '../common/utils/pathUtils';
-import {
-    DidChangeEnvironmentManagerEventArgs,
-    DidChangePackageManagerEventArgs,
-    EnvironmentManagerScope,
-    EnvironmentManagers,
-    InternalDidChangeEnvironmentsEventArgs,
-    InternalDidChangePackagesEventArgs,
-    InternalEnvironmentManager,
-    InternalPackageManager,
-    PackageManagerScope,
-    PythonProjectManager,
-    PythonProjectSettings,
-} from '../internal.api';
+import { InternalEnvironmentManager, InternalPackageManager } from '../managers/common/registeredManagers';
+import type { PythonProjectManager, PythonProjectSettings } from './projectManager';
 import {
     EditAllManagerSettings,
     getDefaultEnvManagerSetting,
     getDefaultPkgManagerSetting,
+    getExactPythonProjectSetting,
+    getManagedInlineScriptProjectRegistration,
     getProjectEnvironmentManagerSetting,
+    InlineScriptPythonProjectRegistration,
+    registerInlineScriptPythonProjectSetting,
+    removeInlineScriptPythonProjectSettings,
+    removeManagedInlineScriptPythonProjectSetting,
+    rollbackInlineScriptPythonProjectSetting,
     setAllManagerSettings,
 } from './settings/settingHelpers';
+
+export type EnvironmentManagerScope = undefined | string | Uri | PythonEnvironment;
+export type PackageManagerScope = undefined | string | Uri | PythonEnvironment | Package;
+
+export interface PackageEventArg {
+    package: Package;
+    manager: InternalPackageManager;
+    environment: PythonEnvironment;
+}
+export type PackageCommandOptions =
+    | {
+          uri: Uri;
+          packages?: string[];
+      }
+    | {
+          packageManager: PackageManager;
+          environment: PythonEnvironment;
+          packages?: string[];
+      };
+
+export interface DidChangeEnvironmentManagerEventArgs {
+    kind: 'registered' | 'unregistered';
+    manager: InternalEnvironmentManager;
+}
+
+export interface DidChangePackageManagerEventArgs {
+    kind: 'registered' | 'unregistered';
+    manager: InternalPackageManager;
+}
+
+export interface InternalDidChangePackagesEventArgs {
+    environment: PythonEnvironment;
+    manager: InternalPackageManager;
+    changes: { kind: PackageChangeKind; pkg: Package }[];
+}
+
+export interface InternalDidChangeEnvironmentsEventArgs {
+    manager: InternalEnvironmentManager;
+    changes: DidChangeEnvironmentsEventArgs;
+}
+
+export interface EnvironmentManagers extends Disposable {
+    registerEnvironmentManager(manager: EnvironmentManager, options?: { extensionId?: string }): Disposable;
+    registerPackageManager(manager: PackageManager, options?: { extensionId?: string }): Disposable;
+
+    /**
+     * This event is fired when any environment manager changes its collection of environments.
+     * This can be any environment manager even if it is not the one selected by the user for the workspace.
+     */
+    onDidChangeEnvironments: Event<InternalDidChangeEnvironmentsEventArgs>;
+
+    /**
+     * Fires when ANY registered environment manager reports a selection change for a scope,
+     * regardless of whether that manager is the one currently selected by the user.
+     * Use this for UI refresh (e.g., status bar updates) that should react to all manager activity.
+     */
+    onDidChangeManagerEnvironment: Event<DidChangeEnvironmentEventArgs>;
+
+    /**
+     * Fires only when the *selected* (active) environment for a scope actually changes.
+     * This is the authoritative "the user's environment changed" event. Consumers that
+     * need to react to the effective interpreter (terminal activation, language server,
+     * Python API clients) should use this event.
+     */
+    onDidChangeActiveEnvironment: Event<DidChangeEnvironmentEventArgs>;
+    onDidChangePackages: Event<InternalDidChangePackagesEventArgs>;
+
+    onDidChangeEnvironmentManager: Event<DidChangeEnvironmentManagerEventArgs>;
+    onDidChangePackageManager: Event<DidChangePackageManagerEventArgs>;
+
+    getEnvironmentManager(scope: EnvironmentManagerScope): InternalEnvironmentManager | undefined;
+    getPackageManager(scope: PackageManagerScope): InternalPackageManager | undefined;
+
+    managers: InternalEnvironmentManager[];
+    packageManagers: InternalPackageManager[];
+
+    clearCache(scope: EnvironmentManagerScope): Promise<void>;
+    clearInlineScriptCache(): Promise<void>;
+
+    /**
+     * Sets the environment for a scope.
+     * @param scope - The scope to set the environment for
+     * @param environment - The environment to set (optional)
+     * @param shouldPersistSettings - Whether to persist to settings.json (default: true)
+     */
+    setEnvironment(
+        scope: SetEnvironmentScope,
+        environment?: PythonEnvironment,
+        shouldPersistSettings?: boolean,
+    ): Promise<void>;
+    /**
+     * Sets environments for multiple scopes.
+     * @param scope - Array of URIs or 'global'
+     * @param environment - The environment to set (optional)
+     * @param shouldPersistSettings - Whether to persist to settings.json (default: true)
+     */
+    setEnvironments(
+        scope: Uri[] | string,
+        environment?: PythonEnvironment,
+        shouldPersistSettings?: boolean,
+    ): Promise<void>;
+    setEnvironmentsIfUnset(scope: Uri[] | string, environment?: PythonEnvironment): Promise<void>;
+    getEnvironment(scope: GetEnvironmentScope): Promise<PythonEnvironment | undefined>;
+    refreshEnvironment(scope: GetEnvironmentScope): Promise<void>;
+
+    /**
+     * Synchronously returns the last-known environment for a scope without triggering a refresh.
+     * Used to serve a value promptly while a slow initial environment resolution runs in the
+     * background. Returns undefined if no environment has been resolved for the scope yet.
+     */
+    getLastKnownEnvironment(scope: GetEnvironmentScope): PythonEnvironment | undefined;
+
+    getProjectEnvManagers(uris: Uri[]): InternalEnvironmentManager[];
+}
 
 function generateId(name: string, extensionId?: string): string {
     const newName = name.toLowerCase().replace(/[^a-zA-Z0-9-_]/g, '_');
@@ -73,6 +186,7 @@ export class PythonEnvironmentManagers implements EnvironmentManagers {
     private readonly _inlineRoutingOverrides = new Map<string, string>();
     private readonly _selectionRevisions = new Map<string, number>();
     private readonly _selectionOperationCounters = new Map<string, number>();
+    private inlineScriptProjectSelectionQueue: Promise<void> = Promise.resolve();
 
     private _onDidChangeEnvironmentManager = new EventEmitter<DidChangeEnvironmentManagerEventArgs>();
     private _onDidChangePackageManager = new EventEmitter<DidChangePackageManagerEventArgs>();
@@ -99,6 +213,15 @@ export class PythonEnvironmentManagers implements EnvironmentManagers {
     public onDidChangeActiveEnvironment: Event<DidChangeEnvironmentEventArgs> =
         this._onDidChangeActiveEnvironment.event;
 
+    private enqueueInlineScriptProjectSelection<T>(operation: () => Promise<T>): Promise<T> {
+        const run = this.inlineScriptProjectSelectionQueue.then(operation);
+        this.inlineScriptProjectSelectionQueue = run.then(
+            () => undefined,
+            () => undefined,
+        );
+        return run;
+    }
+
     constructor(
         private readonly pm: PythonProjectManager,
         private readonly inlineScriptRouting?: InlineScriptRoutingRegistry,
@@ -109,6 +232,13 @@ export class PythonEnvironmentManagers implements EnvironmentManagers {
                     void this.handleInlineScriptRouteabilityChange(e).catch((error) =>
                         traceError('Failed to refresh inline-script routing:', error),
                     );
+                }),
+                this.inlineScriptRouting.onDidChangeAvailability((uri) => {
+                    if (this.getEnvironmentManager(uri)?.id === INLINE_SCRIPT_MANAGER_ID) {
+                        void this.refreshEnvironment(uri, true).catch((error) =>
+                            traceError('Failed to refresh inline-script availability:', error),
+                        );
+                    }
                 }),
             );
         }
@@ -343,6 +473,20 @@ export class PythonEnvironmentManagers implements EnvironmentManagers {
         }
     }
 
+    public clearInlineScriptCache(): Promise<void> {
+        return this.enqueueInlineScriptProjectSelection(async () => {
+            const manager = this._environmentManagers.get(INLINE_SCRIPT_MANAGER_ID);
+            if (!manager || !manager.supportsClearCache()) {
+                throw new Error('Inline-script environment manager is unavailable.');
+            }
+            await manager.clearCache();
+            const projectsToRemove = await removeInlineScriptPythonProjectSettings(this.pm.getProjects());
+            if (projectsToRemove.length > 0) {
+                this.pm.remove(projectsToRemove);
+            }
+        });
+    }
+
     /**
      * Sets the environment for a single scope, scope of undefined checks 'global'.
      * If given an array of scopes, delegates to setEnvironments for batch setting.
@@ -353,7 +497,7 @@ export class PythonEnvironmentManagers implements EnvironmentManagers {
      *   Pass `false` when setting environments during initial selection/auto-discovery
      *   to avoid writing to settings.json.
      */
-    public async setEnvironment(
+    public setEnvironment(
         scope: SetEnvironmentScope,
         environment?: PythonEnvironment,
         shouldPersistSettings: boolean = true,
@@ -361,7 +505,19 @@ export class PythonEnvironmentManagers implements EnvironmentManagers {
         if (Array.isArray(scope)) {
             return this.setEnvironments(scope, environment, shouldPersistSettings);
         }
+        if (this.shouldSerializeInlineScriptProjectSelection(scope, environment, shouldPersistSettings)) {
+            return this.enqueueInlineScriptProjectSelection(() =>
+                this.setEnvironmentCore(scope, environment, shouldPersistSettings),
+            );
+        }
+        return this.setEnvironmentCore(scope, environment, shouldPersistSettings);
+    }
 
+    private async setEnvironmentCore(
+        scope: Uri | undefined,
+        environment: PythonEnvironment | undefined,
+        shouldPersistSettings: boolean,
+    ): Promise<void> {
         const customScope = environment ? environment : scope;
         const manager = this.getEnvironmentManager(customScope);
         if (!manager) {
@@ -374,6 +530,10 @@ export class PythonEnvironmentManagers implements EnvironmentManagers {
             traceError(this.managers.map((m) => m.id).join(', '));
             return;
         }
+        const inlineRegistration =
+            scope && environment && manager.id === INLINE_SCRIPT_MANAGER_ID && shouldPersistSettings
+                ? await this.prepareInlineScriptProjectRegistration(scope)
+                : undefined;
         const project = scope ? this.pm.get(scope) : undefined;
         const key = this.getActiveSelectionKey(scope, manager, project);
         const operation = this.beginSelectionOperation(key);
@@ -393,7 +553,21 @@ export class PythonEnvironmentManagers implements EnvironmentManagers {
             this.inlineScriptRouting?.shouldRoute(scope)
                 ? this.beginSelectionOperation(this.getInlineScriptSelectionKey(scope))
                 : undefined;
-        await manager.set(scope, environment);
+        try {
+            await manager.set(scope, environment);
+        } catch (error) {
+            if (inlineRegistration) {
+                await this.rollbackInlineScriptProjectRegistration(inlineRegistration);
+            }
+            throw error;
+        }
+
+        if (scope && !environment && manager.id === INLINE_SCRIPT_MANAGER_ID && shouldPersistSettings && project) {
+            const removeProject = await removeManagedInlineScriptPythonProjectSetting(project);
+            if (removeProject) {
+                this.pm.remove(project);
+            }
+        }
 
         // Only persist to settings when explicitly requested
         if (shouldPersistSettings && scope) {
@@ -482,10 +656,23 @@ export class PythonEnvironmentManagers implements EnvironmentManagers {
      *   Pass `false` when setting environments during initial selection/auto-discovery
      *   to avoid writing to settings.json.
      */
-    public async setEnvironments(
+    public setEnvironments(
         scope: Uri[] | string,
         environment?: PythonEnvironment,
         shouldPersistSettings: boolean = true,
+    ): Promise<void> {
+        if (this.shouldSerializeInlineScriptProjectSelection(scope, environment, shouldPersistSettings)) {
+            return this.enqueueInlineScriptProjectSelection(() =>
+                this.setEnvironmentsCore(scope, environment, shouldPersistSettings),
+            );
+        }
+        return this.setEnvironmentsCore(scope, environment, shouldPersistSettings);
+    }
+
+    private async setEnvironmentsCore(
+        scope: Uri[] | string,
+        environment: PythonEnvironment | undefined,
+        shouldPersistSettings: boolean,
     ): Promise<void> {
         if (environment) {
             const manager = this.managers.find((m) => m.id === environment.envId.managerId);
@@ -502,8 +689,17 @@ export class PythonEnvironmentManagers implements EnvironmentManagers {
             const settings: EditAllManagerSettings[] = [];
             const events: DidChangeEnvironmentEventArgs[] = [];
             if (Array.isArray(scope) && scope.every((s) => s instanceof Uri)) {
+                const inlineRegistrations =
+                    manager.id === INLINE_SCRIPT_MANAGER_ID && shouldPersistSettings
+                        ? await this.prepareInlineScriptProjectRegistrations(scope)
+                        : [];
                 const selections = scope.map((uri) => this.beginPendingSelection(uri, manager));
-                await manager.set(scope, environment);
+                try {
+                    await manager.set(scope, environment);
+                } catch (error) {
+                    await this.rollbackInlineScriptProjectRegistrations(inlineRegistrations);
+                    throw error;
+                }
                 selections.forEach((selection) => {
                     const m = this.getEnvironmentManager(selection.scope);
                     // Always add settings when persisting, OR when manager differs
@@ -518,7 +714,7 @@ export class PythonEnvironmentManagers implements EnvironmentManagers {
                         });
                     }
                 });
-                if (shouldPersistSettings) {
+                if (shouldPersistSettings && settings.length > 0) {
                     await setAllManagerSettings(settings);
                 }
                 selections.forEach((selection) => {
@@ -601,6 +797,19 @@ export class PythonEnvironmentManagers implements EnvironmentManagers {
                     const events: DidChangeEnvironmentEventArgs[] = [];
                     const selections = uris.map((uri) => this.beginPendingSelection(uri, manager));
                     await manager.set(uris);
+                    if (manager.id === INLINE_SCRIPT_MANAGER_ID && shouldPersistSettings) {
+                        for (const selection of selections) {
+                            if (!selection.project) {
+                                continue;
+                            }
+                            const removeProject = await removeManagedInlineScriptPythonProjectSetting(
+                                selection.project,
+                            );
+                            if (removeProject) {
+                                this.pm.remove(selection.project);
+                            }
+                        }
+                    }
                     await Promise.all(
                         selections.map(async (selection) => {
                             const newEnv = await manager.get(selection.scope);
@@ -689,7 +898,11 @@ export class PythonEnvironmentManagers implements EnvironmentManagers {
             return undefined;
         }
 
-        return manager.get(scope);
+        const environment = await manager.get(scope);
+        if (manager.id === INLINE_SCRIPT_MANAGER_ID && this.getEnvironmentManager(scope) !== manager) {
+            return this.getEnvironment(scope);
+        }
+        return environment;
     }
 
     /**
@@ -700,8 +913,9 @@ export class PythonEnvironmentManagers implements EnvironmentManagers {
      *
      * Unlike getEnvironment(), this IS a mutation — it updates internal state.
      * Unlike setEnvironment(), it does NOT call manager.set() or persist to settings.
+     * Availability recovery may republish an unchanged descriptor so consumers retry a failed lookup.
      */
-    async refreshEnvironment(scope: GetEnvironmentScope): Promise<void> {
+    async refreshEnvironment(scope: GetEnvironmentScope, notifyIfUnchanged = false): Promise<void> {
         const manager = this.getEnvironmentManager(scope);
         if (!manager) {
             return;
@@ -716,7 +930,10 @@ export class PythonEnvironmentManagers implements EnvironmentManagers {
         }
 
         const oldEnv = this._activeSelection.get(key);
-        if (this.isSameEnvironment(oldEnv, newEnv) || !this.commitSelectionOperation(key, operation)) {
+        if (
+            (this.isSameEnvironment(oldEnv, newEnv) && !notifyIfUnchanged) ||
+            !this.commitSelectionOperation(key, operation)
+        ) {
             return;
         }
         this._activeSelection.set(key, newEnv);
@@ -765,6 +982,10 @@ export class PythonEnvironmentManagers implements EnvironmentManagers {
         project: PythonProject | undefined,
     ): InternalEnvironmentManager | undefined {
         if (!project || normalizePath(project.uri.fsPath) !== normalizePath(scope.fsPath)) {
+            return undefined;
+        }
+        const exactSetting = getExactPythonProjectSetting(this.pm, scope);
+        if (getManagedInlineScriptProjectRegistration(exactSetting)) {
             return undefined;
         }
         const exactManagerId = getProjectEnvironmentManagerSetting(this.pm, scope);
@@ -977,16 +1198,99 @@ export class PythonEnvironmentManagers implements EnvironmentManagers {
         );
     }
 
-    private canPersistManagerSettingForScope(
-        scope: Uri,
-        manager: InternalEnvironmentManager,
-        project: PythonProject | undefined,
+    private shouldSerializeInlineScriptProjectSelection(
+        scope: SetEnvironmentScope | string,
+        environment: PythonEnvironment | undefined,
+        shouldPersistSettings: boolean,
     ): boolean {
-        // Inline associations are per file; never promote one to its containing project's manager setting.
-        return (
-            manager.id !== INLINE_SCRIPT_MANAGER_ID ||
-            (!!project && normalizePath(project.uri.fsPath) === normalizePath(scope.fsPath))
+        if (!shouldPersistSettings) {
+            return false;
+        }
+        if (environment?.envId.managerId === INLINE_SCRIPT_MANAGER_ID) {
+            return true;
+        }
+        const scopes = scope instanceof Uri ? [scope] : Array.isArray(scope) ? scope : [];
+        return scopes.some((uri) =>
+            getManagedInlineScriptProjectRegistration(getExactPythonProjectSetting(this.pm, uri)),
         );
+    }
+
+    private async prepareInlineScriptProjectRegistration(
+        scope: Uri,
+    ): Promise<PreparedInlineScriptProjectRegistration | undefined> {
+        const existingProject = this.pm.get(scope);
+        const hasExactProject =
+            existingProject !== undefined &&
+            normalizePath(existingProject.uri.fsPath) === normalizePath(scope.fsPath);
+        const project = hasExactProject
+            ? existingProject
+            : this.pm.create(path.basename(scope.fsPath) || scope.fsPath, scope);
+        const registration = await registerInlineScriptPythonProjectSetting(this.pm, project);
+        if (!registration) {
+            return undefined;
+        }
+
+        const addedProject = !hasExactProject;
+        try {
+            if (addedProject) {
+                await this.pm.add(project, { persistSettings: false });
+            }
+        } catch (error) {
+            const removeProject = await rollbackInlineScriptPythonProjectSetting(project, registration);
+            if (removeProject && addedProject) {
+                this.pm.remove(project);
+            }
+            throw error;
+        }
+        return { project, registration, addedProject };
+    }
+
+    private async prepareInlineScriptProjectRegistrations(
+        scopes: readonly Uri[],
+    ): Promise<PreparedInlineScriptProjectRegistration[]> {
+        const registrations: PreparedInlineScriptProjectRegistration[] = [];
+        try {
+            for (const scope of scopes) {
+                const registration = await this.prepareInlineScriptProjectRegistration(scope);
+                if (registration) {
+                    registrations.push(registration);
+                }
+            }
+            return registrations;
+        } catch (error) {
+            await this.rollbackInlineScriptProjectRegistrations(registrations);
+            throw error;
+        }
+    }
+
+    private async rollbackInlineScriptProjectRegistrations(
+        registrations: readonly PreparedInlineScriptProjectRegistration[],
+    ): Promise<void> {
+        for (const registration of [...registrations].reverse()) {
+            await this.rollbackInlineScriptProjectRegistration(registration);
+        }
+    }
+
+    private async rollbackInlineScriptProjectRegistration(
+        prepared: PreparedInlineScriptProjectRegistration,
+    ): Promise<void> {
+        const removeProject = await rollbackInlineScriptPythonProjectSetting(
+            prepared.project,
+            prepared.registration,
+        );
+        if (removeProject && prepared.addedProject) {
+            this.pm.remove(prepared.project);
+        }
+    }
+
+    private canPersistManagerSettingForScope(
+        _scope: Uri,
+        manager: InternalEnvironmentManager,
+        _project: PythonProject | undefined,
+    ): boolean {
+        // Inline associations are persisted by the inline manager. The managed exact-project entry
+        // stores the ordinary fallback manager rather than replacing it with the inline manager.
+        return manager.id !== INLINE_SCRIPT_MANAGER_ID;
     }
 
     private beginSelectionOperation(key: string): number {
@@ -1054,4 +1358,10 @@ interface PendingEnvironmentSelection {
     readonly operation: number;
     readonly publishInlineSelection: boolean;
     readonly inlineClearOperation: number | undefined;
+}
+
+interface PreparedInlineScriptProjectRegistration {
+    readonly project: PythonProject;
+    readonly registration: InlineScriptPythonProjectRegistration;
+    readonly addedProject: boolean;
 }

@@ -48,21 +48,25 @@ export class ShellStartupActivationVariablesManagerImpl implements ShellStartupA
 
     private async handleEnvironmentChange(e: DidChangeEnvironmentEventArgs) {
         const autoActType = getAutoActivationType();
-        if (autoActType === ACT_TYPE_SHELL && e.uri) {
-            const wf = getWorkspaceFolder(e.uri);
-            if (wf) {
-                const envVars = this.envCollection.getScoped({ workspaceFolder: wf });
-                if (envVars) {
-                    this.shellEnvsProviders.forEach((provider) => {
-                        if (e.new) {
-                            provider.updateEnvVariables(envVars, e.new);
-                        } else {
-                            provider.removeEnvVariables(envVars);
-                        }
-                    });
-                }
-            }
+        if (autoActType !== ACT_TYPE_SHELL || !e.uri) {
+            return;
         }
+        const wf = getWorkspaceFolder(e.uri);
+        if (!wf) {
+            return;
+        }
+        const envVars = this.envCollection.getScoped({ workspaceFolder: wf });
+        if (!envVars) {
+            return;
+        }
+        const folderEnvironment = await this.api.getEnvironment(wf.uri);
+        this.shellEnvsProviders.forEach((provider) => {
+            if (folderEnvironment) {
+                provider.updateEnvVariables(envVars, folderEnvironment);
+            } else {
+                provider.removeEnvVariables(envVars);
+            }
+        });
     }
 
     private async initializeInternal(): Promise<void> {

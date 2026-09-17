@@ -9,7 +9,7 @@ import { createDeferred } from '../../../common/utils/deferred';
 import * as winapi from '../../../common/window.apis';
 import * as wapi from '../../../common/workspace.apis';
 import { AutoFindProjects } from '../../../features/creators/autoFindProjects';
-import { PythonProjectManager } from '../../../internal.api';
+import type { PythonProjectManager } from '../../../features/projectManager';
 
 suite('Auto Find Project tests', () => {
     let findFilesStub: sinon.SinonStub;

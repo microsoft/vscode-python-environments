@@ -50,6 +50,10 @@ export function findFiles(
     return workspace.findFiles(include, exclude, maxResults, token);
 }
 
+export function asRelativePath(pathOrUri: string | Uri, includeWorkspaceFolder?: boolean): string {
+    return workspace.asRelativePath(pathOrUri, includeWorkspaceFolder);
+}
+
 export function createFileSystemWatcher(
     globPattern: GlobPattern,
     ignoreCreateEvents?: boolean,
@@ -89,6 +93,14 @@ export function onDidSaveTextDocument(
     disposables?: Disposable[],
 ): Disposable {
     return workspace.onDidSaveTextDocument(listener, thisArgs, disposables);
+}
+
+export function onDidCloseTextDocument(
+    listener: (e: TextDocument) => any,
+    thisArgs?: any,
+    disposables?: Disposable[],
+): Disposable {
+    return workspace.onDidCloseTextDocument(listener, thisArgs, disposables);
 }
 
 export function onDidChangeTextDocument(

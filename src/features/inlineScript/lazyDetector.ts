@@ -40,10 +40,10 @@ import {
  */
 export class InlineScriptLazyDetector implements Disposable {
     private readonly subscriptions: Disposable[] = [];
-    // In-flight reads keyed by `uri.toString()` so rapid open events
-    // don't double-process the same file.
+    // Routing reads use the canonical script key so case aliases share invalidation.
+    // Telemetry-only reads retain their original URI-based coalescing.
     private readonly inFlight = new Map<string, Promise<void>>();
-    // Routing reads have a generation per URI. A save that arrives while
+    // Routing reads have a generation per script. A save that arrives while
     // an older read is in flight advances its generation and queues a
     // post-save read, preventing the stale read from publishing metadata.
     private readonly routingReadGenerations = new Map<string, number>();
@@ -96,7 +96,9 @@ export class InlineScriptLazyDetector implements Disposable {
         if (this.routingRegistry) {
             this.subscriptions.push(
                 onDidDeleteFiles((e) => e.files.forEach((uri) => this.clearRouteability(uri))),
-                onDidRenameFiles((e) => e.files.forEach((file) => this.clearRouteability(file.oldUri))),
+                onDidRenameFiles((e) =>
+                    Promise.all(e.files.map((file) => this.handleRename(file.oldUri, file.newUri))),
+                ),
             );
         }
         // Defer the catch-up pass so we observe `workspace.textDocuments`
@@ -137,7 +139,37 @@ export class InlineScriptLazyDetector implements Disposable {
         this.routingReadGenerations.clear();
     }
 
-    private async handleDocument(doc: TextDocument, trigger: 'open' | 'save'): Promise<void> {
+    private async handleRename(oldUri: Uri, newUri: Uri): Promise<void> {
+        if (this.disposed || !this.routingRegistry) {
+            return;
+        }
+        const scriptPath = getInlineScriptRoutingKey(oldUri);
+        if (!scriptPath || scriptPath !== getInlineScriptRoutingKey(newUri)) {
+            this.clearRouteability(oldUri);
+            return;
+        }
+
+        if (this.inFlight.has(scriptPath)) {
+            this.advanceRoutingReadGeneration(scriptPath);
+        }
+        const metadata = this.routingRegistry.getMetadata(oldUri);
+        this.routingRegistry.setMetadata(newUri, metadata);
+        if (!metadata) {
+            this.routingRegistry.setValidatedAssociation(newUri, false);
+        }
+        if (getOpenTextDocuments().some(
+            (document) => document.isDirty && getInlineScriptRoutingKey(document.uri) === scriptPath,
+        )) {
+            return;
+        }
+        await this.handleDocument({ uri: newUri, isDirty: false }, 'open', true);
+    }
+
+    private async handleDocument(
+        doc: Pick<TextDocument, 'uri' | 'isDirty'>,
+        trigger: 'open' | 'save',
+        forceRead = false,
+    ): Promise<void> {
         const uri = doc.uri;
         // Diagnostic: trace every event entering the detector. This
         // is high-frequency (fires on every keystroke-triggered save
@@ -158,10 +190,10 @@ export class InlineScriptLazyDetector implements Disposable {
             this.clearRouteability(uri);
             return;
         }
-        const key = uri.toString();
+        const key = this.getReadKey(uri);
         const existing = this.inFlight.get(key);
         if (existing) {
-            if (this.routingRegistry && trigger === 'save') {
+            if (this.routingRegistry && (trigger === 'save' || forceRead)) {
                 const routingGeneration = this.advanceRoutingReadGeneration(key);
                 const work = existing.then(() =>
                     this.processOnce(uri, trigger, shouldHandleUri(uri), routingGeneration),
@@ -193,7 +225,7 @@ export class InlineScriptLazyDetector implements Disposable {
                 return;
             }
             if (this.routingRegistry) {
-                if (this.routingReadGenerations.get(uri.toString()) === routingGeneration) {
+                if (this.routingReadGenerations.get(this.getReadKey(uri)) === routingGeneration) {
                     this.routingRegistry.setMetadata(uri, metadata);
                 }
                 if (!shouldEmitTelemetry || metadata === undefined) {
@@ -244,7 +276,7 @@ export class InlineScriptLazyDetector implements Disposable {
             return;
         }
         if (this.routingRegistry) {
-            const key = e.document.uri.toString();
+            const key = this.getReadKey(e.document.uri);
             const metadata = this.routingRegistry.getMetadata(e.document.uri);
             if (
                 (metadata &&
@@ -284,12 +316,16 @@ export class InlineScriptLazyDetector implements Disposable {
         if (!this.routingRegistry || !shouldTrackRoutingUri(uri)) {
             return;
         }
-        const key = uri.toString();
+        const key = this.getReadKey(uri);
         if (this.inFlight.has(key)) {
             this.advanceRoutingReadGeneration(key);
         }
         this.routingRegistry.clearMetadata(uri);
         this.routingRegistry.setValidatedAssociation(uri, false);
+    }
+
+    private getReadKey(uri: Uri): string {
+        return this.routingRegistry ? getInlineScriptRoutingKey(uri) ?? uri.toString() : uri.toString();
     }
 
     private currentRoutingReadGeneration(key: string): number {

@@ -10,6 +10,7 @@ import { InlineScriptRoutingRegistry } from '../../../common/inlineScript/routin
 import { EventNames } from '../../../common/telemetry/constants';
 import * as telemetrySender from '../../../common/telemetry/sender';
 import { createDeferred } from '../../../common/utils/deferred';
+import * as platformUtils from '../../../common/utils/platformUtils';
 import * as wapi from '../../../common/workspace.apis';
 import { InlineScriptLazyDetector, shouldHandleUri } from '../../../features/inlineScript/lazyDetector';
 
@@ -171,9 +172,9 @@ suite('InlineScriptLazyDetector', () => {
         deleteListener!({ files: uris });
     }
 
-    function fireRename(oldUri: Uri, newUri: Uri): void {
+    async function fireRename(oldUri: Uri, newUri: Uri): Promise<void> {
         assert.ok(renameListener, 'rename listener should be registered after activate()');
-        renameListener!({ files: [{ oldUri, newUri }] });
+        await renameListener!({ files: [{ oldUri, newUri }] });
     }
 
     function callsFor(name: EventNames): sinon.SinonSpyCall[] {
@@ -598,11 +599,156 @@ suite('InlineScriptLazyDetector', () => {
         const detector = createDetector();
         await fireOpen(oldUri);
 
-        fireRename(oldUri, newUri);
+        await fireRename(oldUri, newUri);
 
         assert.strictEqual(routingRegistry.getMetadata(oldUri), undefined);
         assert.strictEqual(routingRegistry.shouldRoute(oldUri), false);
         detector.dispose();
+    });
+
+    suite('case-only Windows renames', () => {
+        let oldUri: Uri;
+        let newUri: Uri;
+        let detector: InlineScriptLazyDetector;
+
+        setup(async () => {
+            sinon.stub(platformUtils, 'isWindows').returns(true);
+            oldUri = Uri.file(path.join(process.cwd(), 'rename-tests', 'script.py'));
+            newUri = Uri.file(path.join(process.cwd(), 'rename-tests', 'Script.py'));
+            readMetadataStub.resolves(VALID_METADATA);
+            detector = createDetector();
+            await flushImmediate();
+        });
+
+        teardown(() => detector.dispose());
+
+        for (const open of [false, true]) {
+            test(`preserves saved metadata and routing for a ${open ? 'clean open' : 'closed'} script`, async () => {
+                await fireOpen(oldUri);
+                routingRegistry.setValidatedAssociation(oldUri, true);
+                if (open) {
+                    getOpenTextDocumentsStub.returns([makeDoc(oldUri)]);
+                }
+
+                await fireRename(oldUri, newUri);
+
+                assert.strictEqual(routingRegistry.shouldRoute(newUri), true);
+                assert.deepStrictEqual(routingRegistry.getMetadata(newUri), VALID_METADATA);
+                assert.strictEqual(routingRegistry.getUri(newUri)?.toString(), newUri.toString());
+                assert.ok(readMetadataStub.calledWithExactly(newUri));
+            });
+        }
+
+        test('does not seed saved metadata over a dirty dependency edit through a case alias', async () => {
+            await fireOpen(oldUri);
+            routingRegistry.setValidatedAssociation(oldUri, true);
+            setDocDirty(oldUri, true);
+            getOpenTextDocumentsStub.returns([makeDoc(newUri), makeDoc(oldUri)]);
+            fireChange(oldUri);
+            const readsBefore = readMetadataStub.callCount;
+
+            await fireRename(oldUri, newUri);
+
+            assert.strictEqual(readMetadataStub.callCount, readsBefore);
+            assert.strictEqual(routingRegistry.getMetadata(newUri), undefined);
+            assert.strictEqual(routingRegistry.shouldRoute(newUri), false);
+
+            const changedMetadata = { ...VALID_METADATA, dependencies: ['changed'] };
+            readMetadataStub.resolves(changedMetadata);
+            setDocDirty(oldUri, false);
+            getOpenTextDocumentsStub.returns([makeDoc(newUri)]);
+            await fireSave(newUri);
+            assert.deepStrictEqual(routingRegistry.getMetadata(newUri), changedMetadata);
+            assert.strictEqual(routingRegistry.shouldRoute(newUri), false);
+        });
+
+        test('keeps an existing valid association during a dirty body-only edit', async () => {
+            await fireOpen(oldUri);
+            routingRegistry.setValidatedAssociation(oldUri, true);
+            setDocDirty(oldUri, true);
+            getOpenTextDocumentsStub.returns([makeDoc(newUri), makeDoc(oldUri)]);
+            fireChange(oldUri, makeContentChanges(VALID_METADATA.range.end + 20));
+            const readsBefore = readMetadataStub.callCount;
+
+            await fireRename(oldUri, newUri);
+
+            assert.strictEqual(readMetadataStub.callCount, readsBefore);
+            assert.strictEqual(routingRegistry.shouldRoute(newUri), true);
+            assert.strictEqual(routingRegistry.getUri(newUri)?.toString(), newUri.toString());
+        });
+
+        for (const useNewName of [false, true]) {
+            test(`re-reads after an in-flight ${useNewName ? 'new-name' : 'old-name'} read without publishing its stale metadata`, async () => {
+                const oldRead = createDeferred<ism.InlineScriptMetadata>();
+                const newRead = createDeferred<ism.InlineScriptMetadata>();
+                const freshMetadata = { ...VALID_METADATA, dependencies: ['fresh'] };
+                readMetadataStub.onFirstCall().returns(oldRead.promise);
+                readMetadataStub.onSecondCall().returns(newRead.promise);
+                const opening = fireOpen(useNewName ? newUri : oldUri);
+                const renaming = fireRename(oldUri, newUri);
+                assert.strictEqual(readMetadataStub.callCount, 1);
+
+                oldRead.resolve(VALID_METADATA);
+                await opening;
+                await flushImmediate();
+                assert.strictEqual(readMetadataStub.callCount, 2);
+                assert.strictEqual(routingRegistry.getMetadata(newUri), undefined);
+                newRead.resolve(freshMetadata);
+                await renaming;
+
+                assert.deepStrictEqual(routingRegistry.getMetadata(newUri), freshMetadata);
+                assert.strictEqual(routingRegistry.getUri(newUri)?.toString(), newUri.toString());
+            });
+        }
+
+        for (const useOldAlias of [false, true]) {
+            test(`an edit through the ${useOldAlias ? 'old' : 'new'} case alias invalidates a pending renamed-file read`, async () => {
+                await fireOpen(oldUri);
+                routingRegistry.setValidatedAssociation(oldUri, true);
+                const renamedRead = createDeferred<ism.InlineScriptMetadata>();
+                readMetadataStub.onSecondCall().returns(renamedRead.promise);
+                const renaming = fireRename(oldUri, newUri);
+
+                fireChange(useOldAlias ? oldUri : newUri);
+                renamedRead.resolve(VALID_METADATA);
+                await renaming;
+
+                assert.strictEqual(routingRegistry.getMetadata(newUri), undefined);
+                assert.strictEqual(routingRegistry.shouldRoute(newUri), false);
+            });
+        }
+
+        test('a saved requirement change discovered during rename is not treated as validated', async () => {
+            await fireOpen(oldUri);
+            routingRegistry.setValidatedAssociation(oldUri, true);
+            const changedMetadata = { ...VALID_METADATA, dependencies: ['changed'] };
+            readMetadataStub.resolves(changedMetadata);
+
+            await fireRename(oldUri, newUri);
+
+            assert.deepStrictEqual(routingRegistry.getMetadata(newUri), changedMetadata);
+            assert.strictEqual(routingRegistry.shouldRoute(newUri), false);
+        });
+    });
+
+    test('keeps case-distinct paths separate on case-sensitive platforms', async () => {
+        sinon.stub(platformUtils, 'isWindows').returns(false);
+        const oldUri = Uri.file(path.join(process.cwd(), 'rename-tests', 'script.py'));
+        const newUri = Uri.file(path.join(process.cwd(), 'rename-tests', 'Script.py'));
+        readMetadataStub.resolves(VALID_METADATA);
+        const detector = createDetector();
+        try {
+            await fireOpen(oldUri);
+            routingRegistry.setValidatedAssociation(oldUri, true);
+
+            await fireRename(oldUri, newUri);
+
+            assert.strictEqual(routingRegistry.getMetadata(oldUri), undefined);
+            assert.strictEqual(routingRegistry.shouldRoute(oldUri), false);
+            assert.strictEqual(routingRegistry.getMetadata(newUri), undefined);
+        } finally {
+            detector.dispose();
+        }
     });
 
     test('activate() replays already-open .py documents via setImmediate', async () => {

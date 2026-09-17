@@ -5,7 +5,7 @@ import { Disposable, LogOutputChannel, Memento, Uri } from 'vscode';
 import { EnvironmentManager, PythonEnvironmentApi } from '../../../api';
 import { traceInfo, traceVerbose } from '../../../common/logging';
 import { InlineScriptFeatureActivation } from '../../../features/inlineScript/activation';
-import { getPythonApi } from '../../../features/pythonApi';
+import { getPythonApi } from '../../../extensionApi';
 import { NativePythonFinder } from '../../common/nativePythonFinder';
 import { InlineScriptEnvManager } from './envManager';
 

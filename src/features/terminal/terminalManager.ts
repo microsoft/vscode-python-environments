@@ -17,7 +17,7 @@ import { getConfiguration, onDidChangeConfiguration } from '../../common/workspa
 import { normalizePath } from '../../common/utils/pathUtils';
 import { isActivatableEnvironment } from '../common/activation';
 import { identifyTerminalShell } from '../common/shellDetector';
-import { getPythonApi } from '../pythonApi';
+import { getPythonApi } from '../../extensionApi';
 import { getShellIntegrationEnabledCache, isWsl, shouldUseProfileActivation } from './shells/common/shellUtils';
 import { ShellEnvsProvider, ShellSetupState, ShellStartupScriptProvider } from './shells/startupProvider';
 import { handleSettingUpShellProfile } from './shellStartupSetupHandlers';

@@ -1,5 +1,5 @@
 import type { Pep440Version } from '@renovatebot/pep440';
-import { compare, explain as parse } from '@renovatebot/pep440';
+import { compare } from '@renovatebot/pep440';
 import {
     CancellationError,
     CancellationToken,
@@ -24,6 +24,7 @@ import {
     PythonEnvironmentApi,
 } from '../../api';
 import { showErrorMessageWithLogs } from '../../common/errors/utils';
+import { PythonVersion } from '../../common/pythonVersion';
 import { showErrorMessage, withProgress } from '../../common/window.apis';
 import { CommandConstructorOptions } from '../base/commands/index';
 import { updatePackagesAndNotify } from '../common/packageChanges';
@@ -88,7 +89,7 @@ export class PipPackageManager implements PackageManager, Disposable {
             }
         }
 
-        if (environment.version.startsWith('2.')) {
+        if (PythonVersion.tryParse(environment.version)?.major === 2) {
             throw new Error('Python 2.* is not supported (deprecated)');
         }
 
@@ -262,14 +263,11 @@ export class PipPackageManager implements PackageManager, Disposable {
             throw new Error(`Python executable is unavailable for environment: ${environment.envId.id}`);
         }
 
-        // Normalize versions like '3.13.1.final.0' (Python's sys.version_info format) to '3.13.1'
-        // before parsing, since pep440 only accepts valid PEP 440 version strings.
-        const versionMatch = (environment.version ?? '').match(/^(\d+(?:\.\d+)*)/);
-        const normalizedVersion = versionMatch?.[1] ?? '';
-        const baseVersion = parse(normalizedVersion)?.base_version;
-        if (!baseVersion) {
+        const pythonVersion = PythonVersion.tryParse(environment.version);
+        if (!pythonVersion) {
             throw new Error(`Python version is unavailable for environment: ${environment.envId.id}`);
         }
+        const baseVersion = pythonVersion.toReleaseString();
 
         const availableVersions = await createPipOrUvCommandWithKind(
             { pythonExecutable, log: this.log },

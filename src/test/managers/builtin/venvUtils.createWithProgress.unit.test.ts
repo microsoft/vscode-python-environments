@@ -12,7 +12,7 @@ import * as windowApis from '../../../common/window.apis';
 import { getVenvPythonPath } from '../../../common/utils/virtualEnvironment';
 import * as builtinHelpers from '../../../managers/builtin/helpers';
 import * as uvEnvironments from '../../../managers/builtin/uvEnvironments';
-import { createWithProgress } from '../../../managers/builtin/venvUtils';
+import { createWithProgress, getBaseInterpreterForVenv } from '../../../managers/builtin/venvUtils';
 import { NativePythonEnvironmentKind, NativePythonFinder } from '../../../managers/common/nativePythonFinder';
 import * as managerUtils from '../../../managers/common/utils';
 
@@ -130,5 +130,53 @@ suite('createWithProgress uv tracking', () => {
         assert.ok(result?.environment);
         assert.strictEqual(typeof result.pkgInstallationErr, 'string');
         assert.strictEqual(result.pkgInstallationCancelled, true);
+    });
+});
+
+suite('getBaseInterpreterForVenv', () => {
+    let tempRoot: string;
+
+    setup(async () => {
+        tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'base-interp-'));
+    });
+
+    teardown(async () => {
+        await fs.remove(tempRoot);
+    });
+
+    function makeBase(executable: string, sysPrefix: string): PythonEnvironment {
+        return {
+            envId: { id: 'base', managerId: 'ms-python.python:system' },
+            name: 'base',
+            displayName: 'base',
+            displayPath: executable,
+            version: '3.8.20',
+            environmentPath: Uri.file(executable),
+            execInfo: { run: { executable } },
+            sysPrefix,
+        } as PythonEnvironment;
+    }
+
+    const inPrefixInterpreter = (prefix: string): string =>
+        process.platform === 'win32' ? path.join(prefix, 'python.exe') : path.join(prefix, 'bin', 'python');
+
+    test('returns the executable unchanged when it lives inside its own prefix', async () => {
+        const executable = inPrefixInterpreter(tempRoot);
+        const result = await getBaseInterpreterForVenv(makeBase(executable, tempRoot));
+        assert.strictEqual(result, executable);
+    });
+
+    test('redirects a shim outside the prefix to the interpreter inside the prefix', async () => {
+        const realInterpreter = inPrefixInterpreter(tempRoot);
+        await fs.outputFile(realInterpreter, '');
+        const shim = path.join(os.tmpdir(), 'shim-bin', 'python3.8.exe');
+        const result = await getBaseInterpreterForVenv(makeBase(shim, tempRoot));
+        assert.strictEqual(result, realInterpreter);
+    });
+
+    test('falls back to the original executable when no interpreter exists in the prefix', async () => {
+        const shim = path.join(os.tmpdir(), 'shim-bin', 'python3.8.exe');
+        const result = await getBaseInterpreterForVenv(makeBase(shim, tempRoot));
+        assert.strictEqual(result, shim);
     });
 });
