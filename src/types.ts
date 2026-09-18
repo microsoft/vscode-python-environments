@@ -1423,7 +1423,9 @@ export interface PythonBackgroundRunOptions {
     args: string[];
 
     /**
-     * Current working directory for the script or module. Default is the project directory for the script being run.
+     * Current working directory for the script or module. This is passed directly to the spawned
+     * process; when it is omitted the process inherits the extension host's working directory,
+     * which is not the project directory. Supply this when the script resolves relative paths.
      */
     cwd?: string;
 
