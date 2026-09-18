@@ -12,7 +12,9 @@ Use this manual to:
 - work with Python projects and environment variables; or
 - contribute an environment manager, package manager, or project creator.
 
-The authoritative API declarations are in [`src/api.ts`](../src/api.ts).
+The runtime facade is [`src/api.ts`](../src/api.ts). The authoritative public
+contracts are in [`src/types.ts`](../src/types.ts), with public errors and type
+guards in [`src/publicErrors.ts`](../src/publicErrors.ts).
 
 > [!IMPORTANT]
 > The API is flat. Call `api.getEnvironments()`, not
@@ -1561,10 +1563,11 @@ The public API is intended to avoid breaking changes. Check
 
 ## Related documentation
 
-- [`src/api.ts`](../src/api.ts) - authoritative API declarations
+- [`src/api.ts`](../src/api.ts) - runtime API facade
+- [`src/types.ts`](../src/types.ts) - authoritative public type contracts
+- [`src/publicErrors.ts`](../src/publicErrors.ts) - public errors and type guards
 - [`api/README.md`](../api/README.md) - npm package quick start
 - [Making and Managing Python Projects](managing-python-projects.md)
 - [Projects API Reference](projects-api-reference.md)
 - [Python Environments API Design](design.md)
 - [Startup Flow](startup-flow.md)
-- [`examples/sample1`](../examples/sample1) - sample environment manager
