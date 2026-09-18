@@ -1518,30 +1518,30 @@ in the UI.
 The interfaces below organize the flat API for type composition. They do not
 represent nested runtime objects.
 
-| Interface | Members grouped by the interface |
-| --- | --- |
-| `PythonEnvironmentsApi` | Environment discovery and resolution |
-| `PythonProjectEnvironmentApi` | Selected environment get/set |
-| `PythonEnvironmentManagementApi` | Environment creation/removal |
-| `PythonEnvironmentItemApi` | Environment item creation |
-| `PythonEnvironmentManagerRegistrationApi` | Environment manager registration |
-| `PythonEnvironmentManagerApi` | Combined environment API |
-| `PythonPackageGetterApi` | Package retrieval and version lookup |
-| `PythonPackageManagementApi` | Package installation/removal |
-| `PythonPackageItemApi` | Package item creation |
-| `PythonPackageManagerRegistrationApi` | Package manager registration |
-| `PythonPackageManagerApi` | Combined package API |
-| `PythonProjectGetterApi` | Project lookup |
-| `PythonProjectModifyApi` | Project collection modification |
-| `PythonProjectCreationApi` | Project creator registration |
-| `PythonProjectApi` | Combined project API |
-| `PythonTerminalCreateApi` | Terminal creation |
-| `PythonTerminalRunApi` | Terminal execution |
-| `PythonTaskRunApi` | Task execution |
-| `PythonBackgroundRunApi` | Background execution |
-| `PythonExecutionApi` | Combined execution API |
-| `PythonEnvironmentVariablesApi` | Environment variable lookup/events |
-| `PythonEnvironmentApi` | Complete flat public API |
+| Interface | Members grouped by the interface | Description |
+| --- | --- | --- |
+| `PythonEnvironmentsApi` | Environment discovery and resolution | Lists and refreshes discovered environments, resolves environment URIs, and reports discovery changes. |
+| `PythonProjectEnvironmentApi` | Selected environment get/set | Reads, updates, and observes the selected environment for URI or global scopes. |
+| `PythonEnvironmentManagementApi` | Environment creation/removal | Creates and removes environments through their associated environment managers. |
+| `PythonEnvironmentItemApi` | Environment item creation | Converts provider-supplied environment information into an identified `PythonEnvironment`. |
+| `PythonEnvironmentManagerRegistrationApi` | Environment manager registration | Registers an `EnvironmentManager` implementation with the extension. |
+| `PythonEnvironmentManagerApi` | Combined environment API | Combines environment registration, item creation, lifecycle, discovery, and selection interfaces. |
+| `PythonPackageGetterApi` | Package retrieval and version lookup | Retrieves and refreshes packages, looks up available versions, and reports package changes. |
+| `PythonPackageManagementApi` | Package installation/removal | Installs, upgrades, or uninstalls packages in an environment. |
+| `PythonPackageItemApi` | Package item creation | Converts provider-supplied package information into an identified `Package`. |
+| `PythonPackageManagerRegistrationApi` | Package manager registration | Registers a `PackageManager` implementation with the extension. |
+| `PythonPackageManagerApi` | Combined package API | Combines package registration, retrieval, management, and item creation interfaces. |
+| `PythonProjectGetterApi` | Project lookup | Returns all known projects or the project associated with a URI. |
+| `PythonProjectModifyApi` | Project collection modification | Adds, removes, and observes projects in the tracked project collection. |
+| `PythonProjectCreationApi` | Project creator registration | Registers a `PythonProjectCreator` implementation. |
+| `PythonProjectApi` | Combined project API | Combines project lookup, modification, events, and creator registration interfaces. |
+| `PythonTerminalCreateApi` | Terminal creation | Creates a terminal configured for a Python environment. |
+| `PythonTerminalRunApi` | Terminal execution | Runs Python in shared or dedicated terminals. |
+| `PythonTaskRunApi` | Task execution | Runs Python as a VS Code task. |
+| `PythonBackgroundRunApi` | Background execution | Starts Python as a background process with stream and exit access. |
+| `PythonExecutionApi` | Combined execution API | Combines terminal creation, terminal execution, task execution, and background execution. |
+| `PythonEnvironmentVariablesApi` | Environment variable lookup/events | Resolves effective environment variables and reports source changes. |
+| `PythonEnvironmentApi` | Complete flat public API | Combines all environment, package, project, execution, and environment-variable APIs exposed at runtime. |
 
 ## Compatibility guidance
 
