@@ -379,12 +379,17 @@ refreshEnvironments(scope: RefreshEnvironmentsScope): Promise<void>;
 | --- | --- | --- | --- |
 | `scope` | [`RefreshEnvironmentsScope`](#scope-types) | Yes (may be `undefined`) | `Uri` refreshes discovery for that project or folder; `undefined` refreshes global and workspace discovery. |
 
-**Returns** `Promise<void>`, resolving when discovery completes. Results arrive
-through [`onDidChangeEnvironments`](#ondidchangeenvironments); subscribe before
-refreshing if you need the deltas.
+**Returns** `Promise<void>`, resolving when the managers finish discovery.
+
+Read the results with [`getEnvironments`](#getenvironments) once the promise
+settles. Do not rely on [`onDidChangeEnvironments`](#ondidchangeenvironments)
+to deliver them: that event is optional on `EnvironmentManager`, and
+`refreshEnvironments` does not synthesize one, so whether a refresh produces
+deltas is up to the provider.
 
 ```typescript
 await api.refreshEnvironments(undefined);
+// Authoritative: read the list rather than waiting for an event.
 const refreshed = await api.getEnvironments('all');
 ```
 
@@ -438,6 +443,29 @@ const active = await api.getEnvironment(
     vscode.window.activeTextEditor?.document.uri,
 );
 ```
+
+> [!IMPORTANT]
+> **This call can return a stale value.** It is deliberately non-blocking: it
+> races the real resolution against a one-second timeout so that slow initial
+> discovery cannot stall callers. If resolution has not finished in time, it
+> returns the *last-known* environment for the scope - which may be `undefined`
+> on a first call - while resolution continues in the background.
+>
+> The resolved value is published through
+> [`onDidChangeEnvironment`](#ondidchangeenvironment) once it settles. If your
+> feature needs the authoritative selection, subscribe to that event and treat
+> the value from `getEnvironment` as a fast first guess:
+>
+> ```typescript
+> let current = await api.getEnvironment(projectUri); // May be last-known.
+> context.subscriptions.push(
+>     api.onDidChangeEnvironment((e) => {
+>         if (e.uri?.toString() === projectUri.toString()) {
+>             current = e.new; // Authoritative once resolution settles.
+>         }
+>     }),
+> );
+> ```
 
 #### `setEnvironment`
 
@@ -1236,7 +1264,7 @@ const module: PythonTerminalExecutionOptions = {
 | `name` | `string` | Yes | Name of the task, shown in the task UI. |
 | `args` | `string[]` | Yes | Arguments passed to the Python executable. |
 | `project` | [`PythonProject`](#pythonproject) | No | Project the task belongs to. |
-| `cwd` | `string` | No | Working directory. Defaults to the project directory of the script being run. |
+| `cwd` | `string` | No | Working directory for the task's shell execution. When omitted, VS Code resolves it from the task scope - the workspace folder containing `project`, or the global scope when `project` is not supplied. |
 | `env` | `{ [key: string]: string }` | No | Additional environment variables for the task. |
 
 #### `PythonBackgroundRunOptions`
@@ -1244,7 +1272,7 @@ const module: PythonTerminalExecutionOptions = {
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
 | `args` | `string[]` | Yes | Arguments passed to the Python executable. |
-| `cwd` | `string` | No | Working directory. Defaults to the project directory of the script being run. |
+| `cwd` | `string` | No | Working directory, passed straight to the spawned process. When omitted, the process inherits the extension host's working directory, which is **not** your project folder - always supply `cwd` (for example `project.uri.fsPath`) if the script resolves relative paths. |
 | `env` | `{ [key: string]: string \| undefined }` | No | Additional environment variables. An `undefined` value unsets a variable. |
 
 #### `PythonProcess`
@@ -1391,10 +1419,19 @@ runInBackground(
 | Parameter | Type | Required | Description |
 | --- | --- | --- | --- |
 | `environment` | [`PythonEnvironment`](#pythonenvironment) | Yes | Environment used to start the process. |
-| `options` | [`PythonBackgroundRunOptions`](#pythonbackgroundrunoptions) | Yes | `args` for Python, plus optional `cwd` and `env`. |
+| `options` | [`PythonBackgroundRunOptions`](#pythonbackgroundrunoptions) | Yes | `args` for Python, plus optional `cwd` and `env`. Supply `cwd` - it is not inferred. |
 
 **Returns** `Promise<PythonProcess>` with `stdin`, `stdout`, `stderr`, `kill()`,
 and `onExit()`.
+
+> [!IMPORTANT]
+> `cwd` is forwarded to the spawned process unchanged. There is no project
+> context to infer it from, so when you omit it the process inherits the
+> extension host's working directory rather than your project folder. Pass
+> `cwd` explicitly whenever the script resolves relative paths.
+>
+> You own the process lifetime: call `kill()` when your feature is done, and
+> tie it to your disposables so it does not outlive deactivation.
 
 ```typescript
 const proc = await api.runInBackground(env, {
