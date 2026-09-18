@@ -107,6 +107,7 @@ The npm package under [`api/`](./api) is the public API facade other extensions 
 ## Additional Resources
 
 - [Development Process](https://github.com/Microsoft/vscode-python/blob/main/CONTRIBUTING.md#development-process)
+- [Release Process](./docs/releasing.md)
 - [API Documentation](./src/api.ts)
 - [Project Documentation](./docs/projects-api-reference.md)
 
