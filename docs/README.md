@@ -29,7 +29,7 @@ The authoritative API declarations are in [`src/api.ts`](../src/api.ts).
 - [Environment variable methods](#environment-variable-methods)
 - [Provider methods](#provider-methods)
 - [Errors and lifecycle](#errors-and-lifecycle)
-- [Shared types](#shared-types)
+- [Object reference](#object-reference)
 - [Compatibility guidance](#compatibility-guidance)
 
 ## Get started
@@ -1085,17 +1085,461 @@ Provider implementations should propagate operational failures rather than
 turning them into successful-looking empty results unless the public contract
 explicitly defines such a result.
 
-## Shared types
+## Object reference
 
-### UI-related types
+This section collects the objects, options, event payloads, and type aliases
+referenced by the methods above. Provider interfaces are documented with their
+registration methods in [Provider methods](#provider-methods).
 
-`IconPath` can be a `Uri`, a light/dark pair of URIs, or a VS Code
-`ThemeIcon`.
+### Environment objects
 
-`EnvironmentGroupInfo` contains a required group `name` and optional
-`description`, `tooltip`, and `iconPath`.
+#### `PythonEnvironment`
 
-`QuickCreateConfig` contains a required `description` and optional `detail`.
+Returned by environment discovery, resolution, selection, and creation methods.
+It combines [`PythonEnvironmentInfo`](#pythonenvironmentinfo) with an `envId`.
+
+```typescript
+interface PythonEnvironment extends PythonEnvironmentInfo {
+    readonly envId: PythonEnvironmentId;
+}
+```
+
+#### `PythonEnvironmentId`
+
+Uniquely identifies an environment and its owning manager.
+
+```typescript
+interface PythonEnvironmentId {
+    id: string;
+    managerId: string;
+}
+```
+
+Use both properties for identity. See
+[`PythonEnvironment` and identity](#pythonenvironment-and-identity).
+
+#### `PythonEnvironmentInfo`
+
+Describes an environment before the API assigns its `envId`. It is passed to
+[`createPythonEnvironmentItem()`](#createpythonenvironmentitem) and forms the
+base of every returned `PythonEnvironment`.
+
+| Property | Type | Required | Description |
+| --- | --- | --- | --- |
+| `name` | `string` | Yes | Environment name. |
+| `displayName` | `string` | Yes | Primary user-facing name. |
+| `displayPath` | `string` | Yes | User-facing path. |
+| `version` | `string` | Yes | Python version. |
+| `environmentPath` | `Uri` | Yes | Python executable or environment directory. |
+| `execInfo` | `PythonEnvironmentExecutionInfo` | Yes | Commands for running and activating Python. |
+| `sysPrefix` | `string` | Yes | Value of Python's `sys.prefix`. |
+| `shortDisplayName` | `string` | No | Compact user-facing name. |
+| `description` | `string` | No | Additional environment description. |
+| `tooltip` | `string \| MarkdownString` | No | Hover text. |
+| `iconPath` | `IconPath` | No | Environment icon. |
+| `group` | `string \| EnvironmentGroupInfo` | No | Environment UI group. |
+| `error` | `string` | No | Diagnostic for a broken or invalid environment. |
+
+#### `PythonCommandRunConfiguration`
+
+Describes one executable invocation.
+
+```typescript
+interface PythonCommandRunConfiguration {
+    executable: string;
+    args?: string[];
+}
+```
+
+`executable` must be an absolute path to an executable that can be spawned.
+`args` are included on every invocation of that command.
+
+#### `PythonEnvironmentExecutionInfo`
+
+Describes how to execute, activate, and deactivate an environment.
+
+| Property | Type | Required | Description |
+| --- | --- | --- | --- |
+| `run` | `PythonCommandRunConfiguration` | Yes | Default Python command. |
+| `activatedRun` | `PythonCommandRunConfiguration` | No | Python command to use after activation. |
+| `activation` | `PythonCommandRunConfiguration[]` | No | Generic activation commands. |
+| `shellActivation` | `Map<string, PythonCommandRunConfiguration[]>` | No | Activation commands by shell name. |
+| `deactivation` | `PythonCommandRunConfiguration[]` | No | Generic deactivation commands. |
+| `shellDeactivation` | `Map<string, PythonCommandRunConfiguration[]>` | No | Deactivation commands by shell name. |
+
+The `unknown` map key can provide a fallback when the shell type is not known.
+
+#### Environment scope aliases
+
+| Type | Definition | Referenced by |
+| --- | --- | --- |
+| `GetEnvironmentsScope` | `Uri \| 'all' \| 'global'` | `getEnvironments()` and manager discovery |
+| `RefreshEnvironmentsScope` | `Uri \| undefined` | `refreshEnvironments()` and manager refresh |
+| `ResolveEnvironmentContext` | `Uri` | `resolveEnvironment()` and manager resolution |
+| `GetEnvironmentScope` | `Uri \| undefined` | `getEnvironment()` and manager selection lookup |
+| `SetEnvironmentScope` | `Uri \| Uri[] \| undefined` | `setEnvironment()` and manager selection updates |
+| `CreateEnvironmentScope` | `Uri \| Uri[] \| 'global'` | `createEnvironment()` and manager creation |
+
+#### `CreateEnvironmentOptions`
+
+Passed to [`createEnvironment()`](#createenvironment) and
+`EnvironmentManager.create()`.
+
+```typescript
+interface CreateEnvironmentOptions {
+    quickCreate?: boolean;
+    additionalPackages?: string[];
+}
+```
+
+`quickCreate: true` requests creation without input. `false` permits prompts
+and records that quick create was skipped. When omitted, prompts are permitted
+and the manager may offer quick create.
+
+#### `RemoveEnvironmentOptions`
+
+Passed to [`removeEnvironment()`](#removeenvironment) and
+`EnvironmentManager.remove()`.
+
+```typescript
+interface RemoveEnvironmentOptions {
+    runHeadless?: boolean;
+}
+```
+
+When `runHeadless` is true, removal should not prompt for confirmation.
+
+#### `QuickCreateConfig`
+
+Returned by an environment manager's optional `quickCreateConfig()` method.
+
+```typescript
+interface QuickCreateConfig {
+    readonly description: string;
+    readonly detail?: string;
+}
+```
+
+#### `DidChangeEnvironmentsEventArgs` and `EnvironmentChangeKind`
+
+`DidChangeEnvironmentsEventArgs` is an array of discovered-environment changes:
+
+```typescript
+type DidChangeEnvironmentsEventArgs = {
+    kind: EnvironmentChangeKind;
+    environment: PythonEnvironment;
+}[];
+
+enum EnvironmentChangeKind {
+    add = 'add',
+    remove = 'remove',
+}
+```
+
+`DidChangeEnvironmentEventArgs` describes a selection change:
+
+```typescript
+type DidChangeEnvironmentEventArgs = {
+    readonly uri: Uri | undefined;
+    readonly old: PythonEnvironment | undefined;
+    readonly new: PythonEnvironment | undefined;
+};
+```
+
+### Package objects
+
+#### `Package`
+
+Returned by [`getPackages()`](#getpackages) and supplied in package change
+events. It combines [`PackageInfo`](#packageinfo) with a `pkgId`.
+
+```typescript
+interface Package extends PackageInfo {
+    readonly pkgId: PackageId;
+}
+```
+
+#### `PackageId`
+
+Identifies a package, its package manager, and its environment.
+
+```typescript
+interface PackageId {
+    id: string;
+    managerId: string;
+    environmentId: string;
+}
+```
+
+#### `PackageInfo`
+
+Passed to [`createPackageItem()`](#createpackageitem) and forms the base of
+every returned `Package`.
+
+| Property | Type | Required | Description |
+| --- | --- | --- | --- |
+| `name` | `string` | Yes | Package name. |
+| `displayName` | `string` | Yes | User-facing package name. |
+| `version` | `string` | No | Installed package version. |
+| `description` | `string` | No | Package description. |
+| `tooltip` | `string \| MarkdownString` | No | Hover text. |
+| `iconPath` | `IconPath` | No | Package icon. |
+| `uris` | `readonly Uri[]` | No | Files or locations associated with the package. |
+| `isTransitive` | `boolean` | No | Whether the package is a transitive dependency. |
+
+#### `GetPackagesOptions`
+
+Passed to [`getPackages()`](#getpackages) and `PackageManager.getPackages()`.
+
+```typescript
+interface GetPackagesOptions {
+    skipCache?: boolean;
+}
+```
+
+Set `skipCache` to true to request current data from the underlying package
+tool.
+
+#### `PackageManagementOptions`
+
+Passed to [`managePackages()`](#managepackages) and
+`PackageManager.manage()`. At least one of `install` or `uninstall` is required.
+
+```typescript
+type PackageManagementOptions = {
+    runHeadless?: boolean;
+    upgrade?: boolean;
+    showSkipOption?: boolean;
+    install?: string[];
+    uninstall?: string[];
+};
+```
+
+The exported type uses a union to enforce the `install` or `uninstall`
+requirement at compile time. `PackageManagementInteractionOptions` contributes
+the optional `runHeadless` property.
+
+#### `GetPackageAvailableVersionsOptions`
+
+Controls error behavior for
+[`getPackageAvailableVersions()`](#getpackageavailableversions).
+
+```typescript
+interface GetPackageAvailableVersionsOptions {
+    errorMode?: 'legacy' | 'throw';
+}
+```
+
+#### `Pep440Version`
+
+Represents a parsed PEP 440 package version. It is re-exported from
+`@renovatebot/pep440` and returned by package tool/version lookup methods.
+
+#### `DidChangePackagesEventArgs` and `PackageChangeKind`
+
+```typescript
+interface DidChangePackagesEventArgs {
+    environment: PythonEnvironment;
+    manager: PackageManager;
+    changes: { kind: PackageChangeKind; pkg: Package }[];
+}
+
+enum PackageChangeKind {
+    add = 'add',
+    remove = 'remove',
+}
+```
+
+### Project objects
+
+#### `PythonProject`
+
+Returned by project lookup methods and accepted by project modification and
+execution methods.
+
+```typescript
+interface PythonProject {
+    readonly name: string;
+    readonly uri: Uri;
+    readonly description?: string;
+    readonly tooltip?: string | MarkdownString;
+}
+```
+
+#### `PythonProjectCreatorOptions`
+
+Passed to `PythonProjectCreator.create()`.
+
+```typescript
+interface PythonProjectCreatorOptions {
+    name: string;
+    rootUri: Uri;
+    quickCreate?: boolean;
+}
+```
+
+#### `DidChangePythonProjectsEventArgs`
+
+Passed to [`onDidChangePythonProjects`](#ondidchangepythonprojects).
+
+```typescript
+interface DidChangePythonProjectsEventArgs {
+    added: PythonProject[];
+    removed: PythonProject[];
+}
+```
+
+### Execution objects
+
+#### `PythonTerminalCreateOptions`
+
+Passed to [`createTerminal()`](#createterminal). It includes all VS Code
+`TerminalOptions` and adds:
+
+```typescript
+interface PythonTerminalCreateOptions extends TerminalOptions {
+    disableActivation?: boolean;
+}
+```
+
+#### `PythonTerminalExecutionOptions`
+
+Passed to [`runInTerminal()`](#runinterminal) and
+[`runInDedicatedTerminal()`](#runindedicatedterminal).
+
+```typescript
+interface PythonTerminalExecutionOptions {
+    cwd: string | Uri;
+    args?: string[];
+    show?: boolean;
+}
+```
+
+#### `PythonTaskExecutionOptions`
+
+Passed to [`runAsTask()`](#runastask).
+
+```typescript
+interface PythonTaskExecutionOptions {
+    name: string;
+    args: string[];
+    project?: PythonProject;
+    cwd?: string;
+    env?: { [key: string]: string };
+}
+```
+
+#### `PythonBackgroundRunOptions`
+
+Passed to [`runInBackground()`](#runinbackground).
+
+```typescript
+interface PythonBackgroundRunOptions {
+    args: string[];
+    cwd?: string;
+    env?: { [key: string]: string | undefined };
+}
+```
+
+#### `PythonProcess`
+
+Returned by [`runInBackground()`](#runinbackground).
+
+```typescript
+interface PythonProcess {
+    readonly pid?: number;
+    readonly stdin: NodeJS.WritableStream;
+    readonly stdout: NodeJS.ReadableStream;
+    readonly stderr: NodeJS.ReadableStream;
+
+    kill(): void;
+    onExit(
+        listener: (
+            code: number | null,
+            signal: NodeJS.Signals | null,
+        ) => void,
+    ): void;
+}
+```
+
+### Environment variable objects
+
+#### `DidChangeEnvironmentVariablesEventArgs`
+
+Passed to
+[`onDidChangeEnvironmentVariables`](#ondidchangeenvironmentvariables).
+
+```typescript
+interface DidChangeEnvironmentVariablesEventArgs {
+    uri?: Uri;
+    changeType: FileChangeType;
+}
+```
+
+`uri` is absent for a non-file source. `changeType` is VS Code's
+`FileChangeType`.
+
+### Shared UI objects
+
+#### `IconPath`
+
+Used by environment, package, group, and provider display objects.
+
+```typescript
+type IconPath =
+    | Uri
+    | {
+          light: Uri;
+          dark: Uri;
+      }
+    | ThemeIcon;
+```
+
+#### `EnvironmentGroupInfo`
+
+Provides display information for an environment group.
+
+```typescript
+interface EnvironmentGroupInfo {
+    readonly name: string;
+    readonly description?: string;
+    readonly tooltip?: string | MarkdownString;
+    readonly iconPath?: IconPath;
+}
+```
+
+When several group definitions use the same name, the first instance is used
+in the UI.
+
+### API interface groups
+
+The interfaces below organize the flat API for type composition. They do not
+represent nested runtime objects.
+
+| Interface | Members grouped by the interface |
+| --- | --- |
+| `PythonEnvironmentsApi` | Environment discovery and resolution |
+| `PythonProjectEnvironmentApi` | Selected environment get/set |
+| `PythonEnvironmentManagementApi` | Environment creation/removal |
+| `PythonEnvironmentItemApi` | Environment item creation |
+| `PythonEnvironmentManagerRegistrationApi` | Environment manager registration |
+| `PythonEnvironmentManagerApi` | Combined environment API |
+| `PythonPackageGetterApi` | Package retrieval and version lookup |
+| `PythonPackageManagementApi` | Package installation/removal |
+| `PythonPackageItemApi` | Package item creation |
+| `PythonPackageManagerRegistrationApi` | Package manager registration |
+| `PythonPackageManagerApi` | Combined package API |
+| `PythonProjectGetterApi` | Project lookup |
+| `PythonProjectModifyApi` | Project collection modification |
+| `PythonProjectCreationApi` | Project creator registration |
+| `PythonProjectApi` | Combined project API |
+| `PythonTerminalCreateApi` | Terminal creation |
+| `PythonTerminalRunApi` | Terminal execution |
+| `PythonTaskRunApi` | Task execution |
+| `PythonBackgroundRunApi` | Background execution |
+| `PythonExecutionApi` | Combined execution API |
+| `PythonEnvironmentVariablesApi` | Environment variable lookup/events |
+| `PythonEnvironmentApi` | Complete flat public API |
 
 ## Compatibility guidance
 
