@@ -46,6 +46,7 @@
         "compile:esm": "tsc -b ./tsconfig.esm.json && mve out/esm/main.js out/esm/main.mjs && node -e \"require('fs').writeFileSync('out/esm/package.json', '{\\\"type\\\":\\\"module\\\"}')\"",
         "compile:cjs": "tsc -b ./tsconfig.cjs.json && mve out/cjs/main.js out/cjs/main.cjs",
         "clean": "node -e \"const fs = require('fs'); fs.rmSync('./out', { recursive: true, force: true });\"",
+        "test": "npm run test:package",
         "test:package": "node ./scripts/test-package.cjs"
     },
     "devDependencies": {
