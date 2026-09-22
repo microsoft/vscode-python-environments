@@ -35,6 +35,8 @@ interface CondaCreationState {
 
     // For named environments
     envName?: string;
+    suppliedName?: boolean;
+    cancelled?: boolean;
 
     // For prefix environments
     prefix?: string;
@@ -82,6 +84,7 @@ async function selectEnvironmentType(state: CondaCreationState): Promise<StepFun
         )) as QuickPickItem | undefined;
 
         if (!selection) {
+            state.cancelled = true;
             return null;
         }
 
@@ -128,16 +131,23 @@ async function selectPythonVersion(state: CondaCreationState): Promise<StepFunct
         });
 
         if (!selection) {
+            state.cancelled = true;
             return null;
         }
 
         state.pythonVersion = (selection as QuickPickItem).description;
 
         // Next step depends on environment type
-        return state.envType === getCondaNamedLabel() ? enterEnvironmentName : selectLocation;
+        if (state.envType === getCondaNamedLabel()) {
+            return state.envName === undefined ? enterEnvironmentName : null;
+        }
+        return selectLocation;
     } catch (ex) {
         if (ex === QuickInputButtons.Back) {
-            // Go back to environment type selection
+            if (state.suppliedName) {
+                state.cancelled = true;
+                return null;
+            }
             return selectEnvironmentType;
         }
         throw ex;
@@ -280,28 +290,35 @@ export async function createStepBasedCondaFlow(
     log: LogOutputChannel,
     manager: EnvironmentManager,
     uris?: Uri | Uri[],
+    name?: string,
 ): Promise<PythonEnvironment | undefined> {
     // Initialize the state object that will track user selections
     const state: CondaCreationState = {
         api: api,
         uris: Array.isArray(uris) ? uris : uris ? [uris] : [],
+        envType: name === undefined ? undefined : getCondaNamedLabel(),
+        envName: name,
+        suppliedName: name !== undefined,
     };
 
     try {
         // Start with the first step
-        let currentStep: StepFunction | null = selectEnvironmentType;
+        let currentStep: StepFunction | null = name === undefined ? selectEnvironmentType : selectPythonVersion;
 
         // Execute steps until completion or cancellation
         while (currentStep !== null) {
             currentStep = await currentStep(state);
         }
 
+        if (state.cancelled) {
+            return undefined;
+        }
+
         // If we have all required data, create the environment
         if (state.envType === getCondaNamedLabel() && state.envName) {
             return await createNamedCondaEnvironment(api, log, manager, state.envName, state.pythonVersion);
         } else if (state.envType === CondaStrings.condaPrefix && state.prefix) {
-            // For prefix environments, we need to pass the fsPath where the environment will be created
-            return await createPrefixCondaEnvironment(api, log, manager, state.fsPath, state.pythonVersion);
+            return await createPrefixCondaEnvironment(api, log, manager, state.prefix, state.pythonVersion);
         }
 
         // If we get here, the flow was likely cancelled
@@ -310,7 +327,7 @@ export async function createStepBasedCondaFlow(
         if (ex === QuickInputButtons.Back) {
             // This should not happen as back navigation is handled within each step
             // But if it does, restart the flow
-            return await createStepBasedCondaFlow(api, log, manager, uris);
+            return await createStepBasedCondaFlow(api, log, manager, uris, name);
         }
         throw ex; // Re-throw other errors
     }

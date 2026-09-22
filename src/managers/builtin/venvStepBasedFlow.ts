@@ -31,6 +31,7 @@ interface VenvCreationState {
 
     // Name for the venv
     venvName?: string;
+    suppliedName?: boolean;
 
     // Packages to install in the venv
     // undefined = not yet set, null = user canceled during package selection
@@ -161,8 +162,7 @@ async function selectBasePython(state: VenvCreationState): Promise<StepFunction 
 
         state.basePython = basePython;
 
-        // Next step: input venv name
-        return enterEnvironmentName;
+        return state.venvName === undefined ? enterEnvironmentName : selectPackages;
     } catch (ex) {
         if (ex === QuickInputButtons.Back) {
             // Go back to create type selection if we came from there
@@ -269,8 +269,7 @@ async function selectPackages(state: VenvCreationState): Promise<StepFunction | 
         return null;
     } catch (ex) {
         if (ex === QuickInputButtons.Back) {
-            // Go back to environment name input
-            return enterEnvironmentName;
+            return state.suppliedName ? selectBasePython : enterEnvironmentName;
         }
         throw ex;
     }
@@ -299,7 +298,7 @@ export async function createStepBasedVenvFlow(
     manager: EnvironmentManager,
     basePythons: PythonEnvironment[],
     venvRoot: Uri,
-    options: { showQuickAndCustomOptions: boolean; additionalPackages?: string[] },
+    options: { showQuickAndCustomOptions: boolean; additionalPackages?: string[]; name?: string },
 ): Promise<CreateEnvironmentResult | undefined> {
     // Sort and filter available Python environments
     const sortedEnvs = ensureGlobalEnv(basePythons, log);
@@ -308,6 +307,9 @@ export async function createStepBasedVenvFlow(
             envCreationErr: 'No suitable Python environments found',
         };
     }
+    if (options.name !== undefined && (await fse.pathExists(path.join(venvRoot.fsPath, options.name)))) {
+        return { envCreationErr: VenvManagerStrings.venvNameErrorExists };
+    }
 
     // Initialize the state object that will track user selections
     const state: VenvCreationState = {
@@ -315,6 +317,8 @@ export async function createStepBasedVenvFlow(
         api, // Store API reference for package selection
         project: [api.getPythonProject(venvRoot)].filter(Boolean) as PythonProject[], // Get project for venvRoot
         venvRoot, // Store venvRoot for path validation
+        venvName: options.name,
+        suppliedName: options.name !== undefined,
     };
 
     try {
@@ -335,8 +339,7 @@ export async function createStepBasedVenvFlow(
         if (state.isQuickCreate && state.basePython) {
             // Use quick create flow
             sendTelemetryEvent(EventNames.VENV_CREATION, undefined, { creationType: 'quick' });
-            // Use the default .venv name for quick create
-            const quickEnvPath = path.join(venvRoot.fsPath, '.venv');
+            const quickEnvPath = path.join(venvRoot.fsPath, options.name ?? '.venv');
 
             // Get workspace dependencies to install
             const project = api.getPythonProject(venvRoot);

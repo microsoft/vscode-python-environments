@@ -217,10 +217,12 @@ export class CondaEnvManager implements EnvironmentManager, Disposable {
             let result: PythonEnvironment | undefined;
             if (options?.quickCreate) {
                 let envRoot: string | undefined = undefined;
-                let name: string | undefined = './.conda';
+                let name: string | undefined = options.name ?? './.conda';
                 if (context === 'global' || (Array.isArray(context) && context.length > 1)) {
                     envRoot = await getDefaultCondaPrefix();
-                    name = await generateName(envRoot);
+                    if (options.name === undefined) {
+                        name = await generateName(envRoot);
+                    }
                 } else {
                     const folder = this.api.getPythonProject(context instanceof Uri ? context : context[0]);
                     envRoot = folder?.uri.fsPath;
@@ -240,6 +242,7 @@ export class CondaEnvManager implements EnvironmentManager, Disposable {
                     this.log,
                     this,
                     context === 'global' ? undefined : context,
+                    options?.name,
                 );
             }
             if (result) {

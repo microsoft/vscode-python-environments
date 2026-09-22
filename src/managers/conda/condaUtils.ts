@@ -1003,8 +1003,9 @@ export async function createCondaEnvironment(
     log: LogOutputChannel,
     manager: EnvironmentManager,
     uris?: Uri | Uri[],
+    name?: string,
 ): Promise<PythonEnvironment | undefined> {
-    return createStepBasedCondaFlow(api, log, manager, uris);
+    return createStepBasedCondaFlow(api, log, manager, uris, name);
 }
 
 function getCondaCreatePrefix(output: string): string {
@@ -1026,22 +1027,22 @@ export async function createNamedCondaEnvironment(
     name?: string,
     pythonVersion?: string,
 ): Promise<PythonEnvironment | undefined> {
-    try {
-        name = await showInputBoxWithButtons({
-            prompt: CondaStrings.condaNamedInput,
-            value: name,
-            ignoreFocusOut: true,
-            showBackButton: true,
-        });
-        if (!name) {
-            return;
+    if (name === undefined) {
+        try {
+            name = await showInputBoxWithButtons({
+                prompt: CondaStrings.condaNamedInput,
+                ignoreFocusOut: true,
+                showBackButton: true,
+            });
+            if (!name) {
+                return;
+            }
+        } catch (ex) {
+            if (ex === QuickInputButtons.Back) {
+                return await createCondaEnvironment(api, log, manager);
+            }
+            throw ex;
         }
-    } catch (ex) {
-        if (ex === QuickInputButtons.Back) {
-            // If back button was pressed, go back to the environment type selection
-            return await createCondaEnvironment(api, log, manager);
-        }
-        throw ex;
     }
 
     const envName: string = name;
@@ -1091,81 +1092,50 @@ export async function createPrefixCondaEnvironment(
     api: PythonEnvironmentApi,
     log: LogOutputChannel,
     manager: EnvironmentManager,
-    fsPath?: string,
+    prefix?: string,
     pythonVersion?: string,
 ): Promise<PythonEnvironment | undefined> {
-    try {
-        if (!fsPath) {
-            return;
-        }
-
-        let name = `./.conda`;
-        if (await fse.pathExists(path.join(fsPath, '.conda'))) {
-            log.warn(`Environment "${path.join(fsPath, '.conda')}" already exists`);
-            const newName = await showInputBoxWithButtons({
-                prompt: l10n.t('Environment "{0}" already exists. Enter a different name', name),
-                ignoreFocusOut: true,
-                showBackButton: true,
-                validateInput: (value) => {
-                    if (value === name) {
-                        return CondaStrings.condaExists;
-                    }
-                    return undefined;
-                },
-            });
-            if (!newName) {
-                return;
-            }
-            name = newName;
-        }
-
-        const prefix: string = path.isAbsolute(name) ? name : path.join(fsPath, name);
-
-        const runArgs = ['create', '--yes', '--prefix', prefix];
-        if (pythonVersion) {
-            runArgs.push(`python=${pythonVersion}`);
-        } else {
-            runArgs.push('python');
-        }
-
-        return await withProgress(
-            {
-                location: ProgressLocation.Notification,
-                title: `Creating conda environment: ${name}`,
-            },
-            async () => {
-                try {
-                    const bin = os.platform() === 'win32' ? 'python.exe' : path.join('bin', 'python');
-                    const output = await runCondaExecutable(runArgs);
-                    log.info(output);
-                    const version = await getVersion(prefix);
-
-                    const environment = api.createPythonEnvironmentItem(
-                        await getPrefixesCondaPythonInfo(
-                            prefix,
-                            path.join(prefix, bin),
-                            version,
-                            await getConda(),
-                            manager,
-                        ),
-                        manager,
-                    );
-                    return environment;
-                } catch (e) {
-                    log.error('Failed to create conda environment', e);
-                    setImmediate(async () => {
-                        await showErrorMessageWithLogs(CondaStrings.condaCreateFailed, log);
-                    });
-                }
-            },
-        );
-    } catch (ex) {
-        if (ex === QuickInputButtons.Back) {
-            // If back button was pressed, go back to the environment type selection
-            return await createCondaEnvironment(api, log, manager);
-        }
-        throw ex;
+    if (!prefix) {
+        return;
     }
+
+    const runArgs = ['create', '--yes', '--prefix', prefix];
+    if (pythonVersion) {
+        runArgs.push(`python=${pythonVersion}`);
+    } else {
+        runArgs.push('python');
+    }
+
+    return await withProgress(
+        {
+            location: ProgressLocation.Notification,
+            title: l10n.t('Creating conda environment: {0}', path.basename(prefix)),
+        },
+        async () => {
+            try {
+                const bin = os.platform() === 'win32' ? 'python.exe' : path.join('bin', 'python');
+                const output = await runCondaExecutable(runArgs);
+                log.info(output);
+                const version = await getVersion(prefix);
+
+                return api.createPythonEnvironmentItem(
+                    await getPrefixesCondaPythonInfo(
+                        prefix,
+                        path.join(prefix, bin),
+                        version,
+                        await getConda(),
+                        manager,
+                    ),
+                    manager,
+                );
+            } catch (e) {
+                log.error('Failed to create conda environment', e);
+                setImmediate(async () => {
+                    await showErrorMessageWithLogs(CondaStrings.condaCreateFailed, log);
+                });
+            }
+        },
+    );
 }
 
 export async function generateName(fsPath: string): Promise<string | undefined> {

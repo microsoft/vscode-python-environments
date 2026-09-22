@@ -156,6 +156,17 @@ export class PythonEnvironmentApiImpl implements PythonEnvironmentApi {
         scope: CreateEnvironmentScope,
         options: CreateEnvironmentOptions | undefined,
     ): Promise<PythonEnvironment | undefined> {
+        if (
+            options?.name !== undefined &&
+            (options.name.trim().length === 0 ||
+                options.name === '.' ||
+                options.name === '..' ||
+                options.name.includes('/') ||
+                options.name.includes('\\') ||
+                options.name.includes('\0'))
+        ) {
+            throw new Error('Environment name must be a non-empty path segment');
+        }
         if (scope === 'global' || (!Array.isArray(scope) && scope instanceof Uri)) {
             await waitForEnvManager(scope === 'global' ? undefined : [scope]);
             const manager = this.envManagers.getEnvironmentManager(scope === 'global' ? undefined : scope);
