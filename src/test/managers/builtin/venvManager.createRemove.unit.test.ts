@@ -19,6 +19,7 @@ import { normalizePath } from '../../../common/utils/pathUtils';
 import * as windowApis from '../../../common/window.apis';
 import * as envCommands from '../../../features/envCommands';
 import { VenvManager } from '../../../managers/builtin/venvManager';
+import { createStepBasedVenvFlow } from '../../../managers/builtin/venvStepBasedFlow';
 import * as venvUtils from '../../../managers/builtin/venvUtils';
 import { NativePythonFinder } from '../../../managers/common/nativePythonFinder';
 import { createMockPythonEnvironment } from '../../mocks/pythonEnvironment';
@@ -141,6 +142,67 @@ suite('VenvManager.create - orchestration', () => {
         assert.strictEqual(quickCreateVenvStub.firstCall.args[4], globalEnv);
         assert.strictEqual(quickCreateVenvStub.firstCall.args[5].fsPath, scope.fsPath);
         assert.deepStrictEqual(quickCreateVenvStub.firstCall.args[6], ['pytest']);
+    });
+
+    test('quick create forwards an explicit environment name', async () => {
+        const globalEnv = createMockPythonEnvironment({
+            name: 'global',
+            envPath: testPath('global', 'python3'),
+            version: '3.12.0',
+        });
+        const manager = createManager({ getEnvironments: sinon.stub().resolves([globalEnv]) });
+        (manager as any).globalEnv = globalEnv;
+        quickCreateVenvStub.resolves({ environment: createdEnvironment() });
+
+        await manager.create(Uri.file(path.join(tmpRoot, 'project')), {
+            name: 'analysis-env',
+            quickCreate: true,
+        });
+
+        assert.strictEqual(quickCreateVenvStub.firstCall.args[7], 'analysis-env');
+    });
+
+    test('custom create forwards an explicit environment name', async () => {
+        const globalEnv = createMockPythonEnvironment({
+            name: 'global',
+            envPath: testPath('global', 'python3'),
+            version: '3.12.0',
+        });
+        const manager = createManager({ getEnvironments: sinon.stub().resolves([globalEnv]) });
+        createPythonVenvStub.resolves({ environment: createdEnvironment() });
+
+        await manager.create(Uri.file(path.join(tmpRoot, 'project')), {
+            name: 'analysis-env',
+            additionalPackages: ['pytest'],
+        });
+
+        assert.deepStrictEqual(createPythonVenvStub.firstCall.args[6], {
+            showQuickAndCustomOptions: true,
+            name: 'analysis-env',
+            additionalPackages: ['pytest'],
+        });
+    });
+
+    test('custom create rejects an explicit name whose destination exists', async () => {
+        const globalEnv = createMockPythonEnvironment({
+            name: 'global',
+            envPath: testPath('global', 'python3'),
+            version: '3.12.0',
+        });
+        const venvRoot = Uri.file(path.join(tmpRoot, 'project'));
+        await fse.mkdirp(path.join(venvRoot.fsPath, 'analysis-env'));
+
+        const result = await createStepBasedVenvFlow(
+            {} as NativePythonFinder,
+            { getPythonProject: sinon.stub().returns(undefined) } as unknown as PythonEnvironmentApi,
+            { error: sinon.stub() } as any,
+            {} as EnvironmentManager,
+            [globalEnv],
+            venvRoot,
+            { showQuickAndCustomOptions: false, name: 'analysis-env' },
+        );
+
+        assert.strictEqual(result?.envCreationErr, 'A folder with the same name already exists');
     });
 
     test('reports creation errors without adding an environment', async () => {
