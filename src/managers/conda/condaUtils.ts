@@ -331,7 +331,7 @@ export async function getNamedCondaPythonInfo(
 
     return {
         name: name,
-        environmentPath: Uri.file(prefix),
+        environmentPath: Uri.file(executable),
         displayName: `${name} (${sv})`,
         shortDisplayName: `${name}:${sv}`,
         displayPath: prefix,
@@ -376,7 +376,7 @@ export async function getPrefixesCondaPythonInfo(
     const basename = path.basename(prefix);
     return {
         name: basename,
-        environmentPath: Uri.file(prefix),
+        environmentPath: Uri.file(executable),
         displayName: `${basename} (${sv})`,
         shortDisplayName: `${basename}:${sv}`,
         displayPath: prefix,
@@ -749,7 +749,9 @@ export function nonWindowsGenerateConfig(
 function getCondaWithoutPython(name: string, prefix: string, conda: string): PythonEnvironmentInfo {
     return {
         name: name,
-        environmentPath: Uri.file(prefix),
+        environmentPath: Uri.file(
+            isWindows() ? path.join(prefix, 'python.exe') : path.join(prefix, 'bin', 'python'),
+        ),
         displayName: `${name} (no-python)`,
         shortDisplayName: `${name} (no-python)`,
         displayPath: prefix,
@@ -1224,11 +1226,11 @@ export async function quickCreateConda(
 }
 
 export async function deleteCondaEnvironment(environment: PythonEnvironment, log: LogOutputChannel): Promise<boolean> {
-    let args = ['env', 'remove', '--yes', '--prefix', environment.environmentPath.fsPath];
+    let args = ['env', 'remove', '--yes', '--prefix', environment.sysPrefix];
     return await withProgress(
         {
             location: ProgressLocation.Notification,
-            title: l10n.t('Deleting conda environment: {0}', environment.environmentPath.fsPath),
+            title: l10n.t('Deleting conda environment: {0}', environment.sysPrefix),
         },
         async () => {
             try {

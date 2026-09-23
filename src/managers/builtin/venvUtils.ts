@@ -173,7 +173,9 @@ async function getPythonInfo(env: NativeEnvInfo, nameStyle: VenvNameStyle = 'def
             version: env.version ?? 'Unknown',
             description: env.error,
             tooltip: env.error,
-            environmentPath: Uri.file(env.prefix ?? env.executable ?? ''),
+            environmentPath: Uri.file(
+                env.executable ?? (env.prefix ? getVenvPythonPath(env.prefix) : ''),
+            ),
             iconPath: new ThemeIcon('warning'),
             sysPrefix: env.prefix ?? '',
             execInfo: {
