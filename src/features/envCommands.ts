@@ -816,6 +816,9 @@ export async function createTerminalCommand(
     const pythonProjects = api.getPythonProjects();
     if (context instanceof PythonEnvTreeItem) {
         const pw = await pickProject(pythonProjects);
+        if (pythonProjects.length > 0 && !pw) {
+            return undefined;
+        }
         const cwd = pw ? await findParentIfFile(pw.uri.fsPath) : undefined;
         const terminal = await tm.create(context.environment, { cwd });
         terminal.show();

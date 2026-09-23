@@ -140,6 +140,27 @@ suite('Create Terminal Command Tests', () => {
         sinon.assert.notCalled(getEnvironment);
     });
 
+    test('does not create a terminal when project selection is cancelled', async () => {
+        const environment = createMockPythonEnvironment({
+            managerId: 'ms-python.python:venv',
+            envPath: path.join(process.cwd(), '.venv', 'python'),
+        });
+        const projects: PythonProject[] = [
+            { name: 'project-one', uri: Uri.file(path.join(process.cwd(), 'project-one')) },
+            { name: 'project-two', uri: Uri.file(path.join(process.cwd(), 'project-two')) },
+        ];
+        const api = {
+            getPythonProjects: sinon.stub().returns(projects),
+        } as unknown as PythonEnvironmentApi;
+        const terminalManager = createTerminalManager();
+        sinon.stub(projectApi, 'pickProject').resolves(undefined);
+
+        const result = await createTerminalCommand(createEnvironmentItem(environment), api, terminalManager.manager);
+
+        assert.strictEqual(result, undefined);
+        sinon.assert.notCalled(terminalManager.create);
+    });
+
     for (const projectEnvironment of [
         undefined,
         createMockPythonEnvironment({
