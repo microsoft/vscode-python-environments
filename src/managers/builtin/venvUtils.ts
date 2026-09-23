@@ -618,10 +618,7 @@ export async function removeVenv(
     log: LogOutputChannel,
     options?: RemoveEnvironmentOptions,
 ): Promise<boolean> {
-    const pythonPath = os.platform() === 'win32' ? 'python.exe' : 'python';
-
-    const envFsPath = path.normalize(environment.environmentPath.fsPath);
-    const envPath = envFsPath.endsWith(pythonPath) ? path.dirname(path.dirname(envFsPath)) : envFsPath;
+    const envPath = path.normalize(environment.sysPrefix);
 
     const validationError = await validateVenvRemovalPath(envPath, log);
     if (validationError) {

@@ -767,7 +767,8 @@ function getCondaWithoutPython(name: string, prefix: string, conda: string): Pyt
     };
 }
 
-async function nativeToPythonEnv(
+/** Converts native finder data to a Conda environment. @internal Exported for testing. */
+export async function nativeToPythonEnv(
     e: NativeEnvInfo,
     api: PythonEnvironmentApi,
     manager: EnvironmentManager,
@@ -779,10 +780,14 @@ async function nativeToPythonEnv(
         traceWarn('nativeToPythonEnv received null/undefined NativeEnvInfo');
         return undefined;
     }
-    if (!(e.prefix && e.executable && e.version)) {
+    if (!e.prefix) {
+        traceWarn('Ignoring Conda environment without a prefix');
+        return undefined;
+    }
+    if (!(e.executable && e.version)) {
         let name = e.name;
         const environment = api.createPythonEnvironmentItem(
-            getCondaWithoutPython(name ?? '', e.prefix ?? '', conda),
+            getCondaWithoutPython(name ?? '', e.prefix, conda),
             manager,
         );
         log.info(`Found a No-Python conda environment: ${e.executable ?? e.prefix ?? 'conda-no-python'}`);

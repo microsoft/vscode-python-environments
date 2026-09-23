@@ -1,15 +1,17 @@
 import assert from 'node:assert';
 import * as path from 'node:path';
 import * as sinon from 'sinon';
-import { Uri } from 'vscode';
+import { LogOutputChannel, Uri } from 'vscode';
 import {
     EnvironmentManager,
     PythonEnvironment,
     PythonEnvironmentApi,
     PythonEnvironmentInfo,
 } from '../../api';
-import { NativeEnvInfo } from '../../managers/common/nativePythonFinder';
+import { NativeEnvInfo, NativePythonFinder } from '../../managers/common/nativePythonFinder';
 import * as managerUtils from '../../managers/common/utils';
+import { nativeToPythonEnv as condaNativeToPythonEnv } from '../../managers/conda/condaUtils';
+import { PipenvManager } from '../../managers/pipenv/pipenvManager';
 import { nativeToPythonEnv as pipenvNativeToPythonEnv } from '../../managers/pipenv/pipenvUtils';
 import { nativeToPythonEnv as poetryNativeToPythonEnv } from '../../managers/poetry/poetryUtils';
 import { nativeToPythonEnv as pyenvNativeToPythonEnv } from '../../managers/pyenv/pyenvUtils';
@@ -89,5 +91,34 @@ suite('Manager environmentPath', () => {
             assert.ok(capturedInfo);
             assert.strictEqual(capturedInfo.environmentPath.fsPath, Uri.file(executable).fsPath);
         });
+    });
+
+    test('Pipenv resolves a legacy persisted environment prefix', () => {
+        const environment = {
+            environmentPath: Uri.file(executable),
+            sysPrefix: prefix,
+            execInfo: { run: { executable } },
+        } as PythonEnvironment;
+        const pipenvManager = new PipenvManager({} as NativePythonFinder, api);
+        const internals = pipenvManager as unknown as {
+            collection: PythonEnvironment[];
+            findEnvironmentByPath(fsPath: string): PythonEnvironment | undefined;
+        };
+        internals.collection = [environment];
+
+        assert.strictEqual(internals.findEnvironmentByPath(prefix), environment);
+    });
+
+    test('Conda ignores a native record without a prefix', async () => {
+        const result = await condaNativeToPythonEnv(
+            { executable, version: '3.12.0' },
+            api,
+            manager,
+            {} as LogOutputChannel,
+            path.join(path.sep, 'tools', 'conda'),
+        );
+
+        assert.strictEqual(result, undefined);
+        assert.strictEqual(capturedInfo, undefined);
     });
 });
