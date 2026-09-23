@@ -14,6 +14,7 @@ import {
     AutoActivationType,
     getAutoActivationType,
     getEnvironmentForTerminal,
+    migrateLegacyTerminalActivationSetting,
     shouldActivateInCurrentTerminal,
     shouldSkipTerminalActivation,
     waitForShellIntegration,
@@ -484,19 +485,29 @@ suite('Terminal Utils - getAutoActivationType', () => {
     });
 
     suite('Legacy Python Setting Fallback', () => {
-        test('should return ACT_TYPE_OFF and update config when python.terminal.activateEnvironment is false', () => {
+        test('should migrate python.terminal.activateEnvironment false to User settings only once', async () => {
             // Mock - no python-envs settings, python.terminal.activateEnvironment is false
             pyEnvsConfig.inspect.withArgs('terminal.autoActivationType').returns(undefined);
             pythonConfig.get.withArgs('terminal.activateEnvironment', undefined).returns(false);
+            pyEnvsConfig.update.rejects(new Error('Unable to update User settings'));
 
             // Run
+            await assert.rejects(migrateLegacyTerminalActivationSetting(), /Unable to update User settings/);
             const result = getAutoActivationType();
+            const repeatedResult = getAutoActivationType();
 
             // Assert
             assert.strictEqual(result, ACT_TYPE_OFF, 'Should return ACT_TYPE_OFF when legacy setting is false');
-            assert.ok(
-                pyEnvsConfig.update.calledWithExactly('terminal.autoActivationType', ACT_TYPE_OFF),
-                'Should update python-envs config to ACT_TYPE_OFF',
+            assert.strictEqual(
+                repeatedResult,
+                ACT_TYPE_OFF,
+                'Should continue returning ACT_TYPE_OFF after a failed migration',
+            );
+            sinon.assert.calledOnceWithExactly(
+                pyEnvsConfig.update,
+                'terminal.autoActivationType',
+                ACT_TYPE_OFF,
+                true,
             );
         });
 
@@ -572,7 +583,7 @@ suite('Terminal Utils - getAutoActivationType', () => {
             );
         });
 
-        test('should prioritize python-envs settings over legacy python settings', () => {
+        test('should prioritize python-envs settings over legacy python settings', async () => {
             // Mock - python-envs has globalValue, python has conflicting setting
             const mockInspectResult = {
                 globalValue: ACT_TYPE_SHELL,
@@ -581,6 +592,7 @@ suite('Terminal Utils - getAutoActivationType', () => {
             pythonConfig.get.withArgs('terminal.activateEnvironment', undefined).returns(false);
 
             // Run
+            await migrateLegacyTerminalActivationSetting();
             const result = getAutoActivationType();
 
             // Assert
