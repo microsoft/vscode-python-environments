@@ -1,5 +1,6 @@
 import assert from 'assert';
 import * as sinon from 'sinon';
+import * as logging from '../../../common/logging';
 import * as persistentState from '../../../common/persistentState';
 import {
     clearSystemEnvCache,
@@ -114,6 +115,51 @@ suite('builtin cache - system global env two-tier lookup', () => {
                 globalMock.set.calledWith(SYSTEM_GLOBAL_KEY, undefined),
                 'globalState should be cleared',
             );
+        });
+
+        test('continues writing globalState if workspaceState write fails', async () => {
+            const error = new Error('workspace write failed');
+            const logError = sinon.stub(logging, 'traceError');
+            workspaceMock.set.rejects(error);
+
+            await setSystemEnvForGlobal('/some/python');
+
+            assert.ok(globalMock.set.calledWith(SYSTEM_GLOBAL_KEY, '/some/python'));
+            assert.ok(logError.calledOnceWithExactly('Failed to update workspace system Python cache:', error));
+        });
+
+        test('continues writing workspaceState if globalState write fails', async () => {
+            const error = new Error('global write failed');
+            const logError = sinon.stub(logging, 'traceError');
+            globalMock.set.rejects(error);
+
+            await setSystemEnvForGlobal('/some/python');
+
+            assert.ok(workspaceMock.set.calledWith(SYSTEM_GLOBAL_KEY, '/some/python'));
+            assert.ok(logError.calledOnceWithExactly('Failed to update global system Python cache:', error));
+        });
+
+        test('logs both failures without rejecting if both cache writes fail', async () => {
+            const logError = sinon.stub(logging, 'traceError');
+            workspaceMock.set.rejects(new Error('workspace write failed'));
+            globalMock.set.rejects(new Error('global write failed'));
+
+            await setSystemEnvForGlobal(undefined);
+
+            assert.strictEqual(logError.callCount, 2);
+            assert.ok(workspaceMock.set.calledWith(SYSTEM_GLOBAL_KEY, undefined));
+            assert.ok(globalMock.set.calledWith(SYSTEM_GLOBAL_KEY, undefined));
+        });
+
+        test('continues writing globalState if workspaceState is unavailable', async () => {
+            const error = new Error('workspace state unavailable');
+            const logError = sinon.stub(logging, 'traceError');
+            getWorkspaceStub.rejects(error);
+
+            await setSystemEnvForGlobal('/some/python');
+
+            assert.ok(globalMock.set.calledWith(SYSTEM_GLOBAL_KEY, '/some/python'));
+            assert.ok(logError.calledOnceWithExactly('Failed to update workspace system Python cache:', error));
         });
 
         test('round-trip: after set, get returns the value from workspaceState (primary)', async () => {

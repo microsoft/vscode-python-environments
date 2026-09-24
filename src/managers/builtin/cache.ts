@@ -1,4 +1,5 @@
 import { ENVS_EXTENSION_ID } from '../../common/constants';
+import { traceError } from '../../common/logging';
 import { getGlobalPersistentState, getWorkspacePersistentState } from '../../common/persistentState';
 
 export const SYSTEM_WORKSPACE_KEY = `${ENVS_EXTENSION_ID}:system:WORKSPACE_SELECTED`;
@@ -83,12 +84,14 @@ export async function getSystemEnvForGlobal(): Promise<string | undefined> {
  * consistent.
  */
 export async function setSystemEnvForGlobal(envPath: string | undefined): Promise<void> {
-    const [workspaceState, globalState] = await Promise.all([
-        getWorkspacePersistentState(),
-        getGlobalPersistentState(),
+    const [workspaceWrite, globalWrite] = await Promise.allSettled([
+        getWorkspacePersistentState().then((state) => state.set(SYSTEM_GLOBAL_KEY, envPath)),
+        getGlobalPersistentState().then((state) => state.set(SYSTEM_GLOBAL_KEY, envPath)),
     ]);
-    await Promise.all([
-        workspaceState.set(SYSTEM_GLOBAL_KEY, envPath),
-        globalState.set(SYSTEM_GLOBAL_KEY, envPath),
-    ]);
+    if (workspaceWrite.status === 'rejected') {
+        traceError('Failed to update workspace system Python cache:', workspaceWrite.reason);
+    }
+    if (globalWrite.status === 'rejected') {
+        traceError('Failed to update global system Python cache:', globalWrite.reason);
+    }
 }
