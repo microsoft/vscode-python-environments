@@ -64,7 +64,7 @@ function getNearestParentProjectSetting(
         const settingPath = normalizePath(settingUri.fsPath);
         if (
             settingPath !== projectPath &&
-            isSameOrParentPath(settingUri.fsPath, projectUri.fsPath) &&
+            isSameOrParentPath(settingPath, projectPath) &&
             (!nearestParent || settingPath.length > nearestParent.pathLength)
         ) {
             nearestParent = { setting, pathLength: settingPath.length };
