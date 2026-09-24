@@ -10,8 +10,9 @@ import {
 } from 'vscode';
 import { spawnProcess } from '../../common/childProcess.apis';
 import { Common, UvInstallStrings } from '../../common/localize';
-import { traceError, traceInfo, traceLog } from '../../common/logging';
+import { traceError, traceInfo, traceLog, traceWarn } from '../../common/logging';
 import { getGlobalPersistentState } from '../../common/persistentState';
+import { PythonVersion } from '../../common/pythonVersion';
 import { executeTask, onDidEndTaskProcess } from '../../common/tasks.apis';
 import { EventNames } from '../../common/telemetry/constants';
 import { sendTelemetryEvent } from '../../common/telemetry/sender';
@@ -21,6 +22,41 @@ import { showErrorMessage, showInformationMessage, showQuickPick, withProgress }
 import { isUvInstalled, resetUvInstallationCache } from './helpers';
 
 export const UV_INSTALL_PYTHON_DONT_ASK_KEY = 'python-envs:uv:UV_INSTALL_PYTHON_DONT_ASK';
+
+const MAX_PROMPT_DETAIL_LENGTH = 120;
+const TASK_TIMEOUT_MS = 5 * 60 * 1000;
+
+// Accept only numeric release segments before forwarding script-controlled input to uv.
+const INSTALLABLE_PYTHON_VERSION = /^\d+(?:\.\d+)*(?:(?:a|b|rc)\d+)?(?:\.dev\d+)?$/i;
+
+// Remove C0/C1 controls and Unicode zero-width/bidirectional formatting characters
+// before displaying script-controlled text in a modal prompt.
+const PROMPT_CONTROL_CHARACTERS =
+    /[\u0000-\u001f\u007f-\u009f\u061c\u200b-\u200f\u202a-\u202e\u2060-\u206f\ufeff]/g;
+
+export type UvPythonInstallTrigger = 'activation' | 'createEnvironment' | 'inlineScript';
+
+export interface UvPythonInstallPromptOptions {
+    readonly version?: string;
+    readonly requiresPython?: string;
+}
+
+export type EnsureUvForInlineScriptVersionLookupResult = 'available' | 'declined' | 'failed';
+
+export type PromptInstallPythonViaUvResult =
+    | { readonly kind: 'installed'; readonly pythonPath: string }
+    | { readonly kind: 'declined' }
+    | { readonly kind: 'failed' };
+
+function sanitizePromptDetail(value: string | undefined): string | undefined {
+    const normalized = value?.replace(PROMPT_CONTROL_CHARACTERS, ' ').replace(/\s+/g, ' ').trim();
+    if (!normalized) {
+        return undefined;
+    }
+    return normalized.length <= MAX_PROMPT_DETAIL_LENGTH
+        ? normalized
+        : `${normalized.slice(0, MAX_PROMPT_DETAIL_LENGTH - 3)}...`;
+}
 
 /**
  * Represents a Python version from uv python list
@@ -39,6 +75,10 @@ export interface UvPythonVersion {
     variant: string;
     implementation: string;
     arch: string;
+}
+
+export interface GetAvailablePythonVersionsOptions {
+    readonly allVersions?: boolean;
 }
 
 /**
@@ -88,9 +128,6 @@ async function getUvInstallCommand(): Promise<{ executable: string; args: string
         args: ['-c', 'curl -LsSf https://astral.sh/uv/install.sh | sh'],
     };
 }
-
-// Timeout for task completion (5 minutes)
-const TASK_TIMEOUT_MS = 5 * 60 * 1000;
 
 /**
  * Runs a shell command as a visible VS Code task and waits for completion.
@@ -160,6 +197,42 @@ export async function installUv(_log?: LogOutputChannel): Promise<boolean> {
     return success;
 }
 
+export async function ensureUvForInlineScriptVersionLookupDetailed(
+    requiresPython: string,
+    log?: LogOutputChannel,
+): Promise<EnsureUvForInlineScriptVersionLookupResult> {
+    if (await isUvInstalled(log)) {
+        return 'available';
+    }
+    const displayedRequirement = sanitizePromptDetail(requiresPython);
+    if (!displayedRequirement) {
+        return 'failed';
+    }
+    const selection = await showInformationMessage(
+        UvInstallStrings.inlineScriptInstallUvForVersionLookupPrompt(displayedRequirement),
+        { modal: true },
+        UvInstallStrings.installUv,
+    );
+    if (selection !== UvInstallStrings.installUv) {
+        return 'declined';
+    }
+    if (!(await installUv(log))) {
+        return 'failed';
+    }
+    if (await isUvInstalled(log)) {
+        return 'available';
+    }
+    showErrorMessage(UvInstallStrings.uvInstallRestartRequired);
+    return 'failed';
+}
+
+export async function ensureUvForInlineScriptVersionLookup(
+    requiresPython: string,
+    log?: LogOutputChannel,
+): Promise<boolean> {
+    return (await ensureUvForInlineScriptVersionLookupDetailed(requiresPython, log)) === 'available';
+}
+
 /**
  * Gets the path to the uv-managed Python installation.
  * Uses `uv python list --only-installed --managed-python` to find only uv-installed Pythons.
@@ -183,9 +256,17 @@ export async function getUvPythonPath(version?: string): Promise<string | undefi
                         return;
                     }
 
-                    // If version specified, find matching one (e.g., "3.12" matches "3.12.11")
+                    // If version specified, find an exact or release-segment match
+                    // (e.g., "3.12" matches "3.12.11", but not "3.120.1").
                     if (version) {
-                        const match = versions.find((v) => v.version.startsWith(version) && v.path);
+                        const requested = PythonVersion.tryParse(version);
+                        const match = requested
+                            ? versions.find(
+                                  (candidate) =>
+                                      candidate.path &&
+                                      PythonVersion.tryParse(candidate.version)?.matchesSelector(requested),
+                              )
+                            : undefined;
                         resolve(match?.path ?? undefined);
                     } else {
                         // Return the first (latest) installed Python
@@ -205,12 +286,20 @@ export async function getUvPythonPath(version?: string): Promise<string | undefi
 
 /**
  * Gets available Python versions from uv.
+ * @param options Set `allVersions` only when older patch releases are needed.
  * @returns Promise that resolves to an array of Python versions
  */
-export async function getAvailablePythonVersions(): Promise<UvPythonVersion[]> {
+export async function getAvailablePythonVersions(
+    options?: GetAvailablePythonVersionsOptions,
+): Promise<UvPythonVersion[]> {
     return new Promise((resolve) => {
         const chunks: string[] = [];
-        const proc = spawnProcess('uv', ['python', 'list', '--output-format', 'json']);
+        const args = ['python', 'list'];
+        if (options?.allVersions) {
+            args.push('--all-versions');
+        }
+        args.push('--output-format', 'json');
+        const proc = spawnProcess('uv', args);
         proc.stdout?.on('data', (data) => chunks.push(data.toString()));
         proc.on('error', () => resolve([]));
         proc.on('exit', (code) => {
@@ -319,51 +408,85 @@ export async function installPythonViaUv(_log?: LogOutputChannel, version?: stri
 }
 
 /**
- * Prompts the user to install Python via uv when no Python is found.
+ * Prompts the user to install Python via uv when no compatible Python is found.
  * Respects the "Don't ask again" setting.
  *
- * @param trigger What triggered this prompt ('activation' or 'createEnvironment')
+ * @param trigger What triggered this prompt
  * @param log Optional log output channel
- * @returns Promise that resolves to the installed Python path, or undefined if not installed
+ * @param options Optional version and script requirement shown to the user and passed to uv after consent
+ * @returns Promise that resolves to a structured installed / declined / failed outcome
  */
-export async function promptInstallPythonViaUv(
-    trigger: 'activation' | 'createEnvironment',
+export async function promptInstallPythonViaUvDetailed(
+    trigger: UvPythonInstallTrigger,
     log?: LogOutputChannel,
-): Promise<string | undefined> {
-    const state = await getGlobalPersistentState();
-    const dontAsk = await state.get<boolean>(UV_INSTALL_PYTHON_DONT_ASK_KEY);
+    options?: UvPythonInstallPromptOptions,
+): Promise<PromptInstallPythonViaUvResult> {
+    const state = trigger === 'inlineScript' ? undefined : await getGlobalPersistentState();
+    const dontAsk = await state?.get<boolean>(UV_INSTALL_PYTHON_DONT_ASK_KEY);
 
     if (dontAsk) {
         traceLog('Skipping Python install prompt: user selected "Don\'t ask again"');
-        return undefined;
+        return { kind: 'declined' };
+    }
+
+    const version = sanitizePromptDetail(options?.version);
+    const requiresPython = sanitizePromptDetail(options?.requiresPython);
+
+    if (trigger === 'inlineScript' && version && !INSTALLABLE_PYTHON_VERSION.test(version)) {
+        traceWarn(`Skipping inline-script Python install prompt: invalid install version ${JSON.stringify(version)}`);
+        return { kind: 'failed' };
+    }
+    if (trigger === 'inlineScript' && requiresPython && !version) {
+        traceWarn('Skipping inline-script Python install prompt: no compatible install version was selected');
+        return { kind: 'failed' };
     }
 
     sendTelemetryEvent(EventNames.UV_PYTHON_INSTALL_PROMPTED, undefined, { trigger });
 
-    // Check if uv is installed to show appropriate message
+    // Check if uv is installed to show appropriate message.
     const uvInstalled = await isUvInstalled(log);
-    const promptMessage = uvInstalled
-        ? UvInstallStrings.installPythonPrompt
-        : UvInstallStrings.installPythonAndUvPrompt;
+    const promptMessage =
+        trigger === 'inlineScript'
+            ? uvInstalled
+                ? UvInstallStrings.inlineScriptInstallPythonPrompt(requiresPython, version)
+                : UvInstallStrings.inlineScriptInstallPythonAndUvPrompt(requiresPython, version)
+            : uvInstalled
+              ? UvInstallStrings.installPythonPrompt
+              : UvInstallStrings.installPythonAndUvPrompt;
+    const installAction = uvInstalled
+        ? version
+            ? UvInstallStrings.installPythonVersion(version)
+            : UvInstallStrings.installPython
+        : version
+          ? UvInstallStrings.installUvAndPythonVersion(version)
+          : UvInstallStrings.installUvAndPython;
 
-    const result = await showInformationMessage(
-        promptMessage,
-        { modal: true },
-        UvInstallStrings.installPython,
-        Common.dontAskAgain,
-    );
+    const result =
+        trigger === 'inlineScript'
+            ? await showInformationMessage(promptMessage, { modal: true }, installAction)
+            : await showInformationMessage(promptMessage, { modal: true }, installAction, Common.dontAskAgain);
 
-    if (result === Common.dontAskAgain) {
+    if (result === Common.dontAskAgain && state) {
         await state.set(UV_INSTALL_PYTHON_DONT_ASK_KEY, true);
         traceLog('User selected "Don\'t ask again" for Python install prompt');
-        return undefined;
+        return { kind: 'declined' };
     }
 
-    if (result === UvInstallStrings.installPython) {
-        return await installPythonWithUv(log);
+    if (result === installAction) {
+        const pythonPath = await installPythonWithUv(log, version);
+        return pythonPath ? { kind: 'installed', pythonPath } : { kind: 'failed' };
     }
 
-    return undefined;
+    return { kind: 'declined' };
+}
+
+export async function promptInstallPythonViaUv(
+    trigger: UvPythonInstallTrigger,
+    log?: LogOutputChannel,
+    options?: UvPythonInstallPromptOptions,
+): Promise<string | undefined> {
+    const result = await promptInstallPythonViaUvDetailed(trigger, log, options);
+    return result.kind === 'installed' ? result.pythonPath : undefined;
 }
 
 /**

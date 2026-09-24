@@ -75,13 +75,17 @@ extends:
                 workingDirectory: $(Build.SourcesDirectory)/api
                 displayName: Install package dependencies
 
+              - script: npm run copy:sources
+                workingDirectory: $(Build.SourcesDirectory)/api
+                displayName: Copy src/api.ts, src/types.ts, src/publicErrors.ts to API package sources
+
               - script: npm run compile
                 workingDirectory: $(Build.SourcesDirectory)/api
                 displayName: Compile TypeScript
 
-              - script: npm pack --ignore-scripts
+              - script: npm run test:package
                 workingDirectory: $(Build.SourcesDirectory)/api
-                displayName: Pack npm package
+                displayName: Pack and validate npm package
 
               - task: CopyFiles@2
                 displayName: Copy package tarball to staging
@@ -97,6 +101,8 @@ extends:
         jobs:
           - job: PublishPackage
             displayName: Publish npm package
+            templateContext:
+              isReleaseJob: true
             steps:
               - download: current
                 artifact: npm-package
@@ -109,5 +115,5 @@ extends:
                   contentSource: 'Folder'
                   folderLocation: '$(Pipeline.Workspace)/npm-package'
                   waitForReleaseCompletion: true
-                  owners: 'grwheele@microsoft.com'
+                  owners: 'brcan@microsoft.com'
                   approvers: 'eduardovil@microsoft.com'

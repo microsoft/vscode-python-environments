@@ -1,4 +1,3 @@
-import { compare as pep440Compare, valid as pep440Valid } from '@renovatebot/pep440';
 import * as fse from 'fs-extra';
 import * as os from 'os';
 import * as path from 'path';
@@ -30,6 +29,7 @@ import { Common, CondaStrings, PackageManagement, Pickers } from '../../common/l
 import { traceError, traceInfo, traceVerbose, traceWarn } from '../../common/logging';
 import { getWorkspacePersistentState } from '../../common/persistentState';
 import { pickProject } from '../../common/pickers/projects';
+import { PythonVersion } from '../../common/pythonVersion';
 import { StopWatch } from '../../common/stopWatch';
 import { createDeferred } from '../../common/utils/deferred';
 import { untildify } from '../../common/utils/pathUtils';
@@ -262,57 +262,28 @@ export async function runCondaExecutable(
     return await _runConda(conda, args, log, token);
 }
 
-interface CondaInfo {
-    envs_dirs: string[];
-}
-
-/**
- * Runs `conda info --envs --json` and parses the result.
- * Validates the JSON response structure at the parsing boundary.
- * @returns Validated CondaInfo object
- * @throws Error if conda command fails or returns invalid JSON structure
- */
-async function getCondaInfo(): Promise<CondaInfo> {
-    const raw = await runConda(['info', '--envs', '--json']);
-    const parsed = JSON.parse(raw);
-
-    // Validate at the JSON→TypeScript boundary
-    if (!parsed || typeof parsed !== 'object') {
-        traceWarn(`conda info returned invalid data: ${typeof parsed}`);
-        throw new Error(`conda info returned invalid data type: ${typeof parsed}`);
-    }
-
-    const envsDirs = parsed['envs_dirs'];
-    if (envsDirs === undefined || envsDirs === null) {
-        traceWarn('conda info envs_dirs is undefined/null');
-        return { envs_dirs: [] };
-    }
-    if (!Array.isArray(envsDirs)) {
-        traceWarn(`conda info envs_dirs is not an array (type: ${typeof envsDirs})`);
-        return { envs_dirs: [] };
-    }
-
-    traceVerbose(`conda info returned ${envsDirs.length} environment directories`);
-    return { envs_dirs: envsDirs };
-}
-
 let prefixes: string[] | undefined;
 export async function getPrefixes(): Promise<string[]> {
-    if (prefixes) {
+    if (prefixes?.length) {
         return prefixes;
     }
 
     const state = await getWorkspacePersistentState();
     const storedPrefixes = await state.get<string[]>(CONDA_PREFIXES_KEY);
-    if (storedPrefixes && Array.isArray(storedPrefixes)) {
+    if (Array.isArray(storedPrefixes) && storedPrefixes.length > 0) {
         prefixes = storedPrefixes;
         return prefixes;
     }
 
     try {
-        const data = await getCondaInfo();
-        prefixes = data.envs_dirs;
-        await state.set(CONDA_PREFIXES_KEY, prefixes);
+        const { envs_dirs: envsDirs } = JSON.parse(await runConda(['info', '--json']));
+        if (!Array.isArray(envsDirs)) {
+            throw new Error('conda info returned invalid envs_dirs');
+        }
+        prefixes = envsDirs;
+        if (prefixes.length > 0) {
+            await state.set(CONDA_PREFIXES_KEY, prefixes);
+        }
     } catch (error) {
         traceError('Failed to get conda environment prefixes', error);
         prefixes = [];
@@ -523,6 +494,7 @@ async function buildShellActivationMapForConda(
                 envIdentifier,
                 envManager.sourcingInformation.condaFolder,
                 condaShPath,
+                envManager.sourcingInformation.shellInitStatus,
             );
             return shellMaps;
         }
@@ -605,6 +577,7 @@ export async function windowsExceptionGenerateConfig(
     prefix: string,
     condaFolder: string,
     condaShPath?: string,
+    shellInitStatus?: ShellCondaInitStatus,
 ): Promise<ShellCommandMaps> {
     const shellActivation: Map<string, PythonCommandRunConfiguration[]> = new Map();
     const shellDeactivation: Map<string, PythonCommandRunConfiguration[]> = new Map();
@@ -625,7 +598,12 @@ export async function windowsExceptionGenerateConfig(
     // is bash-compatible; on Windows, sourceInitPath may point to "activate.bat", which
     // cannot be sourced by Git Bash, so in that case we skip emitting a Git Bash activation.
     let bashActivate: PythonCommandRunConfiguration[];
-    if (condaShPath) {
+    if (shellInitStatus?.bash) {
+        traceVerbose(
+            'Skipping `source conda.sh` for Git Bash because `conda init bash` was detected in the user shell profile',
+        );
+        bashActivate = [{ executable: 'conda', args: ['activate', quotedPrefix] }];
+    } else if (condaShPath) {
         bashActivate = [
             { executable: 'source', args: [condaShPath.replace(/\\/g, '/')] },
             { executable: 'conda', args: ['activate', quotedPrefix] },
@@ -974,31 +952,26 @@ export async function getLocation(api: PythonEnvironmentApi, uris: Uri | Uri[]):
 }
 const RECOMMENDED_CONDA_PYTHON = '3.11.11';
 
-export function trimVersionToMajorMinor(version: string): string {
-    const match = version.match(/^(\d+\.\d+\.\d+)/);
-    return match ? match[1] : version;
+/**
+ * Returns normalized, unique Python interpreter releases sorted newest first.
+ *
+ * @param environments Environments whose interpreter versions should be listed.
+ * @returns Valid Python releases in descending version order.
+ */
+export function getPythonVersionsForCreation(environments: ReadonlyArray<PythonEnvironment>): string[] {
+    const versions = environments
+        .map((environment) => PythonVersion.tryParse(environment.version))
+        .filter((version): version is PythonVersion => !!version)
+        .sort((left, right) => right.compareTo(left))
+        .map((version) => (version.releaseLevel === 'final' ? version.toReleaseString() : version.toString()));
+    return [...new Set(versions)];
 }
 export async function pickPythonVersion(
     api: PythonEnvironmentApi,
     token?: CancellationToken,
 ): Promise<string | undefined> {
     const envs = await api.getEnvironments('global');
-    let versions = Array.from(
-        new Set(
-            envs
-                .map((env) => env.version)
-                .filter(Boolean)
-                .map((v) => trimVersionToMajorMinor(v)), // cut to 3 digits
-        ),
-    );
-
-    // Sort versions descending using PEP 440 comparison
-    versions = versions.sort((a, b) => {
-        if (!pep440Valid(a) || !pep440Valid(b)) {
-            return 0;
-        }
-        return pep440Compare(b, a); // descending
-    });
+    let versions = getPythonVersionsForCreation(envs);
 
     if (!versions || versions.length === 0) {
         versions = ['3.13', '3.12', '3.11', '3.10', '3.9'];
@@ -1034,6 +1007,18 @@ export async function createCondaEnvironment(
     return createStepBasedCondaFlow(api, log, manager, uris);
 }
 
+function getCondaCreatePrefix(output: string): string {
+    const parsed = JSON.parse(output) as {
+        prefix?: unknown;
+        actions?: { PREFIX?: unknown };
+    };
+    const prefix = parsed?.prefix ?? parsed?.actions?.PREFIX;
+    if (typeof prefix !== 'string' || prefix.trim().length === 0) {
+        throw new Error('conda create did not return an environment prefix');
+    }
+    return prefix;
+}
+
 export async function createNamedCondaEnvironment(
     api: PythonEnvironmentApi,
     log: LogOutputChannel,
@@ -1060,7 +1045,7 @@ export async function createNamedCondaEnvironment(
     }
 
     const envName: string = name;
-    const runArgs = ['create', '--yes', '--name', envName];
+    const runArgs = ['create', '--yes', '--quiet', '--json', '--name', envName];
     if (pythonVersion) {
         runArgs.push(`python=${pythonVersion}`);
     } else {
@@ -1077,15 +1062,7 @@ export async function createNamedCondaEnvironment(
                 const bin = os.platform() === 'win32' ? 'python.exe' : path.join('bin', 'python');
                 const output = await runCondaExecutable(runArgs);
                 log.info(output);
-
-                const prefixes = await getPrefixes();
-                let envPath = '';
-                for (let prefix of prefixes) {
-                    if (await fse.pathExists(path.join(prefix, envName))) {
-                        envPath = path.join(prefix, envName);
-                        break;
-                    }
-                }
+                const envPath = getCondaCreatePrefix(output);
                 const version = await getVersion(envPath);
 
                 const environment = api.createPythonEnvironmentItem(
@@ -1266,29 +1243,6 @@ export async function deleteCondaEnvironment(environment: PythonEnvironment, log
             return true;
         },
     );
-}
-
-export async function managePackages(
-    environment: PythonEnvironment,
-    options: PackageManagementOptions,
-    token: CancellationToken,
-    log: LogOutputChannel,
-): Promise<void> {
-    if (options.uninstall && options.uninstall.length > 0) {
-        await runCondaExecutable(
-            ['remove', '--prefix', environment.environmentPath.fsPath, '--yes', ...options.uninstall],
-            log,
-            token,
-        );
-    }
-    if (options.install && options.install.length > 0) {
-        const args = ['install', '--prefix', environment.environmentPath.fsPath, '--yes'];
-        if (options.upgrade) {
-            args.push('--update-all');
-        }
-        args.push(...options.install);
-        await runCondaExecutable(args, log, token);
-    }
 }
 
 async function getCommonPackages(): Promise<Installable[]> {

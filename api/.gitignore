@@ -1,0 +1,7 @@
+# Copied from ../src/api.ts, ../src/types.ts, ../src/publicErrors.ts by the publish pipeline
+# (build/azure-pipeline.npm.yml). These are the published package sources; they are produced
+# at publish time and intentionally NOT committed. src/api.ts, src/types.ts, and
+# src/publicErrors.ts are the single sources of truth.
+src/main.ts
+src/types.ts
+src/publicErrors.ts

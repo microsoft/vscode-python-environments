@@ -1,6 +1,4 @@
-# Python Environments (preview)
-
-> **Note:** The Python Environments icon may no longer appear in the Activity Bar due to the ongoing rollout of the Python Environments extension. To restore the extension, add `"python.useEnvironmentsExtension": true` to your User settings. This setting is temporarily necessary until the rollout is complete!
+# Python Environments
 
 ## Overview
 
@@ -10,8 +8,6 @@ The Python Environments extension for VS Code helps you manage Python environmen
 -   📦 Install and uninstall packages within the selected environment
 -   ✅ Create activated terminals
 -   🖌️ Add and create new Python projects
-
-> **Note:** This extension is in preview, and its APIs and features are subject to change as the project evolves.
 
 > **Important:** This extension requires version `2024.23`, or later, of the Python extension (`ms-python.python`).
 
@@ -159,9 +155,7 @@ The Python Environments extension was built to provide a cohesive and user frien
 
 ### API Reference (proposed)
 
-See [api.ts](https://github.com/microsoft/vscode-python-environments/blob/main/src/api.ts) for the full list of Extension APIs.
-
-To consume these APIs you can look at the example here: [API Consumption Examples](https://github.com/microsoft/vscode-python-environments/blob/main/examples/README.md)
+See [api.ts](https://github.com/microsoft/vscode-python-environments/blob/main/src/api.ts) for the runtime API facade and [types.ts](https://github.com/microsoft/vscode-python-environments/blob/main/src/types.ts) for the public API contracts. Extension authors can consume these contracts from the `@vscode/python-environments` npm package.
 
 ### Callable Commands
 

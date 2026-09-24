@@ -8,7 +8,10 @@ import {
     WorkspaceFolder,
 } from 'vscode';
 import { PythonProjectCreator } from '../../api';
-import { InternalEnvironmentManager, InternalPackageManager } from '../../internal.api';
+import type {
+    InternalEnvironmentManager,
+    InternalPackageManager,
+} from '../../managers/common/registeredManagers';
 import { Common, Interpreter, Pickers } from '../localize';
 import { showQuickPickWithButtons } from '../window.apis';
 

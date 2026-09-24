@@ -2,7 +2,7 @@ import assert from 'node:assert';
 import { CancellationError } from 'vscode';
 import * as rpc from 'vscode-jsonrpc/node';
 import { BaseError } from '../../../common/errors/types';
-import { classifyError } from '../../../common/telemetry/errorClassifier';
+import { classifyError, isTimeoutErrorType } from '../../../common/telemetry/errorClassifier';
 import { RpcTimeoutError } from '../../../managers/common/nativePythonFinder';
 
 suite('Error Classifier', () => {
@@ -11,8 +11,11 @@ suite('Error Classifier', () => {
             assert.strictEqual(classifyError(new CancellationError()), 'canceled');
         });
 
-        test('should classify RpcTimeoutError as spawn_timeout', () => {
-            assert.strictEqual(classifyError(new RpcTimeoutError('resolve', 30000)), 'spawn_timeout');
+        test('should classify RPC timeouts by method', () => {
+            assert.strictEqual(classifyError(new RpcTimeoutError('configure', 30000)), 'rpc_configure_timeout');
+            assert.strictEqual(classifyError(new RpcTimeoutError('refresh', 30000)), 'rpc_refresh_timeout');
+            assert.strictEqual(classifyError(new RpcTimeoutError('resolve', 30000)), 'rpc_resolve_timeout');
+            assert.strictEqual(classifyError(new RpcTimeoutError('info', 2000)), 'rpc_timeout');
         });
 
         test('should classify non-Error values as unknown', () => {
@@ -124,6 +127,22 @@ suite('Error Classifier', () => {
                 classifyError(new Error('Failed to create stdio streams for PET process')),
                 'process_crash',
             );
+        });
+    });
+
+    suite('isTimeoutErrorType', () => {
+        test('recognizes spawn and JSON-RPC timeout categories', () => {
+            assert.strictEqual(isTimeoutErrorType('spawn_timeout'), true);
+            assert.strictEqual(isTimeoutErrorType('rpc_timeout'), true);
+            assert.strictEqual(isTimeoutErrorType('rpc_configure_timeout'), true);
+            assert.strictEqual(isTimeoutErrorType('rpc_refresh_timeout'), true);
+            assert.strictEqual(isTimeoutErrorType('rpc_resolve_timeout'), true);
+        });
+
+        test('rejects non-timeout categories', () => {
+            assert.strictEqual(isTimeoutErrorType('connection_error'), false);
+            assert.strictEqual(isTimeoutErrorType('rpc_error'), false);
+            assert.strictEqual(isTimeoutErrorType('unknown'), false);
         });
     });
 });

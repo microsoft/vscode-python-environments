@@ -75,9 +75,9 @@ Use this to scaffold a brand new Python project with the correct structure and f
    - **Package**: A structured Python package with `pyproject.toml`, tests folder, and package directory
    - **Script**: A simple standalone Python file using PEP 723 inline metadata
 4. Enter a name for your project.
-5. Choose whether to create a virtual environment.
+5. If you're creating a package, choose whether to create a virtual environment.
 
-The extension creates the project structure, adds it to your workspace, and optionally creates a virtual environment.
+The extension creates the project structure and adds it to your workspace. For packages, it can also create a virtual environment.
 
 #### Package template structure
 
@@ -96,6 +96,26 @@ my_package_project/
 #### Script template
 
 When you create a script, the extension generates a single `.py` file with PEP 723 inline script metadata, which allows you to specify dependencies directly in the file.
+
+An inline-script environment is built from the script's `# /// script` block and stored in the extension's cache, where it is shared by every script with the same dependencies and base interpreter. Because editing one would silently change the others, these environments are not user-managed: the Python Environments views do not offer install, uninstall, or version-change actions for them. Their package list remains visible.
+
+A CodeLens above the `# /// script` block offers **Set up environment for this script**, and the same action is available as a quick fix on an unresolved import. For a few seconds after setup succeeds it is replaced by a **Script environment ready (Python X.Y.Z)** confirmation naming the Python that was selected — useful when `requires-python` matches several installed versions, or when one was installed on demand. The confirmation is plain text rather than a clickable action, and it expires on its own; at every other time the setup CodeLens behaves exactly as before.
+
+Setup records which distributions it installed. If that record and the environment's contents later disagree — for example after installing a package into it from a terminal — every script sharing the environment needs setup again. Saving or reopening a script does not repair it; use the script's setup action to rebuild from its declared dependencies.
+
+Once a mismatch is confirmed during an environment lookup, the affected scripts' setup actions return without requiring a save.
+
+An environment whose recorded inventory is unknown, or cannot be read, is left alone rather than treated as modified.
+
+**Delete Environment** on an inline-script environment deletes that single cached environment without a confirmation dialog and clears its known associations in the current workspace. All scripts sharing it will need setup again. Python files, project entries and settings, the base Python installation, and other cached environments are kept. Other windows discover the missing environment when they revalidate it.
+
+Stop runs or debug sessions using the environment before deleting it. The extension refuses deletion while script environments are being created; files held open by other processes may also prevent deletion. Failures are reported rather than treated as successful removal. If deletion begins but cannot finish, affected scripts need setup again; remaining files can be removed by retrying Delete.
+
+On Windows, changing only the letter casing of a script's filename keeps its existing environment association. A rename does not validate unsaved dependency edits or install packages.
+
+Unused cached script environments are cleaned up once per window, about two minutes after the extension activates, rather than being triggered by environment creation. Cleanup considers entries unused for more than 14 days and incomplete setups older than one day, removes at most three entries, and skips environments referenced by this workspace or entries it cannot safely inspect. There is no daily sweep.
+
+The background cache scan does not hold up interpreter lookups. If another window briefly locks an entry, or its last-used time cannot be updated safely, the extension retries the script association in the background with bounded delays. Saving without changing the inline requirements does not cancel, postpone, or reset those retries; changing the requirements or stored inline-environment association cancels outdated recovery work. A temporarily unavailable selected environment keeps its association instead of silently switching execution to another interpreter, and the setup action is available for an explicit retry. If automatic recovery does not succeed, use that action to retry. Cleanup never installs packages.
 
 ## Assigning Environments to Projects
 

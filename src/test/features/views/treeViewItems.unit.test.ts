@@ -1,14 +1,20 @@
 import * as assert from 'assert';
-import { Uri } from 'vscode';
+import { ThemeIcon, Uri } from 'vscode';
+import { Package } from '../../../api';
 import { UvInstallStrings, VenvManagerStrings } from '../../../common/localize';
 import {
     EnvManagerTreeItem,
     getEnvironmentParentDirName,
     NoPythonEnvTreeItem,
+    PackageTreeItem,
+    ProjectEnvironment,
+    ProjectPackage,
     PythonEnvTreeItem,
     PythonGroupEnvTreeItem,
 } from '../../../features/views/treeViewItems';
-import { InternalEnvironmentManager, PythonEnvironmentImpl } from '../../../internal.api';
+import { PythonEnvironmentImpl } from '../../../managers/common/models';
+import { InternalEnvironmentManager } from '../../../managers/common/registeredManagers';
+import type { InternalPackageManager } from '../../../managers/common/registeredManagers';
 
 /**
  * Helper to create a mock PythonEnvironmentImpl with minimal required fields.
@@ -166,7 +172,7 @@ suite('Test TreeView Items', () => {
             const item = new PythonEnvTreeItem(env, managerWithoutRemove);
 
             // Assert
-            assert.strictEqual(item.treeItem.contextValue, 'pythonEnvironment;');
+            assert.strictEqual(item.treeItem.contextValue, 'pythonEnvironment;managePackages;');
         });
 
         test('Context value includes activatable when environment has activation', () => {
@@ -180,7 +186,7 @@ suite('Test TreeView Items', () => {
             const item = new PythonEnvTreeItem(env, managerWithoutRemove);
 
             // Assert
-            assert.strictEqual(item.treeItem.contextValue, 'pythonEnvironment;activatable;');
+            assert.strictEqual(item.treeItem.contextValue, 'pythonEnvironment;activatable;managePackages;');
         });
 
         test('Context value includes remove when manager supports it', () => {
@@ -194,7 +200,51 @@ suite('Test TreeView Items', () => {
             const item = new PythonEnvTreeItem(env, managerWithRemove);
 
             // Assert
+            assert.strictEqual(item.treeItem.contextValue, 'pythonEnvironment;remove;activatable;managePackages;');
+        });
+
+        test('Inline-script environments do not advertise package management', () => {
+            // Arrange
+            const env = createMockEnvironment({
+                environmentPath: '/home/user/.cache/script-envs-v1/abc123/bin/python',
+                managerId: 'ms-python.python:inline-script',
+                hasActivation: true,
+            });
+
+            // Act
+            const item = new PythonEnvTreeItem(env, managerWithRemove);
+
+            // Assert
             assert.strictEqual(item.treeItem.contextValue, 'pythonEnvironment;remove;activatable;');
+        });
+
+        test('Packages of an inline-script environment use the read-only context value', () => {
+            // Arrange
+            const env = createMockEnvironment({
+                environmentPath: '/home/user/.cache/script-envs-v1/abc123/bin/python',
+                managerId: 'ms-python.python:inline-script',
+            });
+            const parent = new PythonEnvTreeItem(env, managerWithRemove);
+            const pkg = { name: 'requests', displayName: 'requests', version: '2.32.0' } as Package;
+
+            // Act
+            const item = new PackageTreeItem(pkg, parent, {} as InternalPackageManager);
+
+            // Assert
+            assert.strictEqual(item.treeItem.contextValue, 'python-package-readonly');
+        });
+
+        test('Packages of an ordinary environment keep the manageable context value', () => {
+            // Arrange
+            const env = createMockEnvironment({ environmentPath: '/home/user/envs/.venv/bin/python' });
+            const parent = new PythonEnvTreeItem(env, managerWithRemove);
+            const pkg = { name: 'requests', displayName: 'requests', version: '2.32.0' } as Package;
+
+            // Act
+            const item = new PackageTreeItem(pkg, parent, {} as InternalPackageManager);
+
+            // Assert
+            assert.strictEqual(item.treeItem.contextValue, 'python-package');
         });
 
         test('Uses environment displayName as tree item label', () => {
@@ -485,6 +535,81 @@ suite('Test TreeView Items', () => {
 
             assert.equal(item.treeItem.label, VenvManagerStrings.noEnvFound);
             assert.equal(item.treeItem.command, undefined, 'Should not have a command');
+        });
+    });
+
+    suite('ProjectPackage', () => {
+        // ProjectPackage only reads parent.id and does not call any manager methods,
+        // so minimal cast mocks are sufficient for exercising the tree item rendering.
+        const parent = { id: 'project>>>env' } as ProjectEnvironment;
+        const manager = {} as InternalPackageManager;
+
+        function createMockPackage(options: Partial<Package> = {}): Package {
+            return {
+                name: options.name ?? 'requests',
+                displayName: options.displayName ?? options.name ?? 'requests',
+                version: options.version,
+                description: options.description,
+                tooltip: options.tooltip,
+                iconPath: options.iconPath,
+                isTransitive: options.isTransitive,
+                pkgId: { id: options.name ?? 'requests', managerId: 'ms-python.python:pip' },
+            } as Package;
+        }
+
+        test('Direct package uses package icon and shows no transitive prefix', () => {
+            // Arrange
+            const pkg = createMockPackage({ name: 'requests', version: '2.31.0', isTransitive: false });
+
+            // Act
+            const item = new ProjectPackage(parent, pkg, manager);
+
+            // Assert
+            assert.strictEqual(item.treeItem.contextValue, 'python-package');
+            assert.strictEqual((item.treeItem.iconPath as ThemeIcon).id, 'package');
+            assert.strictEqual(item.treeItem.description, '2.31.0');
+        });
+
+        test('Transitive package uses list-tree icon and shows transitive prefix', () => {
+            // Arrange
+            const pkg = createMockPackage({ name: 'urllib3', version: '2.0.0', isTransitive: true });
+
+            // Act
+            const item = new ProjectPackage(parent, pkg, manager);
+
+            // Assert
+            assert.strictEqual(item.treeItem.contextValue, 'python-package-transitive');
+            assert.strictEqual((item.treeItem.iconPath as ThemeIcon).id, 'list-tree');
+            assert.ok(
+                (item.treeItem.description as string).startsWith('(transitive) '),
+                'Transitive package description should be prefixed with "(transitive) "',
+            );
+            assert.ok(item.treeItem.tooltip, 'Transitive package should have an explanatory tooltip');
+        });
+
+        test('Prefers package-provided iconPath over default icon', () => {
+            // Arrange
+            const pkg = createMockPackage({ name: 'numpy', isTransitive: true, iconPath: new ThemeIcon('symbol-numeric') });
+
+            // Act
+            const item = new ProjectPackage(parent, pkg, manager);
+
+            // Assert
+            assert.strictEqual((item.treeItem.iconPath as ThemeIcon).id, 'symbol-numeric');
+        });
+
+        test('Falls back to empty description when version and description are missing', () => {
+            // Arrange
+            const directPkg = createMockPackage({ name: 'mypkg', isTransitive: false });
+            const transitivePkg = createMockPackage({ name: 'mypkg', isTransitive: true });
+
+            // Act
+            const directItem = new ProjectPackage(parent, directPkg, manager);
+            const transitiveItem = new ProjectPackage(parent, transitivePkg, manager);
+
+            // Assert
+            assert.strictEqual(directItem.treeItem.description, '');
+            assert.strictEqual(transitiveItem.treeItem.description, '(transitive) ');
         });
     });
 });

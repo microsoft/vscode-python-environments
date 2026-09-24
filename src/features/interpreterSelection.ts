@@ -19,12 +19,12 @@ import {
     onDidChangeConfiguration,
 } from '../common/workspace.apis';
 import { getUserConfiguredSetting } from '../helpers';
-import {
-    EnvironmentManagers,
-    InternalEnvironmentManager,
+import type { EnvironmentManagers } from './envManagers';
+import type {
     PythonProjectManager,
     PythonProjectSettings,
-} from '../internal.api';
+} from './projectManager';
+import type { InternalEnvironmentManager } from '../managers/common/registeredManagers';
 import { NativeEnvInfo, NativePythonFinder } from '../managers/common/nativePythonFinder';
 
 /**
