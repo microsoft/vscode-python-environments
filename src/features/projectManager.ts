@@ -1,5 +1,5 @@
 import * as path from 'path';
-import { Disposable, Event, EventEmitter, MarkdownString, Uri } from 'vscode';
+import { Disposable, Event, EventEmitter, FileType, MarkdownString, Uri } from 'vscode';
 import type { IconPath, PythonProject } from '../api';
 import { DEFAULT_ENV_MANAGER_ID, DEFAULT_PACKAGE_MANAGER_ID } from '../common/constants';
 import { createSimpleDebounce } from '../common/utils/debounce';
@@ -12,6 +12,7 @@ import {
     onDidRenameFiles,
 } from '../common/workspace.apis';
 import { normalizePath } from '../common/utils/pathUtils';
+import { stat } from '../common/workspace.fs.apis';
 import {
     addPythonProjectSetting,
     EditProjectSettings,
@@ -50,6 +51,13 @@ export interface InlineScriptProjectRegistrationMarker {
 }
 
 export class PythonProjectsImpl implements PythonProject {
+    private static readonly dependencyFileNames = [
+        'requirements.txt',
+        'pyproject.toml',
+        'requirements.in',
+        'environment.yml',
+    ] as const;
+
     readonly name: string;
     readonly uri: Uri;
     readonly description?: string;
@@ -66,6 +74,43 @@ export class PythonProjectsImpl implements PythonProject {
         this.description = options?.description ?? uri.fsPath;
         this.tooltip = options?.tooltip ?? uri.fsPath;
         this.iconPath = options?.iconPath;
+    }
+
+    /**
+     * Finds the preferred dependency file at the project root.
+     * @returns The dependency file URI, or `undefined` when no supported dependency file exists.
+     */
+    async discoverDependencyFiles(): Promise<Uri | undefined> {
+        let projectType: FileType;
+        try {
+            projectType = (await stat(this.uri)).type;
+        } catch {
+            return undefined;
+        }
+
+        // A project URI may point directly to a dependency file instead of its parent directory.
+        if (projectType !== FileType.Directory) {
+            const fileName = path.posix.basename(this.uri.path);
+            return projectType === FileType.File &&
+                PythonProjectsImpl.dependencyFileNames.some((candidate) => candidate === fileName)
+                ? this.uri
+                : undefined;
+        }
+
+        // Search directory candidates in dependency-file priority order.
+        for (const fileName of PythonProjectsImpl.dependencyFileNames) {
+            const candidate = this.uri.with({ path: path.posix.join(this.uri.path, fileName) });
+            try {
+                const candidateType = (await stat(candidate)).type;
+                if (candidateType === FileType.File) {
+                    return candidate;
+                }
+            } catch {
+                // Try the next supported dependency file.
+            }
+        }
+
+        return undefined;
     }
 }
 

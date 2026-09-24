@@ -19,7 +19,9 @@ suite('PythonEnvironmentApiImpl - onDidChangePythonProjects', () => {
         const mockEnvManagers = { onDidChangeActiveEnvironment: new EventEmitter().event } as unknown as ApiArgs[0];
         const mockProjectCreators = {} as unknown as ApiArgs[2];
         const mockTerminalManager = {} as unknown as ApiArgs[3];
-        const mockEnvVarManager = { onDidChangeEnvironmentVariables: new EventEmitter().event } as unknown as ApiArgs[4];
+        const mockEnvVarManager = {
+            onDidChangeEnvironmentVariables: new EventEmitter().event,
+        } as unknown as ApiArgs[4];
 
         const api = new PythonEnvironmentApiImpl(
             mockEnvManagers,
@@ -40,7 +42,10 @@ suite('PythonEnvironmentApiImpl - onDidChangePythonProjects', () => {
 
         assert.ok(firedEventPayload, 'Event should have fired');
         assert.strictEqual((firedEventPayload as { added: PythonProject[] }).added.length, 1);
-        assert.strictEqual((firedEventPayload as { added: PythonProject[] }).added[0].uri.fsPath, newProject.uri.fsPath);
+        assert.strictEqual(
+            (firedEventPayload as { added: PythonProject[] }).added[0].uri.fsPath,
+            newProject.uri.fsPath,
+        );
         assert.strictEqual((firedEventPayload as { removed: PythonProject[] }).removed.length, 0);
 
         firedEventPayload = null;
@@ -101,7 +106,9 @@ suite('PythonEnvironmentApiImpl - getEnvironment timeout fallback', () => {
         } as unknown as ApiArgs[0];
         const mockProjectCreators = {} as unknown as ApiArgs[2];
         const mockTerminalManager = {} as unknown as ApiArgs[3];
-        const mockEnvVarManager = { onDidChangeEnvironmentVariables: new EventEmitter().event } as unknown as ApiArgs[4];
+        const mockEnvVarManager = {
+            onDidChangeEnvironmentVariables: new EventEmitter().event,
+        } as unknown as ApiArgs[4];
 
         const api = new PythonEnvironmentApiImpl(
             mockEnvManagers,
