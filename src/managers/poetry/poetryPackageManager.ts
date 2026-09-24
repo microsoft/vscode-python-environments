@@ -90,14 +90,9 @@ export class PoetryPackageManager implements PackageManager, Disposable {
         const execute = async (token?: CancellationToken): Promise<void> => {
             try {
                 await this.runPoetryManage({ install: toInstall, uninstall: toUninstall }, token);
-                await updatePackagesAndNotify(
-                    this,
-                    environment,
-                    this.packages.get(environment.envId.id),
-                    (changes) => {
-                        this._onDidChangePackages.fire({ environment, manager: this, changes });
-                    },
-                );
+                await updatePackagesAndNotify(this, environment, this.packages.get(environment.envId.id), (changes) => {
+                    this._onDidChangePackages.fire({ environment, manager: this, changes });
+                });
             } catch (e) {
                 if (e instanceof CancellationError) {
                     throw e;
@@ -182,10 +177,7 @@ export class PoetryPackageManager implements PackageManager, Disposable {
         return await versionCmd.execute();
     }
 
-    async getPackageAvailableVersions(
-        _environment: PythonEnvironment,
-        _packageName: string,
-    ): Promise<Pep440Version[]> {
+    async getPackageAvailableVersions(_environment: PythonEnvironment, _packageName: string): Promise<Pep440Version[]> {
         throw new PackageVersionLookupNotSupportedError(
             'Poetry does not provide a package version lookup command supported by this extension.',
         );
@@ -265,8 +257,10 @@ export class PoetryPackageManager implements PackageManager, Disposable {
             if (!poetry) {
                 return undefined;
             }
+            const cwd = await this.getPoetryCwd(_environment);
             const showTopLevelCmd = new PoetryShowTopLevelCommand({
                 pythonExecutable: poetry,
+                cwd,
                 log: this.log,
             });
             return await showTopLevelCmd.execute();
