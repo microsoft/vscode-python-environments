@@ -9,7 +9,7 @@ import {
 } from '../../common/constants';
 import { traceError, traceInfo, traceVerbose, traceWarn } from '../../common/logging';
 import { getGlobalPersistentState } from '../../common/persistentState';
-import { normalizePath } from '../../common/utils/pathUtils';
+import { isSameOrParentPath, normalizePath } from '../../common/utils/pathUtils';
 import { EventNames } from '../../common/telemetry/constants';
 import { sendTelemetryEvent } from '../../common/telemetry/sender';
 import * as workspaceApis from '../../common/workspace.apis';
@@ -42,6 +42,36 @@ function resolveProjectSettingUri(
     return resolvedWorkspaceFolder
         ? Uri.file(path.resolve(resolvedWorkspaceFolder.uri.fsPath, setting.path))
         : undefined;
+}
+
+function getNearestParentProjectSetting(
+    settings: readonly PythonProjectSettings[],
+    projectUri: Uri,
+    workspaceFolder: WorkspaceFolder,
+    allWorkspaceFolders: readonly WorkspaceFolder[],
+): PythonProjectSettings | undefined {
+    const projectPath = normalizePath(projectUri.fsPath);
+    let nearestParent: { setting: PythonProjectSettings; pathLength: number } | undefined;
+
+    for (const setting of settings) {
+        if (setting.workspace && setting.workspace !== workspaceFolder.name) {
+            continue;
+        }
+        const settingUri = resolveProjectSettingUri(setting, workspaceFolder, allWorkspaceFolders);
+        if (!settingUri) {
+            continue;
+        }
+        const settingPath = normalizePath(settingUri.fsPath);
+        if (
+            settingPath !== projectPath &&
+            isSameOrParentPath(settingUri.fsPath, projectUri.fsPath) &&
+            (!nearestParent || settingPath.length > nearestParent.pathLength)
+        ) {
+            nearestParent = { setting, pathLength: settingPath.length };
+        }
+    }
+
+    return nearestParent?.setting;
 }
 
 function getSettings(
@@ -784,7 +814,8 @@ export async function addPythonProjectSetting(edits: EditProjectSettings[]): Pro
         traceError(`Unable to find workspace for ${e.project.uri.fsPath}`);
     });
 
-    const isMultiroot = (workspaceApis.getWorkspaceFolders() ?? []).length > 1;
+    const workspaceFolders = workspaceApis.getWorkspaceFolders() ?? [];
+    const isMultiroot = workspaceFolders.length > 1;
 
     const promises: Thenable<void>[] = [];
     workspaces.forEach((es, w) => {
@@ -829,10 +860,40 @@ export async function addPythonProjectSetting(edits: EditProjectSettings[]): Pro
                 }
                 return normalizePath(path.resolve(w.uri.fsPath, s.path)) === pwPath;
             });
+            const usesDefaultManagers = e.envManager === envManager && e.packageManager === pkgManager;
+            if (!isRoot && usesDefaultManagers) {
+                const existingSetting = index >= 0 ? overrides[index] : undefined;
+                if (
+                    existingSetting?.envManager === envManager &&
+                    existingSetting.packageManager === pkgManager
+                ) {
+                    return;
+                }
+
+                const parentSetting = getNearestParentProjectSetting(
+                    overrides,
+                    e.project.uri,
+                    w,
+                    workspaceFolders,
+                );
+                const inheritsDefaultManagers =
+                    !parentSetting ||
+                    (parentSetting.envManager === envManager && parentSetting.packageManager === pkgManager);
+                if (inheritsDefaultManagers) {
+                    if (index >= 0) {
+                        overrides.splice(index, 1);
+                        overridesModified = true;
+                    }
+                    return;
+                }
+            }
             if (index >= 0) {
                 // Preserve existing manager settings if not explicitly provided
                 overrides[index].envManager = e.envManager ?? overrides[index].envManager;
                 overrides[index].packageManager = e.packageManager ?? overrides[index].packageManager;
+                if (isMultiroot) {
+                    overrides[index].workspace = w.name;
+                }
                 // Fix empty path to "." for workspace root in multi-root (migration from buggy entries)
                 if (overrides[index].path === '') {
                     overrides[index].path = '.';

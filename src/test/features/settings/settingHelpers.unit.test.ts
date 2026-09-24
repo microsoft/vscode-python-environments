@@ -216,13 +216,12 @@ suite('Setting Helpers - Settings Write Behavior', () => {
 });
 
 /**
- * Tests for the empty path bug fix (Issue #1219, #1115)
- * When a project is the workspace root folder, we should NOT write "path": "" to pythonProjects.
- * Instead, we should use defaultEnvManager/defaultPackageManager settings.
+ * Tests for adding workspace root and nested project settings.
  */
-suite('Setting Helpers - Empty Path Bug Fix', () => {
+suite('Setting Helpers - Project Add Behavior', () => {
     const VENV_MANAGER_ID = 'ms-python.python:venv';
     const PIP_MANAGER_ID = 'ms-python.python:pip';
+    const CONDA_MANAGER_ID = 'ms-python.python:conda';
 
     const workspacePath = getTestWorkspacePath();
     const workspaceUri = Uri.file(workspacePath);
@@ -278,6 +277,32 @@ suite('Setting Helpers - Empty Path Bug Fix', () => {
         return mockConfig;
     }
 
+    function stubWorkspace(
+        pythonProjects: PythonProjectSettings[] = [],
+        workspaceFolders: WorkspaceFolder[] = [workspaceFolder],
+        projectWorkspace: WorkspaceFolder = workspaceFolder,
+    ): void {
+        sinon.stub(workspaceApis, 'getWorkspaceFolders').returns(workspaceFolders);
+        sinon.stub(workspaceApis, 'getConfiguration').returns(
+            createMockConfigForWorkspace({ pythonProjects }),
+        );
+        sinon.stub(workspaceApis, 'getWorkspaceFolder').returns(projectWorkspace);
+    }
+
+    async function addDefaultProject(rootUri: Uri, ...projectPath: string[]): Promise<void> {
+        const project = new PythonProjectsImpl(
+            projectPath[projectPath.length - 1],
+            Uri.file(path.join(rootUri.fsPath, ...projectPath)),
+        );
+        await addPythonProjectSetting([
+            {
+                project,
+                envManager: VENV_MANAGER_ID,
+                packageManager: PIP_MANAGER_ID,
+            },
+        ]);
+    }
+
     suite('addPythonProjectSetting - Single Folder Workspace', () => {
         test('should use defaultEnvManager/defaultPackageManager for workspace root instead of empty path', async () => {
             // Setup: single folder workspace
@@ -308,33 +333,119 @@ suite('Setting Helpers - Empty Path Bug Fix', () => {
             // (only if values differ, which they don't in this test)
         });
 
-        test('should write to pythonProjects for subfolders (not workspace root)', async () => {
-            // Setup: single folder workspace
-            sinon.stub(workspaceApis, 'getWorkspaceFolders').returns([workspaceFolder]);
-            sinon.stub(workspaceApis, 'getConfiguration').returns(createMockConfigForWorkspace());
-            sinon.stub(workspaceApis, 'getWorkspaceFolder').returns(workspaceFolder);
+        test('should not write a subfolder that inherits workspace defaults', async () => {
+            stubWorkspace();
+            await addDefaultProject(workspaceUri, 'subfolder');
 
-            // Create a project at a subfolder (not workspace root)
-            const subfolderPath = path.join(workspacePath, 'subfolder');
-            const subfolderUri = Uri.file(subfolderPath);
-            const subfolderProject = new PythonProjectsImpl('subfolder', subfolderUri);
+            const pythonProjectsUpdates = updateCalls.filter((c) => c.key === 'pythonProjects');
+            assert.strictEqual(
+                pythonProjectsUpdates.length,
+                0,
+                'Should not write a redundant setting for a subfolder',
+            );
+        });
 
-            await addPythonProjectSetting([
+        test('should use the nearest matching parent setting', async () => {
+            const pythonProjects: PythonProjectSettings[] = [
                 {
-                    project: subfolderProject,
+                    path: 'folderA',
+                    envManager: CONDA_MANAGER_ID,
+                    packageManager: PIP_MANAGER_ID,
+                },
+                {
+                    path: 'folderA/folderB',
                     envManager: VENV_MANAGER_ID,
                     packageManager: PIP_MANAGER_ID,
                 },
+            ];
+            stubWorkspace(pythonProjects);
+            await addDefaultProject(workspaceUri, 'folderA', 'folderB', 'folderC');
+
+            assert.strictEqual(
+                updateCalls.filter((call) => call.key === 'pythonProjects').length,
+                0,
+                'Should inherit settings from the nearest matching parent',
+            );
+        });
+
+        test('should keep a child override when either manager differs from its parent', async () => {
+            const pythonProjects: PythonProjectSettings[] = [
+                {
+                    path: 'folderA',
+                    envManager: VENV_MANAGER_ID,
+                    packageManager: CONDA_MANAGER_ID,
+                },
+                {
+                    path: 'folderA/folderB',
+                    envManager: CONDA_MANAGER_ID,
+                    packageManager: CONDA_MANAGER_ID,
+                },
+            ];
+            stubWorkspace(pythonProjects);
+            await addDefaultProject(workspaceUri, 'folderA', 'folderB');
+
+            const pythonProjectsUpdate = updateCalls.find((call) => call.key === 'pythonProjects');
+            assert.ok(pythonProjectsUpdate, 'Should write a distinct child setting');
+            assert.deepStrictEqual((pythonProjectsUpdate.value as PythonProjectSettings[])[1], {
+                path: 'folderA/folderB',
+                envManager: VENV_MANAGER_ID,
+                packageManager: PIP_MANAGER_ID,
+            });
+        });
+
+        test('should preserve an existing child setting that already matches', async () => {
+            const pythonProjects: PythonProjectSettings[] = [
+                {
+                    path: 'folderA/folderB',
+                    envManager: VENV_MANAGER_ID,
+                    packageManager: PIP_MANAGER_ID,
+                },
+            ];
+            stubWorkspace(pythonProjects);
+            await addDefaultProject(workspaceUri, 'folderA', 'folderB');
+
+            assert.strictEqual(
+                updateCalls.filter((call) => call.key === 'pythonProjects').length,
+                0,
+                'Should keep a matching explicit child setting unchanged',
+            );
+        });
+
+        test('should remove a stale child setting when its parent has the requested defaults', async () => {
+            const pythonProjects: PythonProjectSettings[] = [
+                {
+                    path: 'folderA',
+                    envManager: VENV_MANAGER_ID,
+                    packageManager: PIP_MANAGER_ID,
+                },
+                {
+                    path: 'folderA/folderB',
+                    envManager: CONDA_MANAGER_ID,
+                    packageManager: PIP_MANAGER_ID,
+                },
+                {
+                    path: 'unrelated',
+                    envManager: CONDA_MANAGER_ID,
+                    packageManager: PIP_MANAGER_ID,
+                },
+            ];
+            stubWorkspace(pythonProjects);
+            await addDefaultProject(workspaceUri, 'folderA', 'folderB');
+
+            const pythonProjectsUpdate = updateCalls.find((call) => call.key === 'pythonProjects');
+            assert.ok(pythonProjectsUpdate, 'Should remove the stale child override');
+            assert.deepStrictEqual(pythonProjectsUpdate.value, [
+                {
+                    path: 'folderA',
+                    envManager: VENV_MANAGER_ID,
+                    packageManager: PIP_MANAGER_ID,
+                },
+                {
+                    path: 'unrelated',
+                    envManager: CONDA_MANAGER_ID,
+                    packageManager: PIP_MANAGER_ID,
+                },
             ]);
-
-            // Should write to pythonProjects for subfolders
-            const pythonProjectsUpdates = updateCalls.filter((c) => c.key === 'pythonProjects');
-            assert.strictEqual(pythonProjectsUpdates.length, 1, 'Should write to pythonProjects for subfolders');
-
-            // The path should NOT be empty
-            const projects = pythonProjectsUpdates[0].value as any[];
-            assert.ok(projects.length > 0, 'Should have at least one project entry');
-            assert.strictEqual(projects[0].path, 'subfolder', 'Path should be "subfolder", not empty');
         });
     });
 
@@ -370,6 +481,40 @@ suite('Setting Helpers - Empty Path Bug Fix', () => {
             const projects = pythonProjectsUpdates[0].value as any[];
             assert.ok(projects.length > 0, 'Should have at least one project entry');
             assert.strictEqual(projects[0].path, '.', 'Path should be "." not empty string for workspace root');
+        });
+
+        test('should resolve parents by workspace and save the child with its workspace', async () => {
+            const secondWorkspaceUri = Uri.file(path.join(path.dirname(workspacePath), 'workspace2'));
+            const secondWorkspaceFolder: WorkspaceFolder = {
+                uri: secondWorkspaceUri,
+                name: 'workspace2',
+                index: 1,
+            };
+            const pythonProjects: PythonProjectSettings[] = [
+                {
+                    path: 'folderA',
+                    envManager: VENV_MANAGER_ID,
+                    packageManager: PIP_MANAGER_ID,
+                    workspace: workspaceFolder.name,
+                },
+                {
+                    path: 'folderA',
+                    envManager: CONDA_MANAGER_ID,
+                    packageManager: PIP_MANAGER_ID,
+                    workspace: secondWorkspaceFolder.name,
+                },
+            ];
+            stubWorkspace(pythonProjects, [workspaceFolder, secondWorkspaceFolder], secondWorkspaceFolder);
+            await addDefaultProject(secondWorkspaceUri, 'folderA', 'folderB');
+
+            const pythonProjectsUpdate = updateCalls.find((call) => call.key === 'pythonProjects');
+            assert.ok(pythonProjectsUpdate, 'Should save a child that differs from its same-workspace parent');
+            assert.deepStrictEqual((pythonProjectsUpdate.value as PythonProjectSettings[])[2], {
+                path: 'folderA/folderB',
+                envManager: VENV_MANAGER_ID,
+                packageManager: PIP_MANAGER_ID,
+                workspace: secondWorkspaceFolder.name,
+            });
         });
     });
 
